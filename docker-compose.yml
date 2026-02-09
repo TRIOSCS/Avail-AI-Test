@@ -1,0 +1,50 @@
+# AvailAI — docker compose up -d
+# Three containers: your app, the database, and HTTPS
+
+services:
+  # --- Database ---
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: availai
+      POSTGRES_PASSWORD: availai
+      POSTGRES_DB: availai
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U availai"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # --- Your App ---
+  app:
+    build: .
+    restart: always
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - uploads:/app/uploads
+
+  # --- HTTPS (auto-generates SSL certificate for your domain) ---
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  pgdata:
+  uploads:
+  caddy_data:
+  caddy_config:

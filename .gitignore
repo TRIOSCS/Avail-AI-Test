@@ -1,0 +1,14 @@
+# Never commit these
+.env
+Caddyfile
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+uploads/
+*.egg-info/
+dist/
+build/
+.venv/
+node_modules/
+.DS_Store

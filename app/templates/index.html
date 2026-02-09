@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AvailAI — Sourcing Engine</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0e17; --card: #111827; --card2: #1a2332; --input: #0d1321;
+            --border: #1e293b; --focus: #3b82f6;
+            --text: #e2e8f0; --text2: #94a3b8; --muted: #64748b;
+            --blue: #3b82f6; --green: #10b981; --amber: #f59e0b;
+            --red: #ef4444; --purple: #8b5cf6;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+
+        /* Login */
+        .login { display:flex; align-items:center; justify-content:center; min-height:100vh;
+            background:radial-gradient(ellipse at 30% 20%,rgba(59,130,246,.08)0%,transparent 60%),var(--bg); }
+        .login-card { background:var(--card); border:1px solid var(--border); border-radius:16px;
+            padding:48px; text-align:center; max-width:400px; width:90%; }
+        .login-card h1 { font-size:32px; font-weight:700; }
+        .login-card .sub { color:var(--muted); font-size:14px; margin-bottom:32px; }
+        .btn-ms { display:inline-flex; align-items:center; gap:10px; background:var(--blue);
+            color:white; text-decoration:none; padding:14px 28px; border-radius:10px;
+            font-weight:600; font-size:15px; }
+        .btn-ms:hover { background:#2563eb; }
+        .ver { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); margin-top:24px; }
+
+        /* Shell */
+        .shell { max-width:1100px; margin:0 auto; padding:24px 20px; }
+        .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
+        .topbar h1 { font-size:22px; font-weight:700; }
+        .user { display:flex; align-items:center; gap:12px; color:var(--text2); font-size:14px; }
+        .btn-out { background:none; border:1px solid var(--border); color:var(--text2);
+            padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
+
+        /* Tabs */
+        .tabs { display:flex; gap:2px; margin-bottom:24px; background:var(--card);
+            border-radius:10px; padding:3px; border:1px solid var(--border); width:fit-content; }
+        .tab { padding:8px 20px; border-radius:8px; border:none; background:transparent;
+            color:var(--muted); font-size:14px; font-weight:500; cursor:pointer; }
+        .tab.on { background:var(--blue); color:white; }
+        .tc { display:none; } .tc.on { display:block; }
+
+        /* Search */
+        .spanel { background:var(--card); border:1px solid var(--border); border-radius:12px;
+            padding:24px; margin-bottom:20px; }
+        .srow { display:flex; gap:12px; }
+        .sinput { flex:1; background:var(--input); border:1px solid var(--border); border-radius:8px;
+            padding:14px 16px; color:var(--text); font-family:'JetBrains Mono',monospace;
+            font-size:14px; resize:vertical; min-height:52px; }
+        .sinput:focus { outline:none; border-color:var(--focus); }
+        .qinput { width:120px; background:var(--input); border:1px solid var(--border); border-radius:8px;
+            padding:14px 12px; color:var(--text); font-family:'JetBrains Mono',monospace;
+            font-size:14px; text-align:right; }
+        .qinput:focus { outline:none; border-color:var(--focus); }
+        .btn-s { background:var(--blue); color:white; border:none; border-radius:8px;
+            padding:14px 24px; font-size:14px; font-weight:600; cursor:pointer; white-space:nowrap; }
+        .btn-s:hover { background:#2563eb; }
+        .btn-s:disabled { opacity:.5; }
+
+        /* Results */
+        .rhead { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+        .rhead h2 { font-size:16px; }
+        .rmeta { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--muted); }
+        .ractions { display:flex; gap:8px; align-items:center; }
+        .btn-t { background:none; border:none; color:var(--blue); font-size:13px; cursor:pointer; padding:4px 8px; }
+        .btn-rfq { background:var(--green); color:white; border:none; border-radius:8px;
+            padding:8px 18px; font-size:13px; font-weight:600; cursor:pointer; }
+        .btn-rfq:disabled { opacity:.4; }
+        .empty { color:var(--muted); font-size:14px; padding:40px 0; text-align:center; }
+
+        /* Result Card */
+        .rc { background:var(--card); border:1px solid var(--border); border-radius:10px;
+            padding:16px 20px; margin-bottom:8px; display:flex; gap:14px; }
+        .rc:hover { border-color:#2d3a4f; background:var(--card2); }
+        .rc.excl { opacity:.45; }
+        .rc input[type=checkbox] { width:18px; height:18px; margin-top:4px; accent-color:var(--blue); }
+        .rb { flex:1; min-width:0; }
+        .rtop { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; }
+        .vname { font-weight:600; font-size:14px; }
+        .badge { display:inline-block; font-size:10px; font-weight:600; padding:2px 7px;
+            border-radius:4px; margin-right:4px; }
+        .b-dist { background:rgba(59,130,246,.15); color:var(--blue); }
+        .b-broker { background:rgba(148,163,184,.1); color:var(--text2); }
+        .b-auth { background:rgba(16,185,129,.15); color:var(--green); }
+        .ring { width:44px; height:44px; border-radius:50%; display:flex; align-items:center;
+            justify-content:center; font-family:'JetBrains Mono',monospace; font-size:15px;
+            font-weight:700; border:3px solid; }
+        .ring.hi { border-color:var(--green); color:var(--green); }
+        .ring.mid { border-color:var(--amber); color:var(--amber); }
+        .ring.lo { border-color:var(--red); color:var(--red); }
+        .rdets { display:flex; flex-wrap:wrap; gap:16px; margin-bottom:6px; }
+        .di { display:flex; flex-direction:column; }
+        .dl { font-size:10px; text-transform:uppercase; color:var(--muted); letter-spacing:.5px; }
+        .dv { font-family:'JetBrains Mono',monospace; font-size:13px; }
+        .rmeta2 { font-size:11px; color:var(--muted); display:flex; gap:16px; }
+        .excl-warn { font-size:12px; color:var(--amber); margin-top:4px; }
+        .bdbtn { background:none; border:none; color:var(--blue); font-size:11px; cursor:pointer; margin-top:4px; }
+        .bd { display:none; padding:8px 0; }
+        .bd.open { display:block; }
+        .brow { display:flex; align-items:center; gap:8px; margin-bottom:4px; font-size:12px; }
+        .blbl { width:100px; color:var(--text2); }
+        .btrack { flex:1; height:6px; background:var(--border); border-radius:3px; overflow:hidden; }
+        .bfill { height:100%; border-radius:3px; }
+        .bval { width:30px; text-align:right; font-family:'JetBrains Mono',monospace; color:var(--text2); font-size:11px; }
+
+        /* Upload */
+        .upanel { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; }
+        .uzone { border:2px dashed var(--border); border-radius:10px; padding:40px;
+            text-align:center; cursor:pointer; margin-bottom:20px; }
+        .uzone:hover,.uzone.drag { border-color:var(--blue); background:rgba(59,130,246,.04); }
+        .uzone input { display:none; }
+        .uzone .icon { font-size:32px; margin-bottom:8px; }
+        .uzone .label { color:var(--text2); font-size:14px; }
+        .uzone .hint { color:var(--muted); font-size:12px; margin-top:4px; }
+        .ustatus { font-size:13px; margin-top:12px; padding:10px 14px; border-radius:8px; display:none; }
+        .ustatus.ok { display:block; background:rgba(16,185,129,.1); color:var(--green); }
+        .ustatus.err { display:block; background:rgba(239,68,68,.1); color:var(--red); }
+        .ustatus.load { display:block; background:rgba(59,130,246,.1); color:var(--blue); }
+        .lb { margin-top:24px; }
+        .lb h3 { font-size:15px; font-weight:600; margin-bottom:12px; }
+        .lbt { width:100%; font-size:13px; border-collapse:collapse; }
+        .lbt th { text-align:left; padding:8px 12px; color:var(--muted); font-weight:500;
+            border-bottom:1px solid var(--border); font-size:12px; text-transform:uppercase; }
+        .lbt td { padding:8px 12px; border-bottom:1px solid rgba(30,41,59,.5); }
+        .lbt td:nth-child(3),.lbt td:nth-child(4),.lbt th:nth-child(3),.lbt th:nth-child(4) {
+            text-align:right; font-family:'JetBrains Mono',monospace; }
+        .lbr { color:var(--amber); font-weight:700; }
+
+        /* Responses Tab */
+        .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+            gap:12px; margin-bottom:20px; }
+        .st { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px 20px; }
+        .st .sl { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin-bottom:4px; }
+        .st .sv { font-family:'JetBrains Mono',monospace; font-size:24px; font-weight:600; }
+        .st .ss { font-size:12px; color:var(--muted); }
+        .mact { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+        .mact h2 { font-size:16px; }
+        .btn-poll { background:var(--purple); color:white; border:none; border-radius:8px;
+            padding:10px 20px; font-size:13px; font-weight:600; cursor:pointer; }
+        .btn-poll:disabled { opacity:.5; }
+        .ftabs { display:flex; gap:6px; margin-bottom:16px; }
+        .ft { padding:5px 14px; border-radius:6px; border:1px solid var(--border);
+            background:transparent; color:var(--muted); font-size:12px; cursor:pointer; }
+        .ft.on { background:rgba(59,130,246,.15); color:var(--blue); border-color:var(--blue); }
+        .vrc { background:var(--card); border:1px solid var(--border); border-radius:10px;
+            padding:16px 20px; margin-bottom:8px; }
+        .vrc:hover { border-color:#2d3a4f; background:var(--card2); }
+        .vrh { display:flex; justify-content:space-between; margin-bottom:10px; }
+        .vrv { font-weight:600; font-size:14px; }
+        .vrp { font-family:'JetBrains Mono',monospace; font-size:14px; color:var(--blue); }
+        .vrt { font-size:12px; color:var(--muted); }
+        .vrq { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; margin-bottom:10px; }
+        .qf { background:var(--input); border-radius:6px; padding:8px 10px; }
+        .qfl { font-size:10px; text-transform:uppercase; color:var(--muted); letter-spacing:.5px; }
+        .qfv { font-family:'JetBrains Mono',monospace; font-size:14px; margin-top:2px; }
+        .conf { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
+        .cbar { width:60px; height:4px; background:var(--border); border-radius:2px; overflow:hidden; }
+        .cfill { height:100%; border-radius:2px; }
+        .vra { display:flex; gap:8px; margin-top:10px; }
+        .btn-a { background:rgba(16,185,129,.15); color:var(--green); border:1px solid rgba(16,185,129,.3);
+            border-radius:6px; padding:6px 14px; font-size:12px; font-weight:600; cursor:pointer; }
+        .btn-r { background:rgba(239,68,68,.1); color:var(--red); border:1px solid rgba(239,68,68,.2);
+            border-radius:6px; padding:6px 14px; font-size:12px; font-weight:600; cursor:pointer; }
+        .vrep { font-size:12px; color:var(--muted); margin-top:8px; padding:8px 10px;
+            background:var(--input); border-radius:6px; white-space:pre-wrap;
+            max-height:80px; overflow:hidden; cursor:pointer; }
+        .vrep.exp { max-height:400px; overflow-y:auto; }
+        .sbdg { display:inline-block; padding:2px 8px; border-radius:4px;
+            font-size:11px; font-weight:600; text-transform:uppercase; }
+        .s-parsed { background:rgba(59,130,246,.15); color:var(--blue); }
+        .s-sighting_created,.s-approved { background:rgba(16,185,129,.15); color:var(--green); }
+        .s-rejected { background:rgba(239,68,68,.1); color:var(--red); }
+
+        /* Modal */
+        .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.7); display:none;
+            align-items:center; justify-content:center; z-index:100; padding:20px; }
+        .modal-bg.open { display:flex; }
+        .modal { background:var(--card); border:1px solid var(--border); border-radius:14px;
+            max-width:640px; width:100%; max-height:85vh; overflow-y:auto; padding:28px; }
+        .modal h2 { font-size:18px; font-weight:700; margin-bottom:20px; }
+        .modal label { display:block; font-size:13px; font-weight:500; color:var(--text2); margin-bottom:6px; }
+        .modal input[type=text],.modal textarea { width:100%; background:var(--input);
+            border:1px solid var(--border); border-radius:8px; padding:10px 14px;
+            color:var(--text); font-size:14px; margin-bottom:16px; }
+        .modal textarea { font-family:'JetBrains Mono',monospace; min-height:200px; resize:vertical; }
+        .modal input:focus,.modal textarea:focus { outline:none; border-color:var(--focus); }
+        .mvendors { background:var(--input); border-radius:8px; padding:12px;
+            max-height:120px; overflow-y:auto; margin-bottom:16px; font-size:13px; }
+        .mvr { padding:3px 0; color:var(--text2); }
+        .mvr.excl { color:var(--amber); }
+        .mactions { display:flex; justify-content:flex-end; gap:10px; margin-top:8px; }
+        .btn-can { background:none; border:1px solid var(--border); color:var(--text2);
+            padding:10px 20px; border-radius:8px; cursor:pointer; font-size:14px; }
+        .btn-send { background:var(--green); color:white; border:none; padding:10px 24px;
+            border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
+        .btn-send:disabled { opacity:.5; }
+
+        @media(max-width:768px) { .srow{flex-direction:column} .qinput{width:100%} .rdets{gap:12px} }
+    </style>
+</head>
+<body>
+{% if not logged_in %}
+<div class="login">
+    <div class="login-card">
+        <h1>AvailAI</h1>
+        <p class="sub">Supplier Sourcing Engine</p>
+        <a href="/auth/login" class="btn-ms">
+            <svg width="20" height="20" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+            Sign in with Microsoft
+        </a>
+        <p class="ver">v0.3.0</p>
+    </div>
+</div>
+{% else %}
+<div class="shell">
+    <div class="topbar">
+        <h1>AvailAI</h1>
+        <div class="user">
+            <span>{{ user_name }}</span>
+            <button class="btn-out" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())">Logout</button>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <button class="tab on" onclick="switchTab('search',this)">Search</button>
+        <button class="tab" onclick="switchTab('upload',this)">Upload</button>
+        <button class="tab" onclick="switchTab('responses',this)">Responses</button>
+    </div>
+
+    <!-- SEARCH TAB -->
+    <div id="tab-search" class="tc on">
+        <div class="spanel">
+            <div class="srow">
+                <textarea id="partInput" class="sinput" rows="1" placeholder="Enter part number(s) — comma or newline separated"></textarea>
+                <input type="number" id="targetQty" class="qinput" placeholder="Target qty" min="1">
+                <button id="searchBtn" class="btn-s" onclick="doSearch()">Search</button>
+            </div>
+        </div>
+        <div class="rhead">
+            <div><h2>Results</h2><span id="rmeta" class="rmeta"></span></div>
+            <div class="ractions">
+                <button class="btn-t" onclick="selAll()">Select all</button>
+                <button class="btn-t" onclick="selNone()">Clear</button>
+                <button id="sendBtn" class="btn-rfq" disabled onclick="openRfq()">Send RFQ (0)</button>
+            </div>
+        </div>
+        <div id="results"><p class="empty">Enter a part number to search</p></div>
+    </div>
+
+    <!-- UPLOAD TAB -->
+    <div id="tab-upload" class="tc">
+        <div class="upanel">
+            <div class="uzone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.tsv" onchange="doUpload()">
+                <div class="icon">📁</div>
+                <div class="label">Drop a stock list here or click to browse</div>
+                <div class="hint">CSV, XLSX, XLS, TSV — up to 50 MB</div>
+            </div>
+            <div id="uploadStatus" class="ustatus"></div>
+            <div class="lb">
+                <h3>Upload Leaderboard</h3>
+                <table class="lbt">
+                    <thead><tr><th>#</th><th>User</th><th>Uploads</th><th>Parts</th></tr></thead>
+                    <tbody id="leaderboard"><tr><td colspan="4" style="text-align:center;color:var(--muted)">Loading…</td></tr></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- RESPONSES TAB -->
+    <div id="tab-responses" class="tc">
+        <div class="stats">
+            <div class="st"><div class="sl">RFQs Sent</div><div class="sv" id="stSent">—</div></div>
+            <div class="st"><div class="sl">Replied</div><div class="sv" id="stRepl">—</div><div class="ss" id="stRate"></div></div>
+            <div class="st"><div class="sl">Positive</div><div class="sv" id="stPos">—</div></div>
+            <div class="st"><div class="sl">Avg Response</div><div class="sv" id="stHrs">—</div><div class="ss">hours</div></div>
+            <div class="st"><div class="sl">AI Parsed</div><div class="sv" id="stParsed">—</div><div class="ss" id="stConf"></div></div>
+            <div class="st"><div class="sl">Needs Review</div><div class="sv" id="stPend">—</div></div>
+        </div>
+        <div class="mact">
+            <h2>Vendor Responses</h2>
+            <button class="btn-poll" id="pollBtn" onclick="doPoll()">⟳ Check Inbox</button>
+        </div>
+        <div class="ftabs">
+            <button class="ft on" onclick="filterResp(null,this)">All</button>
+            <button class="ft" onclick="filterResp('parsed',this)">Pending</button>
+            <button class="ft" onclick="filterResp('sighting_created',this)">Auto-Created</button>
+            <button class="ft" onclick="filterResp('approved',this)">Approved</button>
+            <button class="ft" onclick="filterResp('rejected',this)">Rejected</button>
+        </div>
+        <div id="respList"><p class="empty">Click "Check Inbox" to scan for vendor replies</p></div>
+    </div>
+</div>
+
+<!-- RFQ Modal -->
+<div id="rfqModal" class="modal-bg">
+    <div class="modal">
+        <h2>Send RFQ</h2>
+        <label>Recipients</label>
+        <div id="rfqVendors" class="mvendors"></div>
+        <label>Subject</label>
+        <input type="text" id="rfqSubject">
+        <label>Message</label>
+        <textarea id="rfqBody"></textarea>
+        <div class="mactions">
+            <button class="btn-can" onclick="closeRfq()">Cancel</button>
+            <button id="confirmBtn" class="btn-send" onclick="sendRfq()">Send</button>
+        </div>
+    </div>
+</div>
+
+<script src="/static/app.js"></script>
+{% endif %}
+</body>
+</html>

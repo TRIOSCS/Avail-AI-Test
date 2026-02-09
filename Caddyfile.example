@@ -1,0 +1,4 @@
+# Change this to your actual domain
+app.yourdomain.com {
+    reverse_proxy app:8000
+}
