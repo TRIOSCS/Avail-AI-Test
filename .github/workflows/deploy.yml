@@ -1,0 +1,44 @@
+name: Deploy to DigitalOcean
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          script: |
+            set -e
+            echo "=== Backing up database ==="
+            mkdir -p /root/backups
+            cd /root/availai
+            docker compose exec -T db pg_dump -U availai availai > /root/backups/avail_$(date +%Y%m%d_%H%M).sql
+
+            echo "=== Backing up code ==="
+            cp -r /root/availai /root/backups/code_$(date +%Y%m%d_%H%M)
+
+            echo "=== Downloading release ${{ github.event.release.tag_name }} ==="
+            DOWNLOAD_URL=$(echo '${{ toJSON(github.event.release.assets) }}' | python3 -c "import sys,json; assets=json.load(sys.stdin); print(assets[0]['browser_download_url'] if assets else '')")
+            if [ -z "$DOWNLOAD_URL" ]; then echo "No asset found"; exit 1; fi
+            curl -L -o /tmp/release.zip "$DOWNLOAD_URL"
+
+            echo "=== Extracting ==="
+            cd /root/availai
+            unzip -o /tmp/release.zip -d /root/availai
+
+            echo "=== Rebuilding ==="
+            docker compose build --no-cache app
+            docker compose up -d
+
+            echo "=== Health check ==="
+            sleep 5
+            curl -sf https://app.availai.net/health || echo "WARNING: Health check failed"
+            rm -f /tmp/release.zip
+            echo "=== Deploy complete ==="
