@@ -39,6 +39,8 @@ class RfqVendorGroup(BaseModel):
     vendor_name: str
     vendor_email: str
     parts: list[str] = Field(default_factory=list)
+    subject: str = ""
+    body: str = ""
 
 
 class BatchRfqSend(BaseModel):
