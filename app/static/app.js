@@ -49,8 +49,18 @@ function stars(avg, count) {
 }
 
 // ── Init ────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
-    loadRequisitions();
+document.addEventListener('DOMContentLoaded', async () => {
+    await loadRequisitions();
+    // Restore last viewed requisition on page reload
+    try {
+        const lastId = parseInt(localStorage.getItem('lastReqId'));
+        const lastName = localStorage.getItem('lastReqName') || '';
+        if (lastId) {
+            // Try to find it in the loaded list; if not, still open detail (it fetches its own data)
+            const found = _reqListData.find(r => r.id === lastId);
+            showDetail(lastId, found ? found.name : lastName);
+        }
+    } catch(e) {}
     checkM365Status();
     const dz = document.getElementById('dropZone');
     if (dz) {
@@ -143,6 +153,7 @@ function showView(viewId) {
 function showList() {
     showView('view-list');
     currentReqId = null;
+    try { localStorage.removeItem('lastReqId'); localStorage.removeItem('lastReqName'); } catch(e) {}
     const searchInput = document.getElementById('reqSearchInput');
     if (searchInput) searchInput.value = '';
     loadRequisitions();
@@ -151,6 +162,7 @@ function showList() {
 function showDetail(id, name) {
     currentReqId = id;
     currentReqName = name;
+    try { localStorage.setItem('lastReqId', id); localStorage.setItem('lastReqName', name || ''); } catch(e) {}
     showView('view-detail');
     document.getElementById('detailTitle').textContent = name;
     // Show customer display if available
@@ -181,7 +193,7 @@ function showDetail(id, name) {
         searchResults = {};
         selectedSightings.clear();
         // Background fetch: load any previously saved sightings
-        fetch(`/api/requisitions/${id}/sightings`, {headers: authHeaders()})
+        fetch(`/api/requisitions/${id}/sightings`)
             .then(r => r.ok ? r.json() : null)
             .then(data => {
                 if (data && Object.keys(data).length && currentReqId === id) {

@@ -28,7 +28,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_user
-from ..search_service import search_requirement, normalize_mpn
+from ..search_service import search_requirement, normalize_mpn, sighting_to_dict, _get_material_history, _history_to_result
 from .rfq import _enrich_with_vendor_cards
 from ..file_utils import parse_num, parse_tabular_file
 from ..models import Contact, Requirement, Requisition, Sighting, User, VendorResponse
@@ -315,6 +315,7 @@ async def get_saved_sightings(
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404)
+    now = datetime.now(timezone.utc)
     results: dict = {}
     for r in req.requirements:
         rows = (
@@ -323,38 +324,26 @@ async def get_saved_sightings(
             .order_by(Sighting.score.desc())
             .all()
         )
-        if not rows:
-            continue
         label = r.primary_mpn or f"Req #{r.id}"
-        results[str(r.id)] = {
-            "label": label,
-            "sightings": [
-                {
-                    "id": s.id,
-                    "vendor_name": s.vendor_name,
-                    "vendor_email": s.vendor_email,
-                    "vendor_phone": s.vendor_phone,
-                    "mpn_matched": s.mpn_matched,
-                    "manufacturer": s.manufacturer,
-                    "qty_available": s.qty_available,
-                    "unit_price": s.unit_price,
-                    "currency": s.currency,
-                    "moq": s.moq,
-                    "source_type": s.source_type,
-                    "is_authorized": s.is_authorized,
-                    "confidence": s.confidence,
-                    "score": s.score,
-                    "is_unavailable": s.is_unavailable,
-                    "date_code": s.date_code,
-                    "condition": s.condition,
-                    "lead_time": s.lead_time,
-                    "lead_time_days": s.lead_time_days,
-                    "packaging": s.packaging,
-                    "created_at": s.created_at.isoformat() if s.created_at else None,
-                }
-                for s in rows
-            ],
-        }
+        sighting_dicts = []
+        for s in rows:
+            d = sighting_to_dict(s)
+            d["is_historical"] = False
+            d["is_material_history"] = False
+            sighting_dicts.append(d)
+
+        # Append material history (vendors seen before but not in fresh results)
+        fresh_vendors = {s.vendor_name.lower() for s in rows}
+        pns = [r.primary_mpn] + (r.substitutes or [])
+        pns = [p for p in pns if p]
+        history = _get_material_history(pns, fresh_vendors, db)
+        for h in history:
+            sighting_dicts.append(_history_to_result(h, now))
+
+        if not sighting_dicts:
+            continue
+        sighting_dicts.sort(key=lambda x: x.get("score", 0), reverse=True)
+        results[str(r.id)] = {"label": label, "sightings": sighting_dicts}
     _enrich_with_vendor_cards(results, db)
     return results
 
