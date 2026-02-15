@@ -794,8 +794,7 @@
                 <button class="filter-pill" data-req-status="sourcing" onclick="setReqStatusFilter('sourcing',this)">Sourcing</button>
                 <button class="filter-pill" data-req-status="quoting" onclick="setReqStatusFilter('quoting',this)">Quoting</button>
                 <button class="filter-pill" data-req-status="quoted" onclick="setReqStatusFilter('quoted',this)">Quoted</button>
-                <button class="filter-pill" data-req-status="won" onclick="setReqStatusFilter('won',this)">Won</button>
-                <button class="filter-pill" data-req-status="lost" onclick="setReqStatusFilter('lost',this)">Lost</button>
+                <button class="filter-pill" data-req-status="archive" onclick="setReqStatusFilter('archive',this)">Archive</button>
             </div>
             <span class="filter-count" id="reqStatusCount"></span>
         </div>
@@ -811,7 +810,7 @@
                 <span id="detailCustomer" class="req-customer"></span>
             </div>
             <div style="display:flex;gap:8px;align-items:center">
-                <button class="btn btn-ghost btn-sm" onclick="cloneRequisition(currentReqId)" title="Clone this requisition">Clone</button>
+                <button class="btn btn-ghost btn-sm" id="cloneBtn" onclick="cloneRequisition(currentReqId)" title="Clone this requisition" style="display:none">Clone</button>
                 <button class="btn btn-primary" id="searchAllBtn" onclick="searchAll()">⟳ Search All</button>
             </div>
         </div>

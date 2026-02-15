@@ -156,6 +156,12 @@ function showDetail(id, name) {
     // Show customer display if available
     const custEl = document.getElementById('detailCustomer');
     if (custEl) custEl.textContent = _reqCustomerMap[id] || '';
+    // Show Clone button only for archived/won/lost requisitions
+    const cloneBtn = document.getElementById('cloneBtn');
+    if (cloneBtn) {
+        const reqInfo = _reqListData.find(r => r.id === id);
+        cloneBtn.style.display = (reqInfo && ['archived', 'won', 'lost'].includes(reqInfo.status)) ? '' : 'none';
+    }
     // Restore cached results or load saved sightings from DB
     if (searchResultsCache[id]) {
         searchResults = searchResultsCache[id];
@@ -258,13 +264,14 @@ function renderReqList() {
     const el = document.getElementById('reqList');
     const statusBar = document.getElementById('reqStatusBar');
     let data = _reqListData;
-    // Apply status filter
-    if (_reqStatusFilter !== 'all') {
+    // Apply status filter (archive is pre-filtered by backend)
+    if (_reqStatusFilter === 'archive') {
+        // Backend already returned only archived/won/lost
+    } else if (_reqStatusFilter !== 'all') {
         data = data.filter(r => r.status === _reqStatusFilter);
     }
-    // Show/hide status bar
-    const hasMultipleStatuses = new Set(_reqListData.map(r => r.status)).size > 1;
-    if (statusBar) statusBar.style.display = hasMultipleStatuses ? 'flex' : 'none';
+    // Always show status bar so Archive pill is accessible
+    if (statusBar) statusBar.style.display = _reqListData.length > 0 ? 'flex' : 'none';
     const countEl = document.getElementById('reqStatusCount');
     if (countEl) countEl.textContent = _reqStatusFilter !== 'all' ? `${data.length} of ${_reqListData.length}` : `${_reqListData.length} total`;
 
@@ -275,13 +282,13 @@ function renderReqList() {
         return;
     }
     el.innerHTML = data.map(r => {
-        const isArchived = r.status === 'archived';
+        const isArchived = ['archived', 'won', 'lost'].includes(r.status);
         const archiveBtn = isArchived
             ? `<button class="btn-reactivate" onclick="event.stopPropagation();toggleArchive(${r.id})" title="Reactivate">↩ Activate</button>`
             : `<button class="btn-archive" onclick="event.stopPropagation();toggleArchive(${r.id})" title="Archive">📦 Archive</button>`;
         const createdBy = (window.userRole === 'buyer' && r.created_by_name) ? `<span title="Created by ${esc(r.created_by_name)}">👤 ${esc(r.created_by_name)}</span>` : '';
         const custDisplay = r.customer_display ? `<span class="req-customer">${esc(r.customer_display)}</span>` : '';
-        const statusBadge = r.status !== 'active' && !isArchived ? `<span class="status-badge status-${r.status}">${r.status}</span>` : '';
+        const statusBadge = r.status !== 'active' ? `<span class="status-badge status-${r.status}">${r.status}</span>` : '';
         // Reply count badge
         let replyBadge = '';
         if (r.reply_count > 0) {
@@ -312,7 +319,19 @@ function setReqStatusFilter(status, btn) {
     _reqStatusFilter = status;
     document.querySelectorAll('[data-req-status]').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
-    renderReqList();
+    if (status === 'archive') {
+        fetch('/api/requisitions?status=archive')
+            .then(r => r.ok ? r.json() : [])
+            .then(data => {
+                _reqListData = data;
+                data.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
+                renderReqList();
+            });
+    } else if (status === 'all') {
+        loadRequisitions();
+    } else {
+        renderReqList();
+    }
 }
 
 function searchRequisitions(query) {
@@ -355,8 +374,18 @@ async function createRequisition() {
 async function toggleArchive(id) {
     const res = await fetch(`/api/requisitions/${id}/archive`, { method: 'PUT' });
     if (res.ok) {
-        const q = document.getElementById('reqSearchInput').value.trim();
-        loadRequisitions(q);
+        if (_reqStatusFilter === 'archive') {
+            fetch('/api/requisitions?status=archive')
+                .then(r => r.ok ? r.json() : [])
+                .then(data => {
+                    _reqListData = data;
+                    data.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
+                    renderReqList();
+                });
+        } else {
+            const q = document.getElementById('reqSearchInput').value.trim();
+            loadRequisitions(q);
+        }
     }
 }
 

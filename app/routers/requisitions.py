@@ -36,7 +36,7 @@ from ..models import Contact, Requirement, Requisition, Sighting, User, VendorRe
 router = APIRouter(tags=["requisitions"])
 
 @router.get("/api/requisitions")
-async def list_requisitions(q: str = "", user: User = Depends(require_user), db: Session = Depends(get_db)):
+async def list_requisitions(q: str = "", status: str = "", user: User = Depends(require_user), db: Session = Depends(get_db)):
     # Single query with subquery counts — avoids N+1 lazy loads
     from sqlalchemy import select
     req_count_sq = (
@@ -78,8 +78,10 @@ async def list_requisitions(q: str = "", user: User = Depends(require_user), db:
     if q.strip():
         safe_q = q.strip().replace("%", r"\%").replace("_", r"\_")
         query = query.filter(Requisition.name.ilike(f"%{safe_q}%"))
+    elif status == "archive":
+        query = query.filter(Requisition.status.in_(["archived", "won", "lost"]))
     else:
-        query = query.filter(Requisition.status != "archived")
+        query = query.filter(Requisition.status.notin_(["archived", "won", "lost"]))
 
     rows = query.order_by(Requisition.created_at.desc()).all()
     # Pre-load creator names for buyers (they see all reqs)
@@ -127,7 +129,7 @@ async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Se
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404)
-    if req.status == "archived":
+    if req.status in ("archived", "won", "lost"):
         req.status = "active"
     else:
         req.status = "archived"
