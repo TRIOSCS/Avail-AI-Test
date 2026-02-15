@@ -250,6 +250,23 @@ function showToast(msg, type = 'info') {
     setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
 }
 
+const _statusLabels = {draft:'Draft',active:'Sourcing',offers:'Offers',quoting:'Quoting',quoted:'Quoted',won:'Won',lost:'Lost',archived:'Archived'};
+const _statusMessages = {
+    active: 'Requisition submitted — sourcing in progress',
+    offers: 'Vendor offers confirmed — ready for quoting',
+    quoting: 'Quote is being prepared',
+    quoted: 'Quote sent to customer',
+    won: 'Deal won — moved to archive',
+    lost: 'Deal lost — moved to archive',
+};
+function notifyStatusChange(data) {
+    if (!data || !data.status_changed) return;
+    const status = data.req_status;
+    const msg = _statusMessages[status] || ('Status → ' + (_statusLabels[status] || status));
+    const type = status === 'won' ? 'success' : status === 'lost' ? 'warn' : 'info';
+    showToast('📋 ' + msg, type);
+}
+
 // ── Requisitions ────────────────────────────────────────────────────────
 let reqSearchTimer = null;
 let _reqCustomerMap = {};  // id → customer_display
@@ -380,6 +397,9 @@ async function createRequisition() {
 async function toggleArchive(id) {
     const res = await fetch(`/api/requisitions/${id}/archive`, { method: 'PUT' });
     if (res.ok) {
+        const archData = await res.json();
+        const label = archData.status === 'active' ? 'Reactivated' : 'Archived';
+        showToast('📋 ' + label, 'info');
         if (_reqStatusFilter === 'archive') {
             fetch('/api/requisitions?status=archive')
                 .then(r => r.ok ? r.json() : [])
@@ -595,7 +615,8 @@ function submitOrSearch() {
 async function searchAll() {
     if (!currentReqId) return;
     const btn = document.getElementById('searchAllBtn');
-    btn.disabled = true; btn.textContent = 'Searching…';
+    const wasDraft = (_reqListData.find(r => r.id === currentReqId) || {}).status === 'draft';
+    btn.disabled = true; btn.textContent = wasDraft ? 'Submitting…' : 'Searching…';
     try {
         const res = await fetch(`/api/requisitions/${currentReqId}/search`, { method: 'POST' });
         if (res.ok) {
@@ -608,7 +629,10 @@ async function searchAll() {
             switchTab('sources', document.querySelectorAll('.tab')[1]);
             // Update status in cached list (draft→active after submit)
             const reqInfo = _reqListData.find(r => r.id === currentReqId);
-            if (reqInfo && reqInfo.status === 'draft') reqInfo.status = 'active';
+            if (reqInfo && reqInfo.status === 'draft') {
+                reqInfo.status = 'active';
+                notifyStatusChange({status_changed: true, req_status: 'active'});
+            }
         }
     } catch (e) {
         alert('Search error: ' + e.message);

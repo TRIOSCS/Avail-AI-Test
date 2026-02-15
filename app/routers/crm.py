@@ -618,10 +618,11 @@ async def create_offer(
         status=payload.status,
     )
     db.add(offer)
+    old_status = req.status
     if req.status in ("active", "sourcing"):
         req.status = "offers"
     db.commit()
-    return {"id": offer.id, "vendor_name": offer.vendor_name, "mpn": offer.mpn}
+    return {"id": offer.id, "vendor_name": offer.vendor_name, "mpn": offer.mpn, "req_status": req.status, "status_changed": req.status != old_status}
 
 
 @router.put("/api/offers/{offer_id}")
@@ -706,10 +707,14 @@ async def create_quote(
         created_by_id=user.id,
     )
     db.add(quote)
+    old_status = req.status
     if req.status in ("active", "sourcing", "offers"):
         req.status = "quoting"
     db.commit()
-    return quote_to_dict(quote)
+    result = quote_to_dict(quote)
+    result["req_status"] = req.status
+    result["status_changed"] = req.status != old_status
+    return result
 
 
 @router.put("/api/quotes/{quote_id}")
@@ -748,10 +753,11 @@ async def send_quote(quote_id: int, user: User = Depends(require_user), db: Sess
     quote.status = "sent"
     quote.sent_at = datetime.now(timezone.utc)
     req = db.get(Requisition, quote.requisition_id)
+    old_status = req.status if req else None
     if req and req.status not in ("won", "lost", "archived"):
         req.status = "quoted"
     db.commit()
-    return {"ok": True, "status": "sent"}
+    return {"ok": True, "status": "sent", "req_status": req.status if req else None, "status_changed": req and req.status != old_status}
 
 
 @router.post("/api/quotes/{quote_id}/result")
@@ -773,7 +779,7 @@ async def quote_result(
     if req:
         req.status = payload.result
     db.commit()
-    return {"ok": True, "status": payload.result}
+    return {"ok": True, "status": payload.result, "req_status": req.status if req else None, "status_changed": True}
 
 
 @router.post("/api/quotes/{quote_id}/revise")

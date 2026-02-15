@@ -337,7 +337,9 @@ async function saveOffer(andNext) {
             body: JSON.stringify(data)
         });
         if (!res.ok) { showToast('Failed to save offer', 'error'); return; }
+        const result = await res.json();
         showToast('Offer from ' + data.vendor_name + ' saved', 'success');
+        notifyStatusChange(result);
         if (andNext) {
             ['loVendor','loQty','loPrice','loLead','loDC','loMoq','loNotes'].forEach(id => document.getElementById(id).value = '');
             document.getElementById('loCond').value = 'New';
@@ -391,6 +393,7 @@ async function buildQuoteFromSelected() {
         if (!res.ok) { showToast('Failed to build quote', 'error'); return; }
         crmQuote = await res.json();
         showToast('Quote built — review and adjust sell prices', 'success');
+        notifyStatusChange(crmQuote);
         const tabs = document.querySelectorAll('.tab');
         switchTab('quote', tabs[4]);
         renderQuote();
@@ -530,7 +533,9 @@ async function markQuoteSent() {
         await saveQuoteDraft();
         const res = await fetch('/api/quotes/' + crmQuote.id + '/send', { method: 'POST' });
         if (!res.ok) { showToast('Failed to mark as sent', 'error'); return; }
+        const sendData = await res.json();
         showToast('Quote marked as sent', 'success');
+        notifyStatusChange(sendData);
         loadQuote();
     } catch (e) { console.error('markQuoteSent:', e); showToast('Error sending quote', 'error'); }
 }
@@ -544,7 +549,9 @@ async function markQuoteResult(result) {
             body: JSON.stringify({ result })
         });
         if (!res.ok) { showToast('Failed to update result', 'error'); return; }
+        const resultData = await res.json();
         showToast(result === 'won' ? 'Quote marked as Won!' : 'Quote updated', result === 'won' ? 'success' : 'info');
+        notifyStatusChange(resultData);
         loadQuote();
     } catch (e) { console.error('markQuoteResult:', e); showToast('Error updating result', 'error'); }
 }
@@ -565,8 +572,10 @@ async function submitLost() {
             })
         });
         if (!res.ok) { showToast('Failed to submit', 'error'); return; }
+        const lostData = await res.json();
         closeModal('lostModal');
         showToast('Quote marked as lost', 'info');
+        notifyStatusChange(lostData);
         loadQuote();
     } catch (e) { console.error('submitLost:', e); showToast('Error submitting', 'error'); }
 }
