@@ -1,528 +1,555 @@
-"""
-Email Pipeline — the full closed loop:
-  1. SEND:    Draft → capture thread ID → send via Graph API
-  2. MONITOR: Poll inbox for replies matching tracked conversations
-  3. PARSE:   AI extracts structured quotes from reply text
-  4. LEARN:   Create sightings + update vendor reliability scores
-"""
-import re
-import json
-import httpx
-import structlog
-from datetime import datetime, timezone
-from typing import Optional
-from uuid import UUID
-from sqlalchemy import select, and_, or_, func, case
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+"""Email service — batch RFQ sending, inbox monitoring, AI parsing."""
+import asyncio, logging
+from datetime import datetime, timezone, timedelta
+from sqlalchemy.orm import Session
 
-from app.models import Vendor, OutreachLog, VendorResponse, Sighting, User
-from app.scoring import normalize_part_number
-from app.config import get_settings
+from .config import settings
+from .models import Contact, VendorResponse, ProcessedMessage
 
-logger = structlog.get_logger()
-GRAPH = "https://graph.microsoft.com/v1.0"
+log = logging.getLogger(__name__)
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 1. SEND RFQs
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def generate_rfq_draft(part_numbers: list[str], quantities=None, sender_name="") -> tuple[str, str]:
-    """Generate a professional RFQ email."""
-    subject = f"RFQ: {', '.join(part_numbers)}"
-
-    lines = []
-    for pn in part_numbers:
-        qty = quantities.get(pn) if quantities else None
-        lines.append(f"  • {pn}  —  Qty: {qty:,}" if qty else f"  • {pn}")
-
-    body = f"""Hi,
-
-We're interested in the following component(s):
-
-{chr(10).join(lines)}
-
-Could you please provide:
-  1. Current availability / stock quantity
-  2. Unit pricing (USD preferred)
-  3. Lead time
-  4. Date code (if applicable)
-  5. Condition (new/refurb)
-
-Please reply at your earliest convenience.
-
-Best regards,
-{sender_name}"""
-
-    return subject, body
+def _build_html_body(plain_text: str) -> str:
+    """Convert plain text to minimal HTML that looks like a normal email."""
+    html_body = plain_text.replace("\n", "<br>\n")
+    return f"""<html><body style="font-family: Calibri, Arial, sans-serif; font-size: 14px; color: #333;">
+{html_body}
+</body></html>"""
 
 
-async def send_rfq(
-    db: AsyncSession, access_token: str, user_id: UUID,
-    vendor_ids: list[UUID], part_numbers: list[str],
-    subject: str, body: str, bcc_email: str = None,
+async def send_batch_rfq(
+    token: str,
+    db: Session,
+    user_id: int,
+    requisition_id: int,
+    vendor_groups: list[dict],
 ) -> list[dict]:
-    """Send RFQ emails and log outreach with thread tracking."""
+    """Send one RFQ email per vendor group. Each group: {vendor_name, vendor_email, parts, subject, body}.
+    Returns list of created Contact records as dicts."""
+    from app.utils.graph_client import GraphClient
+
+    gc = GraphClient(token)
     results = []
-    normalized_pns = [normalize_part_number(pn) for pn in part_numbers]
 
-    vr = await db.execute(select(Vendor).where(Vendor.id.in_(vendor_ids)))
-    vendors = vr.scalars().all()
-
-    for vendor in vendors:
-        if not vendor.email:
-            results.append({"vendor_id": str(vendor.id), "vendor_name": vendor.name,
-                            "status": "skipped", "reason": "No email address"})
+    for group in vendor_groups:
+        email = group.get("vendor_email")
+        if not email:
             continue
 
+        html_body = _build_html_body(group["body"])
+
+        # Inject [AVAIL-{req_id}] token for reply matching
+        raw_subject = group["subject"]
+        avail_token = f"[AVAIL-{requisition_id}]"
+        if avail_token not in raw_subject:
+            tagged_subject = f"{avail_token} {raw_subject}"
+        else:
+            tagged_subject = raw_subject
+
+        payload = {
+            "message": {
+                "subject": tagged_subject,
+                "body": {"contentType": "HTML", "content": html_body},
+                "toRecipients": [{"emailAddress": {"address": email}}],
+                "isReadReceiptRequested": True,
+                "isDeliveryReceiptRequested": True,
+            },
+            "saveToSentItems": "true",
+        }
+
         try:
-            msg_id, conv_id = await _create_and_send_draft(
-                access_token, vendor.email, subject, body, bcc_email
+            result = await gc.post_json("/me/sendMail", payload)
+            # post_json returns {} on 202 success, or {"error": ...} on client error
+            if "error" in result:
+                log.error(f"Send failed to {email}: {result}")
+                results.append({
+                    "vendor_name": group["vendor_name"],
+                    "vendor_email": email,
+                    "status": "failed",
+                    "error": str(result.get("detail", ""))[:200],
+                })
+                continue
+
+            contact = Contact(
+                requisition_id=requisition_id,
+                user_id=user_id,
+                contact_type="email",
+                vendor_name=group["vendor_name"],
+                vendor_contact=email,
+                parts_included=group.get("parts", []),
+                subject=tagged_subject,
+                details=group["body"],
+                status="sent",
+                status_updated_at=datetime.now(timezone.utc),
+                created_at=datetime.now(timezone.utc),
             )
+            db.add(contact)
+            db.flush()
 
-            now = datetime.now(timezone.utc)
-            for pn_norm in normalized_pns:
-                db.add(OutreachLog(
-                    user_id=user_id, vendor_id=vendor.id,
-                    part_number_normalized=pn_norm,
-                    email_subject=subject, email_body=body, sent_at=now,
-                    graph_message_id=msg_id, graph_conversation_id=conv_id,
-                    recipient_email=vendor.email,
-                ))
+            # Try to get the sent message ID for reply matching
+            try:
+                sent_msg = await _find_sent_message(gc, group["subject"])
+                if sent_msg:
+                    contact.graph_message_id = sent_msg.get("id")
+                    contact.graph_conversation_id = sent_msg.get("conversationId")
+            except Exception as e:
+                log.debug(f"Could not capture sent message ID: {e}")
 
-            vendor.total_outreach = (vendor.total_outreach or 0) + 1
-            results.append({"vendor_id": str(vendor.id), "vendor_name": vendor.name, "status": "sent"})
-            logger.info("rfq_sent", vendor=vendor.name, to=vendor.email)
-
+            db.commit()
+            results.append({
+                "id": contact.id,
+                "vendor_name": contact.vendor_name,
+                "vendor_email": email,
+                "parts_count": len(contact.parts_included),
+                "status": "sent",
+            })
         except Exception as e:
-            logger.error("rfq_failed", vendor=vendor.name, error=str(e))
-            results.append({"vendor_id": str(vendor.id), "vendor_name": vendor.name,
-                            "status": "failed", "reason": str(e)})
+            log.error(f"Send error to {email}: {e}")
+            results.append({
+                "vendor_name": group["vendor_name"],
+                "vendor_email": email,
+                "status": "error",
+                "error": str(e)[:200],
+            })
 
-    await db.commit()
     return results
 
 
-async def _create_and_send_draft(token, to_email, subject, body, bcc=None) -> tuple[str, str]:
-    """Create a draft email (captures thread ID), then send it."""
-    message = {
-        "subject": subject,
-        "body": {"contentType": "Text", "content": body},
-        "toRecipients": [{"emailAddress": {"address": to_email}}],
+async def _find_sent_message(gc, subject: str) -> dict | None:
+    """Find the just-sent message in Sent Items to get its ID and conversationId."""
+    try:
+        await asyncio.sleep(1)  # Brief delay for Graph to process
+        data = await gc.get_json(
+            "/me/mailFolders/sentItems/messages",
+            params={
+                "$top": "5",
+                "$orderby": "sentDateTime desc",
+                "$select": "id,conversationId,subject",
+            })
+        msgs = data.get("value", []) if data else []
+        for m in msgs:
+            if m.get("subject", "").strip() == subject.strip():
+                return m
+    except Exception as e:
+        log.debug(f"Sent message lookup failed: {e}")
+    return None
+
+
+def log_phone_contact(
+    db: Session,
+    user_id: int,
+    requisition_id: int,
+    vendor_name: str,
+    vendor_phone: str,
+    parts: list[str],
+) -> dict:
+    """Log a verified phone contact (click-to-call initiated)."""
+    contact = Contact(
+        requisition_id=requisition_id,
+        user_id=user_id,
+        contact_type="phone",
+        vendor_name=vendor_name,
+        vendor_contact=vendor_phone,
+        parts_included=parts,
+        subject=f"Call to {vendor_name}",
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(contact)
+    db.commit()
+    return {
+        "id": contact.id,
+        "vendor_name": vendor_name,
+        "vendor_phone": vendor_phone,
+        "contact_type": "phone",
+        "created_at": contact.created_at.isoformat(),
     }
-    if bcc:
-        message["bccRecipients"] = [{"emailAddress": {"address": bcc}}]
-
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
-
-    async with httpx.AsyncClient(timeout=30) as client:
-        # Create draft — gives us the message ID and conversation ID
-        r = await client.post(f"{GRAPH}/me/messages", headers=headers, json=message)
-        if r.status_code not in (200, 201):
-            raise Exception(f"Draft failed: {r.status_code} {r.text[:200]}")
-
-        draft = r.json()
-        msg_id = draft.get("id", "")
-        conv_id = draft.get("conversationId", "")
-
-        # Send the draft
-        r2 = await client.post(f"{GRAPH}/me/messages/{msg_id}/send", headers=headers)
-        if r2.status_code not in (200, 202):
-            raise Exception(f"Send failed: {r2.status_code} {r2.text[:200]}")
-
-    return msg_id, conv_id
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# 2. MONITOR INBOX FOR REPLIES
-# ═══════════════════════════════════════════════════════════════════════════════
+async def poll_inbox(token: str, db: Session, requisition_id: int = None,
+                     scanned_by_user_id: int = None) -> list[dict]:
+    """Check inbox for vendor replies. Smart-matches to outbound RFQs.
 
-async def poll_for_replies(db: AsyncSession, access_token: str, user_email: str) -> dict:
-    """Check inbox for replies to all pending RFQs. Returns stats."""
-    stats = {"checked": 0, "new_replies": 0, "parsed_quotes": 0,
-             "sightings_created": 0, "vendors_updated": 0, "errors": 0}
+    Matching priority:
+    1. conversationId — same email thread as a sent RFQ (global, exact)
+    2. Subject [AVAIL-{req_id}] token — explicit RFQ tag
+    3. Vendor email — sender matches a vendor we contacted (USER-SCOPED to avoid data leaks)
+    4. Sender domain — vendor domain match (USER-SCOPED)
+    5. Unmatched — saved for manual review
 
-    # Get all unreplied outreach with thread IDs
-    r = await db.execute(
-        select(OutreachLog).where(
-            and_(
-                OutreachLog.graph_conversation_id.isnot(None),
-                OutreachLog.graph_conversation_id != "",
-                or_(OutreachLog.responded.is_(None), OutreachLog.responded == False),
-            )
-        ).order_by(OutreachLog.sent_at.desc())
-    )
-    pending = list(r.scalars().all())
-    if not pending:
-        return stats
+    Hardening:
+    - H1: Immutable IDs via GraphClient headers
+    - H2: ProcessedMessage dedup (belt-and-suspenders with VendorResponse check)
+    - H6: Retry with exponential backoff via GraphClient
+    - H8: Delta Query when sync_state available (incremental, not full scan)
 
-    # Group by conversation ID (one RFQ email = one conversation)
-    conv_map: dict[str, list[OutreachLog]] = {}
-    for log in pending:
-        conv_map.setdefault(log.graph_conversation_id, []).append(log)
+    Returns list of new responses found (already saved to DB).
+    """
+    import re
+    from app.utils.graph_client import GraphClient
+    from app.models import SyncState
 
-    # Get already-processed reply IDs to avoid duplicates
-    r = await db.execute(
-        select(VendorResponse.graph_reply_id).where(VendorResponse.graph_reply_id.isnot(None))
-    )
-    processed = {row[0] for row in r.fetchall()}
+    gc = GraphClient(token)
 
-    # Check each conversation for replies
-    for conv_id, logs in list(conv_map.items())[:50]:
-        stats["checked"] += 1
+    # ── H8: Try Delta Query for incremental sync ──
+    messages = []
+    used_delta = False
+    if scanned_by_user_id:
+        sync = db.query(SyncState).filter(
+            SyncState.user_id == scanned_by_user_id,
+            SyncState.folder == "inbox",
+        ).first()
+        delta_token = sync.delta_token if sync else None
+
         try:
-            earliest = min(log.sent_at for log in logs)
-            replies = await _fetch_replies(access_token, conv_id, earliest)
-
-            for reply in replies:
-                reply_id = reply.get("id", "")
-                if reply_id in processed:
-                    continue
-
-                # Skip messages from ourselves
-                from_addr = reply.get("from", {}).get("emailAddress", {}).get("address", "").lower()
-                if from_addr == user_email.lower():
-                    continue
-
-                stats["new_replies"] += 1
-
-                # Match to outreach logs
-                matching = [l for l in logs if l.recipient_email and l.recipient_email.lower() == from_addr]
-                if not matching:
-                    matching = logs  # fallback: same thread
-
-                # Extract text from email
-                body_text = _html_to_text(reply.get("body", {}).get("content", ""),
-                                          reply.get("bodyPreview", ""))
-
-                received_at = _parse_datetime(reply.get("receivedDateTime", ""))
-                from_name = reply.get("from", {}).get("emailAddress", {}).get("name", "")
-                part_numbers = list({l.part_number_normalized for l in matching})
-
-                # AI parse the reply
-                try:
-                    quotes = await parse_vendor_reply(body_text, part_numbers,
-                                                      matching[0].vendor.name if matching else "")
-                except Exception as e:
-                    logger.error("parse_error", error=str(e))
-                    quotes = []
-
-                settings = get_settings()
-
-                # Save each parsed quote
-                for q in quotes:
-                    stats["parsed_quotes"] += 1
-                    vr = VendorResponse(
-                        outreach_log_id=matching[0].id, vendor_id=matching[0].vendor_id,
-                        graph_reply_id=reply_id, reply_received_at=received_at,
-                        reply_from_email=from_addr, reply_from_name=from_name,
-                        reply_body_text=body_text[:5000],
-                        part_number=q.get("part_number", ""),
-                        part_number_normalized=normalize_part_number(q.get("part_number", "")),
-                        has_stock=q.get("has_stock"),
-                        quoted_price=q.get("price"),
-                        quoted_currency=q.get("currency", "USD"),
-                        quoted_quantity=q.get("quantity"),
-                        quoted_moq=q.get("moq"),
-                        quoted_lead_time_days=q.get("lead_time_days"),
-                        quoted_lead_time_text=q.get("lead_time_text"),
-                        quoted_condition=q.get("condition"),
-                        quoted_date_code=q.get("date_code"),
-                        quoted_manufacturer=q.get("manufacturer"),
-                        parse_confidence=q.get("confidence", 0.0),
-                        parse_model=q.get("model", ""),
-                        parse_raw=q.get("raw_output"),
-                        parse_notes=q.get("notes", ""),
-                        status="parsed",
-                    )
-                    db.add(vr)
-
-                    # Auto-create sighting for high-confidence positive quotes
-                    if q.get("confidence", 0) >= settings.auto_sighting_confidence and q.get("has_stock"):
-                        s = Sighting(
-                            vendor_id=matching[0].vendor_id,
-                            part_number=q.get("part_number", ""),
-                            part_number_normalized=normalize_part_number(q.get("part_number", "")),
-                            manufacturer=q.get("manufacturer"),
-                            quantity=q.get("quantity"),
-                            price=q.get("price"),
-                            currency=q.get("currency", "USD"),
-                            lead_time_days=q.get("lead_time_days"),
-                            lead_time_text=q.get("lead_time_text"),
-                            condition=q.get("condition"),
-                            date_code=q.get("date_code"),
-                            source_type="email_reply", confidence=5,
-                            evidence_type="direct_offer", is_exact_match=True,
-                            seen_at=received_at,
-                        )
-                        db.add(s)
-                        await db.flush()
-                        vr.sighting_id = s.id
-                        vr.status = "sighting_created"
-                        stats["sightings_created"] += 1
-
-                # Mark outreach as responded
-                for log in matching:
-                    if not log.responded:
-                        log.responded = True
-                        log.responded_at = received_at
-                        log.response_hours = round((received_at - log.sent_at).total_seconds() / 3600, 1)
-                        log.response_was_positive = any(q.get("has_stock") for q in quotes)
-
-                # Update vendor stats
-                await _update_vendor_stats(db, matching[0].vendor_id, received_at, matching[0].sent_at)
-                stats["vendors_updated"] += 1
-                processed.add(reply_id)
-
-        except Exception as e:
-            stats["errors"] += 1
-            logger.error("poll_error", conv=conv_id, error=str(e))
-
-    await db.commit()
-    logger.info("poll_complete", **stats)
-    return stats
-
-
-async def _fetch_replies(token: str, conv_id: str, since: datetime) -> list[dict]:
-    """Get messages in a conversation thread from Graph API."""
-    since_str = since.strftime("%Y-%m-%dT%H:%M:%SZ")
-    params = {
-        "$filter": f"conversationId eq '{conv_id}' and isDraft eq false and receivedDateTime ge {since_str}",
-        "$select": "id,from,receivedDateTime,subject,body,bodyPreview",
-        "$orderby": "receivedDateTime asc",
-        "$top": "25",
-    }
-    headers = {"Authorization": f"Bearer {token}"}
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            r = await client.get(f"{GRAPH}/me/messages", headers=headers, params=params)
-            if r.status_code != 200:
-                logger.warning("graph_error", status=r.status_code)
-                return []
-            return r.json().get("value", [])
-    except Exception as e:
-        logger.error("graph_fetch_error", error=str(e))
-        return []
-
-
-async def _update_vendor_stats(db, vendor_id, responded_at, sent_at):
-    """Update vendor reliability scores with new response data."""
-    r = await db.execute(select(Vendor).where(Vendor.id == vendor_id))
-    vendor = r.scalar_one_or_none()
-    if not vendor:
-        return
-
-    vendor.total_responses = (vendor.total_responses or 0) + 1
-    hours = (responded_at - sent_at).total_seconds() / 3600
-
-    if vendor.avg_response_hours is not None:
-        n = vendor.total_responses
-        vendor.avg_response_hours = round(((vendor.avg_response_hours * (n - 1)) + hours) / n, 1)
-    else:
-        vendor.avg_response_hours = round(hours, 1)
-
-    # Auto-flag/unflag slow responders
-    flags = vendor.red_flags or []
-    if vendor.avg_response_hours and vendor.avg_response_hours > 72:
-        if "slow_responder" not in flags:
-            vendor.red_flags = flags + ["slow_responder"]
-    elif "slow_responder" in flags:
-        flags.remove("slow_responder")
-        vendor.red_flags = flags
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 3. AI RESPONSE PARSER
-# ═══════════════════════════════════════════════════════════════════════════════
-
-EXTRACTION_PROMPT = """You extract structured electronic component quotes from vendor emails.
-
-We asked about these parts: {part_numbers}
-Vendor: {vendor_name}
-
-Rules:
-- Return a JSON array with one object per part number quoted
-- If vendor says NO stock, set has_stock=false
-- If email is out-of-office or irrelevant, return []
-- Parse lead times: "stock"=0 days, "2 weeks"=14, "45 days ARO"=45
-- K=thousands, M=millions
-- Set confidence 0.0-1.0 based on clarity of data
-- Null for any field not mentioned
-
-Return ONLY a JSON array, no markdown. Example:
-[{{"part_number":"LM317T","has_stock":true,"price":0.45,"currency":"USD","quantity":5000,"moq":1000,"lead_time_days":0,"lead_time_text":"stock","condition":"new","date_code":"2024+","manufacturer":"TI","confidence":0.95,"notes":"5K in stock"}}]
-
---- VENDOR REPLY ---
-{email_body}
---- END ---"""
-
-
-async def parse_vendor_reply(email_body: str, part_numbers: list[str], vendor_name: str = "") -> list[dict]:
-    """Use Claude to extract structured quote data from vendor email text."""
-    if not email_body or not email_body.strip():
-        return []
-
-    settings = get_settings()
-    if not settings.anthropic_api_key:
-        logger.warning("no_anthropic_key", msg="Cannot parse replies without ANTHROPIC_API_KEY")
-        return []
-
-    prompt = EXTRACTION_PROMPT.format(
-        part_numbers=", ".join(part_numbers),
-        vendor_name=vendor_name or "Unknown",
-        email_body=email_body[:4000],
-    )
-
-    try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            r = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": settings.anthropic_api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-sonnet-4-20250514",
-                    "max_tokens": 2000,
-                    "messages": [{"role": "user", "content": prompt}],
-                },
+            items, new_delta = await gc.delta_query(
+                "/me/mailFolders/inbox/messages/delta",
+                delta_token=delta_token,
+                select="id,subject,from,receivedDateTime,bodyPreview,body,conversationId",
+                max_items=200,
             )
-            if r.status_code != 200:
-                logger.warning("anthropic_error", status=r.status_code)
-                return []
+            messages = items
+            used_delta = True
 
-            text = ""
-            for block in r.json().get("content", []):
-                if block.get("type") == "text":
-                    text += block.get("text", "")
+            # Persist new delta token
+            if new_delta:
+                if sync:
+                    sync.delta_token = new_delta
+                    sync.last_sync_at = datetime.now(timezone.utc)
+                else:
+                    sync = SyncState(
+                        user_id=scanned_by_user_id,
+                        folder="inbox",
+                        delta_token=new_delta,
+                        last_sync_at=datetime.now(timezone.utc),
+                    )
+                    db.add(sync)
+                db.flush()
+        except Exception as e:
+            log.warning(f"Delta query failed, falling back to full scan: {e}")
+            messages = []
+            used_delta = False
 
-            return _parse_and_enrich(text, part_numbers)
-
-    except Exception as e:
-        logger.error("anthropic_error", error=str(e))
-        return []
-
-
-def _parse_and_enrich(text: str, part_numbers: list[str]) -> list[dict]:
-    """Parse AI JSON response and normalize types."""
-    text = text.strip()
-    if text.startswith("```"):
-        lines = text.split("\n")
-        text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:]).strip()
-
-    try:
-        result = json.loads(text)
-        if isinstance(result, dict):
-            result = [result]
-        if not isinstance(result, list):
+    # ── Fallback: traditional top-50 fetch ──
+    if not messages and not used_delta:
+        try:
+            data = await gc.get_json(
+                "/me/mailFolders/inbox/messages",
+                params={"$top": "50", "$orderby": "receivedDateTime desc",
+                        "$select": "id,subject,from,receivedDateTime,bodyPreview,body,conversationId"})
+            messages = data.get("value", []) if data else []
+        except Exception as e:
+            log.error(f"Inbox poll failed: {e}")
             return []
-    except json.JSONDecodeError:
-        return []
 
-    enriched = []
-    for q in result:
-        if not isinstance(q, dict):
+    # ── H2: Dedup via processed_messages table (belt-and-suspenders) ──
+    incoming_ids = [m.get("id", "") for m in messages if m.get("id")]
+    already_processed = set()
+    if incoming_ids:
+        # Check both VendorResponse and ProcessedMessage tables
+        vr_rows = db.query(VendorResponse.message_id).filter(
+            VendorResponse.message_id.in_(incoming_ids)
+        ).all()
+        pm_rows = db.query(ProcessedMessage.message_id).filter(
+            ProcessedMessage.message_id.in_(incoming_ids),
+            ProcessedMessage.processing_type == "inbox_poll",
+        ).all()
+        already_processed = {r[0] for r in vr_rows} | {r[0] for r in pm_rows}
+
+    # Pre-load outbound email contacts for matching (last 6 months)
+    cutoff = datetime.now(timezone.utc) - timedelta(days=180)
+    all_contacts = db.query(Contact).filter(
+        Contact.contact_type == "email",
+        Contact.created_at > cutoff,
+    ).all()
+
+    # ConversationId map is GLOBAL — thread-specific, unambiguous
+    conv_id_map = {}
+    # Email and domain maps are USER-SCOPED to prevent cross-user data leaks
+    email_map = {}     # vendor_email -> Contact (only this user's contacts)
+    domain_map = {}    # vendor_domain -> Contact (only this user's contacts)
+    for c in all_contacts:
+        if c.graph_conversation_id:
+            conv_id_map[c.graph_conversation_id] = c
+        # Only build email/domain maps for the scanning user
+        if scanned_by_user_id and c.user_id == scanned_by_user_id:
+            if c.vendor_contact:
+                email_lower = c.vendor_contact.lower()
+                email_map[email_lower] = c
+                # Extract domain for domain-level matching
+                if "@" in email_lower:
+                    domain = email_lower.split("@", 1)[1]
+                    if domain not in NOISE_DOMAINS:
+                        domain_map[domain] = c
+
+    # Subject token pattern: [AVAIL-{req_id}]
+    avail_token_re = re.compile(r'\[AVAIL-(\d+)\]')
+
+    results = []
+    for msg in messages:
+        msg_id = msg.get("id", "")
+        if not msg_id or msg_id in already_processed:
             continue
 
-        q["model"] = "claude-sonnet-4-20250514"
-        q["raw_output"] = q.copy()
+        sender = msg.get("from", {}).get("emailAddress", {})
+        email_addr = (sender.get("address") or "").lower()
+        subj = msg.get("subject", "")
+        conv_id = msg.get("conversationId", "")
 
-        # Normalize types
-        for f in ("price", "confidence"):
-            if f in q and q[f] is not None:
+        # Skip noise
+        if _is_noise_email(email_addr):
+            continue
+
+        # ── 4-tier reply matching ──
+        matched_contact = None
+        matched_req_id = requisition_id
+        match_method = "unmatched"
+
+        # Tier 1: ConversationId (exact thread, global)
+        if conv_id and conv_id in conv_id_map:
+            matched_contact = conv_id_map[conv_id]
+            matched_req_id = matched_contact.requisition_id
+            match_method = "conversation_id"
+
+        # Tier 2: Subject [AVAIL-{id}] token
+        if not matched_contact:
+            token_match = avail_token_re.search(subj)
+            if token_match:
+                avail_req_id = int(token_match.group(1))
+                # Verify this req exists and find the contact
+                req_contacts = [c for c in all_contacts
+                                if c.requisition_id == avail_req_id
+                                and c.vendor_contact and c.vendor_contact.lower() == email_addr]
+                if req_contacts:
+                    matched_contact = req_contacts[0]
+                    matched_req_id = avail_req_id
+                    match_method = "subject_token"
+                else:
+                    # Token found but no exact email match — still assign to req
+                    matched_req_id = avail_req_id
+                    match_method = "subject_token_req_only"
+
+        # Tier 3: Exact email match (USER-SCOPED)
+        if not matched_contact and email_addr in email_map:
+            matched_contact = email_map[email_addr]
+            matched_req_id = matched_contact.requisition_id
+            match_method = "email_exact"
+
+        # Tier 4: Domain match (USER-SCOPED)
+        if not matched_contact and "@" in email_addr:
+            sender_domain = email_addr.split("@", 1)[1]
+            if sender_domain in domain_map:
+                matched_contact = domain_map[sender_domain]
+                matched_req_id = matched_contact.requisition_id
+                match_method = "domain"
+
+        try:
+            vr = VendorResponse(
+                requisition_id=matched_req_id,
+                contact_id=matched_contact.id if matched_contact else None,
+                vendor_name=sender.get("name", email_addr),
+                vendor_email=email_addr,
+                subject=subj,
+                body=msg.get("body", {}).get("content", msg.get("bodyPreview", "")),
+                message_id=msg_id,
+                graph_conversation_id=conv_id,
+                scanned_by_user_id=scanned_by_user_id,
+                match_method=match_method,
+                received_at=msg.get("receivedDateTime"),
+                status="matched" if matched_contact else "new",
+                created_at=datetime.now(timezone.utc),
+            )
+            db.add(vr)
+            db.flush()
+
+            # H2: Record in processed_messages for cross-type dedup
+            db.add(ProcessedMessage(
+                message_id=msg_id,
+                processing_type="inbox_poll",
+                processed_at=datetime.now(timezone.utc),
+            ))
+
+            # ── Reply classification + AI parsing ──
+            if settings.anthropic_api_key:
                 try:
-                    q[f] = float(q[f])
-                except (ValueError, TypeError):
-                    q[f] = None
-        for f in ("quantity", "moq", "lead_time_days"):
-            if f in q and q[f] is not None:
-                try:
-                    q[f] = int(q[f])
-                except (ValueError, TypeError):
-                    q[f] = None
+                    parsed = await parse_response_ai(vr.body, vr.subject)
+                    if parsed:
+                        vr.parsed_data = parsed
+                        vr.confidence = parsed.get("confidence", 0)
+                        vr.status = "parsed"
+                        # Classify the response
+                        classification = _classify_response(parsed, vr.body, vr.subject)
+                        vr.classification = classification["type"]
+                        vr.needs_action = classification["needs_action"]
+                        vr.action_hint = classification["action_hint"]
+                except Exception as e:
+                    log.warning(f"AI parse failed for msg {msg_id[:20]}: {e}")
 
-        if not q.get("confidence"):
-            q["confidence"] = 0.5
-        if not q.get("part_number") and len(part_numbers) == 1:
-            q["part_number"] = part_numbers[0]
+            # ── Contact status progression ──
+            if matched_contact:
+                _progress_contact_status(matched_contact, vr, db)
 
-        enriched.append(q)
+            results.append({
+                "id": vr.id,
+                "vendor_name": vr.vendor_name,
+                "vendor_email": vr.vendor_email,
+                "subject": vr.subject,
+                "status": vr.status,
+                "classification": vr.classification,
+                "needs_action": vr.needs_action,
+                "action_hint": vr.action_hint,
+                "parsed_data": vr.parsed_data,
+                "confidence": vr.confidence,
+                "received_at": vr.received_at,
+                "message_id": msg_id,
+                "match_method": match_method,
+                "matched_contact_id": matched_contact.id if matched_contact else None,
+                "matched_requisition_id": matched_req_id,
+            })
+        except Exception as e:
+            log.error(f"Failed to save inbox message {msg_id[:20]}: {e}")
+            db.rollback()
+            continue
 
-    return enriched
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# HELPERS
-# ═══════════════════════════════════════════════════════════════════════════════
-
-def _html_to_text(html: str, preview: str) -> str:
-    """Strip HTML tags from email body."""
-    if not html:
-        return preview or ""
-    text = re.sub(r"<style[^>]*>.*?</style>", "", html, flags=re.DOTALL)
-    text = re.sub(r"<script[^>]*>.*?</script>", "", text, flags=re.DOTALL)
-    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"</?p[^>]*>", "\n", text, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-    return re.sub(r"\n{3,}", "\n\n", text).strip()
-
-
-def _parse_datetime(s: str) -> datetime:
+    # Single commit for all new responses
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
-    except (ValueError, AttributeError):
-        return datetime.now(timezone.utc)
+        db.commit()
+    except Exception as e:
+        log.error(f"Batch commit failed during inbox poll: {e}")
+        db.rollback()
+        return []
+
+    return results
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# MONITORING STATS (for the dashboard)
-# ═══════════════════════════════════════════════════════════════════════════════
+def _classify_response(parsed: dict, body: str, subject: str) -> dict:
+    """Classify a vendor response into actionable categories."""
+    body_lower = (body or "").lower()[:2000]
+    subject_lower = (subject or "").lower()
 
-async def get_monitor_stats(db: AsyncSession, user_id) -> dict:
-    """Dashboard stats for the Responses tab."""
-    r = await db.execute(
-        select(
-            func.count(OutreachLog.id).label("sent"),
-            func.count(case((OutreachLog.responded == True, OutreachLog.id))).label("responded"),
-            func.count(case((OutreachLog.response_was_positive == True, OutreachLog.id))).label("positive"),
-            func.avg(OutreachLog.response_hours).label("avg_hours"),
-        ).where(OutreachLog.user_id == user_id)
+    # OOO / bounce detection
+    ooo_signals = ["out of office", "automatic reply", "autoreply", "i am currently out",
+                   "on vacation", "will return", "away from", "undeliverable", "delivery failure"]
+    if any(s in body_lower or s in subject_lower for s in ooo_signals):
+        return {"type": "ooo_bounce", "needs_action": False,
+                "action_hint": "Auto-reply detected — will need follow-up later"}
+
+    parts = parsed.get("parts", [])
+    sentiment = parsed.get("sentiment", "neutral")
+
+    # Quote provided — has actual pricing
+    if parts and any(p.get("unit_price") for p in parts):
+        return {"type": "quote_provided", "needs_action": True,
+                "action_hint": f"Quote received for {len(parts)} part(s) — review pricing"}
+
+    # Partial availability — some parts but not all, or limited qty
+    if parts and sentiment == "positive":
+        if any(p.get("qty_available") for p in parts):
+            return {"type": "partial_availability", "needs_action": True,
+                    "action_hint": "Partial stock available — review quantities"}
+
+    # No stock
+    no_stock_signals = ["not available", "out of stock", "no stock", "don't have",
+                        "do not have", "cannot supply", "unable to", "unfortunately",
+                        "regret to", "unable to offer", "not in stock"]
+    if any(s in body_lower for s in no_stock_signals) or sentiment == "negative":
+        return {"type": "no_stock", "needs_action": False,
+                "action_hint": "Vendor confirmed no availability"}
+
+    # Counter offer — alternative parts or conditions
+    counter_signals = ["alternative", "instead", "substitute", "we can offer",
+                       "how about", "suggest", "similar"]
+    if any(s in body_lower for s in counter_signals):
+        return {"type": "counter_offer", "needs_action": True,
+                "action_hint": "Vendor proposed an alternative — review offer"}
+
+    # Clarification needed
+    question_signals = ["could you", "can you", "please confirm", "need more",
+                        "what quantity", "which version", "please clarify", "?"]
+    if any(s in body_lower for s in question_signals) and body_lower.count("?") >= 1:
+        return {"type": "clarification_needed", "needs_action": True,
+                "action_hint": "Vendor asked a question — reply needed"}
+
+    # Default: follow_up_pending (got a reply but unclear what it means)
+    return {"type": "follow_up_pending", "needs_action": True,
+            "action_hint": "Response received — review and determine next steps"}
+
+
+def _progress_contact_status(contact: Contact, vr: VendorResponse, db: Session):
+    """Update the outbound Contact status based on the vendor's reply."""
+    now = datetime.now(timezone.utc)
+
+    # Already in a terminal state? Don't regress
+    if contact.status in ("quoted", "declined"):
+        return
+
+    classification = vr.classification or ""
+
+    if classification == "quote_provided":
+        contact.status = "quoted"
+    elif classification == "no_stock":
+        contact.status = "declined"
+    elif classification in ("ooo_bounce",):
+        contact.status = "pending"  # Will need re-follow-up
+    elif classification in ("clarification_needed", "counter_offer", "partial_availability"):
+        contact.status = "responded"
+    else:
+        # Generic response — at least we know they replied
+        if contact.status in ("sent", "opened"):
+            contact.status = "responded"
+
+    contact.status_updated_at = now
+
+
+# Noise filter — common non-vendor senders
+NOISE_DOMAINS = {
+    'microsoft.com', 'microsoftonline.com', 'office365.com', 'office.com',
+    'google.com', 'googleapis.com', 'googlemail.com',
+    'linkedin.com', 'facebook.com', 'twitter.com', 'instagram.com',
+    'youtube.com', 'github.com', 'slack.com', 'zoom.us', 'teams.microsoft.com',
+    'mailchimp.com', 'constantcontact.com', 'sendgrid.net', 'amazonses.com',
+    'hubspot.com', 'salesforce.com', 'marketo.com',
+    'fedex.com', 'ups.com', 'usps.com', 'dhl.com',
+    'intuit.com', 'quickbooks.com', 'paypal.com', 'stripe.com',
+    'docusign.com', 'dropbox.com', 'box.com',
+}
+
+NOISE_PREFIXES = {'noreply', 'no-reply', 'donotreply', 'do-not-reply',
+                   'mailer-daemon', 'postmaster', 'notifications', 'alerts',
+                   'newsletter', 'marketing', 'support', 'info', 'billing'}
+
+
+def _is_noise_email(email: str) -> bool:
+    """Check if an email address is likely non-vendor noise."""
+    if not email or "@" not in email:
+        return True
+    local, domain = email.split("@", 1)
+    if domain.lower() in NOISE_DOMAINS:
+        return True
+    if local.lower() in NOISE_PREFIXES:
+        return True
+    return False
+
+
+async def parse_response_ai(body: str, subject: str) -> dict | None:
+    """Use Claude to parse vendor email response.
+
+    Delegates to claude_client for API calls. Kept as thin wrapper
+    for backward compatibility with poll_inbox().
+    """
+    from app.services.response_parser import parse_vendor_response
+
+    result = await parse_vendor_response(
+        email_body=body,
+        email_subject=subject,
+        vendor_name="",  # Unknown at this point
     )
-    o = r.one()
 
-    r2 = await db.execute(
-        select(
-            func.count(VendorResponse.id).label("total"),
-            func.count(case((VendorResponse.status == "sighting_created", VendorResponse.id))).label("auto"),
-            func.count(case((VendorResponse.status == "approved", VendorResponse.id))).label("approved"),
-            func.count(case((VendorResponse.status == "rejected", VendorResponse.id))).label("rejected"),
-            func.count(case((VendorResponse.status == "parsed", VendorResponse.id))).label("pending"),
-            func.avg(VendorResponse.parse_confidence).label("avg_conf"),
-        )
-    )
-    p = r2.one()
+    if not result:
+        return None
 
-    total_sent = o.sent or 0
-    total_responded = o.responded or 0
-
+    # Map to the legacy format expected by poll_inbox
     return {
-        "outreach": {
-            "total_sent": total_sent,
-            "total_responded": total_responded,
-            "total_positive": o.positive or 0,
-            "response_rate": round((total_responded / total_sent * 100) if total_sent else 0, 1),
-            "avg_response_hours": round(o.avg_hours or 0, 1),
-        },
-        "parsing": {
-            "total_parsed": p.total or 0,
-            "auto_sightings": p.auto or 0,
-            "manual_approved": p.approved or 0,
-            "rejected": p.rejected or 0,
-            "pending_review": p.pending or 0,
-            "avg_confidence": round(p.avg_conf or 0, 2),
-        },
+        "sentiment": result.get("overall_sentiment", "neutral"),
+        "parts": result.get("parts", []),
+        "confidence": result.get("confidence", 0),
     }

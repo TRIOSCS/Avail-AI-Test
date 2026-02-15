@@ -3,319 +3,1270 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AvailAI — Sourcing Engine</title>
+    <title>AVAIL — Opportunity Management</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg: #0a0e17; --card: #111827; --card2: #1a2332; --input: #0d1321;
-            --border: #1e293b; --focus: #3b82f6;
-            --text: #e2e8f0; --text2: #94a3b8; --muted: #64748b;
-            --blue: #3b82f6; --green: #10b981; --amber: #f59e0b;
-            --red: #ef4444; --purple: #8b5cf6;
+            --bg:#f5f6f8; --white:#fff; --card2:#f0f2f5; --input:#f3f5f8; --surface:#f9fafb;
+            --border:#e0e4ea; --border2:#cdd3dc; --focus:#1a7f9b;
+            --text:#1a1f2e; --text2:#4a5568; --muted:#8695a7;
+            --teal:#1a7f9b; --teal-light:#e6f4f8;
+            --green:#0fa67f; --green-light:#e8f8f3;
+            --amber:#d9880b; --amber-light:#fef5e6;
+            --red:#d94452; --red-light:#fce8ea;
+            --bg2:#ebeef3;
         }
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:'DM Sans',sans-serif; background:var(--bg); color:var(--text); min-height:100vh; }
+        *{margin:0;padding:0;box-sizing:border-box}
+        body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 
         /* Login */
-        .login { display:flex; align-items:center; justify-content:center; min-height:100vh;
-            background:radial-gradient(ellipse at 30% 20%,rgba(59,130,246,.08)0%,transparent 60%),var(--bg); }
-        .login-card { background:var(--card); border:1px solid var(--border); border-radius:16px;
-            padding:48px; text-align:center; max-width:400px; width:90%; }
-        .login-card h1 { font-size:32px; font-weight:700; }
-        .login-card .sub { color:var(--muted); font-size:14px; margin-bottom:32px; }
-        .btn-ms { display:inline-flex; align-items:center; gap:10px; background:var(--blue);
-            color:white; text-decoration:none; padding:14px 28px; border-radius:10px;
-            font-weight:600; font-size:15px; }
-        .btn-ms:hover { background:#2563eb; }
-        .ver { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); margin-top:24px; }
+        .login{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(160deg,#f0f4f8,#e8edf5,#f0f7fa)}
+        .login-card{background:var(--white);border:1px solid var(--border);border-radius:16px;padding:48px;text-align:center;max-width:380px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,.06)}
+        .login-logo{width:320px;margin-bottom:20px}
+        .login-card .sub{color:var(--muted);font-size:13px;margin-bottom:28px}
+        .btn-ms{display:inline-flex;align-items:center;gap:10px;background:var(--teal);color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:14px;transition:.15s}
+        .btn-ms:hover{background:#156a82}
+        .ver{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);margin-top:24px}
 
         /* Shell */
-        .shell { max-width:1100px; margin:0 auto; padding:24px 20px; }
-        .topbar { display:flex; justify-content:space-between; align-items:center; margin-bottom:24px; }
-        .topbar h1 { font-size:22px; font-weight:700; }
-        .user { display:flex; align-items:center; gap:12px; color:var(--text2); font-size:14px; }
-        .btn-out { background:none; border:1px solid var(--border); color:var(--text2);
-            padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
+        .shell{max-width:1100px;margin:0 auto;padding:16px 20px}
+        .topbar{display:flex;justify-content:space-between;align-items:center;padding:10px 18px;background:var(--white);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.02)}
+        .topbar-left{display:flex;align-items:center;gap:12px}
+        .topbar-logo{height:65px}
+        .topbar-nav{display:flex;gap:4px;margin-left:16px}
+        .topbar-nav button{padding:5px 12px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
+        .topbar-nav button:hover{background:var(--bg);border-color:var(--border)}
+        .topbar-nav button.active{background:var(--teal-light);color:var(--teal);border-color:rgba(26,127,155,.2)}
+        .user{display:flex;align-items:center;gap:10px;color:var(--text2);font-size:13px}
+        .m365-status{display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:var(--bg);border:1px solid var(--border);cursor:default;font-size:11px}
+        .role-badge{padding:3px 8px;border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.3px}
+        .role-buyer{background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd}
+        .role-sales{background:#fef3c7;color:#92400e;border:1px solid #fde68a}
+        .m365-dot{width:7px;height:7px;border-radius:50%;background:#94a3b8;flex-shrink:0}
+        .m365-dot.green{background:#22c55e}
+        .m365-dot.yellow{background:#eab308}
+        .m365-dot.red{background:#ef4444}
+        .m365-label{font-weight:600;color:var(--text2)}
+        .btn-out{background:var(--bg);border:1px solid var(--border);color:var(--text2);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:11px;transition:.15s}
+        .btn-out:hover{border-color:var(--teal);color:var(--teal)}
+
+        /* Buttons */
+        .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;transition:.15s;border:none}
+        .btn-primary{background:var(--teal);color:#fff}.btn-primary:hover{background:#156a82}
+        .btn-success{background:var(--green);color:#fff}.btn-success:hover{background:#0d9070}
+        .btn-ghost{background:none;border:1px solid var(--border);color:var(--text2)}.btn-ghost:hover{border-color:var(--teal);color:var(--teal)}
+        .btn-sm{padding:5px 11px;font-size:11px}
+        .btn-danger{background:var(--red-light);color:var(--red);border:1px solid rgba(217,68,82,.15)}
+        .btn:disabled{opacity:.4;cursor:default}
+
+        /* Cards */
+        .card{background:var(--white);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:6px;transition:.15s}
+        .card:hover{border-color:var(--border2);box-shadow:0 2px 8px rgba(0,0,0,.04)}
+        .card-clickable{cursor:pointer}
+        .empty{color:var(--muted);font-size:13px;padding:40px 0;text-align:center}
 
         /* Tabs */
-        .tabs { display:flex; gap:2px; margin-bottom:24px; background:var(--card);
-            border-radius:10px; padding:3px; border:1px solid var(--border); width:fit-content; }
-        .tab { padding:8px 20px; border-radius:8px; border:none; background:transparent;
-            color:var(--muted); font-size:14px; font-weight:500; cursor:pointer; }
-        .tab.on { background:var(--blue); color:white; }
-        .tc { display:none; } .tc.on { display:block; }
+        .tabs{display:flex;gap:2px;margin-bottom:16px;background:var(--white);border-radius:8px;padding:3px;border:1px solid var(--border);width:fit-content}
+        .tab{padding:7px 18px;border-radius:6px;border:none;background:transparent;color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
+        .tab.on{background:var(--teal);color:#fff}
+        .tab:not(.on):hover{color:var(--text);background:var(--bg)}
+        .tc{display:none}.tc.on{display:block}
 
-        /* Search */
-        .spanel { background:var(--card); border:1px solid var(--border); border-radius:12px;
-            padding:24px; margin-bottom:20px; }
-        .srow { display:flex; gap:12px; }
-        .sinput { flex:1; background:var(--input); border:1px solid var(--border); border-radius:8px;
-            padding:14px 16px; color:var(--text); font-family:'JetBrains Mono',monospace;
-            font-size:14px; resize:vertical; min-height:52px; }
-        .sinput:focus { outline:none; border-color:var(--focus); }
-        .qinput { width:120px; background:var(--input); border:1px solid var(--border); border-radius:8px;
-            padding:14px 12px; color:var(--text); font-family:'JetBrains Mono',monospace;
-            font-size:14px; text-align:right; }
-        .qinput:focus { outline:none; border-color:var(--focus); }
-        .btn-s { background:var(--blue); color:white; border:none; border-radius:8px;
-            padding:14px 24px; font-size:14px; font-weight:600; cursor:pointer; white-space:nowrap; }
-        .btn-s:hover { background:#2563eb; }
-        .btn-s:disabled { opacity:.5; }
+        /* Requisition List */
+        .req-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+        .req-header h2{font-size:16px;font-weight:700}
+        .req-card{display:flex;justify-content:space-between;align-items:center}
+        .req-name{font-weight:700;font-size:14px}
+        .req-meta{display:flex;gap:16px;font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;align-items:center}
+        .btn-archive{padding:4px 10px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--white);color:var(--text2);transition:.15s}
+        .btn-archive:hover{border-color:var(--amber);color:var(--amber);background:#fffbe6}
+        .req-archived{opacity:0.55}
+        .req-archived .req-name::after{content:" (archived)";font-weight:400;font-size:11px;color:var(--amber)}
+        .btn-reactivate{padding:4px 10px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--teal);background:var(--teal-light);color:var(--teal);transition:.15s}
+        .btn-reactivate:hover{background:var(--teal);color:var(--white)}
+        .req-search{background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);width:280px;transition:.15s}
+        .req-search:focus{outline:none;border-color:var(--teal);background:var(--white);box-shadow:0 0 0 2px rgba(26,127,155,.1)}
+        .req-edit-cell{cursor:pointer;position:relative}
+        .req-edit-cell:hover{background:var(--bg);border-radius:4px}
+        .req-edit-input{background:var(--white);border:1px solid var(--teal);border-radius:4px;padding:3px 6px;font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--text);width:100%;box-sizing:border-box;outline:none;box-shadow:0 0 0 2px rgba(26,127,155,.15)}
+        .req-actions{display:flex;gap:4px;align-items:center}
 
-        /* Results */
-        .rhead { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
-        .rhead h2 { font-size:16px; }
-        .rmeta { font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--muted); }
-        .ractions { display:flex; gap:8px; align-items:center; }
-        .btn-t { background:none; border:none; color:var(--blue); font-size:13px; cursor:pointer; padding:4px 8px; }
-        .btn-rfq { background:var(--green); color:white; border:none; border-radius:8px;
-            padding:8px 18px; font-size:13px; font-weight:600; cursor:pointer; }
-        .btn-rfq:disabled { opacity:.4; }
-        .empty { color:var(--muted); font-size:14px; padding:40px 0; text-align:center; }
+        /* Detail Header */
+        .detail-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+        .detail-header h2{font-size:16px;font-weight:700}
+        .back-link{color:var(--teal);font-size:12px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 
-        /* Result Card */
-        .rc { background:var(--card); border:1px solid var(--border); border-radius:10px;
-            padding:16px 20px; margin-bottom:8px; display:flex; gap:14px; }
-        .rc:hover { border-color:#2d3a4f; background:var(--card2); }
-        .rc.excl { opacity:.45; }
-        .rc input[type=checkbox] { width:18px; height:18px; margin-top:4px; accent-color:var(--blue); }
-        .rb { flex:1; min-width:0; }
-        .rtop { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; }
-        .vname { font-weight:600; font-size:14px; }
-        .badge { display:inline-block; font-size:10px; font-weight:600; padding:2px 7px;
-            border-radius:4px; margin-right:4px; }
-        .b-dist { background:rgba(59,130,246,.15); color:var(--blue); }
-        .b-broker { background:rgba(148,163,184,.1); color:var(--text2); }
-        .b-auth { background:rgba(16,185,129,.15); color:var(--green); }
-        .ring { width:44px; height:44px; border-radius:50%; display:flex; align-items:center;
-            justify-content:center; font-family:'JetBrains Mono',monospace; font-size:15px;
-            font-weight:700; border:3px solid; }
-        .ring.hi { border-color:var(--green); color:var(--green); }
-        .ring.mid { border-color:var(--amber); color:var(--amber); }
-        .ring.lo { border-color:var(--red); color:var(--red); }
-        .rdets { display:flex; flex-wrap:wrap; gap:16px; margin-bottom:6px; }
-        .di { display:flex; flex-direction:column; }
-        .dl { font-size:10px; text-transform:uppercase; color:var(--muted); letter-spacing:.5px; }
-        .dv { font-family:'JetBrains Mono',monospace; font-size:13px; }
-        .rmeta2 { font-size:11px; color:var(--muted); display:flex; gap:16px; }
-        .excl-warn { font-size:12px; color:var(--amber); margin-top:4px; }
-        .bdbtn { background:none; border:none; color:var(--blue); font-size:11px; cursor:pointer; margin-top:4px; }
-        .bd { display:none; padding:8px 0; }
-        .bd.open { display:block; }
-        .brow { display:flex; align-items:center; gap:8px; margin-bottom:4px; font-size:12px; }
-        .blbl { width:100px; color:var(--text2); }
-        .btrack { flex:1; height:6px; background:var(--border); border-radius:3px; overflow:hidden; }
-        .bfill { height:100%; border-radius:3px; }
-        .bval { width:30px; text-align:right; font-family:'JetBrains Mono',monospace; color:var(--text2); font-size:11px; }
+        /* Table */
+        .tbl{width:100%;font-size:12px;border-collapse:collapse}
+        .tbl th{text-align:left;padding:7px 10px;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.5px}
+        .tbl td{padding:7px 10px;border-bottom:1px solid var(--card2)}
+        .tbl tr:hover td{background:var(--bg)}
+        .mono{font-family:'JetBrains Mono',monospace}
 
-        /* Upload */
-        .upanel { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:24px; }
-        .uzone { border:2px dashed var(--border); border-radius:10px; padding:40px;
-            text-align:center; cursor:pointer; margin-bottom:20px; }
-        .uzone:hover,.uzone.drag { border-color:var(--blue); background:rgba(59,130,246,.04); }
-        .uzone input { display:none; }
-        .uzone .icon { font-size:32px; margin-bottom:8px; }
-        .uzone .label { color:var(--text2); font-size:14px; }
-        .uzone .hint { color:var(--muted); font-size:12px; margin-top:4px; }
-        .ustatus { font-size:13px; margin-top:12px; padding:10px 14px; border-radius:8px; display:none; }
-        .ustatus.ok { display:block; background:rgba(16,185,129,.1); color:var(--green); }
-        .ustatus.err { display:block; background:rgba(239,68,68,.1); color:var(--red); }
-        .ustatus.load { display:block; background:rgba(59,130,246,.1); color:var(--blue); }
-        .lb { margin-top:24px; }
-        .lb h3 { font-size:15px; font-weight:600; margin-bottom:12px; }
-        .lbt { width:100%; font-size:13px; border-collapse:collapse; }
-        .lbt th { text-align:left; padding:8px 12px; color:var(--muted); font-weight:500;
-            border-bottom:1px solid var(--border); font-size:12px; text-transform:uppercase; }
-        .lbt td { padding:8px 12px; border-bottom:1px solid rgba(30,41,59,.5); }
-        .lbt td:nth-child(3),.lbt td:nth-child(4),.lbt th:nth-child(3),.lbt th:nth-child(4) {
-            text-align:right; font-family:'JetBrains Mono',monospace; }
-        .lbr { color:var(--amber); font-weight:700; }
+        /* Inline add row */
+        .add-row input{background:var(--input);border:1px solid var(--border);border-radius:5px;padding:6px 8px;font-size:12px;color:var(--text);width:100%;font-family:'JetBrains Mono',monospace}
+        .add-row input:focus{outline:none;border-color:var(--teal);background:var(--white)}
+        .add-row input::placeholder{font-family:'Plus Jakarta Sans',sans-serif;color:var(--muted);font-style:italic}
 
-        /* Responses Tab */
-        .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
-            gap:12px; margin-bottom:20px; }
-        .st { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px 20px; }
-        .st .sl { font-size:11px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin-bottom:4px; }
-        .st .sv { font-family:'JetBrains Mono',monospace; font-size:24px; font-weight:600; }
-        .st .ss { font-size:12px; color:var(--muted); }
-        .mact { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
-        .mact h2 { font-size:16px; }
-        .btn-poll { background:var(--purple); color:white; border:none; border-radius:8px;
-            padding:10px 20px; font-size:13px; font-weight:600; cursor:pointer; }
-        .btn-poll:disabled { opacity:.5; }
-        .ftabs { display:flex; gap:6px; margin-bottom:16px; }
-        .ft { padding:5px 14px; border-radius:6px; border:1px solid var(--border);
-            background:transparent; color:var(--muted); font-size:12px; cursor:pointer; }
-        .ft.on { background:rgba(59,130,246,.15); color:var(--blue); border-color:var(--blue); }
-        .vrc { background:var(--card); border:1px solid var(--border); border-radius:10px;
-            padding:16px 20px; margin-bottom:8px; }
-        .vrc:hover { border-color:#2d3a4f; background:var(--card2); }
-        .vrh { display:flex; justify-content:space-between; margin-bottom:10px; }
-        .vrv { font-weight:600; font-size:14px; }
-        .vrp { font-family:'JetBrains Mono',monospace; font-size:14px; color:var(--blue); }
-        .vrt { font-size:12px; color:var(--muted); }
-        .vrq { display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:8px; margin-bottom:10px; }
-        .qf { background:var(--input); border-radius:6px; padding:8px 10px; }
-        .qfl { font-size:10px; text-transform:uppercase; color:var(--muted); letter-spacing:.5px; }
-        .qfv { font-family:'JetBrains Mono',monospace; font-size:14px; margin-top:2px; }
-        .conf { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); }
-        .cbar { width:60px; height:4px; background:var(--border); border-radius:2px; overflow:hidden; }
-        .cfill { height:100%; border-radius:2px; }
-        .vra { display:flex; gap:8px; margin-top:10px; }
-        .btn-a { background:rgba(16,185,129,.15); color:var(--green); border:1px solid rgba(16,185,129,.3);
-            border-radius:6px; padding:6px 14px; font-size:12px; font-weight:600; cursor:pointer; }
-        .btn-r { background:rgba(239,68,68,.1); color:var(--red); border:1px solid rgba(239,68,68,.2);
-            border-radius:6px; padding:6px 14px; font-size:12px; font-weight:600; cursor:pointer; }
-        .vrep { font-size:12px; color:var(--muted); margin-top:8px; padding:8px 10px;
-            background:var(--input); border-radius:6px; white-space:pre-wrap;
-            max-height:80px; overflow:hidden; cursor:pointer; }
-        .vrep.exp { max-height:400px; overflow-y:auto; }
-        .sbdg { display:inline-block; padding:2px 8px; border-radius:4px;
-            font-size:11px; font-weight:600; text-transform:uppercase; }
-        .s-parsed { background:rgba(59,130,246,.15); color:var(--blue); }
-        .s-sighting_created,.s-approved { background:rgba(16,185,129,.15); color:var(--green); }
-        .s-rejected { background:rgba(239,68,68,.1); color:var(--red); }
+        /* Sightings */
+        .sight-group{margin-bottom:16px}
+        .sight-group-title{font-size:14px;font-weight:700;padding:8px 0;border-bottom:2px solid var(--border);margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;transition:background .15s}
+        .sight-group-title:hover{background:var(--bg);border-radius:6px;padding:8px 6px;margin-left:-6px;margin-right:-6px}
+        .sight-group-title .mono{font-size:12px;color:var(--muted)}
+        .sg-title-left{display:flex;align-items:center;gap:8px;min-width:0}
+        .sg-chevron{font-size:11px;color:var(--muted);width:14px;text-align:center;flex-shrink:0;transition:transform .15s}
+        .sg-mpn{cursor:pointer;color:var(--teal)}
+        .sg-mpn:hover{text-decoration:underline}
+        .sg-collapsed .sight-group-title{border-bottom:1px solid var(--border);margin-bottom:0}
+        .sg-body{transition:all .1s ease}
+        .badge.b-selected{background:#e0f2fe;color:#0369a1;font-size:10px;padding:1px 6px;border-radius:8px}
+        .badge.b-matchcount{background:#fef3c7;color:#92400e;font-size:10px;padding:1px 6px;border-radius:8px}
+        .collapsed-match-hint{font-size:11px;color:var(--amber);padding:4px 0;display:flex;align-items:center;gap:4px}
+        .collapsed-match-hint a{color:var(--teal);text-decoration:underline;cursor:pointer}
+        .collapsed-match-hint.hidden{display:none}
+        .sc{display:flex;gap:10px;align-items:center;padding:8px 14px !important;margin-bottom:4px !important;border-radius:8px}
+        .sc input[type=checkbox]{width:16px;height:16px;accent-color:var(--teal);cursor:pointer}
+        .sc-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+        .sc-top{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+        .sc-vendor{font-weight:700;font-size:13px;letter-spacing:-.01em}
+        .ring{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;border:2px solid;flex-shrink:0}
+        .ring.hi{border-color:var(--green);color:var(--green);background:var(--green-light)}
+        .ring.mid{border-color:var(--amber);color:var(--amber);background:var(--amber-light)}
+        .ring.lo{border-color:var(--red);color:var(--red);background:var(--red-light)}
+        .sc-details{display:flex;gap:14px;font-size:12px;align-items:center}
+        .sc-detail{display:flex;gap:3px;align-items:center}
+        .sc-detail-label{font-size:10px;text-transform:uppercase;color:var(--muted);letter-spacing:.4px;font-weight:600}
+        .sc-detail-val{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500}
+        .badge{display:inline-block;font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;text-transform:uppercase;letter-spacing:.3px}
+        .b-auth{background:var(--green-light);color:var(--green)}
+        .b-src{background:var(--teal-light);color:var(--teal)}
+        .b-email{background:#f0f4ff;color:#4a6fa5;border:1px solid rgba(74,111,165,.1)}
+        .b-hist{background:#f0e6ff;color:#7b4fb0}
+        .sc-actions-right{display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex-shrink:0;margin-left:auto}
+        .btn-call{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:5px;font-size:11px;font-weight:700;background:var(--teal-light);color:var(--teal);border:1px solid rgba(26,127,155,.2);cursor:pointer;text-decoration:none;transition:.15s}
+        .btn-call:hover{background:rgba(26,127,155,.15)}
+        .btn-link{display:inline-flex;align-items:center;gap:3px;padding:4px 8px;border-radius:4px;font-size:11px;font-weight:600;background:#f0f4ff;color:#4a6fa5;border:1px solid rgba(74,111,165,.15);cursor:pointer;text-decoration:none;transition:.15s}
+        .btn-link:hover{background:rgba(74,111,165,.12)}
+        .sc-hist{border-left:3px solid #c4a0e8;opacity:0.85}
+
+        /* Vendor card rating in search results */
+        .sc-rating{cursor:pointer;display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:4px;transition:.15s}
+        .sc-rating:hover{background:var(--amber-light)}
+        .sc-rating-new{cursor:default;color:var(--muted);font-size:12px}
+        .stars{color:var(--amber);font-size:13px;letter-spacing:-1px}
+        .stars-num{font-size:12px;font-weight:700;color:var(--text);margin-left:2px;font-family:'JetBrains Mono',monospace}
+        .stars-count{font-size:10px;color:var(--muted);margin-left:1px}
+        .stars-none{color:var(--muted);font-size:13px}
+
+        /* Activity — Summary stats */
+        .act-summary{display:flex;gap:8px;margin-bottom:12px}
+        .act-stat{flex:1;padding:12px 16px;border-radius:8px;background:var(--white);border:1px solid var(--border);cursor:pointer;transition:.15s;text-align:center}
+        .act-stat:hover{border-color:var(--border2);box-shadow:0 2px 8px rgba(0,0,0,.04)}
+        .act-stat.on{border-color:var(--teal);background:var(--teal-light)}
+        .act-stat-num{font-size:22px;font-weight:800;font-family:'JetBrains Mono',monospace}
+        .act-stat-label{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);margin-top:2px}
+        .act-stat-sent .act-stat-num{color:var(--teal)}
+        .act-stat-replied .act-stat-num{color:var(--green)}
+        .act-stat-opened .act-stat-num{color:#2563eb}
+        .act-stat-awaiting .act-stat-num{color:var(--amber)}
+
+        /* Activity — Vendor cards */
+        .act-card{background:var(--white);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:6px;transition:.15s}
+        .act-card:hover{border-color:var(--border2);box-shadow:0 2px 8px rgba(0,0,0,.04)}
+        .act-card-header{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+        .act-card-vendor{font-size:14px;font-weight:700}
+        .act-badge-replied{font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:var(--green-light);color:var(--green);text-transform:uppercase}
+        .act-badge-awaiting{font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:#fef3c7;color:#92400e;text-transform:uppercase}
+        .act-badge-opened{font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:#dbeafe;color:#1e40af;text-transform:uppercase}
+        .act-badge-unavail{font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:#fce4ec;color:#b71c1c;text-transform:uppercase}
+        .act-badge-type{font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;text-transform:uppercase;letter-spacing:.3px}
+        .act-badge-email{background:var(--teal-light);color:var(--teal)}
+        .act-badge-phone{background:var(--green-light);color:var(--green)}
+        .act-card-date{font-size:11px;color:var(--muted);margin-left:auto;white-space:nowrap}
+        .act-card-meta{font-size:12px;color:var(--text2);margin-top:6px;display:flex;gap:12px;flex-wrap:wrap}
+        .act-card-meta-item{display:flex;gap:4px;align-items:center}
+        .act-card-meta-label{font-size:10px;text-transform:uppercase;color:var(--muted);font-weight:600;letter-spacing:.3px}
+        .act-card-parts{display:flex;gap:5px;margin-top:8px;flex-wrap:wrap}
+        .act-card-part{font-size:11px;font-family:'JetBrains Mono',monospace;background:var(--surface);padding:2px 8px;border-radius:4px;color:var(--text2)}
+        .act-card-quote{margin-top:8px;padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:12px}
+        .act-card-quote-line{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+        .act-card-quote-mpn{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:11px}
+        .act-card-quote-val{font-size:11px;color:var(--text2)}
+        .act-card-actions{display:flex;gap:6px;margin-top:8px;justify-content:flex-end;flex-wrap:wrap}
+        .act-badge-classification{font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:#f0e6ff;color:#7b4fb0;text-transform:uppercase;letter-spacing:.3px}
+        .act-action-hint{font-size:10px;color:var(--teal);font-weight:600;padding:2px 6px}
+
+        /* Filter bar — shared across tabs */
+        .filter-bar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+        .filter-search{flex:1;min-width:180px;max-width:320px;padding:8px 12px 8px 32px;border:1px solid var(--border);border-radius:8px;background:var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E") no-repeat 10px center;font-size:13px;color:var(--text);transition:.15s;outline:none}
+        .filter-search:focus{border-color:var(--teal);box-shadow:0 0 0 2px rgba(26,127,155,.12)}
+        .filter-search::placeholder{color:var(--muted)}
+        .filter-pills{display:flex;gap:4px;align-items:center}
+        .filter-pill{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--white);color:var(--text2);font-size:11px;font-weight:600;cursor:pointer;transition:.15s;white-space:nowrap}
+        .filter-pill:hover{border-color:var(--border2);background:var(--surface)}
+        .filter-pill.on{background:var(--teal);color:#fff;border-color:var(--teal)}
+        .filter-count{font-size:11px;color:var(--muted);margin-left:auto;white-space:nowrap}
+        .filter-sort{padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--white);color:var(--text2);font-size:11px;font-weight:600;cursor:pointer;outline:none;appearance:auto}
 
         /* Modal */
-        .modal-bg { position:fixed; inset:0; background:rgba(0,0,0,.7); display:none;
-            align-items:center; justify-content:center; z-index:100; padding:20px; }
-        .modal-bg.open { display:flex; }
-        .modal { background:var(--card); border:1px solid var(--border); border-radius:14px;
-            max-width:640px; width:100%; max-height:85vh; overflow-y:auto; padding:28px; }
-        .modal h2 { font-size:18px; font-weight:700; margin-bottom:20px; }
-        .modal label { display:block; font-size:13px; font-weight:500; color:var(--text2); margin-bottom:6px; }
-        .modal input[type=text],.modal textarea { width:100%; background:var(--input);
-            border:1px solid var(--border); border-radius:8px; padding:10px 14px;
-            color:var(--text); font-size:14px; margin-bottom:16px; }
-        .modal textarea { font-family:'JetBrains Mono',monospace; min-height:200px; resize:vertical; }
-        .modal input:focus,.modal textarea:focus { outline:none; border-color:var(--focus); }
-        .mvendors { background:var(--input); border-radius:8px; padding:12px;
-            max-height:120px; overflow-y:auto; margin-bottom:16px; font-size:13px; }
-        .mvr { padding:3px 0; color:var(--text2); }
-        .mvr.excl { color:var(--amber); }
-        .mactions { display:flex; justify-content:flex-end; gap:10px; margin-top:8px; }
-        .btn-can { background:none; border:1px solid var(--border); color:var(--text2);
-            padding:10px 20px; border-radius:8px; cursor:pointer; font-size:14px; }
-        .btn-send { background:var(--green); color:white; border:none; padding:10px 24px;
-            border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
-        .btn-send:disabled { opacity:.5; }
+        .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.3);display:none;align-items:center;justify-content:center;z-index:100;padding:20px;backdrop-filter:blur(3px)}
+        .modal-bg.open{display:flex}
+        .modal{background:var(--white);border:1px solid var(--border);border-radius:14px;max-width:640px;width:100%;max-height:85vh;overflow-y:auto;padding:24px;box-shadow:0 12px 48px rgba(0,0,0,.1)}
+        .modal-lg{max-width:760px}
+        .modal h2{font-size:16px;font-weight:800;margin-bottom:16px}
+        .modal .field{margin-bottom:12px}
+        .mactions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+        .field{display:flex;flex-direction:column;gap:3px}
+        .field label{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+        .field input,.field textarea{background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--text);transition:.15s}
+        .field input:focus,.field textarea:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 2px rgba(26,127,155,.1);background:var(--white)}
+        .field textarea{font-family:'JetBrains Mono',monospace;min-height:60px;resize:vertical;font-size:11px}
 
-        @media(max-width:768px) { .srow{flex-direction:column} .qinput{width:100%} .rdets{gap:12px} }
+        /* Upload */
+        .uzone{border:2px dashed var(--border);border-radius:8px;padding:24px;text-align:center;cursor:pointer;transition:.15s;margin-bottom:12px}
+        .uzone:hover,.uzone.drag{border-color:var(--teal);background:var(--teal-light)}
+        .uzone input{display:none}
+        .uzone-label{color:var(--text2);font-size:12px}
+        .uzone-hint{color:var(--muted);font-size:10px;margin-top:3px}
+        .ustatus{font-size:11px;margin-top:8px;padding:8px 12px;border-radius:6px;display:none}
+        .ustatus.ok{display:block;background:var(--green-light);color:var(--green)}
+        .ustatus.err{display:block;background:var(--red-light);color:var(--red)}
+        .ustatus.load{display:block;background:var(--teal-light);color:var(--teal)}
+
+        /* RFQ Prepare/Ready flow */
+        .rfq-vendor-row{display:flex;justify-content:space-between;align-items:center;padding:8px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;gap:8px;background:var(--white)}
+        .rfq-vendor-info{flex:1;min-width:0}
+        .rfq-vendor-info strong{font-size:12px;display:block}
+        .rfq-vendor-parts{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+        .rfq-src-badge{font-size:9px;padding:1px 5px;border-radius:3px;background:#f0f7ff;color:#4a6fa5;border:1px solid rgba(74,111,165,.15)}
+        .rfq-email-row{display:flex;align-items:center;gap:6px}
+        .email-select{background:var(--input);border:1px solid var(--border);border-radius:5px;padding:4px 6px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text);max-width:240px}
+        .email-select:focus{outline:none;border-color:var(--teal)}
+        .email-loading{font-size:10px;color:var(--amber);font-weight:600;padding:3px 8px;background:var(--amber-light);border-radius:4px;border:1px solid rgba(217,136,11,.15);animation:pulse 1.5s ease-in-out infinite}
+        .email-none{font-size:10px;color:var(--red);font-weight:600}
+        .rfq-email-input{background:var(--input);border:1px solid var(--border);border-radius:5px;padding:4px 6px;font-size:11px;font-family:'JetBrains Mono',monospace;color:var(--text);width:180px}
+        .rfq-email-input:focus{outline:none;border-color:var(--teal)}
+        .rfq-condition{display:flex;align-items:center;gap:6px;margin-bottom:12px}
+        .rfq-condition label{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-right:4px}
+        .rfq-cond-btn{padding:5px 14px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-weight:600;cursor:pointer;background:var(--white);color:var(--text2);transition:.15s}
+        .rfq-cond-btn:hover{border-color:var(--teal);color:var(--teal)}
+        .rfq-cond-btn.active{background:var(--teal);color:var(--white);border-color:var(--teal)}
+        .rfq-parts-breakdown{display:flex;flex-wrap:wrap;gap:4px;margin-top:3px}
+        .rfq-parts-tag{font-size:10px;padding:2px 7px;border-radius:4px;font-family:'JetBrains Mono',monospace}
+        .rfq-parts-listing{background:#e8f5e9;color:#2e7d32}
+        .rfq-parts-other{background:#e3f2fd;color:#1565c0}
+        .rfq-exhaust-full{font-size:10px;color:var(--amber);font-weight:600;display:block;margin-top:3px}
+        .rfq-exhaust-partial{font-size:10px;color:var(--text2);display:block;margin-top:3px}
+        .rfq-exhaust-btn{font-size:10px;padding:2px 8px;border:1px solid var(--amber);border-radius:4px;background:#fffbe6;color:var(--amber);cursor:pointer;margin-left:6px;font-weight:600}
+        .rfq-exhaust-btn:hover{background:var(--amber);color:var(--white)}
+        .rfq-exhaust-override{font-size:10px;color:var(--teal);font-weight:600;margin-left:6px}
+        .rfq-vendor-exhausted{opacity:0.45}
+        .rfq-vendor-exhausted:hover{opacity:0.75}
+        .rfq-vendor-excluded{opacity:0.35;background:var(--bg2)}
+        .rfq-vendor-excluded:hover{opacity:0.6}
+        .rfq-vendor-cb{width:16px;height:16px;accent-color:var(--teal);cursor:pointer;flex-shrink:0}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+        /* Vendor Card Popup */
+        .vp-header{margin-bottom:16px}
+        .vp-header h2{font-size:18px;margin-bottom:4px}
+        .vp-rating{display:flex;align-items:center;gap:4px}
+        .vp-section{margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--card2)}
+        .vp-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+        .vp-field{font-size:12px;margin-bottom:3px}
+        .vp-field .vp-label{display:inline;margin-right:6px}
+        .vp-field a{color:var(--teal);text-decoration:none}
+        .vp-field a:hover{text-decoration:underline}
+        .vp-item{font-size:12px;padding:2px 0}
+        .vp-item a{color:var(--teal);text-decoration:none;font-family:'JetBrains Mono',monospace;font-size:11px}
+        .vp-item a:hover{text-decoration:underline}
+        .vp-muted{color:var(--muted);font-style:italic}
+        .vp-review{padding:8px 10px;border:1px solid var(--card2);border-radius:6px;margin-bottom:4px}
+        .vp-review-header{display:flex;justify-content:space-between;align-items:center}
+        .vp-review-header .stars{font-size:13px;letter-spacing:0}
+        .vp-review-author{font-size:10px;color:var(--muted)}
+        .vp-review-comment{font-size:11px;color:var(--text2);margin-top:4px}
+        .vp-review-form{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+        .vp-star-picker{display:flex;gap:2px}
+        .vp-star{font-size:20px;color:var(--amber);cursor:pointer;transition:.1s}
+        .vp-star:hover{transform:scale(1.2)}
+        .vp-input{background:var(--input);border:1px solid var(--border);border-radius:5px;padding:5px 8px;font-size:11px;color:var(--text);flex:1;min-width:120px}
+        .vp-input:focus{outline:none;border-color:var(--teal)}
+
+        /* Blacklist toggle */
+        .btn-blacklist{padding:5px 12px;border-radius:6px;font-size:11px;font-weight:700;cursor:pointer;transition:.15s;border:1px solid}
+        .vp-bl-off{background:var(--white);border-color:var(--border);color:var(--text2)}
+        .vp-bl-off:hover{background:var(--red-light);border-color:var(--red);color:var(--red)}
+        .vp-bl-on{background:var(--red-light);border-color:var(--red);color:var(--red)}
+        .vp-bl-on:hover{background:var(--white);border-color:var(--border);color:var(--text2)}
+        .vendor-card-bl{opacity:0.5}
+
+        /* Vendors List View */
+        .vendor-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+        .vendor-header h2{font-size:16px;font-weight:700}
+        .vendor-search{background:var(--input);border:1px solid var(--border);border-radius:6px;padding:7px 12px;font-size:12px;color:var(--text);width:240px}
+        .vendor-search:focus{outline:none;border-color:var(--teal);background:var(--white)}
+        .vendor-card-row{display:flex;justify-content:space-between;align-items:center}
+        .vendor-card-name{font-weight:700;font-size:13px}
+        .vendor-card-meta{display:flex;gap:12px;align-items:center}
+        .eng-badge{font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px;white-space:nowrap}
+        .eng-proven{background:#e6f9ed;color:#1a7a3a}.eng-developing{background:#fff8e1;color:#b8860b}.eng-caution{background:#fde8e8;color:#c0392b}.eng-new{background:var(--bg3);color:var(--muted)}
+
+        /* Material history badge in search results */
+        .b-mathistory{background:#e6f0e6;color:#3a7a3a;border:1px solid rgba(58,122,58,.12)}
+        .sc-mathistory{border-left:3px solid #6ab36a;opacity:0.9}
+
+        /* Material Card styles (list + popup) */
+        .mat-card-row{display:flex;justify-content:space-between;align-items:center}
+        .mat-card-mpn{font-weight:700;font-size:13px;font-family:'JetBrains Mono',monospace}
+        .mat-card-meta{display:flex;gap:12px;align-items:center;font-size:11px;color:var(--muted)}
+        .mp-header{margin-bottom:16px}
+        .mp-header h2{font-size:18px;margin-bottom:2px;font-family:'JetBrains Mono',monospace}
+        .mp-header-meta{font-size:12px;color:var(--muted)}
+        .mp-section{margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--card2)}
+        .mp-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
+        .mp-vh-row{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--card2);border-radius:6px;margin-bottom:3px;font-size:11px;cursor:pointer;transition:.15s}
+        .mp-vh-row:hover{border-color:var(--border2);background:var(--bg)}
+        .mp-vh-vendor{font-weight:700;min-width:140px}
+        .mp-vh-detail{color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:10px}
+        .mp-vh-badge{font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase}
+        .mp-vh-times{background:#f0f4ff;color:#4a6fa5;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px}
+
+        @media(max-width:768px){
+            /* Shell */
+            .shell{padding:8px 10px;padding-bottom:env(safe-area-inset-bottom,8px)}
+
+            /* Topbar — stack vertically on mobile */
+            .topbar{flex-direction:column;gap:8px;padding:8px 12px}
+            .topbar-left{flex-direction:column;gap:6px;align-items:flex-start;width:100%}
+            .topbar-logo{height:44px}
+            .topbar-nav{margin-left:0;flex-wrap:wrap;gap:3px;width:100%}
+            .topbar-nav button{padding:6px 10px;font-size:11px;flex:1;min-width:0;text-align:center;min-height:36px}
+            .user{width:100%;justify-content:space-between;font-size:12px;flex-wrap:wrap;gap:6px}
+            .m365-status{font-size:10px}
+
+            /* Req list */
+            .req-header{flex-direction:column;gap:8px;align-items:stretch}
+            .req-header > div{flex-direction:column;gap:6px;display:flex}
+            .req-search{width:100%;font-size:16px}
+            .req-card{flex-direction:column;align-items:flex-start;gap:6px}
+            .req-meta{flex-wrap:wrap;gap:8px}
+            .req-actions{width:100%;justify-content:flex-end}
+
+            /* Detail header */
+            .detail-header{flex-direction:column;gap:8px;align-items:flex-start}
+            .detail-header h2{font-size:14px}
+
+            /* Tabs — horizontal scroll on mobile */
+            .tabs{overflow-x:auto;width:100%;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;scrollbar-width:none}
+            .tabs::-webkit-scrollbar{display:none}
+            .tab{white-space:nowrap;flex-shrink:0;padding:7px 14px;font-size:11px;min-height:34px}
+
+            /* Requirements table — horizontal scroll wrapper */
+            #tab-requirements .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
+            .tbl{font-size:11px;min-width:480px}
+            .tbl th,.tbl td{padding:5px 6px}
+            .add-row input{font-size:16px;padding:5px 6px}
+
+            /* Filter bars — stack */
+            .filter-bar{flex-direction:column;gap:6px;align-items:stretch}
+            .filter-search{max-width:100%;min-width:0;font-size:16px}
+            .filter-pills{flex-wrap:wrap;gap:3px}
+            .filter-pill{padding:5px 10px;font-size:10px;min-height:30px;display:inline-flex;align-items:center}
+            .filter-count{text-align:right}
+
+            /* Sighting cards — stack layout */
+            .sc{flex-direction:column;align-items:flex-start;gap:6px;padding:10px 12px !important}
+            .sc input[type=checkbox]{width:20px;height:20px}
+            .sc-top{flex-wrap:wrap}
+            .sc-details{flex-wrap:wrap;gap:8px}
+            .sc-actions-right{flex-direction:row;width:100%;justify-content:flex-end;margin-left:0;margin-top:4px}
+            .ring{width:26px;height:26px;font-size:10px}
+
+            /* Batch RFQ bar */
+            #tab-sources > div:first-child{flex-direction:column;gap:6px;align-items:stretch}
+            #tab-sources > div:first-child > div{flex-wrap:wrap;justify-content:flex-end}
+
+            /* Activity cards */
+            .act-summary{flex-wrap:wrap;gap:6px}
+            .act-stat{padding:8px 10px;min-width:70px;flex:1 1 calc(50% - 4px);min-height:60px}
+            .act-stat-num{font-size:18px}
+            .act-card-header{flex-wrap:wrap;gap:4px}
+            .act-card-vendor{font-size:13px}
+            .act-card-date{margin-left:0;font-size:10px;width:100%}
+            .act-card-meta{flex-direction:column;gap:4px}
+            .act-card-parts{gap:3px}
+            .act-card-actions{justify-content:flex-start}
+
+            /* RFQ Modal */
+            .rfq-vendor-row{flex-direction:column;align-items:flex-start;gap:6px}
+            .rfq-email-row{flex-wrap:wrap}
+            .rfq-email-input{width:100%;font-size:16px}
+            .email-select{max-width:100%;font-size:16px}
+            .rfq-condition{flex-wrap:wrap;gap:4px}
+
+            /* Modal — fullscreen-like on mobile */
+            .modal-bg{padding:8px;align-items:flex-start;padding-top:40px}
+            .modal{padding:16px;max-height:calc(100vh - 60px);border-radius:10px}
+            .modal-lg{max-width:100%}
+            .modal h2{font-size:15px;margin-bottom:12px}
+            .mactions{flex-wrap:wrap}
+
+            /* Fields — 16px prevents iOS zoom */
+            .field input,.field textarea{font-size:16px}
+            .vp-input{font-size:16px}
+
+            /* Vendor/Material popups */
+            .vp-review-form{flex-direction:column;gap:6px;align-items:stretch}
+            .vp-input{min-width:0;width:100%}
+            .mp-vh-row{flex-wrap:wrap;gap:4px}
+            .mp-vh-vendor{min-width:100px}
+
+            /* Vendor list */
+            .vendor-header{flex-direction:column;gap:8px;align-items:stretch}
+            .vendor-search{width:100%;font-size:16px}
+            .vendor-card-row{flex-direction:column;gap:4px;align-items:flex-start}
+            .vendor-card-meta{flex-wrap:wrap;gap:6px}
+
+            /* Material list */
+            .mat-card-row{flex-direction:column;gap:4px;align-items:flex-start}
+            .mat-card-meta{flex-wrap:wrap;gap:8px}
+
+            /* Data Sources */
+            .src-stats{flex-wrap:wrap;gap:6px}
+            .src-stat{min-width:70px;flex:1 1 calc(33% - 8px);padding:8px 10px}
+            .src-stat strong{font-size:16px}
+            .src-grid{grid-template-columns:1fr}
+            .src-card-header{flex-wrap:wrap;gap:6px}
+            .src-env-vars{gap:3px}
+
+            /* Upload area */
+            .uzone{padding:16px}
+            #stockImportArea > div{flex-direction:column}
+
+            /* Buttons — larger touch targets */
+            .btn{padding:9px 16px;font-size:12px;min-height:36px}
+            .btn-sm{padding:6px 12px;font-size:11px;min-height:30px}
+            .btn-out{min-height:30px;padding:6px 12px}
+            .btn-call{min-height:30px;padding:6px 12px}
+            .btn-archive,.btn-reactivate{min-height:28px}
+
+            /* Login */
+            .login-card{padding:28px 20px;width:92%}
+            .login-logo{width:260px}
+            .btn-ms{padding:14px 24px;font-size:14px;width:100%;justify-content:center}
+        }
+
+        /* Extra small screens (phones in portrait) */
+        @media(max-width:420px){
+            .topbar-nav button{font-size:10px;padding:4px 6px;min-height:32px}
+            .tab{font-size:10px;padding:6px 10px}
+            .tbl th,.tbl td{padding:4px 4px;font-size:10px}
+            .tbl{min-width:400px}
+            .sc-vendor{font-size:12px}
+            .act-stat{flex:1 1 calc(50% - 3px)}
+            .act-stat-num{font-size:16px}
+            .act-stat-label{font-size:9px}
+            .src-stat{flex:1 1 calc(50% - 4px)}
+            .btn-primary{padding:8px 12px}
+            .login-card{padding:24px 16px}
+            .login-logo{width:220px}
+            .topbar-logo{height:36px}
+            .shell{padding:6px 8px}
+        }
+
+        /* ── Data Sources Tab ── */
+        .src-stats{display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap}
+        .src-stat{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 16px;text-align:center;min-width:100px}
+        .src-stat strong{display:block;font-size:20px;color:var(--teal);font-weight:700}
+        .src-stat span{font-size:11px;color:var(--text2)}
+        .src-section{margin-bottom:24px}
+        .src-section-title{font-size:14px;font-weight:700;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid var(--border)}
+        .src-live-title{color:#10b981}
+        .src-error-title{color:#ef4444}
+        .src-pending-title{color:#f59e0b}
+        .src-disabled-title{color:#9ca3af}
+        .src-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
+        .src-card{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;transition:.15s}
+        .src-card:hover{border-color:var(--teal);box-shadow:0 2px 8px rgba(26,127,155,.08)}
+        .src-card-live{border-left:3px solid #10b981}
+        .src-card-pending{border-left:3px solid #f59e0b;opacity:.85}
+        .src-card-error{border-left:3px solid #ef4444}
+        .src-card-disabled{border-left:3px solid #9ca3af;opacity:.6}
+        .src-card-header{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+        .src-icon{font-size:20px}
+        .src-card-title{flex:1}
+        .src-card-title strong{font-size:13px;display:block}
+        .src-type-badge{font-size:9px;font-weight:600;padding:1px 6px;border-radius:3px;background:var(--teal-light);color:var(--teal);text-transform:uppercase}
+        .src-status-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+        .src-desc{font-size:11px;color:var(--text2);margin:0 0 8px;line-height:1.4}
+        .src-env-vars{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+        .src-env{font-size:9px;font-family:'JetBrains Mono',monospace;padding:2px 6px;border-radius:3px;font-weight:600}
+        .src-env-set{background:#d1fae5;color:#065f46}
+        .src-env-missing{background:#fef2f2;color:#991b1b}
+        .src-card-stats{font-size:10px;color:var(--text2);margin-bottom:6px;font-family:'JetBrains Mono',monospace}
+        .src-last-ok{font-size:10px;color:#10b981;margin-bottom:2px}
+        .src-last-err{font-size:10px;color:#ef4444;margin-bottom:4px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .src-setup-notes{font-size:10px;color:var(--text2);background:#fffbeb;border:1px solid #fde68a;border-radius:4px;padding:6px 8px;margin-bottom:8px;line-height:1.4}
+        .src-actions{display:flex;gap:6px;flex-wrap:wrap}
+        .src-test-btn{background:var(--teal-light);color:var(--teal);border:1px solid rgba(26,127,155,.2)}
+        .src-test-btn:hover{background:var(--teal);color:white}
+
+        /* EXACT/SUB badges */
+        .b-exact{background:#d1fae5;color:#065f46}
+        .b-sub{background:#e0f4f7;color:#0e7490}
+        .sc-sub{background:#f5f5f5;border-left:3px solid #d1d5db}
+
+        /* Unavailable/Sold state */
+        .b-unavail{background:#fef2f2;color:#991b1b}
+        .b-cond-new{background:#d1fae5;color:#065f46;font-weight:600}
+        .b-cond-ref{background:#fef3c7;color:#92400e;font-weight:600}
+        .sc-unavailable{opacity:0.55;text-decoration:line-through}
+        .sc-unavailable .sc-vendor{text-decoration:line-through}
+        .btn-unavail{font-size:11px;padding:3px 10px;border-radius:5px;border:1px solid var(--border);background:var(--surface);color:var(--text2);cursor:pointer}
+        .btn-unavail:hover{background:#fef2f2;color:#991b1b;border-color:#fca5a5}
+
+        /* Source toggle switches */
+        .src-toggle{position:relative;display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:11px;flex-shrink:0}
+        .src-toggle input{opacity:0;width:0;height:0;position:absolute}
+        .src-toggle-slider{position:relative;width:32px;height:18px;background:#ccc;border-radius:9px;transition:.2s}
+        .src-toggle-slider::before{content:'';position:absolute;width:14px;height:14px;left:2px;top:2px;background:white;border-radius:50%;transition:.2s}
+        .src-toggle input:checked + .src-toggle-slider{background:#10b981}
+        .src-toggle input:checked + .src-toggle-slider::before{transform:translateX(14px)}
+        .src-toggle-label{font-weight:600;color:var(--text2)}
+
+        /* ── v1.2.0 CRM ────────────────────────────────── */
+
+        /* Status badges */
+        .status-badge{display:inline-block;font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;text-transform:uppercase;letter-spacing:.3px}
+        .status-active{background:var(--teal-light);color:var(--teal)}
+        .status-sourcing{background:#e0f4f7;color:#0e7490}
+        .status-quoting{background:var(--amber-light);color:var(--amber)}
+        .status-quoted{background:#dbeafe;color:#2563eb}
+        .status-won{background:var(--green-light);color:var(--green)}
+        .status-lost{background:var(--red-light);color:var(--red)}
+        .status-reopened{background:#fef3c7;color:#92400e}
+        .status-archived{background:var(--bg);color:var(--muted)}
+        .status-draft{background:var(--bg);color:var(--text2)}
+        .status-sent{background:#dbeafe;color:#2563eb}
+        .status-revised{background:var(--bg);color:var(--muted)}
+
+        /* Customers tree */
+        .cust-card{padding:0;overflow:hidden}
+        .cust-header{display:flex;align-items:center;gap:8px;padding:14px 16px;cursor:pointer;user-select:none;transition:background .15s}
+        .cust-header:hover{background:var(--bg)}
+        .cust-expand{font-size:10px;color:var(--muted);transition:transform .2s;width:14px}
+        .cust-card.expanded .cust-expand{transform:rotate(90deg)}
+        .cust-name{font-weight:700;font-size:14px;flex:1}
+        .cust-count{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+        .cust-sites{display:none;border-top:1px solid var(--border);padding:8px 16px}
+        .cust-card.expanded .cust-sites{display:block}
+        .cust-site{display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:6px;cursor:pointer;transition:.15s;font-size:12px}
+        .cust-site:hover{background:var(--bg)}
+        .cust-site-name{font-weight:600;min-width:120px}
+        .cust-site-owner{color:var(--text2);min-width:80px}
+        .cust-site-reqs{color:var(--muted);font-size:11px;font-family:'JetBrains Mono',monospace}
+        .cust-add-site{padding:4px 0;border-top:1px solid var(--card2);margin-top:4px}
+        .site-detail-panel{padding:8px 10px;background:var(--surface);border-radius:6px;margin:4px 0}
+        .si-row{display:flex;gap:8px;padding:4px 0;font-size:12px;border-bottom:1px solid rgba(0,0,0,.03)}
+        .si-label{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;min-width:70px;padding-top:2px}
+        .si-reqs{margin-top:8px}
+        .si-req{display:flex;gap:10px;align-items:center;font-size:11px;padding:4px 6px;border-radius:4px;cursor:pointer;transition:.15s}
+        .si-req:hover{background:var(--bg)}
+        .si-req span:first-child{font-family:'JetBrains Mono',monospace;font-weight:600;color:var(--teal)}
+        .site-info a{color:var(--teal);text-decoration:none}
+        .site-info a:hover{text-decoration:underline}
+
+        /* Offers tab */
+        .offer-group{margin-bottom:16px;background:var(--white);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+        .offer-group-header{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--surface);border-bottom:1px solid var(--border);font-size:12px}
+        .offer-group-header strong{font-family:'JetBrains Mono',monospace;font-size:13px}
+        .offer-group-header span{color:var(--muted)}
+        .offer-table{margin-bottom:0}
+        .offer-table tr.offer-ref{opacity:.5}
+        .offer-ref-badge{font-size:9px;color:var(--muted);font-style:italic}
+
+        /* Quote tab */
+        .quote-header{display:flex;justify-content:space-between;align-items:flex-start;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:12px}
+        .quote-header strong{font-size:15px;font-family:'JetBrains Mono',monospace}
+        .quote-table .quote-cost{color:var(--muted);font-family:'JetBrains Mono',monospace}
+        .quote-sell-input{width:80px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:'JetBrains Mono',monospace;text-align:right}
+        .quote-sell-input:focus{outline:none;border-color:var(--teal)}
+        .quote-margin{font-family:'JetBrains Mono',monospace;font-weight:600}
+        .quote-markup{display:flex;align-items:center;gap:8px;padding:8px 14px;font-size:12px;color:var(--text2);border-top:1px solid var(--card2);margin-top:0}
+        .quote-markup input{width:50px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;text-align:center}
+        .quote-totals{display:flex;gap:24px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin:12px 0;font-size:13px}
+        .quote-totals strong{font-family:'JetBrains Mono',monospace}
+        .quote-terms{display:flex;gap:12px;flex-wrap:wrap;padding:8px 0;font-size:12px}
+        .quote-terms label{display:flex;align-items:center;gap:6px;color:var(--text2);font-size:11px;font-weight:600}
+        .quote-terms input{padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:12px;background:var(--input)}
+        .quote-terms input:focus{outline:none;border-color:var(--teal)}
+        .quote-notes textarea{background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px;resize:vertical}
+        .quote-notes textarea:focus{outline:none;border-color:var(--teal)}
+        .quote-actions{display:flex;gap:8px;padding:12px 0;align-items:center;flex-wrap:wrap}
+        .btn-danger{background:var(--red-light);color:var(--red);border:1px solid rgba(217,68,82,.15)}
+
+        /* Pricing history modal */
+        .ph-summary{margin-top:10px;font-size:12px;color:var(--text2);padding:8px 10px;background:var(--surface);border-radius:6px}
+
+        /* Log offer form */
+        .lo-form{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+        .lo-form .field-full{grid-column:span 2}
+        .lo-sources{display:flex;gap:10px;font-size:12px;align-items:center;padding:4px 0}
+        .lo-sources label{display:flex;align-items:center;gap:4px;cursor:pointer;color:var(--text2)}
+        .lo-sources input[type=radio]{accent-color:var(--teal)}
+
+        /* Req card customer display */
+        .req-customer{font-size:11px;color:var(--teal);font-weight:600}
+        .req-status{display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:.3px;margin-left:4px}
+
+        /* Customer site selector in new req modal */
+        .site-typeahead{position:relative}
+        .site-typeahead input{width:100%}
+        .site-typeahead-list{position:absolute;top:100%;left:0;right:0;background:var(--white);border:1px solid var(--border);border-radius:6px;max-height:160px;overflow-y:auto;z-index:10;display:none;box-shadow:0 4px 16px rgba(0,0,0,.08)}
+        .site-typeahead-list.show{display:block}
+        .site-typeahead-item{padding:8px 10px;font-size:12px;cursor:pointer;transition:.1s}
+        .site-typeahead-item:hover{background:var(--bg)}
+
+        @media(max-width:768px){
+            .dash-metrics{grid-template-columns:repeat(2,1fr)}
+            .dash-grid{grid-template-columns:1fr}
+            .lo-form{grid-template-columns:1fr}
+            .lo-form .field-full{grid-column:span 1}
+            .quote-totals{flex-direction:column;gap:8px}
+            .quote-terms{flex-direction:column}
+            .offer-group-header{flex-wrap:wrap}
+        }
+
+        /* Suggested Contacts */
+        .sc-row{display:flex;gap:10px;align-items:flex-start;padding:8px 10px;border-bottom:1px solid var(--border);font-size:12px;cursor:pointer;transition:background .15s}
+        .sc-row:hover{background:var(--surface)}
+        .sc-row.selected{background:rgba(0,210,190,.08)}
+        .sc-row input[type="checkbox"]{margin-top:3px;accent-color:var(--teal)}
+        .sc-info{flex:1;min-width:0}
+        .sc-name{font-weight:600;color:var(--text)}
+        .sc-title{color:var(--text2);font-size:11px;margin-top:1px}
+        .sc-meta{display:flex;gap:12px;margin-top:3px;font-size:11px;color:var(--muted)}
+        .sc-meta a{color:var(--teal);text-decoration:none}
+        .sc-meta a:hover{text-decoration:underline}
+        .sc-badge{font-size:9px;padding:1px 6px;border-radius:8px;background:var(--bg2);color:var(--text2)}
+
+        /* Enrichment info bar */
+        .enrich-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:11px;color:var(--muted);margin-top:4px}
+        .enrich-bar .enrich-tag{background:var(--bg2);padding:2px 8px;border-radius:8px;font-size:10px}
+        .btn-enrich{font-size:11px;padding:3px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface);color:var(--teal);cursor:pointer;transition:all .15s}
+        .btn-enrich:hover{background:var(--teal);color:#fff;border-color:var(--teal)}
+
+        /* ── AI Intelligence Layer ────────────────────────── */
+
+        /* Confidence badges */
+        .badge-green{background:var(--green-light);color:var(--green)}
+        .badge-yellow{background:var(--amber-light);color:var(--amber)}
+        .badge-gray{background:var(--bg2);color:var(--muted)}
+
+        /* AI action buttons */
+        .btn-ai{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:5px;font-size:11px;font-weight:700;background:linear-gradient(135deg,#f0e6ff,#e6f0ff);color:#6b46c1;border:1px solid rgba(107,70,193,.15);cursor:pointer;transition:.15s}
+        .btn-ai:hover{background:linear-gradient(135deg,#e6d9ff,#d9e6ff);border-color:rgba(107,70,193,.3)}
+        .btn-ai:disabled{opacity:.4;cursor:default}
+
+        /* AI Contact Panel (modal overlay) */
+        .ai-panel-bg{position:fixed;inset:0;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;z-index:110;padding:20px;backdrop-filter:blur(3px)}
+        .ai-panel{background:var(--white);border:1px solid var(--border);border-radius:14px;max-width:640px;width:100%;max-height:80vh;overflow-y:auto;padding:24px;box-shadow:0 12px 48px rgba(0,0,0,.1)}
+        .ai-panel-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+        .ai-panel-header h3{font-size:15px;font-weight:800;margin:0}
+        .btn-close-ai{background:none;border:none;font-size:18px;color:var(--muted);cursor:pointer;padding:4px 8px;border-radius:4px;transition:.15s}
+        .btn-close-ai:hover{background:var(--bg);color:var(--text)}
+        .ai-contact-row{display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--card2)}
+        .ai-contact-row:last-child{border-bottom:none}
+        .ai-contact-info{flex:1;min-width:0}
+        .ai-contact-name{font-weight:700;font-size:13px}
+        .ai-contact-title{color:var(--text2);font-size:11px;margin-top:1px}
+        .ai-contact-meta{display:flex;gap:12px;margin-top:4px;font-size:11px;color:var(--muted);flex-wrap:wrap}
+        .ai-contact-meta a{color:var(--teal);text-decoration:none}
+        .ai-contact-meta a:hover{text-decoration:underline}
+        .ai-contact-actions{display:flex;align-items:center;gap:6px;flex-shrink:0}
+
+        /* Company Intel Card */
+        .intel-card{margin-top:12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);font-size:12px;overflow:hidden}
+        .intel-card summary{padding:10px 14px;cursor:pointer;font-weight:700;font-size:12px;color:var(--teal);display:flex;align-items:center;gap:6px;user-select:none;transition:background .15s;list-style:none}
+        .intel-card summary::-webkit-details-marker{display:none}
+        .intel-card summary::before{content:'▸';font-size:10px;transition:transform .15s}
+        .intel-card[open] summary::before{transform:rotate(90deg)}
+        .intel-card summary:hover{background:var(--bg)}
+        .intel-body{padding:10px 14px;border-top:1px solid var(--border)}
+        .intel-summary{color:var(--text2);line-height:1.5;margin-bottom:8px}
+        .intel-meta{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;font-size:11px}
+        .intel-meta-item{display:flex;gap:3px;align-items:center}
+        .intel-meta-label{font-size:9px;text-transform:uppercase;color:var(--muted);font-weight:600;letter-spacing:.3px}
+        .intel-tags{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+        .intel-tag{font-size:10px;padding:2px 8px;border-radius:4px;background:var(--teal-light);color:var(--teal);font-family:'JetBrains Mono',monospace}
+        .intel-section{margin-top:8px}
+        .intel-section-title{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+        .intel-signal{display:flex;align-items:flex-start;gap:4px;padding:3px 0;font-size:11px;color:var(--text2)}
+        .intel-signal::before{content:'→';color:var(--green);font-weight:700;flex-shrink:0}
+        .intel-source{font-size:10px;color:var(--muted);font-style:italic;margin-top:6px}
+
+        /* Parse Preview Panel */
+        .parse-preview{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;margin-top:8px}
+        .parse-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+        .parse-confidence{font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px}
+        .parse-conf-high{background:var(--green-light);color:var(--green)}
+        .parse-conf-med{background:var(--amber-light);color:var(--amber)}
+        .parse-conf-low{background:var(--red-light);color:var(--red)}
+        .parse-classification{font-size:10px;font-weight:600;padding:2px 6px;border-radius:3px;background:var(--bg2);color:var(--text2);text-transform:uppercase;letter-spacing:.3px}
+        .parse-parts-table{width:100%;font-size:11px;border-collapse:collapse;margin-top:8px}
+        .parse-parts-table th{text-align:left;padding:4px 6px;color:var(--muted);font-weight:600;font-size:9px;text-transform:uppercase;border-bottom:1px solid var(--border)}
+        .parse-parts-table td{padding:4px 6px;border-bottom:1px solid var(--card2);font-family:'JetBrains Mono',monospace}
+        .parse-actions{display:flex;gap:6px;justify-content:flex-end;margin-top:10px}
+
+        /* Engagement score ring in vendor popup */
+        .engagement-ring{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;border:3px solid}
+        .eng-high{border-color:var(--green);color:var(--green);background:var(--green-light)}
+        .eng-med{border-color:var(--amber);color:var(--amber);background:var(--amber-light)}
+        .eng-low{border-color:var(--red);color:var(--red);background:var(--red-light)}
+
+        /* Toast container */
+        #toastContainer{position:fixed;top:16px;right:16px;z-index:200;display:flex;flex-direction:column;gap:6px;pointer-events:none}
+        #toastContainer > *{pointer-events:auto}
+
+        @media(max-width:768px){
+            .ai-panel-bg{padding:8px;align-items:flex-start;padding-top:40px}
+            .ai-panel{padding:16px;max-height:calc(100vh - 60px)}
+            .ai-contact-row{flex-direction:column;gap:6px}
+            .ai-contact-actions{width:100%;justify-content:flex-end}
+            .intel-meta{flex-direction:column;gap:4px}
+        }
     </style>
 </head>
 <body>
 {% if not logged_in %}
 <div class="login">
     <div class="login-card">
-        <h1>AvailAI</h1>
-        <p class="sub">Supplier Sourcing Engine</p>
+        <img src="/static/avail_logo.png" alt="AVAIL" class="login-logo">
+        <p class="sub">TRIO SCS Sourcing Engine</p>
         <a href="/auth/login" class="btn-ms">
-            <svg width="20" height="20" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
+            <svg width="18" height="18" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
             Sign in with Microsoft
         </a>
-        <p class="ver">v0.3.0</p>
+        <p class="ver">v1.2.0</p>
     </div>
 </div>
 {% else %}
 <div class="shell">
     <div class="topbar">
-        <h1>AvailAI</h1>
+        <div class="topbar-left">
+            <img src="/static/avail_logo.png" alt="AVAIL" class="topbar-logo">
+            <div class="topbar-nav">
+                <button class="active" id="navReqs" onclick="showList();setNav(this)">Requisitions</button>
+                <button id="navCustomers" onclick="showCustomers();setNav(this)">Customers</button>
+                <button id="navVendors" onclick="showVendors();setNav(this)">Vendors</button>
+                <button id="navMaterials" onclick="showMaterials();setNav(this)">Materials</button>
+                <button id="navSources" onclick="showSources();setNav(this)">Data Sources</button>
+            </div>
+        </div>
         <div class="user">
+            <span id="roleBadge" class="role-badge"></span>
+            <span class="m365-status" id="m365Status" title="Checking M365 connection...">
+                <span class="m365-dot" id="m365Dot"></span>
+                <span class="m365-label" id="m365Label">M365</span>
+            </span>
             <span>{{ user_name }}</span>
             <button class="btn-out" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())">Logout</button>
         </div>
     </div>
 
-    <div class="tabs">
-        <button class="tab on" onclick="switchTab('search',this)">Search</button>
-        <button class="tab" onclick="switchTab('upload',this)">Upload</button>
-        <button class="tab" onclick="switchTab('responses',this)">Responses</button>
-    </div>
-
-    <!-- SEARCH TAB -->
-    <div id="tab-search" class="tc on">
-        <div class="spanel">
-            <div class="srow">
-                <textarea id="partInput" class="sinput" rows="1" placeholder="Enter part number(s) — comma or newline separated"></textarea>
-                <input type="number" id="targetQty" class="qinput" placeholder="Target qty" min="1">
-                <button id="searchBtn" class="btn-s" onclick="doSearch()">Search</button>
+    <!-- VIEW: Requisition List -->
+    <div id="view-list">
+        <div class="req-header">
+            <h2>Requisitions</h2>
+            <div style="display:flex;gap:10px;align-items:center">
+                <input class="req-search" id="reqSearchInput" type="text" placeholder="Search requisitions…" oninput="searchRequisitions(this.value)">
+                <button class="btn btn-primary" onclick="openNewReqModal()">+ New Requisition</button>
             </div>
         </div>
-        <div class="rhead">
-            <div><h2>Results</h2><span id="rmeta" class="rmeta"></span></div>
-            <div class="ractions">
-                <button class="btn-t" onclick="selAll()">Select all</button>
-                <button class="btn-t" onclick="selNone()">Clear</button>
-                <button id="sendBtn" class="btn-rfq" disabled onclick="openRfq()">Send RFQ (0)</button>
+        <div id="reqStatusBar" class="filter-bar" style="margin-bottom:8px;display:none">
+            <div class="filter-pills">
+                <button class="filter-pill on" data-req-status="all" onclick="setReqStatusFilter('all',this)">All</button>
+                <button class="filter-pill" data-req-status="active" onclick="setReqStatusFilter('active',this)">Active</button>
+                <button class="filter-pill" data-req-status="sourcing" onclick="setReqStatusFilter('sourcing',this)">Sourcing</button>
+                <button class="filter-pill" data-req-status="quoting" onclick="setReqStatusFilter('quoting',this)">Quoting</button>
+                <button class="filter-pill" data-req-status="quoted" onclick="setReqStatusFilter('quoted',this)">Quoted</button>
+                <button class="filter-pill" data-req-status="won" onclick="setReqStatusFilter('won',this)">Won</button>
+                <button class="filter-pill" data-req-status="lost" onclick="setReqStatusFilter('lost',this)">Lost</button>
             </div>
+            <span class="filter-count" id="reqStatusCount"></span>
         </div>
-        <div id="results"><p class="empty">Enter a part number to search</p></div>
+        <div id="reqList"><p class="empty">Loading…</p></div>
     </div>
 
-    <!-- UPLOAD TAB -->
-    <div id="tab-upload" class="tc">
-        <div class="upanel">
-            <div class="uzone" id="dropZone" onclick="document.getElementById('fileInput').click()">
-                <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.tsv" onchange="doUpload()">
-                <div class="icon">📁</div>
-                <div class="label">Drop a stock list here or click to browse</div>
-                <div class="hint">CSV, XLSX, XLS, TSV — up to 50 MB</div>
+    <!-- VIEW: Requisition Detail -->
+    <div id="view-detail" style="display:none">
+        <div class="detail-header">
+            <div>
+                <a class="back-link" onclick="showList()">← Back</a>
+                <h2 id="detailTitle"></h2>
+                <span id="detailCustomer" class="req-customer"></span>
             </div>
-            <div id="uploadStatus" class="ustatus"></div>
-            <div class="lb">
-                <h3>Upload Leaderboard</h3>
-                <table class="lbt">
-                    <thead><tr><th>#</th><th>User</th><th>Uploads</th><th>Parts</th></tr></thead>
-                    <tbody id="leaderboard"><tr><td colspan="4" style="text-align:center;color:var(--muted)">Loading…</td></tr></tbody>
+            <div style="display:flex;gap:8px;align-items:center">
+                <button class="btn btn-ghost btn-sm" onclick="cloneRequisition(currentReqId)" title="Clone this requisition">Clone</button>
+                <button class="btn btn-primary" id="searchAllBtn" onclick="searchAll()">⟳ Search All</button>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab on" onclick="switchTab('requirements',this)">Requirements</button>
+            <button class="tab" onclick="switchTab('sources',this)">Sources</button>
+            <button class="tab" onclick="switchTab('activity',this)">Activity</button>
+            <button class="tab" onclick="switchTab('offers',this)">Offers</button>
+            <button class="tab" onclick="switchTab('quote',this)">Quote</button>
+        </div>
+
+        <!-- Requirements Tab -->
+        <div id="tab-requirements" class="tc on">
+            <div class="card" style="margin-bottom:12px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <strong style="font-size:12px;color:var(--muted)">Type a part number and press Enter to add</strong>
+                    <button class="btn btn-ghost btn-sm" onclick="toggleUpload()">📁 Upload CSV</button>
+                </div>
+                <div id="uploadArea" style="display:none;margin-bottom:12px">
+                    <div class="uzone" id="dropZone" onclick="document.getElementById('fileInput').click()">
+                        <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.tsv" onchange="showFileReady('fileInput','uploadReady','uploadFileName')">
+                        <div class="uzone-label">Drop a file or click to browse</div>
+                        <div class="uzone-hint">CSV or XLSX — columns: mpn (or part_number), qty, substitutes (or sub_1…sub_20)</div>
+                    </div>
+                    <div id="uploadReady" style="display:none;margin-bottom:8px">
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <span style="font-size:12px;color:var(--text2)">📄 <span id="uploadFileName"></span></span>
+                            <button class="btn btn-primary btn-sm" onclick="doUpload()">Upload</button>
+                            <button class="btn btn-ghost btn-sm" onclick="clearFileInput('fileInput','uploadReady')">Cancel</button>
+                        </div>
+                    </div>
+                    <div id="uploadStatus" class="ustatus"></div>
+                </div>
+                <div class="filter-bar" id="reqFilterBar" style="display:none">
+                    <input type="text" class="filter-search" id="reqFilter" placeholder="Filter parts…" oninput="renderRequirementsTable()">
+                    <div class="filter-pills">
+                        <button class="filter-pill on" data-req-filter="all" onclick="setReqFilter('all',this)">All</button>
+                        <button class="filter-pill" data-req-filter="nosrc" onclick="setReqFilter('nosrc',this)">No Sources</button>
+                        <button class="filter-pill" data-req-filter="hassubs" onclick="setReqFilter('hassubs',this)">Has Subs</button>
+                    </div>
+                    <select class="filter-sort" id="reqSort" onchange="renderRequirementsTable()">
+                        <option value="default">Default order</option>
+                        <option value="mpn-asc">MPN A→Z</option>
+                        <option value="mpn-desc">MPN Z→A</option>
+                        <option value="qty-desc">Qty High→Low</option>
+                        <option value="qty-asc">Qty Low→High</option>
+                        <option value="src-desc">Sources High→Low</option>
+                        <option value="src-asc">Sources Low→High</option>
+                    </select>
+                    <span class="filter-count" id="reqFilterCount"></span>
+                </div>
+                <table class="tbl">
+                    <thead><tr><th style="width:35%">Part Number</th><th style="width:55px">Qty</th><th>Substitutes</th><th style="width:70px">Target $</th><th style="width:55px">Sources</th><th style="width:36px"></th></tr></thead>
+                    <tbody id="reqTable"></tbody>
+                    <tfoot>
+                        <tr class="add-row">
+                            <td><input id="fMpn" placeholder="Enter part number…" onkeydown="if(event.key==='Enter')addReq()"></td>
+                            <td><input id="fQty" type="number" value="1" min="1" style="width:56px" onkeydown="if(event.key==='Enter')addReq()"></td>
+                            <td><input id="fSubs" placeholder="Comma-separated alternates…" onkeydown="if(event.key==='Enter')addReq()"></td>
+                            <td><input id="fTarget" type="number" step="0.01" min="0" placeholder="—" style="width:64px" onkeydown="if(event.key==='Enter')addReq()"></td>
+                            <td></td>
+                            <td><button class="btn btn-primary btn-sm" onclick="addReq()" title="Add">+</button></td>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
         </div>
+
+        <!-- Sources Tab -->
+        <div id="tab-sources" class="tc">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <strong style="font-size:13px">Search Results</strong>
+                <div style="display:flex;gap:6px">
+                    <button class="btn btn-ghost btn-sm" onclick="expandAllGroups()">Expand All</button>
+                    <button class="btn btn-ghost btn-sm" onclick="collapseAllGroups()">Collapse All</button>
+                    <span style="width:1px;background:var(--border);margin:0 2px"></span>
+                    <button class="btn btn-ghost btn-sm" data-role="buyer" onclick="selectAllSightings()">Select All</button>
+                    <button class="btn btn-ghost btn-sm" data-role="buyer" onclick="clearSelection()">Clear</button>
+                    <button class="btn btn-success btn-sm" id="batchRfqBtn" data-role="buyer" disabled onclick="openBatchRfqModal()">Send Batch RFQ (0)</button>
+                </div>
+            </div>
+            <div class="filter-bar" id="srcFilterBar">
+                <input type="text" class="filter-search" id="srcFilter" placeholder="Search vendor, MPN, manufacturer…" oninput="renderSources()">
+                <div class="filter-pills">
+                    <button class="filter-pill on" data-src-filter="all" onclick="setSrcFilter('all',this)">All</button>
+                    <button class="filter-pill" data-src-filter="exact" onclick="setSrcFilter('exact',this)">Exact</button>
+                    <button class="filter-pill" data-src-filter="sub" onclick="setSrcFilter('sub',this)">Subs</button>
+                    <button class="filter-pill" data-src-filter="available" onclick="setSrcFilter('available',this)">Available</button>
+                    <button class="filter-pill" data-src-filter="sold" onclick="setSrcFilter('sold',this)">Not Available</button>
+                </div>
+                <span class="filter-count" id="srcFilterCount"></span>
+            </div>
+            <div class="collapsed-match-hint hidden" id="collapsedMatchHint"></div>
+            <div id="sourceResults"><p class="empty">Search requirements to see vendor results</p></div>
+        </div>
+
+        <!-- Activity Tab -->
+        <div id="tab-activity" class="tc">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <strong style="font-size:13px">Contact Activity</strong>
+                <span style="font-size:10px;color:var(--muted)">Inbox checked automatically every 30 min</span>
+            </div>
+            <div class="act-summary" id="actSummary" style="display:none">
+                <div class="act-stat act-stat-sent" data-act-stat="all" onclick="setActStat('all',this)">
+                    <div class="act-stat-num" id="actStatSent">0</div>
+                    <div class="act-stat-label">✉ Sent</div>
+                </div>
+                <div class="act-stat act-stat-replied" data-act-stat="replied" onclick="setActStat('replied',this)">
+                    <div class="act-stat-num" id="actStatReplied">0</div>
+                    <div class="act-stat-label">✅ Replied</div>
+                </div>
+                <div class="act-stat act-stat-opened" data-act-stat="opened" onclick="setActStat('opened',this)">
+                    <div class="act-stat-num" id="actStatOpened">0</div>
+                    <div class="act-stat-label">👁 Opened</div>
+                </div>
+                <div class="act-stat act-stat-awaiting" data-act-stat="awaiting" onclick="setActStat('awaiting',this)">
+                    <div class="act-stat-num" id="actStatAwaiting">0</div>
+                    <div class="act-stat-label">⏳ Awaiting</div>
+                </div>
+            </div>
+            <div class="filter-bar" id="actFilterBar" style="display:none">
+                <input type="text" class="filter-search" id="actFilter" placeholder="Search vendor, contact, part…" oninput="renderActivityCards()">
+                <div class="filter-pills">
+                    <button class="filter-pill on" data-act-filter="all" onclick="setActFilter('all',this)">All</button>
+                    <button class="filter-pill" data-act-filter="email" onclick="setActFilter('email',this)">✉ Email</button>
+                    <button class="filter-pill" data-act-filter="phone" onclick="setActFilter('phone',this)">📞 Phone</button>
+                </div>
+                <select class="filter-sort" id="actSort" onchange="renderActivityCards()">
+                    <option value="date-desc">Newest first</option>
+                    <option value="date-asc">Oldest first</option>
+                    <option value="vendor-asc">Vendor A→Z</option>
+                    <option value="vendor-desc">Vendor Z→A</option>
+                    <option value="status">Status</option>
+                </select>
+                <span class="filter-count" id="actFilterCount"></span>
+            </div>
+            <div id="activityLog"><p class="empty">No activity yet</p></div>
+        </div>
+
+        <!-- Offers Tab -->
+        <div id="tab-offers" class="tc">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                <strong style="font-size:13px">Vendor Offers</strong>
+                <div style="display:flex;gap:6px">
+                    <button class="btn btn-ghost btn-sm" onclick="openLogOfferModal()">+ Log Offer</button>
+                    <button class="btn btn-primary btn-sm" id="buildQuoteBtn" disabled onclick="buildQuoteFromSelected()">Build Quote from Selected (0)</button>
+                </div>
+            </div>
+            <div id="offersContent"><p class="empty">No offers yet — log vendor offers as they come in</p></div>
+        </div>
+
+        <!-- Quote Tab -->
+        <div id="tab-quote" class="tc">
+            <div id="quoteContent"><p class="empty">No quote yet — select offers on the Offers tab and click "Build Quote"</p></div>
+        </div>
     </div>
 
-    <!-- RESPONSES TAB -->
-    <div id="tab-responses" class="tc">
-        <div class="stats">
-            <div class="st"><div class="sl">RFQs Sent</div><div class="sv" id="stSent">—</div></div>
-            <div class="st"><div class="sl">Replied</div><div class="sv" id="stRepl">—</div><div class="ss" id="stRate"></div></div>
-            <div class="st"><div class="sl">Positive</div><div class="sv" id="stPos">—</div></div>
-            <div class="st"><div class="sl">Avg Response</div><div class="sv" id="stHrs">—</div><div class="ss">hours</div></div>
-            <div class="st"><div class="sl">AI Parsed</div><div class="sv" id="stParsed">—</div><div class="ss" id="stConf"></div></div>
-            <div class="st"><div class="sl">Needs Review</div><div class="sv" id="stPend">—</div></div>
+    <!-- VIEW: Customers -->
+    <div id="view-customers" style="display:none">
+        <div class="req-header">
+            <h2>Customers</h2>
+            <div style="display:flex;gap:10px;align-items:center">
+                <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text2);cursor:pointer">
+                    <input type="checkbox" id="custMyOnly" onchange="loadCustomers()" style="accent-color:var(--teal)"> My accounts
+                </label>
+                <input class="req-search" id="custFilter" placeholder="Search companies…" oninput="loadCustomers()">
+                <button class="btn btn-primary" onclick="openNewCompanyModal()">+ New Company</button>
+            </div>
         </div>
-        <div class="mact">
-            <h2>Vendor Responses</h2>
-            <button class="btn-poll" id="pollBtn" onclick="doPoll()">⟳ Check Inbox</button>
+        <div id="custList"><p class="empty">Loading…</p></div>
+    </div>
+
+    <!-- VIEW: Vendors -->
+    <div id="view-vendors" style="display:none">
+        <div class="vendor-header">
+            <h2>Vendor Directory</h2>
+            <input class="vendor-search" id="vendorSearch" placeholder="Search vendors…" oninput="filterVendorList()">
         </div>
-        <div class="ftabs">
-            <button class="ft on" onclick="filterResp(null,this)">All</button>
-            <button class="ft" onclick="filterResp('parsed',this)">Pending</button>
-            <button class="ft" onclick="filterResp('sighting_created',this)">Auto-Created</button>
-            <button class="ft" onclick="filterResp('approved',this)">Approved</button>
-            <button class="ft" onclick="filterResp('rejected',this)">Rejected</button>
+        <div class="vendor-filters" style="display:flex;gap:6px;align-items:center;padding:0 16px 8px;flex-wrap:wrap">
+            <button class="pill-filter on" onclick="setVendorTier('all',this)">All</button>
+            <button class="pill-filter" onclick="setVendorTier('proven',this)">🟢 Proven</button>
+            <button class="pill-filter" onclick="setVendorTier('developing',this)">🟡 Developing</button>
+            <button class="pill-filter" onclick="setVendorTier('caution',this)">🔴 Caution</button>
+            <button class="pill-filter" onclick="setVendorTier('new',this)">⚪ New</button>
+            <label style="margin-left:auto;font-size:11px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px">
+                <input type="checkbox" id="vendorHideBL" onchange="filterVendorList()"> Hide blacklisted
+            </label>
+            <span id="vendorFilterCount" style="font-size:11px;color:var(--muted)"></span>
         </div>
-        <div id="respList"><p class="empty">Click "Check Inbox" to scan for vendor replies</p></div>
+        <div id="vendorList"><p class="empty">Loading…</p></div>
+    </div>
+
+    <!-- VIEW: Materials -->
+    <div id="view-materials" style="display:none">
+        <div class="vendor-header">
+            <h2>Material Cards</h2>
+            <div style="display:flex;gap:8px;align-items:center">
+                <button class="btn btn-ghost btn-sm" onclick="toggleStockImport()">📦 Import Stock</button>
+                <input class="vendor-search" id="materialSearch" placeholder="Search by part number…" oninput="loadMaterialList()">
+            </div>
+        </div>
+        <div id="stockImportArea" data-role="buyer" style="display:none;margin-bottom:12px" class="card">
+            <strong style="font-size:12px;color:var(--muted)">Import a vendor stock list — matching MPNs create material cards and sightings</strong>
+            <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
+                <select id="stockReqSelect" style="flex:1;min-width:150px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px">
+                    <option value="">Select requisition to match against…</option>
+                </select>
+                <input id="stockVendorName" placeholder="Vendor name…" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+                <input type="file" id="stockFileInput" accept=".csv,.xlsx,.xls,.tsv" style="display:none" onchange="showFileReady('stockFileInput','stockFileReady','stockFileName')">
+                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stockFileInput').click()">Choose File</button>
+            </div>
+            <div id="stockFileReady" style="display:none;margin-top:8px">
+                <div style="display:flex;gap:8px;align-items:center">
+                    <span style="font-size:12px;color:var(--text2)">📄 <span id="stockFileName"></span></span>
+                    <button class="btn btn-primary btn-sm" onclick="doStockImport()">Import</button>
+                    <button class="btn btn-ghost btn-sm" onclick="clearFileInput('stockFileInput','stockFileReady')">Cancel</button>
+                </div>
+            </div>
+            <div class="uzone-hint" style="margin-top:4px">CSV/XLSX — columns: mpn (or part_number), qty, price, manufacturer</div>
+            <div id="stockImportStatus" class="ustatus"></div>
+        </div>
+        <div id="materialList"><p class="empty">Loading…</p></div>
+    </div>
+
+    <!-- VIEW: Data Sources -->
+    <div id="view-sources" style="display:none">
+        <div class="vendor-header">
+            <h2>Data Sources</h2>
+            <span style="font-size:12px;color:var(--text2)">Manage API connections, scrapers, and data feeds</span>
+        </div>
+        <div id="sourcesList"><p class="empty">Loading…</p></div>
     </div>
 </div>
 
-<!-- RFQ Modal -->
-<div id="rfqModal" class="modal-bg">
+<!-- New Requisition Modal -->
+<div id="newReqModal" class="modal-bg" onclick="if(event.target===this)closeModal('newReqModal')">
     <div class="modal">
-        <h2>Send RFQ</h2>
-        <label>Recipients</label>
-        <div id="rfqVendors" class="mvendors"></div>
-        <label>Subject</label>
-        <input type="text" id="rfqSubject">
-        <label>Message</label>
-        <textarea id="rfqBody"></textarea>
+        <h2>New Requisition</h2>
+        <div class="field"><label>Name</label><input id="nrName" placeholder="e.g. Siemens Medical - Feb 2026" onkeydown="if(event.key==='Enter')createRequisition()"></div>
+        <div class="field" style="margin-top:10px">
+            <label>Customer Site (optional)</label>
+            <div class="site-typeahead">
+                <input id="nrSiteSearch" placeholder="Type to search companies…" oninput="filterSiteTypeahead(this.value)" onfocus="filterSiteTypeahead(this.value)" autocomplete="off">
+                <input type="hidden" id="nrSiteId">
+                <div class="site-typeahead-list" id="nrSiteList"></div>
+            </div>
+        </div>
         <div class="mactions">
-            <button class="btn-can" onclick="closeRfq()">Cancel</button>
-            <button id="confirmBtn" class="btn-send" onclick="sendRfq()">Send</button>
+            <button class="btn btn-ghost" onclick="closeModal('newReqModal')">Cancel</button>
+            <button class="btn btn-primary" onclick="createRequisition()">Create</button>
         </div>
     </div>
 </div>
 
-<script src="/static/app.js"></script>
+<!-- Batch RFQ Modal -->
+<div id="rfqModal" class="modal-bg" onclick="if(event.target===this)closeModal('rfqModal')">
+    <div class="modal modal-lg">
+        <h2>Send Batch RFQ</h2>
+        <div id="rfqPrepare">
+            <p id="rfqPrepareStatus" style="font-size:12px;color:var(--text2);margin-bottom:12px">Checking vendor contacts…</p>
+        </div>
+        <div id="rfqReady" style="display:none">
+            <p style="font-size:12px;color:var(--text2);margin-bottom:10px" id="rfqSummary"></p>
+            <div style="display:flex;gap:8px;margin-bottom:8px">
+                <button class="btn btn-ghost btn-sm" onclick="rfqSelectAllVendors()">Select All</button>
+                <button class="btn btn-ghost btn-sm" onclick="rfqDeselectAllVendors()">Deselect All</button>
+            </div>
+            <div id="rfqVendorList" style="max-height:240px;overflow-y:auto;margin-bottom:12px"></div>
+            <div class="rfq-condition">
+                <label>Condition Required</label>
+                <button class="rfq-cond-btn active" onclick="setRfqCondition('any',this)">Any</button>
+                <button class="rfq-cond-btn" onclick="setRfqCondition('new',this)">New</button>
+                <button class="rfq-cond-btn" onclick="setRfqCondition('used',this)">Used</button>
+            </div>
+            <div class="field"><label>Subject</label><input id="rfqSubject"></div>
+            <div class="field">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                    <label>Message</label>
+                    <button class="btn-ai btn-sm" onclick="generateSmartRFQForModal()" title="Generate personalized RFQ body using AI">🤖 Smart Draft</button>
+                </div>
+                <textarea id="rfqBody" style="min-height:160px"></textarea>
+            </div>
+            <div class="mactions">
+                <button class="btn btn-ghost" onclick="closeModal('rfqModal')">Cancel</button>
+                <button class="btn btn-success" id="rfqSendBtn" onclick="sendBatchRfq()">Send</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Vendor Card Popup -->
+<div id="vendorPopup" class="modal-bg" onclick="if(event.target===this)closeModal('vendorPopup')">
+    <div class="modal modal-lg">
+        <div id="vendorPopupContent"><p class="empty">Loading…</p></div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('vendorPopup')">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Material Card Popup -->
+<div id="materialPopup" class="modal-bg" onclick="if(event.target===this)closeModal('materialPopup')">
+    <div class="modal modal-lg">
+        <div id="materialPopupContent"><p class="empty">Loading…</p></div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('materialPopup')">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- New Company Modal -->
+<div id="newCompanyModal" class="modal-bg" onclick="if(event.target===this)closeModal('newCompanyModal')">
+    <div class="modal">
+        <h2>New Company</h2>
+        <div class="field"><label>Company Name</label><input id="ncName" placeholder="e.g. Siemens" onkeydown="if(event.key==='Enter')createCompany()"></div>
+        <div class="field"><label>Website</label><input id="ncWebsite" placeholder="siemens.com"></div>
+        <div class="field"><label>Industry</label><input id="ncIndustry" placeholder="Medical, Industrial, etc."></div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('newCompanyModal')">Cancel</button>
+            <button class="btn btn-primary" onclick="createCompany()">Create &amp; Add Site</button>
+        </div>
+    </div>
+</div>
+
+<!-- Add Site Modal -->
+<div id="addSiteModal" class="modal-bg" onclick="if(event.target===this)closeModal('addSiteModal')">
+    <div class="modal">
+        <input type="hidden" id="asSiteCompanyId">
+        <h2>Add Site to <span id="asSiteCompanyName"></span></h2>
+        <div class="lo-form">
+            <div class="field"><label>Site Name</label><input id="asSiteName" placeholder="HQ, West Coast, etc."></div>
+            <div class="field"><label>Owner</label><select id="asSiteOwner"><option value="">— None —</option></select></div>
+            <div class="field"><label>Contact Name</label><input id="asSiteContactName" placeholder="John Smith"></div>
+            <div class="field"><label>Contact Email</label><input id="asSiteContactEmail" placeholder="john@example.com"></div>
+            <div class="field"><label>Contact Phone</label><input id="asSiteContactPhone" placeholder="555-123-4567"></div>
+            <div class="field"><label>Payment Terms</label><input id="asSitePayTerms" placeholder="Net 30"></div>
+            <div class="field"><label>Shipping Terms</label><input id="asSiteShipTerms" placeholder="FOB Origin"></div>
+        </div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('addSiteModal')">Cancel</button>
+            <button class="btn btn-primary" onclick="addSite()">Add Site</button>
+        </div>
+    </div>
+</div>
+
+<!-- Suggested Contacts Modal -->
+<div id="suggestedContactsModal" class="modal-bg" onclick="if(event.target===this)closeModal('suggestedContactsModal')">
+    <div class="modal modal-lg">
+        <h2 id="scModalTitle">Suggested Contacts</h2>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:10px" id="scModalSubtitle">Select contacts to add</p>
+        <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
+            <input class="req-search" id="scTitleFilter" placeholder="Filter by title (e.g. Sales, Procurement)…" style="flex:1"
+                   onkeydown="if(event.key==='Enter')searchSuggestedContacts()">
+            <button class="btn btn-ghost btn-sm" onclick="searchSuggestedContacts()">Search</button>
+        </div>
+        <div id="scResults" style="max-height:340px;overflow-y:auto;margin-bottom:12px">
+            <p class="empty">Click Search or enter a title filter to find contacts</p>
+        </div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('suggestedContactsModal')">Cancel</button>
+            <button class="btn btn-primary" id="scAddBtn" onclick="addSelectedSuggestedContacts()" style="display:none">Add Selected (0)</button>
+        </div>
+    </div>
+</div>
+
+<!-- Log Offer Modal -->
+<div id="logOfferModal" class="modal-bg" onclick="if(event.target===this)closeModal('logOfferModal')">
+    <div class="modal modal-lg">
+        <h2>Log Vendor Offer</h2>
+        <div class="lo-form">
+            <div class="field field-full"><label>Part Number</label><select id="loMpn" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--input);font-size:12px"></select></div>
+            <div class="field field-full"><label>Vendor Name</label><input id="loVendor" placeholder="Type vendor name…"></div>
+            <div class="field"><label>Qty Available</label><input id="loQty" type="number" placeholder="10000"></div>
+            <div class="field"><label>Unit Price ($)</label><input id="loPrice" type="number" step="0.0001" placeholder="0.2500"></div>
+            <div class="field"><label>Lead Time</label><input id="loLead" placeholder="4–6 wks"></div>
+            <div class="field"><label>Condition</label>
+                <select id="loCond" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--input);font-size:12px">
+                    <option value="New">New</option><option value="Refurbished">Refurbished</option><option value="Used">Used</option>
+                </select>
+            </div>
+            <div class="field"><label>Date Code</label><input id="loDC" placeholder="2024+"></div>
+            <div class="field"><label>MOQ</label><input id="loMoq" type="number" placeholder="1000"></div>
+            <div class="field field-full">
+                <label>Source</label>
+                <div class="lo-sources">
+                    <label><input type="radio" name="loSource" value="manual" checked> Manual entry</label>
+                    <label><input type="radio" name="loSource" value="email"> Email quote</label>
+                    <label><input type="radio" name="loSource" value="phone"> Phone quote</label>
+                    <label><input type="radio" name="loSource" value="search"> Search result</label>
+                </div>
+            </div>
+            <div class="field field-full"><label>Notes</label><input id="loNotes" placeholder="Optional notes…"></div>
+        </div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('logOfferModal')">Cancel</button>
+            <button class="btn btn-ghost" onclick="saveOffer(true)">Save &amp; Next</button>
+            <button class="btn btn-primary" onclick="saveOffer(false)">Save &amp; Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Lost Reason Modal -->
+<div id="lostModal" class="modal-bg" onclick="if(event.target===this)closeModal('lostModal')">
+    <div class="modal">
+        <h2>Mark Quote as Lost</h2>
+        <div class="field">
+            <label>Reason</label>
+            <select id="lostReason" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--input);font-size:12px">
+                <option value="">— Select —</option>
+                <option value="price">Price too high</option>
+                <option value="lead_time">Lead time too long</option>
+                <option value="competitor">Lost to competitor</option>
+                <option value="no_response">No response</option>
+                <option value="cancelled">Customer cancelled</option>
+                <option value="other">Other</option>
+            </select>
+        </div>
+        <div class="field"><label>Notes</label><input id="lostNotes" placeholder="Optional details…"></div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('lostModal')">Cancel</button>
+            <button class="btn btn-danger" onclick="submitLost()">Mark Lost</button>
+        </div>
+    </div>
+</div>
+
+<!-- Pricing History Modal -->
+<div id="phModal" class="modal-bg" onclick="if(event.target===this)closeModal('phModal')">
+    <div class="modal modal-lg">
+        <h2>Pricing History — <span id="phMpn" style="font-family:'JetBrains Mono',monospace"></span></h2>
+        <div id="phContent"><p class="empty">Loading…</p></div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('phModal')">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Compare Offers Modal -->
+
+<script>
+window.__userName = "{{ user_name }}";
+window.__userEmail = "{{ user_email }}";
+window.__isAdmin = {{ "true" if is_admin else "false" }};
+function setNav(btn) {
+    document.querySelectorAll('.topbar-nav button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+}
+// Hide Data Sources tab for non-admin users
+if (!window.__isAdmin) {
+    document.addEventListener('DOMContentLoaded', function() {
+        const srcBtn = document.getElementById('navSources');
+        if (srcBtn) srcBtn.style.display = 'none';
+    });
+}
+</script>
+<script src="/static/app.js?v=1.2.0"></script>
+<script src="/static/crm.js?v=1.2.0"></script>
 {% endif %}
 </body>
 </html>

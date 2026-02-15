@@ -1,35 +1,42 @@
-"""Database connection. Tables are auto-created on app startup."""
-from contextlib import asynccontextmanager
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from app.config import get_settings
+"""Database connection and session factory.
 
-settings = get_settings()
+All naive datetimes from PostgreSQL are auto-tagged as UTC via event
+listener to prevent naive-vs-aware comparison errors.
+"""
+from datetime import datetime, timezone
 
-engine = create_async_engine(settings.async_database_url, pool_size=10, pool_pre_ping=True)
-async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+from sqlalchemy import create_engine, event
+from sqlalchemy.orm import sessionmaker
 
+from .config import settings
 
-async def create_tables():
-    """Create all tables if they don't exist. Called on app startup."""
-    from app.models import Base
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+engine = create_engine(settings.database_url, pool_size=10, pool_pre_ping=True)
+SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 
-async def get_db():
-    """FastAPI dependency — gives you a database session."""
-    async with async_session() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+@event.listens_for(engine, "connect")
+def _set_timezone(dbapi_conn, connection_record):
+    cursor = dbapi_conn.cursor()
+    cursor.execute("SET timezone = 'UTC'")
+    cursor.close()
 
 
-@asynccontextmanager
-async def get_db_session():
-    """For background tasks that need a database session."""
-    session = async_session()
+@event.listens_for(SessionLocal, "loaded_as_persistent")
+def _make_datetimes_aware(session, instance):
+    for attr in vars(instance):
+        if attr.startswith("_"):
+            continue
+        val = getattr(instance, attr, None)
+        if isinstance(val, datetime) and val.tzinfo is None:
+            try:
+                setattr(instance, attr, val.replace(tzinfo=timezone.utc))
+            except Exception:
+                pass
+
+
+def get_db():
+    db = SessionLocal()
     try:
-        yield session
+        yield db
     finally:
-        await session.close()
+        db.close()

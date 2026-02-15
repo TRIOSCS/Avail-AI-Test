@@ -1,262 +1,2202 @@
-/* AvailAI Frontend v0.3 */
+/* AVAIL v1.2.0 — CRM, offers, quotes, target pricing */
 
-let results = [], selected = new Set(), curFilter = null;
+// API versioning: all new fetch() calls should use api('/endpoint') instead of '/api/endpoint'.
+// Old /api/ paths keep working via middleware rewrite.
+const API_BASE = '/api/v1';
+function api(path) { return API_BASE + path; }
 
-// --- API helper ---
-async function api(url, opts = {}) {
-    const r = await fetch(url, { headers: {'Content-Type':'application/json', ...opts.headers}, ...opts });
-    if (r.status === 401) { location.href = '/auth/login'; return null; }
-    if (!r.ok) { const e = await r.json().catch(() => ({detail:'Error'})); throw new Error(e.detail || `HTTP ${r.status}`); }
-    return r.json();
+let currentReqId = null;
+let currentReqName = '';
+let searchResults = {};
+let searchResultsCache = {};  // keyed by reqId
+let selectedSightings = new Set();
+let rfqVendorData = [];
+let activeTabCache = {};  // reqId → tab name
+let _vendorListData = [];   // cached vendor list for client-side filtering
+let _vendorTierFilter = 'all';  // all|proven|developing|caution|new
+let expandedGroups = new Set();  // reqIds that are expanded (default: all collapsed)
+
+// ── Utilities ───────────────────────────────────────────────────────────
+function esc(s) {
+    if (!s) return '';
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+}
+function escAttr(s) {
+    if (!s) return '';
+    return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function fmtDate(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleDateString();
+}
+function fmtDateTime(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+}
+function stars(avg, count) {
+    if (avg === null || avg === undefined) return '<span class="stars-none">☆</span>';
+    const full = Math.floor(avg);
+    const half = avg - full >= 0.5 ? 1 : 0;
+    let s = '<span class="stars">';
+    for (let i = 0; i < full; i++) s += '★';
+    if (half) s += '½';
+    s += `</span><span class="stars-num">${avg}</span>`;
+    if (count > 0) s += `<span class="stars-count">(${count})</span>`;
+    return s;
 }
 
-// --- Tabs ---
+// ── Init ────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    loadRequisitions();
+    checkM365Status();
+    const dz = document.getElementById('dropZone');
+    if (dz) {
+        dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag'); });
+        dz.addEventListener('dragleave', () => dz.classList.remove('drag'));
+        dz.addEventListener('drop', e => {
+            e.preventDefault(); dz.classList.remove('drag');
+            if (e.dataTransfer.files.length) {
+                document.getElementById('fileInput').files = e.dataTransfer.files;
+                showFileReady('fileInput','uploadReady','uploadFileName');
+            }
+        });
+    }
+});
+
+// ── M365 Connection Status ───────────────────────────────────────────────
+// Global user state
+window.userRole = 'buyer';  // Default until auth check
+window.userName = '';
+window.userEmail = '';
+
+async function checkM365Status() {
+    try {
+        const r = await fetch('/auth/status');
+        const d = await r.json();
+        const dot = document.getElementById('m365Dot');
+        const label = document.getElementById('m365Label');
+        const wrap = document.getElementById('m365Status');
+        if (!dot) return;
+
+        // Store user info globally
+        if (d.user_role) window.userRole = d.user_role;
+        if (d.user_name) window.userName = d.user_name;
+        if (d.user_email) window.userEmail = d.user_email;
+        if (d.user_id) window.userId = d.user_id;
+
+        // Apply role-based UI visibility
+        applyRoleGating();
+
+        if (d.connected) {
+            const connectedCount = (d.users || []).filter(u => u.status === 'connected').length;
+            dot.className = 'm365-dot green';
+            label.textContent = `M365 · ${connectedCount} user${connectedCount !== 1 ? 's' : ''}`;
+            // Build tooltip with user details
+            const tips = (d.users || []).map(u => {
+                const icon = u.status === 'connected' ? '●' : u.status === 'expired' ? '○' : '✕';
+                const scan = u.last_inbox_scan ? `scanned ${fmtRelative(u.last_inbox_scan)}` : 'never scanned';
+                return `${icon} ${u.name} — ${scan}`;
+            });
+            wrap.title = tips.join('\n');
+        } else {
+            dot.className = 'm365-dot red';
+            label.textContent = 'M365 Disconnected';
+            wrap.title = 'Click Logout and log in again to reconnect';
+            wrap.style.cursor = 'pointer';
+            wrap.onclick = () => { window.location.href = '/auth/login'; };
+        }
+    } catch(e) {
+        // Silent fail — indicator stays gray
+    }
+}
+
+// Refresh M365 status every 5 min
+setInterval(checkM365Status, 300000);
+
+// ── Role-Based UI Gating ────────────────────────────────────────────────
+function applyRoleGating() {
+    // Elements with data-role="buyer" are hidden for sales users
+    document.querySelectorAll('[data-role="buyer"]').forEach(el => {
+        el.style.display = window.userRole === 'buyer' ? '' : 'none';
+    });
+    // Show role badge in nav
+    const roleBadge = document.getElementById('roleBadge');
+    if (roleBadge) {
+        roleBadge.textContent = window.userRole === 'buyer' ? 'Buyer' : 'Sales';
+        roleBadge.className = `role-badge role-${window.userRole}`;
+    }
+}
+function isBuyer() { return window.userRole === 'buyer'; }
+
+// ── Navigation ──────────────────────────────────────────────────────────
+const ALL_VIEWS = ['view-list', 'view-detail', 'view-vendors', 'view-materials', 'view-sources', 'view-customers'];
+
+function showView(viewId) {
+    for (const id of ALL_VIEWS) {
+        document.getElementById(id).style.display = id === viewId ? '' : 'none';
+    }
+}
+
+function showList() {
+    showView('view-list');
+    currentReqId = null;
+    const searchInput = document.getElementById('reqSearchInput');
+    if (searchInput) searchInput.value = '';
+    loadRequisitions();
+}
+
+function showDetail(id, name) {
+    currentReqId = id;
+    currentReqName = name;
+    showView('view-detail');
+    document.getElementById('detailTitle').textContent = name;
+    // Show customer display if available
+    const custEl = document.getElementById('detailCustomer');
+    if (custEl) custEl.textContent = _reqCustomerMap[id] || '';
+    // Restore cached results or load saved sightings from DB
+    if (searchResultsCache[id]) {
+        searchResults = searchResultsCache[id];
+        renderSources();
+    } else {
+        searchResults = {};
+        selectedSightings.clear();
+        // Background fetch: load any previously saved sightings
+        fetch(`/api/requisitions/${id}/sightings`, {headers: authHeaders()})
+            .then(r => r.ok ? r.json() : null)
+            .then(data => {
+                if (data && Object.keys(data).length && currentReqId === id) {
+                    searchResults = data;
+                    searchResultsCache[id] = data;
+                    renderSources();
+                }
+            })
+            .catch(() => {});  // Silent — empty Sources tab is fine
+    }
+    loadRequirements();
+    loadActivity();
+    if (typeof loadOffers === 'function') loadOffers();
+    if (typeof loadQuote === 'function') loadQuote();
+    // Restore last active tab or default to requirements
+    const lastTab = activeTabCache[id] || 'requirements';
+    const tabMap = {requirements:0, sources:1, activity:2, offers:3, quote:4};
+    const tabBtns = document.querySelectorAll('.tab');
+    switchTab(lastTab, tabBtns[tabMap[lastTab] || 0]);
+}
+
+function showVendors() {
+    showView('view-vendors');
+    currentReqId = null;
+    loadVendorList();
+}
+
+function showMaterials() {
+    showView('view-materials');
+    currentReqId = null;
+    loadMaterialList();
+}
+
+function showSources() {
+    showView('view-sources');
+    currentReqId = null;
+    loadSources();
+}
+
 function switchTab(name, btn) {
+    document.querySelectorAll('.tc').forEach(t => t.classList.remove('on'));
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
-    document.querySelectorAll('.tc').forEach(c => c.classList.remove('on'));
+    document.getElementById('tab-' + name).classList.add('on');
     btn.classList.add('on');
-    document.getElementById(`tab-${name}`).classList.add('on');
-    if (name === 'upload') loadLB();
-    if (name === 'responses') { loadStats(); loadResp(); }
+    if (currentReqId) activeTabCache[currentReqId] = name;
+    // Auto-load CRM tabs on first switch
+    if (name === 'offers' && typeof loadOffers === 'function') loadOffers();
+    if (name === 'quote' && typeof loadQuote === 'function') loadQuote();
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// SEARCH
-// ═══════════════════════════════════════════════════════════════════════
+// ── Modals ──────────────────────────────────────────────────────────────
+function openNewReqModal() {
+    document.getElementById('newReqModal').classList.add('open');
+    setTimeout(() => document.getElementById('nrName').focus(), 100);
+}
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
-async function doSearch() {
-    const raw = document.getElementById('partInput').value.trim();
-    if (!raw) return;
-    const pns = raw.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
-    const tgt = parseInt(document.getElementById('targetQty').value) || null;
-    const btn = document.getElementById('searchBtn');
-    btn.disabled = true; btn.textContent = 'Searching…';
-    document.getElementById('results').innerHTML = '<p class="empty">Searching all sources…</p>';
-    document.getElementById('rmeta').textContent = '';
-    try {
-        const data = await api('/api/search', { method:'POST', body:JSON.stringify({part_numbers:pns, include_historical:true, target_qty:tgt}) });
-        results = data.results; selected.clear(); render(data);
-    } catch(e) { document.getElementById('results').innerHTML = `<p class="empty" style="color:var(--red)">Error: ${e.message}</p>`; }
-    finally { btn.disabled = false; btn.textContent = 'Search'; }
+function showToast(msg, type = 'info') {
+    let container = document.getElementById('toastContainer');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.style.cssText = 'position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    const colors = { info: 'var(--teal)', success: 'var(--green)', error: 'var(--red)', warn: 'var(--amber)' };
+    toast.style.cssText = `background:var(--bg2);border-left:4px solid ${colors[type]||colors.info};color:var(--text);padding:10px 16px;border-radius:6px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.25);max-width:340px;opacity:0;transition:opacity .2s`;
+    toast.textContent = msg;
+    container.appendChild(toast);
+    requestAnimationFrame(() => toast.style.opacity = '1');
+    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
 }
 
-function sc(s) { return s >= 60 ? 'hi' : s >= 35 ? 'mid' : 'lo'; }
-function bc(v) { return v >= 70 ? 'var(--green)' : v >= 40 ? 'var(--amber)' : 'var(--red)'; }
+// ── Requisitions ────────────────────────────────────────────────────────
+let reqSearchTimer = null;
+let _reqCustomerMap = {};  // id → customer_display
+let _reqListData = [];     // cached list for client-side filtering
+let _reqStatusFilter = 'all';
 
-function render(data) {
-    const el = document.getElementById('results');
-    if (!results.length) { el.innerHTML = '<p class="empty">No results found</p>'; return; }
-    document.getElementById('rmeta').textContent = `${data.result_count} vendor${data.result_count!==1?'s':''} found`;
+async function loadRequisitions(query = '') {
+    const url = query ? `/api/requisitions?q=${encodeURIComponent(query)}` : '/api/requisitions';
+    const res = await fetch(url);
+    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
+    _reqListData = await res.json();
+    _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
+    renderReqList();
+}
 
-    el.innerHTML = results.map((r,i) => {
-        const s = r.score_breakdown, c = s.components || {};
-        const chk = r.excluded ? 'disabled' : (selected.has(r.vendor_id) ? 'checked' : '');
-        let badges = r.vendor_type==='distributor' ? '<span class="badge b-dist">Distributor</span>' : '<span class="badge b-broker">Broker</span>';
-        if (r.vendor_is_authorized) badges += '<span class="badge b-auth">Authorized</span>';
+function renderReqList() {
+    const el = document.getElementById('reqList');
+    const statusBar = document.getElementById('reqStatusBar');
+    let data = _reqListData;
+    // Apply status filter
+    if (_reqStatusFilter !== 'all') {
+        data = data.filter(r => r.status === _reqStatusFilter);
+    }
+    // Show/hide status bar
+    const hasMultipleStatuses = new Set(_reqListData.map(r => r.status)).size > 1;
+    if (statusBar) statusBar.style.display = hasMultipleStatuses ? 'flex' : 'none';
+    const countEl = document.getElementById('reqStatusCount');
+    if (countEl) countEl.textContent = _reqStatusFilter !== 'all' ? `${data.length} of ${_reqListData.length}` : `${_reqListData.length} total`;
 
-        let dets = `<span class="di"><span class="dl">PN</span><span class="dv">${r.part_number}</span></span>`;
-        if (r.quantity) dets += `<span class="di"><span class="dl">Qty</span><span class="dv">${r.quantity.toLocaleString()}</span></span>`;
-        if (r.price) dets += `<span class="di"><span class="dl">Price</span><span class="dv">$${r.price.toFixed(4)}</span></span>`;
-        if (r.lead_time_days!=null) dets += `<span class="di"><span class="dl">Lead</span><span class="dv">${r.lead_time_days}d</span></span>`;
-        if (r.condition) dets += `<span class="di"><span class="dl">Cond</span><span class="dv">${r.condition}</span></span>`;
-        if (r.manufacturer) dets += `<span class="di"><span class="dl">Mfr</span><span class="dv">${r.manufacturer}</span></span>`;
-
-        const srcs = (r.sources_found_on||[r.source]).join(', ');
-        const seen = r.seen_at ? new Date(r.seen_at).toLocaleDateString() : '—';
-
-        const bars = [['Recency',c.recency||0],['Quantity',c.quantity||0],['Vendor',c.vendor_reliability||0],
-            ['Complete',c.data_completeness||0],['Source',c.source_credibility||0],['Price',c.price||0]]
-            .map(([l,v]) => `<div class="brow"><span class="blbl">${l}</span><div class="btrack"><div class="bfill" style="width:${v}%;background:${bc(v)}"></div></div><span class="bval">${Math.round(v)}</span></div>`).join('');
-
-        const pen = s.penalty_multiplier < 1 ? `<div class="brow"><span class="blbl" style="color:var(--red)">Penalty</span><span style="color:var(--red);font-size:11px">×${s.penalty_multiplier} — ${(s.penalty_reasons||[]).join(', ')}</span></div>` : '';
-
-        return `<div class="rc ${r.excluded?'excl':''}">
-            <input type="checkbox" ${chk} onchange="togV('${r.vendor_id}')">
-            <div class="rb">
-                <div class="rtop"><div><div class="vname">${r.vendor_name}</div><div>${badges}</div></div>
-                    <div style="text-align:center"><div class="ring ${sc(r.score)}">${Math.round(r.score)}</div><div style="font-size:10px;color:var(--muted)">score</div></div></div>
-                <div class="rdets">${dets}</div>
-                <div class="rmeta2"><span>Source: ${srcs}</span><span>Seen: ${seen}</span><span>Conf: ${r.confidence}/5</span></div>
-                ${r.excluded ? `<div class="excl-warn">⚠ ${r.exclusion_reason}</div>` : ''}
-                <button class="bdbtn" onclick="document.getElementById('bd-${i}').classList.toggle('open')">Score breakdown ▾</button>
-                <div id="bd-${i}" class="bd">${bars}${pen}</div>
-            </div></div>`;
+    if (!data.length) {
+        el.innerHTML = _reqStatusFilter !== 'all'
+            ? '<p class="empty">No requisitions with status "' + _reqStatusFilter + '"</p>'
+            : (_reqListData.length ? '<p class="empty">No matching requisitions</p>' : '<p class="empty">No requisitions yet — create one to get started</p>');
+        return;
+    }
+    el.innerHTML = data.map(r => {
+        const isArchived = r.status === 'archived';
+        const archiveBtn = isArchived
+            ? `<button class="btn-reactivate" onclick="event.stopPropagation();toggleArchive(${r.id})" title="Reactivate">↩ Activate</button>`
+            : `<button class="btn-archive" onclick="event.stopPropagation();toggleArchive(${r.id})" title="Archive">📦 Archive</button>`;
+        const createdBy = (window.userRole === 'buyer' && r.created_by_name) ? `<span title="Created by ${esc(r.created_by_name)}">👤 ${esc(r.created_by_name)}</span>` : '';
+        const custDisplay = r.customer_display ? `<span class="req-customer">${esc(r.customer_display)}</span>` : '';
+        const statusBadge = r.status !== 'active' && !isArchived ? `<span class="status-badge status-${r.status}">${r.status}</span>` : '';
+        // Reply count badge
+        let replyBadge = '';
+        if (r.reply_count > 0) {
+            replyBadge = `<span class="badge" style="background:var(--bg3);color:var(--text2);font-size:10px;padding:2px 8px">💬 ${r.reply_count} repl${r.reply_count !== 1 ? 'ies' : 'y'}</span>`;
+        }
+        return `
+        <div class="card card-clickable ${isArchived ? 'req-archived' : ''}" onclick="showDetail(${r.id}, '${escAttr(r.name)}')">
+            <div class="req-card">
+                <div style="flex:1">
+                    <div class="req-name">${esc(r.name)} ${statusBadge}</div>
+                    ${custDisplay}
+                    ${replyBadge}
+                </div>
+                <div class="req-meta">
+                    ${createdBy}
+                    <span>${r.requirement_count} parts</span>
+                    <span>${r.contact_count} contacts</span>
+                    ${r.reply_count > 0 ? `<span>${r.reply_count} repl${r.reply_count !== 1 ? 'ies' : 'y'}</span>` : ''}
+                    <span>${fmtDate(r.created_at)}</span>
+                    ${archiveBtn}
+                </div>
+            </div>
+        </div>`;
     }).join('');
-    updSend();
 }
 
-function togV(id) { selected.has(id) ? selected.delete(id) : selected.add(id); updSend(); }
-function selAll() { results.forEach(r => { if(!r.excluded) selected.add(r.vendor_id); }); render({result_count:results.length}); }
-function selNone() { selected.clear(); render({result_count:results.length}); }
-function updSend() { const b=document.getElementById('sendBtn'); b.textContent=`Send RFQ (${selected.size})`; b.disabled=!selected.size; }
+function setReqStatusFilter(status, btn) {
+    _reqStatusFilter = status;
+    document.querySelectorAll('[data-req-status]').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    renderReqList();
+}
 
-// ═══════════════════════════════════════════════════════════════════════
-// RFQ MODAL
-// ═══════════════════════════════════════════════════════════════════════
+function searchRequisitions(query) {
+    clearTimeout(reqSearchTimer);
+    reqSearchTimer = setTimeout(() => loadRequisitions(query), 300);
+}
 
-async function openRfq() {
-    if (!selected.size) return;
-    const pns = [...new Set(results.map(r => r.part_number))];
+async function sendFollowUp(contactId, vendorName) {
+    if (!confirm(`Send follow-up email to ${vendorName}?`)) return;
     try {
-        const d = await api('/api/outreach/preview', { method:'POST', body:JSON.stringify({vendor_ids:[...selected], part_numbers:pns}) });
-        document.getElementById('rfqSubject').value = d.draft_subject;
-        document.getElementById('rfqBody').value = d.draft_body;
-        document.getElementById('rfqVendors').innerHTML = d.vendors.map(v =>
-            `<div class="mvr ${v.excluded?'excl':''}">${v.name} — ${v.email||'no email'}${v.excluded?' ⚠ '+v.exclusion_reason:''}</div>`
-        ).join('');
-        document.getElementById('rfqModal').classList.add('open');
-    } catch(e) { alert('Error: '+e.message); }
-}
-function closeRfq() { document.getElementById('rfqModal').classList.remove('open'); }
-
-async function sendRfq() {
-    const btn = document.getElementById('confirmBtn');
-    btn.disabled = true; btn.textContent = 'Sending…';
-    try {
-        const pns = [...new Set(results.map(r => r.part_number))];
-        const d = await api('/api/outreach/send', { method:'POST', body:JSON.stringify({
-            vendor_ids:[...selected], part_numbers:pns,
-            subject:document.getElementById('rfqSubject').value,
-            body:document.getElementById('rfqBody').value,
-        }) });
-        alert(`✓ Sent ${d.sent_count} email${d.sent_count!==1?'s':''}`);
-        closeRfq(); selected.clear(); doSearch();
-    } catch(e) { alert('Send failed: '+e.message); }
-    finally { btn.disabled = false; btn.textContent = 'Send'; }
+        const res = await fetch(`/api/follow-ups/${contactId}/send`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({})
+        });
+        if (!res.ok) { showToast('Failed to send follow-up', 'error'); return; }
+        const data = await res.json();
+        showToast(data.message || `Follow-up sent to ${vendorName}`, 'success');
+        if (typeof loadActivity === 'function') loadActivity();
+    } catch (e) { console.error('sendFollowUp:', e); showToast('Error sending follow-up', 'error'); }
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// UPLOAD
-// ═══════════════════════════════════════════════════════════════════════
+async function createRequisition() {
+    const name = document.getElementById('nrName').value.trim();
+    if (!name) return;
+    const siteId = document.getElementById('nrSiteId')?.value || null;
+    const res = await fetch('/api/requisitions', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ name, customer_site_id: siteId ? parseInt(siteId) : null })
+    });
+    if (res.ok) {
+        const data = await res.json();
+        closeModal('newReqModal');
+        document.getElementById('nrName').value = '';
+        document.getElementById('nrSiteSearch').value = '';
+        document.getElementById('nrSiteId').value = '';
+        showDetail(data.id, data.name);
+    }
+}
+
+async function toggleArchive(id) {
+    const res = await fetch(`/api/requisitions/${id}/archive`, { method: 'PUT' });
+    if (res.ok) {
+        const q = document.getElementById('reqSearchInput').value.trim();
+        loadRequisitions(q);
+    }
+}
+
+// ── Requirements ────────────────────────────────────────────────────────
+let reqData = []; // Cache for editing
+
+async function loadRequirements() {
+    if (!currentReqId) return;
+    const res = await fetch(`/api/requisitions/${currentReqId}/requirements`);
+    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
+    reqData = await res.json();
+    window._currentRequirements = reqData;  // expose for AI Smart RFQ
+    const el = document.getElementById('reqTable');
+    const filterBar = document.getElementById('reqFilterBar');
+    if (!reqData.length) {
+        el.innerHTML = '<tr><td colspan="6" class="empty">No parts yet — add one below</td></tr>';
+        if (filterBar) filterBar.style.display = 'none';
+        return;
+    }
+    if (filterBar) filterBar.style.display = reqData.length > 3 ? 'flex' : 'none';
+    renderRequirementsTable();
+}
+function renderRequirementsTable() {
+    const el = document.getElementById('reqTable');
+    const q = (document.getElementById('reqFilter')?.value || '').trim().toUpperCase();
+    const pill = reqFilterType;
+    const sort = document.getElementById('reqSort')?.value || 'default';
+
+    let filtered = [...reqData];
+
+    // Text filter
+    if (q) filtered = filtered.filter(r =>
+        (r.primary_mpn || '').toUpperCase().includes(q) ||
+        (r.substitutes || []).some(s => s.toUpperCase().includes(q))
+    );
+
+    // Pill filter
+    if (pill === 'nosrc') filtered = filtered.filter(r => !r.sighting_count);
+    if (pill === 'hassubs') filtered = filtered.filter(r => (r.substitutes || []).length > 0);
+
+    // Sort
+    if (sort === 'mpn-asc') filtered.sort((a,b) => (a.primary_mpn||'').localeCompare(b.primary_mpn||''));
+    else if (sort === 'mpn-desc') filtered.sort((a,b) => (b.primary_mpn||'').localeCompare(a.primary_mpn||''));
+    else if (sort === 'qty-desc') filtered.sort((a,b) => (b.target_qty||0) - (a.target_qty||0));
+    else if (sort === 'qty-asc') filtered.sort((a,b) => (a.target_qty||0) - (b.target_qty||0));
+    else if (sort === 'src-desc') filtered.sort((a,b) => (b.sighting_count||0) - (a.sighting_count||0));
+    else if (sort === 'src-asc') filtered.sort((a,b) => (a.sighting_count||0) - (b.sighting_count||0));
+
+    const countEl = document.getElementById('reqFilterCount');
+    if (countEl) countEl.textContent = (q || pill !== 'all') ? `${filtered.length} of ${reqData.length}` : `${reqData.length} parts`;
+    el.innerHTML = filtered.map(r => {
+        const subsText = (r.substitutes || []).length ? r.substitutes.join(', ') : '—';
+        return `<tr data-req-id="${r.id}">
+            <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'primary_mpn')" title="Click to edit">${esc(r.primary_mpn || '—')}</td>
+            <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'target_qty')" title="Click to edit" style="width:55px">${r.target_qty}</td>
+            <td class="req-edit-cell" onclick="editReqCell(this,${r.id},'substitutes')" title="Click to edit" style="font-size:11px;color:var(--text2)">${esc(subsText)}</td>
+            <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'target_price')" title="Click to edit" style="width:64px;color:${r.target_price ? 'var(--teal)' : 'var(--muted)'}">${r.target_price != null ? '$' + parseFloat(r.target_price).toFixed(2) : '—'}</td>
+            <td class="mono">${r.sighting_count}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="deleteReq(${r.id})" title="Remove">✕</button></td>
+        </tr>`;
+    }).join('');
+    if (Object.keys(searchResults).length) updateRequirementCounts();
+}
+
+let reqFilterType = 'all';
+function setReqFilter(type, btn) {
+    reqFilterType = type;
+    document.querySelectorAll('[data-req-filter]').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    renderRequirementsTable();
+}
+
+function editReqCell(td, reqId, field) {
+    if (td.querySelector('input')) return; // Already editing
+    const r = reqData.find(x => x.id === reqId);
+    if (!r) return;
+
+    let currentVal;
+    if (field === 'substitutes') currentVal = (r.substitutes || []).join(', ');
+    else if (field === 'target_qty') currentVal = String(r.target_qty || 1);
+    else if (field === 'target_price') currentVal = r.target_price != null ? String(r.target_price) : '';
+    else currentVal = r[field] || '';
+
+    const input = document.createElement('input');
+    input.className = 'req-edit-input';
+    input.value = currentVal;
+    if (field === 'target_qty') { input.type = 'number'; input.min = '1'; input.style.width = '50px'; }
+    if (field === 'target_price') { input.type = 'number'; input.step = '0.01'; input.min = '0'; input.style.width = '60px'; input.placeholder = '0.00'; }
+
+    td.textContent = '';
+    td.appendChild(input);
+    input.focus();
+    input.select();
+
+    const save = async () => {
+        const val = input.value.trim();
+        if (val === currentVal) { loadRequirements(); return; }
+        const body = {};
+        if (field === 'target_price') {
+            body[field] = val ? parseFloat(val) : null;
+        } else {
+            body[field] = val;
+        }
+        await fetch(`/api/requirements/${reqId}`, {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body)
+        });
+        loadRequirements();
+    };
+
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { loadRequirements(); }
+    });
+}
+
+async function addReq() {
+    if (!currentReqId) return;
+    const mpnEl = document.getElementById('fMpn');
+    const qtyEl = document.getElementById('fQty');
+    const subsEl = document.getElementById('fSubs');
+    const targetEl = document.getElementById('fTarget');
+    const mpn = mpnEl.value.trim();
+    if (!mpn) { mpnEl.focus(); return; }
+    const targetPrice = targetEl && targetEl.value ? parseFloat(targetEl.value) : null;
+    const res = await fetch(`/api/requisitions/${currentReqId}/requirements`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ primary_mpn: mpn, target_qty: qtyEl.value || '1', substitutes: subsEl.value.trim(), target_price: targetPrice })
+    });
+    if (res.ok) {
+        mpnEl.value = ''; subsEl.value = ''; qtyEl.value = '1';
+        if (targetEl) targetEl.value = '';
+        mpnEl.focus();
+        loadRequirements();
+    }
+}
+
+async function deleteReq(id) {
+    if (!confirm('Remove this requirement?')) return;
+    await fetch(`/api/requirements/${id}`, { method: 'DELETE' });
+    // Clear cached search results & selections for this requirement
+    delete searchResults[id];
+    for (const key of [...selectedSightings]) {
+        if (key.startsWith(id + ':')) selectedSightings.delete(key);
+    }
+    if (currentReqId) searchResultsCache[currentReqId] = searchResults;
+    loadRequirements();
+}
+
+function toggleUpload() {
+    const el = document.getElementById('uploadArea');
+    el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+function showFileReady(inputId, readyId, nameId) {
+    const file = document.getElementById(inputId).files[0];
+    const readyEl = document.getElementById(readyId);
+    const nameEl = document.getElementById(nameId);
+    if (file) {
+        nameEl.textContent = file.name;
+        readyEl.style.display = '';
+    } else {
+        readyEl.style.display = 'none';
+    }
+}
+
+function clearFileInput(inputId, readyId) {
+    document.getElementById(inputId).value = '';
+    document.getElementById(readyId).style.display = 'none';
+}
 
 async function doUpload() {
-    const inp = document.getElementById('fileInput');
-    if (!inp.files.length) return;
-    const file = inp.files[0], form = new FormData();
-    form.append('file', file);
+    const file = document.getElementById('fileInput').files[0];
+    if (!file || !currentReqId) return;
     const st = document.getElementById('uploadStatus');
-    st.className = 'ustatus load'; st.textContent = `Uploading ${file.name}…`;
+    st.className = 'ustatus load'; st.textContent = 'Uploading…'; st.style.display = 'block';
+    document.getElementById('uploadReady').style.display = 'none';
+    const fd = new FormData(); fd.append('file', file);
     try {
-        const r = await fetch('/api/uploads', { method:'POST', body:form });
-        if (!r.ok) throw new Error((await r.json().catch(()=>({}))).detail || 'Upload failed');
-        const d = await r.json();
-        if (d.status === 'complete') {
+        const res = await fetch(`/api/requisitions/${currentReqId}/upload`, { method: 'POST', body: fd });
+        const data = await res.json();
+        if (res.ok) {
             st.className = 'ustatus ok';
-            st.textContent = `✓ ${d.sighting_count.toLocaleString()} parts from ${d.row_count.toLocaleString()} rows` + (d.error_count?` (${d.error_count} errors)`:'');
-        } else { st.className = 'ustatus err'; st.textContent = `Failed: ${d.error_message||'Unknown'}`; }
-        inp.value = ''; loadLB();
-    } catch(e) { st.className = 'ustatus err'; st.textContent = `Error: ${e.message}`; }
+            st.textContent = `Added ${data.created} parts from ${data.total_rows} rows`;
+            loadRequirements();
+        } else {
+            st.className = 'ustatus err'; st.textContent = data.detail || 'Upload failed';
+        }
+    } catch (e) {
+        st.className = 'ustatus err'; st.textContent = 'Upload error: ' + e.message;
+    }
+    document.getElementById('fileInput').value = '';
 }
 
-// Drag & drop
-document.addEventListener('DOMContentLoaded', () => {
-    const z = document.getElementById('dropZone');
-    if (!z) return;
-    z.addEventListener('dragover', e => { e.preventDefault(); z.classList.add('drag'); });
-    z.addEventListener('dragleave', () => z.classList.remove('drag'));
-    z.addEventListener('drop', e => { e.preventDefault(); z.classList.remove('drag');
-        document.getElementById('fileInput').files = e.dataTransfer.files; doUpload(); });
-});
-
-async function loadLB() {
+// ── Search ──────────────────────────────────────────────────────────────
+async function searchAll() {
+    if (!currentReqId) return;
+    const btn = document.getElementById('searchAllBtn');
+    btn.disabled = true; btn.textContent = 'Searching…';
     try {
-        const d = await api('/api/stats/uploads');
-        const tb = document.getElementById('leaderboard');
-        if (!d.users.length) { tb.innerHTML = '<tr><td colspan="4" style="text-align:center;color:var(--muted)">No uploads yet</td></tr>'; return; }
-        tb.innerHTML = d.users.map((u,i) => `<tr><td><span class="lbr">${i+1}</span></td><td>${u.display_name}</td><td>${u.upload_count}</td><td>${u.sighting_count.toLocaleString()}</td></tr>`).join('');
-    } catch(e) {}
+        const res = await fetch(`/api/requisitions/${currentReqId}/search`, { method: 'POST' });
+        if (res.ok) {
+            searchResults = await res.json();
+            searchResultsCache[currentReqId] = searchResults;
+            selectedSightings.clear();
+            expandedGroups.clear();
+            renderSources();
+            // Update requirement counts from actual search results so they match Sources tab
+            updateRequirementCounts();
+            switchTab('sources', document.querySelectorAll('.tab')[1]);
+        }
+    } catch (e) {
+        alert('Search error: ' + e.message);
+    }
+    btn.disabled = false; btn.textContent = '⟳ Search All';
 }
 
-// ═══════════════════════════════════════════════════════════════════════
-// RESPONSES
-// ═══════════════════════════════════════════════════════════════════════
-
-async function loadStats() {
-    try {
-        const d = await api('/api/monitor/stats');
-        document.getElementById('stSent').textContent = d.outreach.total_sent;
-        document.getElementById('stRepl').textContent = d.outreach.total_responded;
-        document.getElementById('stRate').textContent = `${d.outreach.response_rate}% rate`;
-        document.getElementById('stPos').textContent = d.outreach.total_positive;
-        document.getElementById('stHrs').textContent = d.outreach.avg_response_hours || '—';
-        document.getElementById('stParsed').textContent = d.parsing.total_parsed;
-        document.getElementById('stConf').textContent = d.parsing.avg_confidence ? `${Math.round(d.parsing.avg_confidence*100)}% avg` : '';
-        document.getElementById('stPend').textContent = d.parsing.pending_review;
-    } catch(e) {}
+function updateRequirementCounts() {
+    const rows = document.querySelectorAll('#reqTable tr');
+    for (const reqId of Object.keys(searchResults)) {
+        const group = searchResults[reqId];
+        // Count unique vendors (fresh + material history, deduplicated)
+        const uniqueVendors = new Set(
+            (group.sightings || [])
+                .filter(s => !s.is_historical)
+                .map(s => (s.vendor_name || '').trim().toLowerCase())
+                .filter(Boolean)
+        );
+        const count = uniqueVendors.size;
+        // Update the RESULTS column in the matching row
+        for (const row of rows) {
+            const cells = row.querySelectorAll('td');
+            if (cells.length >= 5) {
+                const mpn = cells[0].textContent.trim();
+                if (mpn === (group.label || '').trim()) {
+                    cells[4].textContent = count;
+                }
+            }
+        }
+    }
 }
 
-async function loadResp(status) {
-    const el = document.getElementById('respList');
-    try {
-        const d = await api(status ? `/api/monitor/responses?status=${status}` : '/api/monitor/responses');
-        if (!d.responses.length) { el.innerHTML = '<p class="empty">No responses found</p>'; return; }
-        el.innerHTML = d.responses.map(renderVR).join('');
-    } catch(e) { el.innerHTML = `<p class="empty" style="color:var(--red)">Error: ${e.message}</p>`; }
-}
+// ── Render Search Results ───────────────────────────────────────────────
+let srcFilterType = 'all';
 
-function filterResp(s, btn) {
-    curFilter = s;
-    document.querySelectorAll('.ft').forEach(t => t.classList.remove('on'));
+function setSrcFilter(type, btn) {
+    srcFilterType = type;
+    document.querySelectorAll('[data-src-filter]').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
-    loadResp(s);
+    renderSources();
 }
 
-function renderVR(r) {
-    const cp = Math.round((r.confidence||0)*100);
-    const cc = cp >= 80 ? 'var(--green)' : cp >= 50 ? 'var(--amber)' : 'var(--red)';
-    const when = r.received_at ? new Date(r.received_at).toLocaleString() : '—';
+function renderSources() {
+    const el = document.getElementById('sourceResults');
+    const keys = Object.keys(searchResults);
+    if (!keys.length) {
+        el.innerHTML = '<p class="empty">No results found</p>';
+        document.getElementById('srcFilterCount').textContent = '';
+        document.getElementById('collapsedMatchHint')?.classList.add('hidden');
+        return;
+    }
 
-    let flds = '';
-    if (r.has_stock!=null) flds += `<div class="qf"><div class="qfl">Stock</div><div class="qfv" style="color:${r.has_stock?'var(--green)':'var(--red)'}">${r.has_stock?'✓ Yes':'✗ No'}</div></div>`;
-    if (r.quoted_price) flds += `<div class="qf"><div class="qfl">Price</div><div class="qfv">$${r.quoted_price.toFixed(4)}</div></div>`;
-    if (r.quoted_quantity) flds += `<div class="qf"><div class="qfl">Qty</div><div class="qfv">${r.quoted_quantity.toLocaleString()}</div></div>`;
-    if (r.quoted_lead_time_text||r.quoted_lead_time_days) flds += `<div class="qf"><div class="qfl">Lead Time</div><div class="qfv">${r.quoted_lead_time_text||r.quoted_lead_time_days+'d'}</div></div>`;
-    if (r.quoted_condition) flds += `<div class="qf"><div class="qfl">Condition</div><div class="qfv">${r.quoted_condition}</div></div>`;
-    if (r.quoted_date_code) flds += `<div class="qf"><div class="qfl">Date Code</div><div class="qfv">${r.quoted_date_code}</div></div>`;
-    if (r.quoted_manufacturer) flds += `<div class="qf"><div class="qfl">Mfr</div><div class="qfv">${r.quoted_manufacturer}</div></div>`;
-    if (r.quoted_moq) flds += `<div class="qf"><div class="qfl">MOQ</div><div class="qfv">${r.quoted_moq.toLocaleString()}</div></div>`;
+    // Build target price lookup: MPN (uppercase) → target_price
+    const targetPriceMap = {};
+    for (const r of reqData) {
+        if (r.target_price != null && r.primary_mpn) {
+            targetPriceMap[r.primary_mpn.trim().toUpperCase()] = parseFloat(r.target_price);
+        }
+    }
 
-    let acts = '';
-    if (r.status === 'parsed') acts = `<div class="vra"><button class="btn-a" onclick="approveVR('${r.id}')">✓ Approve</button><button class="btn-r" onclick="rejectVR('${r.id}')">✗ Reject</button></div>`;
+    const q = (document.getElementById('srcFilter')?.value || '').trim().toUpperCase();
+    let totalShown = 0;
+    let totalAll = 0;
+    let collapsedMatchCount = 0;
+    let collapsedMatchGroups = new Set();
+    const isFiltering = !!(q || srcFilterType !== 'all');
 
-    return `<div class="vrc">
-        <div class="vrh"><div><span class="vrv">${r.vendor_name}</span> <span class="vrp">${r.part_number||'—'}</span>
-            <span class="sbdg s-${r.status}">${r.status.replace('_',' ')}</span></div>
-            <div style="text-align:right"><div class="vrt">${when}</div>
-            <div class="conf"><div class="cbar"><div class="cfill" style="width:${cp}%;background:${cc}"></div></div>${cp}%</div></div></div>
-        <div class="vrq">${flds}</div>
-        ${r.parse_notes?`<div style="font-size:12px;color:var(--muted);margin-bottom:6px">AI: ${r.parse_notes}</div>`:''}
-        ${r.email_preview?`<div class="vrep" onclick="this.classList.toggle('exp')">${r.email_preview}</div>`:''}
-        ${acts}</div>`;
+    let html = '';
+    for (const reqId of keys) {
+        const group = searchResults[reqId];
+        const sightings = group.sightings || [];
+        const isExpanded = expandedGroups.has(reqId);
+        const chevron = isExpanded ? '▼' : '▶';
+
+        // Count unique vendors
+        const uniqueVendors = new Set(
+            sightings
+                .filter(s => !s.is_historical)
+                .map(s => (s.vendor_name || '').trim().toLowerCase())
+                .filter(v => v && v !== 'no seller listed')
+        );
+        const vendorCount = uniqueVendors.size;
+        const freshCount = sightings.filter(s => !s.is_historical && !s.is_material_history).length;
+        const matHistCount = sightings.filter(s => s.is_material_history).length;
+        const histCount = sightings.filter(s => s.is_historical).length;
+        let countLabel = `${vendorCount} vendors`;
+        if (matHistCount > 0) countLabel += ` (${freshCount} current + ${matHistCount} from history)`;
+        if (histCount > 0) countLabel += ` + ${histCount} past searches`;
+
+        // Count how many sightings in this group pass filters (for collapsed match tracking)
+        let groupMatchCount = 0;
+        for (let i = 0; i < sightings.length; i++) {
+            const s = sightings[i];
+            const vName = (s.vendor_name || '').trim();
+            if (!vName || vName.toLowerCase() === 'no seller listed') continue;
+            const searchText = ((s.vendor_name||'') + ' ' + (s.mpn_matched||'') + ' ' + (s.manufacturer||'') + ' ' + (s.source_type||'')).toUpperCase();
+            if (q && !searchText.includes(q)) continue;
+            const isSub_ = s.mpn_matched && group.label && s.mpn_matched.trim().toUpperCase() !== group.label.trim().toUpperCase();
+            if (srcFilterType === 'exact' && isSub_) continue;
+            if (srcFilterType === 'sub' && !isSub_) continue;
+            if (srcFilterType === 'available' && s.is_unavailable) continue;
+            if (srcFilterType === 'sold' && !s.is_unavailable) continue;
+            groupMatchCount++;
+        }
+
+        // Selected count for this group (show in header when collapsed)
+        let groupSelectedCount = 0;
+        for (let i = 0; i < sightings.length; i++) {
+            if (selectedSightings.has(`${reqId}:${i}`)) groupSelectedCount++;
+        }
+
+        const selectedBadge = groupSelectedCount > 0
+            ? `<span class="badge b-selected">${groupSelectedCount} selected</span>`
+            : '';
+        const matchCountBadge = !isExpanded && isFiltering && groupMatchCount > 0
+            ? `<span class="badge b-matchcount">${groupMatchCount} match${groupMatchCount !== 1 ? 'es' : ''}</span>`
+            : '';
+
+        html += `<div class="sight-group ${isExpanded ? 'sg-expanded' : 'sg-collapsed'}">
+            <div class="sight-group-title" onclick="toggleGroup('${escAttr(reqId)}')" title="Click to ${isExpanded ? 'collapse' : 'expand'}">
+                <div class="sg-title-left">
+                    <span class="sg-chevron">${chevron}</span>
+                    <span class="sg-mpn" onclick="event.stopPropagation();openMaterialPopupByMpn('${escAttr(group.label)}')" title="View material card">${esc(group.label)}</span>
+                    ${selectedBadge}
+                    ${matchCountBadge}
+                </div>
+                <span class="mono">${countLabel}</span>
+            </div>`;
+
+        // Sighting rows — always rendered, visibility controlled by CSS
+        html += `<div class="sg-body" ${isExpanded ? '' : 'style="display:none"'}>`;
+
+        if (!sightings.length) {
+            html += '<p class="empty" style="padding:12px 0">No vendors found for this part</p>';
+        }
+
+        for (let i = 0; i < sightings.length; i++) {
+            const s = sightings[i];
+
+            const vName = (s.vendor_name || '').trim();
+            if (!vName || vName.toLowerCase() === 'no seller listed') continue;
+
+            totalAll++;
+
+            // Text filter
+            const searchText = ((s.vendor_name||'') + ' ' + (s.mpn_matched||'') + ' ' + (s.manufacturer||'') + ' ' + (s.source_type||'')).toUpperCase();
+            if (q && !searchText.includes(q)) continue;
+
+            // Pill filter
+            const isSub_ = s.mpn_matched && group.label && s.mpn_matched.trim().toUpperCase() !== group.label.trim().toUpperCase();
+            if (srcFilterType === 'exact' && isSub_) continue;
+            if (srcFilterType === 'sub' && !isSub_) continue;
+            if (srcFilterType === 'available' && s.is_unavailable) continue;
+            if (srcFilterType === 'sold' && !s.is_unavailable) continue;
+
+            totalShown++;
+
+            // Track matches in collapsed groups
+            if (!isExpanded && isFiltering) {
+                collapsedMatchCount++;
+                collapsedMatchGroups.add(reqId);
+            }
+
+            const key = `${reqId}:${i}`;
+            const checked = selectedSightings.has(key) ? 'checked' : '';
+            const score = Math.round(s.score || 0);
+            const rc = score >= 70 ? 'hi' : score >= 40 ? 'mid' : 'lo';
+            const srcLabel = (s.source_type || '').toUpperCase();
+            const cond = (s.condition || '').toUpperCase().trim();
+            const condBadge = cond ? `<span class="badge b-cond-${cond === 'NEW' ? 'new' : 'ref'}">${esc(cond)}</span>` : '';
+            const histBadge = s.is_historical ? `<span class="badge b-hist" title="Previously seen ${s.historical_date || ''}">📋 ${s.historical_date || 'Past'}</span>` : '';
+            const matHistBadge = s.is_material_history ? `<span class="badge b-mathistory" title="Seen ${s.material_times_seen || 1}× · Last: ${s.material_last_seen || '?'} · First: ${s.material_first_seen || '?'}">🧩 ${s.material_times_seen || 1}× · Last ${s.material_last_seen || '?'}</span>` : '';
+
+            const isSub = s.mpn_matched && group.label && s.mpn_matched.trim().toUpperCase() !== group.label.trim().toUpperCase();
+            const matchBadge = isSub
+                ? '<span class="badge b-sub">SUB</span>'
+                : '<span class="badge b-exact">EXACT</span>';
+
+            const unavail = s.is_unavailable;
+            const unavailClass = unavail ? 'sc-unavailable' : '';
+            const unavailBadge = unavail ? '<span class="badge b-unavail">NOT AVAIL</span>' : '';
+            const unavailBtn = s.id
+                ? `<button class="btn-unavail" onclick="event.stopPropagation();markUnavailable(${s.id},${!unavail})" title="${unavail ? 'Mark available' : 'Mark as not available'}">${unavail ? '↩ Restore' : '✕ N/A'}</button>`
+                : '';
+
+            const vn = escAttr(s.vendor_name);
+            const mpn = escAttr(s.mpn_matched || '');
+            const ph = escAttr(s.vendor_phone || '');
+
+            const vc = s.vendor_card || {};
+            const ratingHtml = vc.card_id
+                ? `<span class="sc-rating" onclick="event.stopPropagation();openVendorPopup(${vc.card_id})" title="View vendor card">${stars(vc.avg_rating, vc.review_count)}</span>`
+                : '<span class="sc-rating sc-rating-new" title="New vendor">☆</span>';
+
+            const octopartLink = s.octopart_url ? `<a href="${escAttr(s.octopart_url)}" target="_blank" class="btn-link">🔗 Octopart</a>` : '';
+            const vendorLink = s.vendor_url ? `<a href="${escAttr(s.vendor_url)}" target="_blank" class="btn-link">🏢 Site</a>` : '';
+            const phoneLink = s.vendor_phone ? `<a class="btn-call" href="tel:${ph}" onclick="logCall(event,'${vn}','${ph}','${mpn}')">📞 ${esc(s.vendor_phone)}</a>` : '';
+            const emailIndicator = vc.has_emails ? `<span class="badge b-email" title="${vc.email_count} email(s) on file">✉ ${vc.email_count}</span>` : '';
+
+            html += `<div class="card sc ${s.is_historical ? 'sc-hist' : ''} ${s.is_material_history ? 'sc-mathistory' : ''} ${isSub ? 'sc-sub' : ''} ${unavailClass}">
+                ${isBuyer() ? `<input type="checkbox" ${checked} onchange="toggleSighting('${key}')">` : ''}
+                <div class="ring ${rc}">${score}</div>
+                <div class="sc-body">
+                    <div class="sc-top">
+                        <span class="sc-vendor">${esc(s.vendor_name)}</span>
+                        ${ratingHtml}
+                        ${matchBadge}
+                        ${unavailBadge}
+                        ${s.is_authorized ? '<span class="badge b-auth">Auth</span>' : ''}
+                        <span class="badge b-src">${srcLabel}</span>
+                        ${condBadge}
+                        ${emailIndicator}
+                        ${histBadge}
+                        ${matHistBadge}
+                    </div>
+                    <div class="sc-details">
+                        <div class="sc-detail"><span class="sc-detail-label">MPN</span> <span class="sc-detail-val">${esc(s.mpn_matched || '—')}</span></div>
+                        <div class="sc-detail"><span class="sc-detail-label">Qty</span> <span class="sc-detail-val">${s.qty_available != null ? s.qty_available.toLocaleString() : '—'}</span></div>
+                        <div class="sc-detail"><span class="sc-detail-label">Price</span> <span class="sc-detail-val">${(() => {
+                            if (s.unit_price == null) return '—';
+                            const tp = targetPriceMap[(group.label || '').trim().toUpperCase()];
+                            const priceStr = '$' + s.unit_price.toFixed(2);
+                            if (tp == null) return priceStr;
+                            const pct = ((s.unit_price - tp) / tp * 100).toFixed(0);
+                            if (s.unit_price <= tp) return `<span style="color:var(--green);font-weight:600">${priceStr}</span> <span class="badge" style="background:#dcfce7;color:#166534;font-size:9px;padding:1px 5px">${pct > 0 ? '+' : ''}${pct}%</span>`;
+                            if (s.unit_price <= tp * 1.15) return `<span style="color:var(--amber);font-weight:600">${priceStr}</span> <span class="badge" style="background:#fef3c7;color:#92400e;font-size:9px;padding:1px 5px">+${pct}%</span>`;
+                            return `<span style="color:var(--red);font-weight:600">${priceStr}</span> <span class="badge" style="background:#fee2e2;color:#991b1b;font-size:9px;padding:1px 5px">+${pct}%</span>`;
+                        })()}</span></div>
+                        <div class="sc-detail"><span class="sc-detail-label">Mfr</span> <span class="sc-detail-val">${esc(s.manufacturer || '—')}</span></div>
+                    </div>
+                </div>
+                <div class="sc-actions-right">
+                    ${phoneLink}${octopartLink}${vendorLink}${unavailBtn}
+                </div>
+            </div>`;
+        }
+        html += '</div></div>';
+    }
+    el.innerHTML = html;
+    const countEl = document.getElementById('srcFilterCount');
+    if (countEl) countEl.textContent = (q || srcFilterType !== 'all') ? `${totalShown} of ${totalAll}` : `${totalAll} results`;
+
+    // Collapsed-match hint
+    const hintEl = document.getElementById('collapsedMatchHint');
+    if (hintEl) {
+        if (isFiltering && collapsedMatchCount > 0) {
+            hintEl.innerHTML = `${collapsedMatchCount} match${collapsedMatchCount !== 1 ? 'es' : ''} in ${collapsedMatchGroups.size} collapsed group${collapsedMatchGroups.size !== 1 ? 's' : ''} · <a href="#" onclick="event.preventDefault();expandMatchingGroups()">Expand matching</a>`;
+            hintEl.classList.remove('hidden');
+        } else {
+            hintEl.classList.add('hidden');
+        }
+    }
+
+    updateBatchCount();
 }
 
-async function doPoll() {
-    const btn = document.getElementById('pollBtn');
-    btn.disabled = true; btn.textContent = '⟳ Checking…';
+// ── Group Collapse / Expand ─────────────────────────────────────────────
+function toggleGroup(reqId) {
+    if (expandedGroups.has(reqId)) expandedGroups.delete(reqId);
+    else expandedGroups.add(reqId);
+    renderSources();
+}
+
+function expandAllGroups() {
+    for (const reqId of Object.keys(searchResults)) {
+        expandedGroups.add(reqId);
+    }
+    renderSources();
+}
+
+function collapseAllGroups() {
+    expandedGroups.clear();
+    renderSources();
+}
+
+function expandMatchingGroups() {
+    const q = (document.getElementById('srcFilter')?.value || '').trim().toUpperCase();
+    const isFiltering = !!(q || srcFilterType !== 'all');
+    if (!isFiltering) return;
+
+    for (const reqId of Object.keys(searchResults)) {
+        const group = searchResults[reqId];
+        const sightings = group.sightings || [];
+        for (const s of sightings) {
+            const vName = (s.vendor_name || '').trim();
+            if (!vName || vName.toLowerCase() === 'no seller listed') continue;
+            const searchText = ((s.vendor_name||'') + ' ' + (s.mpn_matched||'') + ' ' + (s.manufacturer||'') + ' ' + (s.source_type||'')).toUpperCase();
+            if (q && !searchText.includes(q)) continue;
+            const isSub_ = s.mpn_matched && group.label && s.mpn_matched.trim().toUpperCase() !== group.label.trim().toUpperCase();
+            if (srcFilterType === 'exact' && isSub_) continue;
+            if (srcFilterType === 'sub' && !isSub_) continue;
+            if (srcFilterType === 'available' && s.is_unavailable) continue;
+            if (srcFilterType === 'sold' && !s.is_unavailable) continue;
+            // This group has a match — expand it
+            expandedGroups.add(reqId);
+            break;
+        }
+    }
+    renderSources();
+}
+
+// ── Selection & Batch RFQ ───────────────────────────────────────────────
+function toggleSighting(key) {
+    if (selectedSightings.has(key)) selectedSightings.delete(key);
+    else selectedSightings.add(key);
+    updateBatchCount();
+}
+
+function selectAllSightings() {
+    for (const reqId of Object.keys(searchResults)) {
+        const sightings = searchResults[reqId].sightings || [];
+        for (let i = 0; i < sightings.length; i++) {
+            const vn = (sightings[i].vendor_name || '').trim().toLowerCase();
+            if (!sightings[i].is_unavailable && vn && vn !== 'no seller listed') {
+                selectedSightings.add(`${reqId}:${i}`);
+            }
+        }
+    }
+    renderSources();
+    updateBatchCount();
+}
+
+function clearSelection() {
+    selectedSightings.clear();
+    renderSources();
+    updateBatchCount();
+}
+
+async function markUnavailable(sightingId, unavail) {
     try {
-        const d = await api('/api/monitor/poll', {method:'POST'});
-        const msg = `Found ${d.new_replies} repl${d.new_replies!==1?'ies':'y'}, ${d.parsed_quotes} quotes, ${d.sightings_created} sightings`;
-        const el = document.getElementById('respList');
-        const t = document.createElement('div');
-        t.style.cssText = 'padding:12px;margin-bottom:12px;border-radius:8px;font-size:13px;background:rgba(59,130,246,.1);color:var(--blue)';
-        t.textContent = `✓ ${msg}`; el.prepend(t); setTimeout(() => t.remove(), 5000);
-        loadStats(); loadResp(curFilter);
-    } catch(e) { alert('Poll failed: '+e.message); }
-    finally { btn.disabled = false; btn.textContent = '⟳ Check Inbox'; }
+        await fetch(`/api/sightings/${sightingId}/unavailable`, {
+            method: 'PUT', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ unavailable: unavail })
+        });
+        // Update local state
+        for (const reqId of Object.keys(searchResults)) {
+            const sightings = searchResults[reqId].sightings || [];
+            for (const s of sightings) {
+                if (s.id === sightingId) {
+                    s.is_unavailable = unavail;
+                    break;
+                }
+            }
+        }
+        renderSources();
+    } catch(e) { alert('Error: ' + e.message); }
 }
 
-async function approveVR(id) {
-    try { await api(`/api/monitor/responses/${id}/approve`, {method:'POST'}); loadResp(curFilter); loadStats(); }
-    catch(e) { alert('Error: '+e.message); }
-}
-async function rejectVR(id) {
-    try { await api(`/api/monitor/responses/${id}/reject`, {method:'POST'}); loadResp(curFilter); loadStats(); }
-    catch(e) { alert('Error: '+e.message); }
+function updateBatchCount() {
+    const btn = document.getElementById('batchRfqBtn');
+    const groups = getSelectedByVendor();
+    const count = groups.length;
+    btn.textContent = `Send Batch RFQ (${count} vendor${count !== 1 ? 's' : ''})`;
+    btn.disabled = count === 0;
 }
 
-// --- Init ---
-document.addEventListener('DOMContentLoaded', () => {
-    const inp = document.getElementById('partInput');
-    if (inp) inp.addEventListener('keydown', e => { if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();doSearch();} });
-    loadLB();
-});
+function getSelectedByVendor() {
+    const groups = {};
+    for (const key of selectedSightings) {
+        const [reqId, idx] = key.split(':');
+        const group = searchResults[reqId];
+        if (!group) continue;
+        const s = group.sightings[parseInt(idx)];
+        if (!s) continue;
+        if (s.is_historical) continue; // Skip old search results
+        const vKey = (s.vendor_name || '').trim().toLowerCase();
+        if (!vKey || vKey === 'no seller listed') continue;
+        if (!groups[vKey]) groups[vKey] = { vendor_name: s.vendor_name, parts: [] };
+        const part = s.mpn_matched || group.label;
+        if (!groups[vKey].parts.includes(part)) groups[vKey].parts.push(part);
+    }
+    return Object.values(groups);
+}
+
+// ── RFQ Flow ────────────────────────────────────────────────────────────
+let rfqAllParts = []; // All MPNs on this requisition
+
+async function openBatchRfqModal() {
+    const groups = getSelectedByVendor();
+    if (!groups.length) return;
+
+    const modal = document.getElementById('rfqModal');
+    document.getElementById('rfqPrepare').style.display = '';
+    document.getElementById('rfqReady').style.display = 'none';
+    rfqCondition = 'any';
+    document.querySelectorAll('.rfq-cond-btn').forEach((b,i) => {
+        b.classList.toggle('active', i === 0);
+    });
+    modal.classList.add('open');
+
+    try {
+        const res = await fetch(`/api/requisitions/${currentReqId}/rfq-prepare`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ vendors: groups.map(g => ({ vendor_name: g.vendor_name })) })
+        });
+        const data = await res.json();
+        rfqAllParts = data.all_parts || [];
+
+        rfqVendorData = data.vendors.map((v, i) => {
+            const listingParts = (groups[i] && groups[i].parts) || [];
+            const otherParts = rfqAllParts.filter(p => !listingParts.map(lp => lp.toUpperCase()).includes(p.toUpperCase()));
+            const alreadyAsked = (v.already_asked || []).map(p => p.toUpperCase());
+
+            // Filter out exhausted parts
+            const newListingParts = listingParts.filter(p => !alreadyAsked.includes(p.toUpperCase()));
+            const repeatListingParts = listingParts.filter(p => alreadyAsked.includes(p.toUpperCase()));
+            const newOtherParts = otherParts.filter(p => !alreadyAsked.includes(p.toUpperCase()));
+            const repeatOtherParts = otherParts.filter(p => alreadyAsked.includes(p.toUpperCase()));
+
+            return {
+                ...v,
+                listing_parts: listingParts,
+                other_parts: otherParts,
+                new_listing: newListingParts,
+                repeat_listing: repeatListingParts,
+                new_other: newOtherParts,
+                repeat_other: repeatOtherParts,
+                already_asked: alreadyAsked,
+                include_repeats: false, // toggle per vendor
+                included: true, // checkbox in RFQ modal
+                selected_email: v.emails.length ? v.emails[0] : '',
+                lookup_status: v.needs_lookup ? 'pending' : 'ready',
+            };
+        });
+    } catch (e) {
+        alert('Failed to prepare RFQ: ' + e.message);
+        closeModal('rfqModal');
+        return;
+    }
+
+    // Run lookups for vendors without emails (3-tier: cache → scrape → AI)
+    const needsLookup = rfqVendorData.filter(v => v.lookup_status === 'pending');
+    if (needsLookup.length) {
+        document.getElementById('rfqPrepareStatus').textContent = `Finding contacts for ${needsLookup.length} vendor(s)…`;
+        for (const v of needsLookup) {
+            v.lookup_status = 'loading';
+            renderRfqVendors();
+            try {
+                const res = await fetch('/api/vendor-contact', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ vendor_name: v.vendor_name })
+                });
+                const data = await res.json();
+                v.emails = data.emails || [];
+                v.phones = data.phones || [];
+                v.card_id = data.card_id;
+                v.selected_email = v.emails.length ? v.emails[0] : '';
+                v.lookup_status = v.emails.length ? 'ready' : 'no_email';
+                v.contact_source = data.source || null;
+                v.contact_tier = data.tier || 0;
+            } catch {
+                v.lookup_status = 'no_email';
+            }
+            renderRfqVendors();
+        }
+    }
+
+    document.getElementById('rfqPrepare').style.display = 'none';
+    document.getElementById('rfqReady').style.display = '';
+    renderRfqVendors();
+    renderRfqMessage();
+}
+
+function renderRfqVendors() {
+    const el = document.getElementById('rfqVendorList');
+    el.innerHTML = rfqVendorData.map((v, i) => {
+        let emailHtml;
+        if (v.lookup_status === 'loading') {
+            emailHtml = '<span class="email-loading">⏳ Looking up…</span>';
+        } else if (v.lookup_status === 'no_email' || (!v.emails.length && v.lookup_status !== 'pending')) {
+            emailHtml = `<div class="rfq-email-row">
+                <span class="email-none">No email found</span>
+                <input class="rfq-email-input" placeholder="Enter email…" onchange="rfqManualEmail(${i},this.value)">
+                <button class="btn btn-danger btn-sm" onclick="rfqRemoveVendor(${i})" title="Remove">✕</button>
+            </div>`;
+        } else if (v.emails.length) {
+            const opts = v.emails.map(e =>
+                `<option value="${escAttr(e)}" ${e === v.selected_email ? 'selected' : ''}>${esc(e)}</option>`
+            ).join('');
+            emailHtml = `<div class="rfq-email-row">
+                <select class="email-select" onchange="rfqSelectEmail(${i},this.value)">
+                    ${opts}
+                    <option value="__custom__">✏️ Enter custom…</option>
+                </select>
+                <button class="btn btn-danger btn-sm" onclick="rfqRemoveVendor(${i})" title="Remove">✕</button>
+            </div>`;
+        } else {
+            emailHtml = '<span class="email-loading">⏳ Pending…</span>';
+        }
+
+        // Source indicator
+        const srcLabels = { cached: '💾 Cached', website_scrape: '🌐 Website', ai_lookup: '🤖 AI' };
+        const srcBadge = v.contact_source ? `<span class="rfq-src-badge">${srcLabels[v.contact_source] || v.contact_source}</span>` : '';
+
+        // Parts breakdown
+        let partsHtml = '';
+        if (v.new_listing.length) {
+            partsHtml += `<span class="rfq-parts-tag rfq-parts-listing" title="Vendor is actively listing these">📦 ${v.new_listing.join(', ')}</span>`;
+        }
+        if (v.new_other.length) {
+            partsHtml += `<span class="rfq-parts-tag rfq-parts-other" title="Also requesting — vendor not currently listing">🔍 ${v.new_other.join(', ')}</span>`;
+        }
+
+        // Exhaustion badges
+        const totalRepeats = v.repeat_listing.length + v.repeat_other.length;
+        let exhaustHtml = '';
+        if (totalRepeats > 0 && (v.new_listing.length + v.new_other.length) === 0) {
+            exhaustHtml = `<span class="rfq-exhaust-full">⚠️ Already contacted for all parts</span>`;
+            if (!v.include_repeats) {
+                exhaustHtml += `<button class="rfq-exhaust-btn" onclick="rfqIncludeRepeats(${i})">Send anyway</button>`;
+            } else {
+                exhaustHtml += `<span class="rfq-exhaust-override">✓ Will re-send</span>`;
+            }
+        } else if (totalRepeats > 0) {
+            const repeatNames = [...v.repeat_listing, ...v.repeat_other].join(', ');
+            exhaustHtml = `<span class="rfq-exhaust-partial" title="Previously asked: ${repeatNames}">🔄 ${totalRepeats} part${totalRepeats > 1 ? 's' : ''} already asked — ${v.new_listing.length + v.new_other.length} new</span>`;
+        }
+
+        return `<div class="rfq-vendor-row ${totalRepeats > 0 && (v.new_listing.length + v.new_other.length) === 0 && !v.include_repeats ? 'rfq-vendor-exhausted' : ''} ${!v.included ? 'rfq-vendor-excluded' : ''}">
+            <input type="checkbox" ${v.included ? 'checked' : ''} onchange="rfqToggleVendor(${i})" class="rfq-vendor-cb" title="Include in RFQ">
+            <div class="rfq-vendor-info">
+                <strong>${esc(v.display_name || v.vendor_name)}</strong>
+                <div class="rfq-parts-breakdown">${partsHtml}</div>
+                ${exhaustHtml}
+                ${srcBadge}
+            </div>
+            ${emailHtml}
+        </div>`;
+    }).join('');
+
+    // Count sendable (included + has email + has new parts or override)
+    const sendable = rfqVendorData.filter(v => v.included && v.selected_email && _vendorHasPartsToSend(v));
+    const ready = sendable.length;
+    const excluded = rfqVendorData.filter(v => !v.included).length;
+    const exhausted = rfqVendorData.filter(v => v.included && !_vendorHasPartsToSend(v)).length;
+    let summary = `${ready} of ${rfqVendorData.length} vendors ready to send`;
+    if (excluded > 0) summary += ` · ${excluded} unchecked`;
+    if (exhausted > 0) summary += ` · ${exhausted} skipped (already contacted)`;
+    document.getElementById('rfqSummary').textContent = summary;
+}
+
+function _vendorHasPartsToSend(v) {
+    if (v.new_listing.length + v.new_other.length > 0) return true;
+    if (v.include_repeats && (v.repeat_listing.length + v.repeat_other.length > 0)) return true;
+    return false;
+}
+
+function rfqIncludeRepeats(idx) {
+    rfqVendorData[idx].include_repeats = true;
+    renderRfqVendors();
+}
+
+function rfqToggleVendor(idx) {
+    rfqVendorData[idx].included = !rfqVendorData[idx].included;
+    renderRfqVendors();
+}
+
+function rfqSelectAllVendors() {
+    rfqVendorData.forEach(v => v.included = true);
+    renderRfqVendors();
+}
+
+function rfqDeselectAllVendors() {
+    rfqVendorData.forEach(v => v.included = false);
+    renderRfqVendors();
+}
+
+let rfqCondition = 'any';
+
+function setRfqCondition(cond, btn) {
+    rfqCondition = cond;
+    document.querySelectorAll('.rfq-cond-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderRfqMessage();
+}
+
+function buildVendorBody(v) {
+    // Determine which parts to include
+    let listingParts = [...v.new_listing];
+    let otherParts = [...v.new_other];
+    if (v.include_repeats) {
+        listingParts = [...listingParts, ...v.repeat_listing];
+        otherParts = [...otherParts, ...v.repeat_other];
+    }
+    const allSendParts = [...listingParts, ...otherParts];
+    if (!allSendParts.length) return null;
+
+    // Sender first name
+    const fullName = (window.userName || 'Trio Supply Chain Solutions').trim();
+    const firstName = fullName.split(' ')[0];
+
+    // Condition line
+    let condLine = '';
+    if (rfqCondition === 'new') condLine = 'Condition: NEW ONLY\n\n';
+    else if (rfqCondition === 'used') condLine = 'Condition: USED / REFURBISHED ACCEPTABLE\n\n';
+
+    let body = 'Hi,\n\n';
+
+    if (listingParts.length > 0) {
+        body += 'We see you may have stock on the following — please send your best offer:\n\n';
+        body += listingParts.map(p => `  ${p}`).join('\n');
+        body += '\n';
+        if (otherParts.length > 0) {
+            body += '\nAlso sourcing — quote if available:\n\n';
+            body += otherParts.map(p => `  ${p}`).join('\n');
+            body += '\n';
+        }
+    } else {
+        body += 'We are sourcing the following — please send your best offer:\n\n';
+        body += otherParts.map(p => `  ${p}`).join('\n');
+        body += '\n';
+    }
+
+    if (condLine) body += '\n' + condLine;
+
+    body += `
+Please include with your quote:
+  - Qty available / Lead time
+  - Unit price (USD)
+  - Condition (New / Used / Refurb)
+  - Photos if available
+  - Warranty & payment terms
+
+Thanks,
+${firstName}
+Trio Supply Chain Solutions`;
+
+    return body;
+}
+
+function renderRfqMessage() {
+    // Subject uses all unique parts across all vendors being sent
+    const allParts = [...new Set(rfqAllParts)];
+    const condTag = rfqCondition !== 'any' ? ` [${rfqCondition.toUpperCase()}]` : '';
+    document.getElementById('rfqSubject').value = `RFQ: ${allParts.slice(0, 5).join(', ')}${allParts.length > 5 ? '…' : ''}${condTag} — ${currentReqName}`;
+
+    // Preview body shows a sample for the first vendor with parts to send
+    const sample = rfqVendorData.find(v => _vendorHasPartsToSend(v));
+    if (sample) {
+        document.getElementById('rfqBody').value = buildVendorBody(sample) || '';
+    } else {
+        document.getElementById('rfqBody').value = '(No vendors with new parts to send)';
+    }
+}
+
+function rfqSelectEmail(idx, value) {
+    if (value === '__custom__') {
+        const custom = prompt('Enter email address:');
+        if (custom && custom.includes('@')) {
+            const email = custom.trim().toLowerCase();
+            rfqVendorData[idx].selected_email = email;
+            if (!rfqVendorData[idx].emails.includes(email)) {
+                rfqVendorData[idx].emails.unshift(email);
+            }
+            fetch('/api/vendor-card/add-email', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ vendor_name: rfqVendorData[idx].vendor_name, email })
+            });
+        }
+        renderRfqVendors();
+    } else {
+        rfqVendorData[idx].selected_email = value;
+    }
+}
+
+function rfqManualEmail(idx, value) {
+    const email = value.trim().toLowerCase();
+    if (email && email.includes('@')) {
+        rfqVendorData[idx].selected_email = email;
+        rfqVendorData[idx].emails.unshift(email);
+        rfqVendorData[idx].lookup_status = 'ready';
+        fetch('/api/vendor-card/add-email', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ vendor_name: rfqVendorData[idx].vendor_name, email })
+        });
+        renderRfqVendors();
+    }
+}
+
+function rfqRemoveVendor(idx) {
+    rfqVendorData.splice(idx, 1);
+    if (!rfqVendorData.length) { closeModal('rfqModal'); return; }
+    renderRfqVendors();
+    renderRfqMessage();
+}
+
+async function sendBatchRfq() {
+    const btn = document.getElementById('rfqSendBtn');
+    btn.disabled = true; btn.textContent = 'Sending…';
+    const subject = document.getElementById('rfqSubject').value;
+    // Build per-vendor payloads with personalized body
+    const sendable = rfqVendorData.filter(g => g.included && g.selected_email && _vendorHasPartsToSend(g));
+    if (!sendable.length) { alert('No vendors with email and new parts to send'); btn.disabled = false; btn.textContent = 'Send'; return; }
+    const payload = sendable.map(g => {
+        const body = buildVendorBody(g);
+        // All parts being sent (for contact tracking)
+        let sentParts = [...g.new_listing, ...g.new_other];
+        if (g.include_repeats) sentParts = [...sentParts, ...g.repeat_listing, ...g.repeat_other];
+        return {
+            vendor_name: g.vendor_name, vendor_email: g.selected_email,
+            parts: sentParts, subject, body
+        };
+    });
+    try {
+        const res = await fetch(`/api/requisitions/${currentReqId}/rfq`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ groups: payload })
+        });
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText || `HTTP ${res.status} — you may need to log in again`);
+        }
+        const data = await res.json();
+        const sent = (data.results || []).filter(r => r.status === 'sent').length;
+        alert(`${sent} of ${payload.length} emails sent successfully`);
+        closeModal('rfqModal');
+        selectedSightings.clear();
+        renderSources();
+        loadActivity();
+    } catch (e) {
+        alert('Send error: ' + e.message);
+    }
+    btn.disabled = false; btn.textContent = 'Send';
+}
+
+// ── Click-to-Call Logging ───────────────────────────────────────────────
+async function logCall(event, vendorName, vendorPhone, mpn) {
+    try {
+        await fetch('/api/contacts/phone', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ requisition_id: currentReqId, vendor_name: vendorName,
+                                   vendor_phone: vendorPhone, parts: mpn ? [mpn] : [] })
+        });
+        loadActivity();
+    } catch (e) { console.error('Failed to log call:', e); }
+}
+
+// ── Vendor Card Popup ──────────────────────────────────────────────────
+async function openVendorPopup(cardId) {
+    const res = await fetch(`/api/vendors/${cardId}`);
+    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
+    const card = await res.json();
+
+    let html = `<div class="vp-header">
+        <h2>${esc(card.display_name)}</h2>
+        <div class="vp-rating">${stars(card.avg_rating, card.review_count)}</div>
+    </div>`;
+
+    // Blacklist toggle
+    const blOn = card.is_blacklisted;
+    html += `<div class="vp-section" style="padding-bottom:8px;margin-bottom:10px">
+        <button class="btn-blacklist ${blOn ? 'vp-bl-on' : 'vp-bl-off'}" onclick="vpToggleBlacklist(${card.id}, ${!blOn})">
+            ${blOn ? '🚫 Blacklisted' : 'Blacklist'}
+        </button>
+        ${blOn ? '<span style="font-size:10px;color:var(--red);margin-left:8px">This vendor is hidden from all search results</span>' : ''}
+    </div>`;
+
+    // Info
+    html += '<div class="vp-section">';
+    if (card.website) html += `<div class="vp-field"><span class="vp-label">Website</span> <a href="${escAttr(card.website)}" target="_blank">${esc(card.website)}</a></div>`;
+    if (card.linkedin_url) html += `<div class="vp-field"><span class="vp-label">LinkedIn</span> <a href="${escAttr(card.linkedin_url)}" target="_blank" style="color:var(--teal)">Company Page ↗</a></div>`;
+    html += `<div class="vp-field"><span class="vp-label">Seen in</span> ${card.sighting_count} search results</div>`;
+    // Enrichment tags
+    if (card.industry || card.employee_size || card.hq_city) {
+        html += '<div class="enrich-bar" style="margin-top:6px">';
+        if (card.industry) html += `<span class="enrich-tag">${esc(card.industry)}</span>`;
+        if (card.employee_size) html += `<span class="enrich-tag">👥 ${esc(card.employee_size)}</span>`;
+        if (card.hq_city) html += `<span class="enrich-tag">📍 ${esc(card.hq_city)}${card.hq_state ? ', ' + esc(card.hq_state) : ''}</span>`;
+        if (card.hq_country && card.hq_country !== 'US') html += `<span class="enrich-tag">${esc(card.hq_country)}</span>`;
+        html += '</div>';
+    }
+    // Action buttons
+    const vendorDomain = card.domain || (card.website ? card.website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
+    html += `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn-enrich" onclick="enrichVendor(${card.id},'${escAttr(vendorDomain)}')">Enrich</button>
+        ${vendorDomain ? `<button class="btn-enrich" onclick="openSuggestedContacts('vendor',${card.id},'${escAttr(vendorDomain)}','${escAttr(card.display_name)}')">Suggested Contacts</button>` : ''}
+        <button class="btn-ai" onclick="findAIContacts('vendor',${card.id},'${escAttr(card.display_name)}','${escAttr(vendorDomain)}')">🤖 Find Contacts</button>
+    </div>`;
+
+    // Engagement Score (from Email Mining v2)
+    if (card.engagement_score != null) {
+        const engScore = Math.round(card.engagement_score);
+        const engClass = engScore >= 70 ? 'eng-high' : engScore >= 40 ? 'eng-med' : 'eng-low';
+        const respRate = card.total_outreach > 0 ? Math.round((card.total_responses / card.total_outreach) * 100) : null;
+        html += `<div style="display:flex;gap:12px;align-items:center;margin-top:10px;padding:8px 12px;background:var(--surface);border-radius:6px;border:1px solid var(--border)">
+            <div class="engagement-ring ${engClass}">${engScore}</div>
+            <div style="flex:1;font-size:11px">
+                <div style="font-weight:700;margin-bottom:2px">Engagement Score</div>
+                <div style="color:var(--text2);display:flex;gap:10px;flex-wrap:wrap">
+                    ${card.total_outreach != null ? `<span>Outreach: ${card.total_outreach}</span>` : ''}
+                    ${card.total_responses != null ? `<span>Replies: ${card.total_responses}</span>` : ''}
+                    ${respRate != null ? `<span>Rate: ${respRate}%</span>` : ''}
+                    ${card.response_velocity_hours != null ? `<span>Avg: ${Math.round(card.response_velocity_hours)}h</span>` : ''}
+                    ${card.ghost_rate != null ? `<span>Ghost: ${Math.round(card.ghost_rate * 100)}%</span>` : ''}
+                </div>
+            </div>
+        </div>`;
+    }
+    html += '</div>';
+
+    // Intel Card container (loaded async)
+    html += `<div id="vpIntelCard"></div>`;
+
+    // Emails
+    html += '<div class="vp-section"><div class="vp-label">Emails</div>';
+    html += card.emails.length
+        ? card.emails.map(e => `<div class="vp-item"><a href="mailto:${escAttr(e)}">${esc(e)}</a></div>`).join('')
+        : '<div class="vp-item vp-muted">No emails on file</div>';
+    html += '</div>';
+
+    // Phones
+    html += '<div class="vp-section"><div class="vp-label">Phones</div>';
+    html += card.phones.length
+        ? card.phones.map(p => `<div class="vp-item"><a href="tel:${escAttr(p)}">${esc(p)}</a></div>`).join('')
+        : '<div class="vp-item vp-muted">No phone numbers on file</div>';
+    html += '</div>';
+
+    // Material Profile (brands/manufacturers)
+    const brands = card.brands || [];
+    const uniqueParts = card.unique_parts || 0;
+    if (brands.length || uniqueParts) {
+        html += '<div class="vp-section"><div class="vp-label">Material Profile</div>';
+        if (uniqueParts) html += `<div class="vp-field" style="margin-bottom:6px"><span style="font-size:11px;color:var(--muted)">Seen with ${uniqueParts} unique part number${uniqueParts !== 1 ? 's' : ''}</span></div>`;
+        if (brands.length) {
+            html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+            html += brands.map(b => `<span class="badge b-src" style="font-size:10px;padding:2px 8px" title="${b.count} sighting${b.count !== 1 ? 's' : ''}">${esc(b.name)} <span style="opacity:.6">×${b.count}</span></span>`).join('');
+            html += '</div>';
+        } else {
+            html += '<div class="vp-item vp-muted">No manufacturer data yet</div>';
+        }
+        html += '</div>';
+    }
+
+    // Reviews
+    html += '<div class="vp-section"><div class="vp-label">Reviews</div>';
+    if (card.reviews.length) {
+        html += card.reviews.map(r => `<div class="vp-review">
+            <div class="vp-review-header">
+                <span class="stars">${'★'.repeat(r.rating)}${'☆'.repeat(5 - r.rating)}</span>
+                <span class="vp-review-author">${esc(r.user_name)} · ${fmtDate(r.created_at)}</span>
+            </div>
+            ${r.comment ? `<div class="vp-review-comment">${esc(r.comment)}</div>` : ''}
+        </div>`).join('');
+    } else {
+        html += '<div class="vp-item vp-muted">No reviews yet</div>';
+    }
+    html += '</div>';
+
+    // Add review form
+    html += `<div class="vp-section">
+        <div class="vp-label">Add Review</div>
+        <div class="vp-review-form">
+            <div class="vp-star-picker" id="vpStarPicker">
+                ${[1,2,3,4,5].map(n => `<span class="vp-star" onclick="vpSetRating(${n})" data-n="${n}">☆</span>`).join('')}
+            </div>
+            <input id="vpComment" class="vp-input" placeholder="Short comment (optional)…" maxlength="500">
+            <button class="btn btn-primary btn-sm" onclick="vpSubmitReview(${card.id})">Submit</button>
+        </div>
+    </div>`;
+
+    document.getElementById('vendorPopupContent').innerHTML = html;
+    document.getElementById('vendorPopup').classList.add('open');
+
+    // Load company intel card asynchronously
+    const intelEl = document.getElementById('vpIntelCard');
+    if (intelEl && card.display_name) {
+        loadCompanyIntel(card.display_name, vendorDomain, intelEl);
+    }
+}
+
+let vpRating = 0;
+function vpSetRating(n) {
+    vpRating = n;
+    document.querySelectorAll('#vpStarPicker .vp-star').forEach(el => {
+        el.textContent = parseInt(el.dataset.n) <= n ? '★' : '☆';
+    });
+}
+
+async function vpSubmitReview(cardId) {
+    if (vpRating === 0) { alert('Please select a rating'); return; }
+    const comment = document.getElementById('vpComment').value.trim();
+    const res = await fetch(`/api/vendors/${cardId}/reviews`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ rating: vpRating, comment })
+    });
+    if (res.ok) { vpRating = 0; openVendorPopup(cardId); }
+}
+
+async function vpToggleBlacklist(cardId, blacklisted) {
+    const action = blacklisted ? 'blacklist' : 'remove from blacklist';
+    if (!confirm(`Are you sure you want to ${action} this vendor?`)) return;
+    const res = await fetch(`/api/vendors/${cardId}/blacklist`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ blacklisted })
+    });
+    if (res.ok) {
+        openVendorPopup(cardId);
+        if (currentReqId && Object.keys(searchResults).length) renderSources();
+    }
+}
+
+// ── Vendors Tab ────────────────────────────────────────────────────────
+async function loadVendorList() {
+    const q = (document.getElementById('vendorSearch') || {}).value || '';
+    const res = await fetch(`/api/vendors?q=${encodeURIComponent(q)}`);
+    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
+    const resp = await res.json();
+    _vendorListData = resp.vendors || resp;
+    filterVendorList();
+}
+
+function vendorTier(score) {
+    if (score == null) return 'new';
+    if (score >= 70) return 'proven';
+    if (score >= 40) return 'developing';
+    return 'caution';
+}
+
+function setVendorTier(tier, btn) {
+    _vendorTierFilter = tier;
+    document.querySelectorAll('.vendor-filters .pill-filter').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    filterVendorList();
+}
+
+function filterVendorList() {
+    const hideBL = (document.getElementById('vendorHideBL') || {}).checked;
+    const q = (document.getElementById('vendorSearch') || {}).value || '';
+    let filtered = _vendorListData;
+    if (q) {
+        const lq = q.toLowerCase();
+        filtered = filtered.filter(c => (c.display_name || '').toLowerCase().includes(lq));
+    }
+    if (_vendorTierFilter !== 'all') {
+        filtered = filtered.filter(c => vendorTier(c.engagement_score) === _vendorTierFilter);
+    }
+    if (hideBL) filtered = filtered.filter(c => !c.is_blacklisted);
+
+    const countEl = document.getElementById('vendorFilterCount');
+    if (countEl) countEl.textContent = filtered.length < _vendorListData.length ? `${filtered.length} of ${_vendorListData.length}` : '';
+
+    const el = document.getElementById('vendorList');
+    if (!filtered.length) {
+        el.innerHTML = `<p class="empty">${_vendorListData.length ? 'No vendors match filters' : 'No vendors yet — they\'ll appear here after your first search'}</p>`;
+        return;
+    }
+    el.innerHTML = filtered.map(c => {
+        const tier = vendorTier(c.engagement_score);
+        const tierLabel = {proven:'Proven',developing:'Developing',caution:'Caution',new:'New'}[tier];
+        const tierCls = {proven:'eng-proven',developing:'eng-developing',caution:'eng-caution',new:'eng-new'}[tier];
+        const scoreText = c.engagement_score != null ? `${Math.round(c.engagement_score)} · ${tierLabel}` : tierLabel;
+        return `<div class="card card-clickable ${c.is_blacklisted ? 'vendor-card-bl' : ''}" onclick="openVendorPopup(${c.id})">
+            <div class="vendor-card-row">
+                <div class="vendor-card-name">${esc(c.display_name)} ${c.is_blacklisted ? '<span style="color:var(--red);font-size:10px">🚫 Blacklisted</span>' : ''}</div>
+                <div class="vendor-card-meta">
+                    <span class="eng-badge ${tierCls}">${scoreText}</span>
+                    <span>${stars(c.avg_rating, c.review_count)}</span>
+                    <span class="badge b-email" title="Emails on file">✉ ${(c.emails||[]).length}</span>
+                    <span style="font-size:10px;color:var(--muted)">${c.sighting_count} sightings</span>
+                </div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ── Materials Tab ──────────────────────────────────────────────────────
+async function loadMaterialList() {
+    const q = (document.getElementById('materialSearch') || {}).value || '';
+    const res = await fetch(`/api/materials?q=${encodeURIComponent(q)}`);
+    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
+    const resp = await res.json();
+    const data = resp.materials || resp;  // Backwards-compatible
+    const el = document.getElementById('materialList');
+    if (!data.length) {
+        el.innerHTML = `<p class="empty">${q ? 'No materials match your search' : 'No material cards yet — they\'ll build automatically as you search'}</p>`;
+        return;
+    }
+    el.innerHTML = data.map(c => `
+        <div class="card card-clickable" onclick="openMaterialPopup(${c.id})">
+            <div class="mat-card-row">
+                <div>
+                    <div class="mat-card-mpn">${esc(c.display_mpn)}</div>
+                    ${c.manufacturer ? `<div style="font-size:11px;color:var(--text2)">${esc(c.manufacturer)}</div>` : ''}
+                </div>
+                <div class="mat-card-meta">
+                    <span class="badge b-mathistory">${c.vendor_count} vendor${c.vendor_count !== 1 ? 's' : ''}</span>
+                    <span>${c.search_count} searches</span>
+                    <span>${c.last_searched_at ? fmtDate(c.last_searched_at) : '—'}</span>
+                </div>
+            </div>
+        </div>
+    `).join('');
+}
+
+async function openMaterialPopup(cardId) {
+    const res = await fetch(`/api/materials/${cardId}`);
+    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
+    const card = await res.json();
+
+    let html = `<div class="mp-header">
+        <h2>${esc(card.display_mpn)}</h2>
+        <div class="mp-header-meta">
+            ${card.manufacturer ? `${esc(card.manufacturer)} · ` : ''}
+            ${card.search_count} searches · Last searched ${card.last_searched_at ? fmtDate(card.last_searched_at) : 'never'}
+        </div>
+    </div>`;
+
+    if (card.description) {
+        html += `<div class="mp-section"><div class="mp-label">Description</div><div style="font-size:12px">${esc(card.description)}</div></div>`;
+    }
+
+    const history = card.vendor_history || [];
+    html += `<div class="mp-section"><div class="mp-label">Vendors Who Have Listed This Part (${history.length})</div>`;
+    if (history.length) {
+        for (const vh of history) {
+            const srcBadge = vh.source_type ? `<span class="badge b-src">${(vh.source_type || '').toUpperCase()}</span>` : '';
+            const authBadge = vh.is_authorized ? '<span class="badge b-auth">Auth</span>' : '';
+            const priceStr = vh.last_price != null ? `$${vh.last_price.toFixed(2)}` : '—';
+            const qtyStr = vh.last_qty != null ? vh.last_qty.toLocaleString() : '—';
+
+            html += `<div class="mp-vh-row" onclick="openVendorPopupByName('${escAttr(vh.vendor_name)}')">
+                <span class="mp-vh-vendor">${esc(vh.vendor_name)}</span>
+                ${srcBadge}${authBadge}
+                <span class="mp-vh-times">${vh.times_seen}×</span>
+                <span class="mp-vh-detail">Qty: ${qtyStr}</span>
+                <span class="mp-vh-detail">Price: ${priceStr}</span>
+                <span class="mp-vh-detail">Last: ${vh.last_seen ? fmtDate(vh.last_seen) : '—'}</span>
+                <span class="mp-vh-detail">First: ${vh.first_seen ? fmtDate(vh.first_seen) : '—'}</span>
+            </div>`;
+        }
+    } else {
+        html += '<div style="font-size:12px;color:var(--muted);font-style:italic">No vendor history yet</div>';
+    }
+    html += '</div>';
+
+    document.getElementById('materialPopupContent').innerHTML = html;
+    document.getElementById('materialPopup').classList.add('open');
+}
+
+async function openVendorPopupByName(vendorName) {
+    const res = await fetch(`/api/vendors?q=${encodeURIComponent(vendorName)}`);
+    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
+    const resp = await res.json();
+    const data = resp.vendors || resp;
+    if (data.length) {
+        const exact = data.find(c => c.display_name.toLowerCase() === vendorName.toLowerCase());
+        openVendorPopup(exact ? exact.id : data[0].id);
+    }
+}
+
+async function openMaterialPopupByMpn(mpn) {
+    try {
+        const res = await fetch(`/api/materials/by-mpn/${encodeURIComponent(mpn)}`);
+        if (res.ok) {
+            const card = await res.json();
+            openMaterialPopup(card.id);
+        }
+    } catch { /* No material card yet */ }
+}
+
+// ── Activity ────────────────────────────────────────────────────────────
+let activityData = { vendors: [], summary: { sent: 0, replied: 0, opened: 0, awaiting: 0 } };
+let actFilterType = 'all';
+let actStatFilter = null; // null = all, 'replied', 'opened', 'awaiting'
+
+function setActFilter(type, btn) {
+    actFilterType = type;
+    document.querySelectorAll('[data-act-filter]').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    renderActivityCards();
+}
+
+function setActStat(type, el) {
+    // Toggle — click same stat again to clear
+    if (actStatFilter === type || type === 'all') {
+        actStatFilter = null;
+        document.querySelectorAll('.act-stat').forEach(s => s.classList.remove('on'));
+    } else {
+        actStatFilter = type;
+        document.querySelectorAll('.act-stat').forEach(s => s.classList.remove('on'));
+        el.classList.add('on');
+    }
+    renderActivityCards();
+}
+
+async function loadActivity() {
+    if (!currentReqId) return;
+    try {
+        const res = await fetch(`/api/requisitions/${currentReqId}/activity`);
+        if (!res.ok) throw new Error();
+        activityData = await res.json();
+    } catch {
+        // Fallback to old endpoint
+        const res2 = await fetch(`/api/requisitions/${currentReqId}/contacts`);
+        if (!res2.ok) return;
+        const contacts = await res2.json();
+        // Convert to vendor-grouped format
+        const vmap = {};
+        for (const c of contacts) {
+            const vk = (c.vendor_name||'').trim().toLowerCase();
+            if (!vmap[vk]) vmap[vk] = { vendor_name: c.vendor_name, status: 'awaiting', contact_count: 0, contact_types: [], all_parts: [], contacts: [], responses: [], last_contacted_at: c.created_at, last_contacted_by: c.user_name, last_contact_email: c.vendor_contact };
+            vmap[vk].contacts.push(c);
+            vmap[vk].contact_count++;
+            if (!vmap[vk].contact_types.includes(c.contact_type)) vmap[vk].contact_types.push(c.contact_type);
+            for (const p of (c.parts_included || [])) { if (!vmap[vk].all_parts.includes(p)) vmap[vk].all_parts.push(p); }
+        }
+        activityData = { vendors: Object.values(vmap), summary: { sent: Object.keys(vmap).length, replied: 0, awaiting: Object.keys(vmap).length } };
+    }
+    renderActivityCards();
+}
+
+function renderActivityCards() {
+    const el = document.getElementById('activityLog');
+    const summaryEl = document.getElementById('actSummary');
+    const filterBarEl = document.getElementById('actFilterBar');
+    const vendors = activityData.vendors || [];
+    const summary = activityData.summary || {};
+
+    if (!vendors.length) {
+        el.innerHTML = '<p class="empty">No contacts yet — send an RFQ or make a call</p>';
+        summaryEl.style.display = 'none';
+        filterBarEl.style.display = 'none';
+        return;
+    }
+
+    // Show summary and filters
+    summaryEl.style.display = 'flex';
+    filterBarEl.style.display = 'flex';
+    document.getElementById('actStatSent').textContent = summary.sent || 0;
+    document.getElementById('actStatReplied').textContent = summary.replied || 0;
+    document.getElementById('actStatOpened').textContent = summary.opened || 0;
+    document.getElementById('actStatAwaiting').textContent = summary.awaiting || 0;
+
+    const q = (document.getElementById('actFilter')?.value || '').trim().toUpperCase();
+    const sortVal = document.getElementById('actSort')?.value || 'date-desc';
+
+    let filtered = [...vendors].filter(v => {
+        const vn = (v.vendor_name || '').trim().toLowerCase();
+        return vn && vn !== 'no seller listed';
+    });
+
+    // Stat filter (from clicking summary cards)
+    if (actStatFilter === 'replied') filtered = filtered.filter(v => v.status === 'replied');
+    else if (actStatFilter === 'opened') filtered = filtered.filter(v => v.status === 'opened');
+    else if (actStatFilter === 'awaiting') filtered = filtered.filter(v => v.status === 'awaiting');
+    else if (actStatFilter === 'unavailable') filtered = filtered.filter(v => v.status === 'unavailable');
+
+    // Pill filter (contact type)
+    if (actFilterType === 'email') filtered = filtered.filter(v => (v.contact_types||[]).includes('email'));
+    if (actFilterType === 'phone') filtered = filtered.filter(v => (v.contact_types||[]).includes('phone'));
+
+    // Text filter
+    if (q) filtered = filtered.filter(v =>
+        ((v.vendor_name||'') + ' ' + (v.last_contact_email||'') + ' ' + (v.all_parts||[]).join(' ') + ' ' + (v.last_contacted_by||'')).toUpperCase().includes(q)
+    );
+
+    // Sort
+    if (sortVal === 'date-desc') filtered.sort((a,b) => (b.last_contacted_at||'').localeCompare(a.last_contacted_at||''));
+    else if (sortVal === 'date-asc') filtered.sort((a,b) => (a.last_contacted_at||'').localeCompare(b.last_contacted_at||''));
+    else if (sortVal === 'vendor-asc') filtered.sort((a,b) => (a.vendor_name||'').localeCompare(b.vendor_name||''));
+    else if (sortVal === 'vendor-desc') filtered.sort((a,b) => (b.vendor_name||'').localeCompare(a.vendor_name||''));
+    else if (sortVal === 'status') filtered.sort((a,b) => (a.status||'').localeCompare(b.status||''));
+
+    const countEl = document.getElementById('actFilterCount');
+    if (countEl) countEl.textContent = (q || actStatFilter || actFilterType !== 'all') ? `${filtered.length} of ${vendors.length}` : `${vendors.length} vendors`;
+
+    if (!filtered.length) {
+        el.innerHTML = '<p class="empty">No matching activity</p>';
+        return;
+    }
+
+    el.innerHTML = filtered.map(v => {
+        const statusBadge = v.status === 'replied'
+            ? '<span class="act-badge-replied">Replied</span>'
+            : v.status === 'opened'
+            ? '<span class="act-badge-opened">Opened</span>'
+            : v.status === 'unavailable'
+            ? '<span class="act-badge-unavail">Not Available</span>'
+            : v.status === 'quoted'
+            ? '<span class="act-badge-replied" style="background:#dcfce7;color:#166534">Quoted</span>'
+            : v.status === 'declined'
+            ? '<span class="act-badge-unavail">Declined</span>'
+            : '<span class="act-badge-awaiting">Awaiting</span>';
+
+        // Classification badge from response
+        let classificationBadge = '';
+        if (v.responses && v.responses.length) {
+            const lastR = v.responses[v.responses.length - 1];
+            const cls = lastR.classification || '';
+            const clsLabels = {
+                'quote_provided': '💰 Quote', 'no_stock': '❌ No Stock', 'partial_availability': '📦 Partial',
+                'counter_offer': '🔄 Counter', 'clarification_needed': '❓ Question', 'ooo_bounce': '✈️ OOO',
+                'follow_up_pending': '⏳ Review', 'unrelated': '—'
+            };
+            if (cls && clsLabels[cls]) {
+                classificationBadge = `<span class="act-badge-classification">${clsLabels[cls]}</span>`;
+            }
+            if (lastR.action_hint) {
+                classificationBadge += `<span class="act-action-hint">${esc(lastR.action_hint)}</span>`;
+            }
+        }
+
+        // Follow-up button for stale contacts (buyer only)
+        let followUpBtn = '';
+        if (isBuyer() && v.status === 'awaiting' && v.contacts && v.contacts.length) {
+            const lastContact = v.contacts[v.contacts.length - 1];
+            const sentDate = new Date(lastContact.created_at);
+            const daysSince = Math.floor((Date.now() - sentDate) / 86400000);
+            if (daysSince >= 3) {
+                followUpBtn = `<button class="btn btn-warning btn-sm" onclick="sendFollowUp(${lastContact.id}, '${escAttr(v.vendor_name)}')">📬 Follow Up (${daysSince}d)</button>`;
+            }
+        }
+
+        const typeBadges = (v.contact_types || []).map(t =>
+            `<span class="act-badge-type ${t === 'email' ? 'act-badge-email' : 'act-badge-phone'}">${t === 'email' ? '✉ Email' : '📞 Phone'}</span>`
+        ).join('');
+
+        const countLabel = v.contact_count > 1 ? `<span style="font-size:10px;color:var(--muted)">${v.contact_count} outreach</span>` : '';
+
+        const parts = (v.all_parts || []).map(p => `<span class="act-card-part">${esc(p)}</span>`).join('');
+
+        // Quote section from parsed responses
+        let quoteHtml = '';
+        if (v.responses && v.responses.length) {
+            const lines = [];
+            for (const r of v.responses) {
+                const pd = r.parsed_data || {};
+                const pParts = pd.parts || [];
+                for (const pp of pParts) {
+                    const priceStr = pp.unit_price != null ? `$${pp.unit_price}` : '';
+                    const qtyStr = pp.qty_available != null ? `${pp.qty_available} avail` : '';
+                    const ltStr = pp.lead_time || '';
+                    const condStr = pp.condition || '';
+                    const vals = [priceStr, qtyStr, condStr, ltStr].filter(Boolean).join(' · ');
+                    if (vals) lines.push(`<div class="act-card-quote-line"><span class="act-card-quote-mpn">${esc(pp.mpn || '?')}</span> <span class="act-card-quote-val">${vals}</span></div>`);
+                }
+                if (!pParts.length && pd.sentiment) {
+                    lines.push(`<div class="act-card-quote-line"><span class="act-card-quote-val">Sentiment: ${esc(pd.sentiment)}</span></div>`);
+                }
+            }
+            if (lines.length) quoteHtml = `<div class="act-card-quote">${lines.join('')}</div>`;
+        }
+
+        const threadBtn = `<button class="btn btn-ghost btn-sm" onclick="viewThread('${escAttr(v.vendor_name)}')">View Thread</button>`;
+
+        // AI Parse button — show for vendors with responses
+        let parseBtn = '';
+        let attBtn = '';
+        if (v.responses && v.responses.length) {
+            const lastR = v.responses[v.responses.length - 1];
+            if (lastR.id) {
+                parseBtn = `<button class="btn-ai btn-sm" onclick="parseResponseAI(${lastR.id})">🤖 Parse</button>`;
+                attBtn = `<button class="btn-ai btn-sm" onclick="parseResponseAttachments(${lastR.id})" title="Parse attachments from this response">📎 Attachments</button>`;
+            }
+        }
+
+        return `<div class="act-card">
+            <div class="act-card-header">
+                <span class="act-card-vendor">${esc(v.vendor_name)}</span>
+                ${statusBadge}
+                ${classificationBadge}
+                ${typeBadges}
+                ${countLabel}
+                <span class="act-card-date">${fmtRelative(v.last_contacted_at)}</span>
+            </div>
+            <div class="act-card-meta">
+                <div class="act-card-meta-item"><span class="act-card-meta-label">To</span> ${esc(v.last_contact_email || '—')}</div>
+                <div class="act-card-meta-item"><span class="act-card-meta-label">By</span> ${esc(v.last_contacted_by || '—')}</div>
+            </div>
+            ${parts ? `<div class="act-card-parts">${parts}</div>` : ''}
+            ${quoteHtml}
+            <div class="act-card-actions">${followUpBtn}${parseBtn}${attBtn}${threadBtn}</div>
+        </div>`;
+    }).join('');
+}
+
+function fmtRelative(iso) {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    const now = new Date();
+    const diff = Math.floor((now - d) / 1000);
+    if (diff < 60) return 'just now';
+    if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+    if (diff < 604800) return `${Math.floor(diff/86400)}d ago`;
+    return d.toLocaleDateString();
+}
+
+async function viewThread(vendorName) {
+    // Find contacts + responses for this vendor
+    const v = (activityData.vendors || []).find(x => x.vendor_name === vendorName);
+    if (!v) return;
+
+    let html = '<div style="max-height:60vh;overflow-y:auto">';
+
+    // Outbound contacts
+    for (const c of (v.contacts || [])) {
+        html += `<div style="margin-bottom:12px;padding:10px 14px;background:var(--teal-light);border-radius:8px;border:1px solid rgba(26,127,155,.15)">
+            <div style="font-size:11px;color:var(--teal);font-weight:600;margin-bottom:4px">
+                ${c.contact_type === 'email' ? '✉ Sent' : '📞 Called'} · ${esc(c.vendor_contact||'')} · ${fmtDateTime(c.created_at)} · by ${esc(c.user_name||'')}
+            </div>
+            ${c.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:2px">${esc(c.subject)}</div>` : ''}
+            <div style="font-size:11px;color:var(--text2)">${(c.parts_included||[]).join(', ')}</div>
+        </div>`;
+    }
+
+    // Inbound responses
+    for (const r of (v.responses || [])) {
+        html += `<div style="margin-bottom:12px;padding:10px 14px;background:var(--green-light);border-radius:8px;border:1px solid rgba(16,185,129,.15)">
+            <div style="font-size:11px;color:var(--green);font-weight:600;margin-bottom:4px">
+                ✅ Reply from ${esc(r.vendor_email||'')} · ${fmtDateTime(r.received_at)}
+            </div>
+            ${r.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:4px">${esc(r.subject)}</div>` : ''}
+            <div style="font-size:11px;color:var(--text2);white-space:pre-wrap;max-height:200px;overflow-y:auto">${esc(r.body||'')}</div>
+        </div>`;
+    }
+
+    if (!v.contacts?.length && !v.responses?.length) {
+        html += '<p class="empty">No thread data available</p>';
+    }
+
+    html += '</div>';
+
+    // Show in a simple modal
+    const modal = document.getElementById('threadModal');
+    if (!modal) {
+        // Create thread modal dynamically
+        const m = document.createElement('div');
+        m.id = 'threadModal';
+        m.className = 'modal-bg';
+        m.innerHTML = `<div class="modal modal-lg"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 id="threadTitle"></h2><button class="btn btn-ghost btn-sm" onclick="closeModal('threadModal')">✕ Close</button></div><div id="threadContent"></div></div>`;
+        m.addEventListener('click', e => { if (e.target === m) closeModal('threadModal'); });
+        document.body.appendChild(m);
+    }
+    document.getElementById('threadTitle').textContent = `Thread: ${vendorName}`;
+    document.getElementById('threadContent').innerHTML = html;
+    document.getElementById('threadModal').classList.add('open');
+}
+
+
+
+// ══════════════════════════════════════════════════════════════════════════
+// DATA SOURCES TAB
+// ══════════════════════════════════════════════════════════════════════════
+
+let sourcesData = [];
+
+async function loadSources() {
+    const el = document.getElementById('sourcesList');
+    el.innerHTML = '<p class="empty">Loading data sources…</p>';
+    try {
+        const res = await fetch('/api/sources');
+        const data = await res.json();
+        sourcesData = data.sources || [];
+        renderSources_tab();
+    } catch (e) {
+        el.innerHTML = '<p class="empty">Failed to load sources</p>';
+    }
+}
+
+function renderSources_tab() {
+    const el = document.getElementById('sourcesList');
+
+    const live = sourcesData.filter(s => s.status === 'live');
+    const pending = sourcesData.filter(s => s.status === 'pending');
+    const error = sourcesData.filter(s => s.status === 'error');
+    const disabled = sourcesData.filter(s => s.status === 'disabled');
+
+    // Stats summary
+    const totalSearches = sourcesData.reduce((a, s) => a + (s.total_searches || 0), 0);
+    const totalResults = sourcesData.reduce((a, s) => a + (s.total_results || 0), 0);
+
+    let html = `
+        <div class="src-stats">
+            <div class="src-stat"><strong>${live.length}</strong><span>Live</span></div>
+            <div class="src-stat"><strong>${pending.length}</strong><span>Pending Setup</span></div>
+            <div class="src-stat"><strong>${error.length}</strong><span>Errors</span></div>
+            <div class="src-stat"><strong>${disabled.length}</strong><span>Disabled</span></div>
+            <div class="src-stat"><strong>${totalSearches.toLocaleString()}</strong><span>Total Searches</span></div>
+            <div class="src-stat"><strong>${totalResults.toLocaleString()}</strong><span>Total Results</span></div>
+        </div>
+    `;
+
+    if (live.length) {
+        html += `<div class="src-section">
+            <h3 class="src-section-title src-live-title">🟢 Live — Active Data Sources (${live.length})</h3>
+            <div class="src-grid">${live.map(s => renderSourceCard(s)).join('')}</div>
+        </div>`;
+    }
+
+    if (error.length) {
+        html += `<div class="src-section">
+            <h3 class="src-section-title src-error-title">🔴 Errors (${error.length})</h3>
+            <div class="src-grid">${error.map(s => renderSourceCard(s)).join('')}</div>
+        </div>`;
+    }
+
+    if (pending.length) {
+        html += `<div class="src-section">
+            <h3 class="src-section-title src-pending-title">🟡 Pending Setup (${pending.length})</h3>
+            <div class="src-grid">${pending.map(s => renderSourceCard(s)).join('')}</div>
+        </div>`;
+    }
+
+    if (disabled.length) {
+        html += `<div class="src-section">
+            <h3 class="src-section-title src-disabled-title">⚪ Disabled (${disabled.length})</h3>
+            <div class="src-grid">${disabled.map(s => renderSourceCard(s)).join('')}</div>
+        </div>`;
+    }
+
+    el.innerHTML = html;
+}
+
+function renderSourceCard(s) {
+    const categoryIcons = {
+        api: '🔌', scraper: '🕷️', email: '📧', manual: '📋',
+    };
+    const typeLabels = {
+        broker: 'Broker Market', authorized: 'Authorized Dist', marketplace: 'Marketplace',
+        aggregator: 'Aggregator', internal: 'Internal', intelligence: 'Component Intel',
+    };
+    const statusColors = {
+        live: '#10b981', pending: '#f59e0b', error: '#ef4444', disabled: '#9ca3af',
+    };
+
+    const icon = categoryIcons[s.category] || '📡';
+    const typeLabel = typeLabels[s.source_type] || s.source_type;
+    const statusColor = statusColors[s.status] || '#9ca3af';
+
+    // Env var status badges
+    let envHtml = '';
+    if (s.env_vars && s.env_vars.length) {
+        envHtml = '<div class="src-env-vars">' + s.env_vars.map(v => {
+            const isSet = s.env_status && s.env_status[v];
+            return `<span class="src-env ${isSet ? 'src-env-set' : 'src-env-missing'}" title="${v}">${isSet ? '✓' : '✗'} ${v}</span>`;
+        }).join('') + '</div>';
+    }
+
+    // Stats row
+    let statsHtml = '';
+    if (s.total_searches > 0) {
+        statsHtml = `<div class="src-card-stats">
+            ${s.total_searches} searches · ${s.total_results.toLocaleString()} results${s.avg_response_ms ? ' · ' + s.avg_response_ms + 'ms avg' : ''}
+        </div>`;
+    }
+
+    // Last success/error
+    let statusDetail = '';
+    if (s.last_success) {
+        const d = new Date(s.last_success);
+        statusDetail = `<div class="src-last-ok">Last OK: ${d.toLocaleDateString()} ${d.toLocaleTimeString()}</div>`;
+    }
+    if (s.last_error) {
+        statusDetail += `<div class="src-last-err" title="${esc(s.last_error)}">Error: ${esc(s.last_error.substring(0, 80))}${s.last_error.length > 80 ? '…' : ''}</div>`;
+    }
+
+    // Toggle switch for configured sources
+    const isOn = s.status === 'live' || s.status === 'error';
+    const canToggle = s.status !== 'pending' || (s.env_status && s.env_vars && s.env_vars.length && s.env_vars.every(v => s.env_status[v]));
+    const toggleHtml = canToggle
+        ? `<label class="src-toggle" title="${isOn ? 'Disable this source' : 'Enable this source'}">
+               <input type="checkbox" ${isOn ? 'checked' : ''} onchange="toggleSource(${s.id}, this.checked ? 'live' : 'disabled')">
+               <span class="src-toggle-slider"></span>
+               <span class="src-toggle-label">${isOn ? 'On' : 'Off'}</span>
+           </label>`
+        : '';
+
+    // Action buttons — test + signup
+    let actions = '';
+    if (s.status === 'live') {
+        actions = `<button class="btn btn-sm src-test-btn" onclick="testSource(${s.id})">🧪 Test</button>`;
+    } else if (s.status === 'error') {
+        actions = `<button class="btn btn-sm src-test-btn" onclick="testSource(${s.id})">🔄 Retry</button>`;
+    } else if (s.status === 'pending' && s.signup_url) {
+        actions = `<a href="${esc(s.signup_url)}" target="_blank" class="btn btn-sm btn-primary">🔗 Sign Up</a>`;
+    }
+
+    // Email mining special button
+    if (s.name === 'email_mining' && s.status === 'live') {
+        actions += ` <button class="btn btn-sm btn-primary" onclick="runEmailScan()">📧 Scan Inbox</button>`;
+    }
+
+    return `<div class="src-card src-card-${s.status}">
+        <div class="src-card-header">
+            <span class="src-icon">${icon}</span>
+            <div class="src-card-title">
+                <strong>${esc(s.display_name)}</strong>
+                <span class="src-type-badge">${typeLabel}</span>
+            </div>
+            ${toggleHtml}
+        </div>
+        <p class="src-desc">${esc(s.description || '')}</p>
+        ${envHtml}
+        ${statsHtml}
+        ${statusDetail}
+        ${s.setup_notes && s.status !== 'live' ? `<div class="src-setup-notes">${esc(s.setup_notes)}</div>` : ''}
+        <div class="src-actions">${actions}</div>
+    </div>`;
+}
+
+async function testSource(sourceId) {
+    const card = document.querySelector(`.src-card [onclick="testSource(${sourceId})"]`);
+    if (card) { card.disabled = true; card.textContent = '⏳ Testing…'; }
+
+    try {
+        const res = await fetch(`/api/sources/${sourceId}/test`, { method: 'POST' });
+        const data = await res.json();
+        if (data.status === 'ok') {
+            alert(`✅ ${data.source}: ${data.results_count} results in ${data.elapsed_ms}ms\n\nSample: ${(data.sample || []).map(s => s.vendor_name || s.mpn_matched).join(', ')}`);
+        } else if (data.status === 'no_results') {
+            alert(`⚠️ ${data.source}: Connected OK but 0 results for test MPN "${data.test_mpn}" (${data.elapsed_ms}ms)`);
+        } else {
+            alert(`❌ ${data.source}: ${data.error || 'Unknown error'}`);
+        }
+        loadSources();
+    } catch (e) {
+        alert('Test failed: ' + e.message);
+    }
+}
+
+async function toggleSource(sourceId, newStatus) {
+    try {
+        await fetch(`/api/sources/${sourceId}/toggle`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ status: newStatus }),
+        });
+        loadSources();
+    } catch (e) {
+        alert('Toggle failed: ' + e.message);
+    }
+}
+
+async function runEmailScan() {
+    if (!confirm('Scan your Outlook inbox for vendor contacts and offers?\n\nThis will scan the last 6 months of emails for component-related correspondence.')) return;
+
+    const btn = event.target;
+    btn.disabled = true; btn.textContent = '⏳ Scanning…';
+
+    try {
+        const res = await fetch('/api/email-mining/scan', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ lookback_days: 180 }),
+        });
+        const data = await res.json();
+        alert(`📧 Email Scan Complete!\n\n` +
+            `Messages scanned: ${data.messages_scanned}\n` +
+            `Vendors found: ${data.vendors_found}\n` +
+            `Offers parsed: ${data.offers_parsed}\n` +
+            `Contacts enriched: ${data.contacts_enriched}\n` +
+            `Stock lists found: ${data.stock_lists_found}`);
+        loadSources();
+    } catch (e) {
+        alert('Email scan failed: ' + e.message);
+    } finally {
+        btn.disabled = false; btn.textContent = '📧 Scan Inbox';
+    }
+}
+
+
+// ── Stock List Import ────────────────────────────────────────────────────
+async function toggleStockImport() {
+    const el = document.getElementById('stockImportArea');
+    const isHidden = el.style.display === 'none';
+    el.style.display = isHidden ? '' : 'none';
+    if (isHidden) {
+        // Populate requisition dropdown
+        const sel = document.getElementById('stockReqSelect');
+        try {
+            const res = await fetch('/api/requisitions');
+            const data = await res.json();
+            sel.innerHTML = '<option value="">Select requisition to match against…</option>';
+            for (const r of data.filter(r => r.status !== 'archived')) {
+                sel.innerHTML += `<option value="${r.id}">${esc(r.name)} (${r.requirement_count} parts)</option>`;
+            }
+            // Pre-select current requisition if we have one
+            if (currentReqId) sel.value = currentReqId;
+        } catch(e) {}
+    }
+}
+
+async function doStockImport() {
+    const fileInput = document.getElementById('stockFileInput');
+    const vendorInput = document.getElementById('stockVendorName');
+    const reqSelect = document.getElementById('stockReqSelect');
+    const statusEl = document.getElementById('stockImportStatus');
+    const file = fileInput.files[0];
+    if (!file) return;
+
+    const reqId = reqSelect.value;
+    if (!reqId) {
+        statusEl.className = 'ustatus err'; statusEl.style.display = 'block';
+        statusEl.textContent = 'Please select a requisition to match against';
+        return;
+    }
+
+    const vendorName = vendorInput.value.trim() || file.name.replace(/\.[^.]+$/, '');
+
+    statusEl.className = 'ustatus load'; statusEl.textContent = '⏳ Importing…'; statusEl.style.display = 'block';
+    document.getElementById('stockFileReady').style.display = 'none';
+
+    try {
+        const form = new FormData();
+        form.append('file', file);
+        form.append('vendor_name', vendorName);
+
+        const res = await fetch(`/api/requisitions/${reqId}/import-stock`, {
+            method: 'POST', body: form
+        });
+        const data = await res.json();
+        if (res.ok) {
+            statusEl.className = 'ustatus ok';
+            statusEl.textContent = `✅ Imported ${data.imported_rows} rows — ${data.matched_sightings} matched sightings created`;
+        } else {
+            statusEl.className = 'ustatus err';
+            statusEl.textContent = data.detail || 'Import failed';
+        }
+        fileInput.value = '';
+        // Refresh search results if we have them for this req
+        if (searchResultsCache[reqId]) {
+            // If viewing this req, refresh
+            if (currentReqId == reqId && Object.keys(searchResults).length) {
+                searchAll();
+            }
+        }
+    } catch(e) {
+        statusEl.className = 'ustatus err';
+        statusEl.textContent = '❌ Import failed: ' + e.message;
+    }
+}

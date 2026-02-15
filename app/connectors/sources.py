@@ -1,35 +1,25 @@
-"""
-API connectors for searching vendor databases.
-
-Each connector searches one source and returns a list of dicts with:
-  vendor_name, part_number, quantity, price, condition, lead_time_days,
-  lead_time_text, manufacturer, source_type, source_url, confidence, evidence_type
-"""
-import httpx
-import asyncio
-import structlog
+"""API connectors — Nexar (Octopart) and BrokerBin."""
+import logging, asyncio, httpx
 from abc import ABC, abstractmethod
+from urllib.parse import quote_plus
 
-logger = structlog.get_logger()
+log = logging.getLogger(__name__)
 
 
 class BaseConnector(ABC):
-    """Base class with built-in retry logic."""
-
-    def __init__(self, timeout: float = 15.0, max_retries: int = 2):
+    def __init__(self, timeout: float = 20.0, max_retries: int = 2):
         self.timeout = timeout
         self.max_retries = max_retries
 
     async def search(self, part_number: str) -> list[dict]:
-        """Search with automatic retry. Never raises — returns [] on failure."""
         for attempt in range(self.max_retries + 1):
             try:
                 return await self._do_search(part_number)
             except Exception as e:
                 if attempt < self.max_retries:
-                    await asyncio.sleep(2 ** attempt)  # 1s, 2s backoff
+                    await asyncio.sleep(2 ** attempt)
                 else:
-                    logger.warning(f"{self.__class__.__name__}_failed", part=part_number, error=str(e))
+                    log.warning(f"{self.__class__.__name__} failed for {part_number}: {e}")
         return []
 
     @abstractmethod
@@ -37,108 +27,287 @@ class BaseConnector(ABC):
         pass
 
 
-class OctopartConnector(BaseConnector):
-    """Search Octopart (Nexar) API."""
+class NexarConnector(BaseConnector):
+    """Nexar/Octopart GraphQL API — full seller data."""
+    TOKEN_URL = "https://identity.nexar.com/connect/token"
+    API_URL = "https://api.nexar.com/graphql"
 
-    def __init__(self, api_key: str):
+    FULL_QUERY = """
+    query ($mpn: String!) {
+      supSearchMpn(q: $mpn, limit: 20) {
+        results { part {
+          mpn
+          manufacturer { name }
+          sellers {
+            company { name homepageUrl }
+            isAuthorized
+            offers {
+              inventoryLevel
+              prices { price currency quantity }
+              clickUrl
+              sku
+            }
+          }
+        }}
+      }
+    }"""
+
+    def __init__(self, client_id: str, client_secret: str):
         super().__init__()
-        self.api_key = api_key
-        self.source_type = "octopart"
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self._token = None
+
+    async def _get_token(self) -> str:
+        if self._token:
+            return self._token
+        async with httpx.AsyncClient(timeout=15) as c:
+            r = await c.post(self.TOKEN_URL, data={
+                "grant_type": "client_credentials",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+            })
+            r.raise_for_status()
+            self._token = r.json()["access_token"]
+            return self._token
+
+    async def _run_query(self, query: str, part_number: str) -> dict:
+        token = await self._get_token()
+        async with httpx.AsyncClient(timeout=self.timeout) as c:
+            r = await c.post(
+                self.API_URL,
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"query": query, "variables": {"mpn": part_number}},
+            )
+            if r.status_code == 401:
+                self._token = None
+                token = await self._get_token()
+                r = await c.post(
+                    self.API_URL,
+                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    json={"query": query, "variables": {"mpn": part_number}},
+                )
+            r.raise_for_status()
+            return r.json()
 
     async def _do_search(self, part_number: str) -> list[dict]:
-        if not self.api_key:
+        if not self.client_id:
             return []
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.get(
-                "https://octopart.com/api/v4/rest/search",
-                params={"q": part_number, "apikey": self.api_key, "limit": 20},
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        data = await self._run_query(self.FULL_QUERY, part_number)
+        errors = data.get("errors", [])
+        if errors:
+            log.warning(f"Nexar query error for {part_number}: {errors[0].get('message', '')[:120]}")
 
+        results_data = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
+        if not results_data:
+            return []
+
+        return self._parse_full(results_data, part_number)
+
+    def _parse_full(self, results_data: list, pn: str) -> list[dict]:
         results = []
-        for hit in data.get("results", []):
-            item = hit.get("item", {})
-            mfr = item.get("manufacturer", {}).get("name", "")
+        seen = set()
+        octopart_url = f"https://octopart.com/search?q={quote_plus(pn)}"
 
-            for seller in item.get("sellers", []):
-                vendor_name = seller.get("company", {}).get("name", "")
-                is_auth = seller.get("is_authorized", False)
+        for hit in results_data:
+            part = hit.get("part") or {}
+            mpn = part.get("mpn", pn)
+            mfr = (part.get("manufacturer") or {}).get("name", "")
+            sellers = part.get("sellers") or []
 
-                for offer in seller.get("offers", []):
-                    qty = offer.get("inventory_level")
-                    prices = offer.get("prices", {})
-                    price = None
-                    for currency_prices in prices.values():
-                        if currency_prices:
-                            price = currency_prices[0][1] if len(currency_prices[0]) > 1 else None
-                            break
+            if not sellers:
+                key = f"_ref_{mpn}_{mfr}"
+                if key not in seen:
+                    seen.add(key)
+                    results.append({
+                        "vendor_name": "(no sellers listed)",
+                        "manufacturer": mfr,
+                        "mpn_matched": mpn,
+                        "qty_available": None,
+                        "unit_price": None,
+                        "currency": "USD",
+                        "source_type": "octopart",
+                        "is_authorized": False,
+                        "confidence": 2,
+                        "octopart_url": octopart_url,
+                    })
+                continue
+
+            for seller in sellers:
+                name = (seller.get("company") or {}).get("name", "")
+                if not name:
+                    continue
+                auth = seller.get("isAuthorized", False)
+                homepage = (seller.get("company") or {}).get("homepageUrl", "")
+
+                offers = seller.get("offers") or []
+                if not offers:
+                    key = f"{name}_{mpn}"
+                    if key not in seen:
+                        seen.add(key)
+                        results.append({
+                            "vendor_name": name,
+                            "manufacturer": mfr,
+                            "mpn_matched": mpn,
+                            "qty_available": None,
+                            "unit_price": None,
+                            "currency": "USD",
+                            "source_type": "octopart",
+                            "is_authorized": auth,
+                            "confidence": 3 if auth else 2,
+                            "octopart_url": octopart_url,
+                            "vendor_url": homepage,
+                        })
+                    continue
+
+                for offer in offers:
+                    qty = offer.get("inventoryLevel")
+                    price, currency = None, "USD"
+                    prices = offer.get("prices") or []
+                    if prices:
+                        best = min(prices, key=lambda p: p.get("quantity", 999999))
+                        price = best.get("price")
+                        currency = best.get("currency", "USD")
+
+                    click_url = offer.get("clickUrl", "")
+                    sku = offer.get("sku", "")
+
+                    key = f"{name}_{mpn}_{sku}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
 
                     results.append({
-                        "vendor_name": vendor_name,
-                        "part_number": item.get("mpn", part_number),
+                        "vendor_name": name,
                         "manufacturer": mfr,
-                        "quantity": int(qty) if qty else None,
-                        "price": float(price) if price else None,
-                        "condition": "new",
-                        "lead_time_days": 0 if qty and qty > 0 else None,
-                        "lead_time_text": "Stock" if qty and qty > 0 else None,
-                        "source_type": self.source_type,
-                        "source_url": item.get("octopart_url", ""),
-                        "confidence": 5 if is_auth and qty else 4,
-                        "evidence_type": "active_listing",
-                        "vendor_type": "distributor" if is_auth else "broker",
-                        "is_authorized": is_auth,
+                        "mpn_matched": mpn,
+                        "qty_available": int(qty) if qty else None,
+                        "unit_price": round(float(price), 4) if price else None,
+                        "currency": currency,
+                        "source_type": "octopart",
+                        "is_authorized": auth,
+                        "confidence": 5 if auth and qty else 4 if qty else 3,
+                        "octopart_url": octopart_url,
+                        "click_url": click_url,
+                        "vendor_url": homepage,
+                        "vendor_sku": sku,
                     })
 
-        logger.info("octopart_search", part=part_number, results=len(results))
+        log.info(f"Nexar: {pn} -> {len(results)} seller results")
         return results
+
+
+OctopartConnector = NexarConnector
 
 
 class BrokerBinConnector(BaseConnector):
-    """Search BrokerBin API."""
+    """BrokerBin REST API v2.
 
-    def __init__(self, api_key: str, api_secret: str):
+    Auth: Bearer token in Authorization header + login header for user.
+    Endpoint: GET https://search.brokerbin.com/api/v2/part/search?query={mpn}&size=100
+    Response: { meta: {...}, data: [{ company, country, part, mfg, cond, description, price, qty, age_in_days }] }
+    """
+    API_URL = "https://search.brokerbin.com/api/v2/part/search"
+
+    def __init__(self, api_key: str, api_secret: str = ""):
         super().__init__()
-        self.api_key = api_key
-        self.api_secret = api_secret
-        self.source_type = "brokerbin"
+        self.token = api_key        # Bearer token
+        self.login = api_secret      # BrokerBin username (e.g. "triomhk")
 
     async def _do_search(self, part_number: str) -> list[dict]:
-        if not self.api_key:
+        if not self.token:
             return []
 
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.get(
-                "https://api.brokerbin.com/v1/search",
-                params={"q": part_number},
-                headers={
-                    "Authorization": f"Bearer {self.api_key}",
-                    "X-Api-Secret": self.api_secret,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        headers = {
+            "Authorization": f"Bearer {self.token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        if self.login:
+            headers["login"] = self.login
+
+        params = {
+            "query": part_number,
+            "size": "100",
+        }
+
+        async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as c:
+            r = await c.get(self.API_URL, params=params, headers=headers)
+
+            if r.status_code != 200:
+                log.warning(f"BrokerBin: HTTP {r.status_code} for {part_number}: {r.text[:200]}")
+                return []
+
+            try:
+                body = r.json()
+            except Exception:
+                log.warning(f"BrokerBin: non-JSON response for {part_number}")
+                return []
+
+        items = body.get("data", [])
+        if not isinstance(items, list):
+            return []
 
         results = []
-        for item in data.get("results", []):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            company = (item.get("company") or "").strip()
+            if not company:
+                continue
+
+            # Log all available fields from first result (once per search)
+            if not results:
+                log.info(f"BrokerBin fields for {part_number}: {list(item.keys())}")
+
+            qty = _safe_int(item.get("qty"))
+            price = _safe_float(item.get("price"))
+            age = _safe_int(item.get("age_in_days"))
+
+            # Confidence: higher for fresh listings with qty and price
+            conf = 3
+            if qty and qty > 0:
+                conf = 4
+            if qty and price and price > 0:
+                conf = 5
+
             results.append({
-                "vendor_name": item.get("company", ""),
-                "part_number": item.get("part_number", part_number),
-                "manufacturer": item.get("manufacturer", ""),
-                "quantity": int(item["quantity"]) if item.get("quantity") else None,
-                "price": float(item["price"]) if item.get("price") else None,
-                "condition": item.get("condition"),
-                "lead_time_days": None,
-                "lead_time_text": None,
-                "source_type": self.source_type,
-                "source_url": item.get("url", ""),
-                "confidence": 4 if item.get("quantity") else 3,
-                "evidence_type": "active_listing",
-                "vendor_type": "broker",
+                "vendor_name": company,
+                "manufacturer": (item.get("mfg") or "").strip(),
+                "mpn_matched": (item.get("part") or part_number).strip(),
+                "qty_available": qty,
+                "unit_price": round(price, 4) if price and price > 0 else None,
+                "currency": "USD",
+                "source_type": "brokerbin",
                 "is_authorized": False,
+                "confidence": conf,
+                "condition": (item.get("cond") or "").strip(),
+                "description": (item.get("description") or "").strip()[:500],
+                "country": (item.get("country") or "").strip(),
+                "age_in_days": age,
+                "vendor_phone": (item.get("phone") or item.get("telephone") or "").strip() or None,
+                "vendor_email": (item.get("email") or item.get("contact_email") or "").strip() or None,
             })
 
-        logger.info("brokerbin_search", part=part_number, results=len(results))
+        total = (body.get("meta") or {}).get("total", len(results))
+        log.info(f"BrokerBin: {part_number} -> {len(results)} results (total: {total})")
         return results
+
+
+def _safe_int(v):
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (ValueError, TypeError):
+        return None
+
+
+def _safe_float(v):
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return None
