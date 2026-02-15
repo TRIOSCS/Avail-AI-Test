@@ -1,7 +1,7 @@
 """Configuration — all settings from environment variables."""
 import os
 
-APP_VERSION = "1.3.2"
+APP_VERSION = "1.3.3"
 
 class Settings:
     app_url: str = os.getenv("APP_URL", "http://localhost:8000")

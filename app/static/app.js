@@ -156,11 +156,16 @@ function showDetail(id, name) {
     // Show customer display if available
     const custEl = document.getElementById('detailCustomer');
     if (custEl) custEl.textContent = _reqCustomerMap[id] || '';
-    // Show Clone button only for archived/won/lost requisitions
+    // Show Clone button only for archived/won/lost; set Submit vs Search All label
+    const reqInfo = _reqListData.find(r => r.id === id);
     const cloneBtn = document.getElementById('cloneBtn');
     if (cloneBtn) {
-        const reqInfo = _reqListData.find(r => r.id === id);
         cloneBtn.style.display = (reqInfo && ['archived', 'won', 'lost'].includes(reqInfo.status)) ? '' : 'none';
+    }
+    const searchBtn = document.getElementById('searchAllBtn');
+    if (searchBtn) {
+        const isDraft = reqInfo && reqInfo.status === 'draft';
+        searchBtn.textContent = isDraft ? 'Submit' : '⟳ Search All';
     }
     // Restore cached results or load saved sightings from DB
     if (searchResultsCache[id]) {
@@ -249,7 +254,7 @@ function showToast(msg, type = 'info') {
 let reqSearchTimer = null;
 let _reqCustomerMap = {};  // id → customer_display
 let _reqListData = [];     // cached list for client-side filtering
-let _reqStatusFilter = 'all';
+let _reqStatusFilter = 'draft';
 
 async function loadRequisitions(query = '') {
     const url = query ? `/api/requisitions?q=${encodeURIComponent(query)}` : '/api/requisitions';
@@ -264,21 +269,24 @@ function renderReqList() {
     const el = document.getElementById('reqList');
     const statusBar = document.getElementById('reqStatusBar');
     let data = _reqListData;
-    // Apply status filter (archive is pre-filtered by backend)
+    // Apply status filter
     if (_reqStatusFilter === 'archive') {
         // Backend already returned only archived/won/lost
-    } else if (_reqStatusFilter !== 'all') {
+    } else if (_reqStatusFilter === 'quoted') {
+        data = data.filter(r => r.status === 'quoting' || r.status === 'quoted');
+    } else if (_reqStatusFilter === 'active') {
+        data = data.filter(r => r.status === 'active');
+    } else {
         data = data.filter(r => r.status === _reqStatusFilter);
     }
-    // Always show status bar so Archive pill is accessible
-    if (statusBar) statusBar.style.display = _reqListData.length > 0 ? 'flex' : 'none';
+    // Always show status bar
+    if (statusBar) statusBar.style.display = 'flex';
     const countEl = document.getElementById('reqStatusCount');
-    if (countEl) countEl.textContent = _reqStatusFilter !== 'all' ? `${data.length} of ${_reqListData.length}` : `${_reqListData.length} total`;
+    if (countEl) countEl.textContent = `${data.length}`;
 
     if (!data.length) {
-        el.innerHTML = _reqStatusFilter !== 'all'
-            ? '<p class="empty">No requisitions with status "' + _reqStatusFilter + '"</p>'
-            : (_reqListData.length ? '<p class="empty">No matching requisitions</p>' : '<p class="empty">No requisitions yet — create one to get started</p>');
+        const labels = {draft:'Draft',active:'Sourcing',offers:'Offers',quoted:'Quoted',archive:'Archive'};
+        el.innerHTML = '<p class="empty">No ' + (labels[_reqStatusFilter] || _reqStatusFilter) + ' requisitions</p>';
         return;
     }
     el.innerHTML = data.map(r => {
@@ -327,8 +335,6 @@ function setReqStatusFilter(status, btn) {
                 data.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
                 renderReqList();
             });
-    } else if (status === 'all') {
-        loadRequisitions();
     } else {
         renderReqList();
     }
@@ -521,7 +527,6 @@ async function addReq() {
         if (targetEl) targetEl.value = '';
         mpnEl.focus();
         loadRequirements();
-        searchAll();
     }
 }
 
@@ -573,7 +578,6 @@ async function doUpload() {
             st.className = 'ustatus ok';
             st.textContent = `Added ${data.created} parts from ${data.total_rows} rows`;
             loadRequirements();
-            searchAll();
         } else {
             st.className = 'ustatus err'; st.textContent = data.detail || 'Upload failed';
         }
@@ -584,6 +588,10 @@ async function doUpload() {
 }
 
 // ── Search ──────────────────────────────────────────────────────────────
+function submitOrSearch() {
+    searchAll();
+}
+
 async function searchAll() {
     if (!currentReqId) return;
     const btn = document.getElementById('searchAllBtn');
@@ -596,9 +604,11 @@ async function searchAll() {
             selectedSightings.clear();
             expandedGroups.clear();
             renderSources();
-            // Update requirement counts from actual search results so they match Sources tab
             updateRequirementCounts();
             switchTab('sources', document.querySelectorAll('.tab')[1]);
+            // Update status in cached list (draft→active after submit)
+            const reqInfo = _reqListData.find(r => r.id === currentReqId);
+            if (reqInfo && reqInfo.status === 'draft') reqInfo.status = 'active';
         }
     } catch (e) {
         alert('Search error: ' + e.message);

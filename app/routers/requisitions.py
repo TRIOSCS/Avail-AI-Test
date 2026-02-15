@@ -118,6 +118,7 @@ async def create_requisition(body: RequisitionCreate, user: User = Depends(requi
         customer_site_id=body.customer_site_id,
         customer_name=body.customer_name,
         created_by=user.id,
+        status="draft",
     )
     db.add(req)
     db.commit()
@@ -281,8 +282,8 @@ async def search_all(req_id: int, user: User = Depends(require_user), db: Sessio
 
     # Stamp last searched time (resets 30-day auto-archive clock)
     req.last_searched_at = datetime.now(timezone.utc)
-    # Reactivate if archived
-    if req.status == "archived":
+    # Transition draft→active on first search; reactivate if archived
+    if req.status in ("draft", "archived"):
         req.status = "active"
     db.commit()
 
