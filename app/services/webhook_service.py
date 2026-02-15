@@ -233,22 +233,8 @@ async def handle_notification(payload: dict, db: Session):
         user_email = user.email.lower()
 
         if from_addr and from_addr.lower() == user_email:
-            # Outbound — log for each recipient
-            for to_addr in to_addrs:
-                if to_addr:
-                    to_name = _extract_name(
-                        next((r for r in msg.get("toRecipients", [])
-                              if _extract_email(r) == to_addr), None)
-                    )
-                    log_email_activity(
-                        user_id=user.id,
-                        direction="sent",
-                        email_addr=to_addr,
-                        subject=subject,
-                        external_id=f"{message_id}:to:{to_addr}",
-                        contact_name=to_name,
-                        db=db,
-                    )
+            # Outbound — skip logging to avoid noise during active sourcing
+            continue
         else:
             # Inbound — log for the sender
             from_name = _extract_name(msg.get("from"))
