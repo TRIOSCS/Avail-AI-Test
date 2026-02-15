@@ -211,6 +211,11 @@ def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Si
         "source_credibility": settings.weight_source_credibility,
         "price": settings.weight_price,
     }
+
+    # Delete previous sightings for this requirement to prevent duplicates on re-search
+    db.query(Sighting).filter_by(requirement_id=req.id).delete()
+    db.flush()
+
     sightings = []
     for r in fresh:
         s = Sighting(

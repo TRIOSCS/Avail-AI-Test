@@ -54,7 +54,7 @@ class TestBatchRfqSend:
 
     def test_valid_groups(self):
         b = BatchRfqSend(groups=[
-            {"vendor_name": "Acme", "email": "a@acme.com", "parts": ["LM358"]},
+            {"vendor_name": "Acme", "vendor_email": "a@acme.com", "parts": ["LM358"]},
         ])
         assert len(b.groups) == 1
         assert b.groups[0].vendor_name == "Acme"
@@ -72,7 +72,7 @@ class TestRfqPrepare:
         assert r.vendors == []
 
     def test_with_vendors(self):
-        r = RfqPrepare(vendors=["Acme", "Globex"])
+        r = RfqPrepare(vendors=[{"vendor_name": "Acme"}, {"vendor_name": "Globex"}])
         assert len(r.vendors) == 2
 
 

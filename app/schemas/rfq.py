@@ -37,7 +37,7 @@ class PhoneCallLog(BaseModel):
 class RfqVendorGroup(BaseModel):
     """A group of vendors to receive an RFQ for specific parts."""
     vendor_name: str
-    email: str
+    vendor_email: str
     parts: list[str] = Field(default_factory=list)
 
 
@@ -46,9 +46,14 @@ class BatchRfqSend(BaseModel):
     groups: list[RfqVendorGroup] = Field(default_factory=list)
 
 
+class RfqPrepareVendor(BaseModel):
+    """A vendor entry in the RFQ prepare request."""
+    vendor_name: str
+
+
 class RfqPrepare(BaseModel):
     """Pre-send vendor preparation — check exhaustion + vendor cards."""
-    vendors: list[str] = Field(default_factory=list)
+    vendors: list[RfqPrepareVendor] = Field(default_factory=list)
 
 
 class FollowUpEmail(BaseModel):

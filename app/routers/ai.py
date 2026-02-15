@@ -120,8 +120,8 @@ async def ai_find_contacts(
             vendor_card_id = card.id
 
     if not company_name:
-        company_name = body.get("company_name", "")
-        domain = body.get("domain")
+        # No company resolved from entity_type/entity_id — will fail below
+        pass
 
     if not company_name:
         raise HTTPException(400, "company_name or entity_id required")

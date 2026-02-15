@@ -14,8 +14,9 @@ Called by: main.py (router mount)
 Depends on: models, email_service, vendor_utils, engagement_scoring
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger as log
 from sqlalchemy import func as sqlfunc
@@ -26,6 +27,7 @@ from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_fresh_token, require_user
 from ..models import Contact, Requisition, User, VendorCard, VendorResponse, VendorReview
 from ..schemas.rfq import BatchRfqSend, FollowUpEmail, PhoneCallLog, RfqPrepare
+from ..email_service import log_phone_contact, send_batch_rfq, poll_inbox
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["rfq"])
@@ -173,7 +175,7 @@ async def rfq_prepare(req_id: int, payload: RfqPrepare, user: User = Depends(req
 
     results = []
     for v in vendors[:50]:
-        vendor_name = v.get("vendor_name", "") if isinstance(v, dict) else str(v)
+        vendor_name = v.vendor_name
         norm = normalize_vendor_name(vendor_name)
         card = db.query(VendorCard).filter_by(normalized_name=norm).first()
         already_asked = sorted(exhaustion.get(norm, set()))
