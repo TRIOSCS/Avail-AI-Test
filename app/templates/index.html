@@ -1249,6 +1249,25 @@
     </div>
 </div>
 
+<!-- Site Contact Modal -->
+<div id="siteContactModal" class="modal-bg" onclick="if(event.target===this)closeModal('siteContactModal')">
+    <div class="modal">
+        <h2 id="siteContactModalTitle">Add Contact</h2>
+        <input type="hidden" id="scSiteId">
+        <input type="hidden" id="scContactId">
+        <label>Name *<input id="scFullName" placeholder="Full name"></label>
+        <label>Job Title<input id="scTitle" placeholder="e.g. Purchasing Manager"></label>
+        <label>Email<input id="scEmail" type="email" placeholder="email@company.com"></label>
+        <label>Phone<input id="scPhone" placeholder="+1 555-000-0000"></label>
+        <label>Notes<textarea id="scNotes" rows="2" placeholder="Optional notes"></textarea></label>
+        <label style="display:flex;align-items:center;gap:8px;margin:8px 0"><input id="scPrimary" type="checkbox"> Primary contact</label>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('siteContactModal')">Cancel</button>
+            <button class="btn btn-primary" onclick="saveSiteContact()">Save Contact</button>
+        </div>
+    </div>
+</div>
+
 <!-- Compare Offers Modal -->
 
 <script>

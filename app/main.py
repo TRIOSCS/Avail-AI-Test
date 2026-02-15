@@ -36,6 +36,8 @@ log = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app):
     """App startup/shutdown — launches background scheduler."""
+    from .startup import run_startup_migrations
+    run_startup_migrations()
     from .scheduler import start_scheduler
     task = asyncio.create_task(start_scheduler())
     log.info("Background scheduler launched")

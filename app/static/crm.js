@@ -88,13 +88,31 @@ async function toggleSiteDetail(siteId) {
             if (!res.ok) { panel.innerHTML = '<p class="empty" style="padding:8px">Error loading site</p>'; return; }
             const s = await res.json();
             const siteDomain = s.company_domain || (s.company_website ? s.company_website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
+            const contactsHtml = (s.contacts || []).length
+                ? s.contacts.map(c => `
+                    <div class="si-contact-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
+                        <div style="flex:1;min-width:0">
+                            <span style="font-weight:500">${esc(c.full_name)}</span>
+                            ${c.is_primary ? '<span style="font-size:9px;background:var(--teal);color:#fff;padding:1px 5px;border-radius:8px;margin-left:4px">Primary</span>' : ''}
+                            ${c.title ? '<span style="color:var(--muted);font-size:11px;margin-left:4px">' + esc(c.title) + '</span>' : ''}
+                            <div style="font-size:11px;color:var(--text2)">
+                                ${c.email ? '<a href="mailto:'+esc(c.email)+'" style="color:var(--teal)">'+esc(c.email)+'</a> ' : ''}
+                                ${c.phone ? '<span>· ' + esc(c.phone) + '</span>' : ''}
+                            </div>
+                            ${c.notes ? '<div style="font-size:10px;color:var(--muted)">'+esc(c.notes)+'</div>' : ''}
+                        </div>
+                        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditSiteContact(${s.id},${c.id})" style="padding:2px 6px;font-size:10px">Edit</button>
+                        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteSiteContact(${s.id},${c.id},'${escAttr(c.full_name)}')" style="padding:2px 6px;font-size:10px">✕</button>
+                    </div>`).join('')
+                : '<p class="empty" style="padding:4px;font-size:11px">No contacts — add one below</p>';
             panel.innerHTML = `
             <div class="site-info">
                 <div class="si-row"><span class="si-label">Owner</span><span>${esc(s.owner_name || '—')}</span></div>
-                <div class="si-row"><span class="si-label">Contact</span><span>${esc(s.contact_name || '—')}${s.contact_title ? ', ' + esc(s.contact_title) : ''}</span></div>
-                <div class="si-row"><span class="si-label">Email</span><span>${s.contact_email ? '<a href="mailto:'+esc(s.contact_email)+'">'+esc(s.contact_email)+'</a>' : '—'}</span></div>
-                <div class="si-row"><span class="si-label">Phone</span><span>${esc(s.contact_phone || '—')}</span></div>
-                ${s.contact_linkedin ? '<div class="si-row"><span class="si-label">LinkedIn</span><span><a href="'+escAttr(s.contact_linkedin)+'" target="_blank" style="color:var(--teal)">Profile ↗</a></span></div>' : ''}
+                <div style="margin:8px 0">
+                    <strong style="font-size:11px;color:var(--muted)">Contacts</strong>
+                    ${contactsHtml}
+                    <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openAddSiteContact(${s.id})" style="margin-top:4px">+ Add Contact</button>
+                </div>
                 <div class="si-row"><span class="si-label">Terms</span><span>${esc(s.payment_terms || '—')} · ${esc(s.shipping_terms || '—')}</span></div>
                 <div class="si-row"><span class="si-label">Address</span><span>${esc(s.address_line1 || '')} ${s.city ? esc(s.city)+', ' : ''}${esc(s.state || '')} ${esc(s.zip || '')}</span></div>
                 ${s.notes ? '<div class="si-row"><span class="si-label">Notes</span><span>'+esc(s.notes)+'</span></div>' : ''}
@@ -1227,6 +1245,81 @@ async function generateSmartRFQ(vendorName, parts) {
         return null;
     }
 }
+
+// ── Site Contacts CRUD ─────────────────────────────────────────────────
+
+function openAddSiteContact(siteId) {
+    document.getElementById('scSiteId').value = siteId;
+    document.getElementById('scContactId').value = '';
+    document.getElementById('siteContactModalTitle').textContent = 'Add Contact';
+    ['scFullName','scTitle','scEmail','scPhone','scNotes'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('scPrimary').checked = false;
+    document.getElementById('siteContactModal').classList.add('open');
+    setTimeout(() => document.getElementById('scFullName').focus(), 100);
+}
+
+async function openEditSiteContact(siteId, contactId) {
+    try {
+        const res = await fetch('/api/sites/' + siteId + '/contacts');
+        if (!res.ok) { showToast('Failed to load contacts', 'error'); return; }
+        const contacts = await res.json();
+        const c = contacts.find(x => x.id === contactId);
+        if (!c) { showToast('Contact not found', 'error'); return; }
+        document.getElementById('scSiteId').value = siteId;
+        document.getElementById('scContactId').value = contactId;
+        document.getElementById('siteContactModalTitle').textContent = 'Edit Contact';
+        document.getElementById('scFullName').value = c.full_name || '';
+        document.getElementById('scTitle').value = c.title || '';
+        document.getElementById('scEmail').value = c.email || '';
+        document.getElementById('scPhone').value = c.phone || '';
+        document.getElementById('scNotes').value = c.notes || '';
+        document.getElementById('scPrimary').checked = !!c.is_primary;
+        document.getElementById('siteContactModal').classList.add('open');
+        setTimeout(() => document.getElementById('scFullName').focus(), 100);
+    } catch (e) { console.error('openEditSiteContact:', e); showToast('Error loading contact', 'error'); }
+}
+
+async function saveSiteContact() {
+    const siteId = document.getElementById('scSiteId').value;
+    const contactId = document.getElementById('scContactId').value;
+    const data = {
+        full_name: document.getElementById('scFullName').value.trim(),
+        title: document.getElementById('scTitle').value.trim() || null,
+        email: document.getElementById('scEmail').value.trim() || null,
+        phone: document.getElementById('scPhone').value.trim() || null,
+        notes: document.getElementById('scNotes').value.trim() || null,
+        is_primary: document.getElementById('scPrimary').checked,
+    };
+    if (!data.full_name) { showToast('Name is required', 'error'); return; }
+    try {
+        const url = contactId
+            ? '/api/sites/' + siteId + '/contacts/' + contactId
+            : '/api/sites/' + siteId + '/contacts';
+        const res = await fetch(url, {
+            method: contactId ? 'PUT' : 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) { showToast('Failed to save contact', 'error'); return; }
+        closeModal('siteContactModal');
+        showToast(contactId ? 'Contact updated' : 'Contact added', 'success');
+        // Refresh the site detail panel
+        const panel = document.getElementById('siteDetail-' + siteId);
+        if (panel) { panel.style.display = 'none'; toggleSiteDetail(parseInt(siteId)); }
+    } catch (e) { console.error('saveSiteContact:', e); showToast('Error saving contact', 'error'); }
+}
+
+async function deleteSiteContact(siteId, contactId, name) {
+    if (!confirm('Remove contact "' + name + '"?')) return;
+    try {
+        const res = await fetch('/api/sites/' + siteId + '/contacts/' + contactId, { method: 'DELETE' });
+        if (!res.ok) { showToast('Failed to delete contact', 'error'); return; }
+        showToast('Contact removed', 'info');
+        const panel = document.getElementById('siteDetail-' + siteId);
+        if (panel) { panel.style.display = 'none'; toggleSiteDetail(siteId); }
+    } catch (e) { console.error('deleteSiteContact:', e); showToast('Error deleting contact', 'error'); }
+}
+
 
 // Generate smart draft for the currently selected first vendor in RFQ modal
 async function generateSmartRFQForModal() {

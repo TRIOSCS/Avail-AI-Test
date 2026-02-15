@@ -35,6 +35,7 @@ from ..models import (
     Quote,
     Requirement,
     Requisition,
+    SiteContact,
     SyncLog,
     User,
     VendorCard,
@@ -54,6 +55,8 @@ from ..schemas.crm import (
     QuoteReopen,
     QuoteResult,
     QuoteUpdate,
+    SiteContactCreate,
+    SiteContactUpdate,
     SiteCreate,
     SiteUpdate,
 )
@@ -253,6 +256,9 @@ async def get_site(site_id: int, user: User = Depends(require_user), db: Session
     reqs = db.query(Requisition).filter(
         Requisition.customer_site_id == site_id,
     ).order_by(Requisition.created_at.desc()).limit(20).all()
+    contacts = db.query(SiteContact).filter(
+        SiteContact.customer_site_id == site_id,
+    ).order_by(SiteContact.is_primary.desc(), SiteContact.full_name).all()
     return {
         "id": site.id, "company_id": site.company_id,
         "company_name": site.company.name if site.company else None,
@@ -268,12 +274,87 @@ async def get_site(site_id: int, user: User = Depends(require_user), db: Session
         "city": site.city, "state": site.state, "zip": site.zip, "country": site.country,
         "payment_terms": site.payment_terms, "shipping_terms": site.shipping_terms,
         "notes": site.notes,
+        "contacts": [{
+            "id": c.id, "full_name": c.full_name, "title": c.title,
+            "email": c.email, "phone": c.phone, "notes": c.notes,
+            "is_primary": c.is_primary,
+        } for c in contacts],
         "recent_reqs": [{
             "id": r.id, "name": r.name, "status": r.status,
             "requirement_count": len(r.requirements),
             "created_at": r.created_at.isoformat() if r.created_at else None,
         } for r in reqs],
     }
+
+
+# ── Site Contacts ─────────────────────────────────────────────────────────
+
+
+@router.get("/api/sites/{site_id}/contacts")
+async def list_site_contacts(site_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    site = db.get(CustomerSite, site_id)
+    if not site:
+        raise HTTPException(404)
+    contacts = db.query(SiteContact).filter(
+        SiteContact.customer_site_id == site_id,
+    ).order_by(SiteContact.is_primary.desc(), SiteContact.full_name).all()
+    return [{
+        "id": c.id, "full_name": c.full_name, "title": c.title,
+        "email": c.email, "phone": c.phone, "notes": c.notes,
+        "is_primary": c.is_primary,
+    } for c in contacts]
+
+
+@router.post("/api/sites/{site_id}/contacts")
+async def create_site_contact(
+    site_id: int, payload: SiteContactCreate,
+    user: User = Depends(require_user), db: Session = Depends(get_db),
+):
+    site = db.get(CustomerSite, site_id)
+    if not site:
+        raise HTTPException(404, "Site not found")
+    if payload.is_primary:
+        db.query(SiteContact).filter(
+            SiteContact.customer_site_id == site_id, SiteContact.is_primary == True,  # noqa: E712
+        ).update({"is_primary": False})
+    contact = SiteContact(customer_site_id=site_id, **payload.model_dump())
+    db.add(contact)
+    db.commit()
+    return {"id": contact.id, "full_name": contact.full_name}
+
+
+@router.put("/api/sites/{site_id}/contacts/{contact_id}")
+async def update_site_contact(
+    site_id: int, contact_id: int, payload: SiteContactUpdate,
+    user: User = Depends(require_user), db: Session = Depends(get_db),
+):
+    contact = db.get(SiteContact, contact_id)
+    if not contact or contact.customer_site_id != site_id:
+        raise HTTPException(404)
+    updates = payload.model_dump(exclude_unset=True)
+    if updates.get("is_primary"):
+        db.query(SiteContact).filter(
+            SiteContact.customer_site_id == site_id,
+            SiteContact.is_primary == True,  # noqa: E712
+            SiteContact.id != contact_id,
+        ).update({"is_primary": False})
+    for field, value in updates.items():
+        setattr(contact, field, value)
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/api/sites/{site_id}/contacts/{contact_id}")
+async def delete_site_contact(
+    site_id: int, contact_id: int,
+    user: User = Depends(require_user), db: Session = Depends(get_db),
+):
+    contact = db.get(SiteContact, contact_id)
+    if not contact or contact.customer_site_id != site_id:
+        raise HTTPException(404)
+    db.delete(contact)
+    db.commit()
+    return {"ok": True}
 
 
 # ── Enrichment (shared for vendors + customers) ─────────────────────────

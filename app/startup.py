@@ -188,9 +188,41 @@ def _create_crm_tables(conn) -> None:
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW()
         )""",
+        """CREATE TABLE IF NOT EXISTS site_contacts (
+            id SERIAL PRIMARY KEY,
+            customer_site_id INTEGER NOT NULL REFERENCES customer_sites(id) ON DELETE CASCADE,
+            full_name VARCHAR(255) NOT NULL,
+            title VARCHAR(255),
+            email VARCHAR(255),
+            phone VARCHAR(100),
+            notes TEXT,
+            is_primary BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )""",
     ]
     for stmt in crm_tables:
         _exec(conn, stmt)
+    # One-time seed: copy existing inline contacts from customer_sites into site_contacts
+    _seed_site_contacts(conn)
+
+
+def _seed_site_contacts(conn) -> None:
+    """Idempotent: copy contact_name/email/phone/title from customer_sites into site_contacts."""
+    try:
+        row = conn.execute(sqltext("SELECT COUNT(*) FROM site_contacts")).scalar()
+        if row and row > 0:
+            return  # already seeded
+        conn.execute(sqltext("""
+            INSERT INTO site_contacts (customer_site_id, full_name, title, email, phone, is_primary)
+            SELECT id, contact_name, contact_title, contact_email, contact_phone, TRUE
+            FROM customer_sites
+            WHERE contact_name IS NOT NULL AND contact_name != ''
+        """))
+        conn.commit()
+        log.info("Seeded site_contacts from existing customer_sites data")
+    except Exception:
+        conn.rollback()
 
 
 # ── CRM column additions ────────────────────────────────────────────
@@ -219,6 +251,8 @@ def _create_crm_indexes(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_quotes_req ON quotes(requisition_id)",
         "CREATE INDEX IF NOT EXISTS ix_quotes_site ON quotes(customer_site_id)",
         "CREATE INDEX IF NOT EXISTS ix_quotes_status ON quotes(status)",
+        "CREATE INDEX IF NOT EXISTS ix_site_contacts_site ON site_contacts(customer_site_id)",
+        "CREATE INDEX IF NOT EXISTS ix_site_contacts_email ON site_contacts(email)",
     ]
     for stmt in stmts:
         _exec(conn, stmt)

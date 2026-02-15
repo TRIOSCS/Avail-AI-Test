@@ -107,10 +107,34 @@ class CustomerSite(Base):
 
     company = relationship("Company", back_populates="sites")
     owner = relationship("User", foreign_keys=[owner_id])
+    site_contacts = relationship("SiteContact", back_populates="customer_site", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_cs_company", "company_id"),
         Index("ix_cs_owner", "owner_id"),
+    )
+
+
+class SiteContact(Base):
+    """Contact person at a customer site — multiple per site."""
+    __tablename__ = "site_contacts"
+    id = Column(Integer, primary_key=True)
+    customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="CASCADE"), nullable=False)
+    full_name = Column(String(255), nullable=False)
+    title = Column(String(255))
+    email = Column(String(255))
+    phone = Column(String(100))
+    notes = Column(Text)
+    is_primary = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+    customer_site = relationship("CustomerSite", back_populates="site_contacts")
+
+    __table_args__ = (
+        Index("ix_site_contacts_site", "customer_site_id"),
+        Index("ix_site_contacts_email", "email"),
     )
 
 

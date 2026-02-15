@@ -115,6 +115,35 @@ class SiteOut(BaseModel):
     site_name: str
 
 
+# ── Site Contacts ────────────────────────────────────────────────────
+
+
+class SiteContactCreate(BaseModel):
+    full_name: str
+    title: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    notes: str | None = None
+    is_primary: bool = False
+
+    @field_validator("full_name")
+    @classmethod
+    def full_name_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Contact name is required")
+        return v
+
+
+class SiteContactUpdate(BaseModel):
+    full_name: str | None = None
+    title: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    notes: str | None = None
+    is_primary: bool | None = None
+
+
 # ── Offers ───────────────────────────────────────────────────────────
 
 
