@@ -805,8 +805,6 @@ function renderSources() {
 
             const key = `${reqId}:${i}`;
             const checked = selectedSightings.has(key) ? 'checked' : '';
-            const score = Math.round(s.score || 0);
-            const rc = score >= 70 ? 'hi' : score >= 40 ? 'mid' : 'lo';
             const srcLabel = (s.source_type || '').toUpperCase();
             const cond = (s.condition || '').toUpperCase().trim();
             const condBadge = cond ? `<span class="badge b-cond-${cond === 'NEW' ? 'new' : 'ref'}">${esc(cond)}</span>` : '';
@@ -841,7 +839,6 @@ function renderSources() {
 
             html += `<div class="card sc ${s.is_historical ? 'sc-hist' : ''} ${s.is_material_history ? 'sc-mathistory' : ''} ${isSub ? 'sc-sub' : ''} ${unavailClass}">
                 ${isBuyer() ? `<input type="checkbox" ${checked} onchange="toggleSighting('${key}')">` : ''}
-                <div class="ring ${rc}">${score}</div>
                 <div class="sc-body">
                     <div class="sc-top">
                         <span class="sc-vendor">${esc(s.vendor_name)}</span>
