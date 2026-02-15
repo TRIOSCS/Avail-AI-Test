@@ -14,7 +14,7 @@ from sqlalchemy import func as sqlfunc, text as sqltext
 from starlette.middleware.sessions import SessionMiddleware
 import httpx
 
-from .config import settings
+from .config import settings, APP_VERSION
 from .database import engine, get_db
 from .models import (
     Base, User, Requisition, Requirement, Sighting, Contact, VendorResponse,
@@ -115,7 +115,7 @@ async def api_version_middleware(request: Request, call_next):
 # ── Health Check ──────────────────────────────────────────────────────
 @app.get("/health")
 async def health():
-    return {"status": "ok", "version": "1.2.0"}
+    return {"status": "ok", "version": APP_VERSION}
 
 
 # ── Seed API Sources ─────────────────────────────────────────────────────

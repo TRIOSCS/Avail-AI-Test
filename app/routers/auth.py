@@ -24,7 +24,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from ..config import settings
+from ..config import settings, APP_VERSION
 from ..database import get_db
 from ..dependencies import get_user
 from ..models import User
@@ -48,6 +48,7 @@ async def index(request: Request, db: Session = Depends(get_db)):
         "user_name": user.name if user else "",
         "user_email": user.email if user else "",
         "is_admin": is_admin,
+        "app_version": APP_VERSION,
     })
 
 
