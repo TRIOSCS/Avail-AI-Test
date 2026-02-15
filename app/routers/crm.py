@@ -188,10 +188,12 @@ async def list_companies(
 
 @router.post("/api/companies")
 async def create_company(payload: CompanyCreate, user: User = Depends(require_user), db: Session = Depends(get_db)):
+    from ..enrichment_service import normalize_company_input
+    clean_name, clean_domain = await normalize_company_input(payload.name, payload.domain or "")
     company = Company(
-        name=payload.name, website=payload.website,
+        name=clean_name, website=payload.website,
         industry=payload.industry, notes=payload.notes,
-        domain=payload.domain, linkedin_url=payload.linkedin_url,
+        domain=clean_domain or payload.domain, linkedin_url=payload.linkedin_url,
     )
     db.add(company)
     db.commit()

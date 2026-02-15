@@ -6,14 +6,155 @@ as enrichment providers. AI runs last to fill any remaining gaps.
 """
 import httpx
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
 from .config import settings
-from .utils.claude_client import claude_json
+from .utils.claude_client import claude_json, claude_text
 from .services.ai_service import enrich_contacts_websearch
 
 log = logging.getLogger("avail.enrichment")
+
+
+# ── Normalization ────────────────────────────────────────────────────────
+
+# Acronyms to preserve in Title Case conversions
+_KNOWN_ACRONYMS = {
+    "IBM", "AMD", "TI", "NXP", "STM", "TDK", "AVX", "TE", "3M", "ON",
+    "IXYS", "QFN", "BGA", "SOP", "IC", "LED", "PCB", "USB", "FPGA", "CPU",
+    "GPU", "RAM", "LLC", "INC", "LTD", "CO", "CORP", "GmbH", "AG", "SA",
+    "PLC", "LP", "NA", "USA", "UK", "EU", "HK",
+}
+
+_US_STATES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
+    "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+    "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+    "WI", "WY", "DC", "PR", "VI", "GU",
+}
+
+_COUNTRY_MAP = {
+    "US": "United States", "USA": "United States", "UK": "United Kingdom",
+    "GB": "United Kingdom", "DE": "Germany", "FR": "France", "JP": "Japan",
+    "CN": "China", "KR": "South Korea", "TW": "Taiwan", "HK": "Hong Kong",
+    "SG": "Singapore", "IN": "India", "CA": "Canada", "AU": "Australia",
+    "NL": "Netherlands", "CH": "Switzerland", "SE": "Sweden", "IL": "Israel",
+    "IT": "Italy", "MX": "Mexico", "BR": "Brazil", "MY": "Malaysia",
+    "TH": "Thailand", "PH": "Philippines", "VN": "Vietnam",
+}
+
+
+def _clean_domain(domain: str) -> str:
+    """Pure string cleanup for domain: strip, lowercase, remove protocol/www."""
+    d = domain.strip().rstrip(".").rstrip("/")
+    d = re.sub(r"^https?://", "", d, flags=re.IGNORECASE)
+    d = re.sub(r"^www\.", "", d, flags=re.IGNORECASE)
+    return d.lower().split("/")[0]
+
+
+def _name_looks_suspicious(name: str) -> bool:
+    """Heuristic: name might have typos if it has no vowels or weird patterns."""
+    words = [w for w in name.split() if len(w) > 2 and w.upper() not in _KNOWN_ACRONYMS]
+    if not words:
+        return False
+    for w in words:
+        if not re.search(r"[aeiouAEIOU]", w):
+            return True
+    return False
+
+
+async def normalize_company_input(name: str, domain: str = "") -> tuple[str, str]:
+    """Layer 1: clean up name and domain before any provider call.
+
+    Returns (cleaned_name, cleaned_domain).
+    """
+    clean_name = (name or "").strip()
+    clean_domain = _clean_domain(domain) if domain else ""
+
+    # AI typo fix only when name looks suspicious and we have an API key
+    if clean_name and _name_looks_suspicious(clean_name) and settings.anthropic_api_key:
+        try:
+            fixed = await claude_text(
+                f'Fix any typos in this company name. Return ONLY the corrected name, nothing else: "{clean_name}"',
+                system="You fix typos in company names. Return only the corrected name. If no typos, return the original exactly.",
+                model_tier="fast",
+                max_tokens=60,
+                timeout=5,
+            )
+            if fixed and fixed.strip().strip('"'):
+                clean_name = fixed.strip().strip('"')
+        except Exception as e:
+            log.debug("Typo fix skipped: %s", e)
+
+    return clean_name, clean_domain
+
+
+def _title_case_preserve_acronyms(s: str) -> str:
+    """Title Case but preserve known acronyms."""
+    if not s:
+        return s
+    words = s.split()
+    result = []
+    for w in words:
+        if w.upper() in _KNOWN_ACRONYMS:
+            result.append(w.upper())
+        else:
+            result.append(w.title())
+    return " ".join(result)
+
+
+def normalize_company_output(data: dict) -> dict:
+    """Layer 2: normalize enrichment output fields to consistent format."""
+    out = dict(data)
+
+    if out.get("legal_name"):
+        out["legal_name"] = _title_case_preserve_acronyms(out["legal_name"])
+
+    if out.get("domain"):
+        out["domain"] = _clean_domain(out["domain"])
+
+    if out.get("industry"):
+        out["industry"] = out["industry"].strip().title()
+
+    if out.get("employee_size"):
+        s = str(out["employee_size"]).strip().replace(",", "").replace(" ", "")
+        s = re.sub(r"employees?", "", s, flags=re.IGNORECASE).strip()
+        if s.isdigit() and int(s) >= 1000:
+            out["employee_size"] = f"{int(s):,}+"
+        elif not re.match(r"^\d+[-–]\d+$|^\d+[,\d]*\+?$", s):
+            out["employee_size"] = s
+        else:
+            out["employee_size"] = s.replace("–", "-")
+
+    if out.get("hq_city"):
+        out["hq_city"] = out["hq_city"].strip().title()
+
+    if out.get("hq_state"):
+        st = out["hq_state"].strip()
+        if st.upper() in _US_STATES:
+            out["hq_state"] = st.upper()
+        else:
+            out["hq_state"] = st.title()
+
+    if out.get("hq_country"):
+        c = out["hq_country"].strip()
+        out["hq_country"] = _COUNTRY_MAP.get(c.upper(), c.title())
+
+    if out.get("website"):
+        w = out["website"].strip().lower()
+        if not w.startswith("http"):
+            w = "https://" + w
+        out["website"] = w
+
+    if out.get("linkedin_url"):
+        li = out["linkedin_url"].strip().lower()
+        if not li.startswith("http"):
+            li = "https://" + li
+        out["linkedin_url"] = li
+
+    return out
 
 # ── Provider: Clay ──────────────────────────────────────────────────────
 
@@ -260,7 +401,11 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
 
     Tries Clay first, Explorium fills gaps, AI fills remaining gaps.
+    Input is normalized before providers, output is normalized after.
     """
+    # Layer 1: input cleanup
+    name, domain = await normalize_company_input(name, domain)
+
     result = {
         "legal_name": None, "domain": domain, "linkedin_url": None,
         "industry": None, "employee_size": None,
@@ -299,7 +444,8 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
             elif "ai" not in result["source"]:
                 result["source"] = result["source"] + "+ai"
 
-    return result
+    # Layer 2: output normalization
+    return normalize_company_output(result)
 
 
 async def find_suggested_contacts(domain: str, name: str = "",
