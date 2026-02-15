@@ -21,13 +21,14 @@
         body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 
         /* Login */
-        .login{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(160deg,#f0f4f8,#e8edf5,#f0f7fa)}
-        .login-card{background:var(--white);border:1px solid var(--border);border-radius:16px;padding:48px;text-align:center;max-width:380px;width:90%;box-shadow:0 4px 24px rgba(0,0,0,.06)}
-        .login-logo{width:420px;margin-bottom:24px}
-        .login-card .sub{color:var(--muted);font-size:13px;margin-bottom:28px}
-        .btn-ms{display:inline-flex;align-items:center;gap:10px;background:var(--teal);color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:14px;transition:.15s}
-        .btn-ms:hover{background:#156a82}
-        .ver{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);margin-top:24px}
+        .login{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(160deg,#eef2f7 0%,#e4eaf3 40%,#e8f1f5 100%)}
+        .login-card{background:var(--white);border:1px solid var(--border);border-radius:20px;padding:56px 48px 44px;text-align:center;max-width:460px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,.07),0 1px 3px rgba(0,0,0,.04)}
+        .login-logo{width:280px;margin-bottom:12px}
+        .login-divider{width:48px;height:2px;background:var(--border2);margin:0 auto 20px;border-radius:1px}
+        .login-card .sub{color:var(--text2);font-size:14px;font-weight:500;margin-bottom:32px;letter-spacing:-.01em}
+        .btn-ms{display:inline-flex;align-items:center;gap:10px;background:var(--teal);color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:14px;transition:all .2s;box-shadow:0 2px 8px rgba(26,127,155,.25)}
+        .btn-ms:hover{background:#156a82;box-shadow:0 4px 16px rgba(26,127,155,.35);transform:translateY(-1px)}
+        .ver{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);margin-top:28px;letter-spacing:.02em}
 
         /* Shell */
         .shell{max-width:1100px;margin:0 auto;padding:16px 20px}
@@ -453,8 +454,8 @@
             .btn-archive,.btn-reactivate{min-height:28px}
 
             /* Login */
-            .login-card{padding:28px 20px;width:92%}
-            .login-logo{width:340px}
+            .login-card{padding:40px 24px 36px;width:92%}
+            .login-logo{width:240px}
             .btn-ms{padding:14px 24px;font-size:14px;width:100%;justify-content:center}
         }
 
@@ -470,8 +471,8 @@
             .act-stat-label{font-size:9px}
             .src-stat{flex:1 1 calc(50% - 4px)}
             .btn-primary{padding:8px 12px}
-            .login-card{padding:24px 16px}
-            .login-logo{width:280px}
+            .login-card{padding:32px 16px 28px}
+            .login-logo{width:200px}
             .topbar-logo{height:50px}
             .shell{padding:6px 8px}
         }
@@ -744,7 +745,8 @@
 <div class="login">
     <div class="login-card">
         <img src="/static/avail_logo.png" alt="AVAIL" class="login-logo">
-        <p class="sub">TRIO SCS Sourcing Engine</p>
+        <div class="login-divider"></div>
+        <p class="sub">Trio Supply Chain Solutions</p>
         <a href="/auth/login" class="btn-ms">
             <svg width="18" height="18" viewBox="0 0 21 21"><rect x="1" y="1" width="9" height="9" fill="#f25022"/><rect x="11" y="1" width="9" height="9" fill="#7fba00"/><rect x="1" y="11" width="9" height="9" fill="#00a4ef"/><rect x="11" y="11" width="9" height="9" fill="#ffb900"/></svg>
             Sign in with Microsoft
