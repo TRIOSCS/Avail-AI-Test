@@ -167,6 +167,12 @@ function showDetail(id, name) {
         const isDraft = reqInfo && reqInfo.status === 'draft';
         searchBtn.textContent = isDraft ? 'Submit' : '⟳ Search All';
     }
+    // Set status chip (no pulse on initial load)
+    const chip = document.getElementById('detailStatus');
+    if (chip && reqInfo) {
+        chip.className = 'status-chip status-' + reqInfo.status;
+        chip.textContent = _statusLabels[reqInfo.status] || reqInfo.status;
+    }
     // Restore cached results or load saved sightings from DB
     if (searchResultsCache[id]) {
         searchResults = searchResultsCache[id];
@@ -251,20 +257,20 @@ function showToast(msg, type = 'info') {
 }
 
 const _statusLabels = {draft:'Draft',active:'Sourcing',offers:'Offers',quoting:'Quoting',quoted:'Quoted',won:'Won',lost:'Lost',archived:'Archived'};
-const _statusMessages = {
-    active: 'Requisition submitted — sourcing in progress',
-    offers: 'Vendor offers confirmed — ready for quoting',
-    quoting: 'Quote is being prepared',
-    quoted: 'Quote sent to customer',
-    won: 'Deal won — moved to archive',
-    lost: 'Deal lost — moved to archive',
-};
+function updateDetailStatus(status) {
+    const chip = document.getElementById('detailStatus');
+    if (!chip) return;
+    chip.className = 'status-chip status-' + status;
+    chip.textContent = _statusLabels[status] || status;
+    chip.classList.remove('pulse');
+    void chip.offsetWidth;
+    chip.classList.add('pulse');
+}
 function notifyStatusChange(data) {
     if (!data || !data.status_changed) return;
-    const status = data.req_status;
-    const msg = _statusMessages[status] || ('Status → ' + (_statusLabels[status] || status));
-    const type = status === 'won' ? 'success' : status === 'lost' ? 'warn' : 'info';
-    showToast('📋 ' + msg, type);
+    updateDetailStatus(data.req_status);
+    const reqInfo = _reqListData.find(r => r.id === currentReqId);
+    if (reqInfo) reqInfo.status = data.req_status;
 }
 
 // ── Requisitions ────────────────────────────────────────────────────────
@@ -397,9 +403,6 @@ async function createRequisition() {
 async function toggleArchive(id) {
     const res = await fetch(`/api/requisitions/${id}/archive`, { method: 'PUT' });
     if (res.ok) {
-        const archData = await res.json();
-        const label = archData.status === 'active' ? 'Reactivated' : 'Archived';
-        showToast('📋 ' + label, 'info');
         if (_reqStatusFilter === 'archive') {
             fetch('/api/requisitions?status=archive')
                 .then(r => r.ok ? r.json() : [])
