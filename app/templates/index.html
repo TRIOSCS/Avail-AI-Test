@@ -53,7 +53,7 @@
         .btn-out:hover{border-color:var(--teal);color:var(--teal)}
 
         /* Buttons */
-        .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;transition:.15s;border:none}
+        .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;transition:.15s;border:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
         .btn-primary{background:var(--teal);color:#fff}.btn-primary:hover{background:#156a82}
         .btn-success{background:var(--green);color:#fff}.btn-success:hover{background:#0d9070}
         .btn-ghost{background:none;border:1px solid var(--border);color:var(--text2)}.btn-ghost:hover{border-color:var(--teal);color:var(--teal)}
@@ -343,7 +343,7 @@
             .topbar-left{flex-direction:column;gap:6px;align-items:flex-start;width:100%}
             .topbar-logo{height:58px}
             .topbar-nav{margin-left:0;flex-wrap:wrap;gap:3px;width:100%}
-            .topbar-nav button{padding:6px 10px;font-size:11px;flex:1;min-width:0;text-align:center;min-height:36px}
+            .topbar-nav button{padding:6px 10px;font-size:11px;flex:1;min-width:0;text-align:center;min-height:36px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
             .user{width:100%;justify-content:space-between;font-size:12px;flex-wrap:wrap;gap:6px}
             .m365-status{font-size:10px}
 
@@ -461,7 +461,7 @@
 
         /* Extra small screens (phones in portrait) */
         @media(max-width:420px){
-            .topbar-nav button{font-size:10px;padding:4px 6px;min-height:32px}
+            .topbar-nav button{font-size:10px;padding:4px 6px;min-height:32px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
             .tab{font-size:10px;padding:6px 10px}
             .tbl th,.tbl td{padding:4px 4px;font-size:10px}
             .tbl{min-width:400px}
