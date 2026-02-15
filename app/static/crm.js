@@ -90,26 +90,31 @@ async function toggleSiteDetail(siteId) {
             const siteDomain = s.company_domain || (s.company_website ? s.company_website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
             const contactsHtml = (s.contacts || []).length
                 ? s.contacts.map(c => `
-                    <div class="si-contact-row" style="display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px solid var(--border)">
-                        <div style="flex:1;min-width:0">
-                            <span style="font-weight:500">${esc(c.full_name)}</span>
-                            ${c.is_primary ? '<span style="font-size:9px;background:var(--teal);color:#fff;padding:1px 5px;border-radius:8px;margin-left:4px">Primary</span>' : ''}
-                            ${c.title ? '<span style="color:var(--muted);font-size:11px;margin-left:4px">' + esc(c.title) + '</span>' : ''}
-                            <div style="font-size:11px;color:var(--text2)">
-                                ${c.email ? '<a href="mailto:'+esc(c.email)+'" style="color:var(--teal)">'+esc(c.email)+'</a> ' : ''}
-                                ${c.phone ? '<span>· ' + esc(c.phone) + '</span>' : ''}
+                    <div class="si-contact">
+                        <div class="si-contact-info">
+                            <div>
+                                <span class="si-contact-name">${esc(c.full_name)}</span>
+                                ${c.is_primary ? '<span class="si-contact-badge">Primary</span>' : ''}
+                                ${c.title ? '<span class="si-contact-title">' + esc(c.title) + '</span>' : ''}
                             </div>
-                            ${c.notes ? '<div style="font-size:10px;color:var(--muted)">'+esc(c.notes)+'</div>' : ''}
+                            <div class="si-contact-meta">
+                                ${c.email ? '<a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>' : ''}
+                                ${c.email && c.phone ? ' · ' : ''}
+                                ${c.phone ? '<span>' + esc(c.phone) + '</span>' : ''}
+                            </div>
+                            ${c.notes ? '<div class="si-contact-notes">'+esc(c.notes)+'</div>' : ''}
                         </div>
-                        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditSiteContact(${s.id},${c.id})" style="padding:2px 6px;font-size:10px">Edit</button>
-                        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteSiteContact(${s.id},${c.id},'${escAttr(c.full_name)}')" style="padding:2px 6px;font-size:10px">✕</button>
+                        <div class="si-contact-actions">
+                            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditSiteContact(${s.id},${c.id})">Edit</button>
+                            <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteSiteContact(${s.id},${c.id},'${escAttr(c.full_name)}')">✕</button>
+                        </div>
                     </div>`).join('')
                 : '<p class="empty" style="padding:4px;font-size:11px">No contacts — add one below</p>';
             panel.innerHTML = `
             <div class="site-info">
                 <div class="si-row"><span class="si-label">Owner</span><span>${esc(s.owner_name || '—')}</span></div>
-                <div style="margin:8px 0">
-                    <strong style="font-size:11px;color:var(--muted)">Contacts</strong>
+                <div class="si-contacts">
+                    <div class="si-contacts-title">Contacts</div>
                     ${contactsHtml}
                     <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openAddSiteContact(${s.id})" style="margin-top:4px">+ Add Contact</button>
                 </div>

@@ -581,6 +581,21 @@
         .site-info a{color:var(--teal);text-decoration:none}
         .site-info a:hover{text-decoration:underline}
 
+        /* Site contacts list */
+        .si-contacts{margin:8px 0}
+        .si-contacts-title{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+        .si-contact{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,.03);font-size:12px}
+        .si-contact:last-of-type{border-bottom:none}
+        .si-contact-info{flex:1;min-width:0}
+        .si-contact-name{font-weight:600;color:var(--text)}
+        .si-contact-badge{font-size:9px;background:var(--teal);color:#fff;padding:1px 5px;border-radius:8px;margin-left:4px}
+        .si-contact-title{color:var(--muted);font-size:11px;margin-left:4px}
+        .si-contact-meta{font-size:11px;color:var(--text2);margin-top:1px}
+        .si-contact-meta a{color:var(--teal);text-decoration:none}
+        .si-contact-meta a:hover{text-decoration:underline}
+        .si-contact-notes{font-size:10px;color:var(--muted);margin-top:1px}
+        .si-contact-actions{display:flex;gap:4px;flex-shrink:0}
+
         /* Offers tab */
         .offer-group{margin-bottom:16px;background:var(--white);border:1px solid var(--border);border-radius:8px;overflow:hidden}
         .offer-group-header{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--surface);border-bottom:1px solid var(--border);font-size:12px}
@@ -640,6 +655,8 @@
             .quote-totals{flex-direction:column;gap:8px}
             .quote-terms{flex-direction:column}
             .offer-group-header{flex-wrap:wrap}
+            .si-contact{flex-direction:column;align-items:flex-start;gap:4px}
+            .si-contact-actions{width:100%;justify-content:flex-end}
         }
 
         /* Suggested Contacts */
@@ -1255,12 +1272,14 @@
         <h2 id="siteContactModalTitle">Add Contact</h2>
         <input type="hidden" id="scSiteId">
         <input type="hidden" id="scContactId">
-        <label>Name *<input id="scFullName" placeholder="Full name"></label>
-        <label>Job Title<input id="scTitle" placeholder="e.g. Purchasing Manager"></label>
-        <label>Email<input id="scEmail" type="email" placeholder="email@company.com"></label>
-        <label>Phone<input id="scPhone" placeholder="+1 555-000-0000"></label>
-        <label>Notes<textarea id="scNotes" rows="2" placeholder="Optional notes"></textarea></label>
-        <label style="display:flex;align-items:center;gap:8px;margin:8px 0"><input id="scPrimary" type="checkbox"> Primary contact</label>
+        <div class="lo-form">
+            <div class="field"><label>Name *</label><input id="scFullName" placeholder="Full name" onkeydown="if(event.key==='Enter')saveSiteContact()"></div>
+            <div class="field"><label>Job Title</label><input id="scTitle" placeholder="e.g. Purchasing Manager"></div>
+            <div class="field"><label>Email</label><input id="scEmail" type="email" placeholder="email@company.com"></div>
+            <div class="field"><label>Phone</label><input id="scPhone" placeholder="+1 555-000-0000"></div>
+            <div class="field field-full"><label>Notes</label><textarea id="scNotes" rows="2" placeholder="Optional notes"></textarea></div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:12px;color:var(--text2);cursor:pointer"><input id="scPrimary" type="checkbox" style="accent-color:var(--teal)"> Primary contact</label>
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('siteContactModal')">Cancel</button>
             <button class="btn btn-primary" onclick="saveSiteContact()">Save Contact</button>
