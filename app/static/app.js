@@ -515,6 +515,10 @@ function editReqCell(td, reqId, field) {
         const body = {};
         if (field === 'target_price') {
             body[field] = val ? parseFloat(val) : null;
+        } else if (field === 'target_qty') {
+            body[field] = parseInt(val) || 1;
+        } else if (field === 'substitutes') {
+            body[field] = val ? val.split(',').map(s => s.trim()).filter(Boolean) : [];
         } else {
             body[field] = val;
         }
