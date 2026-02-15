@@ -165,15 +165,20 @@ async def handle_notification(payload: dict, db: Session):
     """Process a Graph webhook notification payload.
 
     Graph sends a list of notifications. For each, we fetch the message
-    from Graph and log it as an activity.
+    from Graph, log it as an activity, and trigger inbox poll for RFQ
+    reply matching when inbound messages are detected.
     """
     from app.scheduler import get_valid_token
     from app.utils.graph_client import GraphClient
     from app.services.activity_service import log_email_activity
+    from app.email_service import poll_inbox
 
     notifications = payload.get("value", [])
     if not notifications:
         return
+
+    # Track users who received inbound messages so we can poll their inbox
+    users_with_inbound = {}  # user_id -> (user, token)
 
     for notif in notifications:
         # Validate client_state
@@ -257,8 +262,23 @@ async def handle_notification(payload: dict, db: Session):
                     contact_name=from_name,
                     db=db,
                 )
+                # Track this user for RFQ reply matching
+                if user.id not in users_with_inbound:
+                    users_with_inbound[user.id] = (user, token)
 
     db.commit()
+
+    # Trigger inbox poll for users who received inbound messages
+    # This matches vendor replies to outbound RFQ contacts in near-real-time
+    for user_id, (user, token) in users_with_inbound.items():
+        try:
+            new_responses = await poll_inbox(
+                token=token, db=db, scanned_by_user_id=user.id,
+            )
+            if new_responses:
+                log.info(f"Webhook-triggered poll [{user.email}]: {len(new_responses)} new response(s)")
+        except Exception as e:
+            log.error(f"Webhook-triggered poll failed for {user.email}: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════
