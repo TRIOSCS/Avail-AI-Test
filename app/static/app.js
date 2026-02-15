@@ -521,6 +521,7 @@ async function addReq() {
         if (targetEl) targetEl.value = '';
         mpnEl.focus();
         loadRequirements();
+        searchAll();
     }
 }
 
@@ -572,6 +573,7 @@ async function doUpload() {
             st.className = 'ustatus ok';
             st.textContent = `Added ${data.created} parts from ${data.total_rows} rows`;
             loadRequirements();
+            searchAll();
         } else {
             st.className = 'ustatus err'; st.textContent = data.detail || 'Upload failed';
         }

@@ -619,7 +619,7 @@ async def create_offer(
     )
     db.add(offer)
     if req.status in ("active", "sourcing"):
-        req.status = "quoting"
+        req.status = "offers"
     db.commit()
     return {"id": offer.id, "vendor_name": offer.vendor_name, "mpn": offer.mpn}
 
@@ -706,6 +706,8 @@ async def create_quote(
         created_by_id=user.id,
     )
     db.add(quote)
+    if req.status in ("active", "sourcing", "offers"):
+        req.status = "quoting"
     db.commit()
     return quote_to_dict(quote)
 
