@@ -283,8 +283,8 @@ async def enrich_company(
     user: User = Depends(require_user), db: Session = Depends(get_db),
 ):
     """Enrich a customer company with external data."""
-    if not settings.clay_api_key and not settings.explorium_api_key:
-        raise HTTPException(503, "No enrichment providers configured — set CLAY_API_KEY or EXPLORIUM_API_KEY in .env")
+    if not settings.clay_api_key and not settings.explorium_api_key and not settings.anthropic_api_key:
+        raise HTTPException(503, "No enrichment providers configured — set CLAY_API_KEY, EXPLORIUM_API_KEY, or ANTHROPIC_API_KEY in .env")
     from ..enrichment_service import apply_enrichment_to_company, enrich_entity
     company = db.get(Company, company_id)
     if not company:
@@ -308,8 +308,8 @@ async def enrich_vendor_card(
     user: User = Depends(require_user), db: Session = Depends(get_db),
 ):
     """Enrich a vendor card with external data."""
-    if not settings.clay_api_key and not settings.explorium_api_key:
-        raise HTTPException(503, "No enrichment providers configured — set CLAY_API_KEY or EXPLORIUM_API_KEY in .env")
+    if not settings.clay_api_key and not settings.explorium_api_key and not settings.anthropic_api_key:
+        raise HTTPException(503, "No enrichment providers configured — set CLAY_API_KEY, EXPLORIUM_API_KEY, or ANTHROPIC_API_KEY in .env")
     from ..enrichment_service import apply_enrichment_to_vendor, enrich_entity
     card = db.get(VendorCard, card_id)
     if not card:
@@ -333,8 +333,8 @@ async def get_suggested_contacts(
     user: User = Depends(require_user), db: Session = Depends(get_db),
 ):
     """Find suggested contacts at a company from enrichment providers."""
-    if not settings.clay_api_key and not settings.explorium_api_key:
-        raise HTTPException(503, "No enrichment providers configured — set CLAY_API_KEY or EXPLORIUM_API_KEY in .env")
+    if not settings.clay_api_key and not settings.explorium_api_key and not settings.anthropic_api_key:
+        raise HTTPException(503, "No enrichment providers configured — set CLAY_API_KEY, EXPLORIUM_API_KEY, or ANTHROPIC_API_KEY in .env")
     from ..enrichment_service import find_suggested_contacts
     if not domain:
         raise HTTPException(400, "domain parameter is required")
