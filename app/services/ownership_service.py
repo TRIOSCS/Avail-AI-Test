@@ -102,7 +102,7 @@ def check_and_claim_open_account(company_id: int, user_id: int, db: Session) -> 
     Called automatically after an activity is logged against a company.
     Returns True if ownership was claimed.
     """
-    company = db.query(Company).get(company_id)
+    company = db.get(Company, company_id)
     if not company:
         return False
 
@@ -111,7 +111,7 @@ def check_and_claim_open_account(company_id: int, user_id: int, db: Session) -> 
         return False
 
     # Check the user's role — only sales can own accounts
-    user = db.query(User).get(user_id)
+    user = db.get(User, user_id)
     if not user or user.role != "sales":
         return False
 
@@ -319,7 +319,7 @@ async def _send_warning_alert(company: Company, days_inactive: int, inactivity_l
     1. Send email via Graph API
     2. Log a dashboard notification (as an activity_log entry with type 'ownership_warning')
     """
-    owner = db.query(User).get(company.account_owner_id)
+    owner = db.get(User, company.account_owner_id)
     if not owner:
         return
 

@@ -101,7 +101,7 @@ async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
     from app.scheduler import get_valid_token
     from app.utils.graph_client import GraphClient
 
-    user = db.query(User).get(sub.user_id)
+    user = db.get(User, sub.user_id)
     if not user:
         return False
 
@@ -190,7 +190,7 @@ async def handle_notification(payload: dict, db: Session):
             log.warning(f"Client state mismatch for {sub_id}, ignoring")
             continue
 
-        user = db.query(User).get(sub.user_id)
+        user = db.get(User, sub.user_id)
         if not user:
             continue
 

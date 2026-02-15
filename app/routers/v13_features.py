@@ -98,7 +98,7 @@ async def upsert_buyer_profile(
     if user.email.lower() not in settings.admin_emails and user.id != user_id:
         raise HTTPException(403, "Only admins can edit other buyers' profiles")
 
-    target = db.query(User).get(user_id)
+    target = db.get(User, user_id)
     if not target or target.role != "buyer":
         raise HTTPException(400, "Target user must be a buyer")
 
@@ -198,7 +198,7 @@ async def company_activity_status(
     from app.services.activity_service import days_since_last_activity
     from app.config import settings as cfg
 
-    company = db.query(Company).get(company_id)
+    company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
 
@@ -257,11 +257,11 @@ async def claim_account(
     if user.role != "sales":
         raise HTTPException(403, "Only sales users can claim accounts")
 
-    company = db.query(Company).get(company_id)
+    company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
     if company.account_owner_id is not None:
-        owner = db.query(User).get(company.account_owner_id)
+        owner = db.get(User, company.account_owner_id)
         owner_name = owner.name if owner else "Unknown"
         raise HTTPException(409, f"Account already owned by {owner_name}")
 
@@ -280,7 +280,7 @@ async def toggle_strategic(
     if user.email.lower() not in settings.admin_emails:
         raise HTTPException(403, "Admin only")
 
-    company = db.query(Company).get(company_id)
+    company = db.get(Company, company_id)
     if not company:
         raise HTTPException(404, "Company not found")
 

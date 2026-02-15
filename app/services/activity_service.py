@@ -47,7 +47,7 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
         func.lower(VendorContact.email) == email_lower
     ).first()
     if vc:
-        card = db.query(VendorCard).get(vc.vendor_card_id)
+        card = db.get(VendorCard, vc.vendor_card_id)
         if card:
             return {"type": "vendor", "id": card.id, "name": card.display_name}
 
@@ -101,7 +101,7 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
     for vc in vcs:
         vc_digits = "".join(c for c in (vc.phone or "") if c.isdigit())
         if vc_digits and vc_digits[-10:] == suffix:
-            card = db.query(VendorCard).get(vc.vendor_card_id)
+            card = db.get(VendorCard, vc.vendor_card_id)
             if card:
                 return {"type": "vendor", "id": card.id, "name": card.display_name}
 

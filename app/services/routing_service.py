@@ -191,8 +191,8 @@ def rank_buyers_for_assignment(
 
     Returns sorted list of {user_id, user_name, score_details}.
     """
-    requirement = db.query(Requirement).get(requirement_id)
-    vendor = db.query(VendorCard).get(vendor_card_id)
+    requirement = db.get(Requirement, requirement_id)
+    vendor = db.get(VendorCard, vendor_card_id)
     if not requirement or not vendor:
         return []
 
@@ -211,7 +211,7 @@ def rank_buyers_for_assignment(
 
         score = score_buyer(profile, stats, requirement, vendor)
 
-        user = db.query(User).get(profile.user_id)
+        user = db.get(User, profile.user_id)
         results.append({
             "user_id": profile.user_id,
             "user_name": user.name if user else "Unknown",
@@ -280,7 +280,7 @@ def claim_routing(assignment_id: int, buyer_id: int, db: Session) -> dict:
 
     Returns {success, message, assignment_id}.
     """
-    assignment = db.query(RoutingAssignment).get(assignment_id)
+    assignment = db.get(RoutingAssignment, assignment_id)
     if not assignment:
         return {"success": False, "message": "Assignment not found"}
 
@@ -367,7 +367,7 @@ def reconfirm_offer(offer_id: int, db: Session) -> dict:
 
     Returns {success, message, new_expires_at}.
     """
-    offer = db.query(Offer).get(offer_id)
+    offer = db.get(Offer, offer_id)
     if not offer:
         return {"success": False, "message": "Offer not found"}
 
@@ -411,7 +411,7 @@ def get_active_assignments_for_buyer(user_id: int, db: Session) -> list[dict]:
 
 def get_assignment_details(assignment_id: int, db: Session) -> dict | None:
     """Get full details of a routing assignment."""
-    a = db.query(RoutingAssignment).get(assignment_id)
+    a = db.get(RoutingAssignment, assignment_id)
     if not a:
         return None
     return _assignment_to_dict(a)
@@ -466,8 +466,8 @@ async def notify_routing_assignment(
     """
     from app.utils.graph_client import GraphClient
 
-    requirement = db.query(Requirement).get(assignment.requirement_id)
-    vendor = db.query(VendorCard).get(assignment.vendor_card_id)
+    requirement = db.get(Requirement, assignment.requirement_id)
+    vendor = db.get(VendorCard, assignment.vendor_card_id)
     if not requirement or not vendor:
         log.warning(f"Cannot notify: missing requirement or vendor for assignment {assignment.id}")
         return 0
@@ -499,7 +499,7 @@ async def notify_routing_assignment(
         if not buyer_id:
             continue
 
-        buyer = db.query(User).get(buyer_id)
+        buyer = db.get(User, buyer_id)
         if not buyer or not buyer.email:
             continue
 
