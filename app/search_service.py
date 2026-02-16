@@ -203,14 +203,8 @@ async def _fetch_fresh(pns: list[str], db: Session) -> list[dict]:
 
 
 def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Sighting]:
-    weights = {
-        "recency": settings.weight_recency,
-        "quantity": settings.weight_quantity,
-        "vendor_reliability": settings.weight_vendor_reliability,
-        "data_completeness": settings.weight_data_completeness,
-        "source_credibility": settings.weight_source_credibility,
-        "price": settings.weight_price,
-    }
+    from .services.admin_service import get_scoring_weights
+    weights = get_scoring_weights(db)
 
     # Delete previous sightings for this requirement to prevent duplicates on re-search
     db.query(Sighting).filter_by(requirement_id=req.id).delete()

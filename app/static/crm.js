@@ -2430,23 +2430,34 @@ document.addEventListener('click', function(e) {
     }
 });
 
-function showSettings(panel) {
+function openSettingsTab(panel) {
     document.getElementById('settingsDropdownContent').style.display = 'none';
     showView('view-settings');
-    // Clear nav active state
     document.querySelectorAll('.topbar-nav button').forEach(b => b.classList.remove('active'));
-    // Show correct sub-panel
+    switchSettingsTab(panel);
+}
+
+function switchSettingsTab(name, btn) {
     document.querySelectorAll('.settings-panel').forEach(p => p.style.display = 'none');
     document.querySelectorAll('#settingsTabs .tab').forEach(t => t.classList.remove('on'));
-    const target = document.getElementById('settings-' + panel);
+    const target = document.getElementById('settings-' + name);
     if (target) target.style.display = '';
-    const tabBtn = document.querySelector(`#settingsTabs .tab[onclick*="${panel}"]`);
-    if (tabBtn) tabBtn.classList.add('on');
-    // Load data for the panel
-    if (panel === 'sources') loadSettingsSources();
-    else if (panel === 'manage-users') loadAdminUsers();
-    else if (panel === 'data-import') {} // static form
+    if (btn) btn.classList.add('on');
+    else {
+        const tabBtn = document.querySelector(`#settingsTabs .tab[onclick*="${name}"]`);
+        if (tabBtn) tabBtn.classList.add('on');
+    }
+    // Lazy-load data
+    if (name === 'users') loadAdminUsers();
+    else if (name === 'health') loadSettingsHealth();
+    else if (name === 'scoring') loadSettingsScoring();
+    else if (name === 'config') loadSettingsConfig();
+    else if (name === 'sources') loadSettingsSources();
+    else if (name === 'manage-users') loadAdminUsers();
 }
+
+// Keep backward compat for dropdown links
+function showSettings(panel) { openSettingsTab(panel); }
 
 async function loadSettingsSources() {
     // Reuse the existing loadSources() but redirect output to settings panel
@@ -2481,6 +2492,155 @@ async function loadSettingsSources() {
     }
 }
 
+// ── System Health ──
+
+async function loadSettingsHealth() {
+    const el = document.getElementById('settingsHealthContent');
+    el.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        const data = await apiFetch('/api/admin/health');
+        let html = '';
+
+        // Version
+        html += `<div class="card" style="padding:16px;margin-bottom:16px"><strong>Version:</strong> ${data.version}</div>`;
+
+        // DB stats
+        html += '<div class="card" style="padding:16px;margin-bottom:16px"><h3 style="margin:0 0 12px;font-size:14px">Database Statistics</h3>';
+        html += '<table class="perf-table"><thead><tr><th>Table</th><th>Rows</th></tr></thead><tbody>';
+        for (const [k, v] of Object.entries(data.db_stats || {})) {
+            html += `<tr><td>${k}</td><td>${v.toLocaleString()}</td></tr>`;
+        }
+        html += '</tbody></table></div>';
+
+        // Scheduler status
+        html += '<div class="card" style="padding:16px;margin-bottom:16px"><h3 style="margin:0 0 12px;font-size:14px">M365 Scheduler Status</h3>';
+        html += '<table class="perf-table"><thead><tr><th>User</th><th>M365</th><th>Token</th><th>Last Inbox Scan</th></tr></thead><tbody>';
+        for (const u of data.scheduler || []) {
+            const dot = u.m365_connected ? '<span style="color:var(--teal)">Connected</span>' : '<span style="color:var(--muted)">Disconnected</span>';
+            const scan = u.last_inbox_scan ? new Date(u.last_inbox_scan).toLocaleString() : '—';
+            html += `<tr><td>${u.email}</td><td>${dot}</td><td>${u.has_refresh_token ? 'Yes' : 'No'}</td><td>${scan}</td></tr>`;
+        }
+        html += '</tbody></table></div>';
+
+        // Connector health
+        html += '<div class="card" style="padding:16px"><h3 style="margin:0 0 12px;font-size:14px">Connector Health</h3>';
+        html += '<table class="perf-table"><thead><tr><th>Name</th><th>Status</th><th>Searches</th><th>Results</th><th>Last Success</th></tr></thead><tbody>';
+        for (const c of data.connectors || []) {
+            const dot = c.status === 'live' ? '🟢' : c.status === 'error' ? '🔴' : '🟡';
+            const last = c.last_success ? new Date(c.last_success).toLocaleString() : '—';
+            html += `<tr><td>${c.display_name}</td><td>${dot} ${c.status}</td><td>${c.total_searches}</td><td>${c.total_results}</td><td>${last}</td></tr>`;
+        }
+        html += '</tbody></table></div>';
+
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<p class="empty">Error loading health data</p>';
+    }
+}
+
+
+// ── Scoring Weights ──
+
+async function loadSettingsScoring() {
+    const el = document.getElementById('settingsScoringContent');
+    el.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        const configs = await apiFetch('/api/admin/config');
+        const weights = configs.filter(c => c.key.startsWith('weight_'));
+        let html = '<div class="card" style="padding:20px;max-width:600px">';
+        html += '<h3 style="margin:0 0 16px;font-size:14px">Search Scoring Weights</h3>';
+        html += '<p style="font-size:12px;color:var(--muted);margin:0 0 16px">Weights determine how search results are ranked. Total should equal 100.</p>';
+        html += '<div style="display:flex;flex-direction:column;gap:10px">';
+        for (const w of weights) {
+            const label = w.key.replace('weight_', '').replace(/_/g, ' ');
+            html += `<div style="display:flex;align-items:center;gap:10px">
+                <label style="flex:1;font-size:13px;text-transform:capitalize">${label}</label>
+                <input type="number" min="0" max="100" value="${w.value}" id="sw_${w.key}"
+                    onchange="updateWeightTotal()"
+                    style="width:60px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);text-align:center">
+                <button class="btn btn-ghost btn-sm" onclick="saveConfig('${w.key}', document.getElementById('sw_${w.key}').value)">Save</button>
+            </div>`;
+        }
+        html += '</div>';
+        html += '<div style="margin-top:16px;font-size:13px"><strong>Total: <span id="weightTotal">0</span></strong> <span id="weightWarn" style="color:#e74c3c;display:none">(should be 100)</span></div>';
+        html += '</div>';
+        el.innerHTML = html;
+        updateWeightTotal();
+    } catch (e) {
+        el.innerHTML = '<p class="empty">Error loading scoring config</p>';
+    }
+}
+
+function updateWeightTotal() {
+    const inputs = document.querySelectorAll('[id^="sw_weight_"]');
+    let total = 0;
+    inputs.forEach(inp => total += parseInt(inp.value) || 0);
+    const totalEl = document.getElementById('weightTotal');
+    const warnEl = document.getElementById('weightWarn');
+    if (totalEl) totalEl.textContent = total;
+    if (warnEl) warnEl.style.display = total !== 100 ? '' : 'none';
+}
+
+
+// ── Configuration ──
+
+async function loadSettingsConfig() {
+    const el = document.getElementById('settingsConfigContent');
+    el.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        const configs = await apiFetch('/api/admin/config');
+        const nonWeights = configs.filter(c => !c.key.startsWith('weight_'));
+        let html = '<div class="card" style="padding:20px;max-width:600px">';
+        html += '<h3 style="margin:0 0 16px;font-size:14px">System Configuration</h3>';
+        html += '<div style="display:flex;flex-direction:column;gap:12px">';
+        for (const c of nonWeights) {
+            const isBool = c.value === 'true' || c.value === 'false';
+            if (isBool) {
+                const checked = c.value === 'true' ? 'checked' : '';
+                html += `<div style="display:flex;align-items:center;gap:10px">
+                    <label style="flex:1;font-size:13px">${c.key.replace(/_/g, ' ')}<br><span style="font-size:11px;color:var(--muted)">${c.description || ''}</span></label>
+                    <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+                        <input type="checkbox" ${checked} onchange="saveConfig('${c.key}', this.checked ? 'true' : 'false')">
+                        <span style="font-size:12px">${c.value === 'true' ? 'On' : 'Off'}</span>
+                    </label>
+                </div>`;
+            } else {
+                html += `<div style="display:flex;align-items:center;gap:10px">
+                    <label style="flex:1;font-size:13px">${c.key.replace(/_/g, ' ')}<br><span style="font-size:11px;color:var(--muted)">${c.description || ''}</span></label>
+                    <input type="text" value="${c.value}" id="cfg_${c.key}"
+                        style="width:80px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);text-align:center">
+                    <button class="btn btn-ghost btn-sm" onclick="saveConfig('${c.key}', document.getElementById('cfg_${c.key}').value)">Save</button>
+                </div>`;
+            }
+        }
+        html += '</div>';
+        if (nonWeights.length) {
+            const lastUpdate = nonWeights.find(c => c.updated_by);
+            if (lastUpdate) html += `<p style="font-size:11px;color:var(--muted);margin-top:12px">Last updated by ${lastUpdate.updated_by}</p>`;
+        }
+        html += '</div>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<p class="empty">Error loading configuration</p>';
+    }
+}
+
+async function saveConfig(key, value) {
+    try {
+        await apiFetch(`/api/admin/config/${key}`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({value: String(value)})
+        });
+        // Reload the panel that owns this key
+        if (key.startsWith('weight_')) loadSettingsScoring();
+        else loadSettingsConfig();
+    } catch (e) {
+        alert('Error saving: ' + (e.message || e));
+    }
+}
+
+
 // ── Manage Users ──
 
 let _adminUsers = [];
@@ -2500,18 +2660,21 @@ function renderAdminUsers() {
     const el = document.getElementById('adminUsersList');
     if (!_adminUsers.length) { el.innerHTML = '<p class="empty">No users</p>'; return; }
     let html = `<table class="perf-table"><thead><tr>
-        <th>Name</th><th>Email</th><th>Role</th><th>M365</th><th>Actions</th>
+        <th>Name</th><th>Email</th><th>Role</th><th>Active</th><th>M365</th><th>Actions</th>
     </tr></thead><tbody>`;
     for (const u of _adminUsers) {
+        const activeChecked = u.is_active !== false ? 'checked' : '';
         html += `<tr>
             <td>${u.name || '—'}</td>
             <td>${u.email}</td>
-            <td><select onchange="updateUserRole(${u.id}, this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
+            <td><select onchange="updateUserField(${u.id}, 'role', this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
                 <option value="buyer" ${u.role==='buyer'?'selected':''}>Buyer</option>
                 <option value="sales" ${u.role==='sales'?'selected':''}>Sales</option>
                 <option value="manager" ${u.role==='manager'?'selected':''}>Manager</option>
                 <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
+                <option value="dev_assistant" ${u.role==='dev_assistant'?'selected':''}>Dev Assistant</option>
             </select></td>
+            <td><input type="checkbox" ${activeChecked} onchange="updateUserField(${u.id}, 'is_active', this.checked)"></td>
             <td>${u.m365_connected ? '<span style="color:var(--teal)">Connected</span>' : '<span style="color:var(--muted)">—</span>'}</td>
             <td><button class="btn btn-ghost btn-sm" onclick="deleteAdminUser(${u.id}, '${(u.name||u.email).replace(/'/g,"\\'")}')">Delete</button></td>
         </tr>`;
@@ -2520,9 +2683,11 @@ function renderAdminUsers() {
     el.innerHTML = html;
 }
 
-async function updateUserRole(userId, role) {
+async function updateUserField(userId, field, value) {
     try {
-        await apiFetch(`/api/admin/users/${userId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({role})});
+        const body = {};
+        body[field] = value;
+        await apiFetch(`/api/admin/users/${userId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
     } catch (e) {
         alert('Error: ' + (e.message || e));
         loadAdminUsers();

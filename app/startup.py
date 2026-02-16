@@ -35,6 +35,7 @@ def run_startup_migrations() -> None:
         _create_crm_indexes(conn)
         _create_proactive_tables(conn)
         _create_performance_tables(conn)
+        _create_admin_settings_tables(conn)
     log.info("Startup migrations complete")
 
 
@@ -437,3 +438,36 @@ def _create_performance_tables(conn) -> None:
     for stmt in indexes:
         _exec(conn, stmt)
     conn.commit()
+
+
+def _create_admin_settings_tables(conn) -> None:
+    """Admin settings — system_config table, user.is_active column."""
+    # Add is_active column to users
+    _exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE")
+    # Create system_config table
+    _exec(conn, """CREATE TABLE IF NOT EXISTS system_config (
+        id SERIAL PRIMARY KEY,
+        key VARCHAR(100) NOT NULL UNIQUE,
+        value TEXT NOT NULL,
+        description VARCHAR(500),
+        updated_by VARCHAR(255),
+        updated_at TIMESTAMP DEFAULT NOW()
+    )""")
+    _exec(conn, "CREATE UNIQUE INDEX IF NOT EXISTS ix_sysconfig_key ON system_config(key)")
+    # Seed default scoring weights (idempotent — INSERT ON CONFLICT DO NOTHING)
+    seeds = [
+        ("weight_recency", "30", "Scoring weight for data recency (0-100)"),
+        ("weight_quantity", "20", "Scoring weight for quantity match (0-100)"),
+        ("weight_vendor_reliability", "20", "Scoring weight for vendor reliability (0-100)"),
+        ("weight_data_completeness", "10", "Scoring weight for data completeness (0-100)"),
+        ("weight_source_credibility", "10", "Scoring weight for source credibility (0-100)"),
+        ("weight_price", "10", "Scoring weight for price competitiveness (0-100)"),
+        ("inbox_scan_interval_min", "30", "Minutes between inbox scan cycles"),
+        ("email_mining_enabled", "false", "Enable email mining background job"),
+        ("proactive_matching_enabled", "true", "Enable proactive offer matching"),
+        ("activity_tracking_enabled", "true", "Enable CRM activity tracking"),
+    ]
+    for key, value, desc in seeds:
+        _exec(conn, f"""INSERT INTO system_config (key, value, description)
+            VALUES ('{key}', '{value}', '{desc}')
+            ON CONFLICT (key) DO NOTHING""")

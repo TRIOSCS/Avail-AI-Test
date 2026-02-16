@@ -1,4 +1,4 @@
-"""Admin API — User management & data import. Admin-only endpoints."""
+"""Admin API — User management, system config, health, data import."""
 
 import csv
 import io
@@ -6,25 +6,22 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..dependencies import require_user, is_admin
+from ..dependencies import require_admin, require_settings_access
 from ..models import User, Company, CustomerSite, SiteContact, VendorCard, VendorContact
+from ..services.admin_service import (
+    list_users, update_user, get_all_config, set_config_value,
+    get_scoring_weights, get_system_health, VALID_ROLES,
+)
 
 router = APIRouter(tags=["admin"])
 log = logging.getLogger(__name__)
 
-VALID_ROLES = ("buyer", "sales", "manager", "admin")
 
-
-def _require_admin(user: User):
-    if not is_admin(user):
-        raise HTTPException(403, "Admin access required")
-
-
-# ── User Management ──────────────────────────────────────────────────
+# ── Schemas ──────────────────────────────────────────────────────────
 
 class CreateUserRequest(BaseModel):
     name: str
@@ -32,37 +29,31 @@ class CreateUserRequest(BaseModel):
     role: str = "buyer"
 
 
-class UpdateUserRequest(BaseModel):
+class UserUpdateRequest(BaseModel):
     name: str | None = None
     role: str | None = None
+    is_active: bool | None = None
 
+
+class ConfigUpdateRequest(BaseModel):
+    value: str = Field(..., min_length=1, max_length=500)
+
+
+# ── User Management (admin only) ─────────────────────────────────────
 
 @router.get("/api/admin/users")
-def list_users(
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    _require_admin(user)
-    users = db.query(User).order_by(User.name).all()
-    return [{
-        "id": u.id,
-        "name": u.name,
-        "email": u.email,
-        "role": u.role,
-        "m365_connected": u.m365_connected,
-        "created_at": u.created_at.isoformat() if u.created_at else None,
-    } for u in users]
+def api_list_users(user: User = Depends(require_admin), db: Session = Depends(get_db)):
+    return list_users(db)
 
 
 @router.post("/api/admin/users")
-def create_user(
+def api_create_user(
     body: CreateUserRequest,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    _require_admin(user)
     if body.role not in VALID_ROLES:
-        raise HTTPException(400, "Role must be 'buyer', 'sales', 'manager', or 'admin'")
+        raise HTTPException(400, f"Role must be one of: {', '.join(VALID_ROLES)}")
     existing = db.query(User).filter(User.email == body.email.lower().strip()).first()
     if existing:
         raise HTTPException(409, "User with this email already exists")
@@ -77,33 +68,24 @@ def create_user(
 
 
 @router.put("/api/admin/users/{user_id}")
-def update_user(
+def api_update_user(
     user_id: int,
-    body: UpdateUserRequest,
-    user: User = Depends(require_user),
+    body: UserUpdateRequest,
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    _require_admin(user)
-    target = db.get(User, user_id)
-    if not target:
-        raise HTTPException(404, "User not found")
-    if body.name is not None:
-        target.name = body.name.strip()
-    if body.role is not None:
-        if body.role not in VALID_ROLES:
-            raise HTTPException(400, "Role must be 'buyer', 'sales', 'manager', or 'admin'")
-        target.role = body.role
-    db.commit()
-    return {"id": target.id, "name": target.name, "email": target.email, "role": target.role}
+    result = update_user(db, user_id, body.model_dump(exclude_none=False), user)
+    if "error" in result:
+        raise HTTPException(result.get("status", 400), result["error"])
+    return result
 
 
 @router.delete("/api/admin/users/{user_id}")
-def delete_user(
+def api_delete_user(
     user_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    _require_admin(user)
     target = db.get(User, user_id)
     if not target:
         raise HTTPException(404, "User not found")
@@ -114,18 +96,50 @@ def delete_user(
     return {"status": "deleted"}
 
 
-# ── Data Import ──────────────────────────────────────────────────────
+# ── System Config (admin for writes, settings_access for reads) ──────
+
+@router.get("/api/admin/config")
+def api_get_config(
+    user: User = Depends(require_settings_access),
+    db: Session = Depends(get_db),
+):
+    return get_all_config(db)
+
+
+@router.put("/api/admin/config/{key}")
+def api_set_config(
+    key: str,
+    body: ConfigUpdateRequest,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    result = set_config_value(db, key, body.value, user.email)
+    if "error" in result:
+        raise HTTPException(result.get("status", 400), result["error"])
+    return result
+
+
+# ── System Health (settings_access) ──────────────────────────────────
+
+@router.get("/api/admin/health")
+def api_health(
+    user: User = Depends(require_settings_access),
+    db: Session = Depends(get_db),
+):
+    return get_system_health(db)
+
+
+# ── Data Import (admin only) ─────────────────────────────────────────
 
 @router.post("/api/admin/import/customers")
 async def import_customers(
     file: UploadFile = File(...),
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Import customers from CSV. Expected columns: company_name, site_name,
     contact_name, contact_email, contact_phone, contact_title,
     address_line1, city, state, zip, country, payment_terms, shipping_terms"""
-    _require_admin(user)
     content = await file.read()
     try:
         text = content.decode("utf-8-sig")
@@ -141,7 +155,6 @@ async def import_customers(
     sites_created = 0
     contacts_created = 0
 
-    # Group by company_name
     seen_companies = {}
     seen_sites = {}
 
@@ -150,7 +163,6 @@ async def import_customers(
         if not company_name:
             continue
 
-        # Find or create company
         key = company_name.lower()
         if key not in seen_companies:
             company = db.query(Company).filter(
@@ -165,7 +177,6 @@ async def import_customers(
 
         company = seen_companies[key]
 
-        # Find or create site
         site_name = (row.get("site_name") or company_name).strip()
         site_key = f"{key}|{site_name.lower()}"
         if site_key not in seen_sites:
@@ -193,7 +204,6 @@ async def import_customers(
 
         site = seen_sites[site_key]
 
-        # Create contact if provided
         contact_name = (row.get("contact_name") or "").strip()
         contact_email = (row.get("contact_email") or "").strip()
         if contact_name or contact_email:
@@ -227,12 +237,11 @@ async def import_customers(
 @router.post("/api/admin/import/vendors")
 async def import_vendors(
     file: UploadFile = File(...),
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Import vendors from CSV. Expected columns: vendor_name, domain, website,
     contact_name, contact_email, contact_phone, contact_title"""
-    _require_admin(user)
     content = await file.read()
     try:
         text = content.decode("utf-8-sig")
@@ -274,7 +283,6 @@ async def import_vendors(
 
         vc = seen_vendors[normalized]
 
-        # Create vendor contact if provided
         contact_name = (row.get("contact_name") or "").strip()
         contact_email = (row.get("contact_email") or "").strip()
         if contact_name or contact_email:
@@ -287,10 +295,11 @@ async def import_vendors(
             if not existing:
                 vcon = VendorContact(
                     vendor_card_id=vc.id,
-                    name=contact_name or None,
+                    full_name=contact_name or None,
                     email=contact_email.lower() or None,
                     phone=(row.get("contact_phone") or "").strip() or None,
                     title=(row.get("contact_title") or "").strip() or None,
+                    source="csv_import",
                 )
                 db.add(vcon)
                 contacts_created += 1

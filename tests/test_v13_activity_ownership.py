@@ -193,8 +193,8 @@ def test_toggle_strategic_requires_admin(client, test_company):
 
 def test_toggle_strategic_as_admin(client, db_session, test_user, test_company, monkeypatch):
     """Admin can toggle strategic flag."""
-    from app.routers.v13_features import settings as v13_settings
-    monkeypatch.setattr(v13_settings, "admin_emails", [test_user.email.lower()])
+    test_user.role = "admin"
+    db_session.commit()
     resp = client.put(f"/api/companies/{test_company.id}/strategic", json={"is_strategic": True})
     assert resp.status_code == 200
     assert resp.json()["is_strategic"] is True

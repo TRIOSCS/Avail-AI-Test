@@ -25,13 +25,13 @@ class TestApiVersionMiddleware:
         assert resp.headers.get("X-API-Version") == "v1"
 
     def test_old_api_path_still_works(self, client: TestClient):
-        resp = client.get("/api/scheduler-status")
+        resp = client.get("/api/admin/health")
         assert resp.status_code in (200, 401, 403)
         assert resp.headers.get("X-API-Version") == "v1"
 
     def test_v1_prefix_rewrites_to_api(self, client: TestClient):
-        """GET /api/v1/scheduler-status should reach the same endpoint as /api/scheduler-status."""
-        resp = client.get("/api/v1/scheduler-status")
+        """GET /api/v1/admin/health should reach the same endpoint as /api/admin/health."""
+        resp = client.get("/api/v1/admin/health")
         assert resp.status_code in (200, 401, 403)
         assert resp.headers.get("X-API-Version") == "v1"
 

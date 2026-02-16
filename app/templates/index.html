@@ -902,10 +902,12 @@
             <div id="settingsMenu" class="settings-dropdown" style="display:none">
                 <button onclick="toggleSettingsDropdown()" class="btn-settings" title="Settings">&#9881;</button>
                 <div class="settings-dropdown-content" id="settingsDropdownContent">
-                    <a onclick="showSettings('sources')">Data Sources</a>
-                    <a onclick="showSettings('create-user')">Create User</a>
-                    <a onclick="showSettings('manage-users')">Manage Users</a>
-                    <a onclick="showSettings('data-import')">Data Import</a>
+                    <a onclick="openSettingsTab('users')">Users</a>
+                    <a onclick="openSettingsTab('health')">System Health</a>
+                    <a onclick="openSettingsTab('scoring')">Scoring Weights</a>
+                    <a onclick="openSettingsTab('config')">Configuration</a>
+                    <a onclick="openSettingsTab('sources')">Data Sources</a>
+                    <a onclick="openSettingsTab('create-user')">Create User</a>
                 </div>
             </div>
             <button class="btn-out" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())">Logout</button>
@@ -1563,19 +1565,37 @@
         <div id="perfBuyerPanel" style="display:none"><p class="empty">Loading...</p></div>
     </div>
 
-    <!-- VIEW: Settings (admin only) -->
+    <!-- VIEW: Settings (admin + dev_assistant) -->
     <div id="view-settings" style="display:none">
         <div class="vendor-header">
-            <h2>Settings</h2>
+            <h2>Admin Settings</h2>
         </div>
         <div class="tabs" id="settingsTabs">
-            <button class="tab on" onclick="showSettings('sources')">Data Sources</button>
-            <button class="tab" onclick="showSettings('create-user')">Create User</button>
-            <button class="tab" onclick="showSettings('manage-users')">Manage Users</button>
-            <button class="tab" onclick="showSettings('data-import')">Data Import</button>
+            <button class="tab on settings-tab-users" onclick="switchSettingsTab('users',this)">Users</button>
+            <button class="tab" onclick="switchSettingsTab('health',this)">System Health</button>
+            <button class="tab settings-tab-scoring" onclick="switchSettingsTab('scoring',this)">Scoring Weights</button>
+            <button class="tab" onclick="switchSettingsTab('config',this)">Configuration</button>
+            <button class="tab" onclick="switchSettingsTab('sources',this)">Data Sources</button>
+            <button class="tab settings-tab-users" onclick="switchSettingsTab('create-user',this)">Create User</button>
         </div>
 
-        <div id="settings-sources" class="settings-panel">
+        <div id="settings-users" class="settings-panel">
+            <div id="adminUsersList"><p class="empty">Loading...</p></div>
+        </div>
+
+        <div id="settings-health" class="settings-panel" style="display:none">
+            <div id="settingsHealthContent"><p class="empty">Loading...</p></div>
+        </div>
+
+        <div id="settings-scoring" class="settings-panel" style="display:none">
+            <div id="settingsScoringContent"><p class="empty">Loading...</p></div>
+        </div>
+
+        <div id="settings-config" class="settings-panel" style="display:none">
+            <div id="settingsConfigContent"><p class="empty">Loading...</p></div>
+        </div>
+
+        <div id="settings-sources" class="settings-panel" style="display:none">
             <div id="settingsSourcesList"><p class="empty">Loading...</p></div>
         </div>
 
@@ -1590,40 +1610,20 @@
                         <option value="sales">Sales</option>
                         <option value="manager">Manager</option>
                         <option value="admin">Admin</option>
+                        <option value="dev_assistant">Dev Assistant</option>
                     </select>
                     <button class="btn btn-primary" onclick="createUser()">Create User</button>
                 </div>
             </div>
         </div>
 
-        <div id="settings-manage-users" class="settings-panel" style="display:none">
-            <div id="adminUsersList"><p class="empty">Loading...</p></div>
-        </div>
-
-        <div id="settings-data-import" class="settings-panel" style="display:none">
-            <div style="display:flex;gap:20px;flex-wrap:wrap">
-                <div class="card" style="flex:1;min-width:300px;padding:20px">
-                    <h3 style="margin:0 0 12px;font-size:15px">Import Customers</h3>
-                    <p style="font-size:12px;color:var(--muted);margin:0 0 12px">CSV with columns: company_name, site_name, contact_name, contact_email, contact_phone, contact_title, address_line1, city, state, zip, country</p>
-                    <input type="file" id="customerImportFile" accept=".csv" style="font-size:12px;margin-bottom:8px">
-                    <button class="btn btn-primary btn-sm" onclick="importCustomers()">Import</button>
-                    <div id="customerImportStatus" style="font-size:12px;margin-top:8px;color:var(--text2)"></div>
-                </div>
-                <div class="card" style="flex:1;min-width:300px;padding:20px">
-                    <h3 style="margin:0 0 12px;font-size:15px">Import Vendors</h3>
-                    <p style="font-size:12px;color:var(--muted);margin:0 0 12px">CSV with columns: vendor_name, domain, website, contact_name, contact_email, contact_phone, contact_title</p>
-                    <input type="file" id="vendorImportFile" accept=".csv" style="font-size:12px;margin-bottom:8px">
-                    <button class="btn btn-primary btn-sm" onclick="importVendors()">Import</button>
-                    <div id="vendorImportStatus" style="font-size:12px;margin-top:8px;color:var(--text2)"></div>
-                </div>
-            </div>
-        </div>
     </div>
 
 <script>
 window.__userName = "{{ user_name }}";
 window.__userEmail = "{{ user_email }}";
 window.__isAdmin = {{ "true" if is_admin else "false" }};
+window.__isDevAssistant = {{ "true" if is_dev_assistant else "false" }};
 function setNav(btn) {
     document.querySelectorAll('.topbar-nav button').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');

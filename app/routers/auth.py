@@ -41,14 +41,15 @@ SCOPES = "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request, db: Session = Depends(get_db)):
     user = get_user(request, db)
-    from ..dependencies import is_admin as _is_admin
-    is_admin = _is_admin(user) if user else False
+    is_admin = user.role == "admin" if user else False
+    is_dev_assistant = user.role == "dev_assistant" if user else False
     return templates.TemplateResponse("index.html", {
         "request": request,
         "logged_in": user is not None,
         "user_name": user.name if user else "",
         "user_email": user.email if user else "",
         "is_admin": is_admin,
+        "is_dev_assistant": is_dev_assistant,
         "app_version": APP_VERSION,
     })
 
@@ -97,6 +98,11 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
                      azure_id=profile.get("id"))
         db.add(user)
         db.commit()
+
+    # Bootstrap admin: auto-promote users in admin_emails env var
+    if user.email.lower() in settings.admin_emails and user.role != "admin":
+        user.role = "admin"
+        log.info(f"Auto-promoted {user.email} to admin via admin_emails bootstrap")
 
     # Store tokens in DB (not just session) for background jobs
     user.access_token = access_token

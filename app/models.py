@@ -16,7 +16,8 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     email = Column(String(255), unique=True, nullable=False)
     name = Column(String(255))
-    role = Column(String(20), default="buyer")    # "buyer" or "sales"
+    role = Column(String(20), default="buyer")    # buyer | sales | manager | admin | dev_assistant
+    is_active = Column(Boolean, default=True)
     azure_id = Column(String(255), unique=True)
     refresh_token = Column(Text)
     access_token = Column(Text)
@@ -763,6 +764,18 @@ class ApiSource(Base):
     total_results = Column(Integer, default=0)
     avg_response_ms = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
+                        onupdate=lambda: datetime.now(timezone.utc))
+
+
+class SystemConfig(Base):
+    """Key-value runtime configuration. Survives restarts, auditable."""
+    __tablename__ = "system_config"
+    id = Column(Integer, primary_key=True)
+    key = Column(String(100), unique=True, nullable=False, index=True)
+    value = Column(Text, nullable=False)
+    description = Column(String(500))
+    updated_by = Column(String(255))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))
 

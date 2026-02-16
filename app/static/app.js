@@ -258,9 +258,13 @@ function applyRoleGating() {
     // Performance nav visible to all
     const perfNav = document.getElementById('navPerformance');
     if (perfNav) perfNav.style.display = '';
-    // Settings gear visible to admin only
+    // Settings gear visible to admin and dev_assistant
     const settingsMenu = document.getElementById('settingsMenu');
-    if (settingsMenu && window.__isAdmin) settingsMenu.style.display = '';
+    if (settingsMenu && (window.__isAdmin || window.__isDevAssistant)) settingsMenu.style.display = '';
+    // Dev assistants: hide Users/Scoring/Create User/Data Import tabs
+    if (window.__isDevAssistant && !window.__isAdmin) {
+        document.querySelectorAll('.settings-tab-users, .settings-tab-scoring').forEach(el => el.style.display = 'none');
+    }
 }
 function isBuyer() { return window.userRole === 'buyer'; }
 
