@@ -324,6 +324,7 @@ def log_vendor_call(
     contact_name: str | None,
     notes: str | None,
     db: Session,
+    requisition_id: int | None = None,
 ) -> ActivityLog:
     """Log a manual call against a known vendor (from vendor popup)."""
     activity_type = f"call_{direction}"
@@ -337,6 +338,7 @@ def log_vendor_call(
         contact_name=contact_name,
         duration_seconds=duration_seconds,
         notes=notes,
+        requisition_id=requisition_id,
     )
     db.add(record)
     db.flush()
@@ -359,6 +361,7 @@ def log_vendor_note(
     notes: str,
     contact_name: str | None,
     db: Session,
+    requisition_id: int | None = None,
 ) -> ActivityLog:
     """Log a manual note against a vendor."""
     record = ActivityLog(
@@ -369,6 +372,7 @@ def log_vendor_note(
         vendor_contact_id=vendor_contact_id,
         contact_name=contact_name,
         notes=notes,
+        requisition_id=requisition_id,
     )
     db.add(record)
     db.flush()

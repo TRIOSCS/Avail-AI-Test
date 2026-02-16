@@ -53,6 +53,7 @@ class VendorCallLog(BaseModel):
     duration_seconds: int | None = None
     contact_name: str | None = None
     notes: str | None = None
+    requisition_id: int | None = None
 
 
 class VendorNoteLog(BaseModel):
@@ -61,6 +62,7 @@ class VendorNoteLog(BaseModel):
     vendor_contact_id: int | None = None
     contact_name: str | None = None
     notes: str
+    requisition_id: int | None = None
 
 
 # ── Customer Ownership ──────────────────────────────────────────────

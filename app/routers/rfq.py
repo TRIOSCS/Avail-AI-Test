@@ -29,6 +29,7 @@ from ..dependencies import (
     require_user,
 )
 from ..models import (
+    ActivityLog,
     Contact,
     Requisition,
     User,
@@ -164,6 +165,24 @@ async def get_activity(
         .all()
     )
 
+    # Manual activities (calls, notes) scoped to this requisition
+    manual_activities = (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.requisition_id == req_id,
+            ActivityLog.vendor_card_id.isnot(None),
+        )
+        .order_by(ActivityLog.created_at.desc())
+        .all()
+    )
+
+    # Build a vendor_card_id → vendor_name lookup for activities
+    activity_vendor_ids = {a.vendor_card_id for a in manual_activities}
+    vendor_name_map = {}
+    if activity_vendor_ids:
+        cards = db.query(VendorCard).filter(VendorCard.id.in_(activity_vendor_ids)).all()
+        vendor_name_map = {c.id: c.display_name for c in cards}
+
     # Group by normalized vendor name
     vendors = {}
     for c in contacts:
@@ -173,6 +192,7 @@ async def get_activity(
                 "vendor_name": c.vendor_name,
                 "contacts": [],
                 "responses": [],
+                "activities": [],
                 "all_parts": set(),
                 "contact_types": set(),
             }
@@ -203,6 +223,7 @@ async def get_activity(
                 "vendor_name": r.vendor_name,
                 "contacts": [],
                 "responses": [],
+                "activities": [],
                 "all_parts": set(),
                 "contact_types": set(),
             }
@@ -221,6 +242,54 @@ async def get_activity(
                 else r.received_at,
             }
         )
+
+    # Add manual activities into vendor groups
+    for a in manual_activities:
+        vname = vendor_name_map.get(a.vendor_card_id, f"Vendor #{a.vendor_card_id}")
+        vk = normalize_vendor_name(vname)
+        if vk not in vendors:
+            vendors[vk] = {
+                "vendor_name": vname,
+                "contacts": [],
+                "responses": [],
+                "activities": [],
+                "all_parts": set(),
+                "contact_types": set(),
+            }
+        vendors[vk]["activities"].append(
+            {
+                "id": a.id,
+                "activity_type": a.activity_type,
+                "channel": a.channel,
+                "contact_name": a.contact_name,
+                "contact_phone": a.contact_phone,
+                "notes": a.notes,
+                "duration_seconds": a.duration_seconds,
+                "user_name": a.user.name if a.user else "",
+                "created_at": a.created_at.isoformat() if a.created_at else None,
+                "vendor_card_id": a.vendor_card_id,
+            }
+        )
+
+    # Resolve vendor_card_id for each vendor group (for call/note buttons)
+    # First try from activities, then look up by normalized name
+    vendor_card_ids = {}
+    for vk, v in vendors.items():
+        if v["activities"]:
+            vendor_card_ids[vk] = v["activities"][0]["vendor_card_id"]
+    # Bulk lookup remaining by normalized name
+    unresolved = [vk for vk in vendors if vk not in vendor_card_ids]
+    if unresolved:
+        name_list = [vk for vk in unresolved]
+        cards = (
+            db.query(VendorCard)
+            .filter(VendorCard.normalized_name.in_(name_list))
+            .all()
+        )
+        for c in cards:
+            nk = c.normalized_name
+            if nk in vendors and nk not in vendor_card_ids:
+                vendor_card_ids[nk] = c.id
 
     # Build result list
     result = []
@@ -255,6 +324,7 @@ async def get_activity(
         result.append(
             {
                 "vendor_name": v["vendor_name"],
+                "vendor_card_id": vendor_card_ids.get(vk),
                 "status": vendor_status,
                 "contact_count": len(v["contacts"]),
                 "contact_types": sorted(v["contact_types"]),
@@ -270,6 +340,7 @@ async def get_activity(
                 else None,
                 "contacts": v["contacts"],
                 "responses": v["responses"],
+                "activities": v["activities"],
             }
         )
 

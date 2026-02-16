@@ -155,6 +155,7 @@ def _activity_to_dict(a) -> dict:
         "subject": a.subject,
         "notes": getattr(a, "notes", None),
         "duration_seconds": a.duration_seconds,
+        "requisition_id": getattr(a, "requisition_id", None),
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
 
@@ -245,6 +246,7 @@ async def log_vendor_phone_call(
         contact_name=payload.contact_name,
         notes=payload.notes,
         db=db,
+        requisition_id=payload.requisition_id,
     )
     db.commit()
     return {"status": "logged", "activity_id": record.id}
@@ -271,6 +273,7 @@ async def log_vendor_note_endpoint(
         notes=payload.notes,
         contact_name=payload.contact_name,
         db=db,
+        requisition_id=payload.requisition_id,
     )
     db.commit()
     return {"status": "logged", "activity_id": record.id}

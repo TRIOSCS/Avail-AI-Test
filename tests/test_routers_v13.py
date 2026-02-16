@@ -65,7 +65,8 @@ def test_activity_to_dict_includes_all_keys():
         "id", "user_id", "user_name", "activity_type", "channel",
         "company_id", "vendor_card_id", "vendor_contact_id",
         "contact_email", "contact_phone",
-        "contact_name", "subject", "notes", "duration_seconds", "created_at",
+        "contact_name", "subject", "notes", "duration_seconds",
+        "requisition_id", "created_at",
     }
     assert set(_activity_to_dict(_make_activity()).keys()) == expected
 

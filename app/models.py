@@ -1103,6 +1103,7 @@ class ActivityLog(Base):
     company_id = Column(Integer, ForeignKey("companies.id"))
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"))
     vendor_contact_id = Column(Integer, ForeignKey("vendor_contacts.id"))
+    requisition_id = Column(Integer, ForeignKey("requisitions.id"))
 
     # Contact snapshot
     contact_email = Column(String(255))
@@ -1121,6 +1122,7 @@ class ActivityLog(Base):
     company = relationship("Company", foreign_keys=[company_id])
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
     vendor_contact = relationship("VendorContact", foreign_keys=[vendor_contact_id])
+    requisition = relationship("Requisition", foreign_keys=[requisition_id])
 
     __table_args__ = (
         Index(
@@ -1147,6 +1149,13 @@ class ActivityLog(Base):
             "external_id",
             unique=True,
             postgresql_where=Column("external_id").isnot(None),
+        ),
+        Index(
+            "ix_activity_requisition",
+            "requisition_id",
+            "vendor_card_id",
+            "created_at",
+            postgresql_where=Column("requisition_id").isnot(None),
         ),
     )
 

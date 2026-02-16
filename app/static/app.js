@@ -2004,11 +2004,12 @@ async function loadVendorActivityStatus(cardId) {
     } catch(e) { console.error('loadVendorActivityStatus:', e); }
 }
 
-function openVendorLogCallModal(cardId, vendorName) {
+function openVendorLogCallModal(cardId, vendorName, reqId) {
     document.getElementById('vlcCardId').value = cardId;
     document.getElementById('vlcVendorName').textContent = vendorName;
     ['vlcPhone','vlcContactName','vlcDuration','vlcNotes'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('vlcDirection').value = 'outbound';
+    window._vlcReqId = reqId || null;
     document.getElementById('vendorLogCallModal').classList.add('open');
     setTimeout(() => document.getElementById('vlcPhone').focus(), 100);
 }
@@ -2023,19 +2024,23 @@ async function saveVendorLogCall() {
         duration_seconds: isNaN(dur) ? null : dur,
         notes: document.getElementById('vlcNotes').value.trim() || null,
     };
+    if (window._vlcReqId) data.requisition_id = window._vlcReqId;
     try {
         await apiFetch('/api/vendors/' + cardId + '/activities/call', { method: 'POST', body: data });
         closeModal('vendorLogCallModal');
         showToast('Call logged', 'success');
-        loadVendorActivities(parseInt(cardId));
+        if (window._vlcReqId) { loadActivity(); }
+        else { loadVendorActivities(parseInt(cardId)); }
         loadVendorActivityStatus(parseInt(cardId));
+        window._vlcReqId = null;
     } catch(e) { console.error('saveVendorLogCall:', e); showToast('Error logging call', 'error'); }
 }
 
-function openVendorLogNoteModal(cardId, vendorName) {
+function openVendorLogNoteModal(cardId, vendorName, reqId) {
     document.getElementById('vlnCardId').value = cardId;
     document.getElementById('vlnVendorName').textContent = vendorName;
     ['vlnContactName','vlnNotes'].forEach(id => document.getElementById(id).value = '');
+    window._vlnReqId = reqId || null;
     document.getElementById('vendorLogNoteModal').classList.add('open');
     setTimeout(() => document.getElementById('vlnNotes').focus(), 100);
 }
@@ -2048,12 +2053,15 @@ async function saveVendorLogNote() {
         contact_name: document.getElementById('vlnContactName').value.trim() || null,
         notes: notes,
     };
+    if (window._vlnReqId) data.requisition_id = window._vlnReqId;
     try {
         await apiFetch('/api/vendors/' + cardId + '/activities/note', { method: 'POST', body: data });
         closeModal('vendorLogNoteModal');
         showToast('Note added', 'success');
-        loadVendorActivities(parseInt(cardId));
+        if (window._vlnReqId) { loadActivity(); }
+        else { loadVendorActivities(parseInt(cardId)); }
         loadVendorActivityStatus(parseInt(cardId));
+        window._vlnReqId = null;
     } catch(e) { console.error('saveVendorLogNote:', e); showToast('Error adding note', 'error'); }
 }
 
@@ -2449,20 +2457,44 @@ function renderActivityCards() {
         return;
     }
 
-    // Show summary and filters
-    summaryEl.style.display = 'flex';
-    filterBarEl.style.display = 'flex';
+    // Show compact summary — only non-zero stats
+    const statParts = [];
+    if (summary.sent) statParts.push(`${summary.sent} sent`);
+    if (summary.replied) statParts.push(`${summary.replied} replied`);
+    if (summary.opened) statParts.push(`${summary.opened} opened`);
+    if (summary.awaiting) statParts.push(`${summary.awaiting} awaiting`);
+    summaryEl.style.display = statParts.length ? 'flex' : 'none';
+    // Update individual stat elements (keep clickable filter working)
     document.getElementById('actStatSent').textContent = summary.sent || 0;
     document.getElementById('actStatReplied').textContent = summary.replied || 0;
     document.getElementById('actStatOpened').textContent = summary.opened || 0;
     document.getElementById('actStatAwaiting').textContent = summary.awaiting || 0;
+    // Hide zero-count stat cards
+    summaryEl.querySelectorAll('.act-stat').forEach(card => {
+        const num = parseInt(card.querySelector('.act-stat-num')?.textContent || '0');
+        const statType = card.dataset.actStat;
+        // Always show "all" (sent) card; hide others when zero
+        card.style.display = (statType === 'all' || num > 0) ? '' : 'none';
+    });
+
+    filterBarEl.style.display = 'flex';
 
     const q = (document.getElementById('actFilter')?.value || '').trim().toUpperCase();
     const sortVal = document.getElementById('actSort')?.value || 'date-desc';
 
+    // Ghost vendor filter — auto-replies, own users, noise entries
+    const _NOISE_NAMES = new Set(['microsoft outlook', 'outlook', 'postmaster', 'mailer-daemon', 'noreply', 'no-reply', 'do not reply']);
+    const _ownName = (window.userName || '').trim().toLowerCase();
+
     let filtered = [...vendors].filter(v => {
         const vn = (v.vendor_name || '').trim().toLowerCase();
-        return vn && vn !== 'no seller listed';
+        if (!vn || vn === 'no seller listed') return false;
+        // Filter ghost vendors: noise names, own user name, entries with no contacts and no responses
+        if (_NOISE_NAMES.has(vn)) return false;
+        if (_ownName && vn === _ownName) return false;
+        // Entries that have no contacts and no responses and no activities are orphans
+        if (!(v.contacts||[]).length && !(v.responses||[]).length && !(v.activities||[]).length) return false;
+        return true;
     });
 
     // Stat filter (from clicking summary cards)
@@ -2477,7 +2509,7 @@ function renderActivityCards() {
 
     // Text filter
     if (q) filtered = filtered.filter(v =>
-        ((v.vendor_name||'') + ' ' + (v.last_contact_email||'') + ' ' + (v.all_parts||[]).join(' ') + ' ' + (v.last_contacted_by||'')).toUpperCase().includes(q)
+        ((v.vendor_name||'') + ' ' + (v.last_contact_email||'') + ' ' + (v.last_contacted_by||'')).toUpperCase().includes(q)
     );
 
     // Sort
@@ -2488,7 +2520,7 @@ function renderActivityCards() {
     else if (sortVal === 'status') filtered.sort((a,b) => (a.status||'').localeCompare(b.status||''));
 
     const countEl = document.getElementById('actFilterCount');
-    if (countEl) countEl.textContent = (q || actStatFilter || actFilterType !== 'all') ? `${filtered.length} of ${vendors.length}` : `${vendors.length} vendors`;
+    if (countEl) countEl.textContent = (q || actStatFilter || actFilterType !== 'all') ? `${filtered.length} of ${vendors.length}` : `${filtered.length} vendors`;
 
     if (!filtered.length) {
         el.innerHTML = '<p class="empty">No matching activity</p>';
@@ -2543,8 +2575,6 @@ function renderActivityCards() {
 
         const countLabel = v.contact_count > 1 ? `<span style="font-size:10px;color:var(--muted)">${v.contact_count} outreach</span>` : '';
 
-        const parts = (v.all_parts || []).map(p => `<span class="act-card-part">${esc(p)}</span>`).join('');
-
         // Quote section from parsed responses
         let quoteHtml = '';
         if (v.responses && v.responses.length) {
@@ -2569,16 +2599,37 @@ function renderActivityCards() {
 
         const threadBtn = `<button class="btn btn-ghost btn-sm" onclick="viewThread('${escAttr(v.vendor_name)}')">View Thread</button>`;
 
-        // AI Parse button — show for vendors with responses
+        // AI Parse button — only show when response hasn't been parsed yet
+        // Attachments button — always available on responses (we can't detect attachments pre-fetch)
         let parseBtn = '';
         let attBtn = '';
         if (v.responses && v.responses.length) {
             const lastR = v.responses[v.responses.length - 1];
             if (lastR.id) {
-                parseBtn = `<button class="btn-ai btn-sm" onclick="parseResponseAI(${lastR.id})">🤖 Parse</button>`;
+                const pd = lastR.parsed_data || {};
+                const hasParsed = pd.parts && pd.parts.length;
+                if (!hasParsed) {
+                    parseBtn = `<button class="btn-ai btn-sm" onclick="parseResponseAI(${lastR.id})">🤖 Parse</button>`;
+                }
                 attBtn = `<button class="btn-ai btn-sm" onclick="parseResponseAttachments(${lastR.id})" title="Parse attachments from this response">📎 Attachments</button>`;
             }
         }
+
+        // Log Call / Note buttons (only when vendor_card_id is known)
+        let logBtns = '';
+        if (v.vendor_card_id) {
+            logBtns = `<button class="btn btn-ghost btn-sm" onclick="openVendorLogCallModal(${v.vendor_card_id}, '${escAttr(v.vendor_name)}', ${currentReqId})">📞 Log Call</button>`
+                    + `<button class="btn btn-ghost btn-sm" onclick="openVendorLogNoteModal(${v.vendor_card_id}, '${escAttr(v.vendor_name)}', ${currentReqId})">📝 Note</button>`;
+        }
+
+        // Activity count badge
+        const actCount = (v.activities || []).length;
+        const actBadge = actCount ? `<span style="font-size:10px;color:var(--muted)">${actCount} note${actCount > 1 ? 's' : ''}/call${actCount > 1 ? 's' : ''}</span>` : '';
+
+        // Conditional meta — hide To/By when they're empty dashes
+        const hasTo = v.last_contact_email && v.last_contact_email !== '—';
+        const hasBy = v.last_contacted_by && v.last_contacted_by !== '—';
+        const metaHtml = (hasTo || hasBy) ? `<div class="act-card-meta">${hasTo ? `<div class="act-card-meta-item"><span class="act-card-meta-label">To</span> ${esc(v.last_contact_email)}</div>` : ''}${hasBy ? `<div class="act-card-meta-item"><span class="act-card-meta-label">By</span> ${esc(v.last_contacted_by)}</div>` : ''}</div>` : '';
 
         return `<div class="act-card">
             <div class="act-card-header">
@@ -2587,15 +2638,12 @@ function renderActivityCards() {
                 ${classificationBadge}
                 ${typeBadges}
                 ${countLabel}
+                ${actBadge}
                 <span class="act-card-date">${fmtRelative(v.last_contacted_at)}</span>
             </div>
-            <div class="act-card-meta">
-                <div class="act-card-meta-item"><span class="act-card-meta-label">To</span> ${esc(v.last_contact_email || '—')}</div>
-                <div class="act-card-meta-item"><span class="act-card-meta-label">By</span> ${esc(v.last_contacted_by || '—')}</div>
-            </div>
-            ${parts ? `<div class="act-card-parts">${parts}</div>` : ''}
+            ${metaHtml}
             ${quoteHtml}
-            <div class="act-card-actions">${followUpBtn}${parseBtn}${attBtn}${threadBtn}</div>
+            <div class="act-card-actions">${followUpBtn}${parseBtn}${attBtn}${logBtns}${threadBtn}</div>
         </div>`;
     }).join('');
 }
@@ -2637,13 +2685,16 @@ async function viewThread(vendorName) {
 
     let html = '<div id="threadEntries" style="max-height:60vh;overflow-y:auto">';
 
-    // Combine outbound + inbound into a single chronological timeline
+    // Combine outbound + inbound + activities into a single chronological timeline
     const timeline = [];
     for (const c of (v.contacts || [])) {
         timeline.push({ type: 'outbound', date: c.created_at, data: c });
     }
     for (const r of (v.responses || [])) {
         timeline.push({ type: 'inbound', date: r.received_at, data: r });
+    }
+    for (const a of (v.activities || [])) {
+        timeline.push({ type: 'activity', date: a.created_at, data: a });
     }
     timeline.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
@@ -2716,6 +2767,25 @@ async function viewThread(vendorName) {
                 ${r.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:4px">${esc(r.subject)}</div>` : ''}
                 ${parsedHtml}
                 ${emailBodyHtml}
+            </div>`;
+        } else if (entry.type === 'activity') {
+            // Manual call or note
+            const a = entry.data;
+            const isCall = a.activity_type && a.activity_type.startsWith('call_');
+            const icon = isCall ? '📞' : '📝';
+            const label = isCall ? `Call (${a.activity_type === 'call_inbound' ? 'inbound' : 'outbound'})` : 'Note';
+            const bgColor = isCall ? 'rgba(245,158,11,.08)' : 'rgba(107,114,128,.08)';
+            const borderColor = isCall ? 'rgba(245,158,11,.2)' : 'rgba(107,114,128,.15)';
+            const labelColor = isCall ? 'var(--amber)' : 'var(--muted)';
+            const durationStr = isCall && a.duration_seconds ? ` · ${Math.floor(a.duration_seconds/60)}m ${a.duration_seconds%60}s` : '';
+            const contactStr = a.contact_name ? ` · ${esc(a.contact_name)}` : '';
+            const phoneStr = isCall && a.contact_phone ? ` · ${esc(a.contact_phone)}` : '';
+            const searchText = [a.contact_name, a.contact_phone, a.notes, a.user_name, label].filter(Boolean).join(' ').toLowerCase();
+            html += `<div data-searchable="${escAttr(searchText)}" style="margin-bottom:12px;padding:10px 14px;background:${bgColor};border-radius:8px;border:1px solid ${borderColor}">
+                <div style="font-size:11px;color:${labelColor};font-weight:600;margin-bottom:4px">
+                    ${icon} ${label}${contactStr}${phoneStr}${durationStr} · ${fmtDateTime(a.created_at)} · by ${esc(a.user_name||'')}
+                </div>
+                ${a.notes ? `<div style="font-size:12px;color:var(--text);margin-top:4px;white-space:pre-wrap">${esc(a.notes)}</div>` : ''}
             </div>`;
         }
     }

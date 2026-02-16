@@ -94,6 +94,8 @@ def _add_columns(conn) -> None:
         # v1.6.x — Vendor contact activity tracking
         "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS vendor_contact_id INTEGER REFERENCES vendor_contacts(id)",
         "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS notes TEXT",
+        # v1.7.x — Scope activities to requisition
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS requisition_id INTEGER REFERENCES requisitions(id)",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
@@ -114,6 +116,7 @@ def _create_indexes(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_vr_classification ON vendor_responses(classification)",
         "CREATE INDEX IF NOT EXISTS ix_vc_domain ON vendor_cards(domain)",
         "CREATE INDEX IF NOT EXISTS ix_activity_vendor_contact ON activity_log(vendor_contact_id, created_at) WHERE vendor_contact_id IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS ix_activity_requisition ON activity_log(requisition_id, vendor_card_id, created_at) WHERE requisition_id IS NOT NULL",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
