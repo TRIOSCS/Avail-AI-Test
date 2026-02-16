@@ -454,6 +454,8 @@ def _create_admin_settings_tables(conn) -> None:
         updated_at TIMESTAMP DEFAULT NOW()
     )""")
     _exec(conn, "CREATE UNIQUE INDEX IF NOT EXISTS ix_sysconfig_key ON system_config(key)")
+    # Add credentials column to api_sources
+    _exec(conn, "ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS credentials JSONB DEFAULT '{}'::jsonb")
     # Seed default scoring weights (idempotent — INSERT ON CONFLICT DO NOTHING)
     seeds = [
         ("weight_recency", "30", "Scoring weight for data recency (0-100)"),

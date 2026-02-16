@@ -44,30 +44,55 @@ router = APIRouter()
 # ── Helpers ───────────────────────────────────────────────────────────
 
 
-def _get_connector_for_source(name: str):
-    """Instantiate the right connector for a source name."""
+def _get_connector_for_source(name: str, db: Session = None):
+    """Instantiate the right connector for a source name.
+    Checks DB credentials first, falls back to env vars."""
     from ..connectors.sources import NexarConnector, BrokerBinConnector
     from ..connectors.ebay import EbayConnector
     from ..connectors.digikey import DigiKeyConnector
     from ..connectors.mouser import MouserConnector
     from ..connectors.oemsecrets import OEMSecretsConnector
     from ..connectors.sourcengine import SourcengineConnector
+    from ..services.credential_service import get_credential
 
-    if name == "nexar" and settings.nexar_client_id:
-        return NexarConnector(settings.nexar_client_id, settings.nexar_client_secret)
-    elif name == "brokerbin" and settings.brokerbin_api_key:
-        return BrokerBinConnector(settings.brokerbin_api_key, settings.brokerbin_api_secret)
-    elif name == "ebay" and settings.ebay_client_id:
-        return EbayConnector(settings.ebay_client_id, settings.ebay_client_secret)
-    elif name == "digikey" and settings.digikey_client_id:
-        return DigiKeyConnector(settings.digikey_client_id, settings.digikey_client_secret)
-    elif name == "mouser" and settings.mouser_api_key:
-        return MouserConnector(settings.mouser_api_key)
-    elif name == "oemsecrets" and settings.oemsecrets_api_key:
-        return OEMSecretsConnector(settings.oemsecrets_api_key)
-    elif name == "sourcengine" and settings.sourcengine_api_key:
-        return SourcengineConnector(settings.sourcengine_api_key)
-    elif name == "email_mining" and settings.email_mining_enabled:
+    def _cred(var_name):
+        if db:
+            return get_credential(db, name, var_name)
+        return os.getenv(var_name) or None
+
+    nexar_id = _cred("NEXAR_CLIENT_ID")
+    nexar_sec = _cred("NEXAR_CLIENT_SECRET")
+    if name == "nexar" and nexar_id:
+        return NexarConnector(nexar_id, nexar_sec)
+
+    bb_key = _cred("BROKERBIN_API_KEY")
+    bb_sec = _cred("BROKERBIN_API_SECRET")
+    if name == "brokerbin" and bb_key:
+        return BrokerBinConnector(bb_key, bb_sec)
+
+    ebay_id = _cred("EBAY_CLIENT_ID")
+    ebay_sec = _cred("EBAY_CLIENT_SECRET")
+    if name == "ebay" and ebay_id:
+        return EbayConnector(ebay_id, ebay_sec)
+
+    dk_id = _cred("DIGIKEY_CLIENT_ID")
+    dk_sec = _cred("DIGIKEY_CLIENT_SECRET")
+    if name == "digikey" and dk_id:
+        return DigiKeyConnector(dk_id, dk_sec)
+
+    mouser_key = _cred("MOUSER_API_KEY")
+    if name == "mouser" and mouser_key:
+        return MouserConnector(mouser_key)
+
+    oem_key = _cred("OEMSECRETS_API_KEY")
+    if name == "oemsecrets" and oem_key:
+        return OEMSecretsConnector(oem_key)
+
+    src_key = _cred("SOURCENGINE_API_KEY")
+    if name == "sourcengine" and src_key:
+        return SourcengineConnector(src_key)
+
+    if name == "email_mining" and settings.email_mining_enabled:
         return _EmailMiningTestConnector()
     return None
 
@@ -158,11 +183,13 @@ async def list_api_sources(user: User = Depends(require_user), db: Session = Dep
     """Return all API sources grouped by status."""
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
 
+    from ..services.credential_service import credential_is_set
+
     for src in sources:
         env_vars = src.env_vars or []
         if env_vars:
-            all_set = all(os.getenv(v) for v in env_vars)
-            any_set = any(os.getenv(v) for v in env_vars)
+            all_set = all(credential_is_set(db, src.name, v) for v in env_vars)
+            any_set = any(credential_is_set(db, src.name, v) for v in env_vars)
             if all_set and src.status == "pending":
                 src.status = "live"
             elif not any_set and src.status == "live":
@@ -173,7 +200,7 @@ async def list_api_sources(user: User = Depends(require_user), db: Session = Dep
     for src in sources:
         env_status = {}
         for v in (src.env_vars or []):
-            env_status[v] = bool(os.getenv(v))
+            env_status[v] = credential_is_set(db, src.name, v)
 
         result.append({
             "id": src.id,
@@ -211,7 +238,7 @@ async def test_api_source(source_id: int, user: User = Depends(require_user), db
     error = None
 
     try:
-        connector = _get_connector_for_source(src.name)
+        connector = _get_connector_for_source(src.name, db)
         if not connector:
             raise ValueError(f"No connector available for {src.name}")
         results = await connector.search(test_mpn)

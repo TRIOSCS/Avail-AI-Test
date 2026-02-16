@@ -2460,36 +2460,133 @@ function switchSettingsTab(name, btn) {
 function showSettings(panel) { openSettingsTab(panel); }
 
 async function loadSettingsSources() {
-    // Reuse the existing loadSources() but redirect output to settings panel
     const el = document.getElementById('settingsSourcesList');
     el.innerHTML = '<p class="empty">Loading data sources...</p>';
     try {
-        const res = await fetch('/api/sources');
-        const data = await res.json();
-        const sources = data.sources || [];
-        // Copy rendered content from sourcesList after loading
-        // Use same format: render inline
+        const res = await apiFetch('/api/sources');
+        const sources = (res.sources || []).filter(s => s.source_type !== 'internal');
         if (!sources.length) { el.innerHTML = '<p class="empty">No data sources configured</p>'; return; }
-        const live = sources.filter(s => s.status === 'live');
-        const pending = sources.filter(s => s.status === 'pending');
-        const error = sources.filter(s => s.status === 'error');
-        const disabled = sources.filter(s => s.status === 'disabled');
-        let html = `<div class="src-grid">`;
-        for (const s of [...live, ...pending, ...error, ...disabled]) {
+
+        // Sort: live first, then pending, error, disabled
+        const order = {live: 0, pending: 1, error: 2, disabled: 3};
+        sources.sort((a, b) => (order[a.status] || 9) - (order[b.status] || 9));
+
+        let html = '';
+        for (const s of sources) {
             const dot = s.status === 'live' ? '🟢' : s.status === 'pending' ? '🟡' : s.status === 'error' ? '🔴' : '⚫';
-            html += `<div class="card" style="padding:14px">
-                <div style="display:flex;justify-content:space-between;align-items:center">
-                    <strong style="font-size:13px">${s.name}</strong>
-                    <span style="font-size:11px">${dot} ${s.status}</span>
+            const envVars = s.env_vars || [];
+            const envStatus = s.env_status || {};
+
+            let credsHtml = '';
+            for (const v of envVars) {
+                const isSet = envStatus[v];
+                const badge = isSet
+                    ? '<span style="color:var(--teal);font-size:11px;font-weight:600">Set</span>'
+                    : '<span style="color:var(--muted);font-size:11px">Not set</span>';
+                credsHtml += `
+                    <div class="cred-row" id="cred-row-${s.id}-${v}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+                        <code style="font-size:11px;min-width:180px;color:var(--text2)">${v}</code>
+                        <span id="cred-status-${s.id}-${v}">${badge}</span>
+                        <div style="flex:1"></div>
+                        <button class="btn-sm" onclick="editCredential(${s.id},'${v}')" style="font-size:11px;padding:2px 10px">Edit</button>
+                    </div>
+                    <div id="cred-edit-${s.id}-${v}" style="display:none;padding:6px 0 10px">
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <input type="password" id="cred-input-${s.id}-${v}" placeholder="Enter value..."
+                                   style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg);color:var(--text)">
+                            <button class="btn-sm" onclick="saveCredential(${s.id},'${v}')"
+                                    style="font-size:11px;padding:4px 12px;background:var(--teal);color:#fff;border:none;border-radius:4px">Save</button>
+                            <button class="btn-sm" onclick="cancelCredEdit(${s.id},'${v}')"
+                                    style="font-size:11px;padding:4px 10px">Cancel</button>
+                        </div>
+                    </div>`;
+            }
+
+            const statsHtml = s.total_searches
+                ? `<div style="font-size:10px;color:var(--muted);margin-top:8px">${s.total_searches} searches / ${s.total_results} results / ${s.avg_response_ms}ms avg</div>`
+                : '';
+            const errorHtml = s.last_error
+                ? `<div style="font-size:10px;color:#e74c3c;margin-top:4px">Last error: ${s.last_error}</div>`
+                : '';
+
+            html += `<div class="card" style="padding:16px;margin-bottom:12px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <div>
+                        <strong style="font-size:14px">${s.display_name}</strong>
+                        <span style="font-size:11px;color:var(--muted);margin-left:8px">${s.source_type}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <span style="font-size:11px">${dot} ${s.status}</span>
+                        <button class="btn-sm" id="test-btn-${s.id}" onclick="testSourceCred(${s.id})"
+                                style="font-size:11px;padding:3px 12px">Test</button>
+                    </div>
                 </div>
-                <div style="font-size:11px;color:var(--muted);margin-top:4px">${s.source_type || s.type || ''}</div>
+                <div style="font-size:11px;color:var(--text2);margin-bottom:10px">${s.description || ''}</div>
+                ${s.setup_notes ? '<div style="font-size:10px;color:var(--muted);margin-bottom:8px;padding:6px 10px;background:var(--bg);border-radius:4px">' + s.setup_notes + '</div>' : ''}
+                ${s.signup_url ? '<a href="' + s.signup_url + '" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:none">Get API credentials ↗</a>' : ''}
+                <div style="margin-top:10px">${credsHtml}</div>
+                <div id="test-result-${s.id}"></div>
+                ${statsHtml}${errorHtml}
             </div>`;
         }
-        html += '</div>';
         el.innerHTML = html;
     } catch (e) {
         el.innerHTML = '<p class="empty">Failed to load sources</p>';
     }
+}
+
+function editCredential(sourceId, varName) {
+    document.getElementById(`cred-edit-${sourceId}-${varName}`).style.display = '';
+    const input = document.getElementById(`cred-input-${sourceId}-${varName}`);
+    input.value = '';
+    input.focus();
+}
+
+function cancelCredEdit(sourceId, varName) {
+    document.getElementById(`cred-edit-${sourceId}-${varName}`).style.display = 'none';
+}
+
+async function saveCredential(sourceId, varName) {
+    const input = document.getElementById(`cred-input-${sourceId}-${varName}`);
+    const value = input.value.trim();
+    if (!value) { showToast('Please enter a value', 'error'); return; }
+    try {
+        const body = {};
+        body[varName] = value;
+        await apiFetch(`/api/admin/sources/${sourceId}/credentials`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body),
+        });
+        showToast('Credential saved', 'success');
+        cancelCredEdit(sourceId, varName);
+        loadSettingsSources();
+    } catch (e) {
+        showToast('Failed to save credential: ' + (e.message || e), 'error');
+    }
+}
+
+async function testSourceCred(sourceId) {
+    const btn = document.getElementById(`test-btn-${sourceId}`);
+    const resultEl = document.getElementById(`test-result-${sourceId}`);
+    btn.disabled = true;
+    btn.textContent = 'Testing...';
+    resultEl.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:6px 0">Running test...</div>';
+    try {
+        const data = await apiFetch(`/api/sources/${sourceId}/test`, {method: 'POST'});
+        if (data.status === 'ok') {
+            resultEl.innerHTML = `<div style="font-size:11px;color:var(--teal);padding:6px 0">Test passed — ${data.results_count} results in ${data.elapsed_ms}ms</div>`;
+        } else if (data.status === 'no_results') {
+            resultEl.innerHTML = '<div style="font-size:11px;color:#e67e22;padding:6px 0">Connected but no results for test MPN</div>';
+        } else {
+            resultEl.innerHTML = `<div style="font-size:11px;color:#e74c3c;padding:6px 0">Test failed: ${data.error || 'Unknown error'}</div>`;
+        }
+        loadSettingsSources();
+    } catch (e) {
+        resultEl.innerHTML = `<div style="font-size:11px;color:#e74c3c;padding:6px 0">Test error: ${e.message || e}</div>`;
+    }
+    btn.disabled = false;
+    btn.textContent = 'Test';
 }
 
 // ── System Health ──

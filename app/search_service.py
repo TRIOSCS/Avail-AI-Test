@@ -106,21 +106,42 @@ async def _fetch_fresh(pns: list[str], db: Session) -> list[dict]:
 
     connectors = []
 
-    # Tier 1: Direct APIs (skip disabled)
-    if "nexar" not in disabled_sources and settings.nexar_client_id and settings.nexar_client_secret:
-        connectors.append(NexarConnector(settings.nexar_client_id, settings.nexar_client_secret))
-    if "brokerbin" not in disabled_sources and settings.brokerbin_api_key:
-        connectors.append(BrokerBinConnector(settings.brokerbin_api_key, settings.brokerbin_api_secret))
-    if "ebay" not in disabled_sources and settings.ebay_client_id and settings.ebay_client_secret:
-        connectors.append(EbayConnector(settings.ebay_client_id, settings.ebay_client_secret))
-    if "digikey" not in disabled_sources and settings.digikey_client_id and settings.digikey_client_secret:
-        connectors.append(DigiKeyConnector(settings.digikey_client_id, settings.digikey_client_secret))
-    if "mouser" not in disabled_sources and settings.mouser_api_key:
-        connectors.append(MouserConnector(settings.mouser_api_key))
-    if "oemsecrets" not in disabled_sources and settings.oemsecrets_api_key:
-        connectors.append(OEMSecretsConnector(settings.oemsecrets_api_key))
-    if "sourcengine" not in disabled_sources and settings.sourcengine_api_key:
-        connectors.append(SourcengineConnector(settings.sourcengine_api_key))
+    # Tier 1: Direct APIs (skip disabled). DB credentials first, env var fallback.
+    from .services.credential_service import get_credential
+    def _cred(source_name, var_name):
+        return get_credential(db, source_name, var_name)
+
+    nexar_id = _cred("nexar", "NEXAR_CLIENT_ID")
+    nexar_sec = _cred("nexar", "NEXAR_CLIENT_SECRET")
+    if "nexar" not in disabled_sources and nexar_id and nexar_sec:
+        connectors.append(NexarConnector(nexar_id, nexar_sec))
+
+    bb_key = _cred("brokerbin", "BROKERBIN_API_KEY")
+    bb_sec = _cred("brokerbin", "BROKERBIN_API_SECRET")
+    if "brokerbin" not in disabled_sources and bb_key:
+        connectors.append(BrokerBinConnector(bb_key, bb_sec))
+
+    ebay_id = _cred("ebay", "EBAY_CLIENT_ID")
+    ebay_sec = _cred("ebay", "EBAY_CLIENT_SECRET")
+    if "ebay" not in disabled_sources and ebay_id and ebay_sec:
+        connectors.append(EbayConnector(ebay_id, ebay_sec))
+
+    dk_id = _cred("digikey", "DIGIKEY_CLIENT_ID")
+    dk_sec = _cred("digikey", "DIGIKEY_CLIENT_SECRET")
+    if "digikey" not in disabled_sources and dk_id and dk_sec:
+        connectors.append(DigiKeyConnector(dk_id, dk_sec))
+
+    mouser_key = _cred("mouser", "MOUSER_API_KEY")
+    if "mouser" not in disabled_sources and mouser_key:
+        connectors.append(MouserConnector(mouser_key))
+
+    oem_key = _cred("oemsecrets", "OEMSECRETS_API_KEY")
+    if "oemsecrets" not in disabled_sources and oem_key:
+        connectors.append(OEMSecretsConnector(oem_key))
+
+    src_key = _cred("sourcengine", "SOURCENGINE_API_KEY")
+    if "sourcengine" not in disabled_sources and src_key:
+        connectors.append(SourcengineConnector(src_key))
 
     if not connectors:
         return []

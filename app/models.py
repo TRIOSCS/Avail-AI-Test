@@ -758,6 +758,7 @@ class ApiSource(Base):
     setup_notes = Column(Text)
     signup_url = Column(String(500))
     env_vars = Column(JSON, default=list)
+    credentials = Column(JSON, default=dict)   # encrypted credential values keyed by env var name
     last_success = Column(DateTime)
     last_error = Column(String(500))
     total_searches = Column(Integer, default=0)

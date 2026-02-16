@@ -3,6 +3,7 @@
 import csv
 import io
 import logging
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
@@ -11,11 +12,12 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import require_admin, require_settings_access
-from ..models import User, Company, CustomerSite, SiteContact, VendorCard, VendorContact
+from ..models import ApiSource, User, Company, CustomerSite, SiteContact, VendorCard, VendorContact
 from ..services.admin_service import (
     list_users, update_user, get_all_config, set_config_value,
     get_scoring_weights, get_system_health, VALID_ROLES,
 )
+from ..services.credential_service import encrypt_value, decrypt_value, mask_value
 
 router = APIRouter(tags=["admin"])
 log = logging.getLogger(__name__)
@@ -127,6 +129,83 @@ def api_health(
     db: Session = Depends(get_db),
 ):
     return get_system_health(db)
+
+
+# ── Credential Management (admin only) ────────────────────────────────
+
+@router.get("/api/admin/sources/{source_id}/credentials")
+def api_get_credentials(
+    source_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Return masked credential values for a source."""
+    src = db.get(ApiSource, source_id)
+    if not src:
+        raise HTTPException(404, "Source not found")
+    result = {}
+    for var_name in (src.env_vars or []):
+        encrypted = (src.credentials or {}).get(var_name)
+        if encrypted:
+            try:
+                plain = decrypt_value(encrypted)
+                result[var_name] = {"status": "set", "masked": mask_value(plain), "source": "db"}
+            except Exception:
+                result[var_name] = {"status": "error", "masked": "", "source": "db"}
+        elif os.getenv(var_name):
+            result[var_name] = {"status": "set", "masked": mask_value(os.getenv(var_name)), "source": "env"}
+        else:
+            result[var_name] = {"status": "empty", "masked": "", "source": "none"}
+    return {"source_id": src.id, "source_name": src.name, "credentials": result}
+
+
+@router.put("/api/admin/sources/{source_id}/credentials")
+def api_set_credentials(
+    source_id: int,
+    body: dict,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Set credential values for a source. Body: {VAR_NAME: "plaintext_value", ...}"""
+    src = db.get(ApiSource, source_id)
+    if not src:
+        raise HTTPException(404, "Source not found")
+    valid_vars = set(src.env_vars or [])
+    creds = dict(src.credentials or {})
+    updated = []
+    for var_name, value in body.items():
+        if var_name not in valid_vars:
+            continue
+        value = (value or "").strip()
+        if value:
+            creds[var_name] = encrypt_value(value)
+            updated.append(var_name)
+        else:
+            creds.pop(var_name, None)
+            updated.append(var_name)
+    src.credentials = creds
+    db.commit()
+    log.info(f"Credentials updated for {src.name} by {user.email}: {updated}")
+    return {"status": "ok", "updated": updated}
+
+
+@router.delete("/api/admin/sources/{source_id}/credentials/{var_name}")
+def api_delete_credential(
+    source_id: int,
+    var_name: str,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Remove a single credential from a source."""
+    src = db.get(ApiSource, source_id)
+    if not src:
+        raise HTTPException(404, "Source not found")
+    creds = dict(src.credentials or {})
+    removed = creds.pop(var_name, None)
+    src.credentials = creds
+    db.commit()
+    log.info(f"Credential {var_name} removed from {src.name} by {user.email}")
+    return {"status": "removed" if removed else "not_found"}
 
 
 # ── Data Import (admin only) ─────────────────────────────────────────
