@@ -2014,6 +2014,24 @@ function openVendorLogCallModal(cardId, vendorName, reqId) {
     setTimeout(() => document.getElementById('vlcPhone').focus(), 100);
 }
 
+function placeVendorCall(cardId, vendorName, reqId, phone) {
+    // Dial the phone number via tel: link
+    if (phone) {
+        window.open('tel:' + encodeURIComponent(phone), '_self');
+    }
+    // Open log call modal pre-filled so user can record the call
+    document.getElementById('vlcCardId').value = cardId;
+    document.getElementById('vlcVendorName').textContent = vendorName;
+    document.getElementById('vlcPhone').value = phone || '';
+    document.getElementById('vlcContactName').value = '';
+    document.getElementById('vlcDuration').value = '';
+    document.getElementById('vlcNotes').value = '';
+    document.getElementById('vlcDirection').value = 'outbound';
+    window._vlcReqId = reqId || null;
+    document.getElementById('vendorLogCallModal').classList.add('open');
+    setTimeout(function() { document.getElementById('vlcNotes').focus(); }, 300);
+}
+
 async function saveVendorLogCall() {
     const cardId = document.getElementById('vlcCardId').value;
     const dur = parseInt(document.getElementById('vlcDuration').value);
@@ -2458,22 +2476,15 @@ function renderActivityCards() {
     }
 
     // Show compact summary — only non-zero stats
-    const statParts = [];
-    if (summary.sent) statParts.push(`${summary.sent} sent`);
-    if (summary.replied) statParts.push(`${summary.replied} replied`);
-    if (summary.opened) statParts.push(`${summary.opened} opened`);
-    if (summary.awaiting) statParts.push(`${summary.awaiting} awaiting`);
-    summaryEl.style.display = statParts.length ? 'flex' : 'none';
-    // Update individual stat elements (keep clickable filter working)
     document.getElementById('actStatSent').textContent = summary.sent || 0;
     document.getElementById('actStatReplied').textContent = summary.replied || 0;
     document.getElementById('actStatOpened').textContent = summary.opened || 0;
     document.getElementById('actStatAwaiting').textContent = summary.awaiting || 0;
+    summaryEl.style.display = 'flex';
     // Hide zero-count stat cards
-    summaryEl.querySelectorAll('.act-stat').forEach(card => {
-        const num = parseInt(card.querySelector('.act-stat-num')?.textContent || '0');
-        const statType = card.dataset.actStat;
-        // Always show "all" (sent) card; hide others when zero
+    summaryEl.querySelectorAll('.act-stat').forEach(function(card) {
+        var num = parseInt(card.querySelector('.act-stat-num') ? card.querySelector('.act-stat-num').textContent : '0');
+        var statType = card.dataset.actStat;
         card.style.display = (statType === 'all' || num > 0) ? '' : 'none';
     });
 
@@ -2483,16 +2494,14 @@ function renderActivityCards() {
     const sortVal = document.getElementById('actSort')?.value || 'date-desc';
 
     // Ghost vendor filter — auto-replies, own users, noise entries
-    const _NOISE_NAMES = new Set(['microsoft outlook', 'outlook', 'postmaster', 'mailer-daemon', 'noreply', 'no-reply', 'do not reply']);
-    const _ownName = (window.userName || '').trim().toLowerCase();
+    var _NOISE_NAMES = ['microsoft outlook', 'outlook', 'postmaster', 'mailer-daemon', 'noreply', 'no-reply', 'do not reply'];
+    var _ownName = (window.userName || '').trim().toLowerCase();
 
     let filtered = [...vendors].filter(v => {
         const vn = (v.vendor_name || '').trim().toLowerCase();
         if (!vn || vn === 'no seller listed') return false;
-        // Filter ghost vendors: noise names, own user name, entries with no contacts and no responses
-        if (_NOISE_NAMES.has(vn)) return false;
+        if (_NOISE_NAMES.indexOf(vn) !== -1) return false;
         if (_ownName && vn === _ownName) return false;
-        // Entries that have no contacts and no responses and no activities are orphans
         if (!(v.contacts||[]).length && !(v.responses||[]).length && !(v.activities||[]).length) return false;
         return true;
     });
@@ -2540,24 +2549,6 @@ function renderActivityCards() {
             ? '<span class="act-badge-unavail">Declined</span>'
             : '<span class="act-badge-awaiting">Awaiting</span>';
 
-        // Classification badge from response
-        let classificationBadge = '';
-        if (v.responses && v.responses.length) {
-            const lastR = v.responses[v.responses.length - 1];
-            const cls = lastR.classification || '';
-            const clsLabels = {
-                'quote_provided': '💰 Quote', 'no_stock': '❌ No Stock', 'partial_availability': '📦 Partial',
-                'counter_offer': '🔄 Counter', 'clarification_needed': '❓ Question', 'ooo_bounce': '✈️ OOO',
-                'follow_up_pending': '⏳ Review', 'unrelated': '—'
-            };
-            if (cls && clsLabels[cls]) {
-                classificationBadge = `<span class="act-badge-classification">${clsLabels[cls]}</span>`;
-            }
-            if (lastR.action_hint) {
-                classificationBadge += `<span class="act-action-hint">${esc(lastR.action_hint)}</span>`;
-            }
-        }
-
         // Follow-up button for stale contacts (buyer only)
         let followUpBtn = '';
         if (isBuyer() && v.status === 'awaiting' && v.contacts && v.contacts.length) {
@@ -2568,12 +2559,6 @@ function renderActivityCards() {
                 followUpBtn = `<button class="btn btn-warning btn-sm" onclick="sendFollowUp(${lastContact.id}, '${escAttr(v.vendor_name)}')">📬 Follow Up (${daysSince}d)</button>`;
             }
         }
-
-        const typeBadges = (v.contact_types || []).map(t =>
-            `<span class="act-badge-type ${t === 'email' ? 'act-badge-email' : 'act-badge-phone'}">${t === 'email' ? '✉ Email' : '📞 Phone'}</span>`
-        ).join('');
-
-        const countLabel = v.contact_count > 1 ? `<span style="font-size:10px;color:var(--muted)">${v.contact_count} outreach</span>` : '';
 
         // Quote section from parsed responses
         let quoteHtml = '';
@@ -2600,7 +2585,6 @@ function renderActivityCards() {
         const threadBtn = `<button class="btn btn-ghost btn-sm" onclick="viewThread('${escAttr(v.vendor_name)}')">View Thread</button>`;
 
         // AI Parse button — only show when response hasn't been parsed yet
-        // Attachments button — always available on responses (we can't detect attachments pre-fetch)
         let parseBtn = '';
         let attBtn = '';
         if (v.responses && v.responses.length) {
@@ -2615,30 +2599,36 @@ function renderActivityCards() {
             }
         }
 
-        // Log Call / Note buttons (only when vendor_card_id is known)
+        // Place Call / Note buttons (only when vendor_card_id is known)
         let logBtns = '';
         if (v.vendor_card_id) {
-            logBtns = `<button class="btn btn-ghost btn-sm" onclick="openVendorLogCallModal(${v.vendor_card_id}, '${escAttr(v.vendor_name)}', ${currentReqId})">📞 Log Call</button>`
-                    + `<button class="btn btn-ghost btn-sm" onclick="openVendorLogNoteModal(${v.vendor_card_id}, '${escAttr(v.vendor_name)}', ${currentReqId})">📝 Note</button>`;
+            // Find a phone number from phone-type contacts
+            var vendorPhone = '';
+            for (var ci = 0; ci < (v.contacts || []).length; ci++) {
+                if ((v.contacts[ci].contact_type === 'phone') && v.contacts[ci].vendor_contact) {
+                    vendorPhone = v.contacts[ci].vendor_contact;
+                    break;
+                }
+            }
+            logBtns = '<button class="btn btn-ghost btn-sm" onclick="placeVendorCall(' + v.vendor_card_id + ', \'' + escAttr(v.vendor_name) + '\', ' + currentReqId + ', \'' + escAttr(vendorPhone) + '\')">📞 Place Call</button>'
+                    + '<button class="btn btn-ghost btn-sm" onclick="openVendorLogNoteModal(' + v.vendor_card_id + ', \'' + escAttr(v.vendor_name) + '\', ' + currentReqId + ')">📝 Note</button>';
         }
 
-        // Activity count badge
-        const actCount = (v.activities || []).length;
-        const actBadge = actCount ? `<span style="font-size:10px;color:var(--muted)">${actCount} note${actCount > 1 ? 's' : ''}/call${actCount > 1 ? 's' : ''}</span>` : '';
-
-        // Conditional meta — hide To/By when they're empty dashes
+        // Conditional meta — hide To/By when they're empty
         const hasTo = v.last_contact_email && v.last_contact_email !== '—';
         const hasBy = v.last_contacted_by && v.last_contacted_by !== '—';
-        const metaHtml = (hasTo || hasBy) ? `<div class="act-card-meta">${hasTo ? `<div class="act-card-meta-item"><span class="act-card-meta-label">To</span> ${esc(v.last_contact_email)}</div>` : ''}${hasBy ? `<div class="act-card-meta-item"><span class="act-card-meta-label">By</span> ${esc(v.last_contacted_by)}</div>` : ''}</div>` : '';
+        let metaHtml = '';
+        if (hasTo || hasBy) {
+            metaHtml = '<div class="act-card-meta">';
+            if (hasTo) metaHtml += '<div class="act-card-meta-item"><span class="act-card-meta-label">To</span> ' + esc(v.last_contact_email) + '</div>';
+            if (hasBy) metaHtml += '<div class="act-card-meta-item"><span class="act-card-meta-label">By</span> ' + esc(v.last_contacted_by) + '</div>';
+            metaHtml += '</div>';
+        }
 
         return `<div class="act-card">
             <div class="act-card-header">
                 <span class="act-card-vendor">${esc(v.vendor_name)}</span>
                 ${statusBadge}
-                ${classificationBadge}
-                ${typeBadges}
-                ${countLabel}
-                ${actBadge}
                 <span class="act-card-date">${fmtRelative(v.last_contacted_at)}</span>
             </div>
             ${metaHtml}
@@ -2715,7 +2705,7 @@ async function viewThread(vendorName) {
                 <div style="font-size:11px;color:var(--text2)">${(c.parts_included||[]).join(', ')}</div>
                 ${bodyHtml}
             </div>`;
-        } else {
+        } else if (entry.type === 'inbound') {
             // Inbound response
             const r = entry.data;
             const pd = r.parsed_data;
@@ -2773,20 +2763,20 @@ async function viewThread(vendorName) {
             const a = entry.data;
             const isCall = a.activity_type && a.activity_type.startsWith('call_');
             const icon = isCall ? '📞' : '📝';
-            const label = isCall ? `Call (${a.activity_type === 'call_inbound' ? 'inbound' : 'outbound'})` : 'Note';
+            const label = isCall ? ('Call (' + (a.activity_type === 'call_inbound' ? 'inbound' : 'outbound') + ')') : 'Note';
             const bgColor = isCall ? 'rgba(245,158,11,.08)' : 'rgba(107,114,128,.08)';
             const borderColor = isCall ? 'rgba(245,158,11,.2)' : 'rgba(107,114,128,.15)';
             const labelColor = isCall ? 'var(--amber)' : 'var(--muted)';
-            const durationStr = isCall && a.duration_seconds ? ` · ${Math.floor(a.duration_seconds/60)}m ${a.duration_seconds%60}s` : '';
-            const contactStr = a.contact_name ? ` · ${esc(a.contact_name)}` : '';
-            const phoneStr = isCall && a.contact_phone ? ` · ${esc(a.contact_phone)}` : '';
+            const durationStr = isCall && a.duration_seconds ? (' · ' + Math.floor(a.duration_seconds/60) + 'm ' + (a.duration_seconds%60) + 's') : '';
+            const contactStr = a.contact_name ? (' · ' + esc(a.contact_name)) : '';
+            const phoneStr = isCall && a.contact_phone ? (' · ' + esc(a.contact_phone)) : '';
             const searchText = [a.contact_name, a.contact_phone, a.notes, a.user_name, label].filter(Boolean).join(' ').toLowerCase();
-            html += `<div data-searchable="${escAttr(searchText)}" style="margin-bottom:12px;padding:10px 14px;background:${bgColor};border-radius:8px;border:1px solid ${borderColor}">
-                <div style="font-size:11px;color:${labelColor};font-weight:600;margin-bottom:4px">
-                    ${icon} ${label}${contactStr}${phoneStr}${durationStr} · ${fmtDateTime(a.created_at)} · by ${esc(a.user_name||'')}
-                </div>
-                ${a.notes ? `<div style="font-size:12px;color:var(--text);margin-top:4px;white-space:pre-wrap">${esc(a.notes)}</div>` : ''}
-            </div>`;
+            html += '<div data-searchable="' + escAttr(searchText) + '" style="margin-bottom:12px;padding:10px 14px;background:' + bgColor + ';border-radius:8px;border:1px solid ' + borderColor + '">'
+                + '<div style="font-size:11px;color:' + labelColor + ';font-weight:600;margin-bottom:4px">'
+                + icon + ' ' + label + contactStr + phoneStr + durationStr + ' · ' + fmtDateTime(a.created_at) + ' · by ' + esc(a.user_name||'')
+                + '</div>'
+                + (a.notes ? '<div style="font-size:12px;color:var(--text);margin-top:4px;white-space:pre-wrap">' + esc(a.notes) + '</div>' : '')
+                + '</div>';
         }
     }
 
