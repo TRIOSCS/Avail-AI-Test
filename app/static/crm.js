@@ -361,13 +361,28 @@ function renderOffers() {
             const isExpired = o.status === 'expired';
             const rowCls = isRef ? 'offer-ref' : (isExpired ? 'offer-expired' : '');
             const subDetails = [o.firmware && 'FW: '+esc(o.firmware), o.hardware_code && 'HW: '+esc(o.hardware_code), o.packaging && 'Pkg: '+esc(o.packaging)].filter(Boolean).join(' · ');
-            const noteStr = o.notes ? '<div style="font-size:10px;color:var(--text2);margin-top:2px">'+esc(o.notes)+'</div>' : '';
-            const attHtml = (o.attachments||[]).map(a => `<a href="${esc(a.onedrive_url||'#')}" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:underline">${esc(a.file_name)}</a>`).join(' ');
+
+            // Notes pill — shows date/time, click to expand
+            let noteStr = '';
+            if (o.notes) {
+                const noteDate = o.created_at ? new Date(o.created_at).toLocaleString('en-US', {month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}) : '';
+                noteStr = `<span class="offer-note-pill" onclick="this.nextElementSibling.classList.toggle('hidden');event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;margin-top:3px;padding:1px 8px;border-radius:10px;background:var(--amber-light,#fff3cd);color:var(--amber,#856404);font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--amber,#856404)">📝 Notes${noteDate ? ' · '+noteDate : ''}</span><div class="hidden" style="margin-top:4px;padding:6px 8px;border-radius:6px;background:var(--bg2,#f8f9fa);border:1px solid var(--border);font-size:11px;color:var(--text1);white-space:pre-wrap;max-width:350px">${esc(o.notes)}</div>`;
+            }
+
+            // Photo indicator — prominent badge with count and click to open gallery
+            const images = (o.attachments||[]).filter(a => (a.content_type||'').startsWith('image/'));
+            const nonImages = (o.attachments||[]).filter(a => !(a.content_type||'').startsWith('image/'));
+            let photoHtml = '';
+            if (images.length) {
+                photoHtml = `<span onclick="openOfferGallery(${o.id});event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;margin-top:3px;padding:2px 8px;border-radius:10px;background:var(--teal-light,#d1ecf1);color:var(--teal,#0c7c84);font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--teal,#0c7c84)">📷 ${images.length} Photo${images.length>1?'s':''} — View</span>`;
+            }
+            const fileHtml = nonImages.map(a => `<a href="${esc(a.onedrive_url||'#')}" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:underline">${esc(a.file_name)}</a>`).join(' ');
+
             const enteredStr = o.entered_by ? '<span style="font-size:10px;color:var(--muted)">by '+esc(o.entered_by)+'</span>' : '';
             return `
             <tr class="${rowCls}">
                 <td><input type="checkbox" ${checked} ${isRef ? 'disabled' : ''} onchange="toggleOfferSelect(${o.id},this.checked)"></td>
-                <td>${esc(o.vendor_name)}${subDetails ? '<div class="sc-detail" style="font-size:10px;color:var(--muted)">'+subDetails+'</div>' : ''}${noteStr}${attHtml ? '<div style="margin-top:2px">'+attHtml+'</div>' : ''}</td>
+                <td>${esc(o.vendor_name)}${subDetails ? '<div class="sc-detail" style="font-size:10px;color:var(--muted)">'+subDetails+'</div>' : ''}${noteStr ? '<div>'+noteStr+'</div>' : ''}${photoHtml || fileHtml ? '<div style="margin-top:2px">'+photoHtml+(fileHtml?' '+fileHtml:'')+'</div>' : ''}</td>
                 <td>${o.unit_price != null ? '$'+Number(o.unit_price).toFixed(4) : '—'}</td>
                 <td>${o.qty_available != null ? o.qty_available.toLocaleString() : '—'}</td>
                 <td>${esc(o.lead_time || '—')}</td>
@@ -401,6 +416,62 @@ function toggleOfferSelect(offerId, checked) {
     if (checked) selectedOffers.add(offerId);
     else selectedOffers.delete(offerId);
     updateBuildQuoteBtn();
+}
+
+// ── Offer Photo Gallery / Lightbox ─────────────────────────────────────
+function openOfferGallery(offerId) {
+    // Find offer across all groups
+    let images = [];
+    for (const g of crmOffers) {
+        const o = g.offers.find(x => x.id === offerId);
+        if (o) {
+            images = (o.attachments||[]).filter(a => (a.content_type||'').startsWith('image/'));
+            break;
+        }
+    }
+    if (!images.length) return;
+
+    let idx = 0;
+    // Remove existing gallery if any
+    let gal = document.getElementById('offerGalleryOverlay');
+    if (gal) gal.remove();
+
+    gal = document.createElement('div');
+    gal.id = 'offerGalleryOverlay';
+    gal.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.85);display:flex;align-items:center;justify-content:center;';
+    gal.innerHTML = `
+        <button id="galClose" style="position:absolute;top:16px;right:20px;background:none;border:none;color:#fff;font-size:28px;cursor:pointer;z-index:10001">&times;</button>
+        <button id="galPrev" style="position:absolute;left:16px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.15);border:none;color:#fff;font-size:32px;cursor:pointer;padding:8px 14px;border-radius:8px;z-index:10001">&#8249;</button>
+        <div style="display:flex;flex-direction:column;align-items:center;max-width:90vw;max-height:90vh">
+            <img id="galImg" style="max-width:85vw;max-height:80vh;object-fit:contain;border-radius:8px;box-shadow:0 4px 24px rgba(0,0,0,.5)">
+            <div id="galCaption" style="color:#fff;font-size:13px;margin-top:8px;text-align:center"></div>
+        </div>
+        <button id="galNext" style="position:absolute;right:16px;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.15);border:none;color:#fff;font-size:32px;cursor:pointer;padding:8px 14px;border-radius:8px;z-index:10001">&#8250;</button>
+    `;
+    document.body.appendChild(gal);
+
+    function show(i) {
+        idx = i;
+        const img = images[idx];
+        document.getElementById('galImg').src = img.onedrive_url || '';
+        document.getElementById('galCaption').textContent = img.file_name + ' (' + (idx+1) + '/' + images.length + ')';
+        document.getElementById('galPrev').style.visibility = images.length > 1 ? 'visible' : 'hidden';
+        document.getElementById('galNext').style.visibility = images.length > 1 ? 'visible' : 'hidden';
+    }
+    show(0);
+
+    document.getElementById('galClose').onclick = () => gal.remove();
+    document.getElementById('galPrev').onclick = (e) => { e.stopPropagation(); show((idx - 1 + images.length) % images.length); };
+    document.getElementById('galNext').onclick = (e) => { e.stopPropagation(); show((idx + 1) % images.length); };
+    gal.onclick = (e) => { if (e.target === gal) gal.remove(); };
+    // Keyboard nav
+    function galKey(e) {
+        if (!document.getElementById('offerGalleryOverlay')) { document.removeEventListener('keydown', galKey); return; }
+        if (e.key === 'Escape') gal.remove();
+        if (e.key === 'ArrowLeft') show((idx - 1 + images.length) % images.length);
+        if (e.key === 'ArrowRight') show((idx + 1) % images.length);
+    }
+    document.addEventListener('keydown', galKey);
 }
 
 function updateBuildQuoteBtn() {
