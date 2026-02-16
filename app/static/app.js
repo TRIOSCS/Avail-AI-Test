@@ -1082,9 +1082,15 @@ function renderSources() {
             const ph = escAttr(s.vendor_phone || '');
 
             const vc = s.vendor_card || {};
-            const ratingHtml = vc.card_id
-                ? `<span class="sc-rating" onclick="event.stopPropagation();openVendorPopup(${vc.card_id})" title="View vendor card">${stars(vc.avg_rating, vc.review_count)}</span>`
-                : '<span class="sc-rating sc-rating-new" title="New vendor">☆</span>';
+            let ratingHtml = '';
+            if (vc.card_id) {
+                const scoreStr = vc.engagement_score != null ? `<span class="badge" style="background:var(--teal-light);color:var(--teal);font-size:9px;padding:1px 5px;margin-right:3px" title="Vendor score">${vc.engagement_score}</span>` : '';
+                const starStr = vc.avg_rating != null ? `<span class="stars" style="font-size:11px">★</span><span class="stars-num" style="font-size:10px">${vc.avg_rating}</span><span class="stars-count" style="font-size:9px;color:var(--muted)">(${vc.review_count})</span>` : '';
+                const cardPill = `<span class="badge" style="background:var(--bg2);cursor:pointer;font-size:9px;padding:1px 6px;margin-left:3px" onclick="event.stopPropagation();openVendorPopup(${vc.card_id})" title="Open vendor card">View</span>`;
+                ratingHtml = `<span class="sc-rating">${scoreStr}${starStr}${cardPill}</span>`;
+            } else {
+                ratingHtml = '<span class="sc-rating sc-rating-new" title="New vendor">☆</span>';
+            }
 
             const octopartLink = s.octopart_url ? `<a href="${escAttr(s.octopart_url)}" target="_blank" class="btn-link">🔗 Octopart</a>` : '';
             const vendorLink = s.vendor_url ? `<a href="${escAttr(s.vendor_url)}" target="_blank" class="btn-link">🏢 Site</a>` : '';

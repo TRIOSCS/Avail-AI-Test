@@ -667,6 +667,9 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
             "card_id": card.id,
             "avg_rating": avg,
             "review_count": len(revs),
+            "engagement_score": round(card.engagement_score, 1)
+            if card.engagement_score
+            else None,
             "has_emails": bool(card.emails),
             "email_count": len(card.emails or []),
             "is_blacklisted": card.is_blacklisted or False,
@@ -737,6 +740,7 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
         "card_id": None,
         "avg_rating": None,
         "review_count": 0,
+        "engagement_score": None,
         "has_emails": False,
         "email_count": 0,
         "is_blacklisted": False,
