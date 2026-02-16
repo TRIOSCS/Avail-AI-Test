@@ -51,16 +51,14 @@ def test_ai_enabled_all(other_user):
 
 def test_ai_enabled_mike_only_allows_mike(mike_user):
     mock_settings = _make_settings("mike_only")
-    with patch("app.routers.ai.settings", mock_settings), \
-         patch("app.dependencies.settings", mock_settings):
+    with patch("app.routers.ai.settings", mock_settings):
         from app.routers.ai import _ai_enabled
         assert _ai_enabled(mike_user) is True
 
 
 def test_ai_enabled_mike_only_blocks_other(other_user):
     mock_settings = _make_settings("mike_only")
-    with patch("app.routers.ai.settings", mock_settings), \
-         patch("app.dependencies.settings", mock_settings):
+    with patch("app.routers.ai.settings", mock_settings):
         from app.routers.ai import _ai_enabled
         assert _ai_enabled(other_user) is False
 
@@ -68,8 +66,7 @@ def test_ai_enabled_mike_only_blocks_other(other_user):
 def test_ai_enabled_mike_only_case_insensitive():
     user = SimpleNamespace(email="MIKE@TRIOSCS.COM", id=1, name="Mike", role="admin")
     mock_settings = _make_settings("mike_only")
-    with patch("app.routers.ai.settings", mock_settings), \
-         patch("app.dependencies.settings", mock_settings):
+    with patch("app.routers.ai.settings", mock_settings):
         from app.routers.ai import _ai_enabled
         assert _ai_enabled(user) is True
 
