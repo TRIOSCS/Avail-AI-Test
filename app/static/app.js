@@ -2149,7 +2149,7 @@ async function viewThread(vendorName) {
                 ✅ Reply from ${esc(r.vendor_email||'')} · ${fmtDateTime(r.received_at)}
             </div>
             ${r.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:4px">${esc(r.subject)}</div>` : ''}
-            <div style="font-size:11px;color:var(--text2);white-space:pre-wrap;max-height:200px;overflow-y:auto">${esc(r.body||'')}</div>
+            <iframe sandbox="allow-same-origin" srcdoc="${escAttr(r.body||'')}" style="width:100%;max-height:200px;border:none;background:#fff;border-radius:4px" onload="this.style.height=Math.min(this.contentDocument.body.scrollHeight,200)+'px'"></iframe>
         </div>`;
     }
 
