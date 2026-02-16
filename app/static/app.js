@@ -2015,21 +2015,30 @@ function openVendorLogCallModal(cardId, vendorName, reqId) {
 }
 
 function placeVendorCall(cardId, vendorName, reqId, phone) {
-    // Dial the phone number via tel: link
-    if (phone) {
-        window.open('tel:' + encodeURIComponent(phone), '_self');
+    if (!phone) {
+        showToast('No phone number on file for ' + vendorName, 'error');
+        return;
     }
-    // Open log call modal pre-filled so user can record the call
-    document.getElementById('vlcCardId').value = cardId;
-    document.getElementById('vlcVendorName').textContent = vendorName;
-    document.getElementById('vlcPhone').value = phone || '';
-    document.getElementById('vlcContactName').value = '';
-    document.getElementById('vlcDuration').value = '';
-    document.getElementById('vlcNotes').value = '';
-    document.getElementById('vlcDirection').value = 'outbound';
-    window._vlcReqId = reqId || null;
-    document.getElementById('vendorLogCallModal').classList.add('open');
-    setTimeout(function() { document.getElementById('vlcNotes').focus(); }, 300);
+    // Initiate click-to-call via tel: link
+    var a = document.createElement('a');
+    a.href = 'tel:' + phone.replace(/[^\d+\-() ]/g, '');
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    // After a short delay, open the log modal pre-filled so user can record the call
+    setTimeout(function() {
+        document.getElementById('vlcCardId').value = cardId;
+        document.getElementById('vlcVendorName').textContent = vendorName;
+        document.getElementById('vlcPhone').value = phone;
+        document.getElementById('vlcContactName').value = '';
+        document.getElementById('vlcDuration').value = '';
+        document.getElementById('vlcNotes').value = '';
+        document.getElementById('vlcDirection').value = 'outbound';
+        window._vlcReqId = reqId || null;
+        document.getElementById('vendorLogCallModal').classList.add('open');
+        setTimeout(function() { document.getElementById('vlcNotes').focus(); }, 300);
+    }, 500);
 }
 
 async function saveVendorLogCall() {
@@ -2610,8 +2619,12 @@ function renderActivityCards() {
                     break;
                 }
             }
-            logBtns = '<button class="btn btn-ghost btn-sm" onclick="placeVendorCall(' + v.vendor_card_id + ', \'' + escAttr(v.vendor_name) + '\', ' + currentReqId + ', \'' + escAttr(vendorPhone) + '\')">📞 Place Call</button>'
-                    + '<button class="btn btn-ghost btn-sm" onclick="openVendorLogNoteModal(' + v.vendor_card_id + ', \'' + escAttr(v.vendor_name) + '\', ' + currentReqId + ')">📝 Note</button>';
+            if (vendorPhone) {
+                logBtns = '<button class="btn btn-ghost btn-sm" onclick="placeVendorCall(' + v.vendor_card_id + ', \'' + escAttr(v.vendor_name) + '\', ' + currentReqId + ', \'' + escAttr(vendorPhone) + '\')">📞 ' + esc(vendorPhone) + '</button>';
+            } else {
+                logBtns = '<button class="btn btn-ghost btn-sm" onclick="openVendorLogCallModal(' + v.vendor_card_id + ', \'' + escAttr(v.vendor_name) + '\', ' + currentReqId + ')">📞 Log Call</button>';
+            }
+            logBtns += '<button class="btn btn-ghost btn-sm" onclick="openVendorLogNoteModal(' + v.vendor_card_id + ', \'' + escAttr(v.vendor_name) + '\', ' + currentReqId + ')">📝 Note</button>';
         }
 
         // Conditional meta — hide To/By when they're empty
