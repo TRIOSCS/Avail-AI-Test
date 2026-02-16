@@ -16,7 +16,7 @@ from ..models import User, Company, CustomerSite, SiteContact, VendorCard, Vendo
 router = APIRouter(tags=["admin"])
 log = logging.getLogger(__name__)
 
-VALID_ROLES = ("buyer", "sales", "admin")
+VALID_ROLES = ("buyer", "sales", "manager", "admin")
 
 
 def _require_admin(user: User):
@@ -62,7 +62,7 @@ def create_user(
 ):
     _require_admin(user)
     if body.role not in VALID_ROLES:
-        raise HTTPException(400, "Role must be 'buyer', 'sales', or 'admin'")
+        raise HTTPException(400, "Role must be 'buyer', 'sales', 'manager', or 'admin'")
     existing = db.query(User).filter(User.email == body.email.lower().strip()).first()
     if existing:
         raise HTTPException(409, "User with this email already exists")
@@ -91,7 +91,7 @@ def update_user(
         target.name = body.name.strip()
     if body.role is not None:
         if body.role not in VALID_ROLES:
-            raise HTTPException(400, "Role must be 'buyer', 'sales', or 'admin'")
+            raise HTTPException(400, "Role must be 'buyer', 'sales', 'manager', or 'admin'")
         target.role = body.role
     db.commit()
     return {"id": target.id, "name": target.name, "email": target.email, "role": target.role}

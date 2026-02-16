@@ -2509,6 +2509,7 @@ function renderAdminUsers() {
             <td><select onchange="updateUserRole(${u.id}, this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
                 <option value="buyer" ${u.role==='buyer'?'selected':''}>Buyer</option>
                 <option value="sales" ${u.role==='sales'?'selected':''}>Sales</option>
+                <option value="manager" ${u.role==='manager'?'selected':''}>Manager</option>
                 <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
             </select></td>
             <td>${u.m365_connected ? '<span style="color:var(--teal)">Connected</span>' : '<span style="color:var(--muted)">—</span>'}</td>
