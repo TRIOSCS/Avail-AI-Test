@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .models import Contact, VendorResponse, ProcessedMessage
+from .models import Contact, VendorResponse, ProcessedMessage, PendingBatch
 
 log = logging.getLogger(__name__)
 
@@ -316,6 +316,7 @@ async def poll_inbox(
     avail_token_re = re.compile(r"\[AVAIL-(\d+)\]")
 
     results = []
+    pending_parse = []  # VendorResponse objects awaiting AI parsing
     for msg in messages:
         msg_id = msg.get("id", "")
         if not msg_id or msg_id in already_processed:
@@ -405,21 +406,9 @@ async def poll_inbox(
                 )
             )
 
-            # ── Reply classification + AI parsing ──
+            # ── Reply classification + AI parsing (batch or inline) ──
             if settings.anthropic_api_key:
-                try:
-                    parsed = await parse_response_ai(vr.body, vr.subject)
-                    if parsed:
-                        vr.parsed_data = parsed
-                        vr.confidence = parsed.get("confidence", 0)
-                        vr.status = "parsed"
-                        # Classify the response
-                        classification = _classify_response(parsed, vr.body, vr.subject)
-                        vr.classification = classification["type"]
-                        vr.needs_action = classification["needs_action"]
-                        vr.action_hint = classification["action_hint"]
-                except Exception as e:
-                    log.warning(f"AI parse failed for msg {msg_id[:20]}: {e}")
+                pending_parse.append(vr)
 
             # ── Contact status progression ──
             if matched_contact:
@@ -450,6 +439,14 @@ async def poll_inbox(
             log.error(f"Failed to save inbox message {msg_id[:20]}: {e}")
             db.rollback()
             continue
+
+    # ── Submit AI batch or fall back to sequential parsing ──
+    if pending_parse:
+        try:
+            await _submit_parse_batch(pending_parse, db)
+        except Exception as e:
+            log.warning(f"Batch submit failed, falling back to sequential: {e}")
+            await _parse_sequential_fallback(pending_parse, db)
 
     # Single commit for all new responses
     try:
@@ -690,3 +687,156 @@ async def parse_response_ai(body: str, subject: str) -> dict | None:
         "parts": result.get("parts", []),
         "confidence": result.get("confidence", 0),
     }
+
+
+# ── Batch AI Processing ─────────────────────────────────────────────────
+
+
+async def _submit_parse_batch(
+    pending: list[VendorResponse],
+    db: Session,
+) -> None:
+    """Submit pending VendorResponses to Anthropic Batch API for parsing."""
+    from app.utils.claude_client import claude_batch_submit
+    from app.services.response_parser import RESPONSE_PARSE_SCHEMA, SYSTEM_PROMPT, _clean_email_body
+
+    requests = []
+    request_map = {}  # custom_id -> vendor_response_id
+
+    for vr in pending:
+        cid = f"vr-{vr.id}"
+        body_truncated = _clean_email_body(vr.body or "")[:4000]
+        prompt = (
+            f"Vendor: {vr.vendor_name}\n"
+            f"Subject: {vr.subject}\n\n"
+            f"Vendor reply:\n{body_truncated}"
+        )
+        requests.append({
+            "custom_id": cid,
+            "prompt": prompt,
+            "schema": RESPONSE_PARSE_SCHEMA,
+            "system": SYSTEM_PROMPT,
+            "model_tier": "fast",
+            "max_tokens": 1024,
+        })
+        request_map[cid] = vr.id
+
+    batch_id = await claude_batch_submit(requests)
+    if not batch_id:
+        raise RuntimeError("Batch API returned no batch_id")
+
+    # Record the pending batch for later polling
+    pb = PendingBatch(
+        batch_id=batch_id,
+        batch_type="inbox_parse",
+        request_map=request_map,
+        status="processing",
+        submitted_at=datetime.now(timezone.utc),
+    )
+    db.add(pb)
+    log.info(f"Submitted batch {batch_id} with {len(requests)} email parse requests")
+
+
+async def _parse_sequential_fallback(
+    pending: list[VendorResponse],
+    db: Session,
+) -> None:
+    """Fallback: parse emails sequentially when batch API fails."""
+    for vr in pending:
+        try:
+            parsed = await parse_response_ai(vr.body, vr.subject)
+            if parsed:
+                _apply_parsed_result(vr, parsed)
+        except Exception as e:
+            log.warning(f"Sequential AI parse failed for VR {vr.id}: {e}")
+
+
+def _apply_parsed_result(vr: VendorResponse, parsed: dict) -> None:
+    """Apply AI-parsed data to a VendorResponse record."""
+    vr.parsed_data = parsed
+    vr.confidence = parsed.get("confidence", 0)
+    vr.status = "parsed"
+    classification = _classify_response(parsed, vr.body, vr.subject)
+    vr.classification = classification["type"]
+    vr.needs_action = classification["needs_action"]
+    vr.action_hint = classification["action_hint"]
+
+
+async def process_batch_results(db: Session) -> int:
+    """Poll for completed Anthropic batches and apply results.
+
+    Called by scheduler every tick. Returns count of results applied.
+    """
+    from app.utils.claude_client import claude_batch_results
+    from app.services.response_parser import _normalize_parsed_parts
+
+    pending_batches = (
+        db.query(PendingBatch)
+        .filter(PendingBatch.status == "processing")
+        .all()
+    )
+
+    if not pending_batches:
+        return 0
+
+    total_applied = 0
+
+    for pb in pending_batches:
+        try:
+            results = await claude_batch_results(pb.batch_id)
+        except Exception as e:
+            log.warning(f"Batch results check failed for {pb.batch_id}: {e}")
+            # Mark as failed if submitted >24h ago
+            if pb.submitted_at and datetime.now(timezone.utc) - pb.submitted_at > timedelta(hours=24):
+                pb.status = "failed"
+                pb.error_message = f"Timed out after 24h: {e}"
+                db.commit()
+            continue
+
+        if results is None:
+            # Still processing — check for timeout
+            if pb.submitted_at and datetime.now(timezone.utc) - pb.submitted_at > timedelta(hours=24):
+                pb.status = "failed"
+                pb.error_message = "Batch did not complete within 24h"
+                db.commit()
+            continue
+
+        # Batch complete — apply results
+        request_map = pb.request_map or {}
+        applied = 0
+
+        for custom_id, parsed_data in results.items():
+            vr_id = request_map.get(custom_id)
+            if not vr_id:
+                continue
+
+            vr = db.get(VendorResponse, vr_id)
+            if not vr or vr.status == "parsed":
+                continue  # Already parsed (e.g., by sequential fallback)
+
+            if parsed_data:
+                # Normalize extracted values
+                _normalize_parsed_parts(parsed_data)
+
+                # Map to legacy format
+                legacy_parsed = {
+                    "sentiment": parsed_data.get("overall_sentiment", "neutral"),
+                    "parts": parsed_data.get("parts", []),
+                    "confidence": parsed_data.get("confidence", 0),
+                }
+                _apply_parsed_result(vr, legacy_parsed)
+                applied += 1
+
+        pb.status = "completed"
+        pb.completed_at = datetime.now(timezone.utc)
+        pb.result_count = applied
+        total_applied += applied
+
+        try:
+            db.commit()
+            log.info(f"Batch {pb.batch_id} applied: {applied}/{len(request_map)} results")
+        except Exception as e:
+            log.error(f"Batch results commit failed for {pb.batch_id}: {e}")
+            db.rollback()
+
+    return total_applied

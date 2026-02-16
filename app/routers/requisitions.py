@@ -112,6 +112,21 @@ async def list_requisitions(
     ).label("has_new_offers")
 
     latest_offer_at_sq = latest_offer_sq.label("latest_offer_at")
+    # Count requirements that have at least one sighting (for progress indicator)
+    sourced_count_sq = (
+        select(sqlfunc.count(sqlfunc.distinct(Requirement.id)))
+        .where(
+            Requirement.requisition_id == Requisition.id,
+            select(sqlfunc.count(Sighting.id))
+            .where(Sighting.requirement_id == Requirement.id)
+            .correlate(Requirement)
+            .scalar_subquery()
+            > 0,
+        )
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("sourced_count")
+    )
     query = db.query(
         Requisition,
         req_count_sq,
@@ -120,6 +135,7 @@ async def list_requisitions(
         latest_reply_sq,
         has_new_offers_sq,
         latest_offer_at_sq,
+        sourced_count_sq,
     )
     if user.role == "sales":
         query = query.filter(Requisition.created_by == user.id)
@@ -137,7 +153,7 @@ async def list_requisitions(
     # Pre-load creator names for buyers (they see all reqs)
     creator_names = {}
     if user.role == "buyer":
-        creator_ids = {r.created_by for r, _, _, _, _, _, _ in rows if r.created_by}
+        creator_ids = {r.created_by for r, _, _, _, _, _, _, _ in rows if r.created_by}
         if creator_ids:
             creators = (
                 db.query(User.id, User.name, User.email)
@@ -169,9 +185,10 @@ async def list_requisitions(
             "last_searched_at": r.last_searched_at.isoformat()
             if r.last_searched_at
             else None,
+            "sourced_count": sourced_cnt or 0,
             "cloned_from_id": r.cloned_from_id,
         }
-        for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer in rows
+        for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt in rows
     ]
 
 

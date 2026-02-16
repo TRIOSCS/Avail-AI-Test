@@ -1263,3 +1263,18 @@ class RoutingAssignment(Base):
         Index("ix_routing_vendor", "vendor_card_id"),
         Index("ix_routing_expires", "expires_at"),
     )
+
+
+class PendingBatch(Base):
+    """Tracks Anthropic Batch API submissions for async AI processing."""
+
+    __tablename__ = "pending_batches"
+    id = Column(Integer, primary_key=True)
+    batch_id = Column(String, nullable=False, index=True)
+    batch_type = Column(String(50), default="inbox_parse")
+    request_map = Column(JSON)  # {custom_id: vendor_response_id}
+    status = Column(String(20), default="processing")  # processing | completed | failed
+    submitted_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(DateTime(timezone=True))
+    result_count = Column(Integer)
+    error_message = Column(String)

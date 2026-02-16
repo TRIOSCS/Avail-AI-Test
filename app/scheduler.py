@@ -223,6 +223,17 @@ async def _scheduler_tick():
                     db.commit()
                     db.rollback()
 
+        # ── Process pending AI batches (every tick) ──
+        try:
+            from .email_service import process_batch_results
+
+            batch_applied = await process_batch_results(db)
+            if batch_applied:
+                log.info(f"Batch processing: {batch_applied} results applied")
+        except Exception as e:
+            log.error(f"Batch results processing error: {e}")
+            db.rollback()
+
         # ── Contacts sync (all users, every 24h) ──
         if settings.contacts_sync_enabled:
             for user in users:

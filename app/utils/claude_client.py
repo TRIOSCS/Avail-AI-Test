@@ -57,6 +57,7 @@ async def claude_structured(
     max_tokens: int = 1024,
     cache_system: bool = True,
     timeout: int = 30,
+    thinking_budget: int | None = None,
 ) -> dict | None:
     """Call Claude with guaranteed-valid JSON output (Structured Outputs).
 
@@ -68,6 +69,8 @@ async def claude_structured(
         max_tokens: Max output tokens
         cache_system: Whether to mark the system prompt as cacheable (H10)
         timeout: Request timeout seconds
+        thinking_budget: If set, enable extended thinking with this token budget.
+            Requires SMART tier (Sonnet). Increases max_tokens automatically.
 
     Returns:
         Parsed dict conforming to schema, or None on failure
@@ -75,7 +78,11 @@ async def claude_structured(
     if not settings.anthropic_api_key:
         return None
 
-    model = MODELS.get(model_tier, MODELS["fast"])
+    # Extended thinking requires Sonnet
+    if thinking_budget:
+        model = MODELS["smart"]
+    else:
+        model = MODELS.get(model_tier, MODELS["fast"])
 
     # Build system with optional cache control (H10)
     system_blocks = []
@@ -93,6 +100,12 @@ async def claude_structured(
 
     if system_blocks:
         body["system"] = system_blocks
+
+    # Extended thinking
+    if thinking_budget:
+        body["thinking"] = {"type": "enabled", "budget_tokens": thinking_budget}
+        # Ensure max_tokens covers both thinking and output
+        body["max_tokens"] = max(max_tokens, thinking_budget + 1024)
 
     # H9: Structured Outputs — guaranteed valid JSON
     # Use tool-based approach for schema enforcement
@@ -266,3 +279,187 @@ def safe_json_parse(text: str) -> dict | list | None:
 
     log.debug(f"JSON parse failed: {text[:100]}...")
     return None
+
+
+# ── Batch API ────────────────────────────────────────────────────────────
+
+BATCH_API_URL = "https://api.anthropic.com/v1/messages/batches"
+
+
+def _build_batch_request(
+    custom_id: str,
+    prompt: str,
+    schema: dict,
+    system: str = "",
+    model_tier: str = "fast",
+    max_tokens: int = 1024,
+) -> dict:
+    """Build a single request entry for the Batch API."""
+    model = MODELS.get(model_tier, MODELS["fast"])
+
+    system_blocks = []
+    if system:
+        system_blocks.append({"type": "text", "text": system})
+
+    params: dict[str, Any] = {
+        "model": model,
+        "max_tokens": max_tokens,
+        "messages": [{"role": "user", "content": prompt}],
+        "tools": [
+            {
+                "name": "structured_output",
+                "description": "Return structured data matching the required schema.",
+                "input_schema": schema,
+            }
+        ],
+        "tool_choice": {"type": "tool", "name": "structured_output"},
+    }
+
+    if system_blocks:
+        params["system"] = system_blocks
+
+    return {"custom_id": custom_id, "params": params}
+
+
+async def claude_batch_submit(
+    requests: list[dict],
+) -> str | None:
+    """Submit a batch of structured output requests to the Anthropic Batch API.
+
+    Args:
+        requests: List of dicts with keys:
+            custom_id, prompt, schema, system, model_tier, max_tokens
+
+    Returns:
+        Batch ID string for polling, or None on failure.
+        50% cost reduction vs individual calls; up to 24h processing.
+    """
+    if not settings.anthropic_api_key or not requests:
+        return None
+
+    batch_requests = [
+        _build_batch_request(
+            custom_id=r["custom_id"],
+            prompt=r["prompt"],
+            schema=r["schema"],
+            system=r.get("system", ""),
+            model_tier=r.get("model_tier", "fast"),
+            max_tokens=r.get("max_tokens", 1024),
+        )
+        for r in requests
+    ]
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            resp = await client.post(
+                BATCH_API_URL,
+                headers=_headers(),
+                json={"requests": batch_requests},
+            )
+
+            if resp.status_code != 200:
+                log.warning(f"Batch API submit {resp.status_code}: {resp.text[:300]}")
+                return None
+
+            data = resp.json()
+            batch_id = data.get("id")
+            count = data.get("request_counts", {}).get("processing", len(requests))
+            log.info(f"Batch submitted: {batch_id} ({count} requests)")
+            return batch_id
+
+    except Exception as e:
+        log.warning(f"Batch API submit failed: {e}")
+        return None
+
+
+async def claude_batch_results(
+    batch_id: str,
+) -> dict | None:
+    """Check batch status and retrieve results if complete.
+
+    Returns:
+        None if still processing or on error.
+        Dict of {custom_id: parsed_dict} when batch is complete.
+        Entries with errors will have value None.
+    """
+    if not settings.anthropic_api_key or not batch_id:
+        return None
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            # Check batch status
+            resp = await client.get(
+                f"{BATCH_API_URL}/{batch_id}",
+                headers=_headers(),
+            )
+
+            if resp.status_code != 200:
+                log.warning(f"Batch status check {resp.status_code}: {resp.text[:200]}")
+                return None
+
+            data = resp.json()
+            status = data.get("processing_status")
+
+            if status != "ended":
+                log.debug(f"Batch {batch_id} status: {status}")
+                return None  # Still processing
+
+            # Fetch results JSONL
+            results_url = data.get("results_url")
+            if not results_url:
+                log.warning(f"Batch {batch_id} ended but no results_url")
+                return None
+
+            results_resp = await client.get(
+                results_url,
+                headers=_headers(),
+            )
+
+            if results_resp.status_code != 200:
+                log.warning(f"Batch results fetch {results_resp.status_code}")
+                return None
+
+            # Parse JSONL results
+            parsed = {}
+            for line in results_resp.text.strip().split("\n"):
+                if not line.strip():
+                    continue
+                try:
+                    entry = json.loads(line)
+                    cid = entry.get("custom_id", "")
+                    result = entry.get("result", {})
+
+                    if result.get("type") == "succeeded":
+                        message = result.get("message", {})
+                        # Extract tool_use input (same as claude_structured)
+                        for block in message.get("content", []):
+                            if (
+                                block.get("type") == "tool_use"
+                                and block.get("name") == "structured_output"
+                            ):
+                                parsed[cid] = block.get("input")
+                                break
+                        else:
+                            parsed[cid] = None
+                    else:
+                        error = result.get("error", {})
+                        log.warning(
+                            f"Batch item {cid} failed: {error.get('type', 'unknown')}"
+                        )
+                        parsed[cid] = None
+
+                except json.JSONDecodeError:
+                    log.debug(f"Batch JSONL parse error: {line[:100]}")
+                    continue
+
+            counts = data.get("request_counts", {})
+            log.info(
+                f"Batch {batch_id} complete: "
+                f"{counts.get('succeeded', 0)} succeeded, "
+                f"{counts.get('errored', 0)} errored"
+            )
+            return parsed
+
+    except Exception as e:
+        log.warning(f"Batch results check failed: {e}")
+        return None

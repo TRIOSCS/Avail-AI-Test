@@ -249,11 +249,12 @@ function applyRoleGating() {
     document.querySelectorAll('[data-role="buyer"]').forEach(el => {
         el.style.display = window.userRole === 'buyer' ? '' : 'none';
     });
-    // Show role badge in nav
+    // Role badge hidden — keep element for JS role gating but don't display
     const roleBadge = document.getElementById('roleBadge');
     if (roleBadge) {
         roleBadge.textContent = window.userRole === 'buyer' ? 'Buyer' : 'Sales';
         roleBadge.className = `role-badge role-${window.userRole}`;
+        roleBadge.style.display = 'none';
     }
     // Show Buy Plans nav for admins
     const bpNav = document.getElementById('navBuyPlans');
@@ -491,12 +492,17 @@ function renderReqList() {
             }
             // > 96h: no dot shown (auto-clear)
         }
+        const total = r.requirement_count || 0;
+        const sourced = r.sourced_count || 0;
+        const pct = total > 0 ? Math.round(sourced / total * 100) : 0;
+        const progressBar = total > 0 ? `<div class="req-progress"><div class="req-progress-bar"><div class="req-progress-fill" style="width:${pct}%"></div></div><span class="req-progress-text">${sourced}/${total} sourced</span></div>` : '';
         return `
         <div class="card card-clickable ${isArchived ? 'req-archived' : ''}" onclick="showDetail(${r.id}, '${escAttr(r.name)}')">
             <div class="req-card">
                 <div style="flex:1">
                     <div class="req-name">${esc(r.name)} ${statusBadge} ${newOffersDot}</div>
                     ${custDisplay}
+                    ${progressBar}
                     ${replyBadge}
                 </div>
                 <div class="req-meta">
@@ -588,6 +594,7 @@ async function loadRequirements() {
     }
     if (filterBar) filterBar.style.display = reqData.length > 3 ? 'flex' : 'none';
     renderRequirementsTable();
+    updateSearchAllBar();
 }
 function renderRequirementsTable() {
     const el = document.getElementById('reqTable');
@@ -763,6 +770,24 @@ async function doUpload() {
 }
 
 // ── Search ──────────────────────────────────────────────────────────────
+function updateSearchAllBar() {
+    const bar = document.getElementById('searchAllBar');
+    if (!bar) return;
+    if (!reqData.length) { bar.style.display = 'none'; return; }
+    bar.style.display = 'flex';
+    const reqInfo = _reqListData.find(r => r.id === currentReqId);
+    const isDraft = reqInfo && reqInfo.status === 'draft';
+    const unsearched = reqData.filter(r => !r.sighting_count).length;
+    const textEl = document.getElementById('searchAllBarText');
+    if (isDraft) {
+        textEl.textContent = `Submit & search ${reqData.length} part${reqData.length !== 1 ? 's' : ''}`;
+    } else if (unsearched > 0) {
+        textEl.textContent = `🔍 Search all — ${unsearched} part${unsearched !== 1 ? 's' : ''} unsourced`;
+    } else {
+        textEl.textContent = '🔍 Re-search all parts';
+    }
+}
+
 function submitOrSearch() {
     searchAll();
 }
@@ -982,36 +1007,38 @@ function renderSources() {
             const phoneLink = s.vendor_phone ? `<a class="btn-call" href="tel:${ph}" onclick="logCall(event,'${vn}','${ph}','${mpn}')">📞 ${esc(s.vendor_phone)}</a>` : '';
             const emailIndicator = vc.has_emails ? `<span class="badge b-email" title="${vc.email_count} email(s) on file">✉ ${vc.email_count}</span>` : '';
 
+            // Build price HTML
+            const priceHtml = (() => {
+                if (s.unit_price == null) return '<span class="sc-key-val" style="color:var(--muted)">—</span>';
+                const tp = targetPriceMap[(group.label || '').trim().toUpperCase()];
+                const priceStr = '$' + s.unit_price.toFixed(2);
+                if (tp == null) return `<span class="sc-key-val">${priceStr}</span>`;
+                const pct = ((s.unit_price - tp) / tp * 100).toFixed(0);
+                if (s.unit_price <= tp) return `<span class="sc-key-val" style="color:var(--green)">${priceStr}</span><span class="badge" style="background:#dcfce7;color:#166534;font-size:8px;padding:1px 4px">${pct > 0 ? '+' : ''}${pct}%</span>`;
+                if (s.unit_price <= tp * 1.15) return `<span class="sc-key-val" style="color:var(--amber)">${priceStr}</span><span class="badge" style="background:#fef3c7;color:#92400e;font-size:8px;padding:1px 4px">+${pct}%</span>`;
+                return `<span class="sc-key-val" style="color:var(--red)">${priceStr}</span><span class="badge" style="background:#fee2e2;color:#991b1b;font-size:8px;padding:1px 4px">+${pct}%</span>`;
+            })();
+            const qtyHtml = s.qty_available != null
+                ? `<span class="sc-key-val">${s.qty_available.toLocaleString()}</span>`
+                : '<span class="sc-key-val" style="color:var(--muted)">—</span>';
+
+            // Row 2 badges: collect all, show max 3 + overflow
+            const allBadges = [matchBadge, unavailBadge, s.is_authorized ? '<span class="badge b-auth">Auth</span>' : '', `<span class="badge b-src">${srcLabel}</span>`, condBadge, emailIndicator, histBadge, matHistBadge].filter(b => b);
+            const visibleBadges = allBadges.slice(0, 3).join('');
+            const overflowBadge = allBadges.length > 3 ? `<span class="sc-more-badge">+${allBadges.length - 3}</span>` : '';
+
             html += `<div class="card sc ${s.is_historical ? 'sc-hist' : ''} ${s.is_material_history ? 'sc-mathistory' : ''} ${isSub ? 'sc-sub' : ''} ${unavailClass}">
                 ${isBuyer() ? `<input type="checkbox" ${checked} onchange="toggleSighting('${key}')">` : ''}
                 <div class="sc-body">
                     <div class="sc-top">
-                        <span class="sc-vendor">${esc(s.vendor_name)}</span>
+                        <span class="sc-vendor" title="${escAttr(s.vendor_name)}">${esc(s.vendor_name)}</span>
                         ${ratingHtml}
-                        ${matchBadge}
-                        ${unavailBadge}
-                        ${s.is_authorized ? '<span class="badge b-auth">Auth</span>' : ''}
-                        <span class="badge b-src">${srcLabel}</span>
-                        ${condBadge}
-                        ${emailIndicator}
-                        ${histBadge}
-                        ${matHistBadge}
+                        <div class="sc-key-vals">
+                            <span class="sc-detail-label">QTY</span>${qtyHtml}
+                            <span class="sc-detail-label">PRICE</span>${priceHtml}
+                        </div>
                     </div>
-                    <div class="sc-details">
-                        <div class="sc-detail"><span class="sc-detail-label">MPN</span> <span class="sc-detail-val">${esc(s.mpn_matched || '—')}</span></div>
-                        <div class="sc-detail"><span class="sc-detail-label">Qty</span> <span class="sc-detail-val">${s.qty_available != null ? s.qty_available.toLocaleString() : '—'}</span></div>
-                        <div class="sc-detail"><span class="sc-detail-label">Price</span> <span class="sc-detail-val">${(() => {
-                            if (s.unit_price == null) return '—';
-                            const tp = targetPriceMap[(group.label || '').trim().toUpperCase()];
-                            const priceStr = '$' + s.unit_price.toFixed(2);
-                            if (tp == null) return priceStr;
-                            const pct = ((s.unit_price - tp) / tp * 100).toFixed(0);
-                            if (s.unit_price <= tp) return `<span style="color:var(--green);font-weight:600">${priceStr}</span> <span class="badge" style="background:#dcfce7;color:#166534;font-size:9px;padding:1px 5px">${pct > 0 ? '+' : ''}${pct}%</span>`;
-                            if (s.unit_price <= tp * 1.15) return `<span style="color:var(--amber);font-weight:600">${priceStr}</span> <span class="badge" style="background:#fef3c7;color:#92400e;font-size:9px;padding:1px 5px">+${pct}%</span>`;
-                            return `<span style="color:var(--red);font-weight:600">${priceStr}</span> <span class="badge" style="background:#fee2e2;color:#991b1b;font-size:9px;padding:1px 5px">+${pct}%</span>`;
-                        })()}</span></div>
-                        <div class="sc-detail"><span class="sc-detail-label">Mfr</span> <span class="sc-detail-val">${esc(s.manufacturer || '—')}</span></div>
-                    </div>
+                    <div class="sc-badges">${visibleBadges}${overflowBadge}${s.mpn_matched && s.mpn_matched.trim().toUpperCase() !== (group.label || '').trim().toUpperCase() ? ` <span style="font-size:10px;color:var(--muted)">${esc(s.mpn_matched)}</span>` : ''}${s.manufacturer ? ` <span style="font-size:10px;color:var(--muted)">${esc(s.manufacturer)}</span>` : ''}</div>
                 </div>
                 <div class="sc-actions-right">
                     ${phoneLink}${octopartLink}${vendorLink}${unavailBtn}

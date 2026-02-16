@@ -90,35 +90,49 @@ async function toggleSiteDetail(siteId) {
         try {
             const s = await apiFetch('/api/sites/' + siteId);
             const siteDomain = s.company_domain || (s.company_website ? s.company_website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
-            const contactsHtml = (s.contacts || []).length
-                ? s.contacts.map(c => `
-                    <div class="si-contact">
-                        <div class="si-contact-info">
-                            <div>
-                                <span class="si-contact-name">${esc(c.full_name)}</span>
-                                ${c.is_primary ? '<span class="si-contact-badge">Primary</span>' : ''}
-                                ${c.title ? '<span class="si-contact-title">' + esc(c.title) + '</span>' : ''}
-                            </div>
-                            <div class="si-contact-meta">
-                                ${c.email ? '<a href="mailto:'+esc(c.email)+'">'+esc(c.email)+'</a>' : ''}
-                                ${c.email && c.phone ? ' · ' : ''}
-                                ${c.phone ? '<span>' + esc(c.phone) + '</span>' : ''}
-                            </div>
-                            ${c.notes ? '<div class="si-contact-notes">'+esc(c.notes)+'</div>' : ''}
+            const contacts = s.contacts || [];
+            // Sort: primary first, then alphabetical
+            const sorted = [...contacts].sort((a, b) => {
+                if (a.is_primary !== b.is_primary) return b.is_primary ? 1 : -1;
+                return (a.full_name || '').localeCompare(b.full_name || '');
+            });
+            const renderContact = c => `
+                <div class="si-contact-card" data-contact-search="${escAttr((c.full_name + ' ' + (c.title || '') + ' ' + (c.email || '')).toLowerCase())}">
+                    <div class="si-contact-left">
+                        <div class="si-contact-avatar">${esc((c.full_name || '?')[0].toUpperCase())}</div>
+                    </div>
+                    <div class="si-contact-info">
+                        <div class="si-contact-row1">
+                            <span class="si-contact-name">${esc(c.full_name)}</span>
+                            ${c.is_primary ? '<span class="si-contact-badge">Primary</span>' : ''}
                         </div>
-                        <div class="si-contact-actions">
-                            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditSiteContact(${s.id},${c.id})">Edit</button>
-                            <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteSiteContact(${s.id},${c.id},'${escAttr(c.full_name)}')">✕</button>
+                        ${c.title ? '<div class="si-contact-title">' + esc(c.title) + '</div>' : ''}
+                        <div class="si-contact-meta">
+                            ${c.email ? '<a href="mailto:'+esc(c.email)+'" title="'+escAttr(c.email)+'">'+esc(c.email)+'</a>' : ''}
+                            ${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" class="si-contact-phone">'+esc(c.phone)+'</a>' : ''}
                         </div>
-                    </div>`).join('')
+                        ${c.notes ? '<div class="si-contact-notes">'+esc(c.notes)+'</div>' : ''}
+                    </div>
+                    <div class="si-contact-actions">
+                        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditSiteContact(${s.id},${c.id})">Edit</button>
+                        <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteSiteContact(${s.id},${c.id},'${escAttr(c.full_name)}')">✕</button>
+                    </div>
+                </div>`;
+            const searchBar = contacts.length > 5
+                ? `<input class="si-contact-search" placeholder="Filter contacts…" oninput="filterSiteContacts(this,${s.id})">`
+                : '';
+            const contactsHtml = contacts.length
+                ? `${searchBar}<div class="si-contact-grid" id="contactGrid-${s.id}">${sorted.map(renderContact).join('')}</div>`
                 : '<p class="empty" style="padding:4px;font-size:11px">No contacts — add one below</p>';
             panel.innerHTML = `
             <div class="site-info">
                 <div class="si-row"><span class="si-label">Owner</span><span>${esc(s.owner_name || '—')}</span></div>
                 <div class="si-contacts">
-                    <div class="si-contacts-title">Contacts</div>
+                    <div style="display:flex;align-items:center;justify-content:space-between">
+                        <div class="si-contacts-title">Contacts <span style="font-weight:400;color:var(--muted)">(${contacts.length})</span></div>
+                        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openAddSiteContact(${s.id})">+ Add</button>
+                    </div>
                     ${contactsHtml}
-                    <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openAddSiteContact(${s.id})" style="margin-top:4px">+ Add Contact</button>
                 </div>
                 <div class="si-row"><span class="si-label">Terms</span><span>${esc(s.payment_terms || '—')} · ${esc(s.shipping_terms || '—')}</span></div>
                 <div class="si-row"><span class="si-label">Address</span><span>${esc(s.address_line1 || '')} ${s.city ? esc(s.city)+', ' : ''}${esc(s.state || '')} ${esc(s.zip || '')}</span></div>
@@ -164,13 +178,12 @@ async function createCompany() {
         const data = await apiFetch('/api/companies', {
             method: 'POST', body: {
                 name, website: document.getElementById('ncWebsite').value.trim(),
+                linkedin_url: document.getElementById('ncLinkedin').value.trim() || null,
                 industry: document.getElementById('ncIndustry').value.trim(),
             }
         });
         closeModal('newCompanyModal');
-        document.getElementById('ncName').value = '';
-        document.getElementById('ncWebsite').value = '';
-        document.getElementById('ncIndustry').value = '';
+        ['ncName','ncWebsite','ncLinkedin','ncIndustry'].forEach(id => document.getElementById(id).value = '');
         showToast('Company "' + data.name + '" created', 'success');
         openAddSiteModal(data.id, data.name);
         loadCustomers();
@@ -183,7 +196,9 @@ function openAddSiteModal(companyId, companyName) {
     delete document.getElementById('asSiteCompanyId').dataset.editSiteId;
     document.getElementById('asSiteCompanyName').textContent = companyName;
     document.querySelector('#addSiteModal h2').innerHTML = 'Add Site to <span id="asSiteCompanyName">' + esc(companyName) + '</span>';
-    ['asSiteName','asSiteContactName','asSiteContactEmail','asSiteContactPhone','asSitePayTerms','asSiteShipTerms'].forEach(id => document.getElementById(id).value = '');
+    ['asSiteName','asSiteAddr1','asSiteAddr2','asSiteCity','asSiteState','asSiteZip','asSitePayTerms','asSiteShipTerms'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('asSiteCountry').value = 'US';
+    document.getElementById('asSiteNotes').value = '';
     document.getElementById('addSiteModal').classList.add('open');
     setTimeout(() => document.getElementById('asSiteName').focus(), 100);
 }
@@ -193,11 +208,15 @@ async function addSite() {
     const data = {
         site_name: document.getElementById('asSiteName').value.trim(),
         owner_id: document.getElementById('asSiteOwner').value || null,
-        contact_name: document.getElementById('asSiteContactName').value.trim(),
-        contact_email: document.getElementById('asSiteContactEmail').value.trim(),
-        contact_phone: document.getElementById('asSiteContactPhone').value.trim(),
+        address_line1: document.getElementById('asSiteAddr1').value.trim() || null,
+        address_line2: document.getElementById('asSiteAddr2').value.trim() || null,
+        city: document.getElementById('asSiteCity').value.trim() || null,
+        state: document.getElementById('asSiteState').value.trim() || null,
+        zip: document.getElementById('asSiteZip').value.trim() || null,
+        country: document.getElementById('asSiteCountry').value.trim() || 'US',
         payment_terms: document.getElementById('asSitePayTerms').value.trim(),
         shipping_terms: document.getElementById('asSiteShipTerms').value.trim(),
+        notes: document.getElementById('asSiteNotes').value.trim() || null,
     };
     if (!data.site_name) return;
     try {
@@ -211,7 +230,9 @@ async function addSite() {
             showToast('Site created', 'success');
         }
         closeModal('addSiteModal');
-        ['asSiteName','asSiteContactName','asSiteContactEmail','asSiteContactPhone','asSitePayTerms','asSiteShipTerms'].forEach(id => document.getElementById(id).value = '');
+        ['asSiteName','asSiteAddr1','asSiteAddr2','asSiteCity','asSiteState','asSiteZip','asSitePayTerms','asSiteShipTerms'].forEach(id => document.getElementById(id).value = '');
+        document.getElementById('asSiteCountry').value = 'US';
+        document.getElementById('asSiteNotes').value = '';
         loadCustomers();
         loadSiteOptions();
     } catch (e) { showToast('Failed to save site', 'error'); }
@@ -225,11 +246,15 @@ async function openEditSiteModal(siteId) {
         document.getElementById('asSiteCompanyName').textContent = s.company_name || 'Unknown';
         document.getElementById('asSiteName').value = s.site_name || '';
         document.getElementById('asSiteOwner').value = s.owner_id || '';
-        document.getElementById('asSiteContactName').value = s.contact_name || '';
-        document.getElementById('asSiteContactEmail').value = s.contact_email || '';
-        document.getElementById('asSiteContactPhone').value = s.contact_phone || '';
+        document.getElementById('asSiteAddr1').value = s.address_line1 || '';
+        document.getElementById('asSiteAddr2').value = s.address_line2 || '';
+        document.getElementById('asSiteCity').value = s.city || '';
+        document.getElementById('asSiteState').value = s.state || '';
+        document.getElementById('asSiteZip').value = s.zip || '';
+        document.getElementById('asSiteCountry').value = s.country || 'US';
         document.getElementById('asSitePayTerms').value = s.payment_terms || '';
         document.getElementById('asSiteShipTerms').value = s.shipping_terms || '';
+        document.getElementById('asSiteNotes').value = s.notes || '';
         document.getElementById('addSiteModal').classList.add('open');
         document.querySelector('#addSiteModal h2').innerHTML = 'Edit Site — <span>' + esc(s.site_name || '') + '</span>';
     } catch (e) { console.error('openEditSiteModal:', e); showToast('Error loading site', 'error'); }
@@ -594,13 +619,27 @@ async function buildQuoteFromSelected() {
         switchTab('quote', tabs[4]);
         renderQuote();
         updateQuoteTabBadge();
-    } catch (e) { console.error('buildQuoteFromSelected:', e); showToast('Error building quote', 'error'); }
+    } catch (e) {
+        console.error('buildQuoteFromSelected:', e);
+        const msg = (e.message || '').toLowerCase();
+        if (e.status === 400 && msg.includes('customer site')) {
+            showToast('Link this requisition to a customer site first (Customers tab)', 'error');
+        } else {
+            showToast('Error building quote: ' + (e.message || 'unknown error'), 'error');
+        }
+    }
 }
 
 function renderQuote() {
     const el = document.getElementById('quoteContent');
     if (!crmQuote) {
-        el.innerHTML = '<p class="empty">No quote yet — select offers on the Offers tab and click "Build Quote"</p>';
+        const reqInfo = typeof _reqListData !== 'undefined' ? _reqListData.find(r => r.id === currentReqId) : null;
+        const hasSite = reqInfo && reqInfo.customer_site_id;
+        const steps = [];
+        if (!hasSite) steps.push('<li style="color:var(--red)">Link a customer site to this requisition (go to Customers)</li>');
+        steps.push('<li>Log vendor offers on the <strong>Offers</strong> tab</li>');
+        steps.push('<li>Select offers using the checkboxes, then click <strong>Build Quote from Selected</strong></li>');
+        el.innerHTML = '<div class="empty" style="text-align:left;max-width:400px;margin:40px auto"><p style="font-weight:600;margin-bottom:8px">No quote yet</p><ol style="margin:0;padding-left:20px;line-height:1.8;font-size:12px">' + steps.join('') + '</ol></div>';
         return;
     }
     const q = crmQuote;
@@ -626,13 +665,19 @@ function renderQuote() {
 
     el.innerHTML = `
     <div class="quote-header">
-        <div>
-            <strong>${esc(q.quote_number)} Rev ${q.revision}</strong>
-            <span class="status-badge status-${q.status}">${q.status}</span>
+        <div style="display:flex;align-items:center;gap:12px">
+            <img src="/static/avail_logo.png" alt="TRIO" style="height:40px">
+            <div>
+                <div style="font-weight:700;font-size:13px;color:var(--text)">Trio Supply Chain Solutions</div>
+                <div style="font-size:11px;color:var(--muted)">info@trioscs.com</div>
+            </div>
         </div>
-        <div style="color:var(--text2);font-size:12px">
-            ${esc(q.customer_name || '')}<br>
-            ${esc(q.contact_name || '')} · ${q.contact_email ? '<a href="mailto:'+esc(q.contact_email)+'">'+esc(q.contact_email)+'</a>' : ''}
+        <div style="text-align:right">
+            <div><strong>${esc(q.quote_number)} Rev ${q.revision}</strong> <span class="status-badge status-${q.status}">${q.status}</span></div>
+            <div style="color:var(--text2);font-size:12px;margin-top:2px">
+                ${esc(q.customer_name || '')}<br>
+                ${esc(q.contact_name || '')} · ${q.contact_email ? '<a href="mailto:'+esc(q.contact_email)+'">'+esc(q.contact_email)+'</a>' : ''}
+            </div>
         </div>
     </div>
     <table class="tbl quote-table">
@@ -1699,6 +1744,15 @@ async function deleteSiteContact(siteId, contactId, name) {
     } catch (e) { console.error('deleteSiteContact:', e); showToast('Error deleting contact', 'error'); }
 }
 
+function filterSiteContacts(input, siteId) {
+    const q = (input.value || '').trim().toLowerCase();
+    const grid = document.getElementById('contactGrid-' + siteId);
+    if (!grid) return;
+    grid.querySelectorAll('.si-contact-card').forEach(card => {
+        const text = card.dataset.contactSearch || '';
+        card.style.display = !q || text.includes(q) ? '' : 'none';
+    });
+}
 
 // Generate smart draft for the currently selected first vendor in RFQ modal
 async function generateSmartRFQForModal() {

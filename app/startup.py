@@ -478,6 +478,29 @@ def _create_admin_settings_tables(conn) -> None:
         conn,
         "ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS credentials JSONB DEFAULT '{}'::jsonb",
     )
+    # Create pending_batches table for Anthropic Batch API tracking
+    _exec(
+        conn,
+        """CREATE TABLE IF NOT EXISTS pending_batches (
+        id SERIAL PRIMARY KEY,
+        batch_id VARCHAR(255) NOT NULL,
+        batch_type VARCHAR(50) DEFAULT 'inbox_parse',
+        request_map JSONB,
+        status VARCHAR(20) DEFAULT 'processing',
+        submitted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+        completed_at TIMESTAMP WITH TIME ZONE,
+        result_count INTEGER,
+        error_message TEXT
+    )""",
+    )
+    _exec(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_pending_batches_batch_id ON pending_batches(batch_id)",
+    )
+    _exec(
+        conn,
+        "CREATE INDEX IF NOT EXISTS ix_pending_batches_status ON pending_batches(status)",
+    )
     # Seed default scoring weights (idempotent — INSERT ON CONFLICT DO NOTHING)
     seeds = [
         ("weight_recency", "30", "Scoring weight for data recency (0-100)"),

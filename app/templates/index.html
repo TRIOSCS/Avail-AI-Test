@@ -9,9 +9,9 @@
     <style>
         :root {
             --bg:#f5f6f8; --white:#fff; --card2:#f0f2f5; --input:#f3f5f8; --surface:#f9fafb;
-            --border:#e0e4ea; --border2:#cdd3dc; --focus:#1a7f9b;
+            --border:#e0e4ea; --border2:#cdd3dc; --focus:#2563eb;
             --text:#1a1f2e; --text2:#4a5568; --muted:#8695a7;
-            --teal:#1a7f9b; --teal-light:#e6f4f8;
+            --teal:#2563eb; --teal-light:#eff6ff;
             --green:#0fa67f; --green-light:#e8f8f3;
             --amber:#d9880b; --amber-light:#fef5e6;
             --red:#d94452; --red-light:#fce8ea;
@@ -37,35 +37,26 @@
         .login-logo{width:280px;margin-bottom:12px}
         .login-divider{width:48px;height:2px;background:var(--border2);margin:0 auto 20px;border-radius:1px}
         .login-card .sub{color:var(--text2);font-size:14px;font-weight:500;margin-bottom:32px;letter-spacing:-.01em}
-        .btn-ms{display:inline-flex;align-items:center;gap:10px;background:var(--teal);color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:14px;transition:all .2s;box-shadow:0 2px 8px rgba(26,127,155,.25)}
-        .btn-ms:hover{background:#156a82;box-shadow:0 4px 16px rgba(26,127,155,.35);transform:translateY(-1px)}
+        .btn-ms{display:inline-flex;align-items:center;gap:10px;background:var(--teal);color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:14px;transition:all .2s;box-shadow:0 2px 8px rgba(37,99,235,.25)}
+        .btn-ms:hover{background:#1d4ed8;box-shadow:0 4px 16px rgba(37,99,235,.35);transform:translateY(-1px)}
         .ver{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);margin-top:28px;letter-spacing:.02em}
 
         /* Shell */
         .shell{max-width:1100px;margin:0 auto;padding:16px 20px}
-        .topbar{display:flex;justify-content:space-between;align-items:center;padding:10px 18px;background:var(--white);border:1px solid var(--border);border-radius:10px;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.02)}
-        .topbar-left{display:flex;align-items:center;gap:12px}
-        .topbar-logo{height:85px}
-        .topbar-nav{display:flex;gap:4px;margin-left:16px}
+        .topbar{display:flex;justify-content:space-between;align-items:center;padding:6px 16px;background:var(--white);border-bottom:1px solid var(--border);margin-bottom:12px}
+        .topbar-left{display:flex;align-items:center;gap:10px}
+        .topbar-logo{height:36px}
+        .topbar-nav{display:flex;gap:2px;margin-left:12px}
         .topbar-nav button{padding:5px 12px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
         .topbar-nav button:hover{background:var(--bg);border-color:var(--border)}
-        .topbar-nav button.active{background:var(--teal-light);color:var(--teal);border-color:rgba(26,127,155,.2)}
-        .user{display:flex;align-items:center;gap:10px;color:var(--text2);font-size:13px}
-        .m365-status{display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:6px;background:var(--bg);border:1px solid var(--border);cursor:default;font-size:11px}
-        .role-badge{padding:3px 8px;border-radius:6px;font-size:11px;font-weight:600;letter-spacing:.3px}
-        .role-buyer{background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd}
-        .role-sales{background:#fef3c7;color:#92400e;border:1px solid #fde68a}
-        .m365-dot{width:7px;height:7px;border-radius:50%;background:#94a3b8;flex-shrink:0}
-        .m365-dot.green{background:#22c55e}
-        .m365-dot.yellow{background:#eab308}
-        .m365-dot.red{background:#ef4444}
-        .m365-label{font-weight:600;color:var(--text2)}
-        .btn-out{background:var(--bg);border:1px solid var(--border);color:var(--text2);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:11px;transition:.15s}
+        .topbar-nav button.active{background:var(--teal-light);color:var(--teal);border-color:rgba(37,99,235,.15)}
+        .user{display:flex;align-items:center;gap:8px;color:var(--text2);font-size:12px}
+        .btn-out{background:var(--bg);border:1px solid var(--border);color:var(--text2);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;transition:.15s}
         .btn-out:hover{border-color:var(--teal);color:var(--teal)}
 
         /* Buttons */
         .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:7px;font-size:12px;font-weight:700;cursor:pointer;transition:.15s;border:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-        .btn-primary{background:var(--teal);color:#fff}.btn-primary:hover{background:#156a82}
+        .btn-primary{background:var(--teal);color:#fff}.btn-primary:hover{background:#1d4ed8}
         .btn-success{background:var(--green);color:#fff}.btn-success:hover{background:#0d9070}
         .btn-ghost{background:none;border:1px solid var(--border);color:var(--text2)}.btn-ghost:hover{border-color:var(--teal);color:var(--teal)}
         .btn-sm{padding:5px 11px;font-size:11px}
@@ -90,6 +81,11 @@
         .req-header h2{font-size:16px;font-weight:700}
         .req-card{display:flex;justify-content:space-between;align-items:center}
         .req-name{font-weight:700;font-size:14px}
+        .req-progress{display:flex;align-items:center;gap:6px;margin-top:3px}
+        .req-progress-bar{width:60px;height:4px;border-radius:2px;background:var(--bg2);overflow:hidden}
+        .req-progress-fill{height:100%;border-radius:2px;background:var(--teal);transition:width .3s}
+        .req-progress-text{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+        .req-activity{font-size:10px;color:var(--muted);display:inline-flex;align-items:center;gap:2px}
         .req-meta{display:flex;gap:16px;font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;align-items:center}
         .btn-archive{padding:4px 10px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--white);color:var(--text2);transition:.15s}
         .btn-archive:hover{border-color:var(--amber);color:var(--amber);background:#fffbe6}
@@ -98,10 +94,10 @@
         .btn-reactivate{padding:4px 10px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--teal);background:var(--teal-light);color:var(--teal);transition:.15s}
         .btn-reactivate:hover{background:var(--teal);color:var(--white)}
         .req-search{background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 12px;font-size:12px;color:var(--text);width:280px;transition:.15s}
-        .req-search:focus{outline:none;border-color:var(--teal);background:var(--white);box-shadow:0 0 0 2px rgba(26,127,155,.1)}
+        .req-search:focus{outline:none;border-color:var(--teal);background:var(--white);box-shadow:0 0 0 2px rgba(37,99,235,.1)}
         .req-edit-cell{cursor:pointer;position:relative}
         .req-edit-cell:hover{background:var(--bg);border-radius:4px}
-        .req-edit-input{background:var(--white);border:1px solid var(--teal);border-radius:4px;padding:3px 6px;font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--text);width:100%;box-sizing:border-box;outline:none;box-shadow:0 0 0 2px rgba(26,127,155,.15)}
+        .req-edit-input{background:var(--white);border:1px solid var(--teal);border-radius:4px;padding:3px 6px;font-size:12px;font-family:'JetBrains Mono',monospace;color:var(--text);width:100%;box-sizing:border-box;outline:none;box-shadow:0 0 0 2px rgba(37,99,235,.15)}
         .req-actions{display:flex;gap:4px;align-items:center}
 
         /* Detail Header */
@@ -140,8 +136,13 @@
         .sc{display:flex;gap:6px;align-items:center;padding:4px 10px !important;margin-bottom:2px !important;border-radius:6px}
         .sc input[type=checkbox]{width:14px;height:14px;accent-color:var(--teal);cursor:pointer}
         .sc-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:0}
-        .sc-top{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
-        .sc-vendor{font-weight:700;font-size:12px;letter-spacing:-.01em}
+        .sc-top{display:flex;align-items:center;gap:6px;min-width:0}
+        .sc-vendor{font-weight:700;font-size:12px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+        .sc-key-vals{display:flex;gap:8px;align-items:center;margin-left:auto;flex-shrink:0}
+        .sc-key-val{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;white-space:nowrap}
+        .sc-badges{display:flex;gap:3px;align-items:center;flex-wrap:wrap;margin-top:1px}
+        .sc-badges .badge{font-size:7px;padding:1px 4px}
+        .sc-more-badge{font-size:7px;padding:1px 4px;border-radius:3px;background:var(--bg3);color:var(--muted);cursor:default}
         .ring{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;border:2px solid;flex-shrink:0}
         .ring.hi{border-color:var(--green);color:var(--green);background:var(--green-light)}
         .ring.mid{border-color:var(--amber);color:var(--amber);background:var(--amber-light)}
@@ -150,14 +151,18 @@
         .sc-detail{display:flex;gap:2px;align-items:center}
         .sc-detail-label{font-size:9px;text-transform:uppercase;color:var(--muted);letter-spacing:.3px;font-weight:600}
         .sc-detail-val{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500}
+        .search-all-bar{display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;margin-top:8px;border-radius:8px;background:linear-gradient(135deg,var(--teal-light),#e8efff);border:1px solid rgba(37,99,235,.15);cursor:pointer;transition:all .2s}
+        .search-all-bar:hover{background:linear-gradient(135deg,#dbe6ff,#d0dcff);border-color:rgba(37,99,235,.3);box-shadow:0 2px 8px rgba(37,99,235,.1)}
+        .search-all-bar-text{font-size:13px;font-weight:700;color:var(--teal)}
+        .search-all-bar-sub{font-size:11px;color:var(--teal);opacity:.7}
         .badge{display:inline-block;font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase;letter-spacing:.3px}
         .b-auth{background:var(--green-light);color:var(--green)}
         .b-src{background:var(--teal-light);color:var(--teal)}
         .b-email{background:#f0f4ff;color:#4a6fa5;border:1px solid rgba(74,111,165,.1)}
         .b-hist{background:#f0e6ff;color:#7b4fb0}
         .sc-actions-right{display:flex;flex-direction:column;gap:2px;align-items:flex-end;flex-shrink:0;margin-left:auto}
-        .btn-call{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;background:var(--teal-light);color:var(--teal);border:1px solid rgba(26,127,155,.2);cursor:pointer;text-decoration:none;transition:.15s}
-        .btn-call:hover{background:rgba(26,127,155,.15)}
+        .btn-call{display:inline-flex;align-items:center;gap:3px;padding:2px 7px;border-radius:4px;font-size:10px;font-weight:700;background:var(--teal-light);color:var(--teal);border:1px solid rgba(37,99,235,.2);cursor:pointer;text-decoration:none;transition:.15s}
+        .btn-call:hover{background:rgba(37,99,235,.15)}
         .btn-link{display:inline-flex;align-items:center;gap:2px;padding:2px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#f0f4ff;color:#4a6fa5;border:1px solid rgba(74,111,165,.15);cursor:pointer;text-decoration:none;transition:.15s}
         .btn-link:hover{background:rgba(74,111,165,.12)}
         .sc-hist{border-left:3px solid #c4a0e8;opacity:0.85}
@@ -212,7 +217,7 @@
         /* Filter bar — shared across tabs */
         .filter-bar{display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap}
         .filter-search{flex:1;min-width:180px;max-width:320px;padding:8px 12px 8px 32px;border:1px solid var(--border);border-radius:8px;background:var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2' stroke-linecap='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E") no-repeat 10px center;font-size:13px;color:var(--text);transition:.15s;outline:none}
-        .filter-search:focus{border-color:var(--teal);box-shadow:0 0 0 2px rgba(26,127,155,.12)}
+        .filter-search:focus{border-color:var(--teal);box-shadow:0 0 0 2px rgba(37,99,235,.12)}
         .filter-search::placeholder{color:var(--muted)}
         .filter-pills{display:flex;gap:4px;align-items:center}
         .filter-pill{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--white);color:var(--text2);font-size:11px;font-weight:600;cursor:pointer;transition:.15s;white-space:nowrap}
@@ -232,7 +237,7 @@
         .field{display:flex;flex-direction:column;gap:3px}
         .field label{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
         .field input,.field textarea{background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;color:var(--text);transition:.15s}
-        .field input:focus,.field textarea:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 2px rgba(26,127,155,.1);background:var(--white)}
+        .field input:focus,.field textarea:focus{outline:none;border-color:var(--teal);box-shadow:0 0 0 2px rgba(37,99,235,.1);background:var(--white)}
         .field textarea{font-family:'JetBrains Mono',monospace;min-height:60px;resize:vertical;font-size:11px}
 
         /* Upload */
@@ -350,13 +355,12 @@
             .shell{padding:8px 10px;padding-bottom:env(safe-area-inset-bottom,8px)}
 
             /* Topbar — stack vertically on mobile */
-            .topbar{flex-direction:column;gap:8px;padding:8px 12px}
-            .topbar-left{flex-direction:column;gap:6px;align-items:flex-start;width:100%}
-            .topbar-logo{height:58px}
-            .topbar-nav{margin-left:0;flex-wrap:wrap;gap:3px;width:100%}
-            .topbar-nav button{padding:6px 10px;font-size:11px;flex:1;min-width:0;text-align:center;min-height:36px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-            .user{width:100%;justify-content:space-between;font-size:12px;flex-wrap:wrap;gap:6px}
-            .m365-status{font-size:10px}
+            .topbar{flex-direction:column;gap:6px;padding:6px 10px}
+            .topbar-left{flex-direction:column;gap:4px;align-items:flex-start;width:100%}
+            .topbar-logo{height:28px}
+            .topbar-nav{margin-left:0;flex-wrap:wrap;gap:2px;width:100%}
+            .topbar-nav button{padding:6px 10px;font-size:11px;flex:1;min-width:0;text-align:center;min-height:34px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+            .user{width:100%;justify-content:flex-end;font-size:11px;gap:6px}
 
             /* Req list */
             .req-header{flex-direction:column;gap:8px;align-items:stretch}
@@ -392,6 +396,8 @@
             .sc{flex-direction:column;align-items:flex-start;gap:4px;padding:6px 10px !important}
             .sc input[type=checkbox]{width:18px;height:18px}
             .sc-top{flex-wrap:wrap}
+            .sc-vendor{max-width:140px}
+            .sc-key-vals{margin-left:0}
             .sc-details{flex-wrap:wrap;gap:6px}
             .sc-actions-right{flex-direction:row;width:100%;justify-content:flex-end;margin-left:0;margin-top:2px}
 
@@ -507,7 +513,7 @@
         .src-disabled-title{color:#9ca3af}
         .src-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px}
         .src-card{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;transition:.15s}
-        .src-card:hover{border-color:var(--teal);box-shadow:0 2px 8px rgba(26,127,155,.08)}
+        .src-card:hover{border-color:var(--teal);box-shadow:0 2px 8px rgba(37,99,235,.08)}
         .src-card-live{border-left:3px solid #10b981}
         .src-card-pending{border-left:3px solid #f59e0b;opacity:.85}
         .src-card-error{border-left:3px solid #ef4444}
@@ -528,7 +534,7 @@
         .src-last-err{font-size:10px;color:#ef4444;margin-bottom:4px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
         .src-setup-notes{font-size:10px;color:var(--text2);background:#fffbeb;border:1px solid #fde68a;border-radius:4px;padding:6px 8px;margin-bottom:8px;line-height:1.4}
         .src-actions{display:flex;gap:6px;flex-wrap:wrap}
-        .src-test-btn{background:var(--teal-light);color:var(--teal);border:1px solid rgba(26,127,155,.2)}
+        .src-test-btn{background:var(--teal-light);color:var(--teal);border:1px solid rgba(37,99,235,.2)}
         .src-test-btn:hover{background:var(--teal);color:white}
 
         /* EXACT/SUB badges */
@@ -599,20 +605,28 @@
         .site-info a{color:var(--teal);text-decoration:none}
         .site-info a:hover{text-decoration:underline}
 
-        /* Site contacts list */
+        /* Site contacts */
         .si-contacts{margin:8px 0}
-        .si-contacts-title{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
-        .si-contact{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,.03);font-size:12px}
-        .si-contact:last-of-type{border-bottom:none}
+        .si-contacts-title{font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+        .si-contact-search{width:100%;padding:5px 8px;border:1px solid var(--border);border-radius:5px;font-size:11px;margin:6px 0;background:var(--white);outline:none}
+        .si-contact-search:focus{border-color:var(--teal);box-shadow:0 0 0 2px rgba(37,99,235,.1)}
+        .si-contact-grid{display:flex;flex-direction:column;gap:4px;max-height:320px;overflow-y:auto;margin-top:4px}
+        .si-contact-card{display:flex;align-items:flex-start;gap:8px;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:var(--white);font-size:12px;transition:.15s}
+        .si-contact-card:hover{border-color:var(--teal);box-shadow:0 1px 4px rgba(37,99,235,.06)}
+        .si-contact-left{flex-shrink:0}
+        .si-contact-avatar{width:28px;height:28px;border-radius:50%;background:var(--teal-light);color:var(--teal);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
         .si-contact-info{flex:1;min-width:0}
-        .si-contact-name{font-weight:600;color:var(--text)}
-        .si-contact-badge{font-size:9px;background:var(--teal);color:#fff;padding:1px 5px;border-radius:8px;margin-left:4px}
-        .si-contact-title{color:var(--muted);font-size:11px;margin-left:4px}
-        .si-contact-meta{font-size:11px;color:var(--text2);margin-top:1px}
-        .si-contact-meta a{color:var(--teal);text-decoration:none}
+        .si-contact-row1{display:flex;align-items:center;gap:4px}
+        .si-contact-name{font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .si-contact-badge{font-size:8px;background:var(--teal);color:#fff;padding:1px 5px;border-radius:8px;flex-shrink:0}
+        .si-contact-title{color:var(--muted);font-size:10px;margin-top:1px}
+        .si-contact-meta{display:flex;gap:8px;font-size:11px;color:var(--text2);margin-top:2px;flex-wrap:wrap}
+        .si-contact-meta a{color:var(--teal);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
         .si-contact-meta a:hover{text-decoration:underline}
-        .si-contact-notes{font-size:10px;color:var(--muted);margin-top:1px}
-        .si-contact-actions{display:flex;gap:4px;flex-shrink:0}
+        .si-contact-phone{color:var(--text2) !important}
+        .si-contact-notes{font-size:10px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .si-contact-actions{display:flex;gap:4px;flex-shrink:0;opacity:0;transition:opacity .15s}
+        .si-contact-card:hover .si-contact-actions{opacity:1}
 
         /* CRM Activity rows */
         .cust-activity-section{border-top:1px solid var(--border);margin-top:8px;padding-top:8px}
@@ -729,8 +743,9 @@
             .quote-totals{flex-direction:column;gap:8px}
             .quote-terms{flex-direction:column}
             .offer-group-header{flex-wrap:wrap}
-            .si-contact{flex-direction:column;align-items:flex-start;gap:4px}
-            .si-contact-actions{width:100%;justify-content:flex-end}
+            .si-contact-card{flex-wrap:wrap}
+            .si-contact-actions{opacity:1;width:100%;justify-content:flex-end}
+            .si-contact-meta a{max-width:none}
             /* CRM company cards */
             .cust-header{flex-wrap:wrap;gap:6px}
             .cust-header>span:last-child{width:100%;justify-content:flex-start}
@@ -863,7 +878,7 @@
         .perf-table td{padding:8px 10px;border-bottom:1px solid var(--border)}
         .perf-table tr:hover{background:var(--surface)}
         .perf-table tr.cold-start{opacity:0.6}
-        .perf-table tr.lb-highlight{background:rgba(26,127,155,0.08)}
+        .perf-table tr.lb-highlight{background:rgba(37,99,235,0.08)}
         .metric-cell{text-align:center;font-weight:600}
         .metric-cell.metric-green{color:#16a34a}
         .metric-cell.metric-yellow{color:#d97706}
@@ -914,12 +929,9 @@
             </div>
         </div>
         <div class="user">
-            <span id="roleBadge" class="role-badge"></span>
-            <span class="m365-status" id="m365Status" title="Checking M365 connection...">
-                <span class="m365-dot" id="m365Dot"></span>
-                <span class="m365-label" id="m365Label">M365</span>
-            </span>
-            <span>{{ user_name }}</span>
+            <span id="roleBadge" style="display:none"></span>
+            <span id="m365Status" style="display:none"><span id="m365Dot"></span><span id="m365Label"></span></span>
+            <span style="font-weight:600">{{ user_name }}</span>
             <div id="settingsMenu" class="settings-dropdown" style="display:none">
                 <button onclick="toggleSettingsDropdown()" class="btn-settings" title="Settings">&#9881;</button>
                 <div class="settings-dropdown-content" id="settingsDropdownContent">
@@ -1034,6 +1046,9 @@
                         </tr>
                     </tfoot>
                 </table>
+                <div id="searchAllBar" class="search-all-bar" onclick="submitOrSearch()" style="display:none">
+                    <span class="search-all-bar-text" id="searchAllBarText">Search all sources</span>
+                </div>
             </div>
         </div>
 
@@ -1324,6 +1339,7 @@
         <h2>New Company</h2>
         <div class="field"><label for="ncName">Company Name</label><div class="site-typeahead"><input id="ncName" placeholder="e.g. Siemens" required autocomplete="off" onkeydown="if(event.key==='Enter'&&!document.getElementById('ncNameList').classList.contains('show'))createCompany()"><div class="site-typeahead-list" id="ncNameList"></div></div></div>
         <div class="field"><label for="ncWebsite">Website</label><input id="ncWebsite" placeholder="siemens.com" type="url"></div>
+        <div class="field"><label for="ncLinkedin">LinkedIn</label><input id="ncLinkedin" placeholder="linkedin.com/company/..." type="url"></div>
         <div class="field"><label for="ncIndustry">Industry</label><input id="ncIndustry" placeholder="Medical, Industrial, etc."></div>
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('newCompanyModal')">Cancel</button>
@@ -1340,11 +1356,17 @@
         <div class="lo-form">
             <div class="field"><label for="asSiteName">Site Name</label><input id="asSiteName" placeholder="HQ, West Coast, etc." required></div>
             <div class="field"><label for="asSiteOwner">Owner</label><select id="asSiteOwner"><option value="">— None —</option></select></div>
-            <div class="field"><label for="asSiteContactName">Contact Name</label><input id="asSiteContactName" placeholder="John Smith"></div>
-            <div class="field"><label for="asSiteContactEmail">Contact Email</label><input id="asSiteContactEmail" type="email" placeholder="john@example.com"></div>
-            <div class="field"><label for="asSiteContactPhone">Contact Phone</label><input id="asSiteContactPhone" type="tel" placeholder="555-123-4567"></div>
+            <div class="field"><label for="asSiteAddr1">Address Line 1</label><input id="asSiteAddr1" placeholder="123 Main St"></div>
+            <div class="field"><label for="asSiteAddr2">Address Line 2</label><input id="asSiteAddr2" placeholder="Suite 200"></div>
+            <div style="display:flex;gap:8px">
+                <div class="field" style="flex:2"><label for="asSiteCity">City</label><input id="asSiteCity" placeholder="Austin"></div>
+                <div class="field" style="flex:1"><label for="asSiteState">State</label><input id="asSiteState" placeholder="TX"></div>
+                <div class="field" style="flex:1"><label for="asSiteZip">Zip</label><input id="asSiteZip" placeholder="78701"></div>
+            </div>
+            <div class="field"><label for="asSiteCountry">Country</label><input id="asSiteCountry" placeholder="US" value="US"></div>
             <div class="field"><label for="asSitePayTerms">Payment Terms</label><input id="asSitePayTerms" placeholder="Net 30"></div>
             <div class="field"><label for="asSiteShipTerms">Shipping Terms</label><input id="asSiteShipTerms" placeholder="FOB Origin"></div>
+            <div class="field"><label for="asSiteNotes">Notes</label><textarea id="asSiteNotes" rows="2" placeholder="Internal notes..." style="width:100%;resize:vertical"></textarea></div>
         </div>
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('addSiteModal')">Cancel</button>

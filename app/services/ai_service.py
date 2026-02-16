@@ -268,7 +268,7 @@ async def draft_rfq(
         system="You write concise, professional RFQ emails for an electronic component broker. "
         "Keep it short — 3-5 sentences plus a parts table. Reference past business "
         "if history is provided. No fluff, no over-politeness. Business-direct tone.",
-        model_tier=SMART,
+        model_tier=FAST,
         max_tokens=500,
     )
 

@@ -158,6 +158,28 @@ async def parse_vendor_response(
     if not result:
         return None
 
+    # Extended thinking retry: if confidence is in the ambiguous review band,
+    # retry with Sonnet + thinking to attempt higher-confidence extraction
+    confidence = result.get("confidence", 0)
+    if CONFIDENCE_REVIEW <= confidence < CONFIDENCE_AUTO:
+        log.info(
+            f"Ambiguous confidence {confidence:.2f} — retrying with extended thinking"
+        )
+        retry = await claude_structured(
+            prompt=prompt,
+            schema=RESPONSE_PARSE_SCHEMA,
+            system=SYSTEM_PROMPT,
+            model_tier="smart",
+            max_tokens=1024,
+            thinking_budget=2048,
+            timeout=60,
+        )
+        if retry and retry.get("confidence", 0) > confidence:
+            log.info(
+                f"Extended thinking upgraded confidence: {confidence:.2f} → {retry['confidence']:.2f}"
+            )
+            result = retry
+
     # Post-process: normalize extracted values
     _normalize_parsed_parts(result)
 
