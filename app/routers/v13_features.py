@@ -27,6 +27,8 @@ from ..dependencies import is_admin as _is_admin, require_user
 from ..models import ActivityLog, Company, User, VendorCard
 from ..schemas.v13_features import (
     BuyerProfileUpsert,
+    CompanyCallLog,
+    CompanyNoteLog,
     PhoneCallLog,
     RoutingPairRequest,
     StrategicToggle,
@@ -169,6 +171,59 @@ async def get_company_activities(
 
     activities = _get(company_id, db)
     return [_activity_to_dict(a) for a in activities]
+
+
+@router.post("/api/companies/{company_id}/activities/call")
+async def log_company_phone_call(
+    company_id: int,
+    payload: CompanyCallLog,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a manual phone call against a company."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    from app.services.activity_service import log_company_call
+
+    record = log_company_call(
+        user_id=user.id,
+        company_id=company_id,
+        direction=payload.direction,
+        phone=payload.phone,
+        duration_seconds=payload.duration_seconds,
+        contact_name=payload.contact_name,
+        notes=payload.notes,
+        db=db,
+    )
+    db.commit()
+    return {"status": "logged", "activity_id": record.id}
+
+
+@router.post("/api/companies/{company_id}/activities/note")
+async def log_company_note_endpoint(
+    company_id: int,
+    payload: CompanyNoteLog,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a manual note against a company."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    from app.services.activity_service import log_company_note
+
+    record = log_company_note(
+        user_id=user.id,
+        company_id=company_id,
+        contact_name=payload.contact_name,
+        notes=payload.notes,
+        db=db,
+    )
+    db.commit()
+    return {"status": "logged", "activity_id": record.id}
 
 
 @router.get("/api/vendors/{vendor_id}/activities")

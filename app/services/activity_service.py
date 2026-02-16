@@ -310,6 +310,71 @@ def _update_last_activity(match: dict, db: Session, user_id: int | None = None):
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  COMPANY-SPECIFIC MANUAL LOGGING
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def log_company_call(
+    user_id: int,
+    company_id: int,
+    direction: str,
+    phone: str | None,
+    duration_seconds: int | None,
+    contact_name: str | None,
+    notes: str | None,
+    db: Session,
+) -> ActivityLog:
+    """Log a manual call against a company."""
+    activity_type = f"call_{direction}"
+    record = ActivityLog(
+        user_id=user_id,
+        activity_type=activity_type,
+        channel="phone",
+        company_id=company_id,
+        contact_phone=phone,
+        contact_name=contact_name,
+        duration_seconds=duration_seconds,
+        notes=notes,
+    )
+    db.add(record)
+    db.flush()
+
+    now = datetime.now(timezone.utc)
+    db.query(Company).filter(Company.id == company_id).update(
+        {"last_activity_at": now}, synchronize_session=False
+    )
+    log.info(f"Activity logged: {activity_type} -> company {company_id} by user {user_id}")
+    return record
+
+
+def log_company_note(
+    user_id: int,
+    company_id: int,
+    contact_name: str | None,
+    notes: str,
+    db: Session,
+) -> ActivityLog:
+    """Log a manual note against a company."""
+    record = ActivityLog(
+        user_id=user_id,
+        activity_type="note",
+        channel="manual",
+        company_id=company_id,
+        contact_name=contact_name,
+        notes=notes,
+    )
+    db.add(record)
+    db.flush()
+
+    now = datetime.now(timezone.utc)
+    db.query(Company).filter(Company.id == company_id).update(
+        {"last_activity_at": now}, synchronize_session=False
+    )
+    log.info(f"Activity logged: note -> company {company_id} by user {user_id}")
+    return record
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  VENDOR-SPECIFIC MANUAL LOGGING
 # ═══════════════════════════════════════════════════════════════════════
 

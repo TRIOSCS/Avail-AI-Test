@@ -44,6 +44,23 @@ class PhoneCallLog(BaseModel):
     contact_name: str | None = None
 
 
+class CompanyCallLog(BaseModel):
+    """Log a manual call against a company."""
+
+    phone: str | None = None
+    direction: Literal["outbound", "inbound"] = "outbound"
+    duration_seconds: int | None = None
+    contact_name: str | None = None
+    notes: str | None = None
+
+
+class CompanyNoteLog(BaseModel):
+    """Log a manual note against a company."""
+
+    contact_name: str | None = None
+    notes: str
+
+
 class VendorCallLog(BaseModel):
     """Log a manual call against a known vendor."""
 

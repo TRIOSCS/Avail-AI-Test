@@ -1636,10 +1636,26 @@
                 </select>
             </div>
             <div class="field"><label for="lcDuration">Duration (seconds)</label><input id="lcDuration" type="number" placeholder="120" min="0"></div>
+            <div class="field"><label for="lcNotes">Notes</label><textarea id="lcNotes" rows="3" placeholder="Call summary..." style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical"></textarea></div>
         </div>
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('logCallModal')">Cancel</button>
             <button class="btn btn-primary" onclick="saveLogCall()">Log Call</button>
+        </div>
+    </div>
+</div>
+
+<div id="logNoteModal" class="modal-bg" onclick="if(event.target===this)closeModal('logNoteModal')">
+    <div class="modal">
+        <h2>Add Note &mdash; <span id="lnCompanyName"></span></h2>
+        <input type="hidden" id="lnCompanyId">
+        <div class="lo-form">
+            <div class="field"><label for="lnContactName">Contact Name (optional)</label><input id="lnContactName" placeholder="Related contact name"></div>
+            <div class="field"><label for="lnNotes">Note *</label><textarea id="lnNotes" rows="4" placeholder="Enter note..." required style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical"></textarea></div>
+        </div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('logNoteModal')">Cancel</button>
+            <button class="btn btn-primary" onclick="saveLogNote()">Save Note</button>
         </div>
     </div>
 </div>

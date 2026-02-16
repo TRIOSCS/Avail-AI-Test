@@ -80,6 +80,7 @@ function renderCustomers() {
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
                     <span class="si-contacts-title">Recent Activity</span>
                     <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openLogCallModal(${c.id},'${escAttr(c.name)}')">+ Log Call</button>
+                    <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openLogNoteModal(${c.id},'${escAttr(c.name)}')">+ Note</button>
                 </div>
                 <div id="actList-${c.id}"><p class="empty" style="padding:4px;font-size:11px">Loading...</p></div>
             </div>
@@ -1966,7 +1967,7 @@ async function loadCompanyActivities(companyId) {
             return;
         }
         el.innerHTML = activities.slice(0, 10).map(a => {
-            const icons = { email_sent: '&#x1f4e4;', email_received: '&#x1f4e5;', call_outbound: '&#x1f4de;', call_inbound: '&#x1f4f2;', ownership_warning: '&#x26a0;&#xfe0f;' };
+            const icons = { email_sent: '&#x1f4e4;', email_received: '&#x1f4e5;', call_outbound: '&#x1f4de;', call_inbound: '&#x1f4f2;', note: '&#x1f4dd;', ownership_warning: '&#x26a0;&#xfe0f;' };
             const icon = icons[a.activity_type] || '&#x1f4cb;';
             const label = (a.activity_type || '').replace(/_/g, ' ');
             const dur = a.duration_seconds ? ' (' + Math.round(a.duration_seconds / 60) + 'm)' : '';
@@ -1977,6 +1978,7 @@ async function loadCompanyActivities(companyId) {
                     ${a.contact_name ? ' &mdash; ' + esc(a.contact_name) : ''}
                     ${a.contact_email ? ' <span style="color:var(--muted)">' + esc(a.contact_email) + '</span>' : ''}
                     ${a.subject ? '<div class="act-row-subject">' + esc(a.subject) + '</div>' : ''}
+                    ${a.notes ? '<div class="act-row-subject">' + esc(a.notes) + '</div>' : ''}
                 </div>
                 <span class="act-row-meta">${esc(a.user_name || '')}</span>
                 <span class="act-row-meta">${typeof fmtRelative === 'function' ? fmtRelative(a.created_at) : (a.created_at || '').slice(0, 10)}</span>
@@ -1988,7 +1990,7 @@ async function loadCompanyActivities(companyId) {
 function openLogCallModal(companyId, companyName) {
     document.getElementById('lcCompanyId').value = companyId;
     document.getElementById('lcCompanyName').textContent = companyName;
-    ['lcPhone','lcContactName','lcDuration'].forEach(id => document.getElementById(id).value = '');
+    ['lcPhone','lcContactName','lcDuration','lcNotes'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('lcDirection').value = 'outbound';
     document.getElementById('logCallModal').classList.add('open');
     setTimeout(() => document.getElementById('lcPhone').focus(), 100);
@@ -1997,29 +1999,54 @@ function openLogCallModal(companyId, companyName) {
 async function saveLogCall() {
     const companyId = document.getElementById('lcCompanyId').value;
     const data = {
-        phone: document.getElementById('lcPhone').value.trim(),
+        phone: document.getElementById('lcPhone').value.trim() || null,
         contact_name: document.getElementById('lcContactName').value.trim() || null,
         direction: document.getElementById('lcDirection').value,
         duration_seconds: parseInt(document.getElementById('lcDuration').value) || null,
+        notes: document.getElementById('lcNotes').value.trim() || null,
     };
-    if (!data.phone) { showToast('Phone number is required', 'error'); return; }
     try {
-        const result = await apiFetch('/api/activities/call', {
+        await apiFetch('/api/companies/' + companyId + '/activities/call', {
             method: 'POST', body: data
         });
         closeModal('logCallModal');
-        if (result.status === 'no_match') {
-            showToast('Call logged but phone did not match any known contact', 'info');
-        } else {
-            showToast('Call logged', 'success');
-        }
-        // Refresh activity section
+        showToast('Call logged', 'success');
         const el = document.getElementById('actList-' + companyId);
         if (el) el.innerHTML = '<p class="empty" style="padding:4px;font-size:11px">Loading...</p>';
         loadCompanyActivities(parseInt(companyId));
         const healthEl = document.getElementById('actHealth-' + companyId);
         if (healthEl) { delete healthEl.dataset.loaded; loadCompanyActivityStatus(parseInt(companyId)); }
     } catch(e) { console.error('saveLogCall:', e); showToast('Error logging call', 'error'); }
+}
+
+function openLogNoteModal(companyId, companyName) {
+    document.getElementById('lnCompanyId').value = companyId;
+    document.getElementById('lnCompanyName').textContent = companyName;
+    ['lnContactName','lnNotes'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('logNoteModal').classList.add('open');
+    setTimeout(() => document.getElementById('lnNotes').focus(), 100);
+}
+
+async function saveLogNote() {
+    const companyId = document.getElementById('lnCompanyId').value;
+    const notes = document.getElementById('lnNotes').value.trim();
+    if (!notes) { showToast('Note text is required', 'error'); return; }
+    const data = {
+        contact_name: document.getElementById('lnContactName').value.trim() || null,
+        notes: notes,
+    };
+    try {
+        await apiFetch('/api/companies/' + companyId + '/activities/note', {
+            method: 'POST', body: data
+        });
+        closeModal('logNoteModal');
+        showToast('Note added', 'success');
+        const el = document.getElementById('actList-' + companyId);
+        if (el) el.innerHTML = '<p class="empty" style="padding:4px;font-size:11px">Loading...</p>';
+        loadCompanyActivities(parseInt(companyId));
+        const healthEl = document.getElementById('actHealth-' + companyId);
+        if (healthEl) { delete healthEl.dataset.loaded; loadCompanyActivityStatus(parseInt(companyId)); }
+    } catch(e) { console.error('saveLogNote:', e); showToast('Error adding note', 'error'); }
 }
 
 // ── Proactive Offers ──────────────────────────────────────────────────
