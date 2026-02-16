@@ -34,7 +34,7 @@
         /* Login */
         .login{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(160deg,#eef2f7 0%,#e4eaf3 40%,#e8f1f5 100%)}
         .login-card{background:var(--white);border:1px solid var(--border);border-radius:20px;padding:56px 48px 44px;text-align:center;max-width:460px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,.07),0 1px 3px rgba(0,0,0,.04)}
-        .login-logo{width:420px;margin-bottom:12px}
+        .login-logo{width:210px;margin-bottom:12px}
         .login-divider{width:48px;height:2px;background:var(--border2);margin:0 auto 20px;border-radius:1px}
         .login-card .sub{color:var(--text2);font-size:14px;font-weight:500;margin-bottom:32px;letter-spacing:-.01em}
         .btn-ms{display:inline-flex;align-items:center;gap:10px;background:var(--teal);color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:14px;transition:all .2s;box-shadow:0 2px 8px rgba(74,111,165,.25)}
@@ -45,7 +45,7 @@
         .shell{max-width:1100px;margin:0 auto;padding:16px 20px}
         .topbar{display:flex;justify-content:space-between;align-items:center;padding:6px 16px;background:var(--white);border-bottom:1px solid var(--border);margin-bottom:12px;box-shadow:0 1px 4px rgba(0,0,0,.05)}
         .topbar-left{display:flex;align-items:center;gap:10px}
-        .topbar-logo{height:54px}
+        .topbar-logo{height:108px}
         .topbar-nav{display:flex;gap:2px;margin-left:12px}
         .topbar-nav button{padding:5px 12px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
         .topbar-nav button:hover{background:var(--bg);border-color:var(--border)}
@@ -349,6 +349,14 @@
         .mp-vh-detail{color:var(--text2);font-family:'JetBrains Mono',monospace;font-size:10px}
         .mp-vh-badge{font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase}
         .mp-vh-times{background:#f0f4ff;color:#4a6fa5;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px}
+        .mp-empty{font-size:12px;color:var(--muted);font-style:italic;padding:8px 0}
+        .mp-table-wrap{overflow-x:auto;margin-top:4px}
+        .mp-tbl{width:100%;font-size:11px;border-collapse:collapse}
+        .mp-tbl th{text-align:left;padding:5px 8px;color:var(--muted);font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
+        .mp-tbl td{padding:5px 8px;border-bottom:1px solid var(--card2);vertical-align:middle}
+        .mp-tbl tr:hover td{background:var(--bg)}
+        .mp-tbl-vendor{font-weight:600;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .mp-tbl-date{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text2);white-space:nowrap}
 
         @media(max-width:768px){
             /* Shell */
@@ -357,7 +365,7 @@
             /* Topbar — stack vertically on mobile */
             .topbar{flex-direction:column;gap:6px;padding:6px 10px}
             .topbar-left{flex-direction:column;gap:4px;align-items:flex-start;width:100%}
-            .topbar-logo{height:42px}
+            .topbar-logo{height:84px}
             .topbar-nav{margin-left:0;flex-wrap:wrap;gap:2px;width:100%}
             .topbar-nav button{padding:6px 10px;font-size:11px;flex:1;min-width:0;text-align:center;min-height:34px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
             .user{width:100%;justify-content:flex-end;font-size:11px;gap:6px}
@@ -478,7 +486,7 @@
 
             /* Login */
             .login-card{padding:40px 24px 36px;width:92%}
-            .login-logo{width:360px}
+            .login-logo{width:180px}
             .btn-ms{padding:14px 24px;font-size:14px;width:100%;justify-content:center}
         }
 
@@ -495,8 +503,8 @@
             .src-stat{flex:1 1 calc(50% - 4px)}
             .btn-primary{padding:8px 12px}
             .login-card{padding:32px 16px 28px}
-            .login-logo{width:300px}
-            .topbar-logo{height:54px}
+            .login-logo{width:150px}
+            .topbar-logo{height:72px}
             .shell{padding:6px 8px}
         }
 
@@ -1247,14 +1255,24 @@
 <div id="newReqModal" class="modal-bg" onclick="if(event.target===this)closeModal('newReqModal')">
     <div class="modal">
         <h2>New Requisition</h2>
-        <div class="field"><label for="nrName">Name</label><input id="nrName" placeholder="e.g. Siemens Medical - Feb 2026" onkeydown="if(event.key==='Enter')createRequisition()" required></div>
+        <div class="field"><label for="nrName">Name <span style="color:var(--red)">*</span></label><input id="nrName" placeholder="e.g. Siemens Medical - Feb 2026" onkeydown="if(event.key==='Enter')createRequisition()" required></div>
         <div class="field" style="margin-top:10px">
-            <label>Customer Site (optional)</label>
+            <label>Customer Account <span style="color:var(--red)">*</span></label>
             <div class="site-typeahead">
                 <input id="nrSiteSearch" placeholder="Type to search companies…" oninput="debouncedFilterSites(this.value)" onfocus="filterSiteTypeahead(this.value)" autocomplete="off" aria-label="Search customer sites">
                 <input type="hidden" id="nrSiteId">
                 <div class="site-typeahead-list" id="nrSiteList"></div>
             </div>
+            <div id="nrSiteSelected" style="display:none;margin-top:6px;padding:8px 12px;background:var(--teal-light);border:1px solid rgba(74,111,165,.15);border-radius:6px;font-size:12px;display:none">
+                <span id="nrSiteSelectedLabel" style="font-weight:600"></span>
+                <span onclick="clearNrSite()" style="margin-left:8px;color:var(--red);cursor:pointer;font-size:11px">Clear</span>
+            </div>
+        </div>
+        <div class="field" id="nrContactField" style="margin-top:10px;display:none">
+            <label>Requesting Contact</label>
+            <select id="nrContactSelect" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--white);color:var(--text)">
+                <option value="">— Select contact —</option>
+            </select>
         </div>
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('newReqModal')">Cancel</button>

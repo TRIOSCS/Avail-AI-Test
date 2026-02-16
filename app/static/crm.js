@@ -1269,7 +1269,40 @@ function filterSiteTypeahead(query) {
 function selectSite(id, label) {
     document.getElementById('nrSiteId').value = id;
     document.getElementById('nrSiteSearch').value = label;
+    document.getElementById('nrSiteSearch').style.display = 'none';
     document.getElementById('nrSiteList').classList.remove('show');
+    // Show selected badge
+    const sel = document.getElementById('nrSiteSelected');
+    if (sel) {
+        document.getElementById('nrSiteSelectedLabel').textContent = label;
+        sel.style.display = '';
+    }
+    // Load contacts for the selected site's company
+    loadNrContacts(id);
+}
+
+async function loadNrContacts(siteId) {
+    const field = document.getElementById('nrContactField');
+    const select = document.getElementById('nrContactSelect');
+    if (!field || !select) return;
+    // Find site in cache to get company info
+    const site = (_siteListCache || []).find(s => s.id === siteId);
+    if (!site) { field.style.display = 'none'; return; }
+    // Fetch company sites to get contacts
+    try {
+        const companies = await apiFetch(`/api/companies?search=${encodeURIComponent(site.companyName)}`);
+        const company = companies.find(c => c.name === site.companyName);
+        if (!company || !company.sites) { field.style.display = 'none'; return; }
+        const contacts = company.sites
+            .filter(s => s.contact_name)
+            .map(s => ({ siteId: s.id, name: s.contact_name, email: s.contact_email, siteName: s.site_name }));
+        if (contacts.length === 0) { field.style.display = 'none'; return; }
+        select.innerHTML = '<option value="">— Select contact —</option>' +
+            contacts.map(c =>
+                `<option value="${c.siteId}" ${c.siteId === siteId ? 'selected' : ''}>${esc(c.name)}${c.email ? ' (' + esc(c.email) + ')' : ''} — ${esc(c.siteName)}</option>`
+            ).join('');
+        field.style.display = '';
+    } catch (e) { field.style.display = 'none'; }
 }
 
 // Close typeahead on outside click

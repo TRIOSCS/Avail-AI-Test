@@ -12,7 +12,7 @@ import hashlib
 import logging
 from datetime import datetime, date, timezone, timedelta
 
-from sqlalchemy import func as sqlfunc, and_
+from sqlalchemy import func as sqlfunc, and_, or_
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -70,10 +70,16 @@ def compute_vendor_scorecard(
     cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
 
     # ── 1. Response rate ──
+    # Match by normalized name (case-insensitive) and also by display name
+    norm = (vc.normalized_name or "").lower()
+    disp = vc.display_name or ""
     rfqs_sent = (
         db.query(sqlfunc.count(Contact.id))
         .filter(
-            Contact.vendor_name == vc.display_name,
+            or_(
+                sqlfunc.lower(sqlfunc.trim(Contact.vendor_name)) == norm,
+                Contact.vendor_name == disp,
+            ),
             Contact.contact_type == "email",
             Contact.created_at >= cutoff,
         )
@@ -84,7 +90,10 @@ def compute_vendor_scorecard(
     rfqs_answered = (
         db.query(sqlfunc.count(VendorResponse.id))
         .filter(
-            VendorResponse.vendor_name == vc.display_name,
+            or_(
+                sqlfunc.lower(sqlfunc.trim(VendorResponse.vendor_name)) == norm,
+                VendorResponse.vendor_name == disp,
+            ),
             VendorResponse.status != "noise",
             VendorResponse.received_at >= cutoff,
         )

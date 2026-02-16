@@ -593,18 +593,29 @@ async function sendFollowUp(contactId, vendorName) {
 
 async function createRequisition() {
     const name = document.getElementById('nrName').value.trim();
-    if (!name) return;
+    if (!name) { showToast('Please enter a requisition name', 'error'); return; }
     const siteId = document.getElementById('nrSiteId')?.value || null;
+    if (!siteId) { showToast('Please select a customer account', 'error'); return; }
     try {
         const data = await apiFetch('/api/requisitions', {
-            method: 'POST', body: { name, customer_site_id: siteId ? parseInt(siteId) : null }
+            method: 'POST', body: { name, customer_site_id: parseInt(siteId) }
         });
         closeModal('newReqModal');
         document.getElementById('nrName').value = '';
         document.getElementById('nrSiteSearch').value = '';
         document.getElementById('nrSiteId').value = '';
+        document.getElementById('nrSiteSelected').style.display = 'none';
+        document.getElementById('nrContactField').style.display = 'none';
         showDetail(data.id, data.name);
     } catch (e) { showToast('Failed to create requisition', 'error'); }
+}
+
+function clearNrSite() {
+    document.getElementById('nrSiteId').value = '';
+    document.getElementById('nrSiteSearch').value = '';
+    document.getElementById('nrSiteSearch').style.display = '';
+    document.getElementById('nrSiteSelected').style.display = 'none';
+    document.getElementById('nrContactField').style.display = 'none';
 }
 
 async function toggleArchive(id) {
@@ -2164,7 +2175,7 @@ async function openMaterialPopup(cardId) {
     let html = `<div class="mp-header">
         <h2>${esc(card.display_mpn)}</h2>
         <div class="mp-header-meta">
-            ${card.manufacturer ? `${esc(card.manufacturer)} · ` : ''}
+            ${card.manufacturer ? `<span style="font-weight:600">${esc(card.manufacturer)}</span> · ` : ''}
             ${card.search_count} searches · Last searched ${card.last_searched_at ? fmtDate(card.last_searched_at) : 'never'}
         </div>
     </div>`;
@@ -2173,8 +2184,54 @@ async function openMaterialPopup(cardId) {
         html += `<div class="mp-section"><div class="mp-label">Description</div><div style="font-size:12px">${esc(card.description)}</div></div>`;
     }
 
+    // ── Offers section ──
+    const offers = card.offers || [];
+    html += `<div class="mp-section"><div class="mp-label">Offers (${offers.length})</div>`;
+    if (offers.length) {
+        html += '<div class="mp-table-wrap"><table class="mp-tbl"><thead><tr><th>Vendor</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Condition</th><th>Status</th><th>Date</th></tr></thead><tbody>';
+        for (const o of offers) {
+            const statusCls = o.status === 'active' ? 'b-auth' : 'b-src';
+            html += `<tr>
+                <td class="mp-tbl-vendor">${esc(o.vendor_name)}</td>
+                <td>${o.qty_available != null ? o.qty_available.toLocaleString() : '—'}</td>
+                <td>${o.unit_price != null ? '$' + Number(o.unit_price).toFixed(2) : '—'}</td>
+                <td>${esc(o.lead_time || '—')}</td>
+                <td>${esc(o.condition || '—')}</td>
+                <td><span class="badge ${statusCls}">${esc(o.status || 'active')}</span></td>
+                <td class="mp-tbl-date">${o.created_at ? fmtDate(o.created_at) : '—'}</td>
+            </tr>`;
+        }
+        html += '</tbody></table></div>';
+    } else {
+        html += '<div class="mp-empty">No offers recorded yet</div>';
+    }
+    html += '</div>';
+
+    // ── Sightings section ──
+    const sightings = card.sightings || [];
+    html += `<div class="mp-section"><div class="mp-label">Sightings (${sightings.length})</div>`;
+    if (sightings.length) {
+        html += '<div class="mp-table-wrap"><table class="mp-tbl"><thead><tr><th>Vendor</th><th>Qty</th><th>Price</th><th>Source</th><th>Auth</th><th>Condition</th><th>Date</th></tr></thead><tbody>';
+        for (const s of sightings) {
+            html += `<tr>
+                <td class="mp-tbl-vendor">${esc(s.vendor_name)}</td>
+                <td>${s.qty_available != null ? s.qty_available.toLocaleString() : '—'}</td>
+                <td>${s.unit_price != null ? '$' + Number(s.unit_price).toFixed(2) : '—'}</td>
+                <td>${s.source_type ? `<span class="badge b-src">${esc(s.source_type.toUpperCase())}</span>` : '—'}</td>
+                <td>${s.is_authorized ? '<span class="badge b-auth">Auth</span>' : '—'}</td>
+                <td>${esc(s.condition || '—')}</td>
+                <td class="mp-tbl-date">${s.created_at ? fmtDate(s.created_at) : '—'}</td>
+            </tr>`;
+        }
+        html += '</tbody></table></div>';
+    } else {
+        html += '<div class="mp-empty">No sightings recorded yet</div>';
+    }
+    html += '</div>';
+
+    // ── Vendor History section ──
     const history = card.vendor_history || [];
-    html += `<div class="mp-section"><div class="mp-label">Vendors Who Have Listed This Part (${history.length})</div>`;
+    html += `<div class="mp-section"><div class="mp-label">Vendor History (${history.length})</div>`;
     if (history.length) {
         for (const vh of history) {
             const srcBadge = vh.source_type ? `<span class="badge b-src">${(vh.source_type || '').toUpperCase()}</span>` : '';
@@ -2189,11 +2246,10 @@ async function openMaterialPopup(cardId) {
                 <span class="mp-vh-detail">Qty: ${qtyStr}</span>
                 <span class="mp-vh-detail">Price: ${priceStr}</span>
                 <span class="mp-vh-detail">Last: ${vh.last_seen ? fmtDate(vh.last_seen) : '—'}</span>
-                <span class="mp-vh-detail">First: ${vh.first_seen ? fmtDate(vh.first_seen) : '—'}</span>
             </div>`;
         }
     } else {
-        html += '<div style="font-size:12px;color:var(--muted);font-style:italic">No vendor history yet</div>';
+        html += '<div class="mp-empty">No vendor history yet</div>';
     }
     html += '</div>';
 
