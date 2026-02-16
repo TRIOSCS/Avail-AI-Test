@@ -2125,12 +2125,43 @@ async function viewThread(vendorName) {
 
     // Inbound responses
     for (const r of (v.responses || [])) {
+        const pd = r.parsed_data;
+        let bodyHtml = '';
+        if (pd && pd.parts && pd.parts.length) {
+            const clsColors = {quote_provided:'#10b981',no_stock:'#ef4444',counter_offer:'#f59e0b',clarification_needed:'#6366f1',ooo_bounce:'#9ca3af',follow_up:'#3b82f6'};
+            const clsLabels = {quote_provided:'Quote Provided',no_stock:'No Stock',counter_offer:'Counter Offer',clarification_needed:'Clarification Needed',ooo_bounce:'OOO / Bounce',follow_up:'Follow Up'};
+            const cls = pd.overall_classification || '';
+            const clsColor = clsColors[cls] || '#6b7280';
+            const conf = pd.confidence != null ? `<span style="font-size:10px;color:var(--text2);margin-left:6px">${Math.round(pd.confidence*100)}% confidence</span>` : '';
+            bodyHtml += `<div style="margin-bottom:6px"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;color:#fff;background:${clsColor}">${esc(clsLabels[cls]||cls)}</span>${conf}</div>`;
+            bodyHtml += '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:4px">';
+            bodyHtml += '<tr style="color:var(--text2);border-bottom:1px solid rgba(0,0,0,.08)"><th style="text-align:left;padding:3px 6px;font-weight:600">MPN</th><th style="text-align:left;padding:3px 6px;font-weight:600">Status</th><th style="text-align:right;padding:3px 6px;font-weight:600">Qty</th><th style="text-align:right;padding:3px 6px;font-weight:600">Price</th><th style="text-align:left;padding:3px 6px;font-weight:600">Lead Time</th><th style="text-align:left;padding:3px 6px;font-weight:600">Cond</th></tr>';
+            for (const p of pd.parts) {
+                const statusColors = {quoted:'#10b981',no_stock:'#ef4444',follow_up:'#3b82f6'};
+                const price = p.unit_price != null ? `${p.currency||'$'}${p.unit_price.toFixed(2)}` : '\u2014';
+                bodyHtml += `<tr style="border-bottom:1px solid rgba(0,0,0,.04)">
+                    <td style="padding:3px 6px;font-weight:600">${esc(p.mpn||'')}</td>
+                    <td style="padding:3px 6px;color:${statusColors[p.status]||'inherit'}">${esc(p.status||'')}</td>
+                    <td style="padding:3px 6px;text-align:right">${p.qty_available != null ? p.qty_available.toLocaleString() : '\u2014'}</td>
+                    <td style="padding:3px 6px;text-align:right">${price}</td>
+                    <td style="padding:3px 6px">${esc(p.lead_time||'\u2014')}</td>
+                    <td style="padding:3px 6px">${esc(p.condition||'\u2014')}</td>
+                </tr>`;
+            }
+            bodyHtml += '</table>';
+            if (pd.vendor_notes) bodyHtml += `<div style="font-size:11px;color:var(--text2);font-style:italic">${esc(pd.vendor_notes)}</div>`;
+        } else {
+            // Fallback: plain text snippet when no parsed data
+            const snippet = (r.body||'').replace(/<[^>]*>/g,'').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim().slice(0,300);
+            bodyHtml = `<div style="font-size:11px;color:var(--text2);white-space:pre-wrap">${esc(snippet || 'No content available')}</div>`;
+        }
+
         html += `<div style="margin-bottom:12px;padding:10px 14px;background:var(--green-light);border-radius:8px;border:1px solid rgba(16,185,129,.15)">
             <div style="font-size:11px;color:var(--green);font-weight:600;margin-bottom:4px">
                 ✅ Reply from ${esc(r.vendor_email||'')} · ${fmtDateTime(r.received_at)}
             </div>
             ${r.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:4px">${esc(r.subject)}</div>` : ''}
-            <iframe sandbox="allow-same-origin" srcdoc="${escAttr(r.body||'')}" style="width:100%;max-height:200px;border:none;background:#fff;border-radius:4px" onload="this.style.height=Math.min(this.contentDocument.body.scrollHeight,200)+'px'"></iframe>
+            ${bodyHtml}
         </div>`;
     }
 

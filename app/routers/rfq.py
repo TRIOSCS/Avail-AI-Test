@@ -118,6 +118,7 @@ async def get_activity(req_id: int, user: User = Depends(require_user), db: Sess
             "id": r.id, "vendor_email": r.vendor_email, "subject": r.subject,
             "body": (r.body or "")[:500], "status": r.status,
             "parsed_data": r.parsed_data, "confidence": r.confidence,
+            "classification": r.classification,
             "received_at": r.received_at.isoformat() if isinstance(r.received_at, datetime) else r.received_at,
         })
 
