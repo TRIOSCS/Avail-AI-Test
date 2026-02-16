@@ -588,10 +588,20 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
     pending_revenue = sum(
         float(o.total_sell or 0) for o in all_offers if o.status == "sent"
     )
+    quoted = sum(1 for o in all_offers if o.converted_quote_id is not None)
+    converted_quote_ids = [o.converted_quote_id for o in all_offers if o.converted_quote_id]
+    po_count = 0
+    if converted_quote_ids:
+        po_count = db.query(BuyPlan).filter(
+            BuyPlan.quote_id.in_(converted_quote_ids),
+            BuyPlan.status.in_(["approved", "po_entered"]),
+        ).count()
 
     result = {
         "total_sent": sent,
         "total_converted": converted,
+        "total_quoted": quoted,
+        "total_po": po_count,
         "conversion_rate": round(converted / sent * 100, 1) if sent > 0 else 0,
         "anticipated_revenue": round(pending_revenue, 2),
         "converted_revenue": round(converted_revenue, 2),
@@ -619,12 +629,22 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
             u_pending = sum(
                 float(o.total_sell or 0) for o in user_offers if o.status == "sent"
             )
+            u_quoted = sum(1 for o in user_offers if o.converted_quote_id is not None)
+            u_quote_ids = [o.converted_quote_id for o in user_offers if o.converted_quote_id]
+            u_po = 0
+            if u_quote_ids:
+                u_po = db.query(BuyPlan).filter(
+                    BuyPlan.quote_id.in_(u_quote_ids),
+                    BuyPlan.status.in_(["approved", "po_entered"]),
+                ).count()
             breakdown.append(
                 {
                     "salesperson_id": sid,
                     "salesperson_name": sales_map.get(sid, "Unknown"),
                     "sent": u_sent,
                     "converted": u_conv,
+                    "quoted": u_quoted,
+                    "po": u_po,
                     "conversion_rate": round(u_conv / u_sent * 100, 1)
                     if u_sent > 0
                     else 0,

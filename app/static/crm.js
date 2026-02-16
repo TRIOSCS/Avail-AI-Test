@@ -738,7 +738,8 @@ function renderQuote() {
     </div>
     <div class="quote-totals">
         <div>Cost: <strong>$${Number(q.total_cost||0).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
-        <div>Sell: <strong>$${Number(q.subtotal||0).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+        <div>Revenue: <strong>$${Number(q.subtotal||0).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+        <div>Gross Profit: <strong style="color:var(--green)">$${Number((q.subtotal||0)-(q.total_cost||0)).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
         <div>Margin: <strong>${Number(q.total_margin_pct||0).toFixed(1)}%</strong></div>
     </div>
     <div class="quote-terms">
@@ -761,6 +762,28 @@ function updateQuoteLine(idx, newSellPrice) {
     item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
     const mEl = document.getElementById('qm-' + idx);
     if (mEl) mEl.textContent = item.margin_pct.toFixed(1) + '%';
+    refreshQuoteTotals();
+}
+
+function refreshQuoteTotals() {
+    if (!crmQuote) return;
+    let totalCost = 0, totalSell = 0;
+    crmQuote.line_items.forEach(item => {
+        totalCost += (item.cost_price || 0) * (item.qty || 0);
+        totalSell += (item.sell_price || 0) * (item.qty || 0);
+    });
+    crmQuote.subtotal = totalSell;
+    crmQuote.total_cost = totalCost;
+    crmQuote.total_margin_pct = totalSell > 0 ? ((totalSell - totalCost) / totalSell * 100) : 0;
+    const totalsEl = document.querySelector('.quote-totals');
+    if (totalsEl) {
+        const gp = totalSell - totalCost;
+        totalsEl.innerHTML = `
+            <div>Cost: <strong>$${Number(totalCost).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+            <div>Revenue: <strong>$${Number(totalSell).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+            <div>Gross Profit: <strong style="color:var(--green)">$${Number(gp).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+            <div>Margin: <strong>${Number(crmQuote.total_margin_pct).toFixed(1)}%</strong></div>`;
+    }
 }
 
 function applyMarkup() {
@@ -2259,6 +2282,14 @@ function renderProactiveScorecard(data) {
             <div style="font-size:11px;color:var(--muted)">Total Converted</div>
         </div>
         <div class="card" style="text-align:center;padding:16px">
+            <div style="font-size:24px;font-weight:700;color:var(--teal)">${data.total_quoted||0}</div>
+            <div style="font-size:11px;color:var(--muted)">Quoted</div>
+        </div>
+        <div class="card" style="text-align:center;padding:16px">
+            <div style="font-size:24px;font-weight:700;color:var(--amber)">${data.total_po||0}</div>
+            <div style="font-size:11px;color:var(--muted)">PO</div>
+        </div>
+        <div class="card" style="text-align:center;padding:16px">
             <div style="font-size:24px;font-weight:700;color:var(--text)">${data.conversion_rate}%</div>
             <div style="font-size:11px;color:var(--muted)">Overall Rate</div>
         </div>
@@ -2281,6 +2312,8 @@ function renderProactiveScorecard(data) {
             <thead><tr>
                 <th>Salesperson</th>
                 <th style="text-align:right">Sent</th>
+                <th style="text-align:right">Quoted</th>
+                <th style="text-align:right">PO</th>
                 <th style="text-align:right">Converted</th>
                 <th style="text-align:right">Rate</th>
                 <th style="text-align:right">Anticipated</th>
@@ -2293,6 +2326,8 @@ function renderProactiveScorecard(data) {
                 return `<tr>
                     <td><strong>${esc(b.salesperson_name)}</strong>${medal}</td>
                     <td style="text-align:right">${b.sent}</td>
+                    <td style="text-align:right">${b.quoted||0}</td>
+                    <td style="text-align:right">${b.po||0}</td>
                     <td style="text-align:right">${b.converted}</td>
                     <td style="text-align:right;color:${rateColor};font-weight:600">${b.conversion_rate}%</td>
                     <td style="text-align:right;color:var(--amber)">$${Number(b.anticipated_revenue||0).toLocaleString()}</td>
