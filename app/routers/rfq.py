@@ -34,6 +34,7 @@ from ..models import (
     Requisition,
     User,
     VendorCard,
+    VendorContact,
     VendorResponse,
     VendorReview,
 )
@@ -291,6 +292,33 @@ async def get_activity(
             if nk in vendors and nk not in vendor_card_ids:
                 vendor_card_ids[nk] = c.id
 
+    # Collect phone numbers from VendorCard and VendorContact for resolved vendors
+    vendor_phones = {}
+    all_card_ids = [cid for cid in vendor_card_ids.values() if cid]
+    if all_card_ids:
+        phone_cards = (
+            db.query(VendorCard)
+            .filter(VendorCard.id.in_(all_card_ids))
+            .all()
+        )
+        for pc in phone_cards:
+            phones = []
+            if pc.phones:
+                phones.extend(pc.phones)
+            vendor_phones[pc.id] = phones
+        # Also check VendorContact records for phone numbers
+        vcontacts = (
+            db.query(VendorContact)
+            .filter(
+                VendorContact.vendor_card_id.in_(all_card_ids),
+                VendorContact.phone.isnot(None),
+            )
+            .all()
+        )
+        for vc in vcontacts:
+            if vc.phone and vc.phone not in vendor_phones.get(vc.vendor_card_id, []):
+                vendor_phones.setdefault(vc.vendor_card_id, []).append(vc.phone)
+
     # Build result list
     result = []
     for vk, v in vendors.items():
@@ -321,10 +349,12 @@ async def get_activity(
         else:
             vendor_status = "awaiting"
 
+        card_id = vendor_card_ids.get(vk)
         result.append(
             {
                 "vendor_name": v["vendor_name"],
-                "vendor_card_id": vendor_card_ids.get(vk),
+                "vendor_card_id": card_id,
+                "vendor_phones": vendor_phones.get(card_id, []) if card_id else [],
                 "status": vendor_status,
                 "contact_count": len(v["contacts"]),
                 "contact_types": sorted(v["contact_types"]),

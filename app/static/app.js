@@ -2611,16 +2611,11 @@ function renderActivityCards() {
         // Place Call / Note buttons (only when vendor_card_id is known)
         let logBtns = '';
         if (v.vendor_card_id) {
-            // Find a phone number from phone-type contacts
-            var vendorPhone = '';
-            for (var ci = 0; ci < (v.contacts || []).length; ci++) {
-                if ((v.contacts[ci].contact_type === 'phone') && v.contacts[ci].vendor_contact) {
-                    vendorPhone = v.contacts[ci].vendor_contact;
-                    break;
-                }
-            }
-            if (vendorPhone) {
-                logBtns = '<button class="btn btn-ghost btn-sm" onclick="placeVendorCall(' + v.vendor_card_id + ', \'' + escAttr(v.vendor_name) + '\', ' + currentReqId + ', \'' + escAttr(vendorPhone) + '\')">📞 ' + esc(vendorPhone) + '</button>';
+            var vendorPhones = v.vendor_phones || [];
+            if (vendorPhones.length) {
+                logBtns = vendorPhones.map(function(ph) {
+                    return '<button class="btn btn-ghost btn-sm" onclick="placeVendorCall(' + v.vendor_card_id + ', \'' + escAttr(v.vendor_name) + '\', ' + currentReqId + ', \'' + escAttr(ph) + '\')">📞 ' + esc(ph) + '</button>';
+                }).join('');
             } else {
                 logBtns = '<button class="btn btn-ghost btn-sm" onclick="openVendorLogCallModal(' + v.vendor_card_id + ', \'' + escAttr(v.vendor_name) + '\', ' + currentReqId + ')">📞 Log Call</button>';
             }
