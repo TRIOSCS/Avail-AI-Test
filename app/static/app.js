@@ -2526,70 +2526,90 @@ async function viewThread(vendorName) {
 
     let html = '<div id="threadEntries" style="max-height:60vh;overflow-y:auto">';
 
-    // Outbound contacts
+    // Combine outbound + inbound into a single chronological timeline
+    const timeline = [];
     for (const c of (v.contacts || [])) {
-        const searchText = [c.vendor_contact, c.subject, c.user_name, ...(c.parts_included||[])].filter(Boolean).join(' ').toLowerCase();
-        html += `<div data-searchable="${escAttr(searchText)}" style="margin-bottom:12px;padding:10px 14px;background:var(--teal-light);border-radius:8px;border:1px solid rgba(26,127,155,.15)">
-            <div style="font-size:11px;color:var(--teal);font-weight:600;margin-bottom:4px">
-                ${c.contact_type === 'email' ? '✉ Sent' : '📞 Called'} · ${esc(c.vendor_contact||'')} · ${fmtDateTime(c.created_at)} · by ${esc(c.user_name||'')}
-            </div>
-            ${c.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:2px">${esc(c.subject)}</div>` : ''}
-            <div style="font-size:11px;color:var(--text2)">${(c.parts_included||[]).join(', ')}</div>
-        </div>`;
+        timeline.push({ type: 'outbound', date: c.created_at, data: c });
     }
-
-    // Inbound responses
     for (const r of (v.responses || [])) {
-        const pd = r.parsed_data;
-        let bodyHtml = '';
-        // Build searchable text for this response
-        const searchParts = [r.vendor_email, r.subject];
-        if (pd && pd.parts && pd.parts.length) {
-            const clsColors = {quote_provided:'var(--green)',no_stock:'var(--red)',counter_offer:'var(--amber)',clarification_needed:'#6366f1',ooo_bounce:'var(--muted)',follow_up:'var(--blue)'};
-            const clsLabels = {quote_provided:'Quote Provided',no_stock:'No Stock',counter_offer:'Counter Offer',clarification_needed:'Clarification Needed',ooo_bounce:'OOO / Bounce',follow_up:'Follow Up'};
-            const cls = pd.overall_classification || '';
-            const clsColor = clsColors[cls] || '#6b7280';
-            const conf = pd.confidence != null ? `<span style="font-size:10px;color:var(--text2);margin-left:6px">${Math.round(pd.confidence*100)}% confidence</span>` : '';
-            bodyHtml += `<div style="margin-bottom:6px"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;color:#fff;background:${clsColor}">${esc(clsLabels[cls]||cls)}</span>${conf}</div>`;
-            bodyHtml += '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:4px">';
-            bodyHtml += '<tr style="color:var(--text2);border-bottom:1px solid rgba(0,0,0,.08)"><th style="text-align:left;padding:3px 6px;font-weight:600">MPN</th><th style="text-align:left;padding:3px 6px;font-weight:600">Status</th><th style="text-align:right;padding:3px 6px;font-weight:600">Qty</th><th style="text-align:right;padding:3px 6px;font-weight:600">Price</th><th style="text-align:left;padding:3px 6px;font-weight:600">Lead Time</th><th style="text-align:left;padding:3px 6px;font-weight:600">Cond</th></tr>';
-            for (const p of pd.parts) {
-                const statusColors = {quoted:'var(--green)',no_stock:'var(--red)',follow_up:'var(--blue)'};
-                const price = p.unit_price != null ? `${p.currency||'$'}${p.unit_price.toFixed(2)}` : '\u2014';
-                bodyHtml += `<tr style="border-bottom:1px solid rgba(0,0,0,.04)">
-                    <td style="padding:3px 6px;font-weight:600">${esc(p.mpn||'')}</td>
-                    <td style="padding:3px 6px;color:${statusColors[p.status]||'inherit'}">${esc(p.status||'')}</td>
-                    <td style="padding:3px 6px;text-align:right">${p.qty_available != null ? p.qty_available.toLocaleString() : '\u2014'}</td>
-                    <td style="padding:3px 6px;text-align:right">${price}</td>
-                    <td style="padding:3px 6px">${esc(p.lead_time||'\u2014')}</td>
-                    <td style="padding:3px 6px">${esc(p.condition||'\u2014')}</td>
-                </tr>`;
-                searchParts.push(p.mpn, p.status, p.lead_time, p.condition);
-            }
-            bodyHtml += '</table>';
-            if (pd.vendor_notes) {
-                bodyHtml += `<div style="font-size:11px;color:var(--text2);font-style:italic">${esc(pd.vendor_notes)}</div>`;
-                searchParts.push(pd.vendor_notes);
-            }
-            searchParts.push(clsLabels[cls] || cls);
-        } else {
-            // Fallback: plain text snippet when no parsed data
-            const snippet = (r.body||'').replace(/<[^>]*>/g,'').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim().slice(0,300);
-            bodyHtml = `<div style="font-size:11px;color:var(--text2);white-space:pre-wrap">${esc(snippet || 'No content available')}</div>`;
-            searchParts.push(snippet);
-        }
+        timeline.push({ type: 'inbound', date: r.received_at, data: r });
+    }
+    timeline.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 
-        const searchText = searchParts.filter(Boolean).join(' ').toLowerCase();
-        html += `<div data-searchable="${escAttr(searchText)}" style="margin-bottom:12px;padding:10px 14px;background:var(--green-light);border-radius:8px;border:1px solid rgba(16,185,129,.15)">
-            <div style="font-size:11px;color:var(--green);font-weight:600;margin-bottom:4px">
-                ✅ Reply from ${esc(r.vendor_email||'')} · ${fmtDateTime(r.received_at)}
-            </div>
-            ${r.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:4px">${esc(r.subject)}</div>` : ''}
-            ${bodyHtml}
-        </div>`;
+    for (const entry of timeline) {
+        if (entry.type === 'outbound') {
+            const c = entry.data;
+            const bodyText = (c.body || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+            const searchText = [c.vendor_contact, c.subject, c.user_name, bodyText, ...(c.parts_included||[])].filter(Boolean).join(' ').toLowerCase();
+            // Render outbound email body as HTML (it's stored as HTML from the email composer)
+            const bodyHtml = c.body
+                ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(26,127,155,.1);line-height:1.5;max-height:300px;overflow-y:auto">${c.body}</div>`
+                : '';
+            html += `<div data-searchable="${escAttr(searchText)}" style="margin-bottom:12px;padding:10px 14px;background:var(--teal-light);border-radius:8px;border:1px solid rgba(26,127,155,.15)">
+                <div style="font-size:11px;color:var(--teal);font-weight:600;margin-bottom:4px">
+                    ${c.contact_type === 'email' ? '✉ Sent' : '📞 Called'} · ${esc(c.vendor_contact||'')} · ${fmtDateTime(c.created_at)} · by ${esc(c.user_name||'')}
+                </div>
+                ${c.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:2px">${esc(c.subject)}</div>` : ''}
+                <div style="font-size:11px;color:var(--text2)">${(c.parts_included||[]).join(', ')}</div>
+                ${bodyHtml}
+            </div>`;
+        } else {
+            // Inbound response
+            const r = entry.data;
+            const pd = r.parsed_data;
+            let parsedHtml = '';
+            const searchParts = [r.vendor_email, r.subject];
+
+            if (pd && pd.parts && pd.parts.length) {
+                const clsColors = {quote_provided:'var(--green)',no_stock:'var(--red)',counter_offer:'var(--amber)',clarification_needed:'#6366f1',ooo_bounce:'var(--muted)',follow_up:'var(--blue)'};
+                const clsLabels = {quote_provided:'Quote Provided',no_stock:'No Stock',counter_offer:'Counter Offer',clarification_needed:'Clarification Needed',ooo_bounce:'OOO / Bounce',follow_up:'Follow Up'};
+                const cls = pd.overall_classification || '';
+                const clsColor = clsColors[cls] || '#6b7280';
+                const conf = pd.confidence != null ? `<span style="font-size:10px;color:var(--text2);margin-left:6px">${Math.round(pd.confidence*100)}% confidence</span>` : '';
+                parsedHtml += `<div style="margin-bottom:6px"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;color:#fff;background:${clsColor}">${esc(clsLabels[cls]||cls)}</span>${conf}</div>`;
+                parsedHtml += '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:4px">';
+                parsedHtml += '<tr style="color:var(--text2);border-bottom:1px solid rgba(0,0,0,.08)"><th style="text-align:left;padding:3px 6px;font-weight:600">MPN</th><th style="text-align:left;padding:3px 6px;font-weight:600">Status</th><th style="text-align:right;padding:3px 6px;font-weight:600">Qty</th><th style="text-align:right;padding:3px 6px;font-weight:600">Price</th><th style="text-align:left;padding:3px 6px;font-weight:600">Lead Time</th><th style="text-align:left;padding:3px 6px;font-weight:600">Cond</th></tr>';
+                for (const p of pd.parts) {
+                    const statusColors = {quoted:'var(--green)',no_stock:'var(--red)',follow_up:'var(--blue)'};
+                    const price = p.unit_price != null ? `${p.currency||'$'}${p.unit_price.toFixed(2)}` : '\u2014';
+                    parsedHtml += `<tr style="border-bottom:1px solid rgba(0,0,0,.04)">
+                        <td style="padding:3px 6px;font-weight:600">${esc(p.mpn||'')}</td>
+                        <td style="padding:3px 6px;color:${statusColors[p.status]||'inherit'}">${esc(p.status||'')}</td>
+                        <td style="padding:3px 6px;text-align:right">${p.qty_available != null ? p.qty_available.toLocaleString() : '\u2014'}</td>
+                        <td style="padding:3px 6px;text-align:right">${price}</td>
+                        <td style="padding:3px 6px">${esc(p.lead_time||'\u2014')}</td>
+                        <td style="padding:3px 6px">${esc(p.condition||'\u2014')}</td>
+                    </tr>`;
+                    searchParts.push(p.mpn, p.status, p.lead_time, p.condition);
+                }
+                parsedHtml += '</table>';
+                if (pd.vendor_notes) {
+                    parsedHtml += `<div style="font-size:11px;color:var(--text2);font-style:italic">${esc(pd.vendor_notes)}</div>`;
+                    searchParts.push(pd.vendor_notes);
+                }
+                searchParts.push(clsLabels[cls] || cls);
+            }
+
+            // Always show the full email body
+            const rawBody = (r.body || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+            searchParts.push(rawBody);
+            const emailBodyHtml = r.body
+                ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(16,185,129,.1);line-height:1.5;max-height:300px;overflow-y:auto">${r.body}</div>`
+                : '';
+
+            const searchText = searchParts.filter(Boolean).join(' ').toLowerCase();
+            html += `<div data-searchable="${escAttr(searchText)}" style="margin-bottom:12px;padding:10px 14px;background:var(--green-light);border-radius:8px;border:1px solid rgba(16,185,129,.15)">
+                <div style="font-size:11px;color:var(--green);font-weight:600;margin-bottom:4px">
+                    Reply from ${esc(r.vendor_email||'')} · ${fmtDateTime(r.received_at)}
+                </div>
+                ${r.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:4px">${esc(r.subject)}</div>` : ''}
+                ${parsedHtml}
+                ${emailBodyHtml}
+            </div>`;
+        }
     }
 
-    if (!v.contacts?.length && !v.responses?.length) {
+    if (!timeline.length) {
         html += '<p class="empty">No thread data available</p>';
     }
 
