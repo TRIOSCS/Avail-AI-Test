@@ -205,7 +205,7 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None,
             items, new_delta = await gc.delta_query(
                 "/me/mailFolders/inbox/messages/delta",
                 delta_token=delta_token,
-                select="id,subject,from,receivedDateTime,bodyPreview,body,conversationId",
+                params={"$select": "id,subject,from,receivedDateTime,bodyPreview,body,conversationId", "$top": "50"},
                 max_items=200,
             )
             messages = items
