@@ -37,6 +37,7 @@ async def lifespan(app):
     """App startup/shutdown — launches background scheduler."""
     from .startup import run_startup_migrations
     run_startup_migrations()
+    _seed_api_sources()
     from .scheduler import start_scheduler
     task = asyncio.create_task(start_scheduler())
     log.info("Background scheduler launched")
@@ -391,7 +392,7 @@ def _seed_api_sources():
     finally:
         db.close()
 
-_seed_api_sources()
+# _seed_api_sources() is called from lifespan after startup migrations
 
 # ── Shared dependencies (auth, query helpers) ────────────────────────────
 from .dependencies import (
