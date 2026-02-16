@@ -119,7 +119,7 @@ async def ai_find_contacts(
     site_id = None
     vendor_card_id = None
 
-    if entity_type == "company" and entity_id:
+    if entity_type in ("company", "site") and entity_id:
         site = db.query(CustomerSite).filter(CustomerSite.id == entity_id).first()
         if site:
             company_name = site.company.name if site.company else site.site_name

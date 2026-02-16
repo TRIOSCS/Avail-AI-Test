@@ -20,7 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class ProspectFinderRequest(BaseModel):
-    entity_type: Literal["company", "vendor"] = "company"
+    entity_type: Literal["company", "site", "vendor"] = "company"
     entity_id: int | None = None
     title_keywords: str | None = None
 

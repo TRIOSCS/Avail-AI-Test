@@ -1680,24 +1680,27 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
             return
 
         prompt = (
-            f"Analyze this vendor's part inventory and classify them.\n\n"
+            f"Analyze this vendor's part inventory to identify their specialties.\n\n"
             f"Vendor: {card.display_name}\n"
             f"Parts they carry ({len(parts_list)} samples):\n"
             + "\n".join(parts_list[:200])
             + "\n\n"
-            "Return JSON with two arrays:\n"
-            '- "brands": major brands/manufacturers this vendor carries (e.g., "IBM", "Dell", "HP", "Intel", "Samsung"). '
-            "Only include brands with clear evidence from the parts list. Max 15.\n"
-            '- "commodities": commodity categories of parts they carry (e.g., "CPU", "HDD", "DDR", "LCD", '
-            '"SSD", "Power Supply", "Network Card", "Motherboard", "Memory", "GPU", "Cable", "Connector"). '
-            "Use short, standard industry terms. Max 15.\n\n"
+            "Return JSON with two arrays — ONLY include items that appear multiple times "
+            "or show a clear concentration/specialty. Do NOT list everything, only genuine focus areas.\n"
+            '- "brands": brands/manufacturers this vendor clearly specializes in '
+            "(must appear in at least 2-3 parts to qualify). Max 5.\n"
+            '- "commodities": commodity categories they concentrate on '
+            '(e.g., "Server", "Networking", "Storage", "Memory", "Display"). '
+            "Only categories with multiple parts. Max 5.\n\n"
+            "If the data is too sparse to identify specialties, return empty arrays.\n"
             "Return ONLY the JSON object, no explanation."
         )
 
         result = await claude_json(
             prompt,
-            system="You are a parts classification expert for the electronic components and IT hardware industry. "
-            "Analyze part numbers and manufacturers to identify brands and commodity categories.",
+            system="You identify vendor specialties in electronic components and IT hardware. "
+            "Only flag genuine concentrations — if a vendor has 1 IBM part, that is NOT an IBM specialty. "
+            "Be conservative: empty arrays are better than inaccurate tags.",
             model_tier="fast",
             max_tokens=512,
         )
@@ -1710,9 +1713,9 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
 
         # Validate: must be lists of strings
         if isinstance(brands, list):
-            card.brand_tags = [str(b).strip() for b in brands if b][:15]
+            card.brand_tags = [str(b).strip() for b in brands if b][:5]
         if isinstance(commodities, list):
-            card.commodity_tags = [str(c).strip() for c in commodities if c][:15]
+            card.commodity_tags = [str(c).strip() for c in commodities if c][:5]
         card.material_tags_updated_at = datetime.now(timezone.utc)
         db.commit()
 

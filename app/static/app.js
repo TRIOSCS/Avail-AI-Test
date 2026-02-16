@@ -1084,10 +1084,16 @@ function renderSources() {
             const vc = s.vendor_card || {};
             let ratingHtml = '';
             if (vc.card_id) {
-                const scoreStr = vc.engagement_score != null ? `<span class="badge" style="background:var(--teal-light);color:var(--teal);font-size:9px;padding:1px 5px;margin-right:3px" title="Vendor score">${vc.engagement_score}</span>` : '';
+                let scoreRing = '';
+                if (vc.engagement_score != null) {
+                    const es = Math.round(vc.engagement_score);
+                    const esColor = es >= 70 ? 'var(--green)' : es >= 40 ? 'var(--amber)' : 'var(--red)';
+                    const esBg = es >= 70 ? 'var(--green-light)' : es >= 40 ? 'var(--amber-light)' : 'var(--red-light)';
+                    scoreRing = `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:2px solid ${esColor};background:${esBg};font-size:8px;font-weight:700;color:${esColor};margin-right:3px;cursor:default" title="Engagement: ${es}/100&#10;Based on response rate, recency, velocity, and win rate">${es}</span>`;
+                }
                 const starStr = vc.avg_rating != null ? `<span class="stars" style="font-size:11px">★</span><span class="stars-num" style="font-size:10px">${vc.avg_rating}</span><span class="stars-count" style="font-size:9px;color:var(--muted)">(${vc.review_count})</span>` : '';
                 const cardPill = `<span class="badge" style="background:var(--bg2);cursor:pointer;font-size:9px;padding:1px 6px;margin-left:3px" onclick="event.stopPropagation();openVendorPopup(${vc.card_id})" title="Open vendor card">View</span>`;
-                ratingHtml = `<span class="sc-rating">${scoreStr}${starStr}${cardPill}</span>`;
+                ratingHtml = `<span class="sc-rating">${scoreRing}${starStr}${cardPill}</span>`;
             } else {
                 ratingHtml = '<span class="sc-rating sc-rating-new" title="New vendor">☆</span>';
             }
