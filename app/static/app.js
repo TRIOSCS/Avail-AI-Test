@@ -36,6 +36,15 @@ function debounce(fn, ms = 300) {
     return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
 }
 
+// Debounced input handlers — client-side filters at 150ms, API calls at 300ms
+const debouncedRenderReqTable = debounce(() => renderRequirementsTable(), 150);
+const debouncedRenderSources = debounce(() => renderSources(), 150);
+const debouncedRenderActivity = debounce(() => renderActivityCards(), 150);
+const debouncedLoadCustomers = debounce(() => loadCustomers(), 300);
+const debouncedFilterVendors = debounce(() => filterVendorList(), 150);
+const debouncedLoadMaterials = debounce(() => loadMaterialList(), 300);
+const debouncedFilterSites = debounce((v) => filterSiteTypeahead(v), 150);
+
 // ── Utilities ───────────────────────────────────────────────────────────
 function esc(s) {
     if (!s) return '';
@@ -280,7 +289,7 @@ async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-detail', 'view-vendors', 'view-materials', 'view-sources', 'view-customers', 'view-buyplans', 'view-proactive', 'view-performance', 'view-settings'];
+const ALL_VIEWS = ['view-list', 'view-detail', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-performance', 'view-settings'];
 
 function showView(viewId) {
     for (const id of ALL_VIEWS) {
@@ -367,12 +376,6 @@ function showMaterials() {
     showView('view-materials');
     currentReqId = null;
     loadMaterialList();
-}
-
-function showSources() {
-    showView('view-sources');
-    currentReqId = null;
-    loadSources();
 }
 
 function switchTab(name, btn) {
@@ -1476,15 +1479,9 @@ async function sendBatchRfq() {
         };
     });
     try {
-        const res = await fetch(`/api/requisitions/${currentReqId}/rfq`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ groups: payload })
+        const data = await apiFetch(`/api/requisitions/${currentReqId}/rfq`, {
+            method: 'POST', body: { groups: payload }
         });
-        if (!res.ok) {
-            const errText = await res.text();
-            throw new Error(errText || `HTTP ${res.status} — you may need to log in again`);
-        }
-        const data = await res.json();
         const sent = (data.results || []).filter(r => r.status === 'sent').length;
         alert(`${sent} of ${payload.length} emails sent successfully`);
         closeModal('rfqModal');
@@ -1500,10 +1497,9 @@ async function sendBatchRfq() {
 // ── Click-to-Call Logging ───────────────────────────────────────────────
 async function logCall(event, vendorName, vendorPhone, mpn) {
     try {
-        await fetch('/api/contacts/phone', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ requisition_id: currentReqId, vendor_name: vendorName,
-                                   vendor_phone: vendorPhone, parts: mpn ? [mpn] : [] })
+        await apiFetch('/api/contacts/phone', {
+            method: 'POST', body: { requisition_id: currentReqId, vendor_name: vendorName,
+                                   vendor_phone: vendorPhone, parts: mpn ? [mpn] : [] }
         });
         loadActivity();
     } catch (e) { console.error('Failed to log call:', e); }
@@ -1511,9 +1507,9 @@ async function logCall(event, vendorName, vendorPhone, mpn) {
 
 // ── Vendor Card Popup ──────────────────────────────────────────────────
 async function openVendorPopup(cardId) {
-    const res = await fetch(`/api/vendors/${cardId}`);
-    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
-    const card = await res.json();
+    let card;
+    try { card = await apiFetch(`/api/vendors/${cardId}`); }
+    catch (e) { console.error('Failed to load vendor:', e); return; }
 
     let html = `<div class="vp-header">
         <h2>${esc(card.display_name)}</h2>
@@ -1549,12 +1545,12 @@ async function openVendorPopup(cardId) {
         html += '<div style="margin-top:6px">';
         if (card.brand_tags && card.brand_tags.length) {
             html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">';
-            html += card.brand_tags.map(b => `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;background:rgba(59,130,246,.12);color:#3b82f6">${esc(b)}</span>`).join('');
+            html += card.brand_tags.map(b => `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;background:rgba(59,130,246,.12);color:var(--blue)">${esc(b)}</span>`).join('');
             html += '</div>';
         }
         if (card.commodity_tags && card.commodity_tags.length) {
             html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
-            html += card.commodity_tags.map(c => `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;background:rgba(245,158,11,.12);color:#d97706">${esc(c)}</span>`).join('');
+            html += card.commodity_tags.map(c => `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;background:rgba(245,158,11,.12);color:var(--amber)">${esc(c)}</span>`).join('');
             html += '</div>';
         }
         html += '</div>';
@@ -1766,9 +1762,7 @@ function openAddVendorContact(cardId) {
 
 async function openEditVendorContact(cardId, contactId) {
     try {
-        const res = await fetch('/api/vendors/' + cardId + '/contacts');
-        if (!res.ok) { showToast('Failed to load contacts', 'error'); return; }
-        const contacts = await res.json();
+        const contacts = await apiFetch('/api/vendors/' + cardId + '/contacts');
         const c = contacts.find(x => x.id === contactId);
         if (!c) { showToast('Contact not found', 'error'); return; }
         document.getElementById('vcCardId').value = cardId;
@@ -1839,7 +1833,7 @@ async function loadConfirmedQuotes(cardId) {
         listEl.innerHTML = data.items.map(o => {
             const priceStr = o.unit_price != null ? `${o.currency || '$'}${o.unit_price.toFixed(2)}` : '--';
             const qtyStr = o.qty_available != null ? o.qty_available.toLocaleString() : '--';
-            const statusCls = o.status === 'active' ? 'color:#10b981' : 'color:var(--text2)';
+            const statusCls = o.status === 'active' ? 'color:var(--green)' : 'color:var(--text2)';
             return `<div class="mp-vh-row">
                 <span class="mp-vh-vendor" style="font-weight:600;font-family:'JetBrains Mono',monospace;font-size:11px">${esc(o.mpn)}</span>
                 <span class="mp-vh-detail">${esc(o.manufacturer)}</span>
@@ -1946,9 +1940,9 @@ async function analyzeVendorMaterials(cardId) {
 // ── Vendors Tab ────────────────────────────────────────────────────────
 async function loadVendorList() {
     const q = (document.getElementById('vendorSearch') || {}).value || '';
-    const res = await fetch(`/api/vendors?q=${encodeURIComponent(q)}`);
-    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
-    const resp = await res.json();
+    let resp;
+    try { resp = await apiFetch(`/api/vendors?q=${encodeURIComponent(q)}`); }
+    catch (e) { console.error('Failed to load vendors:', e); return; }
     _vendorListData = resp.vendors || resp;
     filterVendorList();
 }
@@ -2010,9 +2004,9 @@ function filterVendorList() {
 // ── Materials Tab ──────────────────────────────────────────────────────
 async function loadMaterialList() {
     const q = (document.getElementById('materialSearch') || {}).value || '';
-    const res = await fetch(`/api/materials?q=${encodeURIComponent(q)}`);
-    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
-    const resp = await res.json();
+    let resp;
+    try { resp = await apiFetch(`/api/materials?q=${encodeURIComponent(q)}`); }
+    catch (e) { console.error('Failed to load materials:', e); return; }
     const data = resp.materials || resp;  // Backwards-compatible
     const el = document.getElementById('materialList');
     if (!data.length) {
@@ -2037,9 +2031,9 @@ async function loadMaterialList() {
 }
 
 async function openMaterialPopup(cardId) {
-    const res = await fetch(`/api/materials/${cardId}`);
-    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
-    const card = await res.json();
+    let card;
+    try { card = await apiFetch(`/api/materials/${cardId}`); }
+    catch (e) { console.error('Failed to load material:', e); return; }
 
     let html = `<div class="mp-header">
         <h2>${esc(card.display_mpn)}</h2>
@@ -2082,9 +2076,9 @@ async function openMaterialPopup(cardId) {
 }
 
 async function openVendorPopupByName(vendorName) {
-    const res = await fetch(`/api/vendors?q=${encodeURIComponent(vendorName)}`);
-    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
-    const resp = await res.json();
+    let resp;
+    try { resp = await apiFetch(`/api/vendors?q=${encodeURIComponent(vendorName)}`); }
+    catch (e) { console.error('Failed to load vendor:', e); return; }
     const data = resp.vendors || resp;
     if (data.length) {
         const exact = data.find(c => c.display_name.toLowerCase() === vendorName.toLowerCase());
@@ -2094,11 +2088,8 @@ async function openVendorPopupByName(vendorName) {
 
 async function openMaterialPopupByMpn(mpn) {
     try {
-        const res = await fetch(`/api/materials/by-mpn/${encodeURIComponent(mpn)}`);
-        if (res.ok) {
-            const card = await res.json();
-            openMaterialPopup(card.id);
-        }
+        const card = await apiFetch(`/api/materials/by-mpn/${encodeURIComponent(mpn)}`);
+        openMaterialPopup(card.id);
     } catch { /* No material card yet */ }
 }
 
@@ -2130,14 +2121,12 @@ function setActStat(type, el) {
 async function loadActivity() {
     if (!currentReqId) return;
     try {
-        const res = await fetch(`/api/requisitions/${currentReqId}/activity`);
-        if (!res.ok) throw new Error();
-        activityData = await res.json();
+        activityData = await apiFetch(`/api/requisitions/${currentReqId}/activity`);
     } catch {
         // Fallback to old endpoint
-        const res2 = await fetch(`/api/requisitions/${currentReqId}/contacts`);
-        if (!res2.ok) return;
-        const contacts = await res2.json();
+        let contacts;
+        try { contacts = await apiFetch(`/api/requisitions/${currentReqId}/contacts`); }
+        catch { return; }
         // Convert to vendor-grouped format
         const vmap = {};
         for (const c of contacts) {
@@ -2374,7 +2363,7 @@ async function viewThread(vendorName) {
         // Build searchable text for this response
         const searchParts = [r.vendor_email, r.subject];
         if (pd && pd.parts && pd.parts.length) {
-            const clsColors = {quote_provided:'#10b981',no_stock:'#ef4444',counter_offer:'#f59e0b',clarification_needed:'#6366f1',ooo_bounce:'#9ca3af',follow_up:'#3b82f6'};
+            const clsColors = {quote_provided:'var(--green)',no_stock:'var(--red)',counter_offer:'var(--amber)',clarification_needed:'#6366f1',ooo_bounce:'var(--muted)',follow_up:'var(--blue)'};
             const clsLabels = {quote_provided:'Quote Provided',no_stock:'No Stock',counter_offer:'Counter Offer',clarification_needed:'Clarification Needed',ooo_bounce:'OOO / Bounce',follow_up:'Follow Up'};
             const cls = pd.overall_classification || '';
             const clsColor = clsColors[cls] || '#6b7280';
@@ -2383,7 +2372,7 @@ async function viewThread(vendorName) {
             bodyHtml += '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:4px">';
             bodyHtml += '<tr style="color:var(--text2);border-bottom:1px solid rgba(0,0,0,.08)"><th style="text-align:left;padding:3px 6px;font-weight:600">MPN</th><th style="text-align:left;padding:3px 6px;font-weight:600">Status</th><th style="text-align:right;padding:3px 6px;font-weight:600">Qty</th><th style="text-align:right;padding:3px 6px;font-weight:600">Price</th><th style="text-align:left;padding:3px 6px;font-weight:600">Lead Time</th><th style="text-align:left;padding:3px 6px;font-weight:600">Cond</th></tr>';
             for (const p of pd.parts) {
-                const statusColors = {quoted:'#10b981',no_stock:'#ef4444',follow_up:'#3b82f6'};
+                const statusColors = {quoted:'var(--green)',no_stock:'var(--red)',follow_up:'var(--blue)'};
                 const price = p.unit_price != null ? `${p.currency||'$'}${p.unit_price.toFixed(2)}` : '\u2014';
                 bodyHtml += `<tr style="border-bottom:1px solid rgba(0,0,0,.04)">
                     <td style="padding:3px 6px;font-weight:600">${esc(p.mpn||'')}</td>
@@ -2445,227 +2434,6 @@ async function viewThread(vendorName) {
 
 
 
-// ══════════════════════════════════════════════════════════════════════════
-// DATA SOURCES TAB
-// ══════════════════════════════════════════════════════════════════════════
-
-let sourcesData = [];
-
-async function loadSources() {
-    const el = document.getElementById('sourcesList');
-    el.innerHTML = '<p class="empty">Loading data sources…</p>';
-    try {
-        const res = await fetch('/api/sources');
-        const data = await res.json();
-        sourcesData = data.sources || [];
-        renderSources_tab();
-    } catch (e) {
-        el.innerHTML = '<p class="empty">Failed to load sources</p>';
-    }
-}
-
-function renderSources_tab() {
-    const el = document.getElementById('sourcesList');
-
-    const live = sourcesData.filter(s => s.status === 'live');
-    const pending = sourcesData.filter(s => s.status === 'pending');
-    const error = sourcesData.filter(s => s.status === 'error');
-    const disabled = sourcesData.filter(s => s.status === 'disabled');
-
-    // Stats summary
-    const totalSearches = sourcesData.reduce((a, s) => a + (s.total_searches || 0), 0);
-    const totalResults = sourcesData.reduce((a, s) => a + (s.total_results || 0), 0);
-
-    let html = `
-        <div class="src-stats">
-            <div class="src-stat"><strong>${live.length}</strong><span>Live</span></div>
-            <div class="src-stat"><strong>${pending.length}</strong><span>Pending Setup</span></div>
-            <div class="src-stat"><strong>${error.length}</strong><span>Errors</span></div>
-            <div class="src-stat"><strong>${disabled.length}</strong><span>Disabled</span></div>
-            <div class="src-stat"><strong>${totalSearches.toLocaleString()}</strong><span>Total Searches</span></div>
-            <div class="src-stat"><strong>${totalResults.toLocaleString()}</strong><span>Total Results</span></div>
-        </div>
-    `;
-
-    if (live.length) {
-        html += `<div class="src-section">
-            <h3 class="src-section-title src-live-title">🟢 Live — Active Data Sources (${live.length})</h3>
-            <div class="src-grid">${live.map(s => renderSourceCard(s)).join('')}</div>
-        </div>`;
-    }
-
-    if (error.length) {
-        html += `<div class="src-section">
-            <h3 class="src-section-title src-error-title">🔴 Errors (${error.length})</h3>
-            <div class="src-grid">${error.map(s => renderSourceCard(s)).join('')}</div>
-        </div>`;
-    }
-
-    if (pending.length) {
-        html += `<div class="src-section">
-            <h3 class="src-section-title src-pending-title">🟡 Pending Setup (${pending.length})</h3>
-            <div class="src-grid">${pending.map(s => renderSourceCard(s)).join('')}</div>
-        </div>`;
-    }
-
-    if (disabled.length) {
-        html += `<div class="src-section">
-            <h3 class="src-section-title src-disabled-title">⚪ Disabled (${disabled.length})</h3>
-            <div class="src-grid">${disabled.map(s => renderSourceCard(s)).join('')}</div>
-        </div>`;
-    }
-
-    el.innerHTML = html;
-}
-
-function renderSourceCard(s) {
-    const categoryIcons = {
-        api: '🔌', scraper: '🕷️', email: '📧', manual: '📋',
-    };
-    const typeLabels = {
-        broker: 'Broker Market', authorized: 'Authorized Dist', marketplace: 'Marketplace',
-        aggregator: 'Aggregator', internal: 'Internal', intelligence: 'Component Intel',
-    };
-    const statusColors = {
-        live: '#10b981', pending: '#f59e0b', error: '#ef4444', disabled: '#9ca3af',
-    };
-
-    const icon = categoryIcons[s.category] || '📡';
-    const typeLabel = typeLabels[s.source_type] || s.source_type;
-    const statusColor = statusColors[s.status] || '#9ca3af';
-
-    // Env var status badges
-    let envHtml = '';
-    if (s.env_vars && s.env_vars.length) {
-        envHtml = '<div class="src-env-vars">' + s.env_vars.map(v => {
-            const isSet = s.env_status && s.env_status[v];
-            return `<span class="src-env ${isSet ? 'src-env-set' : 'src-env-missing'}" title="${v}">${isSet ? '✓' : '✗'} ${v}</span>`;
-        }).join('') + '</div>';
-    }
-
-    // Stats row
-    let statsHtml = '';
-    if (s.total_searches > 0) {
-        statsHtml = `<div class="src-card-stats">
-            ${s.total_searches} searches · ${s.total_results.toLocaleString()} results${s.avg_response_ms ? ' · ' + s.avg_response_ms + 'ms avg' : ''}
-        </div>`;
-    }
-
-    // Last success/error
-    let statusDetail = '';
-    if (s.last_success) {
-        const d = new Date(s.last_success);
-        statusDetail = `<div class="src-last-ok">Last OK: ${d.toLocaleDateString()} ${d.toLocaleTimeString()}</div>`;
-    }
-    if (s.last_error) {
-        statusDetail += `<div class="src-last-err" title="${esc(s.last_error)}">Error: ${esc(s.last_error.substring(0, 80))}${s.last_error.length > 80 ? '…' : ''}</div>`;
-    }
-
-    // Toggle switch for configured sources
-    const isOn = s.status === 'live' || s.status === 'error';
-    const canToggle = s.status !== 'pending' || (s.env_status && s.env_vars && s.env_vars.length && s.env_vars.every(v => s.env_status[v]));
-    const toggleHtml = canToggle
-        ? `<label class="src-toggle" title="${isOn ? 'Disable this source' : 'Enable this source'}">
-               <input type="checkbox" ${isOn ? 'checked' : ''} onchange="toggleSource(${s.id}, this.checked ? 'live' : 'disabled')">
-               <span class="src-toggle-slider"></span>
-               <span class="src-toggle-label">${isOn ? 'On' : 'Off'}</span>
-           </label>`
-        : '';
-
-    // Action buttons — test + signup
-    let actions = '';
-    if (s.status === 'live') {
-        actions = `<button class="btn btn-sm src-test-btn" onclick="testSource(${s.id})">🧪 Test</button>`;
-    } else if (s.status === 'error') {
-        actions = `<button class="btn btn-sm src-test-btn" onclick="testSource(${s.id})">🔄 Retry</button>`;
-    } else if (s.status === 'pending' && s.signup_url) {
-        actions = `<a href="${esc(s.signup_url)}" target="_blank" class="btn btn-sm btn-primary">🔗 Sign Up</a>`;
-    }
-
-    // Email mining special button
-    if (s.name === 'email_mining' && s.status === 'live') {
-        actions += ` <button class="btn btn-sm btn-primary" onclick="runEmailScan()">📧 Scan Inbox</button>`;
-    }
-
-    return `<div class="src-card src-card-${s.status}">
-        <div class="src-card-header">
-            <span class="src-icon">${icon}</span>
-            <div class="src-card-title">
-                <strong>${esc(s.display_name)}</strong>
-                <span class="src-type-badge">${typeLabel}</span>
-            </div>
-            ${toggleHtml}
-        </div>
-        <p class="src-desc">${esc(s.description || '')}</p>
-        ${envHtml}
-        ${statsHtml}
-        ${statusDetail}
-        ${s.setup_notes && s.status !== 'live' ? `<div class="src-setup-notes">${esc(s.setup_notes)}</div>` : ''}
-        <div class="src-actions">${actions}</div>
-    </div>`;
-}
-
-async function testSource(sourceId) {
-    const card = document.querySelector(`.src-card [onclick="testSource(${sourceId})"]`);
-    if (card) { card.disabled = true; card.textContent = '⏳ Testing…'; }
-
-    try {
-        const res = await fetch(`/api/sources/${sourceId}/test`, { method: 'POST' });
-        const data = await res.json();
-        if (data.status === 'ok') {
-            alert(`✅ ${data.source}: ${data.results_count} results in ${data.elapsed_ms}ms\n\nSample: ${(data.sample || []).map(s => s.vendor_name || s.mpn_matched).join(', ')}`);
-        } else if (data.status === 'no_results') {
-            alert(`⚠️ ${data.source}: Connected OK but 0 results for test MPN "${data.test_mpn}" (${data.elapsed_ms}ms)`);
-        } else {
-            alert(`❌ ${data.source}: ${data.error || 'Unknown error'}`);
-        }
-        loadSources();
-    } catch (e) {
-        alert('Test failed: ' + e.message);
-    }
-}
-
-async function toggleSource(sourceId, newStatus) {
-    try {
-        await fetch(`/api/sources/${sourceId}/toggle`, {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ status: newStatus }),
-        });
-        loadSources();
-    } catch (e) {
-        alert('Toggle failed: ' + e.message);
-    }
-}
-
-async function runEmailScan() {
-    if (!confirm('Scan your Outlook inbox for vendor contacts and offers?\n\nThis will scan the last 6 months of emails for component-related correspondence.')) return;
-
-    const btn = event.target;
-    btn.disabled = true; btn.textContent = '⏳ Scanning…';
-
-    try {
-        const res = await fetch('/api/email-mining/scan', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ lookback_days: 180 }),
-        });
-        const data = await res.json();
-        alert(`📧 Email Scan Complete!\n\n` +
-            `Messages scanned: ${data.messages_scanned}\n` +
-            `Vendors found: ${data.vendors_found}\n` +
-            `Offers parsed: ${data.offers_parsed}\n` +
-            `Contacts enriched: ${data.contacts_enriched}\n` +
-            `Stock lists found: ${data.stock_lists_found}`);
-        loadSources();
-    } catch (e) {
-        alert('Email scan failed: ' + e.message);
-    } finally {
-        btn.disabled = false; btn.textContent = '📧 Scan Inbox';
-    }
-}
-
-
 // ── Stock List Import ────────────────────────────────────────────────────
 function toggleStockImport() {
     const el = document.getElementById('stockImportArea');
@@ -2696,18 +2464,12 @@ async function doStockImport() {
         const vendorWebsite = document.getElementById('stockVendorWebsite')?.value?.trim();
         if (vendorWebsite) form.append('vendor_website', vendorWebsite);
 
-        const res = await fetch('/api/materials/import-stock', {
+        const data = await apiFetch('/api/materials/import-stock', {
             method: 'POST', body: form
         });
-        const data = await res.json();
-        if (res.ok) {
-            statusEl.className = 'ustatus ok';
-            statusEl.textContent = `Imported ${data.imported_rows} parts from ${esc(data.vendor_name)} (${data.skipped_rows} rows skipped)`;
-            if (typeof loadMaterialList === 'function') loadMaterialList();
-        } else {
-            statusEl.className = 'ustatus err';
-            statusEl.textContent = data.detail || 'Import failed';
-        }
+        statusEl.className = 'ustatus ok';
+        statusEl.textContent = `Imported ${data.imported_rows} parts from ${esc(data.vendor_name)} (${data.skipped_rows} rows skipped)`;
+        if (typeof loadMaterialList === 'function') loadMaterialList();
         fileInput.value = '';
     } catch(e) {
         statusEl.className = 'ustatus err';

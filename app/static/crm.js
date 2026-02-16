@@ -244,9 +244,7 @@ let _pendingOfferFiles = [];  // Files queued for upload after offer save
 async function loadOffers() {
     if (!currentReqId) return;
     try {
-        const res = await fetch('/api/requisitions/' + currentReqId + '/offers');
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await apiFetch('/api/requisitions/' + currentReqId + '/offers');
         _hasNewOffers = data.has_new_offers || false;
         _latestOfferAt = data.latest_offer_at || null;
         crmOffers = data.groups || [];
@@ -368,12 +366,9 @@ async function saveOffer(andNext) {
     };
     if (!data.vendor_name || !data.mpn) return;
     try {
-        const res = await fetch('/api/requisitions/' + currentReqId + '/offers', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
+        const result = await apiFetch('/api/requisitions/' + currentReqId + '/offers', {
+            method: 'POST', body: data
         });
-        if (!res.ok) { showToast('Failed to save offer', 'error'); return; }
-        const result = await res.json();
         // Upload pending attachments
         if (_pendingOfferFiles.length && result.id) {
             for (const f of _pendingOfferFiles) {
@@ -385,7 +380,7 @@ async function saveOffer(andNext) {
                     } else {
                         const fd = new FormData();
                         fd.append('file', f);
-                        await fetch('/api/offers/' + result.id + '/attachments', { method: 'POST', body: fd });
+                        await apiFetch('/api/offers/' + result.id + '/attachments', { method: 'POST', body: fd });
                     }
                 } catch (e) { console.error('Attachment upload failed:', e); }
             }
@@ -515,8 +510,7 @@ async function deleteOfferAttachment(attId) {
 async function deleteOffer(offerId) {
     if (!confirm('Remove this offer?')) return;
     try {
-        const res = await fetch('/api/offers/' + offerId, { method: 'DELETE' });
-        if (!res.ok) { showToast('Failed to delete offer', 'error'); return; }
+        await apiFetch('/api/offers/' + offerId, { method: 'DELETE' });
         showToast('Offer removed', 'info');
         selectedOffers.delete(offerId);
         loadOffers();
@@ -528,9 +522,7 @@ async function deleteOffer(offerId) {
 async function loadQuote() {
     if (!currentReqId) return;
     try {
-        const res = await fetch('/api/requisitions/' + currentReqId + '/quote');
-        if (!res.ok) { crmQuote = null; renderQuote(); updateQuoteTabBadge(); return; }
-        crmQuote = await res.json();
+        crmQuote = await apiFetch('/api/requisitions/' + currentReqId + '/quote');
         renderQuote();
         updateQuoteTabBadge();
         if (crmQuote && crmQuote.status === 'won') loadBuyPlan();
@@ -548,12 +540,9 @@ function updateQuoteTabBadge() {
 async function buildQuoteFromSelected() {
     if (selectedOffers.size === 0) return;
     try {
-        const res = await fetch('/api/requisitions/' + currentReqId + '/quote', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ offer_ids: Array.from(selectedOffers) })
+        crmQuote = await apiFetch('/api/requisitions/' + currentReqId + '/quote', {
+            method: 'POST', body: { offer_ids: Array.from(selectedOffers) }
         });
-        if (!res.ok) { showToast('Failed to build quote', 'error'); return; }
-        crmQuote = await res.json();
         showToast('Quote built — review and adjust sell prices', 'success');
         notifyStatusChange(crmQuote);
         const tabs = document.querySelectorAll('.tab');
@@ -649,17 +638,15 @@ function applyMarkup() {
 async function saveQuoteDraft() {
     if (!crmQuote) return;
     try {
-        const res = await fetch('/api/quotes/' + crmQuote.id, {
-            method: 'PUT', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
+        await apiFetch('/api/quotes/' + crmQuote.id, {
+            method: 'PUT', body: {
                 line_items: crmQuote.line_items,
                 payment_terms: document.getElementById('qtTerms').value,
                 shipping_terms: document.getElementById('qtShip').value,
                 validity_days: parseInt(document.getElementById('qtValid').value) || 7,
                 notes: document.getElementById('qtNotes').value,
-            })
+            }
         });
-        if (!res.ok) { showToast('Failed to save draft', 'error'); return; }
         showToast('Draft saved', 'success');
         loadQuote();
     } catch (e) { console.error('saveQuoteDraft:', e); showToast('Error saving draft', 'error'); }
@@ -694,9 +681,7 @@ async function markQuoteSent() {
     if (!crmQuote) return;
     try {
         await saveQuoteDraft();
-        const res = await fetch('/api/quotes/' + crmQuote.id + '/send', { method: 'POST' });
-        if (!res.ok) { showToast('Failed to mark as sent', 'error'); return; }
-        const sendData = await res.json();
+        const sendData = await apiFetch('/api/quotes/' + crmQuote.id + '/send', { method: 'POST' });
         showToast('Quote marked as sent', 'success');
         notifyStatusChange(sendData);
         loadQuote();
@@ -711,12 +696,9 @@ async function markQuoteResult(result) {
         return;
     }
     try {
-        const res = await fetch('/api/quotes/' + crmQuote.id + '/result', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ result })
+        const resultData = await apiFetch('/api/quotes/' + crmQuote.id + '/result', {
+            method: 'POST', body: { result }
         });
-        if (!res.ok) { showToast('Failed to update result', 'error'); return; }
-        const resultData = await res.json();
         showToast('Quote updated', 'info');
         notifyStatusChange(resultData);
         loadQuote();
@@ -793,12 +775,12 @@ function renderBuyPlanStatus() {
     const isBuyer = window.userRole === 'buyer';
 
     const statusColors = {
-        pending_approval: '#f59e0b',
-        approved: '#16a34a',
-        rejected: '#dc2626',
-        po_entered: '#2563eb',
-        po_confirmed: '#16a34a',
-        complete: '#16a34a',
+        pending_approval: 'var(--amber)',
+        approved: 'var(--green)',
+        rejected: 'var(--red)',
+        po_entered: 'var(--blue)',
+        po_confirmed: 'var(--green)',
+        complete: 'var(--green)',
     };
     const statusLabels = {
         pending_approval: 'Pending Approval',
@@ -817,8 +799,8 @@ function renderBuyPlanStatus() {
             ? `<input type="text" class="po-input" data-idx="${i}" placeholder="PO#" value="${esc(item.po_number||'')}" style="width:100px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px">`
             : (item.po_number ? `<span style="font-weight:600">${esc(item.po_number)}</span>` : '—');
         const verifyIcon = item.po_verified
-            ? '<span style="color:#16a34a" title="Verified">✓</span>'
-            : (item.po_number ? '<span style="color:#f59e0b" title="Unverified">⏳</span>' : '');
+            ? '<span style="color:var(--green)" title="Verified">✓</span>'
+            : (item.po_number ? '<span style="color:var(--amber)" title="Unverified">⏳</span>' : '');
         const poDetails = item.po_verified
             ? `<div style="font-size:10px;color:var(--muted)">Sent to ${esc(item.po_recipient||'')} at ${item.po_sent_at||''}</div>`
             : '';
@@ -861,7 +843,7 @@ function renderBuyPlanStatus() {
                 <span style="font-size:11px;color:var(--muted)">Submitted by ${esc(bp.submitted_by||'')} ${bp.submitted_at ? '· '+fmtDateTime(bp.submitted_at) : ''}</span>
             </div>
             ${bp.manager_notes ? '<p style="font-size:12px;color:var(--text2);margin-bottom:8px"><em>Manager: '+esc(bp.manager_notes)+'</em></p>' : ''}
-            ${bp.rejection_reason ? '<p style="font-size:12px;color:#dc2626;margin-bottom:8px"><strong>Rejected:</strong> '+esc(bp.rejection_reason)+'</p>' : ''}
+            ${bp.rejection_reason ? '<p style="font-size:12px;color:var(--red);margin-bottom:8px"><strong>Rejected:</strong> '+esc(bp.rejection_reason)+'</p>' : ''}
             <table class="tbl" style="margin-bottom:0">
                 <thead><tr><th>MPN</th><th>Vendor</th><th>Qty</th><th>Cost</th><th>Lead</th><th>PO</th></tr></thead>
                 <tbody>${itemsHtml}</tbody>
@@ -970,7 +952,7 @@ function renderBuyPlansList() {
         pending_approval: 'var(--amber)',
         approved: 'var(--green)',
         rejected: 'var(--red)',
-        po_entered: '#2563eb',
+        po_entered: 'var(--blue)',
         po_confirmed: 'var(--green)',
         complete: 'var(--green)',
     };
@@ -1022,16 +1004,13 @@ async function openBuyPlanDetail(planId) {
 async function submitLost() {
     if (!crmQuote) return;
     try {
-        const res = await fetch('/api/quotes/' + crmQuote.id + '/result', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
+        const lostData = await apiFetch('/api/quotes/' + crmQuote.id + '/result', {
+            method: 'POST', body: {
                 result: 'lost',
                 reason: document.getElementById('lostReason').value,
                 notes: document.getElementById('lostNotes').value,
-            })
+            }
         });
-        if (!res.ok) { showToast('Failed to submit', 'error'); return; }
-        const lostData = await res.json();
         closeModal('lostModal');
         showToast('Quote marked as lost', 'info');
         notifyStatusChange(lostData);
@@ -1042,9 +1021,7 @@ async function submitLost() {
 async function reviseQuote() {
     if (!crmQuote) return;
     try {
-        const res = await fetch('/api/quotes/' + crmQuote.id + '/revise', { method: 'POST' });
-        if (!res.ok) { showToast('Failed to revise', 'error'); return; }
-        crmQuote = await res.json();
+        crmQuote = await apiFetch('/api/quotes/' + crmQuote.id + '/revise', { method: 'POST' });
         showToast('New revision created', 'success');
         renderQuote();
         updateQuoteTabBadge();
@@ -1054,12 +1031,9 @@ async function reviseQuote() {
 async function reopenQuote(revise) {
     if (!crmQuote) return;
     try {
-        const res = await fetch('/api/quotes/' + crmQuote.id + '/reopen', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ revise: revise })
+        crmQuote = await apiFetch('/api/quotes/' + crmQuote.id + '/reopen', {
+            method: 'POST', body: { revise: revise }
         });
-        if (!res.ok) { showToast('Failed to reopen', 'error'); return; }
-        crmQuote = await res.json();
         showToast(revise ? 'Quote reopened with new revision' : 'Quote reopened', 'success');
         renderQuote();
         updateQuoteTabBadge();
@@ -1073,9 +1047,7 @@ async function openPricingHistory(mpn) {
     document.getElementById('phMpn').textContent = mpn;
     document.getElementById('phContent').innerHTML = '<p class="empty">Loading...</p>';
     try {
-        const res = await fetch('/api/pricing-history/' + encodeURIComponent(mpn));
-        if (!res.ok) { document.getElementById('phContent').innerHTML = '<p class="empty">Error loading</p>'; return; }
-        const data = await res.json();
+        const data = await apiFetch('/api/pricing-history/' + encodeURIComponent(mpn));
         if (!data.history?.length) {
             document.getElementById('phContent').innerHTML = '<p class="empty">No pricing history for this MPN</p>';
             return;
@@ -1095,9 +1067,7 @@ async function openPricingHistory(mpn) {
 async function cloneRequisition(reqId) {
     if (!confirm('Clone this requisition? All parts and offers will be copied.')) return;
     try {
-        const res = await fetch('/api/requisitions/' + reqId + '/clone', { method: 'POST' });
-        if (!res.ok) { showToast('Failed to clone', 'error'); return; }
-        const data = await res.json();
+        const data = await apiFetch('/api/requisitions/' + reqId + '/clone', { method: 'POST' });
         showToast('Requisition cloned', 'success');
         showDetail(data.id, data.name);
     } catch (e) { console.error('cloneRequisition:', e); showToast('Error cloning requisition', 'error'); }
@@ -1108,9 +1078,8 @@ let _userListCache = null;
 async function loadUserOptions(selectId) {
     try {
         if (!_userListCache) {
-            const res = await fetch('/api/users/list');
-            if (res.ok) _userListCache = await res.json();
-            else _userListCache = [];
+            try { _userListCache = await apiFetch('/api/users/list'); }
+            catch { _userListCache = []; }
         }
         const sel = document.getElementById(selectId);
         if (!sel) return;
@@ -1123,9 +1092,7 @@ async function loadUserOptions(selectId) {
 let _siteListCache = null;
 async function loadSiteOptions() {
     try {
-        const res = await fetch('/api/companies');
-        if (!res.ok) return;
-        const companies = await res.json();
+        const companies = await apiFetch('/api/companies');
         _siteListCache = [];
         companies.forEach(c => {
             (c.sites || []).forEach(s => {
@@ -1207,17 +1174,11 @@ async function searchSuggestedContacts() {
         let url = `/api/suggested-contacts?domain=${encodeURIComponent(domain)}`;
         if (scContext.name) url += `&name=${encodeURIComponent(scContext.name)}`;
         if (title) url += `&title=${encodeURIComponent(title)}`;
-        const res = await fetch(url);
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            el.innerHTML = `<p class="empty" style="padding:12px">${esc(err.detail || 'Search failed')}</p>`;
-            return;
-        }
-        const data = await res.json();
+        const data = await apiFetch(url);
         scResults = data.contacts || [];
         renderSuggestedContacts();
     } catch (e) {
-        el.innerHTML = '<p class="empty" style="padding:12px">Error searching contacts</p>';
+        el.innerHTML = '<p class="empty" style="padding:12px">' + esc(e.message || 'Error searching contacts') + '</p>';
         console.error('searchSuggestedContacts:', e);
     }
 }
@@ -1281,22 +1242,17 @@ async function addSelectedSuggestedContacts() {
     if (!contacts.length) return;
     try {
         if (scContext.type === 'vendor') {
-            const res = await fetch('/api/suggested-contacts/add-to-vendor', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ vendor_card_id: scContext.id, contacts })
+            const data = await apiFetch('/api/suggested-contacts/add-to-vendor', {
+                method: 'POST', body: { vendor_card_id: scContext.id, contacts }
             });
-            if (!res.ok) { showToast('Failed to add contacts', 'error'); return; }
-            const data = await res.json();
             showToast(`${data.added} contact${data.added !== 1 ? 's' : ''} added`, 'success');
             closeModal('suggestedContactsModal');
             openVendorPopup(scContext.id);  // Refresh vendor popup
         } else if (scContext.type === 'site') {
             const c = contacts[0];
-            const res = await fetch('/api/suggested-contacts/add-to-site', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ site_id: scContext.id, contact: c })
+            await apiFetch('/api/suggested-contacts/add-to-site', {
+                method: 'POST', body: { site_id: scContext.id, contact: c }
             });
-            if (!res.ok) { showToast('Failed to set contact', 'error'); return; }
             showToast('Contact set on site', 'success');
             closeModal('suggestedContactsModal');
             loadCustomers();
@@ -1317,16 +1273,9 @@ async function enrichCompany(companyId, domain) {
     }
     showToast('Enriching…', 'info');
     try {
-        const res = await fetch('/api/enrich/company/' + companyId, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ domain })
+        const data = await apiFetch('/api/enrich/company/' + companyId, {
+            method: 'POST', body: { domain }
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            showToast(err.detail || 'Enrichment failed', 'error');
-            return;
-        }
-        const data = await res.json();
         showToast(`Updated ${data.updated_fields.length} fields`, 'success');
         loadCustomers();
     } catch (e) {
@@ -1342,16 +1291,9 @@ async function enrichVendor(cardId, domain) {
     }
     showToast('Enriching…', 'info');
     try {
-        const res = await fetch('/api/enrich/vendor/' + cardId, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ domain })
+        const data = await apiFetch('/api/enrich/vendor/' + cardId, {
+            method: 'POST', body: { domain }
         });
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            showToast(err.detail || 'Enrichment failed', 'error');
-            return;
-        }
-        const data = await res.json();
         showToast(`Updated ${data.updated_fields.length} fields`, 'success');
         openVendorPopup(cardId);
     } catch (e) {
@@ -1380,24 +1322,14 @@ async function findAIContacts(entityType, entityId, companyName, domain) {
     const btn = event?.target;
     if (btn) { btn.disabled = true; btn.textContent = 'Searching…'; }
     try {
-        const res = await fetch('/api/ai/find-contacts', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
+        const data = await apiFetch('/api/ai/find-contacts', {
+            method: 'POST', body: {
                 entity_type: entityType,
                 entity_id: entityId,
                 company_name: companyName,
                 domain: domain || null,
-            })
+            }
         });
-        if (res.status === 403) {
-            showToast('AI features not enabled for your account', 'error');
-            return;
-        }
-        if (!res.ok) {
-            showToast('Contact search failed', 'error');
-            return;
-        }
-        const data = await res.json();
         if (data.total === 0) {
             showToast('No contacts found', 'info');
             return;
@@ -1458,17 +1390,11 @@ async function saveAIContact(contactId) {
     const btn = document.getElementById(`aiSave${contactId}`);
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
     try {
-        const res = await fetch(`/api/ai/prospect-contacts/${contactId}/save`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({})
+        await apiFetch(`/api/ai/prospect-contacts/${contactId}/save`, {
+            method: 'POST', body: {}
         });
-        if (res.ok) {
-            showToast('Contact saved', 'success');
-            if (btn) { btn.outerHTML = '<span class="badge badge-green">Saved</span>'; }
-        } else {
-            showToast('Save failed', 'error');
-            if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
-        }
+        showToast('Contact saved', 'success');
+        if (btn) { btn.outerHTML = '<span class="badge badge-green">Saved</span>'; }
     } catch (e) {
         showToast('Save error', 'error');
         if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
@@ -1482,16 +1408,7 @@ async function parseResponseAI(responseId) {
     const btn = event?.target;
     if (btn) { btn.disabled = true; btn.textContent = 'Parsing…'; }
     try {
-        const res = await fetch(`/api/ai/parse-response/${responseId}`, { method: 'POST' });
-        if (res.status === 403) {
-            showToast('AI features not enabled', 'error');
-            return;
-        }
-        if (!res.ok) {
-            showToast('Parse failed', 'error');
-            return;
-        }
-        const data = await res.json();
+        const data = await apiFetch(`/api/ai/parse-response/${responseId}`, { method: 'POST' });
         if (!data.parsed) {
             showToast(data.reason || 'Could not parse', 'info');
             return;
@@ -1567,18 +1484,12 @@ async function saveParsedOffers(responseId, offers) {
         return;
     }
     try {
-        const res = await fetch('/api/ai/save-parsed-offers', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ response_id: responseId, offers, requisition_id: currentReqId })
+        const data = await apiFetch('/api/ai/save-parsed-offers', {
+            method: 'POST', body: { response_id: responseId, offers, requisition_id: currentReqId }
         });
-        if (res.ok) {
-            const data = await res.json();
-            showToast(`Saved ${data.created} offer(s) — review in Offers tab`, 'success');
-            document.getElementById('parseBg')?.remove();
-            loadOffers();
-        } else {
-            showToast('Failed to save offers', 'error');
-        }
+        showToast(`Saved ${data.created} offer(s) — review in Offers tab`, 'success');
+        document.getElementById('parseBg')?.remove();
+        loadOffers();
     } catch (e) {
         showToast('Save error', 'error');
     }
@@ -1591,14 +1502,9 @@ async function parseResponseAttachments(responseId) {
     const btn = event ? event.target : null;
     if (btn) { btn.disabled = true; btn.textContent = '⏳ Parsing…'; }
     try {
-        const resp = await fetch(`/api/email-mining/parse-response-attachments/${responseId}`, {
+        const data = await apiFetch(`/api/email-mining/parse-response-attachments/${responseId}`, {
             method: 'POST',
         });
-        const data = await resp.json();
-        if (!resp.ok) {
-            showToast(data.error || 'Attachment parse failed', 'error');
-            return;
-        }
         if (data.parseable === 0) {
             showToast('No parseable attachments found on this response', 'warning');
             return;
@@ -1623,12 +1529,7 @@ async function loadCompanyIntel(companyName, domain, targetEl) {
     try {
         const params = new URLSearchParams({ company_name: companyName });
         if (domain) params.set('domain', domain);
-        const res = await fetch('/api/ai/company-intel?' + params);
-        if (res.status === 403 || !res.ok) {
-            targetEl.innerHTML = '';
-            return;
-        }
-        const data = await res.json();
+        const data = await apiFetch('/api/ai/company-intel?' + params);
         if (!data.available) {
             targetEl.innerHTML = '';
             return;
@@ -1676,13 +1577,9 @@ function renderIntelCard(intel, el) {
 
 async function generateSmartRFQ(vendorName, parts) {
     try {
-        const res = await fetch('/api/ai/draft-rfq', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ vendor_name: vendorName, parts })
+        const data = await apiFetch('/api/ai/draft-rfq', {
+            method: 'POST', body: { vendor_name: vendorName, parts }
         });
-        if (res.status === 403) return null;
-        if (!res.ok) return null;
-        const data = await res.json();
         return data.available ? data.body : null;
     } catch (e) {
         return null;
@@ -1703,9 +1600,7 @@ function openAddSiteContact(siteId) {
 
 async function openEditSiteContact(siteId, contactId) {
     try {
-        const res = await fetch('/api/sites/' + siteId + '/contacts');
-        if (!res.ok) { showToast('Failed to load contacts', 'error'); return; }
-        const contacts = await res.json();
+        const contacts = await apiFetch('/api/sites/' + siteId + '/contacts');
         const c = contacts.find(x => x.id === contactId);
         if (!c) { showToast('Contact not found', 'error'); return; }
         document.getElementById('scSiteId').value = siteId;
@@ -1738,12 +1633,9 @@ async function saveSiteContact() {
         const url = contactId
             ? '/api/sites/' + siteId + '/contacts/' + contactId
             : '/api/sites/' + siteId + '/contacts';
-        const res = await fetch(url, {
-            method: contactId ? 'PUT' : 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
+        await apiFetch(url, {
+            method: contactId ? 'PUT' : 'POST', body: data
         });
-        if (!res.ok) { showToast('Failed to save contact', 'error'); return; }
         closeModal('siteContactModal');
         showToast(contactId ? 'Contact updated' : 'Contact added', 'success');
         // Refresh the site detail panel
@@ -1755,8 +1647,7 @@ async function saveSiteContact() {
 async function deleteSiteContact(siteId, contactId, name) {
     if (!confirm('Remove contact "' + name + '"?')) return;
     try {
-        const res = await fetch('/api/sites/' + siteId + '/contacts/' + contactId, { method: 'DELETE' });
-        if (!res.ok) { showToast('Failed to delete contact', 'error'); return; }
+        await apiFetch('/api/sites/' + siteId + '/contacts/' + contactId, { method: 'DELETE' });
         showToast('Contact removed', 'info');
         const panel = document.getElementById('siteDetail-' + siteId);
         if (panel) { panel.style.display = 'none'; toggleSiteDetail(siteId); }
@@ -1803,9 +1694,7 @@ async function loadCompanyActivityStatus(companyId) {
     const el = document.getElementById('actHealth-' + companyId);
     if (!el || el.dataset.loaded) return;
     try {
-        const res = await fetch('/api/companies/' + companyId + '/activity-status');
-        if (!res.ok) return;
-        const d = await res.json();
+        const d = await apiFetch('/api/companies/' + companyId + '/activity-status');
         const colors = { green: 'var(--green)', yellow: 'var(--amber)', red: 'var(--red)', no_activity: 'var(--muted)' };
         const labels = { green: 'Active', yellow: 'At risk', red: 'Stale', no_activity: 'No activity' };
         const daysText = d.days_since_activity != null ? ' (' + d.days_since_activity + 'd)' : '';
@@ -1820,9 +1709,7 @@ async function loadCompanyActivities(companyId) {
     if (!section || !el) return;
     section.style.display = 'block';
     try {
-        const res = await fetch('/api/companies/' + companyId + '/activities');
-        if (!res.ok) { el.innerHTML = '<p class="empty" style="font-size:11px">Failed to load</p>'; return; }
-        const activities = await res.json();
+        const activities = await apiFetch('/api/companies/' + companyId + '/activities');
         if (!activities.length) {
             el.innerHTML = '<p class="empty" style="padding:4px;font-size:11px">No activity recorded yet</p>';
             return;
@@ -1866,13 +1753,9 @@ async function saveLogCall() {
     };
     if (!data.phone) { showToast('Phone number is required', 'error'); return; }
     try {
-        const res = await fetch('/api/activities/call', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
+        const result = await apiFetch('/api/activities/call', {
+            method: 'POST', body: data
         });
-        if (!res.ok) { showToast('Failed to log call', 'error'); return; }
-        const result = await res.json();
         closeModal('logCallModal');
         if (result.status === 'no_match') {
             showToast('Call logged but phone did not match any known contact', 'info');
@@ -2507,7 +2390,7 @@ async function loadSettingsSources() {
                 ? `<div style="font-size:10px;color:var(--muted);margin-top:8px">${s.total_searches} searches / ${s.total_results} results / ${s.avg_response_ms}ms avg</div>`
                 : '';
             const errorHtml = s.last_error
-                ? `<div style="font-size:10px;color:#e74c3c;margin-top:4px">Last error: ${s.last_error}</div>`
+                ? `<div style="font-size:10px;color:var(--red);margin-top:4px">Last error: ${s.last_error}</div>`
                 : '';
 
             html += `<div class="card" style="padding:16px;margin-bottom:12px">
@@ -2578,13 +2461,13 @@ async function testSourceCred(sourceId) {
         if (data.status === 'ok') {
             resultEl.innerHTML = `<div style="font-size:11px;color:var(--teal);padding:6px 0">Test passed — ${data.results_count} results in ${data.elapsed_ms}ms</div>`;
         } else if (data.status === 'no_results') {
-            resultEl.innerHTML = '<div style="font-size:11px;color:#e67e22;padding:6px 0">Connected but no results for test MPN</div>';
+            resultEl.innerHTML = '<div style="font-size:11px;color:var(--amber);padding:6px 0">Connected but no results for test MPN</div>';
         } else {
-            resultEl.innerHTML = `<div style="font-size:11px;color:#e74c3c;padding:6px 0">Test failed: ${data.error || 'Unknown error'}</div>`;
+            resultEl.innerHTML = `<div style="font-size:11px;color:var(--red);padding:6px 0">Test failed: ${data.error || 'Unknown error'}</div>`;
         }
         loadSettingsSources();
     } catch (e) {
-        resultEl.innerHTML = `<div style="font-size:11px;color:#e74c3c;padding:6px 0">Test error: ${e.message || e}</div>`;
+        resultEl.innerHTML = `<div style="font-size:11px;color:var(--red);padding:6px 0">Test error: ${e.message || e}</div>`;
     }
     btn.disabled = false;
     btn.textContent = 'Test';
@@ -2660,7 +2543,7 @@ async function loadSettingsScoring() {
             </div>`;
         }
         html += '</div>';
-        html += '<div style="margin-top:16px;font-size:13px"><strong>Total: <span id="weightTotal">0</span></strong> <span id="weightWarn" style="color:#e74c3c;display:none">(should be 100)</span></div>';
+        html += '<div style="margin-top:16px;font-size:13px"><strong>Total: <span id="weightTotal">0</span></strong> <span id="weightWarn" style="color:var(--red);display:none">(should be 100)</span></div>';
         html += '</div>';
         el.innerHTML = html;
         updateWeightTotal();
@@ -2825,9 +2708,7 @@ async function importCustomers() {
     const statusEl = document.getElementById('customerImportStatus');
     statusEl.textContent = 'Importing...';
     try {
-        const res = await fetch('/api/admin/import/customers', {method:'POST', body:form});
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Import failed');
+        const data = await apiFetch('/api/admin/import/customers', {method:'POST', body:form});
         statusEl.textContent = `Done: ${data.companies_created} companies, ${data.sites_created} sites, ${data.contacts_created} contacts created from ${data.rows_processed} rows`;
         fileInput.value = '';
     } catch (e) {
@@ -2843,9 +2724,7 @@ async function importVendors() {
     const statusEl = document.getElementById('vendorImportStatus');
     statusEl.textContent = 'Importing...';
     try {
-        const res = await fetch('/api/admin/import/vendors', {method:'POST', body:form});
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Import failed');
+        const data = await apiFetch('/api/admin/import/vendors', {method:'POST', body:form});
         statusEl.textContent = `Done: ${data.vendors_created} vendors, ${data.contacts_created} contacts created from ${data.rows_processed} rows`;
         fileInput.value = '';
     } catch (e) {

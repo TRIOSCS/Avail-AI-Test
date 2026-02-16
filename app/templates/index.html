@@ -15,9 +15,20 @@
             --green:#0fa67f; --green-light:#e8f8f3;
             --amber:#d9880b; --amber-light:#fef5e6;
             --red:#d94452; --red-light:#fce8ea;
+            --blue:#2563eb; --blue-light:#eff6ff;
             --bg2:#ebeef3;
         }
         *{margin:0;padding:0;box-sizing:border-box}
+
+        /* Utility classes */
+        .text-xs{font-size:11px}.text-xxs{font-size:10px}
+        .text-xs-muted{font-size:11px;color:var(--muted)}.text-xxs-muted{font-size:10px;color:var(--muted)}
+        .text-xs-secondary{font-size:11px;color:var(--text2)}.text-muted{color:var(--muted)}
+        .text-right{text-align:right}.text-center{text-align:center}
+        .flex-between{display:flex;justify-content:space-between;align-items:center}
+        .flex-center{display:flex;align-items:center}.flex-gap-sm{display:flex;align-items:center;gap:6px}
+        .flex-gap{display:flex;align-items:center;gap:10px}.hidden{display:none}
+        .clickable{cursor:pointer}.card-empty{text-align:center;padding:16px;color:var(--muted);font-size:13px}
         body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
 
         /* Login */
@@ -981,7 +992,7 @@
                     <div id="uploadStatus" class="ustatus"></div>
                 </div>
                 <div class="filter-bar" id="reqFilterBar" style="display:none">
-                    <input type="text" class="filter-search" id="reqFilter" placeholder="Filter parts…" oninput="renderRequirementsTable()">
+                    <input type="text" class="filter-search" id="reqFilter" placeholder="Filter parts…" oninput="debouncedRenderReqTable()">
                     <div class="filter-pills">
                         <button class="filter-pill on" data-req-filter="all" onclick="setReqFilter('all',this)">All</button>
                         <button class="filter-pill" data-req-filter="nosrc" onclick="setReqFilter('nosrc',this)">No Sources</button>
@@ -1030,7 +1041,7 @@
                 </div>
             </div>
             <div class="filter-bar" id="srcFilterBar">
-                <input type="text" class="filter-search" id="srcFilter" placeholder="Search vendor, MPN, manufacturer…" oninput="renderSources()" aria-label="Filter search results">
+                <input type="text" class="filter-search" id="srcFilter" placeholder="Search vendor, MPN, manufacturer…" oninput="debouncedRenderSources()" aria-label="Filter search results">
                 <div class="filter-pills">
                     <button class="filter-pill on" data-src-filter="all" onclick="setSrcFilter('all',this)">All</button>
                     <button class="filter-pill" data-src-filter="exact" onclick="setSrcFilter('exact',this)">Exact</button>
@@ -1069,7 +1080,7 @@
                 </div>
             </div>
             <div class="filter-bar" id="actFilterBar" style="display:none">
-                <input type="text" class="filter-search" id="actFilter" placeholder="Search vendor, contact, part…" oninput="renderActivityCards()">
+                <input type="text" class="filter-search" id="actFilter" placeholder="Search vendor, contact, part…" oninput="debouncedRenderActivity()">
                 <div class="filter-pills">
                     <button class="filter-pill on" data-act-filter="all" onclick="setActFilter('all',this)">All</button>
                     <button class="filter-pill" data-act-filter="email" onclick="setActFilter('email',this)">✉ Email</button>
@@ -1113,7 +1124,7 @@
                 <label class="flex-center" style="gap:5px;font-size:12px;color:var(--text2);cursor:pointer">
                     <input type="checkbox" id="custMyOnly" onchange="loadCustomers()" style="accent-color:var(--teal)" aria-label="Show only my accounts"> My accounts
                 </label>
-                <input class="req-search" id="custFilter" placeholder="Search companies…" oninput="loadCustomers()" aria-label="Search companies">
+                <input class="req-search" id="custFilter" placeholder="Search companies…" oninput="debouncedLoadCustomers()" aria-label="Search companies">
                 <button class="btn btn-primary" onclick="openNewCompanyModal()">+ New Company</button>
             </div>
         </div>
@@ -1124,7 +1135,7 @@
     <div id="view-vendors" style="display:none">
         <div class="vendor-header">
             <h2>Vendor Directory</h2>
-            <input class="vendor-search" id="vendorSearch" placeholder="Search vendors…" oninput="filterVendorList()" aria-label="Search vendors">
+            <input class="vendor-search" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" aria-label="Search vendors">
         </div>
         <div class="vendor-filters flex-center gap-sm flex-wrap" style="padding:0 16px 8px">
             <button class="pill-filter on" onclick="setVendorTier('all',this)">All</button>
@@ -1146,7 +1157,7 @@
             <h2>Material Cards</h2>
             <div style="display:flex;gap:8px;align-items:center">
                 <button class="btn btn-ghost btn-sm" onclick="toggleStockImport()">📦 Import Stock</button>
-                <input class="vendor-search" id="materialSearch" placeholder="Search by part number…" oninput="loadMaterialList()" aria-label="Search material cards">
+                <input class="vendor-search" id="materialSearch" placeholder="Search by part number…" oninput="debouncedLoadMaterials()" aria-label="Search material cards">
             </div>
         </div>
         <div id="stockImportArea" data-role="buyer" style="display:none;margin-bottom:12px" class="card">
@@ -1168,15 +1179,6 @@
             <div id="stockImportStatus" class="ustatus"></div>
         </div>
         <div id="materialList"><p class="empty">Loading…</p></div>
-    </div>
-
-    <!-- VIEW: Data Sources -->
-    <div id="view-sources" style="display:none">
-        <div class="vendor-header">
-            <h2>Data Sources</h2>
-            <span style="font-size:12px;color:var(--text2)">Manage API connections, scrapers, and data feeds</span>
-        </div>
-        <div id="sourcesList"><p class="empty">Loading…</p></div>
     </div>
 
     <!-- VIEW: Buy Plans (admin only) -->
@@ -1218,7 +1220,7 @@
         <div class="field" style="margin-top:10px">
             <label>Customer Site (optional)</label>
             <div class="site-typeahead">
-                <input id="nrSiteSearch" placeholder="Type to search companies…" oninput="filterSiteTypeahead(this.value)" onfocus="filterSiteTypeahead(this.value)" autocomplete="off" aria-label="Search customer sites">
+                <input id="nrSiteSearch" placeholder="Type to search companies…" oninput="debouncedFilterSites(this.value)" onfocus="filterSiteTypeahead(this.value)" autocomplete="off" aria-label="Search customer sites">
                 <input type="hidden" id="nrSiteId">
                 <div class="site-typeahead-list" id="nrSiteList"></div>
             </div>
