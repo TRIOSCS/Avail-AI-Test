@@ -34,6 +34,7 @@ def run_startup_migrations() -> None:
         _add_crm_columns(conn)
         _create_crm_indexes(conn)
         _create_proactive_tables(conn)
+        _create_performance_tables(conn)
     log.info("Startup migrations complete")
 
 
@@ -354,6 +355,74 @@ def _create_proactive_tables(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_poff_sent ON proactive_offers(sent_at)",
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_pt_mpn_site ON proactive_throttle(mpn, customer_site_id)",
         "CREATE INDEX IF NOT EXISTS ix_pt_last_offered ON proactive_throttle(last_offered_at)",
+    ]
+    for stmt in indexes:
+        _exec(conn, stmt)
+    conn.commit()
+
+
+def _create_performance_tables(conn) -> None:
+    """Performance tracking — vendor scorecards, buyer leaderboard, stock list dedup."""
+    tables = [
+        """CREATE TABLE IF NOT EXISTS vendor_metrics_snapshot (
+            id SERIAL PRIMARY KEY,
+            vendor_card_id INTEGER NOT NULL REFERENCES vendor_cards(id) ON DELETE CASCADE,
+            snapshot_date DATE NOT NULL,
+            response_rate FLOAT,
+            quote_accuracy FLOAT,
+            on_time_delivery FLOAT,
+            cancellation_rate FLOAT,
+            rma_rate FLOAT,
+            lead_time_accuracy FLOAT,
+            composite_score FLOAT,
+            interaction_count INTEGER DEFAULT 0,
+            is_sufficient_data BOOLEAN DEFAULT FALSE,
+            rfqs_sent INTEGER DEFAULT 0,
+            rfqs_answered INTEGER DEFAULT 0,
+            pos_in_window INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS buyer_leaderboard_snapshot (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            month DATE NOT NULL,
+            offers_logged INTEGER DEFAULT 0,
+            offers_quoted INTEGER DEFAULT 0,
+            offers_in_buyplan INTEGER DEFAULT 0,
+            offers_po_confirmed INTEGER DEFAULT 0,
+            points_offers INTEGER DEFAULT 0,
+            points_quoted INTEGER DEFAULT 0,
+            points_buyplan INTEGER DEFAULT 0,
+            points_po INTEGER DEFAULT 0,
+            total_points INTEGER DEFAULT 0,
+            rank INTEGER,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS stock_list_hashes (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            content_hash VARCHAR(64) NOT NULL,
+            vendor_card_id INTEGER REFERENCES vendor_cards(id),
+            file_name VARCHAR(500),
+            row_count INTEGER,
+            first_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            last_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
+            upload_count INTEGER DEFAULT 1
+        )""",
+    ]
+    for stmt in tables:
+        _exec(conn, stmt)
+    indexes = [
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_vms_vendor_date ON vendor_metrics_snapshot(vendor_card_id, snapshot_date)",
+        "CREATE INDEX IF NOT EXISTS ix_vms_date ON vendor_metrics_snapshot(snapshot_date)",
+        "CREATE INDEX IF NOT EXISTS ix_vms_composite ON vendor_metrics_snapshot(composite_score)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_bls_user_month ON buyer_leaderboard_snapshot(user_id, month)",
+        "CREATE INDEX IF NOT EXISTS ix_bls_month_rank ON buyer_leaderboard_snapshot(month, rank)",
+        "CREATE INDEX IF NOT EXISTS ix_bls_month_points ON buyer_leaderboard_snapshot(month, total_points)",
+        "CREATE INDEX IF NOT EXISTS ix_slh_hash ON stock_list_hashes(content_hash)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_slh_user_hash ON stock_list_hashes(user_id, content_hash)",
+        "CREATE INDEX IF NOT EXISTS ix_slh_vendor ON stock_list_hashes(vendor_card_id)",
     ]
     for stmt in indexes:
         _exec(conn, stmt)

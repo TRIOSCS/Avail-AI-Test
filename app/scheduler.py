@@ -22,6 +22,7 @@ def _utc(dt):
 
 # v1.3.0: Track last ownership sweep run (simple module-level timestamp)
 _last_ownership_sweep = datetime.min.replace(tzinfo=timezone.utc)
+_last_performance_compute = datetime.min.replace(tzinfo=timezone.utc)
 
 # ── Token Management ────────────────────────────────────────────────────
 
@@ -303,6 +304,29 @@ async def _scheduler_tick():
             except Exception as e:
                 log.error(f"Proactive matching error: {e}")
                 db.rollback()
+
+        # ── Performance tracking: vendor scorecards + buyer leaderboard (daily) ──
+        try:
+            global _last_performance_compute
+            if now - _last_performance_compute > timedelta(hours=12):
+                from .services.performance_service import (
+                    compute_all_vendor_scorecards, compute_buyer_leaderboard,
+                )
+                from datetime import date as date_type
+                vs_result = compute_all_vendor_scorecards(db)
+                log.info(f"Vendor scorecards: {vs_result['updated']} updated, "
+                         f"{vs_result['skipped_cold_start']} cold-start")
+                current_month = now.date().replace(day=1)
+                bl_result = compute_buyer_leaderboard(db, current_month)
+                log.info(f"Buyer leaderboard: {bl_result['entries']} entries for {current_month}")
+                # Recompute previous month during grace period (first 7 days)
+                if now.day <= 7:
+                    prev_month = (current_month - timedelta(days=1)).replace(day=1)
+                    compute_buyer_leaderboard(db, prev_month)
+                _last_performance_compute = now
+        except Exception as e:
+            log.error(f"Performance tracking error: {e}")
+            db.rollback()
 
     except Exception as e:
         log.error(f"Scheduler batch error: {e}")

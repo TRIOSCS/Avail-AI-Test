@@ -439,3 +439,7 @@ from .routers.rfq import router as rfq_router
 app.include_router(rfq_router)
 from .routers.proactive import router as proactive_router
 app.include_router(proactive_router)
+from .routers.performance import router as performance_router
+app.include_router(performance_router)
+from .routers.admin import router as admin_router
+app.include_router(admin_router)

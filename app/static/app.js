@@ -255,6 +255,12 @@ function applyRoleGating() {
         pNav.style.display = '';
         refreshProactiveBadge();
     }
+    // Performance nav visible to all
+    const perfNav = document.getElementById('navPerformance');
+    if (perfNav) perfNav.style.display = '';
+    // Settings gear visible to admin only
+    const settingsMenu = document.getElementById('settingsMenu');
+    if (settingsMenu && window.__isAdmin) settingsMenu.style.display = '';
 }
 function isBuyer() { return window.userRole === 'buyer'; }
 
@@ -270,7 +276,7 @@ async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-detail', 'view-vendors', 'view-materials', 'view-sources', 'view-customers', 'view-buyplans', 'view-proactive'];
+const ALL_VIEWS = ['view-list', 'view-detail', 'view-vendors', 'view-materials', 'view-sources', 'view-customers', 'view-buyplans', 'view-proactive', 'view-performance', 'view-settings'];
 
 function showView(viewId) {
     for (const id of ALL_VIEWS) {

@@ -2191,3 +2191,380 @@ function renderProactiveScorecard(data) {
 
     el.innerHTML = cards + breakdownHtml;
 }
+
+// ── Performance Tracking ─────────────────────────────────────────────
+
+let _perfVendorSort = 'composite_score';
+let _perfVendorOrder = 'desc';
+
+function showPerformance() {
+    showView('view-performance');
+    currentReqId = null;
+    switchPerfTab('vendors');
+}
+
+function switchPerfTab(tab, btn) {
+    document.querySelectorAll('#perfTabs .tab').forEach(t => t.classList.remove('on'));
+    if (btn) btn.classList.add('on');
+    else document.querySelector(`#perfTabs .tab[onclick*="${tab}"]`)?.classList.add('on');
+    document.getElementById('perfVendorPanel').style.display = tab === 'vendors' ? '' : 'none';
+    document.getElementById('perfBuyerPanel').style.display = tab === 'buyers' ? '' : 'none';
+    if (tab === 'vendors') loadVendorScorecards();
+    else loadBuyerLeaderboard();
+}
+
+async function loadVendorScorecards(sortBy, order) {
+    if (sortBy) _perfVendorSort = sortBy;
+    if (order) _perfVendorOrder = order;
+    const el = document.getElementById('perfVendorPanel');
+    el.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        const search = document.getElementById('perfVendorSearch')?.value || '';
+        const data = await apiFetch(`/api/performance/vendors?sort_by=${_perfVendorSort}&order=${_perfVendorOrder}&limit=100&search=${encodeURIComponent(search)}`);
+        renderVendorScorecards(data);
+    } catch (e) {
+        el.innerHTML = `<p class="empty">Error loading scorecards</p>`;
+    }
+}
+
+function renderVendorScorecards(data) {
+    const el = document.getElementById('perfVendorPanel');
+    const items = data.items || [];
+    if (!items.length) {
+        el.innerHTML = '<p class="empty">No vendor scorecard data yet — scorecards are computed daily</p>';
+        return;
+    }
+
+    function sortIcon(col) {
+        if (col !== _perfVendorSort) return '';
+        return _perfVendorOrder === 'desc' ? ' ▼' : ' ▲';
+    }
+    function toggleSort(col) {
+        if (_perfVendorSort === col) _perfVendorOrder = _perfVendorOrder === 'desc' ? 'asc' : 'desc';
+        else { _perfVendorSort = col; _perfVendorOrder = 'desc'; }
+        loadVendorScorecards();
+    }
+
+    function metricCell(val, invert) {
+        if (val === null || val === undefined) return '<td class="metric-cell na">N/A</td>';
+        const displayed = invert ? val : val;
+        const score = invert ? 1 - val : val;
+        let cls = 'metric-red';
+        if (score >= 0.7) cls = 'metric-green';
+        else if (score >= 0.4) cls = 'metric-yellow';
+        return `<td class="metric-cell ${cls}">${(displayed * 100).toFixed(0)}%</td>`;
+    }
+
+    // Make toggleSort available globally
+    window._perfToggleSort = toggleSort;
+
+    const searchBar = `<div style="margin-bottom:10px"><input type="text" id="perfVendorSearch" placeholder="Search vendors..." value="${document.getElementById('perfVendorSearch')?.value||''}" class="filter-search" oninput="loadVendorScorecards()" style="max-width:300px"></div>`;
+
+    let html = searchBar + `<div style="overflow-x:auto"><table class="perf-table">
+        <thead><tr>
+            <th style="cursor:pointer" onclick="window._perfToggleSort('composite_score')">Vendor${sortIcon('composite_score')}</th>
+            <th style="cursor:pointer" onclick="window._perfToggleSort('response_rate')">Response Rate${sortIcon('response_rate')}</th>
+            <th style="cursor:pointer" onclick="window._perfToggleSort('quote_accuracy')">Quote Accuracy${sortIcon('quote_accuracy')}</th>
+            <th style="cursor:pointer" onclick="window._perfToggleSort('on_time_delivery')">On-Time${sortIcon('on_time_delivery')}</th>
+            <th style="cursor:pointer" onclick="window._perfToggleSort('cancellation_rate')">Cancel Rate${sortIcon('cancellation_rate')}</th>
+            <th style="cursor:pointer" onclick="window._perfToggleSort('rma_rate')">RMA Rate${sortIcon('rma_rate')}</th>
+            <th style="cursor:pointer" onclick="window._perfToggleSort('lead_time_accuracy')">Lead Time${sortIcon('lead_time_accuracy')}</th>
+            <th style="cursor:pointer" onclick="window._perfToggleSort('composite_score')">Score${sortIcon('composite_score')}</th>
+        </tr></thead><tbody>`;
+
+    for (const v of items) {
+        if (!v.is_sufficient_data) {
+            html += `<tr class="cold-start"><td>${v.vendor_name}</td><td colspan="7" class="metric-cell na" style="text-align:center;font-style:italic">Insufficient Data (${v.interaction_count} interactions)</td></tr>`;
+            continue;
+        }
+        html += `<tr>
+            <td><strong>${v.vendor_name}</strong></td>
+            ${metricCell(v.response_rate)}
+            ${metricCell(v.quote_accuracy)}
+            ${metricCell(v.on_time_delivery)}
+            ${metricCell(v.cancellation_rate, true)}
+            ${metricCell(v.rma_rate, true)}
+            ${metricCell(v.lead_time_accuracy)}
+            ${metricCell(v.composite_score)}
+        </tr>`;
+    }
+
+    html += '</tbody></table></div>';
+    if (window.__isAdmin) {
+        html += `<div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="refreshVendorScorecards()">Refresh Scorecards</button></div>`;
+    }
+    el.innerHTML = html;
+}
+
+async function refreshVendorScorecards() {
+    try {
+        await apiFetch('/api/performance/vendors/refresh', {method:'POST'});
+        loadVendorScorecards();
+    } catch (e) {
+        alert('Error refreshing: ' + (e.message || e));
+    }
+}
+
+// ── Buyer Leaderboard ──
+
+let _leaderboardMonth = '';
+
+async function loadBuyerLeaderboard(month) {
+    const el = document.getElementById('perfBuyerPanel');
+    el.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        const monthsData = await apiFetch('/api/performance/buyers/months');
+        const months = monthsData.months || [];
+        if (!month) {
+            _leaderboardMonth = months.length ? months[0] : new Date().toISOString().slice(0,7);
+        } else {
+            _leaderboardMonth = month;
+        }
+        const data = await apiFetch(`/api/performance/buyers?month=${_leaderboardMonth.slice(0,7)}`);
+        renderBuyerLeaderboard(data, months);
+    } catch (e) {
+        el.innerHTML = '<p class="empty">No leaderboard data yet — computed daily</p>';
+    }
+}
+
+function renderBuyerLeaderboard(data, months) {
+    const el = document.getElementById('perfBuyerPanel');
+    const entries = data.entries || [];
+
+    let monthSelector = `<select onchange="loadBuyerLeaderboard(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px">`;
+    for (const m of months) {
+        const label = new Date(m + '-15').toLocaleDateString('en-US', {month:'long', year:'numeric'});
+        monthSelector += `<option value="${m}" ${m === _leaderboardMonth ? 'selected' : ''}>${label}</option>`;
+    }
+    monthSelector += '</select>';
+
+    // Summary cards
+    const totalPts = entries.reduce((s, e) => s + e.total_points, 0);
+    const topScorer = entries.length ? entries[0].user_name : '—';
+    const totalOffers = entries.reduce((s, e) => s + e.offers_logged, 0);
+
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div>${monthSelector}</div>
+        ${window.__isAdmin ? '<button class="btn btn-ghost btn-sm" onclick="refreshBuyerLeaderboard()">Refresh</button>' : ''}
+    </div>`;
+
+    html += `<div class="perf-summary">
+        <div class="perf-card"><div class="perf-card-num">${totalOffers}</div><div class="perf-card-label">Offers Logged</div></div>
+        <div class="perf-card"><div class="perf-card-num">${totalPts}</div><div class="perf-card-label">Total Points</div></div>
+        <div class="perf-card"><div class="perf-card-num">${topScorer}</div><div class="perf-card-label">Top Scorer</div></div>
+    </div>`;
+
+    if (!entries.length) {
+        html += '<p class="empty">No data for this month</p>';
+        el.innerHTML = html;
+        return;
+    }
+
+    const currentEmail = (window.__userEmail || '').toLowerCase();
+
+    html += `<table class="perf-table"><thead><tr>
+        <th>#</th><th>Buyer</th>
+        <th>Offers (x1)</th><th>Quoted (x3)</th><th>Buy Plan (x5)</th><th>PO Confirmed (x8)</th>
+        <th>Total</th>
+    </tr></thead><tbody>`;
+
+    for (const e of entries) {
+        const isMe = e.user_name && currentEmail && entries.some(x => x.user_id === e.user_id);
+        const rowCls = isMe ? 'class="lb-highlight"' : '';
+        const medal = e.rank === 1 ? ' 🥇' : e.rank === 2 ? ' 🥈' : e.rank === 3 ? ' 🥉' : '';
+        html += `<tr ${rowCls}>
+            <td><strong>${e.rank}${medal}</strong></td>
+            <td>${e.user_name || 'Unknown'}</td>
+            <td>${e.offers_logged} <span class="pts">(${e.points_offers})</span></td>
+            <td>${e.offers_quoted} <span class="pts">(${e.points_quoted})</span></td>
+            <td>${e.offers_in_buyplan} <span class="pts">(${e.points_buyplan})</span></td>
+            <td>${e.offers_po_confirmed} <span class="pts">(${e.points_po})</span></td>
+            <td><strong>${e.total_points}</strong></td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+async function refreshBuyerLeaderboard() {
+    try {
+        await apiFetch('/api/performance/buyers/refresh', {method:'POST'});
+        loadBuyerLeaderboard(_leaderboardMonth);
+    } catch (e) {
+        alert('Error refreshing: ' + (e.message || e));
+    }
+}
+
+// ── Settings (Admin) ─────────────────────────────────────────────────
+
+function toggleSettingsDropdown() {
+    const dd = document.getElementById('settingsDropdownContent');
+    dd.style.display = dd.style.display === 'block' ? 'none' : 'block';
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', function(e) {
+    const menu = document.getElementById('settingsMenu');
+    if (menu && !menu.contains(e.target)) {
+        const dd = document.getElementById('settingsDropdownContent');
+        if (dd) dd.style.display = 'none';
+    }
+});
+
+function showSettings(panel) {
+    document.getElementById('settingsDropdownContent').style.display = 'none';
+    showView('view-settings');
+    // Clear nav active state
+    document.querySelectorAll('.topbar-nav button').forEach(b => b.classList.remove('active'));
+    // Show correct sub-panel
+    document.querySelectorAll('.settings-panel').forEach(p => p.style.display = 'none');
+    document.querySelectorAll('#settingsTabs .tab').forEach(t => t.classList.remove('on'));
+    const target = document.getElementById('settings-' + panel);
+    if (target) target.style.display = '';
+    const tabBtn = document.querySelector(`#settingsTabs .tab[onclick*="${panel}"]`);
+    if (tabBtn) tabBtn.classList.add('on');
+    // Load data for the panel
+    if (panel === 'sources') loadSettingsSources();
+    else if (panel === 'manage-users') loadAdminUsers();
+    else if (panel === 'data-import') {} // static form
+}
+
+async function loadSettingsSources() {
+    // Reuse the existing loadSources() but redirect output to settings panel
+    const el = document.getElementById('settingsSourcesList');
+    el.innerHTML = '<p class="empty">Loading data sources...</p>';
+    try {
+        const res = await fetch('/api/sources');
+        const data = await res.json();
+        const sources = data.sources || [];
+        // Copy rendered content from sourcesList after loading
+        // Use same format: render inline
+        if (!sources.length) { el.innerHTML = '<p class="empty">No data sources configured</p>'; return; }
+        const live = sources.filter(s => s.status === 'live');
+        const pending = sources.filter(s => s.status === 'pending');
+        const error = sources.filter(s => s.status === 'error');
+        const disabled = sources.filter(s => s.status === 'disabled');
+        let html = `<div class="src-grid">`;
+        for (const s of [...live, ...pending, ...error, ...disabled]) {
+            const dot = s.status === 'live' ? '🟢' : s.status === 'pending' ? '🟡' : s.status === 'error' ? '🔴' : '⚫';
+            html += `<div class="card" style="padding:14px">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                    <strong style="font-size:13px">${s.name}</strong>
+                    <span style="font-size:11px">${dot} ${s.status}</span>
+                </div>
+                <div style="font-size:11px;color:var(--muted);margin-top:4px">${s.source_type || s.type || ''}</div>
+            </div>`;
+        }
+        html += '</div>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<p class="empty">Failed to load sources</p>';
+    }
+}
+
+// ── Manage Users ──
+
+let _adminUsers = [];
+
+async function loadAdminUsers() {
+    const el = document.getElementById('adminUsersList');
+    el.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        _adminUsers = await apiFetch('/api/admin/users');
+        renderAdminUsers();
+    } catch (e) {
+        el.innerHTML = '<p class="empty">Error loading users</p>';
+    }
+}
+
+function renderAdminUsers() {
+    const el = document.getElementById('adminUsersList');
+    if (!_adminUsers.length) { el.innerHTML = '<p class="empty">No users</p>'; return; }
+    let html = `<table class="perf-table"><thead><tr>
+        <th>Name</th><th>Email</th><th>Role</th><th>M365</th><th>Actions</th>
+    </tr></thead><tbody>`;
+    for (const u of _adminUsers) {
+        html += `<tr>
+            <td>${u.name || '—'}</td>
+            <td>${u.email}</td>
+            <td><select onchange="updateUserRole(${u.id}, this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
+                <option value="buyer" ${u.role==='buyer'?'selected':''}>Buyer</option>
+                <option value="sales" ${u.role==='sales'?'selected':''}>Sales</option>
+            </select></td>
+            <td>${u.m365_connected ? '<span style="color:var(--teal)">Connected</span>' : '<span style="color:var(--muted)">—</span>'}</td>
+            <td><button class="btn btn-ghost btn-sm" onclick="deleteAdminUser(${u.id}, '${(u.name||u.email).replace(/'/g,"\\'")}')">Delete</button></td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    el.innerHTML = html;
+}
+
+async function updateUserRole(userId, role) {
+    try {
+        await apiFetch(`/api/admin/users/${userId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({role})});
+    } catch (e) {
+        alert('Error: ' + (e.message || e));
+        loadAdminUsers();
+    }
+}
+
+async function deleteAdminUser(userId, name) {
+    if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
+    try {
+        await apiFetch(`/api/admin/users/${userId}`, {method:'DELETE'});
+        loadAdminUsers();
+    } catch (e) {
+        alert('Error: ' + (e.message || e));
+    }
+}
+
+async function createUser() {
+    const name = document.getElementById('newUserName').value.trim();
+    const email = document.getElementById('newUserEmail').value.trim();
+    const role = document.getElementById('newUserRole').value;
+    if (!name || !email) { alert('Name and email are required'); return; }
+    try {
+        await apiFetch('/api/admin/users', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, email, role})});
+        document.getElementById('newUserName').value = '';
+        document.getElementById('newUserEmail').value = '';
+        alert('User created successfully');
+    } catch (e) {
+        alert('Error: ' + (e.message || e));
+    }
+}
+
+async function importCustomers() {
+    const fileInput = document.getElementById('customerImportFile');
+    if (!fileInput.files.length) { alert('Select a CSV file first'); return; }
+    const form = new FormData();
+    form.append('file', fileInput.files[0]);
+    const statusEl = document.getElementById('customerImportStatus');
+    statusEl.textContent = 'Importing...';
+    try {
+        const res = await fetch('/api/admin/import/customers', {method:'POST', body:form});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Import failed');
+        statusEl.textContent = `Done: ${data.companies_created} companies, ${data.sites_created} sites, ${data.contacts_created} contacts created from ${data.rows_processed} rows`;
+        fileInput.value = '';
+    } catch (e) {
+        statusEl.textContent = 'Error: ' + (e.message || e);
+    }
+}
+
+async function importVendors() {
+    const fileInput = document.getElementById('vendorImportFile');
+    if (!fileInput.files.length) { alert('Select a CSV file first'); return; }
+    const form = new FormData();
+    form.append('file', fileInput.files[0]);
+    const statusEl = document.getElementById('vendorImportStatus');
+    statusEl.textContent = 'Importing...';
+    try {
+        const res = await fetch('/api/admin/import/vendors', {method:'POST', body:form});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Import failed');
+        statusEl.textContent = `Done: ${data.vendors_created} vendors, ${data.contacts_created} contacts created from ${data.rows_processed} rows`;
+        fileInput.value = '';
+    } catch (e) {
+        statusEl.textContent = 'Error: ' + (e.message || e);
+    }
+}

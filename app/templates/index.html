@@ -836,6 +836,31 @@
         .flex-wrap{flex-wrap:wrap}
         .hidden{display:none!important}
         .text-muted{font-size:11px;color:var(--muted)}
+        /* Performance Tracking */
+        .perf-table{width:100%;border-collapse:collapse;font-size:12px}
+        .perf-table th{text-align:left;padding:8px 10px;border-bottom:2px solid var(--border);font-size:11px;color:var(--muted);white-space:nowrap}
+        .perf-table td{padding:8px 10px;border-bottom:1px solid var(--border)}
+        .perf-table tr:hover{background:var(--surface)}
+        .perf-table tr.cold-start{opacity:0.6}
+        .perf-table tr.lb-highlight{background:rgba(26,127,155,0.08)}
+        .metric-cell{text-align:center;font-weight:600}
+        .metric-cell.metric-green{color:#16a34a}
+        .metric-cell.metric-yellow{color:#d97706}
+        .metric-cell.metric-red{color:#dc2626}
+        .metric-cell.na{color:var(--muted);font-weight:400;font-style:italic}
+        .pts{font-size:10px;color:var(--muted);font-weight:400}
+        .perf-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:16px}
+        .perf-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;text-align:center}
+        .perf-card-num{font-size:22px;font-weight:700;color:var(--text)}
+        .perf-card-label{font-size:11px;color:var(--muted);margin-top:4px}
+        /* Settings Dropdown */
+        .settings-dropdown{position:relative;display:inline-block}
+        .btn-settings{background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:16px;padding:4px 8px;color:var(--text);line-height:1}
+        .btn-settings:hover{background:var(--surface);border-color:var(--teal)}
+        .settings-dropdown-content{display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border);border-radius:8px;min-width:160px;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:100;overflow:hidden}
+        .settings-dropdown-content a{display:block;padding:10px 16px;font-size:13px;color:var(--text);cursor:pointer;text-decoration:none}
+        .settings-dropdown-content a:hover{background:var(--surface)}
+        .settings-panel{margin-top:12px}
     </style>
 </head>
 <body>
@@ -862,9 +887,9 @@
                 <button id="navCustomers" onclick="showCustomers();setNav(this)">Customers</button>
                 <button id="navVendors" onclick="showVendors();setNav(this)">Vendors</button>
                 <button id="navMaterials" onclick="showMaterials();setNav(this)">Materials</button>
-                <button id="navSources" onclick="showSources();setNav(this)">Data Sources</button>
                 <button id="navBuyPlans" onclick="showBuyPlans();setNav(this)" style="display:none">Buy Plans</button>
                 <button id="navProactive" onclick="showProactiveOffers();setNav(this)" style="display:none">Proactive <span id="proactiveBadge" class="nav-badge" style="display:none"></span></button>
+                <button id="navPerformance" onclick="showPerformance();setNav(this)" style="display:none">Performance</button>
             </div>
         </div>
         <div class="user">
@@ -874,6 +899,15 @@
                 <span class="m365-label" id="m365Label">M365</span>
             </span>
             <span>{{ user_name }}</span>
+            <div id="settingsMenu" class="settings-dropdown" style="display:none">
+                <button onclick="toggleSettingsDropdown()" class="btn-settings" title="Settings">&#9881;</button>
+                <div class="settings-dropdown-content" id="settingsDropdownContent">
+                    <a onclick="showSettings('sources')">Data Sources</a>
+                    <a onclick="showSettings('create-user')">Create User</a>
+                    <a onclick="showSettings('manage-users')">Manage Users</a>
+                    <a onclick="showSettings('data-import')">Data Import</a>
+                </div>
+            </div>
             <button class="btn-out" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())">Logout</button>
         </div>
     </div>
@@ -1516,6 +1550,74 @@
     </div>
 </div>
 
+    <!-- VIEW: Performance Tracking -->
+    <div id="view-performance" style="display:none">
+        <div class="vendor-header">
+            <h2>Performance</h2>
+        </div>
+        <div class="tabs" id="perfTabs">
+            <button class="tab on" onclick="switchPerfTab('vendors',this)">Vendor Scorecard</button>
+            <button class="tab" onclick="switchPerfTab('buyers',this)">Buyer Leaderboard</button>
+        </div>
+        <div id="perfVendorPanel"><p class="empty">Loading...</p></div>
+        <div id="perfBuyerPanel" style="display:none"><p class="empty">Loading...</p></div>
+    </div>
+
+    <!-- VIEW: Settings (admin only) -->
+    <div id="view-settings" style="display:none">
+        <div class="vendor-header">
+            <h2>Settings</h2>
+        </div>
+        <div class="tabs" id="settingsTabs">
+            <button class="tab on" onclick="showSettings('sources')">Data Sources</button>
+            <button class="tab" onclick="showSettings('create-user')">Create User</button>
+            <button class="tab" onclick="showSettings('manage-users')">Manage Users</button>
+            <button class="tab" onclick="showSettings('data-import')">Data Import</button>
+        </div>
+
+        <div id="settings-sources" class="settings-panel">
+            <div id="settingsSourcesList"><p class="empty">Loading...</p></div>
+        </div>
+
+        <div id="settings-create-user" class="settings-panel" style="display:none">
+            <div class="card" style="max-width:500px;padding:20px">
+                <h3 style="margin:0 0 16px;font-size:15px">Create New User</h3>
+                <div style="display:flex;flex-direction:column;gap:10px">
+                    <input id="newUserName" placeholder="Full name" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+                    <input id="newUserEmail" placeholder="Email address" type="email" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+                    <select id="newUserRole" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+                        <option value="buyer">Buyer</option>
+                        <option value="sales">Sales</option>
+                    </select>
+                    <button class="btn btn-primary" onclick="createUser()">Create User</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="settings-manage-users" class="settings-panel" style="display:none">
+            <div id="adminUsersList"><p class="empty">Loading...</p></div>
+        </div>
+
+        <div id="settings-data-import" class="settings-panel" style="display:none">
+            <div style="display:flex;gap:20px;flex-wrap:wrap">
+                <div class="card" style="flex:1;min-width:300px;padding:20px">
+                    <h3 style="margin:0 0 12px;font-size:15px">Import Customers</h3>
+                    <p style="font-size:12px;color:var(--muted);margin:0 0 12px">CSV with columns: company_name, site_name, contact_name, contact_email, contact_phone, contact_title, address_line1, city, state, zip, country</p>
+                    <input type="file" id="customerImportFile" accept=".csv" style="font-size:12px;margin-bottom:8px">
+                    <button class="btn btn-primary btn-sm" onclick="importCustomers()">Import</button>
+                    <div id="customerImportStatus" style="font-size:12px;margin-top:8px;color:var(--text2)"></div>
+                </div>
+                <div class="card" style="flex:1;min-width:300px;padding:20px">
+                    <h3 style="margin:0 0 12px;font-size:15px">Import Vendors</h3>
+                    <p style="font-size:12px;color:var(--muted);margin:0 0 12px">CSV with columns: vendor_name, domain, website, contact_name, contact_email, contact_phone, contact_title</p>
+                    <input type="file" id="vendorImportFile" accept=".csv" style="font-size:12px;margin-bottom:8px">
+                    <button class="btn btn-primary btn-sm" onclick="importVendors()">Import</button>
+                    <div id="vendorImportStatus" style="font-size:12px;margin-top:8px;color:var(--text2)"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
 <script>
 window.__userName = "{{ user_name }}";
 window.__userEmail = "{{ user_email }}";
@@ -1524,13 +1626,7 @@ function setNav(btn) {
     document.querySelectorAll('.topbar-nav button').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
 }
-// Hide Data Sources tab for non-admin users
-if (!window.__isAdmin) {
-    document.addEventListener('DOMContentLoaded', function() {
-        const srcBtn = document.getElementById('navSources');
-        if (srcBtn) srcBtn.style.display = 'none';
-    });
-}
+// Data Sources moved to Settings gear menu
 </script>
 <script src="/static/app.js?v={{ app_version }}"></script>
 <script src="/static/crm.js?v={{ app_version }}"></script>
