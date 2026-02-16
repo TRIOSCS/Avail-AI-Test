@@ -33,6 +33,23 @@ async def send_batch_rfq(
     gc = GraphClient(token)
     results = []
 
+    # AI-rephrase each body so emails don't look like cookie-cutter spam
+    if settings.anthropic_api_key:
+        try:
+            from app.services.ai_service import rephrase_rfq
+
+            rephrase_tasks = [rephrase_rfq(g["body"]) for g in vendor_groups if g.get("body")]
+            rephrased = await asyncio.gather(*rephrase_tasks, return_exceptions=True)
+            idx = 0
+            for g in vendor_groups:
+                if g.get("body"):
+                    result = rephrased[idx]
+                    if isinstance(result, str) and result:
+                        g["body"] = result
+                    idx += 1
+        except Exception as e:
+            log.warning(f"AI rephrase failed, using original bodies: {e}")
+
     for group in vendor_groups:
         email = group.get("vendor_email")
         if not email:

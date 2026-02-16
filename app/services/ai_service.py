@@ -273,3 +273,31 @@ async def draft_rfq(
     )
 
     return body
+
+
+async def rephrase_rfq(body: str) -> str | None:
+    """Rephrase an RFQ email body so each send sounds unique.
+
+    Keeps all part numbers, quantities, conditions, and requirements intact
+    but varies the wording, sentence structure, and tone slightly.
+
+    Returns rephrased body or None on failure.
+    """
+    prompt = (
+        f"Rephrase this RFQ email so it reads naturally and differently from the original. "
+        f"Keep ALL part numbers, quantities, and requirements exactly as-is — only change "
+        f"the surrounding wording, sentence structure, and phrasing. Keep it concise and "
+        f"professional. Do not add new requirements or remove existing ones. "
+        f"Return ONLY the rephrased email text, nothing else.\n\n"
+        f"Original:\n{body}"
+    )
+
+    return await claude_text(
+        prompt,
+        system="You rephrase procurement emails for an electronic component broker. "
+        "Vary the greeting, intro, closing, and transitions while keeping all part numbers, "
+        "conditions, and requirements exactly intact. Keep it short and professional. "
+        "Never add placeholder text or commentary — return only the final email.",
+        model_tier=FAST,
+        max_tokens=800,
+    )

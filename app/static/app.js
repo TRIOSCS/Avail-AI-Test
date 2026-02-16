@@ -1486,20 +1486,9 @@ function buildVendorBody(v) {
 
     let body = 'Hi,\n\n';
 
-    if (listingParts.length > 0) {
-        body += 'We see you may have stock on the following — please send your best offer:\n\n';
-        body += listingParts.map(p => `  ${p}`).join('\n');
-        body += '\n';
-        if (otherParts.length > 0) {
-            body += '\nAlso sourcing — quote if available:\n\n';
-            body += otherParts.map(p => `  ${p}`).join('\n');
-            body += '\n';
-        }
-    } else {
-        body += 'We are sourcing the following — please send your best offer:\n\n';
-        body += otherParts.map(p => `  ${p}`).join('\n');
-        body += '\n';
-    }
+    body += 'We are sourcing the following parts — please send your best offer if available:\n\n';
+    body += allSendParts.map(p => `  ${p}`).join('\n');
+    body += '\n';
 
     if (condLine) body += '\n' + condLine;
 
