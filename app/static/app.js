@@ -104,8 +104,7 @@ window.userEmail = '';
 
 async function checkM365Status() {
     try {
-        const r = await fetch('/auth/status');
-        const d = await r.json();
+        const d = await apiFetch('/auth/status');
         const dot = document.getElementById('m365Dot');
         const label = document.getElementById('m365Label');
         const wrap = document.getElementById('m365Status');
@@ -441,9 +440,8 @@ let reqData = []; // Cache for editing
 
 async function loadRequirements() {
     if (!currentReqId) return;
-    const res = await fetch(`/api/requisitions/${currentReqId}/requirements`);
-    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
-    reqData = await res.json();
+    try { reqData = await apiFetch(`/api/requisitions/${currentReqId}/requirements`); }
+    catch(e) { console.error('loadRequirements:', e); return; }
     window._currentRequirements = reqData;  // expose for AI Smart RFQ
     const el = document.getElementById('reqTable');
     const filterBar = document.getElementById('reqFilterBar');
@@ -540,10 +538,7 @@ function editReqCell(td, reqId, field) {
         } else {
             body[field] = val;
         }
-        await fetch(`/api/requirements/${reqId}`, {
-            method: 'PUT', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(body)
-        });
+        await apiFetch(`/api/requirements/${reqId}`, { method: 'PUT', body });
         loadRequirements();
     };
 
@@ -563,21 +558,20 @@ async function addReq() {
     const mpn = mpnEl.value.trim();
     if (!mpn) { mpnEl.focus(); return; }
     const targetPrice = targetEl && targetEl.value ? parseFloat(targetEl.value) : null;
-    const res = await fetch(`/api/requisitions/${currentReqId}/requirements`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ primary_mpn: mpn, target_qty: qtyEl.value || '1', substitutes: subsEl.value.trim(), target_price: targetPrice })
-    });
-    if (res.ok) {
+    try {
+        await apiFetch(`/api/requisitions/${currentReqId}/requirements`, {
+            method: 'POST', body: { primary_mpn: mpn, target_qty: qtyEl.value || '1', substitutes: subsEl.value.trim(), target_price: targetPrice }
+        });
         mpnEl.value = ''; subsEl.value = ''; qtyEl.value = '1';
         if (targetEl) targetEl.value = '';
         mpnEl.focus();
         loadRequirements();
-    }
+    } catch(e) { showToast('Failed to add requirement', 'error'); }
 }
 
 async function deleteReq(id) {
     if (!confirm('Remove this requirement?')) return;
-    await fetch(`/api/requirements/${id}`, { method: 'DELETE' });
+    try { await apiFetch(`/api/requirements/${id}`, { method: 'DELETE' }); } catch(e) { showToast('Failed to delete requirement', 'error'); return; }
     // Clear cached search results & selections for this requirement
     delete searchResults[id];
     for (const key of [...selectedSightings]) {
@@ -617,15 +611,10 @@ async function doUpload() {
     document.getElementById('uploadReady').style.display = 'none';
     const fd = new FormData(); fd.append('file', file);
     try {
-        const res = await fetch(`/api/requisitions/${currentReqId}/upload`, { method: 'POST', body: fd });
-        const data = await res.json();
-        if (res.ok) {
-            st.className = 'ustatus ok';
-            st.textContent = `Added ${data.created} parts from ${data.total_rows} rows`;
-            loadRequirements();
-        } else {
-            st.className = 'ustatus err'; st.textContent = data.detail || 'Upload failed';
-        }
+        const data = await apiFetch(`/api/requisitions/${currentReqId}/upload`, { method: 'POST', body: fd });
+        st.className = 'ustatus ok';
+        st.textContent = `Added ${data.created} parts from ${data.total_rows} rows`;
+        loadRequirements();
     } catch (e) {
         st.className = 'ustatus err'; st.textContent = 'Upload error: ' + e.message;
     }
@@ -643,21 +632,18 @@ async function searchAll() {
     const wasDraft = (_reqListData.find(r => r.id === currentReqId) || {}).status === 'draft';
     btn.disabled = true; btn.textContent = wasDraft ? 'Submitting…' : 'Searching…';
     try {
-        const res = await fetch(`/api/requisitions/${currentReqId}/search`, { method: 'POST' });
-        if (res.ok) {
-            searchResults = await res.json();
-            searchResultsCache[currentReqId] = searchResults;
-            selectedSightings.clear();
-            expandedGroups.clear();
-            renderSources();
-            updateRequirementCounts();
-            switchTab('sources', document.querySelectorAll('.tab')[1]);
-            // Update status in cached list (draft→active after submit)
-            const reqInfo = _reqListData.find(r => r.id === currentReqId);
-            if (reqInfo && reqInfo.status === 'draft') {
-                reqInfo.status = 'active';
-                notifyStatusChange({status_changed: true, req_status: 'active'});
-            }
+        searchResults = await apiFetch(`/api/requisitions/${currentReqId}/search`, { method: 'POST' });
+        searchResultsCache[currentReqId] = searchResults;
+        selectedSightings.clear();
+        expandedGroups.clear();
+        renderSources();
+        updateRequirementCounts();
+        switchTab('sources', document.querySelectorAll('.tab')[1]);
+        // Update status in cached list (draft→active after submit)
+        const reqInfo = _reqListData.find(r => r.id === currentReqId);
+        if (reqInfo && reqInfo.status === 'draft') {
+            reqInfo.status = 'active';
+            notifyStatusChange({status_changed: true, req_status: 'active'});
         }
     } catch (e) {
         alert('Search error: ' + e.message);
@@ -985,9 +971,8 @@ function clearSelection() {
 
 async function markUnavailable(sightingId, unavail) {
     try {
-        await fetch(`/api/sightings/${sightingId}/unavailable`, {
-            method: 'PUT', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ unavailable: unavail })
+        await apiFetch(`/api/sightings/${sightingId}/unavailable`, {
+            method: 'PUT', body: { unavailable: unavail }
         });
         // Update local state
         for (const reqId of Object.keys(searchResults)) {
@@ -1046,11 +1031,9 @@ async function openBatchRfqModal() {
     modal.classList.add('open');
 
     try {
-        const res = await fetch(`/api/requisitions/${currentReqId}/rfq-prepare`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ vendors: groups.map(g => ({ vendor_name: g.vendor_name })) })
+        const data = await apiFetch(`/api/requisitions/${currentReqId}/rfq-prepare`, {
+            method: 'POST', body: { vendors: groups.map(g => ({ vendor_name: g.vendor_name })) }
         });
-        const data = await res.json();
         rfqAllParts = data.all_parts || [];
 
         rfqVendorData = data.vendors.map((v, i) => {
@@ -1093,11 +1076,9 @@ async function openBatchRfqModal() {
             v.lookup_status = 'loading';
             renderRfqVendors();
             try {
-                const res = await fetch('/api/vendor-contact', {
-                    method: 'POST', headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ vendor_name: v.vendor_name })
+                const data = await apiFetch('/api/vendor-contact', {
+                    method: 'POST', body: { vendor_name: v.vendor_name }
                 });
-                const data = await res.json();
                 v.emails = data.emails || [];
                 v.phones = data.phones || [];
                 v.card_id = data.card_id;
