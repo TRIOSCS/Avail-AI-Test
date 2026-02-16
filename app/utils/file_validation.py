@@ -30,34 +30,18 @@ ALLOWED_TYPES = {
 PROCESSABLE_EXTENSIONS = {".xlsx", ".xls", ".csv", ".tsv"}
 
 
-def validate_file(content: bytes, filename: str) -> dict:
+def validate_file(content: bytes, filename: str) -> tuple[bool, str | None]:
     """Validate a file's actual type and encoding.
 
     Returns:
-        {
-            "valid": bool,
-            "file_type": "xlsx" | "csv" | "tsv" | "xls" | None,
-            "encoding": str | None,  # For text files
-            "reason": str | None,    # Why invalid
-            "size": int,
-        }
+        (is_valid, file_type_or_reason) — e.g. (True, "xlsx") or (False, "Empty file")
     """
-    result = {
-        "valid": False,
-        "file_type": None,
-        "encoding": None,
-        "reason": None,
-        "size": len(content),
-    }
-
     # Size check
     if len(content) > MAX_FILE_SIZE:
-        result["reason"] = f"File too large ({len(content)} bytes, max {MAX_FILE_SIZE})"
-        return result
+        return False, f"File too large ({len(content)} bytes, max {MAX_FILE_SIZE})"
 
     if len(content) == 0:
-        result["reason"] = "Empty file"
-        return result
+        return False, "Empty file"
 
     ext = _get_extension(filename)
 
@@ -69,13 +53,10 @@ def validate_file(content: bytes, filename: str) -> dict:
         if kind:
             mime = kind.mime
             if mime in ALLOWED_TYPES:
-                result["valid"] = True
-                result["file_type"] = ALLOWED_TYPES[mime]
-                return result
+                return True, ALLOWED_TYPES[mime]
             # Binary file with wrong type
             if ext in (".xlsx", ".xls"):
-                result["reason"] = f"File claims to be {ext} but detected as {mime}"
-                return result
+                return False, f"File claims to be {ext} but detected as {mime}"
     except ImportError:
         log.warning("filetype library not installed — falling back to extension check")
 
@@ -83,21 +64,15 @@ def validate_file(content: bytes, filename: str) -> dict:
     if ext in (".csv", ".tsv", ".txt"):
         encoding = detect_encoding(content)
         if encoding:
-            result["valid"] = True
-            result["file_type"] = "csv" if ext in (".csv", ".txt") else "tsv"
-            result["encoding"] = encoding
-            return result
-        result["reason"] = "Could not detect text encoding"
-        return result
+            file_type = "csv" if ext in (".csv", ".txt") else "tsv"
+            return True, file_type
+        return False, "Could not detect text encoding"
 
     # Fallback: trust extension for xlsx if filetype wasn't available
     if ext in PROCESSABLE_EXTENSIONS:
-        result["valid"] = True
-        result["file_type"] = ext.lstrip(".")
-        return result
+        return True, ext.lstrip(".")
 
-    result["reason"] = f"Unsupported file type: {ext}"
-    return result
+    return False, f"Unsupported file type: {ext}"
 
 
 def detect_encoding(content: bytes) -> str | None:

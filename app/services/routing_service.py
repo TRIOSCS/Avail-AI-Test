@@ -542,15 +542,15 @@ async def notify_routing_assignment(
     admin_user = (
         db.query(User)
         .filter(
-            User.ms_token.isnot(None),
+            User.access_token.isnot(None),
         )
         .first()
     )
-    if not admin_user or not admin_user.ms_token:
+    if not admin_user or not admin_user.access_token:
         log.warning("No admin token available for routing notifications")
         return 0
 
-    client = GraphClient(admin_user.ms_token)
+    client = GraphClient(admin_user.access_token)
 
     buyer_ids = [
         (assignment.buyer_1_id, assignment.buyer_1_score, 1),

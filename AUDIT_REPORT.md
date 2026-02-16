@@ -143,6 +143,29 @@ Fixed 9 instances of bare `except:` → `except (ValueError, TypeError):` in:
 
 ---
 
+## Additional Bugs Fixed (from deep audit)
+
+### 1. Duplicate `__table_args__` on Sighting model (models.py:270-272)
+**Severity**: HIGH — silently drops the `ix_sightings_vendor_name` index
+
+The Sighting model had two `__table_args__` assignments. The second overwrote the first,
+meaning the `vendor_name` index was silently lost. Merged into a single tuple.
+
+### 2. Non-existent `User.ms_token` attribute (routing_service.py:545)
+**Severity**: HIGH — `AttributeError` at runtime
+
+The routing notification code referenced `User.ms_token` which doesn't exist on the
+User model. Changed to `User.access_token`.
+
+### 3. `validate_file` return type mismatch (file_validation.py:33)
+**Severity**: HIGH — `ValueError` at runtime
+
+`validate_file()` returned a dict, but all 3 callers unpacked it as a 2-tuple:
+`is_valid, detected_type = validate_file(...)`. Changed return type to
+`tuple[bool, str | None]`.
+
+---
+
 ## Known Issues (Deferred)
 
 These are real issues but lower priority or require larger refactoring:
