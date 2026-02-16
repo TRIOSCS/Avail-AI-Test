@@ -1734,7 +1734,6 @@ async function openVendorPopup(cardId) {
             Recent Activity
             <span id="vpActHealth-${card.id}" style="margin-right:auto;margin-left:8px"></span>
             <span style="display:flex;gap:4px">
-                <button class="btn btn-ghost btn-sm" onclick="openVendorLogCallModal(${card.id},'${escAttr(card.display_name)}')">+ Log Call</button>
                 <button class="btn btn-ghost btn-sm" onclick="openVendorLogNoteModal(${card.id},'${escAttr(card.display_name)}')">+ Note</button>
             </span>
         </div>
@@ -2626,8 +2625,6 @@ function renderActivityCards() {
                 logBtns = vendorPhones.map(function(ph) {
                     return '<button class="btn btn-ghost btn-sm" onclick="placeVendorCall(' + v.vendor_card_id + ', \'' + escAttr(v.vendor_name) + '\', ' + currentReqId + ', \'' + escAttr(ph) + '\')">📞 ' + esc(ph) + '</button>';
                 }).join('');
-            } else {
-                logBtns = '<button class="btn btn-ghost btn-sm" onclick="openVendorLogCallModal(' + v.vendor_card_id + ', \'' + escAttr(v.vendor_name) + '\', ' + currentReqId + ')">📞 Log Call</button>';
             }
             logBtns += '<button class="btn btn-ghost btn-sm" onclick="openVendorLogNoteModal(' + v.vendor_card_id + ', \'' + escAttr(v.vendor_name) + '\', ' + currentReqId + ')">📝 Note</button>';
         }

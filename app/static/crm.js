@@ -79,7 +79,6 @@ function renderCustomers() {
             <div id="actSection-${c.id}" class="cust-activity-section" style="display:none">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
                     <span class="si-contacts-title">Recent Activity</span>
-                    <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openLogCallModal(${c.id},'${escAttr(c.name)}')">+ Log Call</button>
                     <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openLogNoteModal(${c.id},'${escAttr(c.name)}')">+ Note</button>
                 </div>
                 <div id="actList-${c.id}"><p class="empty" style="padding:4px;font-size:11px">Loading...</p></div>
