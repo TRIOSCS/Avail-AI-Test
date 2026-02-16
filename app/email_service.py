@@ -1,5 +1,6 @@
 """Email service — batch RFQ sending, inbox monitoring, AI parsing."""
-import asyncio, logging
+import asyncio
+import logging
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 

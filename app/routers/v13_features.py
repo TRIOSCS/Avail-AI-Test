@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..database import get_db
 from ..dependencies import is_admin as _is_admin, require_user
-from ..models import ActivityLog, Company, Offer, User
+from ..models import ActivityLog, Company, User
 from ..schemas.v13_features import (
     BuyerProfileUpsert, PhoneCallLog, RoutingPairRequest, StrategicToggle,
 )

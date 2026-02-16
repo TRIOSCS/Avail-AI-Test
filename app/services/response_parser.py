@@ -12,7 +12,6 @@ Each part in a multi-part reply gets its own classification:
   quoted, no_stock, follow_up, counter_offer
 """
 import logging
-from typing import Any
 
 from app.utils.claude_client import claude_structured
 from app.utils.normalization import (

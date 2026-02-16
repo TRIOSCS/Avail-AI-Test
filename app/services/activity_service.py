@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 
 from app.models import (
-    ActivityLog, Company, CustomerSite, VendorCard, VendorContact, User
+    ActivityLog, Company, CustomerSite, VendorCard, VendorContact
 )
 
 log = logging.getLogger("avail.activity")

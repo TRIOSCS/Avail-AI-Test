@@ -6,7 +6,8 @@ Uses `filetype` library for magic-byte validation (don't trust extensions)
 and `charset-normalizer` for detecting encoding of CSV/TSV files from
 international vendors.
 """
-import hashlib, logging
+import hashlib
+import logging
 
 log = logging.getLogger("avail.file_validation")
 
@@ -140,7 +141,7 @@ def file_fingerprint(content: bytes, rows: int = 10) -> str:
     """
     # Use first 4KB as fingerprint source (covers headers + first rows)
     sample = content[:4096]
-    return hashlib.md5(sample).hexdigest()
+    return hashlib.md5(sample, usedforsecurity=False).hexdigest()
 
 
 def _get_extension(filename: str) -> str:

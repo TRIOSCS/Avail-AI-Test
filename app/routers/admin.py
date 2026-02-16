@@ -4,7 +4,6 @@ import csv
 import io
 import logging
 import os
-from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
@@ -15,7 +14,7 @@ from ..dependencies import require_admin, require_settings_access
 from ..models import ApiSource, User, Company, CustomerSite, SiteContact, VendorCard, VendorContact
 from ..services.admin_service import (
     list_users, update_user, get_all_config, set_config_value,
-    get_scoring_weights, get_system_health, VALID_ROLES,
+    get_system_health, VALID_ROLES,
 )
 from ..services.credential_service import encrypt_value, decrypt_value, mask_value
 

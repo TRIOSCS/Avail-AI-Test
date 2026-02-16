@@ -1,5 +1,6 @@
 """Sourcengine API connector — B2B electronic component marketplace."""
-import logging, httpx
+import logging
+import httpx
 from .sources import BaseConnector
 
 log = logging.getLogger(__name__)

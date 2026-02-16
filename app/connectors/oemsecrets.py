@@ -3,7 +3,8 @@
 Returns pricing/stock from DigiKey, Mouser, Arrow, Avnet, Farnell, RS,
 Future, TME, and many more in a single API call.
 """
-import logging, httpx
+import logging
+import httpx
 from .sources import BaseConnector
 
 log = logging.getLogger(__name__)

@@ -8,7 +8,8 @@ Usage:
     messages = await gc.get_json("/me/messages", params={"$top": "50"})
     delta_msgs, new_token = await gc.delta_query("/me/mailFolders/Inbox/messages/delta", old_token)
 """
-import asyncio, logging
+import asyncio
+import logging
 
 import httpx
 

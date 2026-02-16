@@ -26,7 +26,6 @@ import logging
 from datetime import datetime, timezone, timedelta
 
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func
 
 from app.models import (
     RoutingAssignment, BuyerProfile, BuyerVendorStats,

@@ -4,7 +4,9 @@ Used by:
   - main.py: upload_requirements, import_stock_list
   - scheduler.py: _parse_stock_list_file
 """
-import csv, io, logging
+import csv
+import io
+import logging
 
 log = logging.getLogger(__name__)
 

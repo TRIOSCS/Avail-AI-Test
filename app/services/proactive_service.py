@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import (
-    BuyPlan, Company, CustomerSite, Offer, ProactiveMatch, ProactiveOffer,
+    BuyPlan, CustomerSite, Offer, ProactiveMatch, ProactiveOffer,
     ProactiveThrottle, Quote, Requirement, Requisition, SiteContact, User,
 )
 

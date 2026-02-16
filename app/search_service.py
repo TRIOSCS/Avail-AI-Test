@@ -5,11 +5,12 @@
 - Merges MaterialCard vendor history into results
 - Vendor card enrichment (ratings, blacklist) happens in main.py
 """
-import logging, asyncio, time
+import logging
+import asyncio
+import time
 from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
-from .config import settings
 from .models import (
     Requirement, Sighting,
     MaterialCard, MaterialVendorHistory, ApiSource,

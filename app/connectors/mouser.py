@@ -1,5 +1,6 @@
 """Mouser Search API connector."""
-import logging, httpx
+import logging
+import httpx
 from .sources import BaseConnector
 
 log = logging.getLogger(__name__)

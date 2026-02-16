@@ -25,7 +25,6 @@ import sqlalchemy as sa
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
-from .config import settings
 from .database import get_db
 from .models import Requisition, User
 

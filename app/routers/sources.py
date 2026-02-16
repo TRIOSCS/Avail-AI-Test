@@ -21,7 +21,6 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings

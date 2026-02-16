@@ -12,7 +12,6 @@ Depends on: utils/graph_client, models, config
 """
 
 import logging
-from datetime import datetime, timezone
 
 import httpx
 from sqlalchemy.orm import Session

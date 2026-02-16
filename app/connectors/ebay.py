@@ -1,5 +1,7 @@
 """eBay Browse API connector — searches electronic components on eBay."""
-import logging, base64, httpx
+import logging
+import base64
+import httpx
 from .sources import BaseConnector
 
 log = logging.getLogger(__name__)

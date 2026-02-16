@@ -17,20 +17,17 @@ Depends on: models, search_service, file_utils, scoring, vendor_utils
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
-from loguru import logger as log
 
 from ..schemas.requisitions import (
     RequisitionCreate, RequirementCreate, RequirementUpdate, RequisitionOut, SightingUnavailableIn,
 )
-from sqlalchemy import func as sqlfunc, select
+from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
-from ..config import settings
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_user
-from ..search_service import search_requirement, normalize_mpn, sighting_to_dict, _get_material_history, _history_to_result
+from ..search_service import search_requirement, sighting_to_dict, _get_material_history, _history_to_result
 from .rfq import _enrich_with_vendor_cards
-from ..file_utils import parse_num, parse_tabular_file
 from ..models import Contact, Offer, Requirement, Requisition, Sighting, User, VendorResponse
 
 router = APIRouter(tags=["requisitions"])

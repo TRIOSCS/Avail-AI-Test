@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import require_user
-from ..models import ProactiveMatch, ProactiveOffer, SiteContact, User
+from ..models import ProactiveMatch, SiteContact, User
 from ..scheduler import get_valid_token
 
 router = APIRouter()

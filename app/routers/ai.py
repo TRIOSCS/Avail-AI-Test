@@ -14,7 +14,6 @@ Depends on: services/ai_service.py, services/response_parser.py, connectors/apol
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from loguru import logger as log
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -27,7 +26,6 @@ from ..schemas.ai import (
     SaveDraftOffersRequest,
 )
 from ..models import (
-    Company,
     Contact,
     CustomerSite,
     Offer,

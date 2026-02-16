@@ -18,11 +18,9 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
-from loguru import logger as log
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
-from ..config import settings
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_fresh_token, require_user
 from ..models import Contact, Requisition, User, VendorCard, VendorResponse, VendorReview
@@ -226,7 +224,6 @@ async def rfq_prepare(req_id: int, payload: RfqPrepare, user: User = Depends(req
 @router.get("/api/follow-ups")
 async def get_follow_ups(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Return contacts that need follow-up: sent/opened > 3 days ago with no response."""
-    from sqlalchemy import exists, select
 
     three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
 

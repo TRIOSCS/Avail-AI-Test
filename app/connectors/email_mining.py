@@ -15,7 +15,8 @@ Hardening:
 
 Enriches VendorCards with verified contact info from real correspondence.
 """
-import logging, re
+import logging
+import re
 from datetime import datetime, timezone, timedelta
 
 log = logging.getLogger(__name__)

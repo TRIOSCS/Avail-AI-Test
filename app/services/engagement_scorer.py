@@ -298,7 +298,6 @@ async def compute_all_engagement_scores(db: Session) -> dict:
 def compute_single_vendor_score(card, db: Session) -> float | None:
     """Compute engagement score for a single VendorCard. Returns score or None."""
     from app.models import Contact, VendorResponse, Offer
-    from app.vendor_utils import normalize_vendor_name
 
     norm = card.normalized_name
     now = datetime.now(timezone.utc)

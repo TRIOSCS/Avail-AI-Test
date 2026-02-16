@@ -6,7 +6,8 @@ contact enrichment results (14-day TTL), market context (30-day TTL).
 Simple and reliable — no Redis dependency. Cache table lives in the
 same PostgreSQL database as everything else.
 """
-import json, logging
+import json
+import logging
 from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import text

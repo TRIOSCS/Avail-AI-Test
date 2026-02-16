@@ -1,5 +1,7 @@
 """API connectors — Nexar (Octopart) and BrokerBin."""
-import logging, asyncio, httpx
+import logging
+import asyncio
+import httpx
 from abc import ABC, abstractmethod
 from urllib.parse import quote_plus
 

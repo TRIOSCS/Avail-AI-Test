@@ -15,7 +15,8 @@ Usage:
         model_tier="fast",
     )
 """
-import json, logging
+import json
+import logging
 from typing import Any
 
 import httpx

@@ -12,7 +12,7 @@ import hashlib
 import logging
 from datetime import datetime, date, timezone, timedelta
 
-from sqlalchemy import func as sqlfunc, and_, or_, case, literal
+from sqlalchemy import func as sqlfunc, and_
 from sqlalchemy.orm import Session
 
 from ..models import (

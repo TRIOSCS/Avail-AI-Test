@@ -2,28 +2,20 @@
 from .logging_config import setup_logging
 setup_logging()  # Must run before any other module logs
 
-import json, os, re, logging, asyncio, uuid
+import os
+import logging
+import asyncio
+import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
-from fastapi import FastAPI, Request, Depends, HTTPException
-from fastapi.responses import HTMLResponse, Response
+from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session
-from sqlalchemy import func as sqlfunc, text as sqltext
 from starlette.middleware.sessions import SessionMiddleware
-import httpx
 
 from .config import settings, APP_VERSION
-from .database import engine, get_db
 from .models import (
-    Base, User, Requisition, Requirement, Sighting, Contact, VendorResponse,
-    VendorCard, VendorReview, MaterialCard, MaterialVendorHistory, ApiSource,
-    VendorContact, Company, CustomerSite, Offer, Quote,
-    SyncLog, InventorySnapshot, ProspectContact, ProcessedMessage,
+    ApiSource,
 )
-from .search_service import search_requirement, normalize_mpn
-from .email_service import send_batch_rfq, log_phone_contact, poll_inbox
 
 log = logging.getLogger(__name__)
 
@@ -353,7 +345,7 @@ def _seed_api_sources():
         ]
 
         # Version hash — skip if source list hasn't changed
-        source_hash = hashlib.md5(str([(s["name"], s["description"]) for s in SOURCES]).encode()).hexdigest()[:12]
+        source_hash = hashlib.md5(str([(s["name"], s["description"]) for s in SOURCES]).encode(), usedforsecurity=False).hexdigest()[:12]
         existing_map = {s.name: s for s in db.query(ApiSource).all()}
 
         # Quick check: if all sources exist and count matches, check version
@@ -395,10 +387,6 @@ def _seed_api_sources():
 # _seed_api_sources() is called from lifespan after startup migrations
 
 # ── Shared dependencies (auth, query helpers) ────────────────────────────
-from .dependencies import (
-    get_user, require_user, require_buyer, require_admin, require_settings_access,
-    user_reqs_query, get_req_for_user, require_fresh_token, is_admin as _is_admin,
-)
 
 
 # Auth routes moved to routers/auth.py

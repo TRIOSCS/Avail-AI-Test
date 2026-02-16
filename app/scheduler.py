@@ -5,7 +5,9 @@ Runs on a 5-minute tick loop. Each tick checks what needs to run:
   - Inbox scan: Every 30 min — scans all users' inboxes for vendor replies + stock lists
   - Contacts sync: Every 24h — pulls Outlook contacts into VendorCards
 """
-import asyncio, base64, logging
+import asyncio
+import base64
+import logging
 from datetime import datetime, timezone, timedelta
 
 import httpx
@@ -312,7 +314,6 @@ async def _scheduler_tick():
                 from .services.performance_service import (
                     compute_all_vendor_scorecards, compute_buyer_leaderboard,
                 )
-                from datetime import date as date_type
                 vs_result = compute_all_vendor_scorecards(db)
                 log.info(f"Vendor scorecards: {vs_result['updated']} updated, "
                          f"{vs_result['skipped_cold_start']} cold-start")
@@ -601,7 +602,6 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
     """Scan Sent Items for AVAIL RFQs and update VendorCard outreach metrics."""
     from .config import settings
     from .connectors.email_mining import EmailMiner
-    from .vendor_utils import normalize_vendor_name
     from .models import VendorCard
 
     lookback = settings.inbox_backfill_days if is_backfill else 7

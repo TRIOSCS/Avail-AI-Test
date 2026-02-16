@@ -18,7 +18,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_, or_
+from sqlalchemy import func, and_
 
 from app.models import ActivityLog, Company, User
 from app.config import settings

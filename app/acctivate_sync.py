@@ -71,7 +71,7 @@ def discover_schema():
             "%rma%", "%return%", "%cancel%", "%receipt%",
         ]
         like_clauses = " OR ".join(
-            f"TABLE_NAME LIKE '{kw}'" for kw in keywords
+            "TABLE_NAME LIKE ?" for _ in keywords
         )
         cur.execute(f"""
             SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE,
@@ -79,7 +79,7 @@ def discover_schema():
             FROM INFORMATION_SCHEMA.COLUMNS
             WHERE {like_clauses}
             ORDER BY TABLE_NAME, ORDINAL_POSITION
-        """)
+        """, keywords)
         results["relevant_columns"] = cur.fetchall()
 
         # 3. Row counts for relevant tables
@@ -87,7 +87,8 @@ def discover_schema():
         counts = {}
         for t in sorted(relevant_tables):
             try:
-                cur.execute(f"SELECT COUNT(*) AS cnt FROM [{t}]")
+                # Table names from INFORMATION_SCHEMA — safe, not user input
+                cur.execute(f"SELECT COUNT(*) AS cnt FROM [{t}]")  # nosec B608
                 counts[t] = cur.fetchone()["cnt"]
             except Exception:
                 counts[t] = "error"
@@ -97,7 +98,7 @@ def discover_schema():
         samples = {}
         for t in sorted(relevant_tables)[:20]:  # cap at 20 tables
             try:
-                cur.execute(f"SELECT TOP 5 * FROM [{t}]")
+                cur.execute(f"SELECT TOP 5 * FROM [{t}]")  # nosec B608
                 samples[t] = cur.fetchall()
             except Exception:
                 samples[t] = "error"

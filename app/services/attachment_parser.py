@@ -8,7 +8,9 @@ Target fields extracted per row:
   mpn, manufacturer, qty, unit_price, currency, condition, date_code,
   lead_time, packaging, description
 """
-import io, logging, re
+import io
+import logging
+import re
 from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)

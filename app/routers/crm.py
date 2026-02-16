@@ -49,7 +49,6 @@ from ..schemas.crm import (
     AddContactToSite,
     CompanyCreate,
     CompanyUpdate,
-    CustomerImportRow,
     EnrichDomainRequest,
     OfferCreate,
     OfferUpdate,
