@@ -212,6 +212,10 @@ class Sighting(Base):
 
     requirement = relationship("Requirement", back_populates="sightings")
 
+    __table_args__ = (
+        Index("ix_sightings_vendor_name", "vendor_name"),
+    )
+
     __table_args__ = (Index("ix_sight_req", "requirement_id"),)
 
 

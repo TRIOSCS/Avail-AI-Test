@@ -2,11 +2,11 @@
 from .logging_config import setup_logging
 setup_logging()  # Must run before any other module logs
 
-import json, os, re, logging, asyncio, uuid, ipaddress, socket
+import json, os, re, logging, asyncio, uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
-from fastapi import FastAPI, Request, UploadFile, File, Depends, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, Response
+from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -24,7 +24,6 @@ from .models import (
 )
 from .search_service import search_requirement, normalize_mpn
 from .email_service import send_batch_rfq, log_phone_contact, poll_inbox
-from .vendor_utils import normalize_vendor_name
 
 log = logging.getLogger(__name__)
 

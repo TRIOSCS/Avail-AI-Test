@@ -432,7 +432,8 @@ async def _download_and_import_stock_list(user, db, message_id: str, attachment_
             db.add(card)
             try:
                 db.flush()
-            except Exception:
+            except Exception as e:
+                log.debug(f"MaterialCard flush conflict for '{norm_mpn}': {e}")
                 db.rollback()
                 continue
 
@@ -522,7 +523,8 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
             db.add(card)
             try:
                 db.flush()
-            except Exception:
+            except Exception as e:
+                log.debug(f"VendorCard flush conflict for '{norm}': {e}")
                 db.rollback()
                 continue
 
@@ -537,7 +539,8 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
         db.commit()
         if enriched:
             log.info(f"Contact mining [{user.email}]: enriched {enriched} contacts")
-    except Exception:
+    except Exception as e:
+        log.error(f"Contact mining commit failed for {user.email}: {e}")
         db.rollback()
 
 
@@ -586,7 +589,8 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
         db.commit()
         if updated:
             log.info(f"Outbound scan [{user.email}]: {rfqs} RFQs, {updated} vendor cards updated")
-    except Exception:
+    except Exception as e:
+        log.error(f"Outbound scan commit failed for {user.email}: {e}")
         db.rollback()
 
 
@@ -649,7 +653,8 @@ async def _sync_user_contacts(user, db):
             db.add(card)
             try:
                 db.flush()
-            except Exception:
+            except Exception as e:
+                log.debug(f"VendorCard flush conflict for '{norm}': {e}")
                 db.rollback()
                 continue
 

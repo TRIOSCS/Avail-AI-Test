@@ -208,7 +208,7 @@ async def upload_requirements(req_id: int, file: UploadFile = File(...),
     try:
         from ..file_utils import parse_tabular_file
         rows = parse_tabular_file(content, fname)
-    except Exception as e:
+    except (ValueError, KeyError, TypeError) as e:
         raise HTTPException(400, f"Could not parse file: {str(e)[:200]}")
 
     created = 0
@@ -395,10 +395,10 @@ async def import_stock_list(req_id: int, request: Request,
     # Build a set of MPNs we're looking for in this requisition
     req_mpns = {}
     for r in req.requirements:
-        all_mpns = [r.primary_mpn.strip().upper()] if r.primary_mpn else []
+        all_mpns = [r.primary_mpn.strip().lower()] if r.primary_mpn else []
         for sub in (r.substitutes or []):
             if sub and sub.strip():
-                all_mpns.append(sub.strip().upper())
+                all_mpns.append(sub.strip().lower())
         for mpn in all_mpns:
             req_mpns[mpn] = r
 
@@ -415,7 +415,7 @@ async def import_stock_list(req_id: int, request: Request,
         imported += 1
 
         # Check if this MPN matches any requirement
-        r = req_mpns.get(mpn.upper())
+        r = req_mpns.get(mpn.lower())
         if not r:
             continue
 

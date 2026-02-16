@@ -24,6 +24,7 @@ import socket
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func as sqlfunc, text as sqltext
+from sqlalchemy.exc import IntegrityError
 
 from ..schemas.vendors import (
     MaterialCardUpdate, VendorBlacklistToggle, VendorCardUpdate,
@@ -64,7 +65,9 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
     reviews = db.query(VendorReview).filter_by(vendor_card_id=card.id).all()
     avg = round(sum(r.rating for r in reviews) / len(reviews), 1) if reviews else None
 
-    # Material profile: brands/manufacturers this vendor carries (sightings + stock imports)
+    # Material profile: brands/manufacturers this vendor carries
+    # Note: sightings.vendor_name is raw (needs LOWER/TRIM),
+    # material_vendor_history.vendor_name is already normalized
     norm = card.normalized_name
     mfr_rows = db.execute(sqltext("""
         SELECT manufacturer, SUM(cnt) as total FROM (
@@ -178,7 +181,7 @@ async def list_vendors(request: Request, user: User = Depends(require_user), db:
 async def get_vendor(card_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     card = db.get(VendorCard, card_id)
     if not card:
-        raise HTTPException(404)
+        raise HTTPException(404, "Vendor not found")
     return card_to_dict(card, db)
 
 
@@ -186,7 +189,7 @@ async def get_vendor(card_id: int, user: User = Depends(require_user), db: Sessi
 async def update_vendor(card_id: int, data: VendorCardUpdate, user: User = Depends(require_user), db: Session = Depends(get_db)):
     card = db.get(VendorCard, card_id)
     if not card:
-        raise HTTPException(404)
+        raise HTTPException(404, "Vendor not found")
     if data.emails is not None:
         card.emails = data.emails
     if data.phones is not None:
@@ -206,7 +209,7 @@ async def toggle_blacklist(card_id: int, data: VendorBlacklistToggle, user: User
     """Toggle vendor blacklist status."""
     card = db.get(VendorCard, card_id)
     if not card:
-        raise HTTPException(404)
+        raise HTTPException(404, "Vendor not found")
     card.is_blacklisted = data.blacklisted if data.blacklisted is not None else (not card.is_blacklisted)
     db.commit()
     return card_to_dict(card, db)
@@ -216,7 +219,7 @@ async def toggle_blacklist(card_id: int, data: VendorBlacklistToggle, user: User
 async def delete_vendor(card_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     card = db.get(VendorCard, card_id)
     if not card:
-        raise HTTPException(404)
+        raise HTTPException(404, "Vendor not found")
     db.delete(card)
     db.commit()
     return {"ok": True}
@@ -228,7 +231,7 @@ async def delete_vendor(card_id: int, user: User = Depends(require_user), db: Se
 async def add_review(card_id: int, payload: VendorReviewCreate, user: User = Depends(require_user), db: Session = Depends(get_db)):
     card = db.get(VendorCard, card_id)
     if not card:
-        raise HTTPException(404)
+        raise HTTPException(404, "Vendor not found")
     review = VendorReview(vendor_card_id=card.id, user_id=user.id,
                           rating=payload.rating, comment=payload.comment)
     db.add(review)
@@ -386,7 +389,11 @@ async def lookup_vendor_contact(payload: VendorContactLookup, user: User = Depen
     if not card:
         card = VendorCard(normalized_name=norm, display_name=vendor_name, emails=[], phones=[])
         db.add(card)
-        db.flush()
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            card = db.query(VendorCard).filter_by(normalized_name=norm).first()
 
     # TIER 1: Cache check (free, instant)
     if card.emails:
@@ -641,7 +648,7 @@ async def vendor_email_metrics(card_id: int, user: User = Depends(require_user),
 async def add_email_to_card(payload: VendorEmailAdd, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Quick-add an email to a vendor card (manual entries go to top)."""
     card = get_or_create_card(payload.vendor_name, db)
-    emails = [e for e in (card.emails or []) if e.lower() != payload.email]
+    emails = [e for e in (card.emails or []) if isinstance(e, str) and e.lower() != payload.email]
     emails.insert(0, payload.email)  # Manual entries go to the top
     card.emails = emails
     db.commit()
@@ -715,7 +722,7 @@ async def list_materials(request: Request, user: User = Depends(require_user), d
 async def get_material(card_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     card = db.get(MaterialCard, card_id)
     if not card:
-        raise HTTPException(404)
+        raise HTTPException(404, "Material not found")
     return material_card_to_dict(card, db)
 
 
@@ -733,7 +740,7 @@ async def get_material_by_mpn(mpn: str, user: User = Depends(require_user), db: 
 async def update_material(card_id: int, data: MaterialCardUpdate, user: User = Depends(require_user), db: Session = Depends(get_db)):
     card = db.get(MaterialCard, card_id)
     if not card:
-        raise HTTPException(404)
+        raise HTTPException(404, "Material not found")
     if data.manufacturer is not None:
         card.manufacturer = data.manufacturer
     if data.description is not None:
@@ -748,7 +755,7 @@ async def update_material(card_id: int, data: MaterialCardUpdate, user: User = D
 async def delete_material(card_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     card = db.get(MaterialCard, card_id)
     if not card:
-        raise HTTPException(404)
+        raise HTTPException(404, "Material not found")
     db.delete(card)
     db.commit()
     return {"ok": True}
@@ -786,7 +793,11 @@ async def import_stock_list_standalone(request: Request,
             emails=[], phones=[],
         )
         db.add(vendor_card)
-        db.flush()
+        try:
+            db.flush()
+        except IntegrityError:
+            db.rollback()
+            vendor_card = db.query(VendorCard).filter_by(normalized_name=norm_vendor).first()
 
     imported = 0
     skipped = 0
@@ -811,7 +822,11 @@ async def import_stock_list_standalone(request: Request,
                 manufacturer=parsed.get("manufacturer") or "",
             )
             db.add(card)
-            db.flush()
+            try:
+                db.flush()
+            except IntegrityError:
+                db.rollback()
+                card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
 
         # Upsert MaterialVendorHistory
         mvh = db.query(MaterialVendorHistory).filter_by(
@@ -858,7 +873,7 @@ async def get_vendor_offer_history(card_id: int, request: Request,
     """All parts this vendor has ever offered, from MaterialVendorHistory."""
     card = db.get(VendorCard, card_id)
     if not card:
-        raise HTTPException(404)
+        raise HTTPException(404, "Vendor not found")
 
     q = request.query_params.get("q", "").strip().lower()
     limit = min(int(request.query_params.get("limit", "100")), 500)

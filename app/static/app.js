@@ -16,6 +16,26 @@ let _vendorListData = [];   // cached vendor list for client-side filtering
 let _vendorTierFilter = 'all';  // all|proven|developing|caution|new
 let expandedGroups = new Set();  // reqIds that are expanded (default: all collapsed)
 
+// ── Shared Helpers ──────────────────────────────────────────────────────
+async function apiFetch(url, opts = {}) {
+    if (opts.body && typeof opts.body === 'object' && !(opts.body instanceof FormData)) {
+        opts.headers = {'Content-Type': 'application/json', ...(opts.headers || {})};
+        opts.body = JSON.stringify(opts.body);
+    }
+    const res = await fetch(url, opts);
+    if (!res.ok) {
+        const msg = await res.text().catch(() => res.statusText);
+        throw Object.assign(new Error(msg), {status: res.status});
+    }
+    const ct = res.headers.get('content-type') || '';
+    return ct.includes('json') ? res.json() : res.text();
+}
+
+function debounce(fn, ms = 300) {
+    let timer;
+    return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+}
+
 // ── Utilities ───────────────────────────────────────────────────────────
 function esc(s) {
     if (!s) return '';
@@ -124,7 +144,8 @@ async function checkM365Status() {
 }
 
 // Refresh M365 status every 5 min
-setInterval(checkM365Status, 300000);
+const _m365Timer = setInterval(checkM365Status, 300000);
+window.addEventListener('beforeunload', () => clearInterval(_m365Timer));
 
 // ── Role-Based UI Gating ────────────────────────────────────────────────
 function applyRoleGating() {
@@ -193,8 +214,7 @@ function showDetail(id, name) {
         searchResults = {};
         selectedSightings.clear();
         // Background fetch: load any previously saved sightings
-        fetch(`/api/requisitions/${id}/sightings`)
-            .then(r => r.ok ? r.json() : null)
+        apiFetch(`/api/requisitions/${id}/sightings`)
             .then(data => {
                 if (data && Object.keys(data).length && currentReqId === id) {
                     searchResults = data;
@@ -286,18 +306,17 @@ function notifyStatusChange(data) {
 }
 
 // ── Requisitions ────────────────────────────────────────────────────────
-let reqSearchTimer = null;
 let _reqCustomerMap = {};  // id → customer_display
 let _reqListData = [];     // cached list for client-side filtering
 let _reqStatusFilter = 'draft';
 
 async function loadRequisitions(query = '') {
-    const url = query ? `/api/requisitions?q=${encodeURIComponent(query)}` : '/api/requisitions';
-    const res = await fetch(url);
-    if (!res.ok) { console.error(`API error ${res.status}: ${res.url}`); return; }
-    _reqListData = await res.json();
-    _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
-    renderReqList();
+    try {
+        const url = query ? `/api/requisitions?q=${encodeURIComponent(query)}` : '/api/requisitions';
+        _reqListData = await apiFetch(url);
+        _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
+        renderReqList();
+    } catch (e) { console.error('loadRequisitions:', e); }
 }
 
 function renderReqList() {
@@ -363,71 +382,58 @@ function setReqStatusFilter(status, btn) {
     document.querySelectorAll('[data-req-status]').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
     if (status === 'archive') {
-        fetch('/api/requisitions?status=archive')
-            .then(r => r.ok ? r.json() : [])
+        apiFetch('/api/requisitions?status=archive')
             .then(data => {
                 _reqListData = data;
                 data.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
                 renderReqList();
-            });
+            })
+            .catch(() => showToast('Failed to load archived requisitions', 'error'));
     } else {
         renderReqList();
     }
 }
 
-function searchRequisitions(query) {
-    clearTimeout(reqSearchTimer);
-    reqSearchTimer = setTimeout(() => loadRequisitions(query), 300);
-}
+const searchRequisitions = debounce(query => loadRequisitions(query), 300);
 
 async function sendFollowUp(contactId, vendorName) {
     if (!confirm(`Send follow-up email to ${vendorName}?`)) return;
     try {
-        const res = await fetch(`/api/follow-ups/${contactId}/send`, {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({})
-        });
-        if (!res.ok) { showToast('Failed to send follow-up', 'error'); return; }
-        const data = await res.json();
+        const data = await apiFetch(`/api/follow-ups/${contactId}/send`, { method: 'POST', body: {} });
         showToast(data.message || `Follow-up sent to ${vendorName}`, 'success');
         if (typeof loadActivity === 'function') loadActivity();
-    } catch (e) { console.error('sendFollowUp:', e); showToast('Error sending follow-up', 'error'); }
+    } catch (e) { showToast('Failed to send follow-up', 'error'); }
 }
 
 async function createRequisition() {
     const name = document.getElementById('nrName').value.trim();
     if (!name) return;
     const siteId = document.getElementById('nrSiteId')?.value || null;
-    const res = await fetch('/api/requisitions', {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ name, customer_site_id: siteId ? parseInt(siteId) : null })
-    });
-    if (res.ok) {
-        const data = await res.json();
+    try {
+        const data = await apiFetch('/api/requisitions', {
+            method: 'POST', body: { name, customer_site_id: siteId ? parseInt(siteId) : null }
+        });
         closeModal('newReqModal');
         document.getElementById('nrName').value = '';
         document.getElementById('nrSiteSearch').value = '';
         document.getElementById('nrSiteId').value = '';
         showDetail(data.id, data.name);
-    }
+    } catch (e) { showToast('Failed to create requisition', 'error'); }
 }
 
 async function toggleArchive(id) {
-    const res = await fetch(`/api/requisitions/${id}/archive`, { method: 'PUT' });
-    if (res.ok) {
+    try {
+        await apiFetch(`/api/requisitions/${id}/archive`, { method: 'PUT' });
         if (_reqStatusFilter === 'archive') {
-            fetch('/api/requisitions?status=archive')
-                .then(r => r.ok ? r.json() : [])
-                .then(data => {
-                    _reqListData = data;
-                    data.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
-                    renderReqList();
-                });
+            const data = await apiFetch('/api/requisitions?status=archive');
+            _reqListData = data;
+            data.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
+            renderReqList();
         } else {
             const q = document.getElementById('reqSearchInput').value.trim();
             loadRequisitions(q);
         }
-    }
+    } catch (e) { showToast('Failed to toggle archive', 'error'); }
 }
 
 // ── Requirements ────────────────────────────────────────────────────────
@@ -1303,10 +1309,9 @@ function rfqSelectEmail(idx, value) {
             if (!rfqVendorData[idx].emails.includes(email)) {
                 rfqVendorData[idx].emails.unshift(email);
             }
-            fetch('/api/vendor-card/add-email', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ vendor_name: rfqVendorData[idx].vendor_name, email })
-            });
+            apiFetch('/api/vendor-card/add-email', {
+                method: 'POST', body: { vendor_name: rfqVendorData[idx].vendor_name, email }
+            }).catch(() => showToast('Failed to save email', 'error'));
         }
         renderRfqVendors();
     } else {
@@ -1320,10 +1325,9 @@ function rfqManualEmail(idx, value) {
         rfqVendorData[idx].selected_email = email;
         rfqVendorData[idx].emails.unshift(email);
         rfqVendorData[idx].lookup_status = 'ready';
-        fetch('/api/vendor-card/add-email', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ vendor_name: rfqVendorData[idx].vendor_name, email })
-        });
+        apiFetch('/api/vendor-card/add-email', {
+            method: 'POST', body: { vendor_name: rfqVendorData[idx].vendor_name, email }
+        }).catch(() => showToast('Failed to save email', 'error'));
         renderRfqVendors();
     }
 }
@@ -1545,24 +1549,20 @@ function vpSetRating(n) {
 async function vpSubmitReview(cardId) {
     if (vpRating === 0) { alert('Please select a rating'); return; }
     const comment = document.getElementById('vpComment').value.trim();
-    const res = await fetch(`/api/vendors/${cardId}/reviews`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ rating: vpRating, comment })
-    });
-    if (res.ok) { vpRating = 0; openVendorPopup(cardId); }
+    try {
+        await apiFetch(`/api/vendors/${cardId}/reviews`, { method: 'POST', body: { rating: vpRating, comment } });
+        vpRating = 0; openVendorPopup(cardId);
+    } catch (e) { showToast('Failed to submit review', 'error'); }
 }
 
 async function vpToggleBlacklist(cardId, blacklisted) {
     const action = blacklisted ? 'blacklist' : 'remove from blacklist';
     if (!confirm(`Are you sure you want to ${action} this vendor?`)) return;
-    const res = await fetch(`/api/vendors/${cardId}/blacklist`, {
-        method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ blacklisted })
-    });
-    if (res.ok) {
+    try {
+        await apiFetch(`/api/vendors/${cardId}/blacklist`, { method: 'POST', body: { blacklisted } });
         openVendorPopup(cardId);
         if (currentReqId && Object.keys(searchResults).length) renderSources();
-    }
+    } catch (e) { showToast('Failed to update blacklist', 'error'); }
 }
 
 // ── Vendor Contacts CRUD ──────────────────────────────────────────────
@@ -1571,9 +1571,7 @@ async function loadVendorContacts(cardId) {
     const el = document.getElementById('vpContactsList');
     if (!el) return;
     try {
-        const res = await fetch(`/api/vendors/${cardId}/contacts`);
-        if (!res.ok) { el.innerHTML = '<p class="vp-muted" style="font-size:11px">Failed to load contacts</p>'; return; }
-        const contacts = await res.json();
+        const contacts = await apiFetch(`/api/vendors/${cardId}/contacts`);
         if (!contacts.length) {
             el.innerHTML = '<p class="vp-muted" style="font-size:11px">No contacts on file</p>';
             return;
@@ -1639,52 +1637,42 @@ async function openEditVendorContact(cardId, contactId) {
 async function saveVendorContact() {
     const cardId = document.getElementById('vcCardId').value;
     const contactId = document.getElementById('vcContactId').value;
-    const data = {
+    const body = {
         full_name: document.getElementById('vcFullName').value.trim() || null,
         title: document.getElementById('vcTitle').value.trim() || null,
         email: document.getElementById('vcEmail').value.trim(),
         phone: document.getElementById('vcPhone').value.trim() || null,
         label: document.getElementById('vcLabel').value.trim() || 'Sales',
     };
-    if (!data.email) { showToast('Email is required', 'error'); return; }
+    if (!body.email) { showToast('Email is required', 'error'); return; }
     try {
         const url = contactId
-            ? '/api/vendors/' + cardId + '/contacts/' + contactId
-            : '/api/vendors/' + cardId + '/contacts';
-        const res = await fetch(url, {
-            method: contactId ? 'PUT' : 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(data)
-        });
-        if (!res.ok) { showToast('Failed to save contact', 'error'); return; }
+            ? `/api/vendors/${cardId}/contacts/${contactId}`
+            : `/api/vendors/${cardId}/contacts`;
+        await apiFetch(url, { method: contactId ? 'PUT' : 'POST', body });
         closeModal('vendorContactModal');
         showToast(contactId ? 'Contact updated' : 'Contact added', 'success');
         loadVendorContacts(parseInt(cardId));
-    } catch(e) { console.error('saveVendorContact:', e); showToast('Error saving contact', 'error'); }
+    } catch(e) { showToast('Failed to save contact', 'error'); }
 }
 
 async function deleteVendorContact(cardId, contactId, name) {
     if (!confirm('Remove contact "' + name + '"?')) return;
     try {
-        const res = await fetch('/api/vendors/' + cardId + '/contacts/' + contactId, { method: 'DELETE' });
-        if (!res.ok) { showToast('Failed to delete contact', 'error'); return; }
+        await apiFetch(`/api/vendors/${cardId}/contacts/${contactId}`, { method: 'DELETE' });
         showToast('Contact removed', 'info');
         loadVendorContacts(cardId);
-    } catch(e) { console.error('deleteVendorContact:', e); showToast('Error deleting contact', 'error'); }
+    } catch(e) { showToast('Failed to delete contact', 'error'); }
 }
 
 // ── Vendor Offer History ──────────────────────────────────────────────
 
 let _offerHistoryOffset = 0;
-let _offerSearchTimer = null;
-
-function debounceOfferSearch(cardId) {
-    clearTimeout(_offerSearchTimer);
-    _offerSearchTimer = setTimeout(() => {
-        const q = (document.getElementById('vpOfferHistorySearch') || {}).value || '';
-        loadOfferHistory(cardId, q);
-    }, 300);
-}
+const _debouncedOfferSearch = debounce((cardId) => {
+    const q = (document.getElementById('vpOfferHistorySearch') || {}).value || '';
+    loadOfferHistory(cardId, q);
+}, 300);
+function debounceOfferSearch(cardId) { _debouncedOfferSearch(cardId); }
 
 function toggleOfferHistory(cardId) {
     const el = document.getElementById('vpOfferHistory');
@@ -1705,9 +1693,7 @@ async function loadOfferHistory(cardId, query) {
     listEl.innerHTML = '<p class="vp-muted" style="font-size:11px">Loading...</p>';
 
     try {
-        const res = await fetch(`/api/vendors/${cardId}/offer-history?q=${encodeURIComponent(q)}&limit=50`);
-        if (!res.ok) { listEl.innerHTML = '<p class="vp-muted">Failed to load</p>'; return; }
-        const data = await res.json();
+        const data = await apiFetch(`/api/vendors/${cardId}/offer-history?q=${encodeURIComponent(q)}&limit=50`);
         if (!data.items.length) {
             listEl.innerHTML = '<p class="vp-muted" style="font-size:11px;font-style:italic">No offer history found</p>';
             moreEl.style.display = 'none';
@@ -1727,9 +1713,7 @@ async function loadMoreOfferHistory(cardId) {
     const moreEl = document.getElementById('vpOfferHistoryMore');
 
     try {
-        const res = await fetch(`/api/vendors/${cardId}/offer-history?q=${encodeURIComponent(q)}&limit=50&offset=${_offerHistoryOffset}`);
-        if (!res.ok) return;
-        const data = await res.json();
+        const data = await apiFetch(`/api/vendors/${cardId}/offer-history?q=${encodeURIComponent(q)}&limit=50&offset=${_offerHistoryOffset}`);
         listEl.innerHTML += renderOfferHistoryItems(data.items);
         _offerHistoryOffset += data.items.length;
         moreEl.style.display = _offerHistoryOffset < data.total ? '' : 'none';

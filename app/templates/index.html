@@ -792,6 +792,13 @@
             .topbar-nav button{padding:6px 10px;font-size:11px}
             .modal-lg{max-width:90%}
         }
+        /* Utility classes */
+        .flex{display:flex}.flex-center{display:flex;align-items:center}
+        .gap-sm{gap:6px}.gap-md{gap:8px}.gap-lg{gap:10px}
+        .flex-between{display:flex;justify-content:space-between;align-items:center}
+        .flex-wrap{flex-wrap:wrap}
+        .hidden{display:none!important}
+        .text-muted{font-size:11px;color:var(--muted)}
     </style>
 </head>
 <body>
@@ -836,8 +843,8 @@
     <div id="view-list">
         <div class="req-header">
             <h2>Requisitions</h2>
-            <div style="display:flex;gap:10px;align-items:center">
-                <input class="req-search" id="reqSearchInput" type="text" placeholder="Search requisitions…" oninput="searchRequisitions(this.value)">
+            <div class="flex-center gap-lg">
+                <input class="req-search" id="reqSearchInput" type="text" placeholder="Search requisitions…" oninput="searchRequisitions(this.value)" aria-label="Search requisitions">
                 <button class="btn btn-primary" onclick="openNewReqModal()">+ New Requisition</button>
             </div>
         </div>
@@ -947,7 +954,7 @@
                 </div>
             </div>
             <div class="filter-bar" id="srcFilterBar">
-                <input type="text" class="filter-search" id="srcFilter" placeholder="Search vendor, MPN, manufacturer…" oninput="renderSources()">
+                <input type="text" class="filter-search" id="srcFilter" placeholder="Search vendor, MPN, manufacturer…" oninput="renderSources()" aria-label="Filter search results">
                 <div class="filter-pills">
                     <button class="filter-pill on" data-src-filter="all" onclick="setSrcFilter('all',this)">All</button>
                     <button class="filter-pill" data-src-filter="exact" onclick="setSrcFilter('exact',this)">Exact</button>
@@ -1026,11 +1033,11 @@
     <div id="view-customers" style="display:none">
         <div class="req-header">
             <h2>Customers</h2>
-            <div style="display:flex;gap:10px;align-items:center">
-                <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text2);cursor:pointer">
-                    <input type="checkbox" id="custMyOnly" onchange="loadCustomers()" style="accent-color:var(--teal)"> My accounts
+            <div class="flex-center gap-lg">
+                <label class="flex-center" style="gap:5px;font-size:12px;color:var(--text2);cursor:pointer">
+                    <input type="checkbox" id="custMyOnly" onchange="loadCustomers()" style="accent-color:var(--teal)" aria-label="Show only my accounts"> My accounts
                 </label>
-                <input class="req-search" id="custFilter" placeholder="Search companies…" oninput="loadCustomers()">
+                <input class="req-search" id="custFilter" placeholder="Search companies…" oninput="loadCustomers()" aria-label="Search companies">
                 <button class="btn btn-primary" onclick="openNewCompanyModal()">+ New Company</button>
             </div>
         </div>
@@ -1041,18 +1048,18 @@
     <div id="view-vendors" style="display:none">
         <div class="vendor-header">
             <h2>Vendor Directory</h2>
-            <input class="vendor-search" id="vendorSearch" placeholder="Search vendors…" oninput="filterVendorList()">
+            <input class="vendor-search" id="vendorSearch" placeholder="Search vendors…" oninput="filterVendorList()" aria-label="Search vendors">
         </div>
-        <div class="vendor-filters" style="display:flex;gap:6px;align-items:center;padding:0 16px 8px;flex-wrap:wrap">
+        <div class="vendor-filters flex-center gap-sm flex-wrap" style="padding:0 16px 8px">
             <button class="pill-filter on" onclick="setVendorTier('all',this)">All</button>
             <button class="pill-filter" onclick="setVendorTier('proven',this)">🟢 Proven</button>
             <button class="pill-filter" onclick="setVendorTier('developing',this)">🟡 Developing</button>
             <button class="pill-filter" onclick="setVendorTier('caution',this)">🔴 Caution</button>
             <button class="pill-filter" onclick="setVendorTier('new',this)">⚪ New</button>
             <label style="margin-left:auto;font-size:11px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px">
-                <input type="checkbox" id="vendorHideBL" onchange="filterVendorList()"> Hide blacklisted
+                <input type="checkbox" id="vendorHideBL" onchange="filterVendorList()" aria-label="Hide blacklisted vendors"> Hide blacklisted
             </label>
-            <span id="vendorFilterCount" style="font-size:11px;color:var(--muted)"></span>
+            <span id="vendorFilterCount" class="text-muted"></span>
         </div>
         <div id="vendorList"><p class="empty">Loading…</p></div>
     </div>
@@ -1063,13 +1070,13 @@
             <h2>Material Cards</h2>
             <div style="display:flex;gap:8px;align-items:center">
                 <button class="btn btn-ghost btn-sm" onclick="toggleStockImport()">📦 Import Stock</button>
-                <input class="vendor-search" id="materialSearch" placeholder="Search by part number…" oninput="loadMaterialList()">
+                <input class="vendor-search" id="materialSearch" placeholder="Search by part number…" oninput="loadMaterialList()" aria-label="Search material cards">
             </div>
         </div>
         <div id="stockImportArea" data-role="buyer" style="display:none;margin-bottom:12px" class="card">
             <strong style="font-size:12px;color:var(--muted)">Import a vendor stock list — all rows stored as material cards with vendor history</strong>
             <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
-                <input id="stockVendorName" placeholder="Vendor name (required)…" style="flex:1;min-width:150px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+                <input id="stockVendorName" placeholder="Vendor name (required)…" required aria-label="Vendor name for stock import" style="flex:1;min-width:150px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
                 <input type="file" id="stockFileInput" accept=".csv,.xlsx,.xls,.tsv" style="display:none" onchange="showFileReady('stockFileInput','stockFileReady','stockFileName')">
                 <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stockFileInput').click()">Choose File</button>
             </div>
@@ -1100,11 +1107,11 @@
 <div id="newReqModal" class="modal-bg" onclick="if(event.target===this)closeModal('newReqModal')">
     <div class="modal">
         <h2>New Requisition</h2>
-        <div class="field"><label>Name</label><input id="nrName" placeholder="e.g. Siemens Medical - Feb 2026" onkeydown="if(event.key==='Enter')createRequisition()"></div>
+        <div class="field"><label for="nrName">Name</label><input id="nrName" placeholder="e.g. Siemens Medical - Feb 2026" onkeydown="if(event.key==='Enter')createRequisition()" required></div>
         <div class="field" style="margin-top:10px">
             <label>Customer Site (optional)</label>
             <div class="site-typeahead">
-                <input id="nrSiteSearch" placeholder="Type to search companies…" oninput="filterSiteTypeahead(this.value)" onfocus="filterSiteTypeahead(this.value)" autocomplete="off">
+                <input id="nrSiteSearch" placeholder="Type to search companies…" oninput="filterSiteTypeahead(this.value)" onfocus="filterSiteTypeahead(this.value)" autocomplete="off" aria-label="Search customer sites">
                 <input type="hidden" id="nrSiteId">
                 <div class="site-typeahead-list" id="nrSiteList"></div>
             </div>
@@ -1169,11 +1176,11 @@
         <input type="hidden" id="vcCardId">
         <input type="hidden" id="vcContactId">
         <div class="lo-form">
-            <div class="field"><label>Email *</label><input id="vcEmail" type="email" placeholder="email@vendor.com" onkeydown="if(event.key==='Enter')saveVendorContact()"></div>
-            <div class="field"><label>Name</label><input id="vcFullName" placeholder="Full name"></div>
-            <div class="field"><label>Job Title</label><input id="vcTitle" placeholder="e.g. Sales Manager"></div>
-            <div class="field"><label>Phone</label><input id="vcPhone" placeholder="+1 555-000-0000"></div>
-            <div class="field"><label>Label</label><input id="vcLabel" placeholder="Sales, Support, etc." value="Sales"></div>
+            <div class="field"><label for="vcEmail">Email *</label><input id="vcEmail" type="email" placeholder="email@vendor.com" required onkeydown="if(event.key==='Enter')saveVendorContact()"></div>
+            <div class="field"><label for="vcFullName">Name</label><input id="vcFullName" placeholder="Full name"></div>
+            <div class="field"><label for="vcTitle">Job Title</label><input id="vcTitle" placeholder="e.g. Sales Manager"></div>
+            <div class="field"><label for="vcPhone">Phone</label><input id="vcPhone" type="tel" placeholder="+1 555-000-0000"></div>
+            <div class="field"><label for="vcLabel">Label</label><input id="vcLabel" placeholder="Sales, Support, etc." value="Sales"></div>
         </div>
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('vendorContactModal')">Cancel</button>
@@ -1196,9 +1203,9 @@
 <div id="newCompanyModal" class="modal-bg" onclick="if(event.target===this)closeModal('newCompanyModal')">
     <div class="modal">
         <h2>New Company</h2>
-        <div class="field"><label>Company Name</label><input id="ncName" placeholder="e.g. Siemens" onkeydown="if(event.key==='Enter')createCompany()"></div>
-        <div class="field"><label>Website</label><input id="ncWebsite" placeholder="siemens.com"></div>
-        <div class="field"><label>Industry</label><input id="ncIndustry" placeholder="Medical, Industrial, etc."></div>
+        <div class="field"><label for="ncName">Company Name</label><input id="ncName" placeholder="e.g. Siemens" required onkeydown="if(event.key==='Enter')createCompany()"></div>
+        <div class="field"><label for="ncWebsite">Website</label><input id="ncWebsite" placeholder="siemens.com" type="url"></div>
+        <div class="field"><label for="ncIndustry">Industry</label><input id="ncIndustry" placeholder="Medical, Industrial, etc."></div>
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('newCompanyModal')">Cancel</button>
             <button class="btn btn-primary" onclick="createCompany()">Create &amp; Add Site</button>
@@ -1212,13 +1219,13 @@
         <input type="hidden" id="asSiteCompanyId">
         <h2>Add Site to <span id="asSiteCompanyName"></span></h2>
         <div class="lo-form">
-            <div class="field"><label>Site Name</label><input id="asSiteName" placeholder="HQ, West Coast, etc."></div>
-            <div class="field"><label>Owner</label><select id="asSiteOwner"><option value="">— None —</option></select></div>
-            <div class="field"><label>Contact Name</label><input id="asSiteContactName" placeholder="John Smith"></div>
-            <div class="field"><label>Contact Email</label><input id="asSiteContactEmail" placeholder="john@example.com"></div>
-            <div class="field"><label>Contact Phone</label><input id="asSiteContactPhone" placeholder="555-123-4567"></div>
-            <div class="field"><label>Payment Terms</label><input id="asSitePayTerms" placeholder="Net 30"></div>
-            <div class="field"><label>Shipping Terms</label><input id="asSiteShipTerms" placeholder="FOB Origin"></div>
+            <div class="field"><label for="asSiteName">Site Name</label><input id="asSiteName" placeholder="HQ, West Coast, etc." required></div>
+            <div class="field"><label for="asSiteOwner">Owner</label><select id="asSiteOwner"><option value="">— None —</option></select></div>
+            <div class="field"><label for="asSiteContactName">Contact Name</label><input id="asSiteContactName" placeholder="John Smith"></div>
+            <div class="field"><label for="asSiteContactEmail">Contact Email</label><input id="asSiteContactEmail" type="email" placeholder="john@example.com"></div>
+            <div class="field"><label for="asSiteContactPhone">Contact Phone</label><input id="asSiteContactPhone" type="tel" placeholder="555-123-4567"></div>
+            <div class="field"><label for="asSitePayTerms">Payment Terms</label><input id="asSitePayTerms" placeholder="Net 30"></div>
+            <div class="field"><label for="asSiteShipTerms">Shipping Terms</label><input id="asSiteShipTerms" placeholder="FOB Origin"></div>
         </div>
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('addSiteModal')">Cancel</button>
@@ -1325,13 +1332,13 @@
         <input type="hidden" id="scSiteId">
         <input type="hidden" id="scContactId">
         <div class="lo-form">
-            <div class="field"><label>Name *</label><input id="scFullName" placeholder="Full name" onkeydown="if(event.key==='Enter')saveSiteContact()"></div>
-            <div class="field"><label>Job Title</label><input id="scTitle" placeholder="e.g. Purchasing Manager"></div>
-            <div class="field"><label>Email</label><input id="scEmail" type="email" placeholder="email@company.com"></div>
-            <div class="field"><label>Phone</label><input id="scPhone" placeholder="+1 555-000-0000"></div>
-            <div class="field field-full"><label>Notes</label><textarea id="scNotes" rows="2" placeholder="Optional notes"></textarea></div>
+            <div class="field"><label for="scFullName">Name *</label><input id="scFullName" placeholder="Full name" required onkeydown="if(event.key==='Enter')saveSiteContact()"></div>
+            <div class="field"><label for="scTitle">Job Title</label><input id="scTitle" placeholder="e.g. Purchasing Manager"></div>
+            <div class="field"><label for="scEmail">Email</label><input id="scEmail" type="email" placeholder="email@company.com"></div>
+            <div class="field"><label for="scPhone">Phone</label><input id="scPhone" type="tel" placeholder="+1 555-000-0000"></div>
+            <div class="field field-full"><label for="scNotes">Notes</label><textarea id="scNotes" rows="2" placeholder="Optional notes"></textarea></div>
         </div>
-        <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:12px;color:var(--text2);cursor:pointer"><input id="scPrimary" type="checkbox" style="accent-color:var(--teal)"> Primary contact</label>
+        <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:12px;color:var(--text2);cursor:pointer"><input id="scPrimary" type="checkbox" style="accent-color:var(--teal)" aria-label="Primary contact"> Primary contact</label>
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('siteContactModal')">Cancel</button>
             <button class="btn btn-primary" onclick="saveSiteContact()">Save Contact</button>
@@ -1345,15 +1352,15 @@
         <h2>Log Phone Call &mdash; <span id="lcCompanyName"></span></h2>
         <input type="hidden" id="lcCompanyId">
         <div class="lo-form">
-            <div class="field"><label>Phone *</label><input id="lcPhone" placeholder="+1 555-000-0000" onkeydown="if(event.key==='Enter')saveLogCall()"></div>
-            <div class="field"><label>Contact Name</label><input id="lcContactName" placeholder="Who did you speak to?"></div>
-            <div class="field"><label>Direction</label>
+            <div class="field"><label for="lcPhone">Phone *</label><input id="lcPhone" type="tel" placeholder="+1 555-000-0000" required onkeydown="if(event.key==='Enter')saveLogCall()"></div>
+            <div class="field"><label for="lcContactName">Contact Name</label><input id="lcContactName" placeholder="Who did you speak to?"></div>
+            <div class="field"><label for="lcDirection">Direction</label>
                 <select id="lcDirection" style="background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;width:100%">
                     <option value="outbound">Outbound</option>
                     <option value="inbound">Inbound</option>
                 </select>
             </div>
-            <div class="field"><label>Duration (seconds)</label><input id="lcDuration" type="number" placeholder="120"></div>
+            <div class="field"><label for="lcDuration">Duration (seconds)</label><input id="lcDuration" type="number" placeholder="120" min="0"></div>
         </div>
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('logCallModal')">Cancel</button>

@@ -1,8 +1,6 @@
 /* AVAIL v1.2.0 — CRM Extension: Customers, Offers, Quotes */
 
-// API versioning: uses same API_BASE / api() from app.js (loaded first).
-// API_BASE and api() provided by app.js (loaded first)
-// API_BASE and api() provided by app.js (loaded first)
+// Depends on app.js (loaded first): apiFetch, debounce, esc, escAttr, showToast, fmtDate, fmtDateTime
 
 // ── CRM State ──────────────────────────────────────────────────────────
 let crmCustomers = [];
@@ -24,11 +22,9 @@ async function loadCustomers() {
         const myOnly = document.getElementById('custMyOnly')?.checked;
         let url = '/api/companies?search=' + encodeURIComponent(filter);
         if (myOnly && window.userId) url += '&owner_id=' + window.userId;
-        const res = await fetch(url);
-        if (!res.ok) { showToast('Failed to load customers', 'error'); return; }
-        crmCustomers = await res.json();
+        crmCustomers = await apiFetch(url);
         renderCustomers();
-    } catch (e) { console.error('loadCustomers:', e); showToast('Error loading customers', 'error'); }
+    } catch (e) { showToast('Failed to load customers', 'error'); }
 }
 
 function renderCustomers() {
@@ -92,9 +88,7 @@ async function toggleSiteDetail(siteId) {
         panel.style.display = 'block';
         panel.innerHTML = '<p class="empty" style="padding:8px">Loading...</p>';
         try {
-            const res = await fetch('/api/sites/' + siteId);
-            if (!res.ok) { panel.innerHTML = '<p class="empty" style="padding:8px">Error loading site</p>'; return; }
-            const s = await res.json();
+            const s = await apiFetch('/api/sites/' + siteId);
             const siteDomain = s.company_domain || (s.company_website ? s.company_website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
             const contactsHtml = (s.contacts || []).length
                 ? s.contacts.map(c => `
@@ -167,15 +161,12 @@ async function createCompany() {
     const name = document.getElementById('ncName').value.trim();
     if (!name) return;
     try {
-        const res = await fetch('/api/companies', {
-            method: 'POST', headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
+        const data = await apiFetch('/api/companies', {
+            method: 'POST', body: {
                 name, website: document.getElementById('ncWebsite').value.trim(),
                 industry: document.getElementById('ncIndustry').value.trim(),
-            })
+            }
         });
-        if (!res.ok) { showToast('Failed to create company', 'error'); return; }
-        const data = await res.json();
         closeModal('newCompanyModal');
         document.getElementById('ncName').value = '';
         document.getElementById('ncWebsite').value = '';
@@ -184,7 +175,7 @@ async function createCompany() {
         openAddSiteModal(data.id, data.name);
         loadCustomers();
         loadSiteOptions();
-    } catch (e) { console.error('createCompany:', e); showToast('Error creating company', 'error'); }
+    } catch (e) { showToast('Failed to create company', 'error'); }
 }
 
 function openAddSiteModal(companyId, companyName) {
@@ -212,37 +203,23 @@ async function addSite() {
     try {
         const editId = document.getElementById('asSiteCompanyId').dataset.editSiteId;
         if (editId) {
-            const res = await fetch('/api/sites/' + editId, {
-                method: 'PUT', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            });
-            if (!res.ok) { showToast('Failed to update site', 'error'); return; }
-            closeModal('addSiteModal');
+            await apiFetch('/api/sites/' + editId, { method: 'PUT', body: data });
             delete document.getElementById('asSiteCompanyId').dataset.editSiteId;
-            ['asSiteName','asSiteContactName','asSiteContactEmail','asSiteContactPhone','asSitePayTerms','asSiteShipTerms'].forEach(id => document.getElementById(id).value = '');
             showToast('Site updated', 'success');
-            loadCustomers();
-            loadSiteOptions();
         } else {
-            const res = await fetch('/api/companies/' + companyId + '/sites', {
-                method: 'POST', headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify(data)
-            });
-            if (!res.ok) { showToast('Failed to create site', 'error'); return; }
-            closeModal('addSiteModal');
-            ['asSiteName','asSiteContactName','asSiteContactEmail','asSiteContactPhone','asSitePayTerms','asSiteShipTerms'].forEach(id => document.getElementById(id).value = '');
+            await apiFetch('/api/companies/' + companyId + '/sites', { method: 'POST', body: data });
             showToast('Site created', 'success');
-            loadCustomers();
-            loadSiteOptions();
         }
-    } catch (e) { console.error('addSite:', e); showToast('Error saving site', 'error'); }
+        closeModal('addSiteModal');
+        ['asSiteName','asSiteContactName','asSiteContactEmail','asSiteContactPhone','asSitePayTerms','asSiteShipTerms'].forEach(id => document.getElementById(id).value = '');
+        loadCustomers();
+        loadSiteOptions();
+    } catch (e) { showToast('Failed to save site', 'error'); }
 }
 
 async function openEditSiteModal(siteId) {
     try {
-        const res = await fetch('/api/sites/' + siteId);
-        if (!res.ok) { showToast('Failed to load site', 'error'); return; }
-        const s = await res.json();
+        const s = await apiFetch('/api/sites/' + siteId);
         document.getElementById('asSiteCompanyId').value = s.company_id;
         document.getElementById('asSiteCompanyId').dataset.editSiteId = siteId;
         document.getElementById('asSiteCompanyName').textContent = s.company_name || 'Unknown';
