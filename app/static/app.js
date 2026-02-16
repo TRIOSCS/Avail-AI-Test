@@ -2323,9 +2323,14 @@ async function loadMaterialList() {
 }
 
 async function openMaterialPopup(cardId) {
-    let card;
+    let card, pricingHistory;
     try { card = await apiFetch(`/api/materials/${cardId}`); }
     catch (e) { console.error('Failed to load material:', e); return; }
+
+    // Fetch customer quote history for this MPN
+    const mpn = card.display_mpn || card.normalized_mpn;
+    try { pricingHistory = await apiFetch(`/api/pricing-history/${encodeURIComponent(mpn)}`); }
+    catch { pricingHistory = { history: [] }; }
 
     let html = `<div class="mp-header">
         <h2>${esc(card.display_mpn)}</h2>
@@ -2384,27 +2389,30 @@ async function openMaterialPopup(cardId) {
     }
     html += '</div>';
 
-    // ── Vendor History section ──
-    const history = card.vendor_history || [];
-    html += `<div class="mp-section"><div class="mp-label">Vendor History (${history.length})</div>`;
-    if (history.length) {
-        for (const vh of history) {
-            const srcBadge = vh.source_type ? `<span class="badge b-src">${(vh.source_type || '').toUpperCase()}</span>` : '';
-            const authBadge = vh.is_authorized ? '<span class="badge b-auth">Auth</span>' : '';
-            const priceStr = vh.last_price != null ? `$${vh.last_price.toFixed(2)}` : '—';
-            const qtyStr = vh.last_qty != null ? vh.last_qty.toLocaleString() : '—';
-
-            html += `<div class="mp-vh-row" onclick="openVendorPopupByName('${escAttr(vh.vendor_name)}')">
-                <span class="mp-vh-vendor">${esc(vh.vendor_name)}</span>
-                ${srcBadge}${authBadge}
-                <span class="mp-vh-times">${vh.times_seen}×</span>
-                <span class="mp-vh-detail">Qty: ${qtyStr}</span>
-                <span class="mp-vh-detail">Price: ${priceStr}</span>
-                <span class="mp-vh-detail">Last: ${vh.last_seen ? fmtDate(vh.last_seen) : '—'}</span>
-            </div>`;
+    // ── Customer Quote History section ──
+    const quoteHist = pricingHistory.history || [];
+    html += `<div class="mp-section"><div class="mp-label">Customer Quote History (${quoteHist.length})</div>`;
+    if (pricingHistory.avg_price != null) {
+        html += `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">Avg sell: $${Number(pricingHistory.avg_price).toFixed(2)}${pricingHistory.avg_margin != null ? ` · Avg margin: ${pricingHistory.avg_margin}%` : ''}${pricingHistory.price_range ? ` · Range: $${Number(pricingHistory.price_range[0]).toFixed(2)}–$${Number(pricingHistory.price_range[1]).toFixed(2)}` : ''}</div>`;
+    }
+    if (quoteHist.length) {
+        html += '<div class="mp-table-wrap"><table class="mp-tbl"><thead><tr><th>Date</th><th>Customer</th><th>Quote #</th><th>Qty</th><th>Cost</th><th>Sell</th><th>Margin</th><th>Result</th></tr></thead><tbody>';
+        for (const qh of quoteHist) {
+            const resultCls = qh.result === 'won' ? 'b-auth' : qh.result === 'lost' ? 'b-src' : '';
+            html += `<tr>
+                <td class="mp-tbl-date">${qh.date ? fmtDate(qh.date) : '—'}</td>
+                <td>${esc(qh.customer || '—')}</td>
+                <td>${esc(qh.quote_number || '—')}</td>
+                <td>${qh.qty != null ? Number(qh.qty).toLocaleString() : '—'}</td>
+                <td>${qh.cost_price != null ? '$' + Number(qh.cost_price).toFixed(2) : '—'}</td>
+                <td>${qh.sell_price != null ? '$' + Number(qh.sell_price).toFixed(2) : '—'}</td>
+                <td>${qh.margin_pct != null ? qh.margin_pct + '%' : '—'}</td>
+                <td>${qh.result ? `<span class="badge ${resultCls}">${esc(qh.result.toUpperCase())}</span>` : '—'}</td>
+            </tr>`;
         }
+        html += '</tbody></table></div>';
     } else {
-        html += '<div class="mp-empty">No vendor history yet</div>';
+        html += '<div class="mp-empty">No customer quotes found for this part</div>';
     }
     html += '</div>';
 

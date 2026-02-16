@@ -1875,6 +1875,7 @@ async def pricing_history(
                         if (q.sent_at or q.created_at)
                         else None,
                         "qty": item.get("qty"),
+                        "cost_price": item.get("cost_price"),
                         "sell_price": item.get("sell_price"),
                         "margin_pct": item.get("margin_pct"),
                         "customer": site_name,
