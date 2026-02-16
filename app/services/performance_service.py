@@ -16,7 +16,7 @@ from sqlalchemy import func as sqlfunc, and_, or_, case, literal
 from sqlalchemy.orm import Session
 
 from ..models import (
-    User, VendorCard, Contact, VendorResponse, Offer, Quote, BuyPlan,
+    User, VendorCard, VendorReview, Contact, VendorResponse, Offer, Quote, BuyPlan,
     VendorMetricsSnapshot, BuyerLeaderboardSnapshot, StockListHash,
 )
 
@@ -27,12 +27,15 @@ VENDOR_WINDOW_DAYS = 90
 COLD_START_THRESHOLD = 5
 
 # Vendor composite weights (sum = 1.0)
-W_RESPONSE_RATE = 0.25
-W_QUOTE_ACCURACY = 0.20
-W_ON_TIME = 0.20
-W_CANCELLATION = 0.15
-W_RMA = 0.10
-W_LEAD_TIME = 0.10
+W_RESPONSE_RATE = 0.15
+W_QUOTE_ACCURACY = 0.10
+W_ON_TIME = 0.10
+W_CANCELLATION = 0.10
+W_RMA = 0.05
+W_LEAD_TIME = 0.05
+W_QUOTE_CONVERSION = 0.15
+W_PO_CONVERSION = 0.15
+W_REVIEW_RATING = 0.15
 
 # Buyer point multipliers
 PTS_LOGGED = 1
@@ -134,8 +137,47 @@ def compute_vendor_scorecard(db: Session, vendor_card_id: int,
         # Approximate from on-time delivery data
         lead_time_accuracy = on_time_delivery
 
+    # ── 7. Quote conversion rate ──
+    # What % of this vendor's offers made it into quotes?
+    total_offers = len(offers_in_window)
+    offers_in_quotes = 0
+    if total_offers > 0:
+        offer_id_set = {o.id for o in offers_in_window}
+        all_quotes = db.query(Quote).filter(
+            Quote.status.in_(["sent", "won", "lost"]),
+        ).all()
+        for q in all_quotes:
+            for item in (q.line_items or []):
+                oid = item.get("offer_id")
+                if oid in offer_id_set:
+                    offers_in_quotes += 1
+                    offer_id_set.discard(oid)
+    quote_conversion = (offers_in_quotes / total_offers) if total_offers > 0 else None
+
+    # ── 8. PO conversion rate ──
+    # What % of this vendor's offers made it to PO confirmed/complete?
+    offers_to_po = 0
+    if total_offers > 0:
+        offer_id_set2 = {o.id for o in offers_in_window}
+        po_plans = db.query(BuyPlan).filter(
+            BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]),
+        ).all()
+        for bp in po_plans:
+            for item in (bp.line_items or []):
+                oid = item.get("offer_id")
+                if oid in offer_id_set2:
+                    offers_to_po += 1
+                    offer_id_set2.discard(oid)
+    po_conversion = (offers_to_po / total_offers) if total_offers > 0 else None
+
+    # ── 9. Average buyer review rating ──
+    avg_rating_row = db.query(sqlfunc.avg(VendorReview.rating)).filter(
+        VendorReview.vendor_card_id == vendor_card_id,
+    ).scalar()
+    avg_review_rating = float(avg_rating_row) / 5.0 if avg_rating_row else None  # Normalize to 0-1
+
     # ── Interaction count & cold-start ──
-    interaction_count = rfqs_sent + len(offers_in_window)
+    interaction_count = rfqs_sent + total_offers
 
     # Count POs in window
     pos_in_window = total_delivery
@@ -146,6 +188,7 @@ def compute_vendor_scorecard(db: Session, vendor_card_id: int,
     composite = _compute_composite(
         response_rate, quote_accuracy, on_time_delivery,
         cancellation_rate, rma_rate, lead_time_accuracy,
+        quote_conversion, po_conversion, avg_review_rating,
     ) if is_sufficient else None
 
     return {
@@ -156,6 +199,9 @@ def compute_vendor_scorecard(db: Session, vendor_card_id: int,
         "cancellation_rate": cancellation_rate,
         "rma_rate": rma_rate,
         "lead_time_accuracy": lead_time_accuracy,
+        "quote_conversion": quote_conversion,
+        "po_conversion": po_conversion,
+        "avg_review_rating": avg_review_rating,
         "composite_score": composite,
         "interaction_count": interaction_count,
         "is_sufficient_data": is_sufficient,
@@ -166,7 +212,9 @@ def compute_vendor_scorecard(db: Session, vendor_card_id: int,
 
 
 def _compute_composite(response_rate, quote_accuracy, on_time,
-                        cancellation_rate, rma_rate, lead_time) -> float:
+                        cancellation_rate, rma_rate, lead_time,
+                        quote_conversion=None, po_conversion=None,
+                        avg_review_rating=None) -> float:
     """Weighted average of available metrics. Cancellation & RMA are inverted (lower=better)."""
     metrics = []
     weights = []
@@ -189,6 +237,15 @@ def _compute_composite(response_rate, quote_accuracy, on_time,
     if lead_time is not None:
         metrics.append(lead_time)
         weights.append(W_LEAD_TIME)
+    if quote_conversion is not None:
+        metrics.append(min(1.0, quote_conversion))
+        weights.append(W_QUOTE_CONVERSION)
+    if po_conversion is not None:
+        metrics.append(min(1.0, po_conversion))
+        weights.append(W_PO_CONVERSION)
+    if avg_review_rating is not None:
+        metrics.append(min(1.0, avg_review_rating))
+        weights.append(W_REVIEW_RATING)
 
     if not weights:
         return None
@@ -228,6 +285,9 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
             snap.cancellation_rate = result["cancellation_rate"]
             snap.rma_rate = result["rma_rate"]
             snap.lead_time_accuracy = result["lead_time_accuracy"]
+            snap.quote_conversion = result["quote_conversion"]
+            snap.po_conversion = result["po_conversion"]
+            snap.avg_review_rating = result["avg_review_rating"]
             snap.composite_score = result["composite_score"]
             snap.interaction_count = result["interaction_count"]
             snap.is_sufficient_data = result["is_sufficient_data"]
@@ -296,6 +356,9 @@ def get_vendor_scorecard_list(db: Session, sort_by: str = "composite_score",
             "cancellation_rate": snap.cancellation_rate,
             "rma_rate": snap.rma_rate,
             "lead_time_accuracy": snap.lead_time_accuracy,
+            "quote_conversion": snap.quote_conversion,
+            "po_conversion": snap.po_conversion,
+            "avg_review_rating": snap.avg_review_rating,
             "composite_score": snap.composite_score,
             "interaction_count": snap.interaction_count,
             "is_sufficient_data": snap.is_sufficient_data,
@@ -338,6 +401,9 @@ def get_vendor_scorecard_detail(db: Session, vendor_card_id: int) -> dict:
             "cancellation_rate": latest.cancellation_rate,
             "rma_rate": latest.rma_rate,
             "lead_time_accuracy": latest.lead_time_accuracy,
+            "quote_conversion": latest.quote_conversion,
+            "po_conversion": latest.po_conversion,
+            "avg_review_rating": latest.avg_review_rating,
             "composite_score": latest.composite_score,
             "interaction_count": latest.interaction_count,
             "is_sufficient_data": latest.is_sufficient_data,

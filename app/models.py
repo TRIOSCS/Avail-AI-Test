@@ -479,6 +479,9 @@ class VendorMetricsSnapshot(Base):
     cancellation_rate = Column(Float)
     rma_rate = Column(Float)
     lead_time_accuracy = Column(Float)
+    quote_conversion = Column(Float)
+    po_conversion = Column(Float)
+    avg_review_rating = Column(Float)
 
     composite_score = Column(Float)
     interaction_count = Column(Integer, default=0)

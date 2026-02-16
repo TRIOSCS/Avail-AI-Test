@@ -2269,14 +2269,20 @@ function renderVendorScorecards(data) {
             <th style="cursor:pointer" onclick="window._perfToggleSort('cancellation_rate')">Cancel Rate${sortIcon('cancellation_rate')}</th>
             <th style="cursor:pointer" onclick="window._perfToggleSort('rma_rate')">RMA Rate${sortIcon('rma_rate')}</th>
             <th style="cursor:pointer" onclick="window._perfToggleSort('lead_time_accuracy')">Lead Time${sortIcon('lead_time_accuracy')}</th>
+            <th style="cursor:pointer" onclick="window._perfToggleSort('quote_conversion')">Quote Rate${sortIcon('quote_conversion')}</th>
+            <th style="cursor:pointer" onclick="window._perfToggleSort('po_conversion')">PO Rate${sortIcon('po_conversion')}</th>
+            <th style="cursor:pointer" onclick="window._perfToggleSort('avg_review_rating')">Reviews${sortIcon('avg_review_rating')}</th>
             <th style="cursor:pointer" onclick="window._perfToggleSort('composite_score')">Score${sortIcon('composite_score')}</th>
         </tr></thead><tbody>`;
 
     for (const v of items) {
         if (!v.is_sufficient_data) {
-            html += `<tr class="cold-start"><td>${v.vendor_name}</td><td colspan="7" class="metric-cell na" style="text-align:center;font-style:italic">Insufficient Data (${v.interaction_count} interactions)</td></tr>`;
+            html += `<tr class="cold-start"><td>${v.vendor_name}</td><td colspan="10" class="metric-cell na" style="text-align:center;font-style:italic">Insufficient Data (${v.interaction_count} interactions)</td></tr>`;
             continue;
         }
+        const reviewDisplay = v.avg_review_rating !== null && v.avg_review_rating !== undefined
+            ? `<td class="metric-cell ${v.avg_review_rating >= 0.7 ? 'metric-green' : v.avg_review_rating >= 0.4 ? 'metric-yellow' : 'metric-red'}">${(v.avg_review_rating * 5).toFixed(1)}/5</td>`
+            : '<td class="metric-cell na">N/A</td>';
         html += `<tr>
             <td><strong>${v.vendor_name}</strong></td>
             ${metricCell(v.response_rate)}
@@ -2285,6 +2291,9 @@ function renderVendorScorecards(data) {
             ${metricCell(v.cancellation_rate, true)}
             ${metricCell(v.rma_rate, true)}
             ${metricCell(v.lead_time_accuracy)}
+            ${metricCell(v.quote_conversion)}
+            ${metricCell(v.po_conversion)}
+            ${reviewDisplay}
             ${metricCell(v.composite_score)}
         </tr>`;
     }

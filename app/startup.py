@@ -374,6 +374,9 @@ def _create_performance_tables(conn) -> None:
             cancellation_rate FLOAT,
             rma_rate FLOAT,
             lead_time_accuracy FLOAT,
+            quote_conversion FLOAT,
+            po_conversion FLOAT,
+            avg_review_rating FLOAT,
             composite_score FLOAT,
             interaction_count INTEGER DEFAULT 0,
             is_sufficient_data BOOLEAN DEFAULT FALSE,
@@ -413,6 +416,13 @@ def _create_performance_tables(conn) -> None:
     ]
     for stmt in tables:
         _exec(conn, stmt)
+    # Add new columns to existing tables
+    for col_stmt in [
+        "ALTER TABLE vendor_metrics_snapshot ADD COLUMN IF NOT EXISTS quote_conversion FLOAT",
+        "ALTER TABLE vendor_metrics_snapshot ADD COLUMN IF NOT EXISTS po_conversion FLOAT",
+        "ALTER TABLE vendor_metrics_snapshot ADD COLUMN IF NOT EXISTS avg_review_rating FLOAT",
+    ]:
+        _exec(conn, col_stmt)
     indexes = [
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_vms_vendor_date ON vendor_metrics_snapshot(vendor_card_id, snapshot_date)",
         "CREATE INDEX IF NOT EXISTS ix_vms_date ON vendor_metrics_snapshot(snapshot_date)",
