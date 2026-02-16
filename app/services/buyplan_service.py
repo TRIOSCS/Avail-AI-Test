@@ -35,16 +35,16 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
     # Build line items table
     rows = ""
     total_cost = 0
-    for item in (plan.line_items or []):
+    for item in plan.line_items or []:
         cost = (item.get("qty") or 0) * (item.get("cost_price") or 0)
         total_cost += cost
         rows += f"""<tr>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get('mpn','')}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get('vendor_name','')}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get('qty',0):,}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">${item.get('cost_price',0):.4f}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("mpn", "")}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("vendor_name", "")}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("qty", 0):,}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">${item.get("cost_price", 0):.4f}</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb">${cost:,.2f}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get('lead_time','')}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("lead_time", "")}</td>
         </tr>"""
 
     html_body = f"""
@@ -88,27 +88,33 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
             if not token:
                 continue
             from ..utils.graph_client import GraphClient
+
             gc = GraphClient(token)
-            await gc.post_json("/me/sendMail", {
-                "message": {
-                    "subject": f"[AVAIL] Buy Plan Approval Required — #{plan.requisition_id}",
-                    "body": {"contentType": "HTML", "content": html_body},
-                    "toRecipients": [{"emailAddress": {"address": admin.email}}],
+            await gc.post_json(
+                "/me/sendMail",
+                {
+                    "message": {
+                        "subject": f"[AVAIL] Buy Plan Approval Required — #{plan.requisition_id}",
+                        "body": {"contentType": "HTML", "content": html_body},
+                        "toRecipients": [{"emailAddress": {"address": admin.email}}],
+                    },
+                    "saveToSentItems": "false",
                 },
-                "saveToSentItems": "false",
-            })
+            )
             log.info(f"Buy plan email sent to admin {admin.email}")
         except Exception as e:
             log.error(f"Failed to send buy plan email to {admin.email}: {e}")
 
     # In-app notification
     for admin in admin_users:
-        db.add(ActivityLog(
-            user_id=admin.id,
-            activity_type="buyplan_pending",
-            channel="system",
-            subject=f"Buy plan #{plan.id} awaiting approval — {submitter_name}",
-        ))
+        db.add(
+            ActivityLog(
+                user_id=admin.id,
+                activity_type="buyplan_pending",
+                channel="system",
+                subject=f"Buy plan #{plan.id} awaiting approval — {submitter_name}",
+            )
+        )
     db.commit()
 
     # Teams notification
@@ -119,7 +125,9 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
         f"[Review in AVAIL]({settings.app_url}/#buyplan/{plan.id})"
     )
     for admin in admin_users:
-        await _send_teams_dm(admin, f"Buy Plan #{plan.id} needs your approval — ${total_cost:,.2f}")
+        await _send_teams_dm(
+            admin, f"Buy Plan #{plan.id} needs your approval — ${total_cost:,.2f}"
+        )
 
 
 async def notify_buyplan_approved(plan: BuyPlan, db: Session):
@@ -131,13 +139,17 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
 
     # Identify unique buyers from the line items
     buyer_ids = set()
-    for item in (plan.line_items or []):
+    for item in plan.line_items or []:
         entered_by = item.get("entered_by_id")
         if entered_by:
             buyer_ids.add(entered_by)
     if not buyer_ids:
         # Fallback: get entered_by_id from the offers themselves
-        offer_ids = [item.get("offer_id") for item in (plan.line_items or []) if item.get("offer_id")]
+        offer_ids = [
+            item.get("offer_id")
+            for item in (plan.line_items or [])
+            if item.get("offer_id")
+        ]
         if offer_ids:
             offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
             buyer_ids = {o.entered_by_id for o in offers if o.entered_by_id}
@@ -146,8 +158,9 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
 
     for buyer in buyers:
         # Filter items for this buyer
-        buyer_items = [i for i in (plan.line_items or [])
-                       if i.get("entered_by_id") == buyer.id]
+        buyer_items = [
+            i for i in (plan.line_items or []) if i.get("entered_by_id") == buyer.id
+        ]
         if not buyer_items:
             # All items if not specifically assigned
             buyer_items = plan.line_items or []
@@ -155,18 +168,18 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
         rows = ""
         for item in buyer_items:
             rows += f"""<tr>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get('mpn','')}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get('vendor_name','')}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get('qty',0):,}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">${item.get('cost_price',0):.4f}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get('lead_time','')}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("mpn", "")}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("vendor_name", "")}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("qty", 0):,}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb">${item.get("cost_price", 0):.4f}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("lead_time", "")}</td>
             </tr>"""
 
         html_body = f"""
         <div style="font-family:Arial,sans-serif;max-width:700px">
             <h2 style="color:#16a34a">Buy Plan Approved — Action Required</h2>
             <p>A buy plan has been approved by <strong>{approver_name}</strong>. Please create POs in Acctivate for the following items:</p>
-            {f'<p style="color:#6b7280"><em>Manager notes: {plan.manager_notes}</em></p>' if plan.manager_notes else ''}
+            {f'<p style="color:#6b7280"><em>Manager notes: {plan.manager_notes}</em></p>' if plan.manager_notes else ""}
             <table style="border-collapse:collapse;width:100%;margin:16px 0">
                 <thead><tr style="background:#f3f4f6">
                     <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>
@@ -191,31 +204,39 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
             if not token:
                 continue
             from ..utils.graph_client import GraphClient
+
             gc = GraphClient(token)
-            await gc.post_json("/me/sendMail", {
-                "message": {
-                    "subject": f"[AVAIL] Buy Plan Approved — PO Required for #{plan.requisition_id}",
-                    "body": {"contentType": "HTML", "content": html_body},
-                    "toRecipients": [{"emailAddress": {"address": buyer.email}}],
+            await gc.post_json(
+                "/me/sendMail",
+                {
+                    "message": {
+                        "subject": f"[AVAIL] Buy Plan Approved — PO Required for #{plan.requisition_id}",
+                        "body": {"contentType": "HTML", "content": html_body},
+                        "toRecipients": [{"emailAddress": {"address": buyer.email}}],
+                    },
+                    "saveToSentItems": "false",
                 },
-                "saveToSentItems": "false",
-            })
+            )
             log.info(f"Buy plan approved email sent to buyer {buyer.email}")
         except Exception as e:
             log.error(f"Failed to send approved email to {buyer.email}: {e}")
 
         # In-app notification
-        db.add(ActivityLog(
-            user_id=buyer.id,
-            activity_type="buyplan_approved",
-            channel="system",
-            subject=f"Buy plan #{plan.id} approved — create POs",
-        ))
+        db.add(
+            ActivityLog(
+                user_id=buyer.id,
+                activity_type="buyplan_approved",
+                channel="system",
+                subject=f"Buy plan #{plan.id} approved — create POs",
+            )
+        )
 
         # Teams DM
-        await _send_teams_dm(buyer,
+        await _send_teams_dm(
+            buyer,
             f"Buy Plan #{plan.id} has been approved. "
-            f"Please create POs for {len(buyer_items)} item(s) in Acctivate.")
+            f"Please create POs for {len(buyer_items)} item(s) in Acctivate.",
+        )
 
     db.commit()
 
@@ -242,7 +263,7 @@ async def notify_buyplan_rejected(plan: BuyPlan, db: Session):
     <div style="font-family:Arial,sans-serif;max-width:600px">
         <h2 style="color:#dc2626">Buy Plan Rejected</h2>
         <p>Your buy plan for requisition <strong>#{plan.requisition_id}</strong> was rejected by <strong>{rejector_name}</strong>.</p>
-        {f'<p><strong>Reason:</strong> {plan.rejection_reason}</p>' if plan.rejection_reason else ''}
+        {f"<p><strong>Reason:</strong> {plan.rejection_reason}</p>" if plan.rejection_reason else ""}
         <p style="margin-top:20px">
             <a href="{settings.app_url}/#buyplan/{plan.id}"
                style="background:#2563eb;color:white;padding:10px 24px;text-decoration:none;border-radius:5px">
@@ -256,27 +277,38 @@ async def notify_buyplan_rejected(plan: BuyPlan, db: Session):
         token = await get_valid_token(submitter, db)
         if token:
             from ..utils.graph_client import GraphClient
+
             gc = GraphClient(token)
-            await gc.post_json("/me/sendMail", {
-                "message": {
-                    "subject": f"[AVAIL] Buy Plan Rejected — #{plan.requisition_id}",
-                    "body": {"contentType": "HTML", "content": html_body},
-                    "toRecipients": [{"emailAddress": {"address": submitter.email}}],
+            await gc.post_json(
+                "/me/sendMail",
+                {
+                    "message": {
+                        "subject": f"[AVAIL] Buy Plan Rejected — #{plan.requisition_id}",
+                        "body": {"contentType": "HTML", "content": html_body},
+                        "toRecipients": [
+                            {"emailAddress": {"address": submitter.email}}
+                        ],
+                    },
+                    "saveToSentItems": "false",
                 },
-                "saveToSentItems": "false",
-            })
+            )
     except Exception as e:
         log.error(f"Failed to send rejection email to {submitter.email}: {e}")
 
-    db.add(ActivityLog(
-        user_id=submitter.id,
-        activity_type="buyplan_rejected",
-        channel="system",
-        subject=f"Buy plan #{plan.id} rejected — {plan.rejection_reason or 'no reason given'}",
-    ))
+    db.add(
+        ActivityLog(
+            user_id=submitter.id,
+            activity_type="buyplan_rejected",
+            channel="system",
+            subject=f"Buy plan #{plan.id} rejected — {plan.rejection_reason or 'no reason given'}",
+        )
+    )
     db.commit()
 
-    await _send_teams_dm(submitter, f"Buy Plan #{plan.id} was rejected: {plan.rejection_reason or 'no reason given'}")
+    await _send_teams_dm(
+        submitter,
+        f"Buy Plan #{plan.id} was rejected: {plan.rejection_reason or 'no reason given'}",
+    )
 
 
 # ── Teams Integration ────────────────────────────────────────────────────
@@ -289,20 +321,29 @@ async def _post_teams_channel(message: str):
         return
     try:
         async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(settings.teams_webhook_url, json={
-                "type": "message",
-                "attachments": [{
-                    "contentType": "application/vnd.microsoft.card.adaptive",
-                    "content": {
-                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                        "type": "AdaptiveCard",
-                        "version": "1.4",
-                        "body": [{"type": "TextBlock", "text": message, "wrap": True}],
-                    }
-                }]
-            })
+            resp = await client.post(
+                settings.teams_webhook_url,
+                json={
+                    "type": "message",
+                    "attachments": [
+                        {
+                            "contentType": "application/vnd.microsoft.card.adaptive",
+                            "content": {
+                                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                                "type": "AdaptiveCard",
+                                "version": "1.4",
+                                "body": [
+                                    {"type": "TextBlock", "text": message, "wrap": True}
+                                ],
+                            },
+                        }
+                    ],
+                },
+            )
             if resp.status_code not in (200, 202):
-                log.warning(f"Teams webhook returned {resp.status_code}: {resp.text[:200]}")
+                log.warning(
+                    f"Teams webhook returned {resp.status_code}: {resp.text[:200]}"
+                )
     except Exception as e:
         log.error(f"Teams channel post failed: {e}")
 
@@ -314,24 +355,32 @@ async def _send_teams_dm(user: User, message: str):
         return
     try:
         from ..utils.graph_client import GraphClient
+
         gc = GraphClient(user.access_token)
         # Create or get 1:1 chat with the user (self-chat acts as notification)
-        chat = await gc.post_json("/chats", {
-            "chatType": "oneOnOne",
-            "members": [
-                {"@odata.type": "#microsoft.graph.aadUserConversationMember",
-                 "roles": ["owner"],
-                 "user@odata.bind": f"https://graph.microsoft.com/v1.0/users/{user.email}"}
-            ]
-        })
+        chat = await gc.post_json(
+            "/chats",
+            {
+                "chatType": "oneOnOne",
+                "members": [
+                    {
+                        "@odata.type": "#microsoft.graph.aadUserConversationMember",
+                        "roles": ["owner"],
+                        "user@odata.bind": f"https://graph.microsoft.com/v1.0/users/{user.email}",
+                    }
+                ],
+            },
+        )
         chat_id = chat.get("id")
         if chat_id:
-            await gc.post_json(f"/chats/{chat_id}/messages", {
-                "body": {"content": message}
-            })
+            await gc.post_json(
+                f"/chats/{chat_id}/messages", {"body": {"content": message}}
+            )
             log.info(f"Teams DM sent to {user.email}")
     except Exception as e:
-        log.debug(f"Teams DM to {user.email} failed (may not have Chat permissions): {e}")
+        log.debug(
+            f"Teams DM to {user.email} failed (may not have Chat permissions): {e}"
+        )
 
 
 # ── PO Email Verification ────────────────────────────────────────────────
@@ -377,13 +426,15 @@ async def verify_po_sent(plan: BuyPlan, db: Session) -> dict:
                     "$top": "5",
                     "$select": "subject,toRecipients,sentDateTime",
                     "$orderby": "sentDateTime desc",
-                }
+                },
             )
             messages = search_result.get("value", [])
             if messages:
                 msg = messages[0]
                 recipients = msg.get("toRecipients", [])
-                po_recipient = recipients[0]["emailAddress"]["address"] if recipients else None
+                po_recipient = (
+                    recipients[0]["emailAddress"]["address"] if recipients else None
+                )
                 po_sent_at = msg.get("sentDateTime")
 
                 # Update line item
@@ -407,10 +458,12 @@ async def verify_po_sent(plan: BuyPlan, db: Session) -> dict:
 
     if updated:
         from sqlalchemy.orm.attributes import flag_modified
+
         flag_modified(plan, "line_items")
         # Check if all POs are verified
         all_verified = all(
-            item.get("po_verified") for item in (plan.line_items or [])
+            item.get("po_verified")
+            for item in (plan.line_items or [])
             if item.get("po_number")
         )
         if all_verified and plan.status == "po_entered":

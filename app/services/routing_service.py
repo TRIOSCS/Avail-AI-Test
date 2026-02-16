@@ -22,14 +22,20 @@ Usage:
     # Also: expire stale offers (14-day TTL)
     expire_stale_offers(db)
 """
+
 import logging
 from datetime import datetime, timezone, timedelta
 
 from sqlalchemy.orm import Session
 
 from app.models import (
-    RoutingAssignment, BuyerProfile, BuyerVendorStats,
-    Requirement, VendorCard, Offer, User
+    RoutingAssignment,
+    BuyerProfile,
+    BuyerVendorStats,
+    Requirement,
+    VendorCard,
+    Offer,
+    User,
 )
 from app.config import settings
 
@@ -110,7 +116,9 @@ def _score_commodity(profile: BuyerProfile, requirement: Requirement) -> float:
     # Infer commodity from requirement context
     req_commodity = _infer_commodity(requirement)
     if not req_commodity:
-        return float(W_COMMODITY) * 0.25  # Small baseline — can't determine, don't penalize
+        return (
+            float(W_COMMODITY) * 0.25
+        )  # Small baseline — can't determine, don't penalize
 
     if profile.primary_commodity == req_commodity:
         return float(W_COMMODITY)
@@ -181,6 +189,7 @@ def _country_to_region(country: str) -> str | None:
 #  ASSIGNMENT ENGINE — rank buyers, create routing
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def rank_buyers_for_assignment(
     requirement_id: int,
     vendor_card_id: int,
@@ -203,19 +212,25 @@ def rank_buyers_for_assignment(
     results = []
     for profile in profiles:
         # Get this buyer's stats with this vendor
-        stats = db.query(BuyerVendorStats).filter(
-            BuyerVendorStats.user_id == profile.user_id,
-            BuyerVendorStats.vendor_card_id == vendor_card_id,
-        ).first()
+        stats = (
+            db.query(BuyerVendorStats)
+            .filter(
+                BuyerVendorStats.user_id == profile.user_id,
+                BuyerVendorStats.vendor_card_id == vendor_card_id,
+            )
+            .first()
+        )
 
         score = score_buyer(profile, stats, requirement, vendor)
 
         user = db.get(User, profile.user_id)
-        results.append({
-            "user_id": profile.user_id,
-            "user_name": user.name if user else "Unknown",
-            "score_details": score,
-        })
+        results.append(
+            {
+                "user_id": profile.user_id,
+                "user_name": user.name if user else "Unknown",
+                "score_details": score,
+            }
+        )
 
     # Sort by total score descending
     results.sort(key=lambda x: x["score_details"]["total"], reverse=True)
@@ -233,11 +248,15 @@ def create_routing_assignment(
     Skips if an active assignment already exists for this pair.
     """
     # Check for existing active assignment
-    existing = db.query(RoutingAssignment).filter(
-        RoutingAssignment.requirement_id == requirement_id,
-        RoutingAssignment.vendor_card_id == vendor_card_id,
-        RoutingAssignment.status == "active",
-    ).first()
+    existing = (
+        db.query(RoutingAssignment)
+        .filter(
+            RoutingAssignment.requirement_id == requirement_id,
+            RoutingAssignment.vendor_card_id == vendor_card_id,
+            RoutingAssignment.status == "active",
+        )
+        .first()
+    )
     if existing:
         return existing
 
@@ -265,14 +284,17 @@ def create_routing_assignment(
     db.add(assignment)
     db.flush()
 
-    log.info(f"Routing assignment created: req={requirement_id} vendor={vendor_card_id} "
-             f"top3=[{', '.join(str(t['user_id']) for t in top3)}]")
+    log.info(
+        f"Routing assignment created: req={requirement_id} vendor={vendor_card_id} "
+        f"top3=[{', '.join(str(t['user_id']) for t in top3)}]"
+    )
     return assignment
 
 
 # ═══════════════════════════════════════════════════════════════════════
 #  CLAIM — first buyer to enter offer wins
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def claim_routing(assignment_id: int, buyer_id: int, db: Session) -> dict:
     """Claim a routing assignment by entering an offer.
@@ -284,7 +306,10 @@ def claim_routing(assignment_id: int, buyer_id: int, db: Session) -> dict:
         return {"success": False, "message": "Assignment not found"}
 
     if assignment.status == "claimed":
-        return {"success": False, "message": f"Already claimed by user {assignment.claimed_by_id}"}
+        return {
+            "success": False,
+            "message": f"Already claimed by user {assignment.claimed_by_id}",
+        }
 
     if assignment.status == "expired":
         return {"success": False, "message": "Assignment has expired"}
@@ -296,25 +321,39 @@ def claim_routing(assignment_id: int, buyer_id: int, db: Session) -> dict:
         return {"success": False, "message": "Assignment has expired"}
 
     # Verify buyer is in the top-3 (or allow any if past 24 hours for the waterfall)
-    is_top3 = buyer_id in [assignment.buyer_1_id, assignment.buyer_2_id, assignment.buyer_3_id]
+    is_top3 = buyer_id in [
+        assignment.buyer_1_id,
+        assignment.buyer_2_id,
+        assignment.buyer_3_id,
+    ]
     hours_elapsed = (now - assignment.assigned_at).total_seconds() / 3600
 
     if not is_top3 and hours_elapsed < 24:
-        return {"success": False, "message": "Only top-3 ranked buyers can claim in the first 24 hours"}
+        return {
+            "success": False,
+            "message": "Only top-3 ranked buyers can claim in the first 24 hours",
+        }
 
     assignment.claimed_by_id = buyer_id
     assignment.claimed_at = now
     assignment.status = "claimed"
     db.flush()
 
-    log.info(f"Routing claimed: assignment={assignment_id} by user={buyer_id} "
-             f"(top3={is_top3}, hours={hours_elapsed:.1f})")
-    return {"success": True, "message": "Routing claimed", "assignment_id": assignment_id}
+    log.info(
+        f"Routing claimed: assignment={assignment_id} by user={buyer_id} "
+        f"(top3={is_top3}, hours={hours_elapsed:.1f})"
+    )
+    return {
+        "success": True,
+        "message": "Routing claimed",
+        "assignment_id": assignment_id,
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════
 #  EXPIRATION SWEEPS
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def expire_stale_assignments(db: Session) -> int:
     """Expire routing assignments past their 48-hour window.
@@ -323,10 +362,14 @@ def expire_stale_assignments(db: Session) -> int:
     Returns count of expired assignments.
     """
     now = datetime.now(timezone.utc)
-    stale = db.query(RoutingAssignment).filter(
-        RoutingAssignment.status == "active",
-        RoutingAssignment.expires_at <= now,
-    ).all()
+    stale = (
+        db.query(RoutingAssignment)
+        .filter(
+            RoutingAssignment.status == "active",
+            RoutingAssignment.expires_at <= now,
+        )
+        .all()
+    )
 
     for assignment in stale:
         assignment.status = "expired"
@@ -344,19 +387,27 @@ def expire_stale_offers(db: Session) -> int:
     Called by nightly scheduler.
     Returns count of expired offers.
     """
-    cutoff = datetime.now(timezone.utc) - timedelta(days=settings.offer_attribution_days)
-    stale = db.query(Offer).filter(
-        Offer.attribution_status == "active",
-        Offer.expires_at.isnot(None),
-        Offer.expires_at <= cutoff,
-    ).all()
+    cutoff = datetime.now(timezone.utc) - timedelta(
+        days=settings.offer_attribution_days
+    )
+    stale = (
+        db.query(Offer)
+        .filter(
+            Offer.attribution_status == "active",
+            Offer.expires_at.isnot(None),
+            Offer.expires_at <= cutoff,
+        )
+        .all()
+    )
 
     for offer in stale:
         offer.attribution_status = "expired"
 
     if stale:
         db.flush()
-        log.info(f"Expired {len(stale)} offers past {settings.offer_attribution_days}-day window")
+        log.info(
+            f"Expired {len(stale)} offers past {settings.offer_attribution_days}-day window"
+        )
 
     return len(stale)
 
@@ -371,7 +422,10 @@ def reconfirm_offer(offer_id: int, db: Session) -> dict:
         return {"success": False, "message": "Offer not found"}
 
     if offer.attribution_status == "converted":
-        return {"success": False, "message": "Offer already converted — no reconfirm needed"}
+        return {
+            "success": False,
+            "message": "Offer already converted — no reconfirm needed",
+        }
 
     now = datetime.now(timezone.utc)
     offer.reconfirmed_at = now
@@ -392,18 +446,24 @@ def reconfirm_offer(offer_id: int, db: Session) -> dict:
 #  QUERY HELPERS
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def get_active_assignments_for_buyer(user_id: int, db: Session) -> list[dict]:
     """Get all active routing assignments where the user is in the top-3."""
     now = datetime.now(timezone.utc)
-    assignments = db.query(RoutingAssignment).filter(
-        RoutingAssignment.status == "active",
-        RoutingAssignment.expires_at > now,
-        (
-            (RoutingAssignment.buyer_1_id == user_id) |
-            (RoutingAssignment.buyer_2_id == user_id) |
-            (RoutingAssignment.buyer_3_id == user_id)
-        ),
-    ).order_by(RoutingAssignment.expires_at.asc()).all()
+    assignments = (
+        db.query(RoutingAssignment)
+        .filter(
+            RoutingAssignment.status == "active",
+            RoutingAssignment.expires_at > now,
+            (
+                (RoutingAssignment.buyer_1_id == user_id)
+                | (RoutingAssignment.buyer_2_id == user_id)
+                | (RoutingAssignment.buyer_3_id == user_id)
+            ),
+        )
+        .order_by(RoutingAssignment.expires_at.asc())
+        .all()
+    )
 
     return [_assignment_to_dict(a, user_id) for a in assignments]
 
@@ -419,7 +479,11 @@ def get_assignment_details(assignment_id: int, db: Session) -> dict | None:
 def _assignment_to_dict(a: RoutingAssignment, for_user_id: int | None = None) -> dict:
     """Serialize a routing assignment to dict."""
     now = datetime.now(timezone.utc)
-    hours_remaining = max(0, (a.expires_at - now).total_seconds() / 3600) if a.status == "active" else 0
+    hours_remaining = (
+        max(0, (a.expires_at - now).total_seconds() / 3600)
+        if a.status == "active"
+        else 0
+    )
 
     rank = None
     if for_user_id:
@@ -454,6 +518,7 @@ def _assignment_to_dict(a: RoutingAssignment, for_user_id: int | None = None) ->
 #  NOTIFICATIONS — email top-3 buyers when assigned
 # ═══════════════════════════════════════════════════════════════════════
 
+
 async def notify_routing_assignment(
     assignment: RoutingAssignment,
     db: Session,
@@ -468,13 +533,19 @@ async def notify_routing_assignment(
     requirement = db.get(Requirement, assignment.requirement_id)
     vendor = db.get(VendorCard, assignment.vendor_card_id)
     if not requirement or not vendor:
-        log.warning(f"Cannot notify: missing requirement or vendor for assignment {assignment.id}")
+        log.warning(
+            f"Cannot notify: missing requirement or vendor for assignment {assignment.id}"
+        )
         return 0
 
     # Get admin token for sending
-    admin_user = db.query(User).filter(
-        User.ms_token.isnot(None),
-    ).first()
+    admin_user = (
+        db.query(User)
+        .filter(
+            User.ms_token.isnot(None),
+        )
+        .first()
+    )
     if not admin_user or not admin_user.ms_token:
         log.warning("No admin token available for routing notifications")
         return 0
@@ -491,7 +562,11 @@ async def notify_routing_assignment(
     brand = requirement.brand or "Unknown"
     vendor_name = vendor.display_name or "Unknown Vendor"
     hours = settings.routing_window_hours
-    expires_str = assignment.expires_at.strftime("%b %d at %I:%M %p UTC") if assignment.expires_at else "48 hours"
+    expires_str = (
+        assignment.expires_at.strftime("%b %d at %I:%M %p UTC")
+        if assignment.expires_at
+        else "48 hours"
+    )
 
     sent = 0
     for buyer_id, score, rank in buyer_ids:
@@ -528,15 +603,15 @@ async def notify_routing_assignment(
                     "message": {
                         "subject": subject,
                         "body": {"contentType": "HTML", "content": body},
-                        "toRecipients": [
-                            {"emailAddress": {"address": buyer.email}}
-                        ],
+                        "toRecipients": [{"emailAddress": {"address": buyer.email}}],
                     },
                     "saveToSentItems": False,
                 },
             )
             sent += 1
-            log.info(f"Routing notification sent to {buyer.email} (rank #{rank}) for assignment {assignment.id}")
+            log.info(
+                f"Routing notification sent to {buyer.email} (rank #{rank}) for assignment {assignment.id}"
+            )
         except Exception as e:
             log.error(f"Failed to send routing notification to {buyer.email}: {e}")
 

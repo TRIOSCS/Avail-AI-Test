@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 
 class PhoneCallLog(BaseModel):
     """Log a phone contact with a vendor."""
+
     requisition_id: int
     vendor_name: str
     vendor_phone: str
@@ -36,6 +37,7 @@ class PhoneCallLog(BaseModel):
 
 class RfqVendorGroup(BaseModel):
     """A group of vendors to receive an RFQ for specific parts."""
+
     vendor_name: str
     vendor_email: str
     parts: list[str] = Field(default_factory=list)
@@ -45,19 +47,23 @@ class RfqVendorGroup(BaseModel):
 
 class BatchRfqSend(BaseModel):
     """Batch RFQ send payload."""
+
     groups: list[RfqVendorGroup] = Field(default_factory=list)
 
 
 class RfqPrepareVendor(BaseModel):
     """A vendor entry in the RFQ prepare request."""
+
     vendor_name: str
 
 
 class RfqPrepare(BaseModel):
     """Pre-send vendor preparation — check exhaustion + vendor cards."""
+
     vendors: list[RfqPrepareVendor] = Field(default_factory=list)
 
 
 class FollowUpEmail(BaseModel):
     """Follow-up email body — defaults handled in router if blank."""
+
     body: str = ""

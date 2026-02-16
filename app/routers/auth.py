@@ -43,15 +43,18 @@ async def index(request: Request, db: Session = Depends(get_db)):
     user = get_user(request, db)
     is_admin = user.role == "admin" if user else False
     is_dev_assistant = user.role == "dev_assistant" if user else False
-    return templates.TemplateResponse("index.html", {
-        "request": request,
-        "logged_in": user is not None,
-        "user_name": user.name if user else "",
-        "user_email": user.email if user else "",
-        "is_admin": is_admin,
-        "is_dev_assistant": is_dev_assistant,
-        "app_version": APP_VERSION,
-    })
+    return templates.TemplateResponse(
+        "index.html",
+        {
+            "request": request,
+            "logged_in": user is not None,
+            "user_name": user.name if user else "",
+            "user_email": user.email if user else "",
+            "is_admin": is_admin,
+            "is_dev_assistant": is_dev_assistant,
+            "app_version": APP_VERSION,
+        },
+    )
 
 
 @router.get("/auth/login")
@@ -67,19 +70,29 @@ async def login():
 async def callback(request: Request, code: str = "", db: Session = Depends(get_db)):
     if not code:
         return RedirectResponse("/")
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(f"{AZURE_AUTH}/token", data={
-            "client_id": settings.azure_client_id,
-            "client_secret": settings.azure_client_secret,
-            "code": code,
-            "grant_type": "authorization_code",
-            "redirect_uri": f"{settings.app_url}/auth/callback",
-            "scope": SCOPES,
-        })
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                f"{AZURE_AUTH}/token",
+                data={
+                    "client_id": settings.azure_client_id,
+                    "client_secret": settings.azure_client_secret,
+                    "code": code,
+                    "grant_type": "authorization_code",
+                    "redirect_uri": f"{settings.app_url}/auth/callback",
+                    "scope": SCOPES,
+                },
+            )
+    except httpx.HTTPError as e:
+        log.error(f"Azure token exchange failed: {e}")
+        return RedirectResponse("/")
     if resp.status_code != 200:
         return RedirectResponse("/")
     tokens = resp.json()
-    access_token = tokens["access_token"]
+    access_token = tokens.get("access_token")
+    if not access_token:
+        log.error("Azure token response missing access_token")
+        return RedirectResponse("/")
     request.session["access_token"] = access_token
     request.session["token_issued_at"] = datetime.now(timezone.utc).timestamp()
 
@@ -87,15 +100,29 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
     expires_in = tokens.get("expires_in", 3600)
     token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
-    async with httpx.AsyncClient() as client:
-        me = await client.get("https://graph.microsoft.com/v1.0/me",
-            headers={"Authorization": f"Bearer {access_token}"})
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            me = await client.get(
+                "https://graph.microsoft.com/v1.0/me",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+        if me.status_code != 200:
+            log.error(f"Graph /me returned {me.status_code}")
+            return RedirectResponse("/")
+    except httpx.HTTPError as e:
+        log.error(f"Graph /me request failed: {e}")
+        return RedirectResponse("/")
     profile = me.json()
-    email = (profile.get("mail") or profile.get("userPrincipalName", "")).strip().lower()
+    email = (
+        (profile.get("mail") or profile.get("userPrincipalName", "")).strip().lower()
+    )
     user = db.query(User).filter_by(email=email).first()
     if not user:
-        user = User(email=email, name=profile.get("displayName", email),
-                     azure_id=profile.get("id"))
+        user = User(
+            email=email,
+            name=profile.get("displayName", email),
+            azure_id=profile.get("id"),
+        )
         db.add(user)
         db.commit()
 
@@ -115,7 +142,9 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
 
     # Trigger first-time backfill if user has never been scanned
     if not user.last_inbox_scan:
-        log.info(f"New M365 connection for {user.email} — backfill will run on next scheduler tick")
+        log.info(
+            f"New M365 connection for {user.email} — backfill will run on next scheduler tick"
+        )
 
     request.session["user_id"] = user.id
     return RedirectResponse("/")
@@ -140,27 +169,41 @@ async def auth_status(request: Request, db: Session = Depends(get_db)):
         status = "connected"
         if not u.m365_connected:
             status = "disconnected"
-        elif u.token_expires_at and u.token_expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
+        elif u.token_expires_at and u.token_expires_at.replace(
+            tzinfo=timezone.utc
+        ) < datetime.now(timezone.utc):
             status = "expired"
-        users_status.append({
-            "id": u.id,
-            "name": u.name,
-            "email": u.email,
-            "role": u.role or "buyer",
-            "status": status,
-            "m365_error": u.m365_error_reason,
-            "m365_last_healthy": u.m365_last_healthy.isoformat() if u.m365_last_healthy else None,
-            "last_inbox_scan": u.last_inbox_scan.isoformat() if u.last_inbox_scan else None,
-            "last_contacts_sync": u.last_contacts_sync.isoformat() if u.last_contacts_sync else None,
-        })
+        users_status.append(
+            {
+                "id": u.id,
+                "name": u.name,
+                "email": u.email,
+                "role": u.role or "buyer",
+                "status": status,
+                "m365_error": u.m365_error_reason,
+                "m365_last_healthy": u.m365_last_healthy.isoformat()
+                if u.m365_last_healthy
+                else None,
+                "last_inbox_scan": u.last_inbox_scan.isoformat()
+                if u.last_inbox_scan
+                else None,
+                "last_contacts_sync": u.last_contacts_sync.isoformat()
+                if u.last_contacts_sync
+                else None,
+            }
+        )
 
-    return JSONResponse({
-        "connected": user.m365_connected,
-        "user_id": user.id,
-        "user_email": user.email,
-        "user_name": user.name or user.email.split("@")[0],
-        "user_role": user.role or "buyer",
-        "m365_error": user.m365_error_reason,
-        "m365_last_healthy": user.m365_last_healthy.isoformat() if user.m365_last_healthy else None,
-        "users": users_status,
-    })
+    return JSONResponse(
+        {
+            "connected": user.m365_connected,
+            "user_id": user.id,
+            "user_email": user.email,
+            "user_name": user.name or user.email.split("@")[0],
+            "user_role": user.role or "buyer",
+            "m365_error": user.m365_error_reason,
+            "m365_last_healthy": user.m365_last_healthy.isoformat()
+            if user.m365_last_healthy
+            else None,
+            "users": users_status,
+        }
+    )

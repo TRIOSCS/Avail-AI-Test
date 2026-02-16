@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 def run_startup_migrations() -> None:
     """Execute all idempotent DDL statements. Safe to call on every app boot."""
     import os
+
     if os.environ.get("TESTING"):
         log.info("TESTING mode — skipping startup migrations")
         return
@@ -49,6 +50,7 @@ def _exec(conn, stmt: str) -> None:
 
 
 # ── Column additions on existing tables ──────────────────────────────
+
 
 def _add_columns(conn) -> None:
     stmts = [
@@ -96,6 +98,7 @@ def _add_columns(conn) -> None:
 
 # ── Indexes on existing tables ───────────────────────────────────────
 
+
 def _create_indexes(conn) -> None:
     stmts = [
         "CREATE UNIQUE INDEX IF NOT EXISTS ix_vr_message_id ON vendor_responses(message_id)",
@@ -113,6 +116,7 @@ def _create_indexes(conn) -> None:
 
 
 # ── CRM tables (v1.2.0) ─────────────────────────────────────────────
+
 
 def _create_crm_tables(conn) -> None:
     crm_tables = [
@@ -250,12 +254,14 @@ def _seed_site_contacts(conn) -> None:
         row = conn.execute(sqltext("SELECT COUNT(*) FROM site_contacts")).scalar()
         if row and row > 0:
             return  # already seeded
-        conn.execute(sqltext("""
+        conn.execute(
+            sqltext("""
             INSERT INTO site_contacts (customer_site_id, full_name, title, email, phone, is_primary)
             SELECT id, contact_name, contact_title, contact_email, contact_phone, TRUE
             FROM customer_sites
             WHERE contact_name IS NOT NULL AND contact_name != ''
-        """))
+        """)
+        )
         conn.commit()
         log.info("Seeded site_contacts from existing customer_sites data")
     except Exception:
@@ -263,6 +269,7 @@ def _seed_site_contacts(conn) -> None:
 
 
 # ── CRM column additions ────────────────────────────────────────────
+
 
 def _add_crm_columns(conn) -> None:
     stmts = [
@@ -275,6 +282,7 @@ def _add_crm_columns(conn) -> None:
 
 
 # ── CRM indexes ──────────────────────────────────────────────────────
+
 
 def _create_crm_indexes(conn) -> None:
     stmts = [
@@ -446,26 +454,49 @@ def _create_performance_tables(conn) -> None:
 def _create_admin_settings_tables(conn) -> None:
     """Admin settings — system_config table, user.is_active column."""
     # Add is_active column to users
-    _exec(conn, "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE")
+    _exec(
+        conn,
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
+    )
     # Create system_config table
-    _exec(conn, """CREATE TABLE IF NOT EXISTS system_config (
+    _exec(
+        conn,
+        """CREATE TABLE IF NOT EXISTS system_config (
         id SERIAL PRIMARY KEY,
         key VARCHAR(100) NOT NULL UNIQUE,
         value TEXT NOT NULL,
         description VARCHAR(500),
         updated_by VARCHAR(255),
         updated_at TIMESTAMP DEFAULT NOW()
-    )""")
-    _exec(conn, "CREATE UNIQUE INDEX IF NOT EXISTS ix_sysconfig_key ON system_config(key)")
+    )""",
+    )
+    _exec(
+        conn, "CREATE UNIQUE INDEX IF NOT EXISTS ix_sysconfig_key ON system_config(key)"
+    )
     # Add credentials column to api_sources
-    _exec(conn, "ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS credentials JSONB DEFAULT '{}'::jsonb")
+    _exec(
+        conn,
+        "ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS credentials JSONB DEFAULT '{}'::jsonb",
+    )
     # Seed default scoring weights (idempotent — INSERT ON CONFLICT DO NOTHING)
     seeds = [
         ("weight_recency", "30", "Scoring weight for data recency (0-100)"),
         ("weight_quantity", "20", "Scoring weight for quantity match (0-100)"),
-        ("weight_vendor_reliability", "20", "Scoring weight for vendor reliability (0-100)"),
-        ("weight_data_completeness", "10", "Scoring weight for data completeness (0-100)"),
-        ("weight_source_credibility", "10", "Scoring weight for source credibility (0-100)"),
+        (
+            "weight_vendor_reliability",
+            "20",
+            "Scoring weight for vendor reliability (0-100)",
+        ),
+        (
+            "weight_data_completeness",
+            "10",
+            "Scoring weight for data completeness (0-100)",
+        ),
+        (
+            "weight_source_credibility",
+            "10",
+            "Scoring weight for source credibility (0-100)",
+        ),
         ("weight_price", "10", "Scoring weight for price competitiveness (0-100)"),
         ("inbox_scan_interval_min", "30", "Minutes between inbox scan cycles"),
         ("email_mining_enabled", "false", "Enable email mining background job"),
@@ -473,6 +504,9 @@ def _create_admin_settings_tables(conn) -> None:
         ("activity_tracking_enabled", "true", "Enable CRM activity tracking"),
     ]
     for key, value, desc in seeds:
-        _exec(conn, f"""INSERT INTO system_config (key, value, description)
+        _exec(
+            conn,
+            f"""INSERT INTO system_config (key, value, description)
             VALUES ('{key}', '{value}', '{desc}')
-            ON CONFLICT (key) DO NOTHING""")
+            ON CONFLICT (key) DO NOTHING""",
+        )

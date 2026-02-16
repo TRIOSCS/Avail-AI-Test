@@ -6,6 +6,7 @@ the routing engine. Simple get/set, no magic.
 Usage:
     from app.services.buyer_service import get_profile, upsert_profile, list_profiles
 """
+
 import logging
 from datetime import datetime, timezone
 
@@ -16,7 +17,15 @@ from app.models import BuyerProfile, User
 log = logging.getLogger("avail.buyer")
 
 # Valid values for dropdowns / validation
-VALID_COMMODITIES = {"semiconductors", "pc_server_parts", "networking", "storage", "memory", "passives", "connectors"}
+VALID_COMMODITIES = {
+    "semiconductors",
+    "pc_server_parts",
+    "networking",
+    "storage",
+    "memory",
+    "passives",
+    "connectors",
+}
 VALID_GEOGRAPHIES = {"apac", "emea", "americas", "global"}
 VALID_USAGE_TYPES = {"sourcing_to_buy", "selling_trading", "backup_buying"}
 
@@ -53,17 +62,19 @@ def upsert_profile(user_id: int, data: dict, db: Session) -> BuyerProfile:
     profile.updated_at = datetime.now(timezone.utc)
     db.flush()
 
-    log.info(f"Buyer profile upserted for user {user_id}: "
-             f"commodity={profile.primary_commodity}/{profile.secondary_commodity}, "
-             f"geo={profile.primary_geography}, brands={profile.brand_specialties}")
+    log.info(
+        f"Buyer profile upserted for user {user_id}: "
+        f"commodity={profile.primary_commodity}/{profile.secondary_commodity}, "
+        f"geo={profile.primary_geography}, brands={profile.brand_specialties}"
+    )
     return profile
 
 
 def list_profiles(db: Session) -> list[dict]:
     """List all buyer profiles with user info for admin view."""
-    profiles = db.query(BuyerProfile, User).join(
-        User, BuyerProfile.user_id == User.id
-    ).all()
+    profiles = (
+        db.query(BuyerProfile, User).join(User, BuyerProfile.user_id == User.id).all()
+    )
 
     return [
         {
@@ -76,7 +87,9 @@ def list_profiles(db: Session) -> list[dict]:
             "brand_specialties": profile.brand_specialties or [],
             "brand_material_types": profile.brand_material_types or [],
             "brand_usage_types": profile.brand_usage_types or [],
-            "updated_at": profile.updated_at.isoformat() if profile.updated_at else None,
+            "updated_at": profile.updated_at.isoformat()
+            if profile.updated_at
+            else None,
         }
         for profile, user in profiles
     ]

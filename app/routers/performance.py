@@ -25,6 +25,7 @@ def list_vendor_scorecards(
     db: Session = Depends(get_db),
 ):
     from ..services.performance_service import get_vendor_scorecard_list
+
     return get_vendor_scorecard_list(db, sort_by, order, limit, offset, search)
 
 
@@ -35,6 +36,7 @@ def get_vendor_scorecard(
     db: Session = Depends(get_db),
 ):
     from ..services.performance_service import get_vendor_scorecard_detail
+
     result = get_vendor_scorecard_detail(db, vendor_card_id)
     if not result:
         raise HTTPException(404, "Vendor not found")
@@ -49,6 +51,7 @@ def refresh_vendor_scorecards(
     if not _is_admin(user):
         raise HTTPException(403, "Admin required")
     from ..services.performance_service import compute_all_vendor_scorecards
+
     result = compute_all_vendor_scorecards(db)
     return {"status": "ok", **result}
 
@@ -60,6 +63,7 @@ def list_buyer_leaderboard(
     db: Session = Depends(get_db),
 ):
     from ..services.performance_service import get_buyer_leaderboard
+
     if month:
         try:
             m = datetime.strptime(month, "%Y-%m").date()
@@ -76,6 +80,7 @@ def list_leaderboard_months(
     db: Session = Depends(get_db),
 ):
     from ..services.performance_service import get_buyer_leaderboard_months
+
     return {"months": get_buyer_leaderboard_months(db)}
 
 
@@ -87,6 +92,7 @@ def refresh_buyer_leaderboard(
     if not _is_admin(user):
         raise HTTPException(403, "Admin required")
     from ..services.performance_service import compute_buyer_leaderboard
+
     m = date.today().replace(day=1)
     result = compute_buyer_leaderboard(db, m)
     return {"status": "ok", **result}

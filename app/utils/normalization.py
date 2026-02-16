@@ -11,20 +11,41 @@ Normalizes vendor data values extracted from emails and attachments:
 
 Design: Prefer less data if it means better data. Return None for ambiguous values.
 """
+
 import re
 from typing import Any
 
 # ── Price normalization ───────────────────────────────────────────────
 
 _CURRENCY_SYMBOLS = {
-    "$": "USD", "€": "EUR", "£": "GBP", "¥": "JPY",
-    "₩": "KRW", "₹": "INR", "元": "CNY", "A$": "AUD",
-    "C$": "CAD", "S$": "SGD", "HK$": "HKD",
+    "$": "USD",
+    "€": "EUR",
+    "£": "GBP",
+    "¥": "JPY",
+    "₩": "KRW",
+    "₹": "INR",
+    "元": "CNY",
+    "A$": "AUD",
+    "C$": "CAD",
+    "S$": "SGD",
+    "HK$": "HKD",
 }
 
 _CURRENCY_CODES = {
-    "USD", "EUR", "GBP", "JPY", "CNY", "KRW", "INR",
-    "AUD", "CAD", "SGD", "HKD", "TWD", "THB", "MYR",
+    "USD",
+    "EUR",
+    "GBP",
+    "JPY",
+    "CNY",
+    "KRW",
+    "INR",
+    "AUD",
+    "CAD",
+    "SGD",
+    "HKD",
+    "TWD",
+    "THB",
+    "MYR",
 }
 
 
@@ -44,7 +65,7 @@ def normalize_price(raw: Any) -> float | None:
         s = s.replace(sym, "")
     # Remove currency codes (USD, EUR, GBP, etc.)
     for code in _CURRENCY_CODES:
-        s = re.sub(rf'\b{code}\b', '', s, flags=re.IGNORECASE)
+        s = re.sub(rf"\b{code}\b", "", s, flags=re.IGNORECASE)
     s = s.strip()
 
     # Remove commas (thousand separators)
@@ -59,13 +80,18 @@ def normalize_price(raw: Any) -> float | None:
             pass
 
     # Handle "each", "ea", "/ea", "/pc", "/unit"
-    s = re.sub(r'[/\s]*(ea|each|pc|pcs|unit|units|piece|pieces)\.?\s*$', '', s, flags=re.IGNORECASE)
+    s = re.sub(
+        r"[/\s]*(ea|each|pc|pcs|unit|units|piece|pieces)\.?\s*$",
+        "",
+        s,
+        flags=re.IGNORECASE,
+    )
 
     # Handle K/M shorthand: "1.5k" → 1500, "2M" → 2000000
-    m = re.match(r'^([\d.]+)\s*([kKmM])$', s)
+    m = re.match(r"^([\d.]+)\s*([kKmM])$", s)
     if m:
         num = float(m.group(1))
-        mult = {'k': 1_000, 'K': 1_000, 'm': 1_000_000, 'M': 1_000_000}
+        mult = {"k": 1_000, "K": 1_000, "m": 1_000_000, "M": 1_000_000}
         return num * mult.get(m.group(2), 1)
 
     try:
@@ -97,8 +123,10 @@ def detect_currency(raw: Any) -> str:
 # ── Quantity normalization ────────────────────────────────────────────
 
 _QTY_MULTIPLIERS = {
-    "k": 1_000, "K": 1_000,
-    "m": 1_000_000, "M": 1_000_000,
+    "k": 1_000,
+    "K": 1_000,
+    "m": 1_000_000,
+    "M": 1_000_000,
 }
 
 
@@ -134,6 +162,7 @@ def normalize_quantity(raw: Any) -> int | None:
 
 # ── Lead time normalization ───────────────────────────────────────────
 
+
 def normalize_lead_time(raw: Any) -> int | None:
     """Parse lead time to days. Returns midpoint for ranges. None if ambiguous.
 
@@ -150,7 +179,7 @@ def normalize_lead_time(raw: Any) -> int | None:
         return 0
 
     # Extract numbers
-    numbers = re.findall(r'(\d+(?:\.\d+)?)', s)
+    numbers = re.findall(r"(\d+(?:\.\d+)?)", s)
     if not numbers:
         return None
 
@@ -213,6 +242,7 @@ def normalize_condition(raw: Any) -> str | None:
 
 # ── Date code normalization ───────────────────────────────────────────
 
+
 def normalize_date_code(raw: Any) -> str | None:
     """Normalize date codes. Passes through common formats, strips noise.
 
@@ -227,7 +257,7 @@ def normalize_date_code(raw: Any) -> str | None:
         return None
 
     # Strip "DC" prefix
-    s = re.sub(r'^(?:dc|date\s*code)[:\s]*', '', s, flags=re.IGNORECASE).strip()
+    s = re.sub(r"^(?:dc|date\s*code)[:\s]*", "", s, flags=re.IGNORECASE).strip()
 
     # Keep if it contains at least 2 digits (year info)
     if sum(c.isdigit() for c in s) >= 2:
@@ -238,13 +268,14 @@ def normalize_date_code(raw: Any) -> str | None:
 
 # ── MOQ normalization ─────────────────────────────────────────────────
 
+
 def normalize_moq(raw: Any) -> int | None:
     """Parse MOQ. Handles: 10000, "10K", "10K minimum", "MOQ: 500"."""
     if raw is None:
         return None
     s = str(raw).strip()
     # Strip common prefixes
-    s = re.sub(r'^(?:moq|minimum|min)[:\s]*', '', s, flags=re.IGNORECASE).strip()
+    s = re.sub(r"^(?:moq|minimum|min)[:\s]*", "", s, flags=re.IGNORECASE).strip()
     return normalize_quantity(s)
 
 
@@ -256,7 +287,7 @@ _PACKAGING_MAP = {
     "tape & reel": "reel",
     "cut tape": "cut_tape",
     "t&r": "reel",
-    "tray": "tray",        # MUST come before "tr" — "tr" is a substring of "tray"
+    "tray": "tray",  # MUST come before "tr" — "tr" is a substring of "tray"
     "reel": "reel",
     "tube": "tube",
     "bulk": "bulk",
@@ -265,7 +296,7 @@ _PACKAGING_MAP = {
     "ct": "cut_tape",
     "dip": "tube",
     "smd": "reel",
-    "tr": "reel",           # "T/R" shorthand — checked AFTER "tray"
+    "tr": "reel",  # "T/R" shorthand — checked AFTER "tray"
 }
 
 
@@ -282,6 +313,7 @@ def normalize_packaging(raw: Any) -> str | None:
 
 # ── MPN normalization ─────────────────────────────────────────────────
 
+
 def normalize_mpn(raw: Any) -> str | None:
     """Normalize MPN: uppercase, strip whitespace, remove common noise."""
     if not raw:
@@ -290,7 +322,7 @@ def normalize_mpn(raw: Any) -> str | None:
     # Remove surrounding quotes
     s = s.strip("'\"")
     # Collapse internal whitespace
-    s = re.sub(r'\s+', '', s)
+    s = re.sub(r"\s+", "", s)
 
     if len(s) < 3:
         return None
@@ -321,7 +353,9 @@ def fuzzy_mpn_match(mpn_a: str | None, mpn_b: str | None) -> bool:
 
     # One is prefix of the other (trailing revision)
     if a_stripped.startswith(b_stripped) or b_stripped.startswith(a_stripped):
-        suffix = a_stripped.replace(b_stripped, "") or b_stripped.replace(a_stripped, "")
+        suffix = a_stripped.replace(b_stripped, "") or b_stripped.replace(
+            a_stripped, ""
+        )
         if len(suffix) <= 2:  # Short suffix = likely revision
             return True
 

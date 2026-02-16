@@ -27,6 +27,7 @@ class ProspectFinderRequest(BaseModel):
 
 class ProspectContactSave(BaseModel):
     """Optional body when saving a prospect contact."""
+
     notes: str | None = None
 
 

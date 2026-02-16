@@ -42,6 +42,7 @@ router = APIRouter(tags=["ai"])
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
+
 def _ai_enabled(user: User) -> bool:
     """Check if AI features are enabled for this user."""
     flag = settings.ai_features_enabled
@@ -60,18 +61,31 @@ def _build_vendor_history(vendor_name: str, db: Session) -> dict:
     if not card:
         return {}
 
-    total_rfqs = db.query(Contact).filter(
-        Contact.vendor_name.ilike(f"%{vendor_name}%"),
-        Contact.contact_type == "email",
-    ).count()
+    total_rfqs = (
+        db.query(Contact)
+        .filter(
+            Contact.vendor_name.ilike(f"%{vendor_name}%"),
+            Contact.contact_type == "email",
+        )
+        .count()
+    )
 
-    total_offers = db.query(Offer).filter(
-        Offer.vendor_name.ilike(f"%{vendor_name}%"),
-    ).count()
+    total_offers = (
+        db.query(Offer)
+        .filter(
+            Offer.vendor_name.ilike(f"%{vendor_name}%"),
+        )
+        .count()
+    )
 
-    last = db.query(Contact).filter(
-        Contact.vendor_name.ilike(f"%{vendor_name}%"),
-    ).order_by(Contact.created_at.desc()).first()
+    last = (
+        db.query(Contact)
+        .filter(
+            Contact.vendor_name.ilike(f"%{vendor_name}%"),
+        )
+        .order_by(Contact.created_at.desc())
+        .first()
+    )
 
     return {
         "total_rfqs": total_rfqs,
@@ -83,6 +97,7 @@ def _build_vendor_history(vendor_name: str, db: Session) -> dict:
 
 
 # ── Feature 1: Contact Enrichment ────────────────────────────────────────
+
 
 @router.post("/api/ai/find-contacts")
 async def ai_find_contacts(
@@ -125,12 +140,16 @@ async def ai_find_contacts(
         raise HTTPException(400, "company_name or entity_id required")
 
     from app.connectors.apollo_client import search_contacts as apollo_search
+
     apollo_results = await apollo_search(company_name, domain, title_keywords, limit=5)
 
     web_results = []
     if len(apollo_results) < 3:
         from app.services.ai_service import enrich_contacts_websearch
-        web_results = await enrich_contacts_websearch(company_name, domain, title_keywords, limit=5)
+
+        web_results = await enrich_contacts_websearch(
+            company_name, domain, title_keywords, limit=5
+        )
 
     seen_emails: set[str] = set()
     merged = []
@@ -181,19 +200,22 @@ async def list_prospect_contacts(
         raise HTTPException(400, "entity_type and entity_id required")
 
     contacts = q.order_by(ProspectContact.created_at.desc()).limit(50).all()
-    return [{
-        "id": c.id,
-        "full_name": c.full_name,
-        "title": c.title,
-        "email": c.email,
-        "email_status": c.email_status,
-        "phone": c.phone,
-        "linkedin_url": c.linkedin_url,
-        "source": c.source,
-        "confidence": c.confidence,
-        "is_saved": c.is_saved,
-        "found_at": c.found_at.isoformat() if c.found_at else None,
-    } for c in contacts]
+    return [
+        {
+            "id": c.id,
+            "full_name": c.full_name,
+            "title": c.title,
+            "email": c.email,
+            "email_status": c.email_status,
+            "phone": c.phone,
+            "linkedin_url": c.linkedin_url,
+            "source": c.source,
+            "confidence": c.confidence,
+            "is_saved": c.is_saved,
+            "found_at": c.found_at.isoformat() if c.found_at else None,
+        }
+        for c in contacts
+    ]
 
 
 @router.post("/api/ai/prospect-contacts/{contact_id}/save")
@@ -232,6 +254,7 @@ async def delete_prospect_contact(
 
 # ── Feature 2: Parse Vendor Reply → Structured Offer ─────────────────────
 
+
 @router.post("/api/ai/parse-response/{response_id}")
 async def ai_parse_response(
     response_id: int,
@@ -248,16 +271,26 @@ async def ai_parse_response(
 
     rfq_context = None
     if vr.requisition_id:
-        reqs = db.query(Requirement).filter(
-            Requirement.requisition_id == vr.requisition_id
-        ).all()
+        reqs = (
+            db.query(Requirement)
+            .filter(Requirement.requisition_id == vr.requisition_id)
+            .all()
+        )
         rfq_context = [
-            {"mpn": r.primary_mpn, "qty": r.target_qty, "target_price": float(r.target_price) if r.target_price else None}
-            for r in reqs if r.primary_mpn
+            {
+                "mpn": r.primary_mpn,
+                "qty": r.target_qty,
+                "target_price": float(r.target_price) if r.target_price else None,
+            }
+            for r in reqs
+            if r.primary_mpn
         ]
 
     from app.services.response_parser import (
-        parse_vendor_response, should_auto_apply, should_flag_review, extract_draft_offers
+        parse_vendor_response,
+        should_auto_apply,
+        should_flag_review,
+        extract_draft_offers,
     )
 
     result = await parse_vendor_response(
@@ -274,7 +307,10 @@ async def ai_parse_response(
     vr.confidence = result.get("confidence", 0)
     vr.classification = result.get("overall_classification")
     vr.needs_action = result.get("overall_classification") in (
-        "quote_provided", "counter_offer", "clarification_needed", "partial_availability"
+        "quote_provided",
+        "counter_offer",
+        "clarification_needed",
+        "partial_availability",
     )
 
     draft_offers = extract_draft_offers(result, vr.vendor_name or "")
@@ -307,9 +343,12 @@ async def save_parsed_offers(
         req_id = None
         if o.mpn:
             from app.utils.normalization import fuzzy_mpn_match
-            reqs = db.query(Requirement).filter(
-                Requirement.requisition_id == requisition_id
-            ).all()
+
+            reqs = (
+                db.query(Requirement)
+                .filter(Requirement.requisition_id == requisition_id)
+                .all()
+            )
             for r in reqs:
                 if fuzzy_mpn_match(o.mpn, r.primary_mpn):
                     req_id = r.id
@@ -345,6 +384,7 @@ async def save_parsed_offers(
 
 # ── Feature 3: Company Intelligence Cards ─────────────────────────────────
 
+
 @router.get("/api/ai/company-intel")
 async def get_company_intel(
     company_name: str = "",
@@ -359,6 +399,7 @@ async def get_company_intel(
         raise HTTPException(400, "company_name required")
 
     from app.services.ai_service import company_intel
+
     intel = await company_intel(company_name, domain or None)
 
     if not intel:
@@ -367,6 +408,7 @@ async def get_company_intel(
 
 
 # ── Feature 4: Smart RFQ Drafts ──────────────────────────────────────────
+
 
 @router.post("/api/ai/draft-rfq")
 async def ai_draft_rfq(
@@ -384,6 +426,7 @@ async def ai_draft_rfq(
     vendor_history = _build_vendor_history(vendor_name, db)
 
     from app.services.ai_service import draft_rfq
+
     draft = await draft_rfq(
         vendor_name=vendor_name,
         parts=parts,

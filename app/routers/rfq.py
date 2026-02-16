@@ -22,68 +22,147 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..dependencies import get_req_for_user, require_buyer, require_fresh_token, require_user
-from ..models import Contact, Requisition, User, VendorCard, VendorResponse, VendorReview
+from ..dependencies import (
+    get_req_for_user,
+    require_buyer,
+    require_fresh_token,
+    require_user,
+)
+from ..models import (
+    Contact,
+    Requisition,
+    User,
+    VendorCard,
+    VendorResponse,
+    VendorReview,
+)
 from ..schemas.rfq import BatchRfqSend, FollowUpEmail, PhoneCallLog, RfqPrepare
 from ..email_service import log_phone_contact, send_batch_rfq, poll_inbox
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["rfq"])
 
+
 @router.post("/api/contacts/phone")
-async def log_call(payload: PhoneCallLog, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    return log_phone_contact(db=db, user_id=user.id, requisition_id=payload.requisition_id,
-                             vendor_name=payload.vendor_name, vendor_phone=payload.vendor_phone,
-                             parts=payload.parts)
+async def log_call(
+    payload: PhoneCallLog,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    return log_phone_contact(
+        db=db,
+        user_id=user.id,
+        requisition_id=payload.requisition_id,
+        vendor_name=payload.vendor_name,
+        vendor_phone=payload.vendor_phone,
+        parts=payload.parts,
+    )
 
 
 @router.get("/api/requisitions/{req_id}/contacts")
-async def list_contacts(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    contacts = db.query(Contact).filter_by(requisition_id=req_id).order_by(Contact.created_at.desc()).all()
-    return [{
-        "id": c.id, "contact_type": c.contact_type, "vendor_name": c.vendor_name,
-        "vendor_contact": c.vendor_contact, "parts_included": c.parts_included,
-        "subject": c.subject,
-        "created_at": c.created_at.isoformat() if c.created_at else None,
-        "user_name": c.user.name if c.user else "",
-    } for c in contacts]
+async def list_contacts(
+    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+):
+    contacts = (
+        db.query(Contact)
+        .filter_by(requisition_id=req_id)
+        .order_by(Contact.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": c.id,
+            "contact_type": c.contact_type,
+            "vendor_name": c.vendor_name,
+            "vendor_contact": c.vendor_contact,
+            "parts_included": c.parts_included,
+            "subject": c.subject,
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+            "user_name": c.user.name if c.user else "",
+        }
+        for c in contacts
+    ]
 
 
 # ── Batch RFQ ────────────────────────────────────────────────────────────
 @router.post("/api/requisitions/{req_id}/rfq")
-async def send_rfq(req_id: int, payload: BatchRfqSend, request: Request,
-                    user: User = Depends(require_buyer), db: Session = Depends(get_db)):
+async def send_rfq(
+    req_id: int,
+    payload: BatchRfqSend,
+    request: Request,
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
     token = await require_fresh_token(request, db)
-    results = await send_batch_rfq(token=token, db=db, user_id=user.id,
-                                   requisition_id=req_id, vendor_groups=[g.model_dump() for g in payload.groups])
+    results = await send_batch_rfq(
+        token=token,
+        db=db,
+        user_id=user.id,
+        requisition_id=req_id,
+        vendor_groups=[g.model_dump() for g in payload.groups],
+    )
     return {"results": results}
 
 
 # ── Inbox Polling ────────────────────────────────────────────────────────
 @router.post("/api/requisitions/{req_id}/poll")
-async def poll(req_id: int, request: Request,
-               user: User = Depends(require_buyer), db: Session = Depends(get_db)):
+async def poll(
+    req_id: int,
+    request: Request,
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
     token = await require_fresh_token(request, db)
-    results = await poll_inbox(token, db, requisition_id=req_id, scanned_by_user_id=user.id)
+    results = await poll_inbox(
+        token, db, requisition_id=req_id, scanned_by_user_id=user.id
+    )
     return {"responses": results}
 
 
 @router.get("/api/requisitions/{req_id}/responses")
-async def list_responses(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    resps = db.query(VendorResponse).filter_by(requisition_id=req_id).order_by(VendorResponse.created_at.desc()).all()
-    return [{
-        "id": r.id, "vendor_name": r.vendor_name, "vendor_email": r.vendor_email,
-        "subject": r.subject, "status": r.status, "parsed_data": r.parsed_data,
-        "confidence": r.confidence,
-        "received_at": r.received_at.isoformat() if isinstance(r.received_at, datetime) else r.received_at,
-    } for r in resps]
+async def list_responses(
+    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+):
+    resps = (
+        db.query(VendorResponse)
+        .filter_by(requisition_id=req_id)
+        .order_by(VendorResponse.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "vendor_name": r.vendor_name,
+            "vendor_email": r.vendor_email,
+            "subject": r.subject,
+            "status": r.status,
+            "parsed_data": r.parsed_data,
+            "confidence": r.confidence,
+            "received_at": r.received_at.isoformat()
+            if isinstance(r.received_at, datetime)
+            else r.received_at,
+        }
+        for r in resps
+    ]
 
 
 @router.get("/api/requisitions/{req_id}/activity")
-async def get_activity(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+async def get_activity(
+    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+):
     """Combined activity view: contacts + responses + tracking, grouped by vendor."""
-    contacts = db.query(Contact).filter_by(requisition_id=req_id).order_by(Contact.created_at.desc()).all()
-    responses = db.query(VendorResponse).filter_by(requisition_id=req_id).order_by(VendorResponse.received_at.desc()).all()
+    contacts = (
+        db.query(Contact)
+        .filter_by(requisition_id=req_id)
+        .order_by(Contact.created_at.desc())
+        .all()
+    )
+    responses = (
+        db.query(VendorResponse)
+        .filter_by(requisition_id=req_id)
+        .order_by(VendorResponse.received_at.desc())
+        .all()
+    )
 
     # Group by normalized vendor name
     vendors = {}
@@ -91,36 +170,56 @@ async def get_activity(req_id: int, user: User = Depends(require_user), db: Sess
         vk = normalize_vendor_name(c.vendor_name)
         if vk not in vendors:
             vendors[vk] = {
-                "vendor_name": c.vendor_name, "contacts": [], "responses": [],
-                "all_parts": set(), "contact_types": set(),
+                "vendor_name": c.vendor_name,
+                "contacts": [],
+                "responses": [],
+                "all_parts": set(),
+                "contact_types": set(),
             }
-        vendors[vk]["contacts"].append({
-            "id": c.id, "contact_type": c.contact_type,
-            "vendor_contact": c.vendor_contact, "subject": c.subject,
-            "parts_included": c.parts_included or [],
-            "created_at": c.created_at.isoformat() if c.created_at else None,
-            "user_name": c.user.name if c.user else "",
-            "status": c.status or "sent",
-            "status_updated_at": c.status_updated_at.isoformat() if c.status_updated_at else None,
-        })
+        vendors[vk]["contacts"].append(
+            {
+                "id": c.id,
+                "contact_type": c.contact_type,
+                "vendor_contact": c.vendor_contact,
+                "subject": c.subject,
+                "parts_included": c.parts_included or [],
+                "created_at": c.created_at.isoformat() if c.created_at else None,
+                "user_name": c.user.name if c.user else "",
+                "status": c.status or "sent",
+                "status_updated_at": c.status_updated_at.isoformat()
+                if c.status_updated_at
+                else None,
+            }
+        )
         vendors[vk]["contact_types"].add(c.contact_type)
-        for p in (c.parts_included or []):
+        for p in c.parts_included or []:
             vendors[vk]["all_parts"].add(p)
 
     for r in responses:
         vk = normalize_vendor_name(r.vendor_name)
         if vk not in vendors:
             vendors[vk] = {
-                "vendor_name": r.vendor_name, "contacts": [], "responses": [],
-                "all_parts": set(), "contact_types": set(),
+                "vendor_name": r.vendor_name,
+                "contacts": [],
+                "responses": [],
+                "all_parts": set(),
+                "contact_types": set(),
             }
-        vendors[vk]["responses"].append({
-            "id": r.id, "vendor_email": r.vendor_email, "subject": r.subject,
-            "body": (r.body or "")[:500], "status": r.status,
-            "parsed_data": r.parsed_data, "confidence": r.confidence,
-            "classification": r.classification,
-            "received_at": r.received_at.isoformat() if isinstance(r.received_at, datetime) else r.received_at,
-        })
+        vendors[vk]["responses"].append(
+            {
+                "id": r.id,
+                "vendor_email": r.vendor_email,
+                "subject": r.subject,
+                "body": (r.body or "")[:500],
+                "status": r.status,
+                "parsed_data": r.parsed_data,
+                "confidence": r.confidence,
+                "classification": r.classification,
+                "received_at": r.received_at.isoformat()
+                if isinstance(r.received_at, datetime)
+                else r.received_at,
+            }
+        )
 
     # Build result list
     result = []
@@ -136,7 +235,11 @@ async def get_activity(req_id: int, user: User = Depends(require_user), db: Sess
                 vendor_status = "quoted"
             elif "declined" in contact_statuses:
                 # Has responses, at least one declined
-                vendor_status = "replied" if (contact_statuses - {"declined", "sent", "opened"}) else "declined"
+                vendor_status = (
+                    "replied"
+                    if (contact_statuses - {"declined", "sent", "opened"})
+                    else "declined"
+                )
             else:
                 vendor_status = "replied"
         elif "responded" in contact_statuses:
@@ -148,18 +251,26 @@ async def get_activity(req_id: int, user: User = Depends(require_user), db: Sess
         else:
             vendor_status = "awaiting"
 
-        result.append({
-            "vendor_name": v["vendor_name"],
-            "status": vendor_status,
-            "contact_count": len(v["contacts"]),
-            "contact_types": sorted(v["contact_types"]),
-            "all_parts": sorted(v["all_parts"]),
-            "last_contacted_at": last_contact["created_at"] if last_contact else None,
-            "last_contacted_by": last_contact["user_name"] if last_contact else None,
-            "last_contact_email": last_contact["vendor_contact"] if last_contact else None,
-            "contacts": v["contacts"],
-            "responses": v["responses"],
-        })
+        result.append(
+            {
+                "vendor_name": v["vendor_name"],
+                "status": vendor_status,
+                "contact_count": len(v["contacts"]),
+                "contact_types": sorted(v["contact_types"]),
+                "all_parts": sorted(v["all_parts"]),
+                "last_contacted_at": last_contact["created_at"]
+                if last_contact
+                else None,
+                "last_contacted_by": last_contact["user_name"]
+                if last_contact
+                else None,
+                "last_contact_email": last_contact["vendor_contact"]
+                if last_contact
+                else None,
+                "contacts": v["contacts"],
+                "responses": v["responses"],
+            }
+        )
 
     # Sort by most recent contact
     result.sort(key=lambda x: x["last_contacted_at"] or "", reverse=True)
@@ -171,13 +282,25 @@ async def get_activity(req_id: int, user: User = Depends(require_user), db: Sess
     declined = sum(1 for r in result if r["status"] == "declined")
     awaiting = sent - replied - opened - declined
 
-    return {"vendors": result, "summary": {"sent": sent, "replied": replied, "opened": opened, "awaiting": awaiting}}
-
+    return {
+        "vendors": result,
+        "summary": {
+            "sent": sent,
+            "replied": replied,
+            "opened": opened,
+            "awaiting": awaiting,
+        },
+    }
 
 
 # ── RFQ Prepare ─────────────────────────────────────────────────────────
 @router.post("/api/requisitions/{req_id}/rfq-prepare")
-async def rfq_prepare(req_id: int, payload: RfqPrepare, user: User = Depends(require_buyer), db: Session = Depends(get_db)):
+async def rfq_prepare(
+    req_id: int,
+    payload: RfqPrepare,
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
     """Return vendor card data + exhaustion info for selected vendors before RFQ send."""
     req = get_req_for_user(db, user, req_id)
     if not req:
@@ -194,7 +317,7 @@ async def rfq_prepare(req_id: int, payload: RfqPrepare, user: User = Depends(req
         vk = normalize_vendor_name(c.vendor_name)
         if vk not in exhaustion:
             exhaustion[vk] = set()
-        for p in (c.parts_included or []):
+        for p in c.parts_included or []:
             exhaustion[vk].add(p.upper())
 
     results = []
@@ -211,8 +334,14 @@ async def rfq_prepare(req_id: int, payload: RfqPrepare, user: User = Depends(req
             "already_asked": already_asked,
         }
         if card and card.emails:
-            base.update({"emails": card.emails or [], "phones": card.phones or [],
-                         "needs_lookup": False, "contact_source": "cached"})
+            base.update(
+                {
+                    "emails": card.emails or [],
+                    "phones": card.phones or [],
+                    "needs_lookup": False,
+                    "contact_source": "cached",
+                }
+            )
         else:
             base.update({"emails": [], "phones": [], "needs_lookup": True})
         results.append(base)
@@ -222,7 +351,9 @@ async def rfq_prepare(req_id: int, payload: RfqPrepare, user: User = Depends(req
 
 # ── Follow-Up Detection ───────────────────────────────────────────────
 @router.get("/api/follow-ups")
-async def get_follow_ups(user: User = Depends(require_user), db: Session = Depends(get_db)):
+async def get_follow_ups(
+    user: User = Depends(require_user), db: Session = Depends(get_db)
+):
     """Return contacts that need follow-up: sent/opened > 3 days ago with no response."""
 
     three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
@@ -239,56 +370,83 @@ async def get_follow_ups(user: User = Depends(require_user), db: Session = Depen
             Requisition.created_by == user.id
         )
 
-    stale = stale_contacts.order_by(Contact.created_at.asc()).all()
+    stale = stale_contacts.order_by(Contact.created_at.asc()).limit(500).all()
+
+    # Pre-fetch requisition names (avoids N+1 query per contact)
+    req_ids = {c.requisition_id for c in stale}
+    req_names: dict[int, str] = {}
+    if req_ids:
+        name_rows = (
+            db.query(Requisition.id, Requisition.name)
+            .filter(Requisition.id.in_(req_ids))
+            .all()
+        )
+        req_names = {r.id: r.name for r in name_rows}
 
     results = []
+    now = datetime.now(timezone.utc)
     for c in stale:
-        req = db.query(Requisition).filter_by(id=c.requisition_id).first()
-        days_waiting = (datetime.now(timezone.utc) - c.created_at).days
-        results.append({
-            "contact_id": c.id,
-            "requisition_id": c.requisition_id,
-            "requisition_name": req.name if req else "Unknown",
-            "vendor_name": c.vendor_name,
-            "vendor_email": c.vendor_contact,
-            "parts": c.parts_included or [],
-            "status": c.status,
-            "sent_at": c.created_at.isoformat() if c.created_at else None,
-            "days_waiting": days_waiting,
-            "subject": c.subject,
-        })
+        days_waiting = (now - c.created_at).days
+        results.append(
+            {
+                "contact_id": c.id,
+                "requisition_id": c.requisition_id,
+                "requisition_name": req_names.get(c.requisition_id, "Unknown"),
+                "vendor_name": c.vendor_name,
+                "vendor_email": c.vendor_contact,
+                "parts": c.parts_included or [],
+                "status": c.status,
+                "sent_at": c.created_at.isoformat() if c.created_at else None,
+                "days_waiting": days_waiting,
+                "subject": c.subject,
+            }
+        )
 
     return {"follow_ups": results, "count": len(results)}
 
 
 @router.get("/api/follow-ups/summary")
-async def follow_up_summary(user: User = Depends(require_user), db: Session = Depends(get_db)):
+async def follow_up_summary(
+    user: User = Depends(require_user), db: Session = Depends(get_db)
+):
     """Cross-req follow-up counts for badge display."""
     three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
 
-    query = db.query(
-        Requisition.id,
-        Requisition.name,
-        sqlfunc.count(Contact.id).label("stale_count"),
-    ).join(Contact).filter(
-        Contact.contact_type == "email",
-        Contact.status.in_(["sent", "opened"]),
-        Contact.created_at < three_days_ago,
-    ).group_by(Requisition.id, Requisition.name)
+    query = (
+        db.query(
+            Requisition.id,
+            Requisition.name,
+            sqlfunc.count(Contact.id).label("stale_count"),
+        )
+        .join(Contact)
+        .filter(
+            Contact.contact_type == "email",
+            Contact.status.in_(["sent", "opened"]),
+            Contact.created_at < three_days_ago,
+        )
+        .group_by(Requisition.id, Requisition.name)
+    )
 
     if user.role == "sales":
         query = query.filter(Requisition.created_by == user.id)
 
     rows = query.all()
     total = sum(r.stale_count for r in rows)
-    by_req = [{"req_id": r.id, "req_name": r.name, "count": r.stale_count} for r in rows]
+    by_req = [
+        {"req_id": r.id, "req_name": r.name, "count": r.stale_count} for r in rows
+    ]
 
     return {"total": total, "by_requisition": by_req}
 
 
 @router.post("/api/follow-ups/{contact_id}/send")
-async def send_follow_up(contact_id: int, payload: FollowUpEmail, request: Request,
-                          user: User = Depends(require_buyer), db: Session = Depends(get_db)):
+async def send_follow_up(
+    contact_id: int,
+    payload: FollowUpEmail,
+    request: Request,
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
     """Send a follow-up email for a stale contact."""
     token = await require_fresh_token(request, db)
 
@@ -306,7 +464,11 @@ async def send_follow_up(contact_id: int, payload: FollowUpEmail, request: Reque
 
     html_body = _build_html_body(body)
 
-    subject = f"Re: {contact.subject}" if contact.subject else f"Follow-Up — RFQ from TRIO Supply Chain"
+    subject = (
+        f"Re: {contact.subject}"
+        if contact.subject
+        else "Follow-Up — RFQ from TRIO Supply Chain"
+    )
 
     payload = {
         "message": {
@@ -331,8 +493,6 @@ async def send_follow_up(contact_id: int, payload: FollowUpEmail, request: Reque
     return {"ok": True, "message": f"Follow-up sent to {contact.vendor_contact}"}
 
 
-
-
 # ── Search enrichment with vendor cards ────────────────────────────────
 def _enrich_with_vendor_cards(results: dict, db: Session):
     """Add vendor card rating info to search results. No contact lookup."""
@@ -350,7 +510,11 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
         norm = normalize_vendor_name(name)
         norm_map.setdefault(norm, []).append(name)
 
-    cards = db.query(VendorCard).filter(VendorCard.normalized_name.in_(norm_map.keys())).all()
+    cards = (
+        db.query(VendorCard)
+        .filter(VendorCard.normalized_name.in_(norm_map.keys()))
+        .all()
+    )
     card_by_norm = {c.normalized_name: c for c in cards}
 
     # Auto-create cards for vendors we haven't seen before
@@ -360,7 +524,8 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
             card = VendorCard(
                 normalized_name=norm,
                 display_name=names[0],
-                emails=[], phones=[],
+                emails=[],
+                phones=[],
                 sighting_count=0,
             )
             db.add(card)
@@ -372,7 +537,11 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
 
     # Batch fetch reviews
     card_ids = [c.id for c in cards]
-    all_reviews = db.query(VendorReview).filter(VendorReview.vendor_card_id.in_(card_ids)).all() if card_ids else []
+    all_reviews = (
+        db.query(VendorReview).filter(VendorReview.vendor_card_id.in_(card_ids)).all()
+        if card_ids
+        else []
+    )
     reviews_by_card = {}
     for r in all_reviews:
         reviews_by_card.setdefault(r.vendor_card_id, []).append(r)
@@ -383,7 +552,8 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
         revs = reviews_by_card.get(card.id, [])
         avg = round(sum(r.rating for r in revs) / len(revs), 1) if revs else None
         summary_cache[norm] = {
-            "card_id": card.id, "avg_rating": avg,
+            "card_id": card.id,
+            "avg_rating": avg,
             "review_count": len(revs),
             "has_emails": bool(card.emails),
             "email_count": len(card.emails or []),
@@ -397,11 +567,19 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
     websites_by_norm = {}
     for group in results.values():
         for s in group.get("sightings", []):
-            if not s.get("is_historical") and not s.get("is_material_history") and s.get("vendor_name"):
+            if (
+                not s.get("is_historical")
+                and not s.get("is_material_history")
+                and s.get("vendor_name")
+            ):
                 n = normalize_vendor_name(s["vendor_name"])
-                mpns_by_norm.setdefault(n, set()).add((s.get("mpn_matched") or "").lower())
+                mpns_by_norm.setdefault(n, set()).add(
+                    (s.get("mpn_matched") or "").lower()
+                )
                 if s.get("vendor_email"):
-                    emails_by_norm.setdefault(n, set()).add(s["vendor_email"].strip().lower())
+                    emails_by_norm.setdefault(n, set()).add(
+                        s["vendor_email"].strip().lower()
+                    )
                 if s.get("vendor_phone"):
                     phones_by_norm.setdefault(n, set()).add(s["vendor_phone"].strip())
                 if s.get("vendor_url"):
@@ -443,7 +621,14 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
 
     # Enrich each sighting + filter blacklisted + filter garbage vendors
     _GARBAGE_VENDORS = {"no seller listed", "no seller", "n/a", "unknown", ""}
-    empty_summary = {"card_id": None, "avg_rating": None, "review_count": 0, "has_emails": False, "email_count": 0, "is_blacklisted": False}
+    empty_summary = {
+        "card_id": None,
+        "avg_rating": None,
+        "review_count": 0,
+        "has_emails": False,
+        "email_count": 0,
+        "is_blacklisted": False,
+    }
     for group in results.values():
         enriched = []
         for s in group.get("sightings", []):
@@ -457,5 +642,3 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
             s["vendor_card"] = summary
             enriched.append(s)
         group["sightings"] = enriched
-
-

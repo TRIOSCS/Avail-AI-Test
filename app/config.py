@@ -1,12 +1,18 @@
 """Configuration — all settings from environment variables."""
+
 import os
 
 APP_VERSION = "1.5.5"
 
+
 class Settings:
     app_url: str = os.getenv("APP_URL", "http://localhost:8000")
-    secret_key: str = os.getenv("SESSION_SECRET") or os.getenv("SECRET_KEY", "change-me-in-production")
-    database_url: str = os.getenv("DATABASE_URL", "postgresql://availai:availai@db:5432/availai")
+    secret_key: str = os.getenv("SESSION_SECRET") or os.getenv(
+        "SECRET_KEY", "change-me-in-production"
+    )
+    database_url: str = os.getenv(
+        "DATABASE_URL", "postgresql://availai:availai@db:5432/availai"
+    )
 
     # Microsoft Azure OAuth
     azure_client_id: str = os.getenv("AZURE_CLIENT_ID", "")
@@ -55,16 +61,24 @@ class Settings:
     apollo_api_key: str = os.getenv("APOLLO_API_KEY", "")
 
     # AI Features (Definitive Spec)
-    ai_features_enabled: str = os.getenv("AI_FEATURES_ENABLED", "mike_only")  # "all", "mike_only", "off"
+    ai_features_enabled: str = os.getenv(
+        "AI_FEATURES_ENABLED", "mike_only"
+    )  # "all", "mike_only", "off"
 
     # Email Intelligence
-    email_mining_enabled: bool = os.getenv("EMAIL_MINING_ENABLED", "false").lower() == "true"
-    email_mining_lookback_days: int = int(os.getenv("EMAIL_MINING_LOOKBACK_DAYS", "180"))
+    email_mining_enabled: bool = (
+        os.getenv("EMAIL_MINING_ENABLED", "false").lower() == "true"
+    )
+    email_mining_lookback_days: int = int(
+        os.getenv("EMAIL_MINING_LOOKBACK_DAYS", "180")
+    )
 
     # M365 Integration v2
     inbox_scan_interval_min: int = int(os.getenv("INBOX_SCAN_INTERVAL_MIN", "30"))
     inbox_backfill_days: int = int(os.getenv("INBOX_BACKFILL_DAYS", "180"))
-    contacts_sync_enabled: bool = os.getenv("CONTACTS_SYNC_ENABLED", "true").lower() == "true"
+    contacts_sync_enabled: bool = (
+        os.getenv("CONTACTS_SYNC_ENABLED", "true").lower() == "true"
+    )
 
     # Scoring weights
     weight_recency: int = int(os.getenv("WEIGHT_RECENCY", "30"))
@@ -75,7 +89,11 @@ class Settings:
     weight_price: int = int(os.getenv("WEIGHT_PRICE", "10"))
 
     # Admin
-    admin_emails: list = [e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "mkhoury@trioscs.com").split(",") if e.strip()]
+    admin_emails: list = [
+        e.strip().lower()
+        for e in os.getenv("ADMIN_EMAILS", "mkhoury@trioscs.com").split(",")
+        if e.strip()
+    ]
 
     # Microsoft Teams (Buy Plan notifications)
     teams_webhook_url: str = os.getenv("TEAMS_WEBHOOK_URL", "")
@@ -83,19 +101,28 @@ class Settings:
     teams_channel_id: str = os.getenv("TEAMS_CHANNEL_ID", "")
 
     # Activity tracking & customer ownership (v1.3.0)
-    activity_tracking_enabled: bool = os.getenv("ACTIVITY_TRACKING_ENABLED", "true").lower() == "true"
+    activity_tracking_enabled: bool = (
+        os.getenv("ACTIVITY_TRACKING_ENABLED", "true").lower() == "true"
+    )
     customer_inactivity_days: int = int(os.getenv("CUSTOMER_INACTIVITY_DAYS", "30"))
     strategic_inactivity_days: int = int(os.getenv("STRATEGIC_INACTIVITY_DAYS", "90"))
     customer_warning_days: int = int(os.getenv("CUSTOMER_WARNING_DAYS", "23"))
     offer_attribution_days: int = int(os.getenv("OFFER_ATTRIBUTION_DAYS", "14"))
-    vendor_protection_warn_days: int = int(os.getenv("VENDOR_PROTECTION_WARN_DAYS", "60"))
-    vendor_protection_drop_days: int = int(os.getenv("VENDOR_PROTECTION_DROP_DAYS", "90"))
+    vendor_protection_warn_days: int = int(
+        os.getenv("VENDOR_PROTECTION_WARN_DAYS", "60")
+    )
+    vendor_protection_drop_days: int = int(
+        os.getenv("VENDOR_PROTECTION_DROP_DAYS", "90")
+    )
     routing_window_hours: int = int(os.getenv("ROUTING_WINDOW_HOURS", "48"))
     collision_lookback_days: int = int(os.getenv("COLLISION_LOOKBACK_DAYS", "7"))
 
     # Proactive offers
-    proactive_matching_enabled: bool = os.getenv("PROACTIVE_MATCHING_ENABLED", "true").lower() == "true"
+    proactive_matching_enabled: bool = (
+        os.getenv("PROACTIVE_MATCHING_ENABLED", "true").lower() == "true"
+    )
     proactive_archive_age_days: int = int(os.getenv("PROACTIVE_ARCHIVE_AGE_DAYS", "30"))
     proactive_throttle_days: int = int(os.getenv("PROACTIVE_THROTTLE_DAYS", "21"))
+
 
 settings = Settings()

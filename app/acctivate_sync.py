@@ -12,6 +12,7 @@ Design rules (from data architecture spec):
   - Entire sync should run in under 60 seconds.
   - Log failures and alert. That's the only failure mode.
 """
+
 import logging
 from datetime import datetime, timezone
 from contextlib import contextmanager
@@ -23,6 +24,7 @@ from .config import settings
 log = logging.getLogger("avail.acctivate")
 
 # ── Connection ────────────────────────────────────────────────────────
+
 
 @contextmanager
 def _connect():
@@ -45,6 +47,7 @@ def _connect():
 
 # ── Schema Discovery (run once to map tables) ────────────────────────
 
+
 def discover_schema():
     """Return Acctivate's table/column structure for query development.
 
@@ -66,20 +69,30 @@ def discover_schema():
 
         # 2. Columns for tables likely related to POs, vendors, inventory
         keywords = [
-            "%vendor%", "%supplier%", "%purchase%", "%order%",
-            "%inventory%", "%stock%", "%product%", "%item%",
-            "%rma%", "%return%", "%cancel%", "%receipt%",
+            "%vendor%",
+            "%supplier%",
+            "%purchase%",
+            "%order%",
+            "%inventory%",
+            "%stock%",
+            "%product%",
+            "%item%",
+            "%rma%",
+            "%return%",
+            "%cancel%",
+            "%receipt%",
         ]
-        like_clauses = " OR ".join(
-            "TABLE_NAME LIKE ?" for _ in keywords
-        )
-        cur.execute(f"""
+        like_clauses = " OR ".join("TABLE_NAME LIKE ?" for _ in keywords)
+        cur.execute(
+            f"""
             SELECT TABLE_NAME, COLUMN_NAME, DATA_TYPE,
                    CHARACTER_MAXIMUM_LENGTH, IS_NULLABLE
             FROM INFORMATION_SCHEMA.COLUMNS
             WHERE {like_clauses}
             ORDER BY TABLE_NAME, ORDINAL_POSITION
-        """, keywords)
+        """,
+            keywords,
+        )
         results["relevant_columns"] = cur.fetchall()
 
         # 3. Row counts for relevant tables
@@ -180,6 +193,7 @@ GROUP BY VendorName, ProductID
 
 # ── Sync Orchestrator ─────────────────────────────────────────────────
 
+
 def run_sync(db_session):
     """Execute the daily sync. Returns a status dict for logging.
 
@@ -210,16 +224,17 @@ def run_sync(db_session):
             matched = 0
             for row in rows:
                 norm = normalize_vendor_name(row["VendorName"])
-                card = db_session.query(VendorCard).filter_by(
-                    normalized_name=norm
-                ).first()
+                card = (
+                    db_session.query(VendorCard).filter_by(normalized_name=norm).first()
+                )
                 if card:
                     card.cancellation_rate = row["cancellation_rate"]
                     card.acctivate_total_orders = row["total_orders"]
                     card.last_synced_at = started
                     matched += 1
             result["counts"]["vendor_cancellation"] = {
-                "total": len(rows), "matched": matched
+                "total": len(rows),
+                "matched": matched,
             }
 
             # ── 2. Vendor RMA rates ───────────────────────────────
@@ -253,8 +268,9 @@ def run_sync(db_session):
 
     result["finished_at"] = datetime.now(timezone.utc)
     duration = (result["finished_at"] - started).total_seconds()
-    log.info("Acctivate sync %s in %.1fs — %s",
-             result["status"], duration, result["counts"])
+    log.info(
+        "Acctivate sync %s in %.1fs — %s", result["status"], duration, result["counts"]
+    )
 
     # Write sync log
     try:

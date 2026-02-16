@@ -4,6 +4,7 @@ Used by:
   - main.py: upload_requirements, import_stock_list
   - scheduler.py: _parse_stock_list_file
 """
+
 import csv
 import io
 import logging
@@ -36,6 +37,7 @@ def parse_tabular_file(content: bytes, filename: str) -> list[dict]:
 def _parse_excel(content: bytes) -> list[dict]:
     """Parse Excel bytes into list of row dicts."""
     import openpyxl
+
     wb = openpyxl.load_workbook(io.BytesIO(content), read_only=True, data_only=True)
     ws = wb.active
     rows = []
@@ -64,14 +66,49 @@ def _parse_csv(content: bytes, delimiter: str = ",") -> list[dict]:
 # ── Stock list row normalization ────────────────────────────────────────
 
 # Common header variations for stock list columns
-MPN_HEADERS = {'mpn', 'part number', 'part_number', 'pn', 'partnumber', 'part#',
-               'part no', 'part_no', 'mfr part', 'mfr_part', 'manufacturer part',
-               'component', 'item', 'item number', 'sku', 'model'}
-QTY_HEADERS = {'qty', 'quantity', 'avail', 'available', 'stock', 'on hand',
-               'on_hand', 'inventory', 'qty available', 'qty_available'}
-PRICE_HEADERS = {'price', 'unit price', 'unit_price', 'cost', 'each', 'unit cost',
-                 'unit_cost', 'sell price', 'sell_price', 'usd'}
-MFR_HEADERS = {'manufacturer', 'mfr', 'mfg', 'brand', 'make', 'vendor', 'oem'}
+MPN_HEADERS = {
+    "mpn",
+    "part number",
+    "part_number",
+    "pn",
+    "partnumber",
+    "part#",
+    "part no",
+    "part_no",
+    "mfr part",
+    "mfr_part",
+    "manufacturer part",
+    "component",
+    "item",
+    "item number",
+    "sku",
+    "model",
+}
+QTY_HEADERS = {
+    "qty",
+    "quantity",
+    "avail",
+    "available",
+    "stock",
+    "on hand",
+    "on_hand",
+    "inventory",
+    "qty available",
+    "qty_available",
+}
+PRICE_HEADERS = {
+    "price",
+    "unit price",
+    "unit_price",
+    "cost",
+    "each",
+    "unit cost",
+    "unit_cost",
+    "sell price",
+    "sell_price",
+    "usd",
+}
+MFR_HEADERS = {"manufacturer", "mfr", "mfg", "brand", "make", "vendor", "oem"}
 
 
 def normalize_stock_row(r: dict) -> dict | None:
@@ -95,7 +132,7 @@ def normalize_stock_row(r: dict) -> dict | None:
     for h in QTY_HEADERS:
         if h in norm and norm[h]:
             try:
-                qty = int(float(str(norm[h]).replace(',', '').strip()))
+                qty = int(float(str(norm[h]).replace(",", "").strip()))
             except (ValueError, TypeError):
                 pass
             break
@@ -104,7 +141,7 @@ def normalize_stock_row(r: dict) -> dict | None:
     for h in PRICE_HEADERS:
         if h in norm and norm[h]:
             try:
-                price = float(str(norm[h]).replace('$', '').replace(',', '').strip())
+                price = float(str(norm[h]).replace("$", "").replace(",", "").strip())
             except (ValueError, TypeError):
                 pass
             break

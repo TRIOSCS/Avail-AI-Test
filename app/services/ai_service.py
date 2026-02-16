@@ -12,6 +12,7 @@ Design rules:
   - Never auto-sends anything — always human confirmation
   - AVAIL still works if all AI fails
 """
+
 import logging
 
 from app.utils.claude_client import claude_text, claude_json
@@ -28,9 +29,14 @@ FAST = "fast"
 
 # Default title keywords for electronic component sales
 DEFAULT_TITLE_KEYWORDS = [
-    "procurement", "purchasing", "buyer", "supply chain",
-    "component engineer", "commodity manager",
-    "materials manager", "sourcing",
+    "procurement",
+    "purchasing",
+    "buyer",
+    "supply chain",
+    "component engineer",
+    "commodity manager",
+    "materials manager",
+    "sourcing",
 ]
 
 CONTACT_SEARCH_SCHEMA = {
@@ -83,8 +89,8 @@ async def enrich_contacts_websearch(
     result = await claude_json(
         prompt,
         system="You find B2B contacts for electronic component sales outreach. "
-               "Return JSON: {\"contacts\": [{\"full_name\", \"title\", \"email\", \"phone\", \"linkedin_url\"}]}. "
-               "Only include contacts with real evidence. Null for unknown fields.",
+        'Return JSON: {"contacts": [{"full_name", "title", "email", "phone", "linkedin_url"}]}. '
+        "Only include contacts with real evidence. Null for unknown fields.",
         model_tier=SMART,
         max_tokens=1500,
         tools=[{"type": "web_search_20250305", "name": "web_search"}],
@@ -114,15 +120,17 @@ async def enrich_contacts_websearch(
         elif c.get("linkedin_url"):
             confidence = "low"
 
-        contacts.append({
-            "full_name": c["full_name"].strip(),
-            "title": (c.get("title") or "").strip() or None,
-            "email": email,
-            "phone": (c.get("phone") or "").strip() or None,
-            "linkedin_url": (c.get("linkedin_url") or "").strip() or None,
-            "source": "web_search",
-            "confidence": confidence,
-        })
+        contacts.append(
+            {
+                "full_name": c["full_name"].strip(),
+                "title": (c.get("title") or "").strip() or None,
+                "email": email,
+                "phone": (c.get("phone") or "").strip() or None,
+                "linkedin_url": (c.get("linkedin_url") or "").strip() or None,
+                "source": "web_search",
+                "confidence": confidence,
+            }
+        )
 
     return contacts
 
@@ -189,8 +197,8 @@ async def company_intel(company_name: str, domain: str | None = None) -> dict | 
     intel = await claude_json(
         prompt,
         system="You provide concise company intelligence for electronic component salespeople. "
-               "Return JSON with: summary, revenue, employees, products, components_they_buy, "
-               "recent_news, opportunity_signals, sources. Null for unknown fields.",
+        "Return JSON with: summary, revenue, employees, products, components_they_buy, "
+        "recent_news, opportunity_signals, sources. Null for unknown fields.",
         model_tier=SMART,
         max_tokens=1500,
         tools=[{"type": "web_search_20250305", "name": "web_search"}],
@@ -205,6 +213,7 @@ async def company_intel(company_name: str, domain: str | None = None) -> dict | 
 
 
 # ── Feature 4: Smart RFQ Email Drafts ─────────────────────────────────
+
 
 async def draft_rfq(
     vendor_name: str,
@@ -238,7 +247,7 @@ async def draft_rfq(
 
     parts_str = "\n".join(
         f"- {p.get('mpn', '?')}: {p.get('qty', '?')} pcs"
-        + (f" (target: ${p['target_price']})" if p.get('target_price') else "")
+        + (f" (target: ${p['target_price']})" if p.get("target_price") else "")
         for p in parts[:20]
     )
 
@@ -257,8 +266,8 @@ async def draft_rfq(
     body = await claude_text(
         prompt,
         system="You write concise, professional RFQ emails for an electronic component broker. "
-               "Keep it short — 3-5 sentences plus a parts table. Reference past business "
-               "if history is provided. No fluff, no over-politeness. Business-direct tone.",
+        "Keep it short — 3-5 sentences plus a parts table. Reference past business "
+        "if history is provided. No fluff, no over-politeness. Business-direct tone.",
         model_tier=SMART,
         max_tokens=500,
     )

@@ -11,10 +11,22 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import require_admin, require_settings_access
-from ..models import ApiSource, User, Company, CustomerSite, SiteContact, VendorCard, VendorContact
+from ..models import (
+    ApiSource,
+    User,
+    Company,
+    CustomerSite,
+    SiteContact,
+    VendorCard,
+    VendorContact,
+)
 from ..services.admin_service import (
-    list_users, update_user, get_all_config, set_config_value,
-    get_system_health, VALID_ROLES,
+    list_users,
+    update_user,
+    get_all_config,
+    set_config_value,
+    get_system_health,
+    VALID_ROLES,
 )
 from ..services.credential_service import encrypt_value, decrypt_value, mask_value
 
@@ -23,6 +35,7 @@ log = logging.getLogger(__name__)
 
 
 # ── Schemas ──────────────────────────────────────────────────────────
+
 
 class CreateUserRequest(BaseModel):
     name: str
@@ -41,6 +54,7 @@ class ConfigUpdateRequest(BaseModel):
 
 
 # ── User Management (admin only) ─────────────────────────────────────
+
 
 @router.get("/api/admin/users")
 def api_list_users(user: User = Depends(require_admin), db: Session = Depends(get_db)):
@@ -65,7 +79,12 @@ def api_create_user(
     )
     db.add(new_user)
     db.commit()
-    return {"id": new_user.id, "name": new_user.name, "email": new_user.email, "role": new_user.role}
+    return {
+        "id": new_user.id,
+        "name": new_user.name,
+        "email": new_user.email,
+        "role": new_user.role,
+    }
 
 
 @router.put("/api/admin/users/{user_id}")
@@ -99,6 +118,7 @@ def api_delete_user(
 
 # ── System Config (admin for writes, settings_access for reads) ──────
 
+
 @router.get("/api/admin/config")
 def api_get_config(
     user: User = Depends(require_settings_access),
@@ -122,6 +142,7 @@ def api_set_config(
 
 # ── System Health (settings_access) ──────────────────────────────────
 
+
 @router.get("/api/admin/health")
 def api_health(
     user: User = Depends(require_settings_access),
@@ -131,6 +152,7 @@ def api_health(
 
 
 # ── Credential Management (admin only) ────────────────────────────────
+
 
 @router.get("/api/admin/sources/{source_id}/credentials")
 def api_get_credentials(
@@ -143,16 +165,24 @@ def api_get_credentials(
     if not src:
         raise HTTPException(404, "Source not found")
     result = {}
-    for var_name in (src.env_vars or []):
+    for var_name in src.env_vars or []:
         encrypted = (src.credentials or {}).get(var_name)
         if encrypted:
             try:
                 plain = decrypt_value(encrypted)
-                result[var_name] = {"status": "set", "masked": mask_value(plain), "source": "db"}
+                result[var_name] = {
+                    "status": "set",
+                    "masked": mask_value(plain),
+                    "source": "db",
+                }
             except Exception:
                 result[var_name] = {"status": "error", "masked": "", "source": "db"}
         elif os.getenv(var_name):
-            result[var_name] = {"status": "set", "masked": mask_value(os.getenv(var_name)), "source": "env"}
+            result[var_name] = {
+                "status": "set",
+                "masked": mask_value(os.getenv(var_name)),
+                "source": "env",
+            }
         else:
             result[var_name] = {"status": "empty", "masked": "", "source": "none"}
     return {"source_id": src.id, "source_name": src.name, "credentials": result}
@@ -209,6 +239,7 @@ def api_delete_credential(
 
 # ── Data Import (admin only) ─────────────────────────────────────────
 
+
 @router.post("/api/admin/import/customers")
 async def import_customers(
     file: UploadFile = File(...),
@@ -243,9 +274,7 @@ async def import_customers(
 
         key = company_name.lower()
         if key not in seen_companies:
-            company = db.query(Company).filter(
-                Company.name.ilike(company_name)
-            ).first()
+            company = db.query(Company).filter(Company.name.ilike(company_name)).first()
             if not company:
                 company = Company(name=company_name)
                 db.add(company)
@@ -258,10 +287,14 @@ async def import_customers(
         site_name = (row.get("site_name") or company_name).strip()
         site_key = f"{key}|{site_name.lower()}"
         if site_key not in seen_sites:
-            site = db.query(CustomerSite).filter(
-                CustomerSite.company_id == company.id,
-                CustomerSite.site_name.ilike(site_name),
-            ).first()
+            site = (
+                db.query(CustomerSite)
+                .filter(
+                    CustomerSite.company_id == company.id,
+                    CustomerSite.site_name.ilike(site_name),
+                )
+                .first()
+            )
             if not site:
                 site = CustomerSite(
                     company_id=company.id,
@@ -287,10 +320,14 @@ async def import_customers(
         if contact_name or contact_email:
             existing_contact = None
             if contact_email:
-                existing_contact = db.query(SiteContact).filter(
-                    SiteContact.customer_site_id == site.id,
-                    SiteContact.email == contact_email.lower(),
-                ).first()
+                existing_contact = (
+                    db.query(SiteContact)
+                    .filter(
+                        SiteContact.customer_site_id == site.id,
+                        SiteContact.email == contact_email.lower(),
+                    )
+                    .first()
+                )
             if not existing_contact:
                 sc = SiteContact(
                     customer_site_id=site.id,
@@ -342,9 +379,11 @@ async def import_vendors(
 
         normalized = vendor_name.lower().strip()
         if normalized not in seen_vendors:
-            vc = db.query(VendorCard).filter(
-                VendorCard.normalized_name == normalized
-            ).first()
+            vc = (
+                db.query(VendorCard)
+                .filter(VendorCard.normalized_name == normalized)
+                .first()
+            )
             if not vc:
                 domain = (row.get("domain") or "").strip() or None
                 website = (row.get("website") or "").strip() or None
@@ -366,10 +405,14 @@ async def import_vendors(
         if contact_name or contact_email:
             existing = None
             if contact_email:
-                existing = db.query(VendorContact).filter(
-                    VendorContact.vendor_card_id == vc.id,
-                    VendorContact.email == contact_email.lower(),
-                ).first()
+                existing = (
+                    db.query(VendorContact)
+                    .filter(
+                        VendorContact.vendor_card_id == vc.id,
+                        VendorContact.email == contact_email.lower(),
+                    )
+                    .first()
+                )
             if not existing:
                 vcon = VendorContact(
                     vendor_card_id=vc.id,

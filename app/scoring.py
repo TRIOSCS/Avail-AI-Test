@@ -3,12 +3,17 @@
 Phase 1 scores based on available data:
   Recency(30) + Quantity(20) + Source(20) + Completeness(10) + Authorized(10) + Price(10)
 """
+
 import math
 from datetime import datetime, timezone
 
 SOURCE_SCORES = {
-    "nexar": 85, "octopart": 85, "brokerbin": 75,
-    "upload": 70, "email": 95, "manual": 60,
+    "nexar": 85,
+    "octopart": 85,
+    "brokerbin": 75,
+    "upload": 70,
+    "email": 95,
+    "manual": 60,
 }
 
 
@@ -18,7 +23,10 @@ def score_sighting(sighting, target_qty: int, weights: dict) -> float:
 
     # Recency — newer is better (exponential decay)
     if sighting.created_at:
-        days = max(0, (datetime.now(timezone.utc) - sighting.created_at).total_seconds() / 86400)
+        days = max(
+            0,
+            (datetime.now(timezone.utc) - sighting.created_at).total_seconds() / 86400,
+        )
         scores["recency"] = max(5, 100 * math.exp(-0.012 * days))
     else:
         scores["recency"] = 50
@@ -42,8 +50,13 @@ def score_sighting(sighting, target_qty: int, weights: dict) -> float:
     scores["source_credibility"] = SOURCE_SCORES.get(sighting.source_type or "", 50)
 
     # Data completeness — how much info do we have?
-    fields = [sighting.unit_price, sighting.qty_available, sighting.manufacturer,
-              sighting.vendor_email or sighting.vendor_phone, sighting.moq]
+    fields = [
+        sighting.unit_price,
+        sighting.qty_available,
+        sighting.manufacturer,
+        sighting.vendor_email or sighting.vendor_phone,
+        sighting.moq,
+    ]
     scores["data_completeness"] = sum(20 for f in fields if f) or 10
 
     # Authorized distributor bonus
@@ -54,12 +67,12 @@ def score_sighting(sighting, target_qty: int, weights: dict) -> float:
 
     # Weighted total
     total = (
-        scores["recency"] * weights.get("recency", 30) / 100 +
-        scores["quantity"] * weights.get("quantity", 20) / 100 +
-        scores["source_credibility"] * weights.get("source_credibility", 10) / 100 +
-        scores["data_completeness"] * weights.get("data_completeness", 10) / 100 +
-        scores["vendor_reliability"] * weights.get("vendor_reliability", 20) / 100 +
-        scores["price"] * weights.get("price", 10) / 100
+        scores["recency"] * weights.get("recency", 30) / 100
+        + scores["quantity"] * weights.get("quantity", 20) / 100
+        + scores["source_credibility"] * weights.get("source_credibility", 10) / 100
+        + scores["data_completeness"] * weights.get("data_completeness", 10) / 100
+        + scores["vendor_reliability"] * weights.get("vendor_reliability", 20) / 100
+        + scores["price"] * weights.get("price", 10) / 100
     )
 
     return max(0, min(100, round(total, 1)))

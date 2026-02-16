@@ -78,7 +78,7 @@ def get_all_credentials_for_source(db: Session, source_name: str) -> dict[str, s
         return {}
 
     result = {}
-    for var_name in (src.env_vars or []):
+    for var_name in src.env_vars or []:
         val = None
         if src.credentials:
             encrypted = src.credentials.get(var_name)

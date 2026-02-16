@@ -16,6 +16,7 @@ is surfaced in the UI as a color-coded ring (green ≥70, yellow 40-69, red <40)
 
 Integration: 20% weight in the master vendor ranking algorithm.
 """
+
 import logging
 from datetime import datetime, timezone
 
@@ -33,10 +34,10 @@ W_WIN_RATE = 0.15
 
 # ── Thresholds ──
 MIN_OUTREACH_FOR_SCORE = 2  # Need at least 2 outreach events to compute
-VELOCITY_IDEAL_HOURS = 4    # ≤4h = perfect score
-VELOCITY_MAX_HOURS = 168    # ≥168h (7 days) = zero score
-RECENCY_IDEAL_DAYS = 7      # Contacted within 7 days = perfect
-RECENCY_MAX_DAYS = 365      # Over a year = zero score
+VELOCITY_IDEAL_HOURS = 4  # ≤4h = perfect score
+VELOCITY_MAX_HOURS = 168  # ≥168h (7 days) = zero score
+RECENCY_IDEAL_DAYS = 7  # Contacted within 7 days = perfect
+RECENCY_MAX_DAYS = 365  # Over a year = zero score
 
 
 def compute_engagement_score(
@@ -73,7 +74,9 @@ def compute_engagement_score(
         }
 
     # ── 1. Response Rate (0-100) ──
-    response_rate = min(total_responses / total_outreach, 1.0) if total_outreach > 0 else 0
+    response_rate = (
+        min(total_responses / total_outreach, 1.0) if total_outreach > 0 else 0
+    )
     response_score = response_rate * 100
 
     # ── 2. Ghost Rate penalty (0-100, inverted: 0 ghosts = 100) ──
@@ -93,7 +96,13 @@ def compute_engagement_score(
         else:
             # Linear decay from ideal to max
             recency_score = max(
-                0, 100 * (1 - (days_since - RECENCY_IDEAL_DAYS) / (RECENCY_MAX_DAYS - RECENCY_IDEAL_DAYS))
+                0,
+                100
+                * (
+                    1
+                    - (days_since - RECENCY_IDEAL_DAYS)
+                    / (RECENCY_MAX_DAYS - RECENCY_IDEAL_DAYS)
+                ),
             )
 
     # ── 4. Response Velocity (0-100) ──
@@ -105,7 +114,13 @@ def compute_engagement_score(
             velocity_score = 0.0
         else:
             velocity_score = max(
-                0, 100 * (1 - (avg_velocity_hours - VELOCITY_IDEAL_HOURS) / (VELOCITY_MAX_HOURS - VELOCITY_IDEAL_HOURS))
+                0,
+                100
+                * (
+                    1
+                    - (avg_velocity_hours - VELOCITY_IDEAL_HOURS)
+                    / (VELOCITY_MAX_HOURS - VELOCITY_IDEAL_HOURS)
+                ),
             )
 
     # ── 5. Win Rate (0-100) ──
@@ -286,7 +301,9 @@ async def compute_all_engagement_scores(db: Session) -> dict:
 
     try:
         db.commit()
-        log.info(f"Engagement scoring: updated {updated} vendor cards, skipped {skipped}")
+        log.info(
+            f"Engagement scoring: updated {updated} vendor cards, skipped {skipped}"
+        )
     except Exception as e:
         log.error(f"Engagement scoring commit failed: {e}")
         db.rollback()
@@ -306,21 +323,24 @@ def compute_single_vendor_score(card, db: Session) -> float | None:
         db.query(func.count(Contact.id))
         .filter(Contact.contact_type == "email")
         .filter(func.lower(Contact.vendor_name) == norm)
-        .scalar() or 0
+        .scalar()
+        or 0
     )
 
     responses = (
         db.query(func.count(VendorResponse.id))
         .filter(func.lower(VendorResponse.vendor_name) == norm)
         .filter(VendorResponse.status != "noise")
-        .scalar() or 0
+        .scalar()
+        or 0
     )
 
     wins = (
         db.query(func.count(Offer.id))
         .filter(func.lower(Offer.vendor_name) == norm)
         .filter(Offer.status == "accepted")
-        .scalar() or 0
+        .scalar()
+        or 0
     )
 
     result = compute_engagement_score(
@@ -349,16 +369,20 @@ def apply_outbound_stats(db: Session, vendors_contacted: dict[str, int]):
     updated = 0
     for domain, count in vendors_contacted.items():
         # Find vendor card by domain
-        card = db.query(VendorCard).filter(
-            func.lower(VendorCard.domain) == domain.lower()
-        ).first()
+        card = (
+            db.query(VendorCard)
+            .filter(func.lower(VendorCard.domain) == domain.lower())
+            .first()
+        )
 
         # Fallback: try matching by normalized name (strip TLD)
         if not card:
             vendor_key = domain.split(".")[0] if "." in domain else domain
-            card = db.query(VendorCard).filter(
-                func.lower(VendorCard.normalized_name) == vendor_key.lower()
-            ).first()
+            card = (
+                db.query(VendorCard)
+                .filter(func.lower(VendorCard.normalized_name) == vendor_key.lower())
+                .first()
+            )
 
         if card:
             card.total_outreach = (card.total_outreach or 0) + count

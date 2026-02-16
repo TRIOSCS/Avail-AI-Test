@@ -8,6 +8,7 @@ Target fields extracted per row:
   mpn, manufacturer, qty, unit_price, currency, condition, date_code,
   lead_time, packaging, description
 """
+
 import io
 import logging
 import re
@@ -20,36 +21,20 @@ HEADER_PATTERNS = {
     "mpn": re.compile(
         r"(?i)^(part\s*(?:no|number|#|num)|mpn|mfr?\s*part|mfg\s*p/?n|p/?n|item\s*(?:no|#))$"
     ),
-    "manufacturer": re.compile(
-        r"(?i)^(manufacturer|mfr|mfg|brand|make|vendor)$"
-    ),
+    "manufacturer": re.compile(r"(?i)^(manufacturer|mfr|mfg|brand|make|vendor)$"),
     "qty": re.compile(
         r"(?i)^(qty|quantity|qoh|avail(?:able)?|stock|on\s*hand|inv(?:entory)?)$"
     ),
     "unit_price": re.compile(
         r"(?i)^(price|unit\s*price|cost|unit\s*cost|rate|ea|each|\$/ea|usd)$"
     ),
-    "condition": re.compile(
-        r"(?i)^(cond(?:ition)?|grade|quality|status)$"
-    ),
-    "date_code": re.compile(
-        r"(?i)^(date\s*code|dc|d/?c|lot|batch)$"
-    ),
-    "lead_time": re.compile(
-        r"(?i)^(lead\s*time|lt|delivery|tat|ard|eta|ship)$"
-    ),
-    "packaging": re.compile(
-        r"(?i)^(pack(?:aging|age)?|pkg|spq|form)$"
-    ),
-    "description": re.compile(
-        r"(?i)^(desc(?:ription)?|detail|spec|product)$"
-    ),
-    "currency": re.compile(
-        r"(?i)^(curr(?:ency)?|ccy)$"
-    ),
-    "moq": re.compile(
-        r"(?i)^(moq|min(?:imum)?\s*(?:order|qty)|min)$"
-    ),
+    "condition": re.compile(r"(?i)^(cond(?:ition)?|grade|quality|status)$"),
+    "date_code": re.compile(r"(?i)^(date\s*code|dc|d/?c|lot|batch)$"),
+    "lead_time": re.compile(r"(?i)^(lead\s*time|lt|delivery|tat|ard|eta|ship)$"),
+    "packaging": re.compile(r"(?i)^(pack(?:aging|age)?|pkg|spq|form)$"),
+    "description": re.compile(r"(?i)^(desc(?:ription)?|detail|spec|product)$"),
+    "currency": re.compile(r"(?i)^(curr(?:ency)?|ccy)$"),
+    "moq": re.compile(r"(?i)^(moq|min(?:imum)?\s*(?:order|qty)|min)$"),
 }
 
 
@@ -98,12 +83,26 @@ async def _ai_detect_columns(
                     "items": {
                         "type": "object",
                         "properties": {
-                            "column_index": {"type": "integer", "description": "0-based column index"},
+                            "column_index": {
+                                "type": "integer",
+                                "description": "0-based column index",
+                            },
                             "field_name": {
                                 "type": "string",
-                                "enum": ["mpn", "manufacturer", "qty", "unit_price",
-                                         "currency", "condition", "date_code",
-                                         "lead_time", "packaging", "description", "moq", "ignore"],
+                                "enum": [
+                                    "mpn",
+                                    "manufacturer",
+                                    "qty",
+                                    "unit_price",
+                                    "currency",
+                                    "condition",
+                                    "date_code",
+                                    "lead_time",
+                                    "packaging",
+                                    "description",
+                                    "moq",
+                                    "ignore",
+                                ],
                             },
                             "confidence": {"type": "number", "description": "0.0-1.0"},
                         },
@@ -165,12 +164,19 @@ async def _get_or_detect_mapping(
     # Step 1: Check cache
     if db and vendor_domain and file_fingerprint:
         from app.models import ColumnMappingCache
-        cached = db.query(ColumnMappingCache).filter_by(
-            vendor_domain=vendor_domain,
-            file_fingerprint=file_fingerprint,
-        ).first()
+
+        cached = (
+            db.query(ColumnMappingCache)
+            .filter_by(
+                vendor_domain=vendor_domain,
+                file_fingerprint=file_fingerprint,
+            )
+            .first()
+        )
         if cached and cached.mapping:
-            log.info(f"Cache hit for column mapping: {vendor_domain}/{file_fingerprint[:8]}")
+            log.info(
+                f"Cache hit for column mapping: {vendor_domain}/{file_fingerprint[:8]}"
+            )
             # Convert string keys back to int
             return {int(k): v for k, v in cached.mapping.items()}
 
@@ -193,6 +199,7 @@ async def _get_or_detect_mapping(
     # Step 4: Cache the result
     if db and vendor_domain and file_fingerprint and mapping:
         from app.models import ColumnMappingCache
+
         cache_entry = ColumnMappingCache(
             vendor_domain=vendor_domain,
             file_fingerprint=file_fingerprint,
@@ -202,15 +209,23 @@ async def _get_or_detect_mapping(
         )
         try:
             from sqlalchemy.dialects.postgresql import insert
-            stmt = insert(ColumnMappingCache.__table__).values(
-                vendor_domain=cache_entry.vendor_domain,
-                file_fingerprint=cache_entry.file_fingerprint,
-                mapping=cache_entry.mapping,
-                confidence=cache_entry.confidence,
-                created_at=cache_entry.created_at,
-            ).on_conflict_do_update(
-                index_elements=["vendor_domain", "file_fingerprint"],
-                set_={"mapping": cache_entry.mapping, "confidence": cache_entry.confidence},
+
+            stmt = (
+                insert(ColumnMappingCache.__table__)
+                .values(
+                    vendor_domain=cache_entry.vendor_domain,
+                    file_fingerprint=cache_entry.file_fingerprint,
+                    mapping=cache_entry.mapping,
+                    confidence=cache_entry.confidence,
+                    created_at=cache_entry.created_at,
+                )
+                .on_conflict_do_update(
+                    index_elements=["vendor_domain", "file_fingerprint"],
+                    set_={
+                        "mapping": cache_entry.mapping,
+                        "confidence": cache_entry.confidence,
+                    },
+                )
             )
             db.execute(stmt)
             db.flush()
@@ -277,9 +292,15 @@ def _parse_csv(file_bytes: bytes, filename: str) -> tuple[list[str], list[list[s
 def _extract_row(row: list[str], mapping: dict[int, str]) -> dict | None:
     """Extract a single row using the column mapping. Returns dict or None if no MPN."""
     from app.utils.normalization import (
-        normalize_mpn, normalize_price, normalize_quantity,
-        normalize_condition, normalize_date_code, normalize_lead_time,
-        normalize_packaging, detect_currency, normalize_moq,
+        normalize_mpn,
+        normalize_price,
+        normalize_quantity,
+        normalize_condition,
+        normalize_date_code,
+        normalize_lead_time,
+        normalize_packaging,
+        detect_currency,
+        normalize_moq,
     )
 
     result = {}
@@ -375,5 +396,7 @@ async def parse_attachment(
         if extracted:
             results.append(extracted)
 
-    log.info(f"Parsed {len(results)} rows from {filename} ({len(data_rows)} total, {len(mapping)} mapped columns)")
+    log.info(
+        f"Parsed {len(results)} rows from {filename} ({len(data_rows)} total, {len(mapping)} mapped columns)"
+    )
     return results

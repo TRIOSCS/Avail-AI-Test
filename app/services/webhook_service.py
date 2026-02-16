@@ -13,6 +13,7 @@ Usage:
     # Renew expiring subscriptions (called from scheduler)
     await renew_expiring_subscriptions(db)
 """
+
 import logging
 import secrets
 from datetime import datetime, timezone, timedelta
@@ -26,12 +27,13 @@ log = logging.getLogger("avail.webhook")
 
 # Graph webhook subscriptions for mail expire after max 3 days (4230 min)
 SUBSCRIPTION_LIFETIME_HOURS = 70  # ~3 days, renew before expiry
-RENEW_BUFFER_HOURS = 6            # renew when less than 6h remaining
+RENEW_BUFFER_HOURS = 6  # renew when less than 6h remaining
 
 
 # ═══════════════════════════════════════════════════════════════════════
 #  SUBSCRIPTION MANAGEMENT
 # ═══════════════════════════════════════════════════════════════════════
+
 
 async def create_mail_subscription(user: User, db: Session) -> GraphSubscription | None:
     """Create a Graph webhook subscription for a user's mailbox.
@@ -48,16 +50,24 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
         return None
 
     # Check for existing active subscription
-    existing = db.query(GraphSubscription).filter(
-        GraphSubscription.user_id == user.id,
-        GraphSubscription.expiration_dt > datetime.now(timezone.utc)
-    ).first()
+    existing = (
+        db.query(GraphSubscription)
+        .filter(
+            GraphSubscription.user_id == user.id,
+            GraphSubscription.expiration_dt > datetime.now(timezone.utc),
+        )
+        .first()
+    )
     if existing:
-        log.debug(f"Active subscription exists for {user.email}: {existing.subscription_id}")
+        log.debug(
+            f"Active subscription exists for {user.email}: {existing.subscription_id}"
+        )
         return existing
 
     client_state = secrets.token_hex(16)
-    expiration = datetime.now(timezone.utc) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
+    expiration = datetime.now(timezone.utc) + timedelta(
+        hours=SUBSCRIPTION_LIFETIME_HOURS
+    )
 
     notification_url = f"{settings.app_url}/api/webhooks/graph"
 
@@ -92,7 +102,9 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
     db.add(record)
     db.commit()
 
-    log.info(f"Created Graph subscription {sub_id} for {user.email}, expires {expiration}")
+    log.info(
+        f"Created Graph subscription {sub_id} for {user.email}, expires {expiration}"
+    )
     return record
 
 
@@ -109,13 +121,19 @@ async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
     if not token:
         return False
 
-    new_expiration = datetime.now(timezone.utc) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
+    new_expiration = datetime.now(timezone.utc) + timedelta(
+        hours=SUBSCRIPTION_LIFETIME_HOURS
+    )
 
     gc = GraphClient(token)
     try:
         await gc.post_json(
             f"/subscriptions/{sub.subscription_id}",
-            {"expirationDateTime": new_expiration.strftime("%Y-%m-%dT%H:%M:%S.0000000Z")}
+            {
+                "expirationDateTime": new_expiration.strftime(
+                    "%Y-%m-%dT%H:%M:%S.0000000Z"
+                )
+            },
         )
     except Exception as e:
         log.error(f"Failed to renew subscription {sub.subscription_id}: {e}")
@@ -133,9 +151,11 @@ async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
 async def renew_expiring_subscriptions(db: Session):
     """Renew all subscriptions expiring within the buffer window."""
     cutoff = datetime.now(timezone.utc) + timedelta(hours=RENEW_BUFFER_HOURS)
-    expiring = db.query(GraphSubscription).filter(
-        GraphSubscription.expiration_dt <= cutoff
-    ).all()
+    expiring = (
+        db.query(GraphSubscription)
+        .filter(GraphSubscription.expiration_dt <= cutoff)
+        .all()
+    )
 
     for sub in expiring:
         await renew_subscription(sub, db)
@@ -143,16 +163,24 @@ async def renew_expiring_subscriptions(db: Session):
 
 async def ensure_all_users_subscribed(db: Session):
     """Create subscriptions for any M365-connected user that doesn't have one."""
-    users = db.query(User).filter(
-        User.m365_connected.is_(True),
-        User.role.in_(["buyer", "sales"]),
-    ).all()
+    users = (
+        db.query(User)
+        .filter(
+            User.m365_connected.is_(True),
+            User.role.in_(["buyer", "sales"]),
+        )
+        .all()
+    )
 
     for user in users:
-        existing = db.query(GraphSubscription).filter(
-            GraphSubscription.user_id == user.id,
-            GraphSubscription.expiration_dt > datetime.now(timezone.utc)
-        ).first()
+        existing = (
+            db.query(GraphSubscription)
+            .filter(
+                GraphSubscription.user_id == user.id,
+                GraphSubscription.expiration_dt > datetime.now(timezone.utc),
+            )
+            .first()
+        )
         if not existing:
             await create_mail_subscription(user, db)
 
@@ -160,6 +188,7 @@ async def ensure_all_users_subscribed(db: Session):
 # ═══════════════════════════════════════════════════════════════════════
 #  NOTIFICATION HANDLER
 # ═══════════════════════════════════════════════════════════════════════
+
 
 async def handle_notification(payload: dict, db: Session):
     """Process a Graph webhook notification payload.
@@ -185,9 +214,11 @@ async def handle_notification(payload: dict, db: Session):
         client_state = notif.get("clientState")
         sub_id = notif.get("subscriptionId")
 
-        sub = db.query(GraphSubscription).filter(
-            GraphSubscription.subscription_id == sub_id
-        ).first()
+        sub = (
+            db.query(GraphSubscription)
+            .filter(GraphSubscription.subscription_id == sub_id)
+            .first()
+        )
         if not sub:
             log.warning(f"Unknown subscription {sub_id}, ignoring")
             continue
@@ -213,9 +244,12 @@ async def handle_notification(payload: dict, db: Session):
         gc = GraphClient(token)
         try:
             # Fetch the message details
-            msg = await gc.get_json(f"/{resource}", params={
-                "$select": "id,subject,from,toRecipients,sentDateTime,isDraft,parentFolderId"
-            })
+            msg = await gc.get_json(
+                f"/{resource}",
+                params={
+                    "$select": "id,subject,from,toRecipients,sentDateTime,isDraft,parentFolderId"
+                },
+            )
         except Exception as e:
             log.error(f"Failed to fetch message for notification: {e}")
             continue
@@ -228,7 +262,7 @@ async def handle_notification(payload: dict, db: Session):
 
         # Determine direction: sent by user or received
         from_addr = _extract_email(msg.get("from"))
-        to_addrs = [_extract_email(r) for r in msg.get("toRecipients", [])]
+        [_extract_email(r) for r in msg.get("toRecipients", [])]
 
         user_email = user.email.lower()
 
@@ -259,10 +293,14 @@ async def handle_notification(payload: dict, db: Session):
     for user_id, (user, token) in users_with_inbound.items():
         try:
             new_responses = await poll_inbox(
-                token=token, db=db, scanned_by_user_id=user.id,
+                token=token,
+                db=db,
+                scanned_by_user_id=user.id,
             )
             if new_responses:
-                log.info(f"Webhook-triggered poll [{user.email}]: {len(new_responses)} new response(s)")
+                log.info(
+                    f"Webhook-triggered poll [{user.email}]: {len(new_responses)} new response(s)"
+                )
         except Exception as e:
             log.error(f"Webhook-triggered poll failed for {user.email}: {e}")
 
@@ -270,6 +308,7 @@ async def handle_notification(payload: dict, db: Session):
 # ═══════════════════════════════════════════════════════════════════════
 #  HELPERS
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def _extract_email(recipient: dict | None) -> str | None:
     """Extract email from Graph recipient structure."""

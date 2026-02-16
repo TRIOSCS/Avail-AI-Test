@@ -3,6 +3,7 @@
 Returns pricing/stock from DigiKey, Mouser, Arrow, Avnet, Farnell, RS,
 Future, TME, and many more in a single API call.
 """
+
 import logging
 import httpx
 from .sources import BaseConnector
@@ -12,6 +13,7 @@ log = logging.getLogger(__name__)
 
 class OEMSecretsConnector(BaseConnector):
     """OEMSecrets Part Search API — JSON endpoint."""
+
     # Docs: https://www.oemsecrets.com/api
     SEARCH_URL = "https://www.oemsecrets.com/api/v1/search"
 
@@ -38,7 +40,11 @@ class OEMSecretsConnector(BaseConnector):
 
     def _parse(self, data: dict, pn: str) -> list[dict]:
         # OEMSecrets response varies — handle both formats
-        stock_data = data if isinstance(data, list) else data.get("stock", data.get("results", []))
+        stock_data = (
+            data
+            if isinstance(data, list)
+            else data.get("stock", data.get("results", []))
+        )
         if not isinstance(stock_data, list):
             stock_data = []
 
@@ -50,7 +56,11 @@ class OEMSecretsConnector(BaseConnector):
                 continue
 
             distributor = item.get("distributor", {})
-            dist_name = distributor.get("name", "") if isinstance(distributor, dict) else str(distributor)
+            dist_name = (
+                distributor.get("name", "")
+                if isinstance(distributor, dict)
+                else str(distributor)
+            )
             if not dist_name:
                 dist_name = item.get("distributor_name", item.get("seller", ""))
             if not dist_name:
@@ -74,32 +84,41 @@ class OEMSecretsConnector(BaseConnector):
             # Authorized distributors from OEMSecrets are generally legit
             is_auth = item.get("authorized", item.get("is_authorized", True))
 
-            results.append({
-                "vendor_name": dist_name,
-                "manufacturer": mfr,
-                "mpn_matched": mpn,
-                "qty_available": _safe_int(qty),
-                "unit_price": _safe_float(price),
-                "currency": currency,
-                "source_type": "oemsecrets",
-                "is_authorized": bool(is_auth),
-                "confidence": 5 if qty else 3,
-                "click_url": url,
-                "vendor_sku": sku,
-                "moq": _safe_int(moq),
-                "datasheet_url": datasheet,
-            })
+            results.append(
+                {
+                    "vendor_name": dist_name,
+                    "manufacturer": mfr,
+                    "mpn_matched": mpn,
+                    "qty_available": _safe_int(qty),
+                    "unit_price": _safe_float(price),
+                    "currency": currency,
+                    "source_type": "oemsecrets",
+                    "is_authorized": bool(is_auth),
+                    "confidence": 5 if qty else 3,
+                    "click_url": url,
+                    "vendor_sku": sku,
+                    "moq": _safe_int(moq),
+                    "datasheet_url": datasheet,
+                }
+            )
 
         log.info(f"OEMSecrets: {pn} -> {len(results)} results")
         return results
 
 
 def _safe_int(v):
-    if v is None: return None
-    try: return int(v)
-    except: return None
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (ValueError, TypeError):
+        return None
+
 
 def _safe_float(v):
-    if v is None: return None
-    try: return float(v)
-    except: return None
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return None

@@ -7,6 +7,7 @@ API docs: https://apolloio.github.io/apollo-api-docs/
 
 Gracefully returns empty results when API key is not configured.
 """
+
 import logging
 from typing import Any
 
@@ -20,9 +21,14 @@ APOLLO_BASE = "https://api.apollo.io/api/v1"
 
 # Default title keywords for electronic component sales
 DEFAULT_TITLES = [
-    "procurement", "purchasing", "buyer", "supply chain",
-    "component engineer", "commodity manager",
-    "materials manager", "sourcing",
+    "procurement",
+    "purchasing",
+    "buyer",
+    "supply chain",
+    "component engineer",
+    "commodity manager",
+    "materials manager",
+    "sourcing",
 ]
 
 
@@ -68,7 +74,9 @@ async def search_contacts(
             )
 
             if resp.status_code != 200:
-                log.warning(f"Apollo search failed: {resp.status_code} {resp.text[:200]}")
+                log.warning(
+                    f"Apollo search failed: {resp.status_code} {resp.text[:200]}"
+                )
                 return []
 
             data = resp.json()
@@ -87,16 +95,18 @@ async def search_contacts(
                 else:
                     confidence = "low"
 
-                contacts.append({
-                    "full_name": _full_name(person),
-                    "title": person.get("title") or person.get("headline"),
-                    "email": email,
-                    "email_status": email_status,
-                    "phone": _best_phone(person),
-                    "linkedin_url": person.get("linkedin_url"),
-                    "source": "apollo",
-                    "confidence": confidence,
-                })
+                contacts.append(
+                    {
+                        "full_name": _full_name(person),
+                        "title": person.get("title") or person.get("headline"),
+                        "email": email,
+                        "email_status": email_status,
+                        "phone": _best_phone(person),
+                        "linkedin_url": person.get("linkedin_url"),
+                        "source": "apollo",
+                        "confidence": confidence,
+                    }
+                )
 
             return contacts
 

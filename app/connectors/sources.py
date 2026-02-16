@@ -1,4 +1,5 @@
 """API connectors — Nexar (Octopart) and BrokerBin."""
+
 import logging
 import asyncio
 import httpx
@@ -19,9 +20,11 @@ class BaseConnector(ABC):
                 return await self._do_search(part_number)
             except Exception as e:
                 if attempt < self.max_retries:
-                    await asyncio.sleep(2 ** attempt)
+                    await asyncio.sleep(2**attempt)
                 else:
-                    log.warning(f"{self.__class__.__name__} failed for {part_number}: {e}")
+                    log.warning(
+                        f"{self.__class__.__name__} failed for {part_number}: {e}"
+                    )
         return []
 
     @abstractmethod
@@ -31,6 +34,7 @@ class BaseConnector(ABC):
 
 class NexarConnector(BaseConnector):
     """Nexar/Octopart GraphQL API — full seller data."""
+
     TOKEN_URL = "https://identity.nexar.com/connect/token"
     API_URL = "https://api.nexar.com/graphql"
 
@@ -64,11 +68,14 @@ class NexarConnector(BaseConnector):
         if self._token:
             return self._token
         async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.post(self.TOKEN_URL, data={
-                "grant_type": "client_credentials",
-                "client_id": self.client_id,
-                "client_secret": self.client_secret,
-            })
+            r = await c.post(
+                self.TOKEN_URL,
+                data={
+                    "grant_type": "client_credentials",
+                    "client_id": self.client_id,
+                    "client_secret": self.client_secret,
+                },
+            )
             r.raise_for_status()
             self._token = r.json()["access_token"]
             return self._token
@@ -78,7 +85,10 @@ class NexarConnector(BaseConnector):
         async with httpx.AsyncClient(timeout=self.timeout) as c:
             r = await c.post(
                 self.API_URL,
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
                 json={"query": query, "variables": {"mpn": part_number}},
             )
             if r.status_code == 401:
@@ -86,7 +96,10 @@ class NexarConnector(BaseConnector):
                 token = await self._get_token()
                 r = await c.post(
                     self.API_URL,
-                    headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
                     json={"query": query, "variables": {"mpn": part_number}},
                 )
             r.raise_for_status()
@@ -99,9 +112,13 @@ class NexarConnector(BaseConnector):
         data = await self._run_query(self.FULL_QUERY, part_number)
         errors = data.get("errors", [])
         if errors:
-            log.warning(f"Nexar query error for {part_number}: {errors[0].get('message', '')[:120]}")
+            log.warning(
+                f"Nexar query error for {part_number}: {errors[0].get('message', '')[:120]}"
+            )
 
-        results_data = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
+        results_data = (
+            (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
+        )
         if not results_data:
             return []
 
@@ -122,18 +139,20 @@ class NexarConnector(BaseConnector):
                 key = f"_ref_{mpn}_{mfr}"
                 if key not in seen:
                     seen.add(key)
-                    results.append({
-                        "vendor_name": "(no sellers listed)",
-                        "manufacturer": mfr,
-                        "mpn_matched": mpn,
-                        "qty_available": None,
-                        "unit_price": None,
-                        "currency": "USD",
-                        "source_type": "octopart",
-                        "is_authorized": False,
-                        "confidence": 2,
-                        "octopart_url": octopart_url,
-                    })
+                    results.append(
+                        {
+                            "vendor_name": "(no sellers listed)",
+                            "manufacturer": mfr,
+                            "mpn_matched": mpn,
+                            "qty_available": None,
+                            "unit_price": None,
+                            "currency": "USD",
+                            "source_type": "octopart",
+                            "is_authorized": False,
+                            "confidence": 2,
+                            "octopart_url": octopart_url,
+                        }
+                    )
                 continue
 
             for seller in sellers:
@@ -148,19 +167,21 @@ class NexarConnector(BaseConnector):
                     key = f"{name}_{mpn}"
                     if key not in seen:
                         seen.add(key)
-                        results.append({
-                            "vendor_name": name,
-                            "manufacturer": mfr,
-                            "mpn_matched": mpn,
-                            "qty_available": None,
-                            "unit_price": None,
-                            "currency": "USD",
-                            "source_type": "octopart",
-                            "is_authorized": auth,
-                            "confidence": 3 if auth else 2,
-                            "octopart_url": octopart_url,
-                            "vendor_url": homepage,
-                        })
+                        results.append(
+                            {
+                                "vendor_name": name,
+                                "manufacturer": mfr,
+                                "mpn_matched": mpn,
+                                "qty_available": None,
+                                "unit_price": None,
+                                "currency": "USD",
+                                "source_type": "octopart",
+                                "is_authorized": auth,
+                                "confidence": 3 if auth else 2,
+                                "octopart_url": octopart_url,
+                                "vendor_url": homepage,
+                            }
+                        )
                     continue
 
                 for offer in offers:
@@ -180,21 +201,23 @@ class NexarConnector(BaseConnector):
                         continue
                     seen.add(key)
 
-                    results.append({
-                        "vendor_name": name,
-                        "manufacturer": mfr,
-                        "mpn_matched": mpn,
-                        "qty_available": int(qty) if qty else None,
-                        "unit_price": round(float(price), 4) if price else None,
-                        "currency": currency,
-                        "source_type": "octopart",
-                        "is_authorized": auth,
-                        "confidence": 5 if auth and qty else 4 if qty else 3,
-                        "octopart_url": octopart_url,
-                        "click_url": click_url,
-                        "vendor_url": homepage,
-                        "vendor_sku": sku,
-                    })
+                    results.append(
+                        {
+                            "vendor_name": name,
+                            "manufacturer": mfr,
+                            "mpn_matched": mpn,
+                            "qty_available": int(qty) if qty else None,
+                            "unit_price": round(float(price), 4) if price else None,
+                            "currency": currency,
+                            "source_type": "octopart",
+                            "is_authorized": auth,
+                            "confidence": 5 if auth and qty else 4 if qty else 3,
+                            "octopart_url": octopart_url,
+                            "click_url": click_url,
+                            "vendor_url": homepage,
+                            "vendor_sku": sku,
+                        }
+                    )
 
         log.info(f"Nexar: {pn} -> {len(results)} seller results")
         return results
@@ -210,12 +233,13 @@ class BrokerBinConnector(BaseConnector):
     Endpoint: GET https://search.brokerbin.com/api/v2/part/search?query={mpn}&size=100
     Response: { meta: {...}, data: [{ company, country, part, mfg, cond, description, price, qty, age_in_days }] }
     """
+
     API_URL = "https://search.brokerbin.com/api/v2/part/search"
 
     def __init__(self, api_key: str, api_secret: str = ""):
         super().__init__()
-        self.token = api_key        # Bearer token
-        self.login = api_secret      # BrokerBin username (e.g. "triomhk")
+        self.token = api_key  # Bearer token
+        self.login = api_secret  # BrokerBin username (e.g. "triomhk")
 
     async def _do_search(self, part_number: str) -> list[dict]:
         if not self.token:
@@ -238,7 +262,9 @@ class BrokerBinConnector(BaseConnector):
             r = await c.get(self.API_URL, params=params, headers=headers)
 
             if r.status_code != 200:
-                log.warning(f"BrokerBin: HTTP {r.status_code} for {part_number}: {r.text[:200]}")
+                log.warning(
+                    f"BrokerBin: HTTP {r.status_code} for {part_number}: {r.text[:200]}"
+                )
                 return []
 
             try:
@@ -274,23 +300,31 @@ class BrokerBinConnector(BaseConnector):
             if qty and price and price > 0:
                 conf = 5
 
-            results.append({
-                "vendor_name": company,
-                "manufacturer": (item.get("mfg") or "").strip(),
-                "mpn_matched": (item.get("part") or part_number).strip(),
-                "qty_available": qty,
-                "unit_price": round(price, 4) if price and price > 0 else None,
-                "currency": "USD",
-                "source_type": "brokerbin",
-                "is_authorized": False,
-                "confidence": conf,
-                "condition": (item.get("cond") or "").strip(),
-                "description": (item.get("description") or "").strip()[:500],
-                "country": (item.get("country") or "").strip(),
-                "age_in_days": age,
-                "vendor_phone": (item.get("phone") or item.get("telephone") or "").strip() or None,
-                "vendor_email": (item.get("email") or item.get("contact_email") or "").strip() or None,
-            })
+            results.append(
+                {
+                    "vendor_name": company,
+                    "manufacturer": (item.get("mfg") or "").strip(),
+                    "mpn_matched": (item.get("part") or part_number).strip(),
+                    "qty_available": qty,
+                    "unit_price": round(price, 4) if price and price > 0 else None,
+                    "currency": "USD",
+                    "source_type": "brokerbin",
+                    "is_authorized": False,
+                    "confidence": conf,
+                    "condition": (item.get("cond") or "").strip(),
+                    "description": (item.get("description") or "").strip()[:500],
+                    "country": (item.get("country") or "").strip(),
+                    "age_in_days": age,
+                    "vendor_phone": (
+                        item.get("phone") or item.get("telephone") or ""
+                    ).strip()
+                    or None,
+                    "vendor_email": (
+                        item.get("email") or item.get("contact_email") or ""
+                    ).strip()
+                    or None,
+                }
+            )
 
         total = (body.get("meta") or {}).get("total", len(results))
         log.info(f"BrokerBin: {part_number} -> {len(results)} results (total: {total})")

@@ -4,6 +4,7 @@ Shared enrichment workflow for both vendor cards and customer companies.
 Supports Clay, Explorium (Vibe Prospecting), and AI (Claude + web search)
 as enrichment providers. AI runs last to fill any remaining gaps.
 """
+
 import httpx
 import logging
 import re
@@ -21,28 +22,129 @@ log = logging.getLogger("avail.enrichment")
 
 # Acronyms to preserve in Title Case conversions
 _KNOWN_ACRONYMS = {
-    "IBM", "AMD", "TI", "NXP", "STM", "TDK", "AVX", "TE", "3M", "ON",
-    "IXYS", "QFN", "BGA", "SOP", "IC", "LED", "PCB", "USB", "FPGA", "CPU",
-    "GPU", "RAM", "LLC", "INC", "LTD", "CO", "CORP", "GmbH", "AG", "SA",
-    "PLC", "LP", "NA", "USA", "UK", "EU", "HK",
+    "IBM",
+    "AMD",
+    "TI",
+    "NXP",
+    "STM",
+    "TDK",
+    "AVX",
+    "TE",
+    "3M",
+    "ON",
+    "IXYS",
+    "QFN",
+    "BGA",
+    "SOP",
+    "IC",
+    "LED",
+    "PCB",
+    "USB",
+    "FPGA",
+    "CPU",
+    "GPU",
+    "RAM",
+    "LLC",
+    "INC",
+    "LTD",
+    "CO",
+    "CORP",
+    "GmbH",
+    "AG",
+    "SA",
+    "PLC",
+    "LP",
+    "NA",
+    "USA",
+    "UK",
+    "EU",
+    "HK",
 }
 
 _US_STATES = {
-    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
-    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
-    "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
-    "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
-    "WI", "WY", "DC", "PR", "VI", "GU",
+    "AL",
+    "AK",
+    "AZ",
+    "AR",
+    "CA",
+    "CO",
+    "CT",
+    "DE",
+    "FL",
+    "GA",
+    "HI",
+    "ID",
+    "IL",
+    "IN",
+    "IA",
+    "KS",
+    "KY",
+    "LA",
+    "ME",
+    "MD",
+    "MA",
+    "MI",
+    "MN",
+    "MS",
+    "MO",
+    "MT",
+    "NE",
+    "NV",
+    "NH",
+    "NJ",
+    "NM",
+    "NY",
+    "NC",
+    "ND",
+    "OH",
+    "OK",
+    "OR",
+    "PA",
+    "RI",
+    "SC",
+    "SD",
+    "TN",
+    "TX",
+    "UT",
+    "VT",
+    "VA",
+    "WA",
+    "WV",
+    "WI",
+    "WY",
+    "DC",
+    "PR",
+    "VI",
+    "GU",
 }
 
 _COUNTRY_MAP = {
-    "US": "United States", "USA": "United States", "UK": "United Kingdom",
-    "GB": "United Kingdom", "DE": "Germany", "FR": "France", "JP": "Japan",
-    "CN": "China", "KR": "South Korea", "TW": "Taiwan", "HK": "Hong Kong",
-    "SG": "Singapore", "IN": "India", "CA": "Canada", "AU": "Australia",
-    "NL": "Netherlands", "CH": "Switzerland", "SE": "Sweden", "IL": "Israel",
-    "IT": "Italy", "MX": "Mexico", "BR": "Brazil", "MY": "Malaysia",
-    "TH": "Thailand", "PH": "Philippines", "VN": "Vietnam",
+    "US": "United States",
+    "USA": "United States",
+    "UK": "United Kingdom",
+    "GB": "United Kingdom",
+    "DE": "Germany",
+    "FR": "France",
+    "JP": "Japan",
+    "CN": "China",
+    "KR": "South Korea",
+    "TW": "Taiwan",
+    "HK": "Hong Kong",
+    "SG": "Singapore",
+    "IN": "India",
+    "CA": "Canada",
+    "AU": "Australia",
+    "NL": "Netherlands",
+    "CH": "Switzerland",
+    "SE": "Sweden",
+    "IL": "Israel",
+    "IT": "Italy",
+    "MX": "Mexico",
+    "BR": "Brazil",
+    "MY": "Malaysia",
+    "TH": "Thailand",
+    "PH": "Philippines",
+    "VN": "Vietnam",
 }
 
 
@@ -156,6 +258,7 @@ def normalize_company_output(data: dict) -> dict:
 
     return out
 
+
 # ── Provider: Clay ──────────────────────────────────────────────────────
 
 CLAY_BASE = "https://api.clay.com/v3/sources"
@@ -170,12 +273,18 @@ async def _clay_find_company(domain: str) -> Optional[dict]:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 f"{CLAY_BASE}/enrich-company",
-                headers={"Authorization": f"Bearer {settings.clay_api_key}",
-                         "Content-Type": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {settings.clay_api_key}",
+                    "Content-Type": "application/json",
+                },
                 json={"domain": domain},
             )
             if resp.status_code != 200:
-                log.warning("Clay company lookup failed: %s %s", resp.status_code, resp.text[:200])
+                log.warning(
+                    "Clay company lookup failed: %s %s",
+                    resp.status_code,
+                    resp.text[:200],
+                )
                 return None
             data = resp.json()
             return {
@@ -185,8 +294,12 @@ async def _clay_find_company(domain: str) -> Optional[dict]:
                 "linkedin_url": data.get("linkedin_url") or data.get("url"),
                 "industry": data.get("industry"),
                 "employee_size": data.get("size"),
-                "hq_city": data.get("locality", "").split(",")[0].strip() if data.get("locality") else None,
-                "hq_state": data.get("locality", "").split(",")[-1].strip() if data.get("locality") and "," in data.get("locality", "") else None,
+                "hq_city": data.get("locality", "").split(",")[0].strip()
+                if data.get("locality")
+                else None,
+                "hq_state": data.get("locality", "").split(",")[-1].strip()
+                if data.get("locality") and "," in data.get("locality", "")
+                else None,
                 "hq_country": data.get("country"),
                 "website": data.get("website"),
             }
@@ -206,24 +319,30 @@ async def _clay_find_contacts(domain: str, title_filter: str = "") -> list[dict]
                 payload["title"] = title_filter
             resp = await client.post(
                 f"{CLAY_BASE}/find-people",
-                headers={"Authorization": f"Bearer {settings.clay_api_key}",
-                         "Content-Type": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {settings.clay_api_key}",
+                    "Content-Type": "application/json",
+                },
                 json=payload,
             )
             if resp.status_code != 200:
                 log.warning("Clay contacts lookup failed: %s", resp.status_code)
                 return []
             people = resp.json().get("people") or resp.json().get("contacts") or []
-            return [{
-                "source": "clay",
-                "full_name": p.get("name") or p.get("full_name"),
-                "title": p.get("title") or p.get("latest_experience_title"),
-                "email": p.get("email"),
-                "phone": p.get("phone"),
-                "linkedin_url": p.get("linkedin_url") or p.get("url"),
-                "location": p.get("location_name") or p.get("location"),
-                "company": p.get("company") or p.get("latest_experience_company"),
-            } for p in people if p.get("name") or p.get("full_name")]
+            return [
+                {
+                    "source": "clay",
+                    "full_name": p.get("name") or p.get("full_name"),
+                    "title": p.get("title") or p.get("latest_experience_title"),
+                    "email": p.get("email"),
+                    "phone": p.get("phone"),
+                    "linkedin_url": p.get("linkedin_url") or p.get("url"),
+                    "location": p.get("location_name") or p.get("location"),
+                    "company": p.get("company") or p.get("latest_experience_company"),
+                }
+                for p in people
+                if p.get("name") or p.get("full_name")
+            ]
     except Exception as e:
         log.error("Clay contacts lookup error: %s", e)
         return []
@@ -243,15 +362,21 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 f"{EXPLORIUM_BASE}/match/business",
-                headers={"Authorization": f"Bearer {settings.explorium_api_key}",
-                         "Content-Type": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {settings.explorium_api_key}",
+                    "Content-Type": "application/json",
+                },
                 json={"domain": domain, "name": name},
             )
             if resp.status_code != 200:
                 log.warning("Explorium company lookup failed: %s", resp.status_code)
                 return None
             data = resp.json()
-            firmo = {k.replace("firmo_", ""): v for k, v in data.items() if k.startswith("firmo_")}
+            firmo = {
+                k.replace("firmo_", ""): v
+                for k, v in data.items()
+                if k.startswith("firmo_")
+            }
             return {
                 "source": "explorium",
                 "legal_name": firmo.get("name"),
@@ -283,23 +408,29 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
                 payload["job_title_keywords"] = [title_filter]
             resp = await client.post(
                 f"{EXPLORIUM_BASE}/fetch/prospects",
-                headers={"Authorization": f"Bearer {settings.explorium_api_key}",
-                         "Content-Type": "application/json"},
+                headers={
+                    "Authorization": f"Bearer {settings.explorium_api_key}",
+                    "Content-Type": "application/json",
+                },
                 json=payload,
             )
             if resp.status_code != 200:
                 return []
             prospects = resp.json().get("prospects") or []
-            return [{
-                "source": "explorium",
-                "full_name": p.get("full_name"),
-                "title": p.get("job_title"),
-                "email": p.get("email"),
-                "phone": p.get("phone"),
-                "linkedin_url": p.get("linkedin_url"),
-                "location": p.get("location"),
-                "company": p.get("company_name"),
-            } for p in prospects if p.get("full_name")]
+            return [
+                {
+                    "source": "explorium",
+                    "full_name": p.get("full_name"),
+                    "title": p.get("job_title"),
+                    "email": p.get("email"),
+                    "phone": p.get("phone"),
+                    "linkedin_url": p.get("linkedin_url"),
+                    "location": p.get("location"),
+                    "company": p.get("company_name"),
+                }
+                for p in prospects
+                if p.get("full_name")
+            ]
     except Exception as e:
         log.error("Explorium contacts lookup error: %s", e)
         return []
@@ -310,7 +441,7 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
 COMPANY_SEARCH_SYSTEM = (
     "You are a B2B company research assistant for an electronic component broker. "
     "Look up the requested company by domain and return firmographic data as JSON. "
-    'Return ONLY a JSON object with these keys: '
+    "Return ONLY a JSON object with these keys: "
     '{"legal_name", "industry", "employee_size", "hq_city", "hq_state", "hq_country", '
     '"website", "linkedin_url"}. '
     "Use null for any field you cannot verify. Do not guess or fabricate data."
@@ -340,7 +471,9 @@ async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
             system=COMPANY_SEARCH_SYSTEM,
             model_tier="smart",
             max_tokens=1024,
-            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}],
+            tools=[
+                {"type": "web_search_20250305", "name": "web_search", "max_uses": 5}
+            ],
             timeout=60,
         )
         if not data or not isinstance(data, dict):
@@ -363,8 +496,9 @@ async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
         return None
 
 
-async def _ai_find_contacts(domain: str, name: str = "",
-                             title_filter: str = "") -> list[dict]:
+async def _ai_find_contacts(
+    domain: str, name: str = "", title_filter: str = ""
+) -> list[dict]:
     """Find contacts at a company using Claude + web search.
 
     Delegates to ai_service.enrich_contacts_websearch() and normalizes
@@ -380,22 +514,27 @@ async def _ai_find_contacts(domain: str, name: str = "",
             title_keywords=title_keywords,
             limit=5,
         )
-        return [{
-            "source": "ai",
-            "full_name": c.get("full_name"),
-            "title": c.get("title"),
-            "email": c.get("email"),
-            "phone": c.get("phone"),
-            "linkedin_url": c.get("linkedin_url"),
-            "location": None,
-            "company": name or domain,
-        } for c in raw if c.get("full_name")]
+        return [
+            {
+                "source": "ai",
+                "full_name": c.get("full_name"),
+                "title": c.get("title"),
+                "email": c.get("email"),
+                "phone": c.get("phone"),
+                "linkedin_url": c.get("linkedin_url"),
+                "location": None,
+                "company": name or domain,
+            }
+            for c in raw
+            if c.get("full_name")
+        ]
     except Exception as e:
         log.error("AI contacts lookup error: %s", e)
         return []
 
 
 # ── Unified Enrichment ──────────────────────────────────────────────────
+
 
 async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
@@ -407,10 +546,16 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     name, domain = await normalize_company_input(name, domain)
 
     result = {
-        "legal_name": None, "domain": domain, "linkedin_url": None,
-        "industry": None, "employee_size": None,
-        "hq_city": None, "hq_state": None, "hq_country": None,
-        "website": None, "source": None,
+        "legal_name": None,
+        "domain": domain,
+        "linkedin_url": None,
+        "industry": None,
+        "employee_size": None,
+        "hq_city": None,
+        "hq_state": None,
+        "hq_country": None,
+        "website": None,
+        "source": None,
     }
 
     # Try Clay
@@ -431,8 +576,16 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
             result["source"] = "clay+explorium"
 
     # Try AI (fills remaining gaps)
-    _enrichable = ["legal_name", "industry", "employee_size", "hq_city",
-                    "hq_state", "hq_country", "website", "linkedin_url"]
+    _enrichable = [
+        "legal_name",
+        "industry",
+        "employee_size",
+        "hq_city",
+        "hq_state",
+        "hq_country",
+        "website",
+        "linkedin_url",
+    ]
     if any(not result.get(f) for f in _enrichable):
         ai = await _ai_find_company(domain, name)
         if ai:
@@ -448,8 +601,9 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     return normalize_company_output(result)
 
 
-async def find_suggested_contacts(domain: str, name: str = "",
-                                   title_filter: str = "") -> list[dict]:
+async def find_suggested_contacts(
+    domain: str, name: str = "", title_filter: str = ""
+) -> list[dict]:
     """Find suggested contacts at a company from all configured providers.
 
     Returns deduplicated list sorted by relevance. Each contact has:
@@ -471,7 +625,11 @@ async def find_suggested_contacts(domain: str, name: str = "",
     seen = set()
     unique = []
     for c in all_contacts:
-        key = (c.get("email") or "").lower() or c.get("linkedin_url") or (c.get("full_name") or "").lower()
+        key = (
+            (c.get("email") or "").lower()
+            or c.get("linkedin_url")
+            or (c.get("full_name") or "").lower()
+        )
         if not key or key in seen:
             continue
         seen.add(key)
@@ -484,10 +642,14 @@ def apply_enrichment_to_company(company, data: dict) -> list[str]:
     """Apply enrichment data dict to a Company model. Returns list of fields updated."""
     updated = []
     field_map = {
-        "domain": "domain", "linkedin_url": "linkedin_url",
-        "legal_name": "legal_name", "industry": "industry",
-        "employee_size": "employee_size", "hq_city": "hq_city",
-        "hq_state": "hq_state", "hq_country": "hq_country",
+        "domain": "domain",
+        "linkedin_url": "linkedin_url",
+        "legal_name": "legal_name",
+        "industry": "industry",
+        "employee_size": "employee_size",
+        "hq_city": "hq_city",
+        "hq_state": "hq_state",
+        "hq_country": "hq_country",
     }
     for data_key, model_field in field_map.items():
         val = data.get(data_key)
@@ -508,9 +670,13 @@ def apply_enrichment_to_vendor(card, data: dict) -> list[str]:
     """Apply enrichment data dict to a VendorCard model. Returns list of fields updated."""
     updated = []
     field_map = {
-        "linkedin_url": "linkedin_url", "legal_name": "legal_name",
-        "industry": "industry", "employee_size": "employee_size",
-        "hq_city": "hq_city", "hq_state": "hq_state", "hq_country": "hq_country",
+        "linkedin_url": "linkedin_url",
+        "legal_name": "legal_name",
+        "industry": "industry",
+        "employee_size": "employee_size",
+        "hq_city": "hq_city",
+        "hq_state": "hq_state",
+        "hq_country": "hq_country",
     }
     for data_key, model_field in field_map.items():
         val = data.get(data_key)

@@ -100,7 +100,13 @@ class _EmailMiningTestConnector:
     """Thin wrapper so email_mining can be tested via the source test UI."""
 
     async def search(self, mpn: str) -> list[dict]:
-        return [{"vendor_name": "Email Mining Active", "mpn_matched": "Inbox scanned every 30 min", "status": "ok"}]
+        return [
+            {
+                "vendor_name": "Email Mining Active",
+                "mpn_matched": "Inbox scanned every 30 min",
+                "status": "ok",
+            }
+        ]
 
 
 def _create_sightings_from_attachment(
@@ -137,12 +143,16 @@ def _create_sightings_from_attachment(
         if not matched_req:
             continue
 
-        existing = db.query(Sighting).filter_by(
-            requirement_id=matched_req.id,
-            vendor_name=vr.vendor_name or "",
-            mpn_matched=mpn,
-            source_type="email_attachment",
-        ).first()
+        existing = (
+            db.query(Sighting)
+            .filter_by(
+                requirement_id=matched_req.id,
+                vendor_name=vr.vendor_name or "",
+                mpn_matched=mpn,
+                source_type="email_attachment",
+            )
+            .first()
+        )
         if existing:
             continue
 
@@ -178,7 +188,9 @@ def _create_sightings_from_attachment(
 
 
 @router.get("/api/sources")
-async def list_api_sources(user: User = Depends(require_user), db: Session = Depends(get_db)):
+async def list_api_sources(
+    user: User = Depends(require_user), db: Session = Depends(get_db)
+):
     """Return all API sources grouped by status."""
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
 
@@ -198,34 +210,40 @@ async def list_api_sources(user: User = Depends(require_user), db: Session = Dep
     result = []
     for src in sources:
         env_status = {}
-        for v in (src.env_vars or []):
+        for v in src.env_vars or []:
             env_status[v] = credential_is_set(db, src.name, v)
 
-        result.append({
-            "id": src.id,
-            "name": src.name,
-            "display_name": src.display_name,
-            "category": src.category,
-            "source_type": src.source_type,
-            "status": src.status,
-            "description": src.description,
-            "setup_notes": src.setup_notes,
-            "signup_url": src.signup_url,
-            "env_vars": src.env_vars or [],
-            "env_status": env_status,
-            "last_success": src.last_success.isoformat() if src.last_success else None,
-            "last_error": src.last_error,
-            "total_searches": src.total_searches or 0,
-            "total_results": src.total_results or 0,
-            "avg_response_ms": src.avg_response_ms or 0,
-            "created_at": src.created_at.isoformat() if src.created_at else None,
-        })
+        result.append(
+            {
+                "id": src.id,
+                "name": src.name,
+                "display_name": src.display_name,
+                "category": src.category,
+                "source_type": src.source_type,
+                "status": src.status,
+                "description": src.description,
+                "setup_notes": src.setup_notes,
+                "signup_url": src.signup_url,
+                "env_vars": src.env_vars or [],
+                "env_status": env_status,
+                "last_success": src.last_success.isoformat()
+                if src.last_success
+                else None,
+                "last_error": src.last_error,
+                "total_searches": src.total_searches or 0,
+                "total_results": src.total_results or 0,
+                "avg_response_ms": src.avg_response_ms or 0,
+                "created_at": src.created_at.isoformat() if src.created_at else None,
+            }
+        )
 
     return {"sources": result}
 
 
 @router.post("/api/sources/{source_id}/test")
-async def test_api_source(source_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
+async def test_api_source(
+    source_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+):
     """Test a specific API source with a known part number."""
     src = db.get(ApiSource, source_id)
     if not src:
@@ -267,7 +285,12 @@ async def test_api_source(source_id: int, user: User = Depends(require_user), db
 
 
 @router.put("/api/sources/{source_id}/toggle")
-async def toggle_api_source(source_id: int, payload: SourceStatusToggle, user: User = Depends(require_user), db: Session = Depends(get_db)):
+async def toggle_api_source(
+    source_id: int,
+    payload: SourceStatusToggle,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
     """Enable or disable a source."""
     src = db.get(ApiSource, source_id)
     if not src:
@@ -283,7 +306,9 @@ async def toggle_api_source(source_id: int, payload: SourceStatusToggle, user: U
 
 
 @router.post("/api/email-mining/scan")
-async def scan_inbox_for_vendors(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
+async def scan_inbox_for_vendors(
+    request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
+):
     """Run email intelligence scan — mines inbox for vendor contacts and offers."""
     token = await require_fresh_token(request, db)
 
@@ -315,7 +340,8 @@ async def scan_inbox_for_vendors(request: Request, user: User = Depends(require_
             card = VendorCard(
                 normalized_name=norm,
                 display_name=vendor_name,
-                emails=[], phones=[],
+                emails=[],
+                phones=[],
                 source="email_mining",
             )
             db.add(card)
@@ -334,7 +360,9 @@ async def scan_inbox_for_vendors(request: Request, user: User = Depends(require_
     if em_src:
         em_src.last_success = datetime.now(timezone.utc)
         em_src.total_searches = (em_src.total_searches or 0) + 1
-        em_src.total_results = (em_src.total_results or 0) + results.get("vendors_found", 0)
+        em_src.total_results = (em_src.total_results or 0) + results.get(
+            "vendors_found", 0
+        )
         em_src.status = "live"
         db.commit()
 
@@ -348,7 +376,9 @@ async def scan_inbox_for_vendors(request: Request, user: User = Depends(require_
 
 
 @router.get("/api/email-mining/status")
-async def email_mining_status(user: User = Depends(require_user), db: Session = Depends(get_db)):
+async def email_mining_status(
+    user: User = Depends(require_user), db: Session = Depends(get_db)
+):
     """Get current email mining status."""
     src = db.query(ApiSource).filter_by(name="email_mining").first()
     return {
@@ -392,7 +422,11 @@ async def email_mining_scan_outbound(
         card = db.query(VendorCard).filter(VendorCard.domain == domain).first()
         if not card:
             prefix = domain.split(".")[0].lower() if "." in domain else domain
-            card = db.query(VendorCard).filter(VendorCard.normalized_name == prefix).first()
+            card = (
+                db.query(VendorCard)
+                .filter(VendorCard.normalized_name == prefix)
+                .first()
+            )
         if card:
             card.total_outreach = (card.total_outreach or 0) + count
             card.last_contact_at = datetime.now(timezone.utc)
@@ -465,9 +499,13 @@ async def vendor_engagement_detail(
             "total_wins": card.total_wins or 0,
             "response_velocity_hours": card.response_velocity_hours,
             "relationship_months": card.relationship_months,
-            "last_contact_at": card.last_contact_at.isoformat() if card.last_contact_at else None,
+            "last_contact_at": card.last_contact_at.isoformat()
+            if card.last_contact_at
+            else None,
         },
-        "computed_at": card.engagement_computed_at.isoformat() if card.engagement_computed_at else None,
+        "computed_at": card.engagement_computed_at.isoformat()
+        if card.engagement_computed_at
+        else None,
     }
 
 
@@ -487,7 +525,10 @@ async def parse_response_attachments(
         return JSONResponse(status_code=404, content={"error": "Response not found"})
 
     if not vr.message_id:
-        return JSONResponse(status_code=400, content={"error": "No message ID — cannot fetch attachments"})
+        return JSONResponse(
+            status_code=400,
+            content={"error": "No message ID — cannot fetch attachments"},
+        )
 
     from ..utils.graph_client import GraphClient
     from ..scheduler import get_valid_token
@@ -498,16 +539,25 @@ async def parse_response_attachments(
     try:
         att_data = await gc.get_json(f"/me/messages/{vr.message_id}/attachments")
     except Exception as e:
-        return JSONResponse(status_code=502, content={"error": f"Graph API error: {str(e)[:200]}"})
+        return JSONResponse(
+            status_code=502, content={"error": f"Graph API error: {str(e)[:200]}"}
+        )
 
     attachments = att_data.get("value", []) if att_data else []
     parseable_exts = {".xlsx", ".xls", ".csv", ".tsv"}
-    parseable = [a for a in attachments if any(
-        (a.get("name") or "").lower().endswith(ext) for ext in parseable_exts
-    )]
+    parseable = [
+        a
+        for a in attachments
+        if any((a.get("name") or "").lower().endswith(ext) for ext in parseable_exts)
+    ]
 
     if not parseable:
-        return {"attachments_found": len(attachments), "parseable": 0, "rows_parsed": 0, "sightings_created": 0}
+        return {
+            "attachments_found": len(attachments),
+            "parseable": 0,
+            "rows_parsed": 0,
+            "sightings_created": 0,
+        }
 
     from ..services.attachment_parser import parse_attachment
     from ..utils.file_validation import validate_file
@@ -531,7 +581,9 @@ async def parse_response_attachments(
         if not is_valid:
             continue
 
-        rows = await parse_attachment(file_bytes, filename, vendor_domain=vendor_domain, db=db)
+        rows = await parse_attachment(
+            file_bytes, filename, vendor_domain=vendor_domain, db=db
+        )
         total_rows += len(rows)
 
         if vr.requisition_id and rows:
@@ -541,7 +593,9 @@ async def parse_response_attachments(
         db.commit()
     except Exception as e:
         db.rollback()
-        return JSONResponse(status_code=500, content={"error": f"Save failed: {str(e)[:200]}"})
+        return JSONResponse(
+            status_code=500, content={"error": f"Save failed: {str(e)[:200]}"}
+        )
 
     return {
         "attachments_found": len(attachments),

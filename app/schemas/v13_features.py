@@ -17,6 +17,7 @@ from pydantic import BaseModel, field_validator
 
 # ── Buyer Profiles ──────────────────────────────────────────────────
 
+
 class BuyerProfileUpsert(BaseModel):
     """Create or update a buyer's expertise profile."""
 
@@ -32,6 +33,7 @@ class BuyerProfileUpsert(BaseModel):
 
 # ── Activity Logging ────────────────────────────────────────────────
 
+
 class PhoneCallLog(BaseModel):
     """Log an inbound or outbound phone call."""
 
@@ -44,6 +46,7 @@ class PhoneCallLog(BaseModel):
 
 # ── Customer Ownership ──────────────────────────────────────────────
 
+
 class StrategicToggle(BaseModel):
     """Toggle a company's strategic account flag."""
 
@@ -51,6 +54,7 @@ class StrategicToggle(BaseModel):
 
 
 # ── Routing ─────────────────────────────────────────────────────────
+
 
 class RoutingPairRequest(BaseModel):
     """Identify a requirement+vendor pair for routing operations."""

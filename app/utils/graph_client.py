@@ -8,6 +8,7 @@ Usage:
     messages = await gc.get_json("/me/messages", params={"$top": "50"})
     delta_msgs, new_token = await gc.delta_query("/me/mailFolders/Inbox/messages/delta", old_token)
 """
+
 import asyncio
 import logging
 
@@ -36,30 +37,36 @@ class GraphClient:
             **IMMUTABLE_ID_HEADER,
         }
 
-    async def get_json(self, path: str, params: dict | None = None,
-                       timeout: int = 30) -> dict:
+    async def get_json(
+        self, path: str, params: dict | None = None, timeout: int = 30
+    ) -> dict:
         """GET → parsed JSON. Raises on non-200 after retries."""
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
         async with httpx.AsyncClient(timeout=timeout) as client:
             return await self._request_with_retry(client, "GET", url, params=params)
 
-    async def post_json(self, path: str, json_data: dict,
-                        timeout: int = 30) -> dict:
+    async def post_json(self, path: str, json_data: dict, timeout: int = 30) -> dict:
         """POST → parsed JSON or empty dict on 202."""
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
         async with httpx.AsyncClient(timeout=timeout) as client:
-            return await self._request_with_retry(client, "POST", url, json_data=json_data)
+            return await self._request_with_retry(
+                client, "POST", url, json_data=json_data
+            )
 
-    async def get_all_pages(self, path: str, params: dict | None = None,
-                            max_items: int = 500, timeout: int = 30) -> list[dict]:
+    async def get_all_pages(
+        self,
+        path: str,
+        params: dict | None = None,
+        max_items: int = 500,
+        timeout: int = 30,
+    ) -> list[dict]:
         """GET with auto-pagination. Returns flat list of items."""
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
         items: list[dict] = []
         async with httpx.AsyncClient(timeout=timeout) as client:
             while url and len(items) < max_items:
                 data = await self._request_with_retry(
-                    client, "GET", url,
-                    params=params if GRAPH_BASE in url else None
+                    client, "GET", url, params=params if GRAPH_BASE in url else None
                 )
                 items.extend(data.get("value", []))
                 url = data.get("@odata.nextLink")
@@ -68,10 +75,14 @@ class GraphClient:
 
     # ── H8: Delta Query ─────────────────────────────────────────────
 
-    async def delta_query(self, path: str, delta_token: str | None = None,
-                          params: dict | None = None,
-                          max_items: int = 1000, timeout: int = 30
-                          ) -> tuple[list[dict], str | None]:
+    async def delta_query(
+        self,
+        path: str,
+        delta_token: str | None = None,
+        params: dict | None = None,
+        max_items: int = 1000,
+        timeout: int = 30,
+    ) -> tuple[list[dict], str | None]:
         """Run a Delta Query. Returns (items, new_delta_token).
 
         If delta_token is None, performs a full sync and returns the initial token.
@@ -89,8 +100,7 @@ class GraphClient:
         async with httpx.AsyncClient(timeout=timeout) as client:
             while url and len(items) < max_items:
                 data = await self._request_with_retry(
-                    client, "GET", url,
-                    params=params if not delta_token else None
+                    client, "GET", url, params=params if not delta_token else None
                 )
                 items.extend(data.get("value", []))
 
@@ -108,8 +118,10 @@ class GraphClient:
     # ── Internal retry logic ────────────────────────────────────────
 
     async def _request_with_retry(
-        self, client: httpx.AsyncClient,
-        method: str, url: str,
+        self,
+        client: httpx.AsyncClient,
+        method: str,
+        url: str,
         params: dict | None = None,
         json_data: dict | None = None,
     ) -> dict:
@@ -119,11 +131,13 @@ class GraphClient:
         for attempt in range(MAX_RETRIES + 1):
             try:
                 if method == "GET":
-                    resp = await client.get(url, params=params,
-                                            headers=self._base_headers)
+                    resp = await client.get(
+                        url, params=params, headers=self._base_headers
+                    )
                 else:
-                    resp = await client.post(url, json=json_data,
-                                             headers=self._base_headers)
+                    resp = await client.post(
+                        url, json=json_data, headers=self._base_headers
+                    )
 
                 # Success
                 if resp.status_code in (200, 201):
@@ -135,7 +149,9 @@ class GraphClient:
 
                 # Throttled — respect Retry-After
                 if resp.status_code == 429:
-                    wait = int(resp.headers.get("Retry-After", BACKOFF_BASE ** (attempt + 1)))
+                    wait = int(
+                        resp.headers.get("Retry-After", BACKOFF_BASE ** (attempt + 1))
+                    )
                     log.warning(f"Graph 429 — retry in {wait}s (attempt {attempt + 1})")
                     await asyncio.sleep(wait)
                     continue
@@ -143,7 +159,9 @@ class GraphClient:
                 # Server error — exponential backoff
                 if resp.status_code >= 500:
                     wait = BACKOFF_BASE ** (attempt + 1)
-                    log.warning(f"Graph {resp.status_code} — retry in {wait}s (attempt {attempt + 1})")
+                    log.warning(
+                        f"Graph {resp.status_code} — retry in {wait}s (attempt {attempt + 1})"
+                    )
                     await asyncio.sleep(wait)
                     continue
 

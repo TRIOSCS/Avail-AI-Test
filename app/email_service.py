@@ -1,4 +1,5 @@
 """Email service — batch RFQ sending, inbox monitoring, AI parsing."""
+
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
@@ -63,12 +64,14 @@ async def send_batch_rfq(
             # post_json returns {} on 202 success, or {"error": ...} on client error
             if "error" in result:
                 log.error(f"Send failed to {email}: {result}")
-                results.append({
-                    "vendor_name": group["vendor_name"],
-                    "vendor_email": email,
-                    "status": "failed",
-                    "error": str(result.get("detail", ""))[:200],
-                })
+                results.append(
+                    {
+                        "vendor_name": group["vendor_name"],
+                        "vendor_email": email,
+                        "status": "failed",
+                        "error": str(result.get("detail", ""))[:200],
+                    }
+                )
                 continue
 
             contact = Contact(
@@ -97,21 +100,25 @@ async def send_batch_rfq(
                 log.debug(f"Could not capture sent message ID: {e}")
 
             db.commit()
-            results.append({
-                "id": contact.id,
-                "vendor_name": contact.vendor_name,
-                "vendor_email": email,
-                "parts_count": len(contact.parts_included),
-                "status": "sent",
-            })
+            results.append(
+                {
+                    "id": contact.id,
+                    "vendor_name": contact.vendor_name,
+                    "vendor_email": email,
+                    "parts_count": len(contact.parts_included),
+                    "status": "sent",
+                }
+            )
         except Exception as e:
             log.error(f"Send error to {email}: {e}")
-            results.append({
-                "vendor_name": group["vendor_name"],
-                "vendor_email": email,
-                "status": "error",
-                "error": str(e)[:200],
-            })
+            results.append(
+                {
+                    "vendor_name": group["vendor_name"],
+                    "vendor_email": email,
+                    "status": "error",
+                    "error": str(e)[:200],
+                }
+            )
 
     return results
 
@@ -126,7 +133,8 @@ async def _find_sent_message(gc, subject: str) -> dict | None:
                 "$top": "5",
                 "$orderby": "sentDateTime desc",
                 "$select": "id,conversationId,subject",
-            })
+            },
+        )
         msgs = data.get("value", []) if data else []
         for m in msgs:
             if m.get("subject", "").strip() == subject.strip():
@@ -166,8 +174,9 @@ def log_phone_contact(
     }
 
 
-async def poll_inbox(token: str, db: Session, requisition_id: int = None,
-                     scanned_by_user_id: int = None) -> list[dict]:
+async def poll_inbox(
+    token: str, db: Session, requisition_id: int = None, scanned_by_user_id: int = None
+) -> list[dict]:
     """Check inbox for vendor replies. Smart-matches to outbound RFQs.
 
     Matching priority:
@@ -195,17 +204,24 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None,
     messages = []
     used_delta = False
     if scanned_by_user_id:
-        sync = db.query(SyncState).filter(
-            SyncState.user_id == scanned_by_user_id,
-            SyncState.folder == "inbox",
-        ).first()
+        sync = (
+            db.query(SyncState)
+            .filter(
+                SyncState.user_id == scanned_by_user_id,
+                SyncState.folder == "inbox",
+            )
+            .first()
+        )
         delta_token = sync.delta_token if sync else None
 
         try:
             items, new_delta = await gc.delta_query(
                 "/me/mailFolders/inbox/messages/delta",
                 delta_token=delta_token,
-                params={"$select": "id,subject,from,receivedDateTime,bodyPreview,body,conversationId", "$top": "50"},
+                params={
+                    "$select": "id,subject,from,receivedDateTime,bodyPreview,body,conversationId",
+                    "$top": "50",
+                },
                 max_items=200,
             )
             messages = items
@@ -235,8 +251,12 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None,
         try:
             data = await gc.get_json(
                 "/me/mailFolders/inbox/messages",
-                params={"$top": "50", "$orderby": "receivedDateTime desc",
-                        "$select": "id,subject,from,receivedDateTime,bodyPreview,body,conversationId"})
+                params={
+                    "$top": "50",
+                    "$orderby": "receivedDateTime desc",
+                    "$select": "id,subject,from,receivedDateTime,bodyPreview,body,conversationId",
+                },
+            )
             messages = data.get("value", []) if data else []
         except Exception as e:
             log.error(f"Inbox poll failed: {e}")
@@ -247,27 +267,37 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None,
     already_processed = set()
     if incoming_ids:
         # Check both VendorResponse and ProcessedMessage tables
-        vr_rows = db.query(VendorResponse.message_id).filter(
-            VendorResponse.message_id.in_(incoming_ids)
-        ).all()
-        pm_rows = db.query(ProcessedMessage.message_id).filter(
-            ProcessedMessage.message_id.in_(incoming_ids),
-            ProcessedMessage.processing_type == "inbox_poll",
-        ).all()
+        vr_rows = (
+            db.query(VendorResponse.message_id)
+            .filter(VendorResponse.message_id.in_(incoming_ids))
+            .all()
+        )
+        pm_rows = (
+            db.query(ProcessedMessage.message_id)
+            .filter(
+                ProcessedMessage.message_id.in_(incoming_ids),
+                ProcessedMessage.processing_type == "inbox_poll",
+            )
+            .all()
+        )
         already_processed = {r[0] for r in vr_rows} | {r[0] for r in pm_rows}
 
     # Pre-load outbound email contacts for matching (last 6 months)
     cutoff = datetime.now(timezone.utc) - timedelta(days=180)
-    all_contacts = db.query(Contact).filter(
-        Contact.contact_type == "email",
-        Contact.created_at > cutoff,
-    ).all()
+    all_contacts = (
+        db.query(Contact)
+        .filter(
+            Contact.contact_type == "email",
+            Contact.created_at > cutoff,
+        )
+        .all()
+    )
 
     # ConversationId map is GLOBAL — thread-specific, unambiguous
     conv_id_map = {}
     # Email and domain maps are USER-SCOPED to prevent cross-user data leaks
-    email_map = {}     # vendor_email -> Contact (only this user's contacts)
-    domain_map = {}    # vendor_domain -> Contact (only this user's contacts)
+    email_map = {}  # vendor_email -> Contact (only this user's contacts)
+    domain_map = {}  # vendor_domain -> Contact (only this user's contacts)
     for c in all_contacts:
         if c.graph_conversation_id:
             conv_id_map[c.graph_conversation_id] = c
@@ -283,7 +313,7 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None,
                         domain_map[domain] = c
 
     # Subject token pattern: [AVAIL-{req_id}]
-    avail_token_re = re.compile(r'\[AVAIL-(\d+)\]')
+    avail_token_re = re.compile(r"\[AVAIL-(\d+)\]")
 
     results = []
     for msg in messages:
@@ -317,9 +347,13 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None,
             if token_match:
                 avail_req_id = int(token_match.group(1))
                 # Verify this req exists and find the contact
-                req_contacts = [c for c in all_contacts
-                                if c.requisition_id == avail_req_id
-                                and c.vendor_contact and c.vendor_contact.lower() == email_addr]
+                req_contacts = [
+                    c
+                    for c in all_contacts
+                    if c.requisition_id == avail_req_id
+                    and c.vendor_contact
+                    and c.vendor_contact.lower() == email_addr
+                ]
                 if req_contacts:
                     matched_contact = req_contacts[0]
                     matched_req_id = avail_req_id
@@ -363,11 +397,13 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None,
             db.flush()
 
             # H2: Record in processed_messages for cross-type dedup
-            db.add(ProcessedMessage(
-                message_id=msg_id,
-                processing_type="inbox_poll",
-                processed_at=datetime.now(timezone.utc),
-            ))
+            db.add(
+                ProcessedMessage(
+                    message_id=msg_id,
+                    processing_type="inbox_poll",
+                    processed_at=datetime.now(timezone.utc),
+                )
+            )
 
             # ── Reply classification + AI parsing ──
             if settings.anthropic_api_key:
@@ -389,23 +425,27 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None,
             if matched_contact:
                 _progress_contact_status(matched_contact, vr, db)
 
-            results.append({
-                "id": vr.id,
-                "vendor_name": vr.vendor_name,
-                "vendor_email": vr.vendor_email,
-                "subject": vr.subject,
-                "status": vr.status,
-                "classification": vr.classification,
-                "needs_action": vr.needs_action,
-                "action_hint": vr.action_hint,
-                "parsed_data": vr.parsed_data,
-                "confidence": vr.confidence,
-                "received_at": vr.received_at,
-                "message_id": msg_id,
-                "match_method": match_method,
-                "matched_contact_id": matched_contact.id if matched_contact else None,
-                "matched_requisition_id": matched_req_id,
-            })
+            results.append(
+                {
+                    "id": vr.id,
+                    "vendor_name": vr.vendor_name,
+                    "vendor_email": vr.vendor_email,
+                    "subject": vr.subject,
+                    "status": vr.status,
+                    "classification": vr.classification,
+                    "needs_action": vr.needs_action,
+                    "action_hint": vr.action_hint,
+                    "parsed_data": vr.parsed_data,
+                    "confidence": vr.confidence,
+                    "received_at": vr.received_at,
+                    "message_id": msg_id,
+                    "match_method": match_method,
+                    "matched_contact_id": matched_contact.id
+                    if matched_contact
+                    else None,
+                    "matched_requisition_id": matched_req_id,
+                }
+            )
         except Exception as e:
             log.error(f"Failed to save inbox message {msg_id[:20]}: {e}")
             db.rollback()
@@ -428,51 +468,106 @@ def _classify_response(parsed: dict, body: str, subject: str) -> dict:
     subject_lower = (subject or "").lower()
 
     # OOO / bounce detection
-    ooo_signals = ["out of office", "automatic reply", "autoreply", "i am currently out",
-                   "on vacation", "will return", "away from", "undeliverable", "delivery failure"]
+    ooo_signals = [
+        "out of office",
+        "automatic reply",
+        "autoreply",
+        "i am currently out",
+        "on vacation",
+        "will return",
+        "away from",
+        "undeliverable",
+        "delivery failure",
+    ]
     if any(s in body_lower or s in subject_lower for s in ooo_signals):
-        return {"type": "ooo_bounce", "needs_action": False,
-                "action_hint": "Auto-reply detected — will need follow-up later"}
+        return {
+            "type": "ooo_bounce",
+            "needs_action": False,
+            "action_hint": "Auto-reply detected — will need follow-up later",
+        }
 
     parts = parsed.get("parts", [])
     sentiment = parsed.get("sentiment", "neutral")
 
     # Quote provided — has actual pricing
     if parts and any(p.get("unit_price") for p in parts):
-        return {"type": "quote_provided", "needs_action": True,
-                "action_hint": f"Quote received for {len(parts)} part(s) — review pricing"}
+        return {
+            "type": "quote_provided",
+            "needs_action": True,
+            "action_hint": f"Quote received for {len(parts)} part(s) — review pricing",
+        }
 
     # Partial availability — some parts but not all, or limited qty
     if parts and sentiment == "positive":
         if any(p.get("qty_available") for p in parts):
-            return {"type": "partial_availability", "needs_action": True,
-                    "action_hint": "Partial stock available — review quantities"}
+            return {
+                "type": "partial_availability",
+                "needs_action": True,
+                "action_hint": "Partial stock available — review quantities",
+            }
 
     # No stock
-    no_stock_signals = ["not available", "out of stock", "no stock", "don't have",
-                        "do not have", "cannot supply", "unable to", "unfortunately",
-                        "regret to", "unable to offer", "not in stock"]
+    no_stock_signals = [
+        "not available",
+        "out of stock",
+        "no stock",
+        "don't have",
+        "do not have",
+        "cannot supply",
+        "unable to",
+        "unfortunately",
+        "regret to",
+        "unable to offer",
+        "not in stock",
+    ]
     if any(s in body_lower for s in no_stock_signals) or sentiment == "negative":
-        return {"type": "no_stock", "needs_action": False,
-                "action_hint": "Vendor confirmed no availability"}
+        return {
+            "type": "no_stock",
+            "needs_action": False,
+            "action_hint": "Vendor confirmed no availability",
+        }
 
     # Counter offer — alternative parts or conditions
-    counter_signals = ["alternative", "instead", "substitute", "we can offer",
-                       "how about", "suggest", "similar"]
+    counter_signals = [
+        "alternative",
+        "instead",
+        "substitute",
+        "we can offer",
+        "how about",
+        "suggest",
+        "similar",
+    ]
     if any(s in body_lower for s in counter_signals):
-        return {"type": "counter_offer", "needs_action": True,
-                "action_hint": "Vendor proposed an alternative — review offer"}
+        return {
+            "type": "counter_offer",
+            "needs_action": True,
+            "action_hint": "Vendor proposed an alternative — review offer",
+        }
 
     # Clarification needed
-    question_signals = ["could you", "can you", "please confirm", "need more",
-                        "what quantity", "which version", "please clarify", "?"]
+    question_signals = [
+        "could you",
+        "can you",
+        "please confirm",
+        "need more",
+        "what quantity",
+        "which version",
+        "please clarify",
+        "?",
+    ]
     if any(s in body_lower for s in question_signals) and body_lower.count("?") >= 1:
-        return {"type": "clarification_needed", "needs_action": True,
-                "action_hint": "Vendor asked a question — reply needed"}
+        return {
+            "type": "clarification_needed",
+            "needs_action": True,
+            "action_hint": "Vendor asked a question — reply needed",
+        }
 
     # Default: follow_up_pending (got a reply but unclear what it means)
-    return {"type": "follow_up_pending", "needs_action": True,
-            "action_hint": "Response received — review and determine next steps"}
+    return {
+        "type": "follow_up_pending",
+        "needs_action": True,
+        "action_hint": "Response received — review and determine next steps",
+    }
 
 
 def _progress_contact_status(contact: Contact, vr: VendorResponse, db: Session):
@@ -491,7 +586,11 @@ def _progress_contact_status(contact: Contact, vr: VendorResponse, db: Session):
         contact.status = "declined"
     elif classification in ("ooo_bounce",):
         contact.status = "pending"  # Will need re-follow-up
-    elif classification in ("clarification_needed", "counter_offer", "partial_availability"):
+    elif classification in (
+        "clarification_needed",
+        "counter_offer",
+        "partial_availability",
+    ):
         contact.status = "responded"
     else:
         # Generic response — at least we know they replied
@@ -503,20 +602,57 @@ def _progress_contact_status(contact: Contact, vr: VendorResponse, db: Session):
 
 # Noise filter — common non-vendor senders
 NOISE_DOMAINS = {
-    'microsoft.com', 'microsoftonline.com', 'office365.com', 'office.com',
-    'google.com', 'googleapis.com', 'googlemail.com',
-    'linkedin.com', 'facebook.com', 'twitter.com', 'instagram.com',
-    'youtube.com', 'github.com', 'slack.com', 'zoom.us', 'teams.microsoft.com',
-    'mailchimp.com', 'constantcontact.com', 'sendgrid.net', 'amazonses.com',
-    'hubspot.com', 'salesforce.com', 'marketo.com',
-    'fedex.com', 'ups.com', 'usps.com', 'dhl.com',
-    'intuit.com', 'quickbooks.com', 'paypal.com', 'stripe.com',
-    'docusign.com', 'dropbox.com', 'box.com',
+    "microsoft.com",
+    "microsoftonline.com",
+    "office365.com",
+    "office.com",
+    "google.com",
+    "googleapis.com",
+    "googlemail.com",
+    "linkedin.com",
+    "facebook.com",
+    "twitter.com",
+    "instagram.com",
+    "youtube.com",
+    "github.com",
+    "slack.com",
+    "zoom.us",
+    "teams.microsoft.com",
+    "mailchimp.com",
+    "constantcontact.com",
+    "sendgrid.net",
+    "amazonses.com",
+    "hubspot.com",
+    "salesforce.com",
+    "marketo.com",
+    "fedex.com",
+    "ups.com",
+    "usps.com",
+    "dhl.com",
+    "intuit.com",
+    "quickbooks.com",
+    "paypal.com",
+    "stripe.com",
+    "docusign.com",
+    "dropbox.com",
+    "box.com",
 }
 
-NOISE_PREFIXES = {'noreply', 'no-reply', 'donotreply', 'do-not-reply',
-                   'mailer-daemon', 'postmaster', 'notifications', 'alerts',
-                   'newsletter', 'marketing', 'support', 'info', 'billing'}
+NOISE_PREFIXES = {
+    "noreply",
+    "no-reply",
+    "donotreply",
+    "do-not-reply",
+    "mailer-daemon",
+    "postmaster",
+    "notifications",
+    "alerts",
+    "newsletter",
+    "marketing",
+    "support",
+    "info",
+    "billing",
+}
 
 
 def _is_noise_email(email: str) -> bool:

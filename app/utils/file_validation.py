@@ -6,6 +6,7 @@ Uses `filetype` library for magic-byte validation (don't trust extensions)
 and `charset-normalizer` for detecting encoding of CSV/TSV files from
 international vendors.
 """
+
 import hashlib
 import logging
 
@@ -63,6 +64,7 @@ def validate_file(content: bytes, filename: str) -> dict:
     # H3: Magic-byte validation for binary files
     try:
         import filetype as ft
+
         kind = ft.guess(content)
         if kind:
             mime = kind.mime
@@ -106,6 +108,7 @@ def detect_encoding(content: bytes) -> str | None:
     """
     try:
         from charset_normalizer import from_bytes
+
         results = from_bytes(content)
         best = results.best()
         if best:
@@ -157,6 +160,7 @@ def is_password_protected(content: bytes) -> bool:
     try:
         import openpyxl
         import io
+
         openpyxl.load_workbook(io.BytesIO(content), read_only=True)
         return False
     except Exception as e:

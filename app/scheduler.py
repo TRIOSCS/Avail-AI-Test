@@ -5,6 +5,7 @@ Runs on a 5-minute tick loop. Each tick checks what needs to run:
   - Inbox scan: Every 30 min — scans all users' inboxes for vendor replies + stock lists
   - Contacts sync: Every 24h — pulls Outlook contacts into VendorCards
 """
+
 import asyncio
 import base64
 import logging
@@ -93,13 +94,16 @@ async def _refresh_access_token(
 
     async with httpx.AsyncClient(timeout=15) as client:
         try:
-            r = await client.post(token_url, data={
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "refresh_token": refresh_token,
-                "grant_type": "refresh_token",
-                "scope": "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read",
-            })
+            r = await client.post(
+                token_url,
+                data={
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "refresh_token": refresh_token,
+                    "grant_type": "refresh_token",
+                    "scope": "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read",
+                },
+            )
 
             if r.status_code != 200:
                 log.warning(f"Token refresh failed: {r.status_code} — {r.text[:200]}")
@@ -115,10 +119,14 @@ async def _refresh_access_token(
 
 # ── Main Scheduler Loop ─────────────────────────────────────────────────
 
+
 async def start_scheduler():
     """Launch the background scheduler loop. Call once on app startup."""
     from .config import settings
-    log.info(f"Background scheduler started — inbox scan every {settings.inbox_scan_interval_min} min")
+
+    log.info(
+        f"Background scheduler started — inbox scan every {settings.inbox_scan_interval_min} min"
+    )
 
     # Wait 10 seconds on startup before first tick (let app fully boot)
     await asyncio.sleep(10)
@@ -144,11 +152,15 @@ async def _scheduler_tick():
         # ── Auto-archive stale requisitions (runs every tick, no auth needed) ──
         try:
             cutoff = now - timedelta(days=30)
-            stale = db.query(Requisition).filter(
-                Requisition.status == "active",
-                Requisition.last_searched_at != None,
-                Requisition.last_searched_at < cutoff,
-            ).all()
+            stale = (
+                db.query(Requisition)
+                .filter(
+                    Requisition.status == "active",
+                    Requisition.last_searched_at.isnot(None),
+                    Requisition.last_searched_at < cutoff,
+                )
+                .all()
+            )
             for r in stale:
                 r.status = "archived"
             if stale:
@@ -160,7 +172,9 @@ async def _scheduler_tick():
 
         users = db.query(User).filter(User.refresh_token.isnot(None)).all()
         if not users:
-            log.debug("Scheduler tick: no users with refresh tokens — skipping email tasks")
+            log.debug(
+                "Scheduler tick: no users with refresh tokens — skipping email tasks"
+            )
             return
 
         scan_interval = timedelta(minutes=settings.inbox_scan_interval_min)
@@ -170,7 +184,12 @@ async def _scheduler_tick():
         for user in users:
             needs_refresh = False
             if user.token_expires_at:
-                exp = user.token_expires_at.replace(tzinfo=timezone.utc) if user.token_expires_at.tzinfo is None else user.token_expires_at; needs_refresh = now > exp - timedelta(minutes=15)
+                exp = (
+                    user.token_expires_at.replace(tzinfo=timezone.utc)
+                    if user.token_expires_at.tzinfo is None
+                    else user.token_expires_at
+                )
+                needs_refresh = now > exp - timedelta(minutes=15)
             elif not user.access_token:
                 needs_refresh = True
 
@@ -225,10 +244,14 @@ async def _scheduler_tick():
         # ── Upgrade 4: Engagement scoring (daily) ──
         try:
             from .models import VendorCard
+
             # Check if we've computed today already
-            latest = db.query(VendorCard.engagement_computed_at).filter(
-                VendorCard.engagement_computed_at.isnot(None)
-            ).order_by(VendorCard.engagement_computed_at.desc()).first()
+            latest = (
+                db.query(VendorCard.engagement_computed_at)
+                .filter(VendorCard.engagement_computed_at.isnot(None))
+                .order_by(VendorCard.engagement_computed_at.desc())
+                .first()
+            )
 
             should_compute = True
             if latest and latest[0]:
@@ -248,8 +271,10 @@ async def _scheduler_tick():
         if settings.activity_tracking_enabled:
             try:
                 from .services.webhook_service import (
-                    ensure_all_users_subscribed, renew_expiring_subscriptions
+                    ensure_all_users_subscribed,
+                    renew_expiring_subscriptions,
                 )
+
                 await renew_expiring_subscriptions(db)
                 await ensure_all_users_subscribed(db)
             except Exception as e:
@@ -260,6 +285,7 @@ async def _scheduler_tick():
         if settings.activity_tracking_enabled:
             try:
                 from .services.ownership_service import run_ownership_sweep
+
                 global _last_ownership_sweep
                 if now - _last_ownership_sweep > timedelta(hours=12):
                     await run_ownership_sweep(db)
@@ -271,7 +297,11 @@ async def _scheduler_tick():
         # ── v1.3.0: Routing & offer expiration sweeps (daily) ──
         if settings.activity_tracking_enabled:
             try:
-                from .services.routing_service import expire_stale_assignments, expire_stale_offers
+                from .services.routing_service import (
+                    expire_stale_assignments,
+                    expire_stale_offers,
+                )
+
                 expired_assignments = expire_stale_assignments(db)
                 expired_offers = expire_stale_offers(db)
                 if expired_assignments or expired_offers:
@@ -284,9 +314,10 @@ async def _scheduler_tick():
         try:
             from .models import BuyPlan
             from .services.buyplan_service import verify_po_sent
-            unverified_plans = db.query(BuyPlan).filter(
-                BuyPlan.status == "po_entered"
-            ).all()
+
+            unverified_plans = (
+                db.query(BuyPlan).filter(BuyPlan.status == "po_entered").all()
+            )
             for plan in unverified_plans:
                 try:
                     await verify_po_sent(plan, db)
@@ -300,9 +331,12 @@ async def _scheduler_tick():
         if settings.proactive_matching_enabled:
             try:
                 from .services.proactive_service import scan_new_offers_for_matches
+
                 result = scan_new_offers_for_matches(db)
                 if result.get("matches_created"):
-                    log.info(f"Proactive matching: {result['matches_created']} new matches from {result['scanned']} offers")
+                    log.info(
+                        f"Proactive matching: {result['matches_created']} new matches from {result['scanned']} offers"
+                    )
             except Exception as e:
                 log.error(f"Proactive matching error: {e}")
                 db.rollback()
@@ -312,14 +346,20 @@ async def _scheduler_tick():
             global _last_performance_compute
             if now - _last_performance_compute > timedelta(hours=12):
                 from .services.performance_service import (
-                    compute_all_vendor_scorecards, compute_buyer_leaderboard,
+                    compute_all_vendor_scorecards,
+                    compute_buyer_leaderboard,
                 )
+
                 vs_result = compute_all_vendor_scorecards(db)
-                log.info(f"Vendor scorecards: {vs_result['updated']} updated, "
-                         f"{vs_result['skipped_cold_start']} cold-start")
+                log.info(
+                    f"Vendor scorecards: {vs_result['updated']} updated, "
+                    f"{vs_result['skipped_cold_start']} cold-start"
+                )
                 current_month = now.date().replace(day=1)
                 bl_result = compute_buyer_leaderboard(db, current_month)
-                log.info(f"Buyer leaderboard: {bl_result['entries']} entries for {current_month}")
+                log.info(
+                    f"Buyer leaderboard: {bl_result['entries']} entries for {current_month}"
+                )
                 # Recompute previous month during grace period (first 7 days)
                 if now.day <= 7:
                     prev_month = (current_month - timedelta(days=1)).replace(day=1)
@@ -337,6 +377,7 @@ async def _scheduler_tick():
 
 # ── Inbox Scanning ──────────────────────────────────────────────────────
 
+
 async def _scan_user_inbox(user, db):
     """Scan a single user's inbox for vendor replies and stock lists."""
     from .config import settings
@@ -344,7 +385,9 @@ async def _scan_user_inbox(user, db):
 
     is_backfill = user.last_inbox_scan is None
     if is_backfill:
-        log.info(f"First-time inbox backfill for {user.email} ({settings.inbox_backfill_days} days)")
+        log.info(
+            f"First-time inbox backfill for {user.email} ({settings.inbox_backfill_days} days)"
+        )
 
     # Poll inbox for replies (poll_inbox handles dedup via message_id)
     try:
@@ -398,13 +441,16 @@ async def _scan_stock_list_attachments(user, db, is_backfill: bool = False):
     if not stock_emails:
         return
 
-    log.info(f"Stock list scan [{user.email}]: found {len(stock_emails)} emails with attachments")
+    log.info(
+        f"Stock list scan [{user.email}]: found {len(stock_emails)} emails with attachments"
+    )
 
     for email_info in stock_emails:
         for att_info in email_info.get("stock_files", []):
             try:
                 await _download_and_import_stock_list(
-                    user, db,
+                    user,
+                    db,
                     message_id=att_info["message_id"],
                     attachment_id=att_info["attachment_id"],
                     filename=att_info["filename"],
@@ -415,8 +461,15 @@ async def _scan_stock_list_attachments(user, db, is_backfill: bool = False):
                 log.error(f"Stock list import failed [{att_info.get('filename')}]: {e}")
 
 
-async def _download_and_import_stock_list(user, db, message_id: str, attachment_id: str,
-                                           filename: str, vendor_name: str, vendor_email: str):
+async def _download_and_import_stock_list(
+    user,
+    db,
+    message_id: str,
+    attachment_id: str,
+    filename: str,
+    vendor_name: str,
+    vendor_email: str,
+):
     """Download an attachment via Graph API and import as material cards + sightings."""
     from .models import MaterialCard, MaterialVendorHistory
     from .vendor_utils import normalize_vendor_name
@@ -428,10 +481,13 @@ async def _download_and_import_stock_list(user, db, message_id: str, attachment_
 
     # Download the attachment via GraphClient (H1: immutable IDs, H6: retry)
     from app.utils.graph_client import GraphClient
+
     dl_token = await get_valid_token(user, db) or user.access_token
     gc = GraphClient(dl_token)
     try:
-        att_data = await gc.get_json(f"/me/messages/{message_id}/attachments/{attachment_id}")
+        att_data = await gc.get_json(
+            f"/me/messages/{message_id}/attachments/{attachment_id}"
+        )
     except Exception as e:
         log.warning(f"Attachment download failed: {e}")
         return
@@ -448,6 +504,7 @@ async def _download_and_import_stock_list(user, db, message_id: str, attachment_
 
     # H3: Validate file type before parsing
     from app.utils.file_validation import validate_file
+
     is_valid, detected_type = validate_file(file_bytes, filename)
     if not is_valid:
         log.warning(f"File validation failed for {filename}: detected {detected_type}")
@@ -456,7 +513,10 @@ async def _download_and_import_stock_list(user, db, message_id: str, attachment_
     # Parse the file — use new AI-powered parser (Upgrade 2), fallback to legacy
     try:
         from app.services.attachment_parser import parse_attachment
-        rows = await parse_attachment(file_bytes, filename, vendor_domain=vendor_domain, db=db)
+
+        rows = await parse_attachment(
+            file_bytes, filename, vendor_domain=vendor_domain, db=db
+        )
     except Exception as e:
         log.warning(f"AI attachment parser failed, using legacy parser: {e}")
         rows = _parse_stock_file(file_bytes, filename)
@@ -485,14 +545,16 @@ async def _download_and_import_stock_list(user, db, message_id: str, attachment_
             try:
                 db.flush()
             except Exception as e:
-                log.debug(f"MaterialCard flush conflict for '{norm_mpn}': {e}")
+                log.debug(f"MaterialCard flush conflict for '{mpn}': {e}")
                 db.rollback()
                 continue
 
         # Add/update vendor history (richer fields from Upgrade 2)
-        mvh = db.query(MaterialVendorHistory).filter_by(
-            material_card_id=card.id, vendor_name=norm_vendor
-        ).first()
+        mvh = (
+            db.query(MaterialVendorHistory)
+            .filter_by(material_card_id=card.id, vendor_name=norm_vendor)
+            .first()
+        )
         if mvh:
             mvh.last_seen = datetime.now(timezone.utc)
             mvh.times_seen = (mvh.times_seen or 0) + 1
@@ -528,6 +590,7 @@ async def _download_and_import_stock_list(user, db, message_id: str, attachment_
 def _parse_stock_file(file_bytes: bytes, filename: str) -> list[dict]:
     """Parse a stock list file (CSV/XLSX) into rows with mpn, qty, price, manufacturer."""
     from .file_utils import parse_tabular_file, normalize_stock_row
+
     raw_rows = parse_tabular_file(file_bytes, filename)
     rows = []
     for r in raw_rows:
@@ -538,6 +601,7 @@ def _parse_stock_file(file_bytes: bytes, filename: str) -> list[dict]:
 
 
 # ── Vendor Contact Mining ───────────────────────────────────────────────
+
 
 async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
     """Extract vendor contact info from recent emails into VendorCards."""
@@ -569,7 +633,8 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
             card = VendorCard(
                 normalized_name=norm,
                 display_name=vendor_name,
-                emails=[], phones=[],
+                emails=[],
+                phones=[],
                 source="email_mining",
             )
             db.add(card)
@@ -598,6 +663,7 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
 
 # ── Upgrade 3: Outbound RFQ Scanning ──────────────────────────────────
 
+
 async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
     """Scan Sent Items for AVAIL RFQs and update VendorCard outreach metrics."""
     from .config import settings
@@ -620,16 +686,24 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
     updated = 0
     for domain, count in vendors.items():
         # Find VendorCard by domain
-        card = db.query(VendorCard).filter(
-            VendorCard.domain == domain,
-        ).first()
+        card = (
+            db.query(VendorCard)
+            .filter(
+                VendorCard.domain == domain,
+            )
+            .first()
+        )
 
         if not card:
             # Try by normalized domain prefix
             prefix = domain.split(".")[0].lower() if "." in domain else domain
-            card = db.query(VendorCard).filter(
-                VendorCard.normalized_name == prefix,
-            ).first()
+            card = (
+                db.query(VendorCard)
+                .filter(
+                    VendorCard.normalized_name == prefix,
+                )
+                .first()
+            )
 
         if card:
             card.total_outreach = (card.total_outreach or 0) + count
@@ -639,13 +713,16 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
     try:
         db.commit()
         if updated:
-            log.info(f"Outbound scan [{user.email}]: {rfqs} RFQs, {updated} vendor cards updated")
+            log.info(
+                f"Outbound scan [{user.email}]: {rfqs} RFQs, {updated} vendor cards updated"
+            )
     except Exception as e:
         log.error(f"Outbound scan commit failed for {user.email}: {e}")
         db.rollback()
 
 
 # ── Upgrade 4: Engagement Score Computation ───────────────────────────
+
 
 async def _compute_engagement_scores_job(db):
     """Recompute engagement scores for all vendors with outreach data.
@@ -656,21 +733,28 @@ async def _compute_engagement_scores_job(db):
 
     try:
         result = await compute_all_engagement_scores(db)
-        log.info(f"Engagement scoring complete: {result['updated']} updated, {result['skipped']} skipped")
+        log.info(
+            f"Engagement scoring complete: {result['updated']} updated, {result['skipped']} skipped"
+        )
     except Exception as e:
         log.error(f"Engagement scoring failed: {e}")
 
 
-
 # ── Contacts Sync (Outlook → VendorCards) ───────────────────────────────
+
 
 async def _sync_user_contacts(user, db):
     """Pull contacts from Outlook into VendorCards."""
     from .models import VendorCard
-    from .vendor_utils import normalize_vendor_name, merge_emails_into_card, merge_phones_into_card
+    from .vendor_utils import (
+        normalize_vendor_name,
+        merge_emails_into_card,
+        merge_phones_into_card,
+    )
 
     # Use GraphClient for pagination with retry (H1, H6)
     from app.utils.graph_client import GraphClient
+
     gc = GraphClient(user.access_token)
     try:
         contacts = await gc.get_all_pages(
@@ -698,7 +782,8 @@ async def _sync_user_contacts(user, db):
             card = VendorCard(
                 normalized_name=norm,
                 display_name=company,
-                emails=[], phones=[],
+                emails=[],
+                phones=[],
                 source="outlook_contacts",
             )
             db.add(card)
@@ -711,8 +796,7 @@ async def _sync_user_contacts(user, db):
 
         # Merge emails from Outlook contact
         outlook_emails = [
-            (addr.get("address") or "").strip()
-            for addr in c.get("emailAddresses", [])
+            (addr.get("address") or "").strip() for addr in c.get("emailAddresses", [])
         ]
         enriched += merge_emails_into_card(card, outlook_emails)
 
@@ -726,8 +810,9 @@ async def _sync_user_contacts(user, db):
     try:
         user.last_contacts_sync = datetime.now(timezone.utc)
         db.commit()
-        log.info(f"Contacts sync [{user.email}]: {len(contacts)} contacts, {enriched} new emails")
+        log.info(
+            f"Contacts sync [{user.email}]: {len(contacts)} contacts, {enriched} new emails"
+        )
     except Exception as e:
         log.error(f"Contacts sync commit failed: {e}")
         db.rollback()
-

@@ -11,20 +11,27 @@ Confidence thresholds:
 Each part in a multi-part reply gets its own classification:
   quoted, no_stock, follow_up, counter_offer
 """
+
 import logging
 
 from app.utils.claude_client import claude_structured
 from app.utils.normalization import (
-    normalize_price, normalize_quantity, normalize_lead_time,
-    normalize_condition, normalize_date_code, normalize_moq,
-    normalize_packaging, detect_currency, fuzzy_mpn_match,
+    normalize_price,
+    normalize_quantity,
+    normalize_lead_time,
+    normalize_condition,
+    normalize_date_code,
+    normalize_moq,
+    normalize_packaging,
+    detect_currency,
+    fuzzy_mpn_match,
 )
 
 log = logging.getLogger("avail.response_parser")
 
 # ── Confidence thresholds ─────────────────────────────────────────────
 
-CONFIDENCE_AUTO = 0.8    # Auto-apply parsed data
+CONFIDENCE_AUTO = 0.8  # Auto-apply parsed data
 CONFIDENCE_REVIEW = 0.5  # Flag for human review
 # Below 0.5: store raw only
 
@@ -40,8 +47,14 @@ RESPONSE_PARSE_SCHEMA = {
         },
         "overall_classification": {
             "type": "string",
-            "enum": ["quote_provided", "no_stock", "counter_offer",
-                     "clarification_needed", "ooo_bounce", "follow_up"],
+            "enum": [
+                "quote_provided",
+                "no_stock",
+                "counter_offer",
+                "clarification_needed",
+                "ooo_bounce",
+                "follow_up",
+            ],
             "description": "Primary response type",
         },
         "confidence": {
@@ -121,8 +134,7 @@ async def parse_vendor_response(
     if rfq_context:
         if isinstance(rfq_context, list):
             parts_str = ", ".join(
-                f"{p.get('mpn', '?')} x{p.get('qty', '?')}"
-                for p in rfq_context[:10]
+                f"{p.get('mpn', '?')} x{p.get('qty', '?')}" for p in rfq_context[:10]
             )
             context_str = f"\nParts we asked about: {parts_str}"
         elif isinstance(rfq_context, dict):
@@ -200,20 +212,21 @@ def _cross_validate(result: dict, rfq_context: dict | list) -> None:
 def _clean_email_body(body: str) -> str:
     """Strip HTML tags, excessive whitespace, and email signatures."""
     import re
+
     if not body:
         return ""
     # Remove HTML tags
-    text = re.sub(r'<[^>]+>', ' ', body)
+    text = re.sub(r"<[^>]+>", " ", body)
     # Collapse whitespace
-    text = re.sub(r'\s+', ' ', text).strip()
+    text = re.sub(r"\s+", " ", text).strip()
     # Remove common email disclaimers (often very long)
     disclaimer_patterns = [
-        r'(?i)this email and any attachments.*?(?=\n\n|\Z)',
-        r'(?i)confidentiality notice.*?(?=\n\n|\Z)',
-        r'(?i)DISCLAIMER.*?(?=\n\n|\Z)',
+        r"(?i)this email and any attachments.*?(?=\n\n|\Z)",
+        r"(?i)confidentiality notice.*?(?=\n\n|\Z)",
+        r"(?i)DISCLAIMER.*?(?=\n\n|\Z)",
     ]
     for pat in disclaimer_patterns:
-        text = re.sub(pat, '', text)
+        text = re.sub(pat, "", text)
     return text.strip()
 
 
@@ -241,22 +254,24 @@ def extract_draft_offers(result: dict, vendor_name: str) -> list[dict]:
         if not part.get("unit_price"):
             continue
 
-        offers.append({
-            "vendor_name": vendor_name,
-            "mpn": part.get("mpn", ""),
-            "manufacturer": part.get("manufacturer"),
-            "qty_available": part.get("qty_available"),
-            "unit_price": part.get("unit_price"),
-            "currency": part.get("currency", "USD"),
-            "lead_time": part.get("lead_time"),
-            "date_code": part.get("date_code"),
-            "condition": part.get("condition_normalized") or part.get("condition"),
-            "packaging": part.get("packaging_normalized") or part.get("packaging"),
-            "moq": part.get("moq"),
-            "valid_days": part.get("valid_days"),
-            "notes": part.get("notes"),
-            "source": "ai_parsed",
-            "status": "pending_review",
-        })
+        offers.append(
+            {
+                "vendor_name": vendor_name,
+                "mpn": part.get("mpn", ""),
+                "manufacturer": part.get("manufacturer"),
+                "qty_available": part.get("qty_available"),
+                "unit_price": part.get("unit_price"),
+                "currency": part.get("currency", "USD"),
+                "lead_time": part.get("lead_time"),
+                "date_code": part.get("date_code"),
+                "condition": part.get("condition_normalized") or part.get("condition"),
+                "packaging": part.get("packaging_normalized") or part.get("packaging"),
+                "moq": part.get("moq"),
+                "valid_days": part.get("valid_days"),
+                "notes": part.get("notes"),
+                "source": "ai_parsed",
+                "status": "pending_review",
+            }
+        )
 
     return offers

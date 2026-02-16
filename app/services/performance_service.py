@@ -16,8 +16,17 @@ from sqlalchemy import func as sqlfunc, and_
 from sqlalchemy.orm import Session
 
 from ..models import (
-    User, VendorCard, VendorReview, Contact, VendorResponse, Offer, Quote, BuyPlan,
-    VendorMetricsSnapshot, BuyerLeaderboardSnapshot, StockListHash,
+    User,
+    VendorCard,
+    VendorReview,
+    Contact,
+    VendorResponse,
+    Offer,
+    Quote,
+    BuyPlan,
+    VendorMetricsSnapshot,
+    BuyerLeaderboardSnapshot,
+    StockListHash,
 )
 
 log = logging.getLogger("avail.performance")
@@ -49,8 +58,10 @@ GRACE_DAYS = 7
 
 # ── Vendor Scorecard ──────────────────────────────────────────────────
 
-def compute_vendor_scorecard(db: Session, vendor_card_id: int,
-                             window_days: int = VENDOR_WINDOW_DAYS) -> dict:
+
+def compute_vendor_scorecard(
+    db: Session, vendor_card_id: int, window_days: int = VENDOR_WINDOW_DAYS
+) -> dict:
     """Compute all 6 metrics for a single vendor over the rolling window."""
     vc = db.get(VendorCard, vendor_card_id)
     if not vc:
@@ -59,36 +70,54 @@ def compute_vendor_scorecard(db: Session, vendor_card_id: int,
     cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
 
     # ── 1. Response rate ──
-    rfqs_sent = db.query(sqlfunc.count(Contact.id)).filter(
-        Contact.vendor_name == vc.display_name,
-        Contact.contact_type == "email",
-        Contact.created_at >= cutoff,
-    ).scalar() or 0
+    rfqs_sent = (
+        db.query(sqlfunc.count(Contact.id))
+        .filter(
+            Contact.vendor_name == vc.display_name,
+            Contact.contact_type == "email",
+            Contact.created_at >= cutoff,
+        )
+        .scalar()
+        or 0
+    )
 
-    rfqs_answered = db.query(sqlfunc.count(VendorResponse.id)).filter(
-        VendorResponse.vendor_name == vc.display_name,
-        VendorResponse.status != "noise",
-        VendorResponse.received_at >= cutoff,
-    ).scalar() or 0
+    rfqs_answered = (
+        db.query(sqlfunc.count(VendorResponse.id))
+        .filter(
+            VendorResponse.vendor_name == vc.display_name,
+            VendorResponse.status != "noise",
+            VendorResponse.received_at >= cutoff,
+        )
+        .scalar()
+        or 0
+    )
 
     response_rate = (rfqs_answered / rfqs_sent) if rfqs_sent > 0 else None
 
     # ── 2. Quote accuracy ──
     # Compare offer prices to buy plan cost prices for same offer_id
-    offers_in_window = db.query(Offer).filter(
-        Offer.vendor_card_id == vendor_card_id,
-        Offer.created_at >= cutoff,
-        Offer.unit_price.isnot(None),
-    ).all()
+    offers_in_window = (
+        db.query(Offer)
+        .filter(
+            Offer.vendor_card_id == vendor_card_id,
+            Offer.created_at >= cutoff,
+            Offer.unit_price.isnot(None),
+        )
+        .all()
+    )
 
     accuracy_diffs = []
     for offer in offers_in_window:
         # Find buy plans that reference this offer in line_items
-        buy_plans = db.query(BuyPlan).filter(
-            BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]),
-        ).all()
+        buy_plans = (
+            db.query(BuyPlan)
+            .filter(
+                BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]),
+            )
+            .all()
+        )
         for bp in buy_plans:
-            for item in (bp.line_items or []):
+            for item in bp.line_items or []:
                 if item.get("offer_id") == offer.id and item.get("cost_price"):
                     bp_price = float(item["cost_price"])
                     offer_price = float(offer.unit_price)
@@ -96,7 +125,9 @@ def compute_vendor_scorecard(db: Session, vendor_card_id: int,
                         diff = abs(offer_price - bp_price) / bp_price
                         accuracy_diffs.append(diff)
 
-    quote_accuracy = (1 - (sum(accuracy_diffs) / len(accuracy_diffs))) if accuracy_diffs else None
+    quote_accuracy = (
+        (1 - (sum(accuracy_diffs) / len(accuracy_diffs))) if accuracy_diffs else None
+    )
     if quote_accuracy is not None:
         quote_accuracy = max(0.0, min(1.0, quote_accuracy))
 
@@ -104,18 +135,24 @@ def compute_vendor_scorecard(db: Session, vendor_card_id: int,
     # BuyPlans with po_confirmed — check if confirmation was within lead time
     on_time_count = 0
     total_delivery = 0
-    for bp in db.query(BuyPlan).filter(
-        BuyPlan.status.in_(["po_confirmed", "complete"]),
-        BuyPlan.approved_at >= cutoff,
-        BuyPlan.approved_at.isnot(None),
-    ).all():
-        for item in (bp.line_items or []):
+    for bp in (
+        db.query(BuyPlan)
+        .filter(
+            BuyPlan.status.in_(["po_confirmed", "complete"]),
+            BuyPlan.approved_at >= cutoff,
+            BuyPlan.approved_at.isnot(None),
+        )
+        .all()
+    ):
+        for item in bp.line_items or []:
             if item.get("vendor_name", "").lower() == (vc.display_name or "").lower():
                 total_delivery += 1
                 # Use lead_time field to estimate expected delivery
                 lead_str = item.get("lead_time", "")
                 try:
-                    lead_days = int("".join(c for c in str(lead_str) if c.isdigit()) or "0")
+                    lead_days = int(
+                        "".join(c for c in str(lead_str) if c.isdigit()) or "0"
+                    )
                 except (ValueError, TypeError):
                     lead_days = 0
                 if lead_days > 0 and bp.approved_at:
@@ -144,11 +181,15 @@ def compute_vendor_scorecard(db: Session, vendor_card_id: int,
     offers_in_quotes = 0
     if total_offers > 0:
         offer_id_set = {o.id for o in offers_in_window}
-        all_quotes = db.query(Quote).filter(
-            Quote.status.in_(["sent", "won", "lost"]),
-        ).all()
+        all_quotes = (
+            db.query(Quote)
+            .filter(
+                Quote.status.in_(["sent", "won", "lost"]),
+            )
+            .all()
+        )
         for q in all_quotes:
-            for item in (q.line_items or []):
+            for item in q.line_items or []:
                 oid = item.get("offer_id")
                 if oid in offer_id_set:
                     offers_in_quotes += 1
@@ -160,11 +201,15 @@ def compute_vendor_scorecard(db: Session, vendor_card_id: int,
     offers_to_po = 0
     if total_offers > 0:
         offer_id_set2 = {o.id for o in offers_in_window}
-        po_plans = db.query(BuyPlan).filter(
-            BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]),
-        ).all()
+        po_plans = (
+            db.query(BuyPlan)
+            .filter(
+                BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]),
+            )
+            .all()
+        )
         for bp in po_plans:
-            for item in (bp.line_items or []):
+            for item in bp.line_items or []:
                 oid = item.get("offer_id")
                 if oid in offer_id_set2:
                     offers_to_po += 1
@@ -172,10 +217,16 @@ def compute_vendor_scorecard(db: Session, vendor_card_id: int,
     po_conversion = (offers_to_po / total_offers) if total_offers > 0 else None
 
     # ── 9. Average buyer review rating ──
-    avg_rating_row = db.query(sqlfunc.avg(VendorReview.rating)).filter(
-        VendorReview.vendor_card_id == vendor_card_id,
-    ).scalar()
-    avg_review_rating = float(avg_rating_row) / 5.0 if avg_rating_row else None  # Normalize to 0-1
+    avg_rating_row = (
+        db.query(sqlfunc.avg(VendorReview.rating))
+        .filter(
+            VendorReview.vendor_card_id == vendor_card_id,
+        )
+        .scalar()
+    )
+    avg_review_rating = (
+        float(avg_rating_row) / 5.0 if avg_rating_row else None
+    )  # Normalize to 0-1
 
     # ── Interaction count & cold-start ──
     interaction_count = rfqs_sent + total_offers
@@ -186,11 +237,21 @@ def compute_vendor_scorecard(db: Session, vendor_card_id: int,
     is_sufficient = interaction_count >= COLD_START_THRESHOLD
 
     # ── Composite score ──
-    composite = _compute_composite(
-        response_rate, quote_accuracy, on_time_delivery,
-        cancellation_rate, rma_rate, lead_time_accuracy,
-        quote_conversion, po_conversion, avg_review_rating,
-    ) if is_sufficient else None
+    composite = (
+        _compute_composite(
+            response_rate,
+            quote_accuracy,
+            on_time_delivery,
+            cancellation_rate,
+            rma_rate,
+            lead_time_accuracy,
+            quote_conversion,
+            po_conversion,
+            avg_review_rating,
+        )
+        if is_sufficient
+        else None
+    )
 
     return {
         "vendor_card_id": vendor_card_id,
@@ -212,10 +273,17 @@ def compute_vendor_scorecard(db: Session, vendor_card_id: int,
     }
 
 
-def _compute_composite(response_rate, quote_accuracy, on_time,
-                        cancellation_rate, rma_rate, lead_time,
-                        quote_conversion=None, po_conversion=None,
-                        avg_review_rating=None) -> float:
+def _compute_composite(
+    response_rate,
+    quote_accuracy,
+    on_time,
+    cancellation_rate,
+    rma_rate,
+    lead_time,
+    quote_conversion=None,
+    po_conversion=None,
+    avg_review_rating=None,
+) -> float:
     """Weighted average of available metrics. Cancellation & RMA are inverted (lower=better)."""
     metrics = []
     weights = []
@@ -230,7 +298,9 @@ def _compute_composite(response_rate, quote_accuracy, on_time,
         metrics.append(on_time)
         weights.append(W_ON_TIME)
     if cancellation_rate is not None:
-        metrics.append(max(0.0, 1.0 - cancellation_rate))  # Invert: lower cancel = higher score
+        metrics.append(
+            max(0.0, 1.0 - cancellation_rate)
+        )  # Invert: lower cancel = higher score
         weights.append(W_CANCELLATION)
     if rma_rate is not None:
         metrics.append(max(0.0, 1.0 - rma_rate))  # Invert: lower RMA = higher score
@@ -269,10 +339,14 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
                 continue
 
             # Upsert snapshot
-            existing = db.query(VendorMetricsSnapshot).filter(
-                VendorMetricsSnapshot.vendor_card_id == vid,
-                VendorMetricsSnapshot.snapshot_date == today,
-            ).first()
+            existing = (
+                db.query(VendorMetricsSnapshot)
+                .filter(
+                    VendorMetricsSnapshot.vendor_card_id == vid,
+                    VendorMetricsSnapshot.snapshot_date == today,
+                )
+                .first()
+            )
 
             if existing:
                 snap = existing
@@ -310,25 +384,38 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
     return {"updated": updated, "skipped_cold_start": skipped}
 
 
-def get_vendor_scorecard_list(db: Session, sort_by: str = "composite_score",
-                               order: str = "desc", limit: int = 50,
-                               offset: int = 0, search: str | None = None) -> dict:
+def get_vendor_scorecard_list(
+    db: Session,
+    sort_by: str = "composite_score",
+    order: str = "desc",
+    limit: int = 50,
+    offset: int = 0,
+    search: str | None = None,
+) -> dict:
     """Return paginated vendor scorecards with latest snapshot."""
     from sqlalchemy import desc as sql_desc, asc as sql_asc
 
     # Subquery: latest snapshot date per vendor
-    latest_sq = db.query(
-        VendorMetricsSnapshot.vendor_card_id,
-        sqlfunc.max(VendorMetricsSnapshot.snapshot_date).label("max_date"),
-    ).group_by(VendorMetricsSnapshot.vendor_card_id).subquery()
+    latest_sq = (
+        db.query(
+            VendorMetricsSnapshot.vendor_card_id,
+            sqlfunc.max(VendorMetricsSnapshot.snapshot_date).label("max_date"),
+        )
+        .group_by(VendorMetricsSnapshot.vendor_card_id)
+        .subquery()
+    )
 
-    q = db.query(VendorMetricsSnapshot, VendorCard.display_name).join(
-        latest_sq,
-        and_(
-            VendorMetricsSnapshot.vendor_card_id == latest_sq.c.vendor_card_id,
-            VendorMetricsSnapshot.snapshot_date == latest_sq.c.max_date,
-        ),
-    ).join(VendorCard, VendorCard.id == VendorMetricsSnapshot.vendor_card_id)
+    q = (
+        db.query(VendorMetricsSnapshot, VendorCard.display_name)
+        .join(
+            latest_sq,
+            and_(
+                VendorMetricsSnapshot.vendor_card_id == latest_sq.c.vendor_card_id,
+                VendorMetricsSnapshot.snapshot_date == latest_sq.c.max_date,
+            ),
+        )
+        .join(VendorCard, VendorCard.id == VendorMetricsSnapshot.vendor_card_id)
+    )
 
     if search:
         q = q.filter(VendorCard.display_name.ilike(f"%{search}%"))
@@ -337,7 +424,9 @@ def get_vendor_scorecard_list(db: Session, sort_by: str = "composite_score",
     total = q.count()
 
     # Sort
-    sort_col = getattr(VendorMetricsSnapshot, sort_by, VendorMetricsSnapshot.composite_score)
+    sort_col = getattr(
+        VendorMetricsSnapshot, sort_by, VendorMetricsSnapshot.composite_score
+    )
     if order == "asc":
         q = q.order_by(sql_asc(sort_col).nulls_last())
     else:
@@ -347,23 +436,25 @@ def get_vendor_scorecard_list(db: Session, sort_by: str = "composite_score",
 
     items = []
     for snap, vendor_name in rows:
-        items.append({
-            "vendor_card_id": snap.vendor_card_id,
-            "vendor_name": vendor_name,
-            "snapshot_date": snap.snapshot_date.isoformat(),
-            "response_rate": snap.response_rate,
-            "quote_accuracy": snap.quote_accuracy,
-            "on_time_delivery": snap.on_time_delivery,
-            "cancellation_rate": snap.cancellation_rate,
-            "rma_rate": snap.rma_rate,
-            "lead_time_accuracy": snap.lead_time_accuracy,
-            "quote_conversion": snap.quote_conversion,
-            "po_conversion": snap.po_conversion,
-            "avg_review_rating": snap.avg_review_rating,
-            "composite_score": snap.composite_score,
-            "interaction_count": snap.interaction_count,
-            "is_sufficient_data": snap.is_sufficient_data,
-        })
+        items.append(
+            {
+                "vendor_card_id": snap.vendor_card_id,
+                "vendor_name": vendor_name,
+                "snapshot_date": snap.snapshot_date.isoformat(),
+                "response_rate": snap.response_rate,
+                "quote_accuracy": snap.quote_accuracy,
+                "on_time_delivery": snap.on_time_delivery,
+                "cancellation_rate": snap.cancellation_rate,
+                "rma_rate": snap.rma_rate,
+                "lead_time_accuracy": snap.lead_time_accuracy,
+                "quote_conversion": snap.quote_conversion,
+                "po_conversion": snap.po_conversion,
+                "avg_review_rating": snap.avg_review_rating,
+                "composite_score": snap.composite_score,
+                "interaction_count": snap.interaction_count,
+                "is_sufficient_data": snap.is_sufficient_data,
+            }
+        )
 
     return {"items": items, "total": total}
 
@@ -375,21 +466,34 @@ def get_vendor_scorecard_detail(db: Session, vendor_card_id: int) -> dict:
         return {}
 
     cutoff = date.today() - timedelta(days=90)
-    snapshots = db.query(VendorMetricsSnapshot).filter(
-        VendorMetricsSnapshot.vendor_card_id == vendor_card_id,
-        VendorMetricsSnapshot.snapshot_date >= cutoff,
-    ).order_by(VendorMetricsSnapshot.snapshot_date.desc()).limit(90).all()
+    snapshots = (
+        db.query(VendorMetricsSnapshot)
+        .filter(
+            VendorMetricsSnapshot.vendor_card_id == vendor_card_id,
+            VendorMetricsSnapshot.snapshot_date >= cutoff,
+        )
+        .order_by(VendorMetricsSnapshot.snapshot_date.desc())
+        .limit(90)
+        .all()
+    )
 
     if not snapshots:
-        return {"vendor_card_id": vendor_card_id, "vendor_name": vc.display_name,
-                "latest": None, "trend": []}
+        return {
+            "vendor_card_id": vendor_card_id,
+            "vendor_name": vc.display_name,
+            "latest": None,
+            "trend": [],
+        }
 
     latest = snapshots[0]
-    trend = [{
-        "date": s.snapshot_date.isoformat(),
-        "composite_score": s.composite_score,
-        "response_rate": s.response_rate,
-    } for s in reversed(snapshots)]
+    trend = [
+        {
+            "date": s.snapshot_date.isoformat(),
+            "composite_score": s.composite_score,
+            "response_rate": s.response_rate,
+        }
+        for s in reversed(snapshots)
+    ]
 
     return {
         "vendor_card_id": vendor_card_id,
@@ -418,6 +522,7 @@ def get_vendor_scorecard_detail(db: Session, vendor_card_id: int) -> dict:
 
 # ── Buyer Leaderboard ─────────────────────────────────────────────────
 
+
 def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     """Compute buyer leaderboard for a given month."""
     # Normalize to first of month
@@ -427,10 +532,12 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     else:
         month_end = month_start.replace(month=month_start.month + 1)
 
-    month_start_dt = datetime(month_start.year, month_start.month, month_start.day,
-                              tzinfo=timezone.utc)
-    month_end_dt = datetime(month_end.year, month_end.month, month_end.day,
-                            tzinfo=timezone.utc)
+    month_start_dt = datetime(
+        month_start.year, month_start.month, month_start.day, tzinfo=timezone.utc
+    )
+    month_end_dt = datetime(
+        month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc
+    )
 
     # Grace period: last 7 days of previous month
     grace_start_dt = month_start_dt - timedelta(days=GRACE_DAYS)
@@ -440,12 +547,16 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
 
     # Collect all offer_ids that appear in quotes and buy plans (for status checks)
     # Quotes: line_items JSON contains offer_id
-    all_quotes = db.query(Quote).filter(
-        Quote.status.in_(["sent", "won", "lost"]),
-    ).all()
+    all_quotes = (
+        db.query(Quote)
+        .filter(
+            Quote.status.in_(["sent", "won", "lost"]),
+        )
+        .all()
+    )
     quoted_offer_ids = set()
     for q in all_quotes:
-        for item in (q.line_items or []):
+        for item in q.line_items or []:
             oid = item.get("offer_id")
             if oid:
                 quoted_offer_ids.add(oid)
@@ -455,7 +566,7 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     buyplan_offer_ids = set()
     po_confirmed_offer_ids = set()
     for bp in all_buyplans:
-        for item in (bp.line_items or []):
+        for item in bp.line_items or []:
             oid = item.get("offer_id")
             if oid:
                 buyplan_offer_ids.add(oid)
@@ -465,18 +576,26 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     entries = []
     for buyer in buyers:
         # Offers logged in this month (plus grace period offers that advanced)
-        month_offers = db.query(Offer).filter(
-            Offer.entered_by_id == buyer.id,
-            Offer.created_at >= month_start_dt,
-            Offer.created_at < month_end_dt,
-        ).all()
+        month_offers = (
+            db.query(Offer)
+            .filter(
+                Offer.entered_by_id == buyer.id,
+                Offer.created_at >= month_start_dt,
+                Offer.created_at < month_end_dt,
+            )
+            .all()
+        )
 
         # Grace offers: created in last 7 days of prev month
-        grace_offers = db.query(Offer).filter(
-            Offer.entered_by_id == buyer.id,
-            Offer.created_at >= grace_start_dt,
-            Offer.created_at < month_start_dt,
-        ).all()
+        grace_offers = (
+            db.query(Offer)
+            .filter(
+                Offer.entered_by_id == buyer.id,
+                Offer.created_at >= grace_start_dt,
+                Offer.created_at < month_start_dt,
+            )
+            .all()
+        )
 
         # Grace offers only count if they advanced during this month
         grace_advanced = []
@@ -493,11 +612,15 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
         po_confirmed = sum(1 for oid in offer_ids if oid in po_confirmed_offer_ids)
 
         # Stock lists uploaded in this month (unique, non-duplicate)
-        stock_uploaded = db.query(StockListHash).filter(
-            StockListHash.user_id == buyer.id,
-            StockListHash.first_seen_at >= month_start_dt,
-            StockListHash.first_seen_at < month_end_dt,
-        ).count()
+        stock_uploaded = (
+            db.query(StockListHash)
+            .filter(
+                StockListHash.user_id == buyer.id,
+                StockListHash.first_seen_at >= month_start_dt,
+                StockListHash.first_seen_at < month_end_dt,
+            )
+            .count()
+        )
 
         pts_logged = logged * PTS_LOGGED
         pts_quoted = quoted * PTS_QUOTED
@@ -506,20 +629,22 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
         pts_stock = stock_uploaded * PTS_STOCK_LIST
         total = pts_logged + pts_quoted + pts_buyplan + pts_po + pts_stock
 
-        entries.append({
-            "user_id": buyer.id,
-            "offers_logged": logged,
-            "offers_quoted": quoted,
-            "offers_in_buyplan": in_buyplan,
-            "offers_po_confirmed": po_confirmed,
-            "stock_lists_uploaded": stock_uploaded,
-            "points_offers": pts_logged,
-            "points_quoted": pts_quoted,
-            "points_buyplan": pts_buyplan,
-            "points_po": pts_po,
-            "points_stock": pts_stock,
-            "total_points": total,
-        })
+        entries.append(
+            {
+                "user_id": buyer.id,
+                "offers_logged": logged,
+                "offers_quoted": quoted,
+                "offers_in_buyplan": in_buyplan,
+                "offers_po_confirmed": po_confirmed,
+                "stock_lists_uploaded": stock_uploaded,
+                "points_offers": pts_logged,
+                "points_quoted": pts_quoted,
+                "points_buyplan": pts_buyplan,
+                "points_po": pts_po,
+                "points_stock": pts_stock,
+                "total_points": total,
+            }
+        )
 
     # Rank by total_points descending
     entries.sort(key=lambda e: e["total_points"], reverse=True)
@@ -528,10 +653,14 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
 
     # Upsert snapshots
     for entry in entries:
-        existing = db.query(BuyerLeaderboardSnapshot).filter(
-            BuyerLeaderboardSnapshot.user_id == entry["user_id"],
-            BuyerLeaderboardSnapshot.month == month_start,
-        ).first()
+        existing = (
+            db.query(BuyerLeaderboardSnapshot)
+            .filter(
+                BuyerLeaderboardSnapshot.user_id == entry["user_id"],
+                BuyerLeaderboardSnapshot.month == month_start,
+            )
+            .first()
+        )
 
         if existing:
             snap = existing
@@ -560,58 +689,85 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
 def get_buyer_leaderboard(db: Session, month: date) -> list[dict]:
     """Return leaderboard for a given month."""
     month_start = month.replace(day=1)
-    rows = db.query(BuyerLeaderboardSnapshot, User.name).join(
-        User, User.id == BuyerLeaderboardSnapshot.user_id,
-    ).filter(
-        BuyerLeaderboardSnapshot.month == month_start,
-    ).order_by(BuyerLeaderboardSnapshot.rank).all()
+    rows = (
+        db.query(BuyerLeaderboardSnapshot, User.name)
+        .join(
+            User,
+            User.id == BuyerLeaderboardSnapshot.user_id,
+        )
+        .filter(
+            BuyerLeaderboardSnapshot.month == month_start,
+        )
+        .order_by(BuyerLeaderboardSnapshot.rank)
+        .all()
+    )
 
-    return [{
-        "user_id": snap.user_id,
-        "user_name": user_name,
-        "rank": snap.rank,
-        "offers_logged": snap.offers_logged,
-        "offers_quoted": snap.offers_quoted,
-        "offers_in_buyplan": snap.offers_in_buyplan,
-        "offers_po_confirmed": snap.offers_po_confirmed,
-        "stock_lists_uploaded": snap.stock_lists_uploaded or 0,
-        "points_offers": snap.points_offers,
-        "points_quoted": snap.points_quoted,
-        "points_buyplan": snap.points_buyplan,
-        "points_po": snap.points_po,
-        "points_stock": snap.points_stock or 0,
-        "total_points": snap.total_points,
-    } for snap, user_name in rows]
+    return [
+        {
+            "user_id": snap.user_id,
+            "user_name": user_name,
+            "rank": snap.rank,
+            "offers_logged": snap.offers_logged,
+            "offers_quoted": snap.offers_quoted,
+            "offers_in_buyplan": snap.offers_in_buyplan,
+            "offers_po_confirmed": snap.offers_po_confirmed,
+            "stock_lists_uploaded": snap.stock_lists_uploaded or 0,
+            "points_offers": snap.points_offers,
+            "points_quoted": snap.points_quoted,
+            "points_buyplan": snap.points_buyplan,
+            "points_po": snap.points_po,
+            "points_stock": snap.points_stock or 0,
+            "total_points": snap.total_points,
+        }
+        for snap, user_name in rows
+    ]
 
 
 def get_buyer_leaderboard_months(db: Session) -> list[str]:
     """Return available months for leaderboard."""
-    rows = db.query(BuyerLeaderboardSnapshot.month).distinct().order_by(
-        BuyerLeaderboardSnapshot.month.desc()
-    ).limit(12).all()
+    rows = (
+        db.query(BuyerLeaderboardSnapshot.month)
+        .distinct()
+        .order_by(BuyerLeaderboardSnapshot.month.desc())
+        .limit(12)
+        .all()
+    )
     return [r[0].isoformat() for r in rows]
 
 
 # ── Stock List Dedup ──────────────────────────────────────────────────
 
+
 def compute_stock_list_hash(rows: list[dict]) -> str:
     """Normalize and hash stock list content. Sort MPNs, lowercase, SHA-256."""
-    mpns = sorted(set(
-        str(r.get("mpn") or r.get("part_number") or "").strip().upper()
-        for r in rows if r.get("mpn") or r.get("part_number")
-    ))
+    mpns = sorted(
+        set(
+            str(r.get("mpn") or r.get("part_number") or "").strip().upper()
+            for r in rows
+            if r.get("mpn") or r.get("part_number")
+        )
+    )
     content = "|".join(mpns)
     return hashlib.sha256(content.encode()).hexdigest()
 
 
-def check_and_record_stock_list(db: Session, user_id: int, content_hash: str,
-                                 vendor_card_id: int | None, file_name: str,
-                                 row_count: int) -> dict:
+def check_and_record_stock_list(
+    db: Session,
+    user_id: int,
+    content_hash: str,
+    vendor_card_id: int | None,
+    file_name: str,
+    row_count: int,
+) -> dict:
     """Check if a stock list is a duplicate and record it."""
-    existing = db.query(StockListHash).filter(
-        StockListHash.user_id == user_id,
-        StockListHash.content_hash == content_hash,
-    ).first()
+    existing = (
+        db.query(StockListHash)
+        .filter(
+            StockListHash.user_id == user_id,
+            StockListHash.content_hash == content_hash,
+        )
+        .first()
+    )
 
     if existing:
         existing.upload_count += 1
@@ -632,4 +788,8 @@ def check_and_record_stock_list(db: Session, user_id: int, content_hash: str,
     )
     db.add(slh)
     db.commit()
-    return {"is_duplicate": False, "first_seen_at": slh.first_seen_at.isoformat(), "upload_count": 1}
+    return {
+        "is_duplicate": False,
+        "first_seen_at": slh.first_seen_at.isoformat(),
+        "upload_count": 1,
+    }

@@ -5,6 +5,7 @@
 - Merges MaterialCard vendor history into results
 - Vendor card enrichment (ratings, blacklist) happens in main.py
 """
+
 import logging
 import asyncio
 import time
@@ -12,8 +13,11 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from .models import (
-    Requirement, Sighting,
-    MaterialCard, MaterialVendorHistory, ApiSource,
+    Requirement,
+    Sighting,
+    MaterialCard,
+    MaterialVendorHistory,
+    ApiSource,
 )
 from .scoring import score_sighting
 from .connectors.sources import NexarConnector, BrokerBinConnector
@@ -48,7 +52,7 @@ def get_all_pns(req: Requirement) -> list[str]:
     pns = []
     if req.primary_mpn and req.primary_mpn.strip():
         pns.append(req.primary_mpn.strip())
-    for sub in (req.substitutes or []):
+    for sub in req.substitutes or []:
         s = str(sub).strip() if sub else ""
         if s and s not in pns:
             pns.append(s)
@@ -99,6 +103,7 @@ async def search_requirement(req: Requirement, db: Session) -> list[dict]:
 
 # ── Private helpers ──────────────────────────────────────────────────────
 
+
 async def _fetch_fresh(pns: list[str], db: Session) -> list[dict]:
     # Check which sources are disabled by the user
     disabled_sources = set()
@@ -109,6 +114,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> list[dict]:
 
     # Tier 1: Direct APIs (skip disabled). DB credentials first, env var fallback.
     from .services.credential_service import get_credential
+
     def _cred(source_name, var_name):
         return get_credential(db, source_name, var_name)
 
@@ -178,7 +184,16 @@ async def _fetch_fresh(pns: list[str], db: Session) -> list[dict]:
     # Apply stats to DB in one pass — safe, sequential, after gather completes
     try:
         source_names = {s[0] for s in stats_updates if s[0]}
-        src_map = {s.name: s for s in db.query(ApiSource).filter(ApiSource.name.in_(source_names)).all()} if source_names else {}
+        src_map = (
+            {
+                s.name: s
+                for s in db.query(ApiSource)
+                .filter(ApiSource.name.in_(source_names))
+                .all()
+            }
+            if source_names
+            else {}
+        )
         for source_name, hit_count, elapsed_ms, error in stats_updates:
             src = src_map.get(source_name)
             if not src:
@@ -207,25 +222,38 @@ async def _fetch_fresh(pns: list[str], db: Session) -> list[dict]:
     seen = set()
     out = []
     for r in raw:
-        key = (r.get("vendor_name", "").lower(),
-               r.get("mpn_matched", "").lower(),
-               (r.get("vendor_sku") or "").lower())
+        key = (
+            r.get("vendor_name", "").lower(),
+            r.get("mpn_matched", "").lower(),
+            (r.get("vendor_sku") or "").lower(),
+        )
         if key not in seen:
             seen.add(key)
             out.append(r)
 
     # Filter out junk vendors — no sellers, blanks, placeholders
     JUNK_VENDORS = {
-        "", "unknown", "(no sellers listed)", "no sellers listed",
-        "n/a", "none", "(none)", "-", "no vendor", "no seller",
+        "",
+        "unknown",
+        "(no sellers listed)",
+        "no sellers listed",
+        "n/a",
+        "none",
+        "(none)",
+        "-",
+        "no vendor",
+        "no seller",
     }
-    out = [r for r in out if r.get("vendor_name", "").strip().lower() not in JUNK_VENDORS]
+    out = [
+        r for r in out if r.get("vendor_name", "").strip().lower() not in JUNK_VENDORS
+    ]
 
     return out
 
 
 def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Sighting]:
     from .services.admin_service import get_scoring_weights
+
     weights = get_scoring_weights(db)
 
     # Delete previous sightings for this requirement to prevent duplicates on re-search
@@ -258,7 +286,9 @@ def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Si
     return sightings
 
 
-def _get_material_history(pns: list[str], fresh_vendors: set, db: Session) -> list[dict]:
+def _get_material_history(
+    pns: list[str], fresh_vendors: set, db: Session
+) -> list[dict]:
     """Vendors from material cards NOT in fresh results."""
     if not pns:
         return []
@@ -267,15 +297,19 @@ def _get_material_history(pns: list[str], fresh_vendors: set, db: Session) -> li
     norm_pns = [normalize_mpn(pn) for pn in pns if normalize_mpn(pn)]
     if not norm_pns:
         return []
-    cards = db.query(MaterialCard).filter(MaterialCard.normalized_mpn.in_(norm_pns)).all()
+    cards = (
+        db.query(MaterialCard).filter(MaterialCard.normalized_mpn.in_(norm_pns)).all()
+    )
     if not cards:
         return []
 
     # Batch fetch all vendor histories for these cards (1 query instead of N lazy loads)
     card_map = {c.id: c for c in cards}
-    all_vh = db.query(MaterialVendorHistory).filter(
-        MaterialVendorHistory.material_card_id.in_(card_map.keys())
-    ).all()
+    all_vh = (
+        db.query(MaterialVendorHistory)
+        .filter(MaterialVendorHistory.material_card_id.in_(card_map.keys()))
+        .all()
+    )
 
     rows = []
     seen = set()
@@ -285,39 +319,51 @@ def _get_material_history(pns: list[str], fresh_vendors: set, db: Session) -> li
             continue
         seen.add(vk)
         card = card_map[vh.material_card_id]
-        rows.append({
-            "vendor_name": vh.vendor_name,
-            "mpn_matched": card.display_mpn,
-            "manufacturer": vh.last_manufacturer,
-            "qty_available": vh.last_qty,
-            "unit_price": vh.last_price,
-            "currency": vh.last_currency or "USD",
-            "source_type": vh.source_type,
-            "is_authorized": vh.is_authorized or False,
-            "vendor_sku": vh.vendor_sku,
-            "first_seen": vh.first_seen,
-            "last_seen": vh.last_seen,
-            "times_seen": vh.times_seen or 1,
-            "material_card_id": card.id,
-        })
+        rows.append(
+            {
+                "vendor_name": vh.vendor_name,
+                "mpn_matched": card.display_mpn,
+                "manufacturer": vh.last_manufacturer,
+                "qty_available": vh.last_qty,
+                "unit_price": vh.last_price,
+                "currency": vh.last_currency or "USD",
+                "source_type": vh.source_type,
+                "is_authorized": vh.is_authorized or False,
+                "vendor_sku": vh.vendor_sku,
+                "first_seen": vh.first_seen,
+                "last_seen": vh.last_seen,
+                "times_seen": vh.times_seen or 1,
+                "material_card_id": card.id,
+            }
+        )
     return rows
 
 
 def _history_to_result(h: dict, now: datetime) -> dict:
     last_seen = h["last_seen"]
-    age_days = (now.replace(tzinfo=None) - last_seen.replace(tzinfo=None)).days if last_seen else 999
+    age_days = (
+        (now.replace(tzinfo=None) - last_seen.replace(tzinfo=None)).days
+        if last_seen
+        else 999
+    )
 
-    if age_days < 7:     base = 55
-    elif age_days < 30:  base = 45
-    elif age_days < 90:  base = 35
-    else:                base = 30
+    if age_days < 7:
+        base = 55
+    elif age_days < 30:
+        base = 45
+    elif age_days < 90:
+        base = 35
+    else:
+        base = 30
     bonus = min(15, (h["times_seen"] - 1) * 3)
     score = max(10, base + bonus - (age_days * 0.1))
 
     return {
-        "id": None, "requirement_id": None,
+        "id": None,
+        "requirement_id": None,
         "vendor_name": h["vendor_name"],
-        "vendor_email": None, "vendor_phone": None,
+        "vendor_email": None,
+        "vendor_phone": None,
         "mpn_matched": h["mpn_matched"],
         "manufacturer": h["manufacturer"],
         "qty_available": h["qty_available"],
@@ -325,20 +371,27 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         "currency": h["currency"],
         "source_type": h["source_type"],
         "is_authorized": h["is_authorized"],
-        "confidence": 0, "score": round(score, 1),
-        "octopart_url": None, "click_url": None, "vendor_url": None,
+        "confidence": 0,
+        "score": round(score, 1),
+        "octopart_url": None,
+        "click_url": None,
+        "vendor_url": None,
         "vendor_sku": h["vendor_sku"],
         "created_at": last_seen.isoformat() if last_seen else None,
         "is_historical": False,
         "is_material_history": True,
         "material_last_seen": last_seen.strftime("%b %d") if last_seen else None,
         "material_times_seen": h["times_seen"],
-        "material_first_seen": h["first_seen"].strftime("%b %d, %Y") if h["first_seen"] else None,
+        "material_first_seen": h["first_seen"].strftime("%b %d, %Y")
+        if h["first_seen"]
+        else None,
         "material_card_id": h["material_card_id"],
     }
 
 
-def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: datetime):
+def _upsert_material_card(
+    pn: str, sightings: list[Sighting], db: Session, now: datetime
+):
     """Upsert material card. Raises on error — caller handles rollback."""
     norm = normalize_mpn(pn)
     if not norm:
@@ -364,7 +417,9 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
     # Batch fetch all existing vendor histories for this card (avoids N+1)
     existing_vh = {
         vh.vendor_name: vh
-        for vh in db.query(MaterialVendorHistory).filter_by(material_card_id=card.id).all()
+        for vh in db.query(MaterialVendorHistory)
+        .filter_by(material_card_id=card.id)
+        .all()
     }
 
     for s in pn_sightings:
@@ -376,19 +431,31 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
         if vh:
             vh.last_seen = now
             vh.times_seen = (vh.times_seen or 1) + 1
-            if s.qty_available is not None: vh.last_qty = s.qty_available
-            if s.unit_price is not None:    vh.last_price = s.unit_price
-            if s.currency:                  vh.last_currency = s.currency
-            if s.manufacturer:              vh.last_manufacturer = s.manufacturer
-            if s.is_authorized:             vh.is_authorized = True
-            if raw.get("vendor_sku"):       vh.vendor_sku = raw["vendor_sku"]
+            if s.qty_available is not None:
+                vh.last_qty = s.qty_available
+            if s.unit_price is not None:
+                vh.last_price = s.unit_price
+            if s.currency:
+                vh.last_currency = s.currency
+            if s.manufacturer:
+                vh.last_manufacturer = s.manufacturer
+            if s.is_authorized:
+                vh.is_authorized = True
+            if raw.get("vendor_sku"):
+                vh.vendor_sku = raw["vendor_sku"]
         else:
             new_vh = MaterialVendorHistory(
-                material_card_id=card.id, vendor_name=s.vendor_name,
-                source_type=s.source_type, is_authorized=s.is_authorized or False,
-                first_seen=now, last_seen=now, times_seen=1,
-                last_qty=s.qty_available, last_price=s.unit_price,
-                last_currency=s.currency or "USD", last_manufacturer=s.manufacturer,
+                material_card_id=card.id,
+                vendor_name=s.vendor_name,
+                source_type=s.source_type,
+                is_authorized=s.is_authorized or False,
+                first_seen=now,
+                last_seen=now,
+                times_seen=1,
+                last_qty=s.qty_available,
+                last_price=s.unit_price,
+                last_currency=s.currency or "USD",
+                last_manufacturer=s.manufacturer,
                 vendor_sku=raw.get("vendor_sku"),
             )
             db.add(new_vh)
@@ -399,13 +466,19 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
 def sighting_to_dict(s: Sighting) -> dict:
     raw = s.raw_data or {}
     return {
-        "id": s.id, "requirement_id": s.requirement_id,
+        "id": s.id,
+        "requirement_id": s.requirement_id,
         "vendor_name": s.vendor_name,
-        "vendor_email": s.vendor_email, "vendor_phone": s.vendor_phone,
-        "mpn_matched": s.mpn_matched, "manufacturer": s.manufacturer,
-        "qty_available": s.qty_available, "unit_price": s.unit_price,
-        "currency": s.currency, "source_type": s.source_type,
-        "is_authorized": s.is_authorized, "confidence": s.confidence,
+        "vendor_email": s.vendor_email,
+        "vendor_phone": s.vendor_phone,
+        "mpn_matched": s.mpn_matched,
+        "manufacturer": s.manufacturer,
+        "qty_available": s.qty_available,
+        "unit_price": s.unit_price,
+        "currency": s.currency,
+        "source_type": s.source_type,
+        "is_authorized": s.is_authorized,
+        "confidence": s.confidence,
         "score": s.score,
         "is_unavailable": getattr(s, "is_unavailable", False) or False,
         "octopart_url": raw.get("octopart_url"),

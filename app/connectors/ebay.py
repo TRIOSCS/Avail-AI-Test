@@ -1,4 +1,5 @@
 """eBay Browse API connector — searches electronic components on eBay."""
+
 import logging
 import base64
 import httpx
@@ -17,6 +18,7 @@ EBAY_CATEGORIES = {
 
 class EbayConnector(BaseConnector):
     """eBay Browse API — OAuth client credentials flow."""
+
     TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
     SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
 
@@ -29,15 +31,21 @@ class EbayConnector(BaseConnector):
     async def _get_token(self) -> str:
         if self._token:
             return self._token
-        creds = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
+        creds = base64.b64encode(
+            f"{self.client_id}:{self.client_secret}".encode()
+        ).decode()
         async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.post(self.TOKEN_URL, headers={
-                "Authorization": f"Basic {creds}",
-                "Content-Type": "application/x-www-form-urlencoded",
-            }, data={
-                "grant_type": "client_credentials",
-                "scope": "https://api.ebay.com/oauth/api_scope",
-            })
+            r = await c.post(
+                self.TOKEN_URL,
+                headers={
+                    "Authorization": f"Basic {creds}",
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                data={
+                    "grant_type": "client_credentials",
+                    "scope": "https://api.ebay.com/oauth/api_scope",
+                },
+            )
             r.raise_for_status()
             self._token = r.json()["access_token"]
             return self._token
@@ -56,20 +64,28 @@ class EbayConnector(BaseConnector):
         }
 
         async with httpx.AsyncClient(timeout=self.timeout) as c:
-            r = await c.get(self.SEARCH_URL, headers={
-                "Authorization": f"Bearer {token}",
-                "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-                "Content-Type": "application/json",
-            }, params=params)
+            r = await c.get(
+                self.SEARCH_URL,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+                    "Content-Type": "application/json",
+                },
+                params=params,
+            )
 
             if r.status_code == 401:
                 self._token = None
                 token = await self._get_token()
-                r = await c.get(self.SEARCH_URL, headers={
-                    "Authorization": f"Bearer {token}",
-                    "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-                    "Content-Type": "application/json",
-                }, params=params)
+                r = await c.get(
+                    self.SEARCH_URL,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+                        "Content-Type": "application/json",
+                    },
+                    params=params,
+                )
 
             if r.status_code == 404:
                 return []
@@ -113,34 +129,43 @@ class EbayConnector(BaseConnector):
                 continue
             seen.add(key)
 
-            results.append({
-                "vendor_name": seller_name,
-                "manufacturer": "",  # eBay doesn't reliably provide this
-                "mpn_matched": pn,
-                "qty_available": qty,
-                "unit_price": price,
-                "currency": currency,
-                "source_type": "ebay",
-                "is_authorized": False,
-                "confidence": 3 if qty else 2,
-                "click_url": item_url,
-                "ebay_item_id": item_id,
-                "ebay_title": title,
-                "ebay_condition": condition,
-                "ebay_image": image,
-                "vendor_url": f"https://www.ebay.com/usr/{seller_name}",
-            })
+            results.append(
+                {
+                    "vendor_name": seller_name,
+                    "manufacturer": "",  # eBay doesn't reliably provide this
+                    "mpn_matched": pn,
+                    "qty_available": qty,
+                    "unit_price": price,
+                    "currency": currency,
+                    "source_type": "ebay",
+                    "is_authorized": False,
+                    "confidence": 3 if qty else 2,
+                    "click_url": item_url,
+                    "ebay_item_id": item_id,
+                    "ebay_title": title,
+                    "ebay_condition": condition,
+                    "ebay_image": image,
+                    "vendor_url": f"https://www.ebay.com/usr/{seller_name}",
+                }
+            )
 
         log.info(f"eBay: {pn} -> {len(results)} results")
         return results
 
 
 def _safe_int(v):
-    if v is None: return None
-    try: return int(v)
-    except: return None
+    if v is None:
+        return None
+    try:
+        return int(v)
+    except (ValueError, TypeError):
+        return None
+
 
 def _safe_float(v):
-    if v is None: return None
-    try: return float(v)
-    except: return None
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (ValueError, TypeError):
+        return None

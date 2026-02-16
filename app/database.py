@@ -3,6 +3,7 @@
 All naive datetimes from PostgreSQL are auto-tagged as UTC via event
 listener to prevent naive-vs-aware comparison errors.
 """
+
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, event
@@ -10,7 +11,7 @@ from sqlalchemy.orm import sessionmaker
 
 from .config import settings
 
-engine = create_engine(settings.database_url, pool_size=10, pool_pre_ping=True)
+engine = create_engine(settings.database_url, pool_size=10, max_overflow=20, pool_pre_ping=True)
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
 

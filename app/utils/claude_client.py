@@ -15,6 +15,7 @@ Usage:
         model_tier="fast",
     )
 """
+
 import json
 import logging
 from typing import Any
@@ -95,11 +96,13 @@ async def claude_structured(
 
     # H9: Structured Outputs — guaranteed valid JSON
     # Use tool-based approach for schema enforcement
-    body["tools"] = [{
-        "name": "structured_output",
-        "description": "Return structured data matching the required schema.",
-        "input_schema": schema,
-    }]
+    body["tools"] = [
+        {
+            "name": "structured_output",
+            "description": "Return structured data matching the required schema.",
+            "input_schema": schema,
+        }
+    ]
     body["tool_choice"] = {"type": "tool", "name": "structured_output"}
 
     try:
@@ -117,7 +120,10 @@ async def claude_structured(
             data = resp.json()
             # Tool use response — extract the tool input (guaranteed valid JSON)
             for block in data.get("content", []):
-                if block.get("type") == "tool_use" and block.get("name") == "structured_output":
+                if (
+                    block.get("type") == "tool_use"
+                    and block.get("name") == "structured_output"
+                ):
                     return block.get("input")
 
             log.warning("Claude structured output: no tool_use block in response")
@@ -191,7 +197,9 @@ async def claude_text(
 
             data = resp.json()
             # Extract text from response (may be interleaved with tool use)
-            texts = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
+            texts = [
+                b["text"] for b in data.get("content", []) if b.get("type") == "text"
+            ]
             return "\n".join(texts) if texts else None
 
     except Exception as e:
@@ -214,8 +222,12 @@ async def claude_json(
     (e.g., when using web_search tool alongside JSON extraction).
     """
     text = await claude_text(
-        prompt, system=system, model_tier=model_tier,
-        max_tokens=max_tokens, tools=tools, timeout=timeout,
+        prompt,
+        system=system,
+        model_tier=model_tier,
+        max_tokens=max_tokens,
+        tools=tools,
+        timeout=timeout,
     )
     if not text:
         return None
@@ -233,7 +245,7 @@ def safe_json_parse(text: str) -> dict | list | None:
     if cleaned.startswith("```"):
         lines = cleaned.split("\n")
         # Remove first and last ``` lines
-        lines = [l for l in lines if not l.strip().startswith("```")]
+        lines = [line for line in lines if not line.strip().startswith("```")]
         cleaned = "\n".join(lines).strip()
 
     # Try direct parse
@@ -248,7 +260,7 @@ def safe_json_parse(text: str) -> dict | list | None:
         end = cleaned.rfind(end_char)
         if start != -1 and end > start:
             try:
-                return json.loads(cleaned[start:end + 1])
+                return json.loads(cleaned[start : end + 1])
             except json.JSONDecodeError:
                 continue
 

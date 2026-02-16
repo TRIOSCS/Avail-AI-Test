@@ -33,6 +33,7 @@ log = logging.getLogger(__name__)
 
 # ── Authentication ────────────────────────────────────────────────────
 
+
 def get_user(request: Request, db: Session) -> User | None:
     """Return current user from session, or None if not logged in."""
     uid = request.session.get("user_id")
@@ -87,6 +88,7 @@ def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
 
 # ── Query Helpers ─────────────────────────────────────────────────────
 
+
 def user_reqs_query(db: Session, user: User):
     """Base requisition query respecting role-based access.
     Sales sees own reqs only; dev_assistant sees none; others see all."""
@@ -108,6 +110,7 @@ def get_req_for_user(db: Session, user: User, req_id: int) -> Requisition:
 
 
 # ── Token Management ──────────────────────────────────────────────────
+
 
 async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -> str:
     """Return a valid M365 access token, refreshing proactively if near expiry.
@@ -138,6 +141,7 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
     if needs_refresh:
         if user.refresh_token:
             from .scheduler import refresh_user_token
+
             result = await refresh_user_token(user, db)
             if result:
                 request.session["access_token"] = result

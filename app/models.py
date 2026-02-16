@@ -1,8 +1,20 @@
 """Database models — Requisition-based sourcing with CRM."""
+
 from datetime import datetime, timezone
 from sqlalchemy import (
-    Column, Integer, String, Float, DateTime, Text, Boolean,
-    ForeignKey, JSON, Index, Numeric, Date, ARRAY
+    Column,
+    Integer,
+    String,
+    Float,
+    DateTime,
+    Text,
+    Boolean,
+    ForeignKey,
+    JSON,
+    Index,
+    Numeric,
+    Date,
+    ARRAY,
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
@@ -16,7 +28,9 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     email = Column(String(255), unique=True, nullable=False)
     name = Column(String(255))
-    role = Column(String(20), default="buyer")    # buyer | sales | manager | admin | dev_assistant
+    role = Column(
+        String(20), default="buyer"
+    )  # buyer | sales | manager | admin | dev_assistant
     is_active = Column(Boolean, default=True)
     azure_id = Column(String(255), unique=True)
     refresh_token = Column(Text)
@@ -37,8 +51,10 @@ class User(Base):
 
 # ── CRM: Companies & Sites ────────────────────────────────────────────
 
+
 class Company(Base):
     """Parent company — umbrella for multiple sites."""
+
     __tablename__ = "companies"
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
@@ -51,7 +67,7 @@ class Company(Base):
     domain = Column(String(255), index=True)
     linkedin_url = Column(String(500))
     legal_name = Column(String(500))
-    employee_size = Column(String(50))     # Range: "1-10", "51-200", "10001+"
+    employee_size = Column(String(50))  # Range: "1-10", "51-200", "10001+"
     hq_city = Column(String(255))
     hq_state = Column(String(100))
     hq_country = Column(String(100))
@@ -65,19 +81,27 @@ class Company(Base):
     account_owner_id = Column(Integer, ForeignKey("users.id"))
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
-    sites = relationship("CustomerSite", back_populates="company", cascade="all, delete-orphan")
+    sites = relationship(
+        "CustomerSite", back_populates="company", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (Index("ix_companies_name", "name"),)
 
 
 class CustomerSite(Base):
     """Child site within a company — where ownership lives."""
+
     __tablename__ = "customer_sites"
     id = Column(Integer, primary_key=True)
-    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
+    company_id = Column(
+        Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
     site_name = Column(String(255), nullable=False)
     owner_id = Column(Integer, ForeignKey("users.id"))
 
@@ -103,12 +127,17 @@ class CustomerSite(Base):
     notes = Column(Text)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     company = relationship("Company", back_populates="sites")
     owner = relationship("User", foreign_keys=[owner_id])
-    site_contacts = relationship("SiteContact", back_populates="customer_site", cascade="all, delete-orphan")
+    site_contacts = relationship(
+        "SiteContact", back_populates="customer_site", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("ix_cs_company", "company_id"),
@@ -118,9 +147,12 @@ class CustomerSite(Base):
 
 class SiteContact(Base):
     """Contact person at a customer site — multiple per site."""
+
     __tablename__ = "site_contacts"
     id = Column(Integer, primary_key=True)
-    customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="CASCADE"), nullable=False)
+    customer_site_id = Column(
+        Integer, ForeignKey("customer_sites.id", ondelete="CASCADE"), nullable=False
+    )
     full_name = Column(String(255), nullable=False)
     title = Column(String(255))
     email = Column(String(255))
@@ -128,8 +160,11 @@ class SiteContact(Base):
     notes = Column(Text)
     is_primary = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     customer_site = relationship("CustomerSite", back_populates="site_contacts")
 
@@ -141,11 +176,12 @@ class SiteContact(Base):
 
 # ── Core: Requisitions & Requirements ─────────────────────────────────
 
+
 class Requisition(Base):
     __tablename__ = "requisitions"
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
-    customer_name = Column(String(255))           # Legacy — kept for migration
+    customer_name = Column(String(255))  # Legacy — kept for migration
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id"))
     status = Column(String(50), default="active")
     cloned_from_id = Column(Integer, ForeignKey("requisitions.id"))
@@ -156,10 +192,18 @@ class Requisition(Base):
 
     creator = relationship("User", back_populates="requisitions")
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
-    requirements = relationship("Requirement", back_populates="requisition", cascade="all, delete-orphan")
-    contacts = relationship("Contact", back_populates="requisition", cascade="all, delete-orphan")
-    offers = relationship("Offer", back_populates="requisition", cascade="all, delete-orphan")
-    quotes = relationship("Quote", back_populates="requisition", cascade="all, delete-orphan")
+    requirements = relationship(
+        "Requirement", back_populates="requisition", cascade="all, delete-orphan"
+    )
+    contacts = relationship(
+        "Contact", back_populates="requisition", cascade="all, delete-orphan"
+    )
+    offers = relationship(
+        "Offer", back_populates="requisition", cascade="all, delete-orphan"
+    )
+    quotes = relationship(
+        "Quote", back_populates="requisition", cascade="all, delete-orphan"
+    )
 
 
 class Requirement(Base):
@@ -182,8 +226,12 @@ class Requirement(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="requirements")
-    sightings = relationship("Sighting", back_populates="requirement", cascade="all, delete-orphan")
-    offers = relationship("Offer", back_populates="requirement", cascade="all, delete-orphan")
+    sightings = relationship(
+        "Sighting", back_populates="requirement", cascade="all, delete-orphan"
+    )
+    offers = relationship(
+        "Offer", back_populates="requirement", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (Index("ix_req_requisition", "requisition_id"),)
 
@@ -219,20 +267,22 @@ class Sighting(Base):
 
     requirement = relationship("Requirement", back_populates="sightings")
 
-    __table_args__ = (
-        Index("ix_sightings_vendor_name", "vendor_name"),
-    )
+    __table_args__ = (Index("ix_sightings_vendor_name", "vendor_name"),)
 
     __table_args__ = (Index("ix_sight_req", "requirement_id"),)
 
 
 # ── CRM: Offers ───────────────────────────────────────────────────────
 
+
 class Offer(Base):
     """Vendor offer logged by a buyer for a specific MPN on a requisition."""
+
     __tablename__ = "offers"
     id = Column(Integer, primary_key=True)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
+    requisition_id = Column(
+        Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
+    )
     requirement_id = Column(Integer, ForeignKey("requirements.id"))
 
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"))
@@ -264,12 +314,16 @@ class Offer(Base):
     expires_at = Column(DateTime)
     reconfirmed_at = Column(DateTime)
     reconfirm_count = Column(Integer, default=0)
-    attribution_status = Column(String(20), default="active")  # active, expired, converted
+    attribution_status = Column(
+        String(20), default="active"
+    )  # active, expired, converted
 
     requisition = relationship("Requisition", back_populates="offers")
     requirement = relationship("Requirement", back_populates="offers")
     entered_by = relationship("User", foreign_keys=[entered_by_id])
-    attachments = relationship("OfferAttachment", back_populates="offer", cascade="all, delete-orphan")
+    attachments = relationship(
+        "OfferAttachment", back_populates="offer", cascade="all, delete-orphan"
+    )
 
     __table_args__ = (
         Index("ix_offers_req", "requisition_id"),
@@ -281,9 +335,12 @@ class Offer(Base):
 
 class OfferAttachment(Base):
     """File attachment on a vendor offer (stored in OneDrive)."""
+
     __tablename__ = "offer_attachments"
     id = Column(Integer, primary_key=True)
-    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False)
+    offer_id = Column(
+        Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False
+    )
     file_name = Column(String(500), nullable=False)
     onedrive_item_id = Column(String(500))
     onedrive_url = Column(Text)
@@ -296,18 +353,20 @@ class OfferAttachment(Base):
     offer = relationship("Offer", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
 
-    __table_args__ = (
-        Index("ix_offer_attachments_offer", "offer_id"),
-    )
+    __table_args__ = (Index("ix_offer_attachments_offer", "offer_id"),)
 
 
 # ── CRM: Quotes ───────────────────────────────────────────────────────
 
+
 class Quote(Base):
     """Quote built by salesperson from selected offers."""
+
     __tablename__ = "quotes"
     id = Column(Integer, primary_key=True)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
+    requisition_id = Column(
+        Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
+    )
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id"), nullable=False)
 
     quote_number = Column(String(50), nullable=False, unique=True)
@@ -334,8 +393,11 @@ class Quote(Base):
 
     created_by_id = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     requisition = relationship("Requisition", back_populates="quotes")
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
@@ -350,10 +412,15 @@ class Quote(Base):
 
 class BuyPlan(Base):
     """Purchase plan submitted after a quote is won — requires manager approval."""
+
     __tablename__ = "buy_plans"
     id = Column(Integer, primary_key=True)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
-    quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False)
+    requisition_id = Column(
+        Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
+    )
+    quote_id = Column(
+        Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False
+    )
 
     status = Column(String(30), default="pending_approval")
     # pending_approval | approved | rejected | po_entered | po_confirmed | complete
@@ -391,11 +458,18 @@ class BuyPlan(Base):
 
 class ProactiveMatch(Base):
     """A match between a new vendor offer and an archived customer requirement."""
+
     __tablename__ = "proactive_matches"
     id = Column(Integer, primary_key=True)
-    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False)
-    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
+    offer_id = Column(
+        Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False
+    )
+    requirement_id = Column(
+        Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False
+    )
+    requisition_id = Column(
+        Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
+    )
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id"), nullable=False)
     salesperson_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     mpn = Column(String(255), nullable=False)
@@ -420,6 +494,7 @@ class ProactiveMatch(Base):
 
 class ProactiveOffer(Base):
     """A proactive offer email sent to a customer with selected match items."""
+
     __tablename__ = "proactive_offers"
     id = Column(Integer, primary_key=True)
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id"), nullable=False)
@@ -452,10 +527,13 @@ class ProactiveOffer(Base):
 
 class ProactiveThrottle(Base):
     """Tracks when an MPN was last proactively offered to a customer site."""
+
     __tablename__ = "proactive_throttle"
     id = Column(Integer, primary_key=True)
     mpn = Column(String(255), nullable=False)
-    customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="CASCADE"), nullable=False)
+    customer_site_id = Column(
+        Integer, ForeignKey("customer_sites.id", ondelete="CASCADE"), nullable=False
+    )
     last_offered_at = Column(DateTime, nullable=False)
     proactive_offer_id = Column(Integer, ForeignKey("proactive_offers.id"))
 
@@ -467,11 +545,15 @@ class ProactiveThrottle(Base):
 
 # ── Performance Tracking ─────────────────────────────────────────────
 
+
 class VendorMetricsSnapshot(Base):
     """Daily snapshot of vendor performance metrics (90-day rolling window)."""
+
     __tablename__ = "vendor_metrics_snapshot"
     id = Column(Integer, primary_key=True)
-    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
+    vendor_card_id = Column(
+        Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False
+    )
     snapshot_date = Column(Date, nullable=False)
 
     response_rate = Column(Float)
@@ -505,9 +587,12 @@ class VendorMetricsSnapshot(Base):
 
 class BuyerLeaderboardSnapshot(Base):
     """Monthly buyer leaderboard snapshot with multiplier scoring."""
+
     __tablename__ = "buyer_leaderboard_snapshot"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     month = Column(Date, nullable=False)
 
     offers_logged = Column(Integer, default=0)
@@ -526,8 +611,11 @@ class BuyerLeaderboardSnapshot(Base):
     rank = Column(Integer)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     user = relationship("User", foreign_keys=[user_id])
 
@@ -540,6 +628,7 @@ class BuyerLeaderboardSnapshot(Base):
 
 class StockListHash(Base):
     """Deduplication hashes for uploaded stock lists."""
+
     __tablename__ = "stock_list_hashes"
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -547,8 +636,12 @@ class StockListHash(Base):
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"))
     file_name = Column(String(500))
     row_count = Column(Integer)
-    first_seen_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
-    last_seen_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    first_seen_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    last_seen_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
     upload_count = Column(Integer, default=1)
 
     user = relationship("User", foreign_keys=[user_id])
@@ -561,6 +654,7 @@ class StockListHash(Base):
 
 
 # ── Existing Models (unchanged) ───────────────────────────────────────
+
 
 class Contact(Base):
     __tablename__ = "contacts"
@@ -611,12 +705,12 @@ class VendorResponse(Base):
     message_id = Column(String(255), unique=True, index=True, nullable=True)
     graph_conversation_id = Column(String(500))
     scanned_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
-    match_method = Column(String(50))  # conversation_id, subject_token, email_exact, domain, unmatched
+    match_method = Column(
+        String(50)
+    )  # conversation_id, subject_token, email_exact, domain, unmatched
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    __table_args__ = (
-        Index("ix_vr_classification", "classification"),
-    )
+    __table_args__ = (Index("ix_vr_classification", "classification"),)
 
 
 class VendorCard(Base):
@@ -650,8 +744,8 @@ class VendorCard(Base):
 
     # Acctivate sync fields — behavioral truth
     acctivate_vendor_id = Column(String(255), index=True)  # For reconciliation
-    cancellation_rate = Column(Float)            # cancelled / total orders
-    rma_rate = Column(Float)                     # units returned / units received
+    cancellation_rate = Column(Float)  # cancelled / total orders
+    rma_rate = Column(Float)  # units returned / units received
     acctivate_total_orders = Column(Integer)
     acctivate_total_units = Column(Integer)
     acctivate_last_order_date = Column(Date)
@@ -676,22 +770,31 @@ class VendorCard(Base):
     last_activity_at = Column(DateTime)
 
     # AI-generated material intelligence
-    brand_tags = Column(JSON, default=list)           # ["IBM", "Dell", "HP"]
-    commodity_tags = Column(JSON, default=list)        # ["CPU", "HDD", "DDR", "LCD"]
+    brand_tags = Column(JSON, default=list)  # ["IBM", "Dell", "HP"]
+    commodity_tags = Column(JSON, default=list)  # ["CPU", "HDD", "DDR", "LCD"]
     material_tags_updated_at = Column(DateTime)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
-    reviews = relationship("VendorReview", back_populates="vendor_card", cascade="all, delete-orphan")
-    vendor_contacts = relationship("VendorContact", back_populates="vendor_card", cascade="all, delete-orphan")
+    reviews = relationship(
+        "VendorReview", back_populates="vendor_card", cascade="all, delete-orphan"
+    )
+    vendor_contacts = relationship(
+        "VendorContact", back_populates="vendor_card", cascade="all, delete-orphan"
+    )
 
 
 class VendorContact(Base):
     __tablename__ = "vendor_contacts"
     id = Column(Integer, primary_key=True)
-    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
+    vendor_card_id = Column(
+        Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False
+    )
     contact_type = Column(String(20), default="company")
     full_name = Column(String(255))
     title = Column(String(255))
@@ -742,10 +845,17 @@ class MaterialCard(Base):
     search_count = Column(Integer, default=0)
     last_searched_at = Column(DateTime)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
-    vendor_history = relationship("MaterialVendorHistory", back_populates="material_card", cascade="all, delete-orphan")
+    vendor_history = relationship(
+        "MaterialVendorHistory",
+        back_populates="material_card",
+        cascade="all, delete-orphan",
+    )
 
 
 class ApiSource(Base):
@@ -760,27 +870,36 @@ class ApiSource(Base):
     setup_notes = Column(Text)
     signup_url = Column(String(500))
     env_vars = Column(JSON, default=list)
-    credentials = Column(JSON, default=dict)   # encrypted credential values keyed by env var name
+    credentials = Column(
+        JSON, default=dict
+    )  # encrypted credential values keyed by env var name
     last_success = Column(DateTime)
     last_error = Column(String(500))
     total_searches = Column(Integer, default=0)
     total_results = Column(Integer, default=0)
     avg_response_ms = Column(Integer, default=0)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class SystemConfig(Base):
     """Key-value runtime configuration. Survives restarts, auditable."""
+
     __tablename__ = "system_config"
     id = Column(Integer, primary_key=True)
     key = Column(String(100), unique=True, nullable=False, index=True)
     value = Column(Text, nullable=False)
     description = Column(String(500))
     updated_by = Column(String(255))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class MaterialVendorHistory(Base):
@@ -802,8 +921,10 @@ class MaterialVendorHistory(Base):
     # Acctivate transaction truth (separate from API sighting prices)
     acctivate_last_price = Column(Float)
     acctivate_last_date = Column(Date)
-    acctivate_rma_rate = Column(Float)       # Per-part RMA rate for this vendor+part
-    source = Column(String(50), default="api_sighting")  # "api_sighting", "acctivate", "salesforce"
+    acctivate_rma_rate = Column(Float)  # Per-part RMA rate for this vendor+part
+    source = Column(
+        String(50), default="api_sighting"
+    )  # "api_sighting", "acctivate", "salesforce"
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -817,8 +938,10 @@ class MaterialVendorHistory(Base):
 
 # ── Acctivate Sync ────────────────────────────────────────────────────
 
+
 class InventorySnapshot(Base):
     """Current inventory from Acctivate — refreshed daily."""
+
     __tablename__ = "inventory_snapshots"
     id = Column(Integer, primary_key=True)
     product_id = Column(String(255), nullable=False, index=True)
@@ -833,10 +956,15 @@ class InventorySnapshot(Base):
 
 class SyncLog(Base):
     """Log of each data sync run."""
+
     __tablename__ = "sync_logs"
     id = Column(Integer, primary_key=True)
-    source = Column(String(50), nullable=False)   # "acctivate", "salesforce", "quickbooks"
-    status = Column(String(50), nullable=False)    # "success", "error", "connection_failed"
+    source = Column(
+        String(50), nullable=False
+    )  # "acctivate", "salesforce", "quickbooks"
+    status = Column(
+        String(50), nullable=False
+    )  # "success", "error", "connection_failed"
     started_at = Column(DateTime, nullable=False)
     finished_at = Column(DateTime)
     duration_seconds = Column(Float)
@@ -844,26 +972,31 @@ class SyncLog(Base):
     errors = Column(JSON)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    __table_args__ = (
-        Index("ix_sync_source_time", "source", "started_at"),
-    )
+    __table_args__ = (Index("ix_sync_source_time", "source", "started_at"),)
 
 
 # ── Email Mining v2: Pipeline Infrastructure ──────────────────────────
 
+
 class ProcessedMessage(Base):
     """H2: Deduplication — track messages already processed."""
+
     __tablename__ = "processed_messages"
     message_id = Column(Text, primary_key=True)
-    processing_type = Column(Text, primary_key=True)  # mining, response, attachment, sent
+    processing_type = Column(
+        Text, primary_key=True
+    )  # mining, response, attachment, sent
     processed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class SyncState(Base):
     """H8: Delta Query state per user per folder."""
+
     __tablename__ = "sync_state"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
     folder = Column(String(100), nullable=False)  # Inbox, SentItems
     delta_token = Column(Text)
     last_sync_at = Column(DateTime)
@@ -875,6 +1008,7 @@ class SyncState(Base):
 
 class ColumnMappingCache(Base):
     """Upgrade 2: Cache AI-detected column mappings for vendor attachments."""
+
     __tablename__ = "column_mapping_cache"
     id = Column(Integer, primary_key=True)
     vendor_domain = Column(Text, nullable=False)
@@ -890,21 +1024,27 @@ class ColumnMappingCache(Base):
 
 # ── Intelligence Layer: Contact Enrichment ────────────────────────────
 
+
 class ProspectContact(Base):
     """Enriched contacts found via Apollo/web search for customers and vendors."""
+
     __tablename__ = "prospect_contacts"
     id = Column(Integer, primary_key=True)
-    customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"))
+    customer_site_id = Column(
+        Integer, ForeignKey("customer_sites.id", ondelete="SET NULL")
+    )
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"))
 
     full_name = Column(String(255), nullable=False)
     title = Column(String(255))
     email = Column(String(255))
-    email_status = Column(String(20))           # verified, guessed, unavailable, bounced
+    email_status = Column(String(20))  # verified, guessed, unavailable, bounced
     phone = Column(String(100))
     linkedin_url = Column(String(500))
 
-    source = Column(String(50), nullable=False)  # apollo, web_search, email_reply, manual, import
+    source = Column(
+        String(50), nullable=False
+    )  # apollo, web_search, email_reply, manual, import
     confidence = Column(String(10), nullable=False)  # high, medium, low
     found_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     verified_at = Column(DateTime)
@@ -914,8 +1054,11 @@ class ProspectContact(Base):
     notes = Column(Text)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     __table_args__ = (
         Index("ix_prospect_contacts_site", "customer_site_id"),
@@ -926,8 +1069,10 @@ class ProspectContact(Base):
 
 # ── Intelligence Layer: Intel Cache ───────────────────────────────────
 
+
 class IntelCache(Base):
     """Cached intelligence data with TTL."""
+
     __tablename__ = "intel_cache"
     id = Column(Integer, primary_key=True)
     cache_key = Column(String(500), nullable=False, unique=True, index=True)
@@ -944,11 +1089,14 @@ class IntelCache(Base):
 
 class ActivityLog(Base):
     """Auto-logged activity — no manual entry. System events only."""
+
     __tablename__ = "activity_log"
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    activity_type = Column(String(20), nullable=False)  # email_sent, email_received, call_outbound, call_inbound
-    channel = Column(String(20), nullable=False)         # email, phone
+    activity_type = Column(
+        String(20), nullable=False
+    )  # email_sent, email_received, call_outbound, call_inbound
+    channel = Column(String(20), nullable=False)  # email, phone
 
     # Polymorphic link — at most one set
     company_id = Column(Integer, ForeignKey("companies.id"))
@@ -971,36 +1119,56 @@ class ActivityLog(Base):
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
 
     __table_args__ = (
-        Index("ix_activity_company", "company_id", "created_at", postgresql_where=Column("company_id").isnot(None)),
-        Index("ix_activity_vendor", "vendor_card_id", "created_at", postgresql_where=Column("vendor_card_id").isnot(None)),
+        Index(
+            "ix_activity_company",
+            "company_id",
+            "created_at",
+            postgresql_where=Column("company_id").isnot(None),
+        ),
+        Index(
+            "ix_activity_vendor",
+            "vendor_card_id",
+            "created_at",
+            postgresql_where=Column("vendor_card_id").isnot(None),
+        ),
         Index("ix_activity_user", "user_id", "created_at"),
-        Index("ix_activity_external", "external_id", unique=True, postgresql_where=Column("external_id").isnot(None)),
+        Index(
+            "ix_activity_external",
+            "external_id",
+            unique=True,
+            postgresql_where=Column("external_id").isnot(None),
+        ),
     )
 
 
 class BuyerProfile(Base):
     """Buyer routing attributes — commodity, geography, brand assignments."""
+
     __tablename__ = "buyer_profiles"
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
 
-    primary_commodity = Column(String(100))     # semiconductors, pc_server_parts
+    primary_commodity = Column(String(100))  # semiconductors, pc_server_parts
     secondary_commodity = Column(String(100))
-    primary_geography = Column(String(50))       # apac, emea, americas
+    primary_geography = Column(String(50))  # apac, emea, americas
 
-    brand_specialties = Column(ARRAY(Text))      # ['IBM']
-    brand_material_types = Column(ARRAY(Text))   # ['systems', 'parts']
-    brand_usage_types = Column(ARRAY(Text))      # ['sourcing_to_buy', 'backup_buying']
+    brand_specialties = Column(ARRAY(Text))  # ['IBM']
+    brand_material_types = Column(ARRAY(Text))  # ['systems', 'parts']
+    brand_usage_types = Column(ARRAY(Text))  # ['sourcing_to_buy', 'backup_buying']
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     user = relationship("User", foreign_keys=[user_id])
 
 
 class BuyerVendorStats(Base):
     """Per-buyer performance with a specific vendor. Auto-populated."""
+
     __tablename__ = "buyer_vendor_stats"
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
@@ -1016,8 +1184,11 @@ class BuyerVendorStats(Base):
     last_contact_at = Column(DateTime)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
-                        onupdate=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
     user = relationship("User", foreign_keys=[user_id])
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
@@ -1031,12 +1202,13 @@ class BuyerVendorStats(Base):
 
 class GraphSubscription(Base):
     """Tracks active Graph API webhook subscriptions per user."""
+
     __tablename__ = "graph_subscriptions"
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     subscription_id = Column(String(255), nullable=False, unique=True)
-    resource = Column(String(255), nullable=False)     # /me/messages
-    change_type = Column(String(100), nullable=False)   # created
+    resource = Column(String(255), nullable=False)  # /me/messages
+    change_type = Column(String(100), nullable=False)  # created
     expiration_dt = Column(DateTime, nullable=False)
     client_state = Column(String(255))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -1051,9 +1223,12 @@ class GraphSubscription(Base):
 
 class RoutingAssignment(Base):
     """Tracks buyer routing for a requirement+vendor pair with 48-hour waterfall."""
+
     __tablename__ = "routing_assignments"
     id = Column(Integer, primary_key=True)
-    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
+    requirement_id = Column(
+        Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False
+    )
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"), nullable=False)
 
     buyer_1_id = Column(Integer, ForeignKey("users.id"))
@@ -1065,7 +1240,9 @@ class RoutingAssignment(Base):
     buyer_3_score = Column(Float)
     scoring_details = Column(JSON)
 
-    assigned_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    assigned_at = Column(
+        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
     expires_at = Column(DateTime, nullable=False)
     claimed_by_id = Column(Integer, ForeignKey("users.id"))
     claimed_at = Column(DateTime)

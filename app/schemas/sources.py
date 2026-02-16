@@ -25,4 +25,5 @@ class SourceStatusToggle(BaseModel):
 
 class MiningOptions(BaseModel):
     """Optional params for inbox/sent mining. All fields have defaults."""
+
     lookback_days: int = Field(default=30, ge=1, le=365)

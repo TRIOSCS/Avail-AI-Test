@@ -15,6 +15,7 @@ Hardening:
 
 Enriches VendorCards with verified contact info from real correspondence.
 """
+
 import logging
 import re
 from datetime import datetime, timezone, timedelta
@@ -22,43 +23,41 @@ from datetime import datetime, timezone, timedelta
 log = logging.getLogger(__name__)
 
 # Common stock list file extensions
-STOCK_LIST_EXTENSIONS = {'.xlsx', '.xls', '.csv', '.tsv'}
+STOCK_LIST_EXTENSIONS = {".xlsx", ".xls", ".csv", ".tsv"}
 
 # Patterns that suggest an email contains component offers
 OFFER_PATTERNS = [
-    r'(?i)quot(?:e|ation)',
-    r'(?i)in\s*stock',
-    r'(?i)avail(?:able|ability)',
-    r'(?i)lead\s*time',
-    r'(?i)unit\s*price',
-    r'(?i)rfq\s*(?:response|reply)',
-    r'(?i)(?:we|i)\s*(?:have|can\s*offer|can\s*supply)',
-    r'(?i)stock\s*list',
-    r'(?i)line\s*card',
-    r'(?i)price\s*list',
-    r'(?i)inventory\s*list',
-    r'(?i)excess\s*list',
+    r"(?i)quot(?:e|ation)",
+    r"(?i)in\s*stock",
+    r"(?i)avail(?:able|ability)",
+    r"(?i)lead\s*time",
+    r"(?i)unit\s*price",
+    r"(?i)rfq\s*(?:response|reply)",
+    r"(?i)(?:we|i)\s*(?:have|can\s*offer|can\s*supply)",
+    r"(?i)stock\s*list",
+    r"(?i)line\s*card",
+    r"(?i)price\s*list",
+    r"(?i)inventory\s*list",
+    r"(?i)excess\s*list",
 ]
 
 # Part number pattern — uppercase alphanumeric with dashes/slashes, 4+ chars
-MPN_PATTERN = re.compile(
-    r'\b([A-Z0-9][A-Z0-9\-/\.#]{3,30}[A-Z0-9])\b'
-)
+MPN_PATTERN = re.compile(r"\b([A-Z0-9][A-Z0-9\-/\.#]{3,30}[A-Z0-9])\b")
 
 # Email signature extraction patterns
 PHONE_PATTERN = re.compile(
-    r'(?:(?:phone|tel|cell|mobile|fax|ph|direct|office)[\s:.\-]*)?'
-    r'(\+?1?[\s.\-]?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})',
-    re.IGNORECASE
+    r"(?:(?:phone|tel|cell|mobile|fax|ph|direct|office)[\s:.\-]*)?"
+    r"(\+?1?[\s.\-]?\(?\d{3}\)?[\s.\-]?\d{3}[\s.\-]?\d{4})",
+    re.IGNORECASE,
 )
 
 WEBSITE_PATTERN = re.compile(
-    r'(?:https?://)?(?:www\.)?([a-zA-Z0-9\-]+\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?)',
-    re.IGNORECASE
+    r"(?:https?://)?(?:www\.)?([a-zA-Z0-9\-]+\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?)",
+    re.IGNORECASE,
 )
 
 # Subject token pattern: [AVAIL-{req_id}]
-AVAIL_TOKEN_RE = re.compile(r'\[AVAIL-(\d+)\]')
+AVAIL_TOKEN_RE = re.compile(r"\[AVAIL-(\d+)\]")
 
 # Fields requested from Graph API for messages
 MSG_SELECT = "id,subject,from,receivedDateTime,body,hasAttachments,conversationId"
@@ -73,22 +72,30 @@ class EmailMiner:
 
     def __init__(self, access_token: str, db=None, user_id: int | None = None):
         from app.utils.graph_client import GraphClient
+
         self.gc = GraphClient(access_token)
         self.db = db
         self.user_id = user_id
 
     # ── H2: Dedup helpers ────────────────────────────────────────────
 
-    def _already_processed(self, message_ids: list[str], processing_type: str) -> set[str]:
+    def _already_processed(
+        self, message_ids: list[str], processing_type: str
+    ) -> set[str]:
         """Check which message IDs have already been processed (H2)."""
         if not self.db or not message_ids:
             return set()
 
         from app.models import ProcessedMessage
-        rows = self.db.query(ProcessedMessage.message_id).filter(
-            ProcessedMessage.message_id.in_(message_ids),
-            ProcessedMessage.processing_type == processing_type,
-        ).all()
+
+        rows = (
+            self.db.query(ProcessedMessage.message_id)
+            .filter(
+                ProcessedMessage.message_id.in_(message_ids),
+                ProcessedMessage.processing_type == processing_type,
+            )
+            .all()
+        )
         return {r[0] for r in rows}
 
     def _mark_processed(self, message_id: str, processing_type: str):
@@ -96,12 +103,15 @@ class EmailMiner:
         if not self.db:
             return
         from app.models import ProcessedMessage
+
         try:
-            self.db.add(ProcessedMessage(
-                message_id=message_id,
-                processing_type=processing_type,
-                processed_at=datetime.now(timezone.utc),
-            ))
+            self.db.add(
+                ProcessedMessage(
+                    message_id=message_id,
+                    processing_type=processing_type,
+                    processed_at=datetime.now(timezone.utc),
+                )
+            )
             self.db.flush()
         except Exception:
             # Duplicate key — already processed (race condition safety)
@@ -114,10 +124,15 @@ class EmailMiner:
         if not self.db or not self.user_id:
             return None
         from app.models import SyncState
-        sync = self.db.query(SyncState).filter(
-            SyncState.user_id == self.user_id,
-            SyncState.folder == folder,
-        ).first()
+
+        sync = (
+            self.db.query(SyncState)
+            .filter(
+                SyncState.user_id == self.user_id,
+                SyncState.folder == folder,
+            )
+            .first()
+        )
         return sync.delta_token if sync else None
 
     def _save_delta_token(self, folder: str, token: str):
@@ -125,28 +140,36 @@ class EmailMiner:
         if not self.db or not self.user_id:
             return
         from app.models import SyncState
-        sync = self.db.query(SyncState).filter(
-            SyncState.user_id == self.user_id,
-            SyncState.folder == folder,
-        ).first()
+
+        sync = (
+            self.db.query(SyncState)
+            .filter(
+                SyncState.user_id == self.user_id,
+                SyncState.folder == folder,
+            )
+            .first()
+        )
         if sync:
             sync.delta_token = token
             sync.last_sync_at = datetime.now(timezone.utc)
         else:
-            self.db.add(SyncState(
-                user_id=self.user_id,
-                folder=folder,
-                delta_token=token,
-                last_sync_at=datetime.now(timezone.utc),
-            ))
+            self.db.add(
+                SyncState(
+                    user_id=self.user_id,
+                    folder=folder,
+                    delta_token=token,
+                    last_sync_at=datetime.now(timezone.utc),
+                )
+            )
         self.db.flush()
 
     # ══════════════════════════════════════════════════════════════════
     #  Inbound: Vendor Contact Mining
     # ══════════════════════════════════════════════════════════════════
 
-    async def scan_inbox(self, lookback_days: int = 180, max_messages: int = 500,
-                         use_delta: bool = True) -> dict:
+    async def scan_inbox(
+        self, lookback_days: int = 180, max_messages: int = 500, use_delta: bool = True
+    ) -> dict:
         """Full inbox scan — returns enrichment data for vendor cards.
 
         H2: Skips messages already in processed_messages (processing_type='mining')
@@ -181,20 +204,26 @@ class EmailMiner:
                     self._save_delta_token("inbox_mining", new_token)
                 log.info(f"Delta scan (mining): {len(messages)} changes")
             except Exception as e:
-                log.warning(f"Delta query failed for mining, falling back to search: {e}")
+                log.warning(
+                    f"Delta query failed for mining, falling back to search: {e}"
+                )
                 messages = []
                 used_delta = False
 
         # ── Fallback: Keyword search scan ──
         if not messages and not used_delta:
-            since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            since = (
+                datetime.now(timezone.utc) - timedelta(days=lookback_days)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
             queries = [
                 f"received>={since} AND (subject:RFQ OR subject:quote OR subject:stock OR subject:inventory OR subject:availability)",
                 f"received>={since} AND (body:in stock OR body:lead time OR body:unit price)",
             ]
             seen_ids = set()
             for query in queries:
-                results = await self._search_messages(query, max_messages // len(queries))
+                results = await self._search_messages(
+                    query, max_messages // len(queries)
+                )
                 for msg in results:
                     msg_id = msg.get("id", "")
                     if msg_id and msg_id not in seen_ids:
@@ -222,7 +251,9 @@ class EmailMiner:
             subject = msg.get("subject", "")
 
             # Extract vendor intelligence from this email
-            vendor_info = self._extract_vendor_info(sender_name, sender_email, body, subject)
+            vendor_info = self._extract_vendor_info(
+                sender_name, sender_email, body, subject
+            )
 
             # Track unique vendor contacts
             vendor_key = self._normalize_vendor_from_email(sender_email)
@@ -257,13 +288,15 @@ class EmailMiner:
                 parts = self._extract_part_numbers(subject + " " + body)
                 c["parts_mentioned"].update(parts)
                 if parts:
-                    offers.append({
-                        "from_email": sender_email,
-                        "vendor_name": vendor_info["vendor_name"],
-                        "subject": subject,
-                        "parts": list(parts)[:50],
-                        "received": received,
-                    })
+                    offers.append(
+                        {
+                            "from_email": sender_email,
+                            "vendor_name": vendor_info["vendor_name"],
+                            "subject": subject,
+                            "parts": list(parts)[:50],
+                            "received": received,
+                        }
+                    )
 
             # H2: Mark as processed
             self._mark_processed(msg["id"], "mining")
@@ -271,16 +304,20 @@ class EmailMiner:
         # Convert to serializable format
         enriched = []
         for key, c in contacts.items():
-            enriched.append({
-                "vendor_key": key,
-                "vendor_name": c["vendor_name"],
-                "emails": sorted(c["emails"]),
-                "phones": sorted(c["phones"]),
-                "websites": sorted(c["websites"]),
-                "parts_mentioned": sorted(c["parts_mentioned"])[:100],
-                "message_count": c["message_count"],
-                "last_contact": c["last_contact"].isoformat() if c["last_contact"] else None,
-            })
+            enriched.append(
+                {
+                    "vendor_key": key,
+                    "vendor_name": c["vendor_name"],
+                    "emails": sorted(c["emails"]),
+                    "phones": sorted(c["phones"]),
+                    "websites": sorted(c["websites"]),
+                    "parts_mentioned": sorted(c["parts_mentioned"])[:100],
+                    "message_count": c["message_count"],
+                    "last_contact": c["last_contact"].isoformat()
+                    if c["last_contact"]
+                    else None,
+                }
+            )
 
         return {
             "vendors_found": len(contacts),
@@ -300,7 +337,9 @@ class EmailMiner:
 
         H2: Skips attachment messages already in processed_messages (type='attachment').
         """
-        since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
         query = f"received>={since} AND hasAttachments:true AND (subject:stock list OR subject:inventory OR subject:excess OR subject:line card)"
 
         results = []
@@ -322,21 +361,25 @@ class EmailMiner:
             for att in attachments:
                 name = (att.get("name") or "").lower()
                 if any(name.endswith(ext) for ext in STOCK_LIST_EXTENSIONS):
-                    stock_files.append({
-                        "filename": att.get("name"),
-                        "size": att.get("size"),
-                        "attachment_id": att.get("id"),
-                        "message_id": msg_id,
-                    })
+                    stock_files.append(
+                        {
+                            "filename": att.get("name"),
+                            "size": att.get("size"),
+                            "attachment_id": att.get("id"),
+                            "message_id": msg_id,
+                        }
+                    )
 
             if stock_files:
-                results.append({
-                    "from_email": (sender.get("address") or "").lower(),
-                    "vendor_name": sender.get("name", ""),
-                    "subject": msg.get("subject", ""),
-                    "received": msg.get("receivedDateTime"),
-                    "stock_files": stock_files,
-                })
+                results.append(
+                    {
+                        "from_email": (sender.get("address") or "").lower(),
+                        "vendor_name": sender.get("name", ""),
+                        "subject": msg.get("subject", ""),
+                        "received": msg.get("receivedDateTime"),
+                        "stock_files": stock_files,
+                    }
+                )
                 # H2: Mark message as processed for attachment scanning
                 self._mark_processed(msg_id, "attachment")
 
@@ -346,7 +389,9 @@ class EmailMiner:
     #  Upgrade 3: Outbound Mining — Scan SentItems for AVAIL RFQs
     # ══════════════════════════════════════════════════════════════════
 
-    async def scan_sent_items(self, lookback_days: int = 90, max_messages: int = 500) -> dict:
+    async def scan_sent_items(
+        self, lookback_days: int = 90, max_messages: int = 500
+    ) -> dict:
         """Scan Sent Items for outbound AVAIL RFQs.
 
         Detects emails with [AVAIL-{req_id}] subject tokens.
@@ -388,7 +433,9 @@ class EmailMiner:
 
         # ── Fallback: Search SentItems ──
         if not messages and not used_delta:
-            since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+            since = (
+                datetime.now(timezone.utc) - timedelta(days=lookback_days)
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
             try:
                 results = await self.gc.get_all_pages(
                     "/me/mailFolders/sentItems/messages",
@@ -403,8 +450,12 @@ class EmailMiner:
                 messages = results
             except Exception as e:
                 log.warning(f"SentItems search failed: {e}")
-                return {"messages_scanned": 0, "rfqs_detected": 0,
-                        "vendors_contacted": {}, "used_delta": False}
+                return {
+                    "messages_scanned": 0,
+                    "rfqs_detected": 0,
+                    "vendors_contacted": {},
+                    "used_delta": False,
+                }
 
         # ── H2: Filter already-processed ──
         msg_ids = [m.get("id", "") for m in messages if m.get("id")]
@@ -463,12 +514,16 @@ class EmailMiner:
             "$orderby": "receivedDateTime desc",
         }
         try:
-            return await self.gc.get_all_pages("/me/messages", params=params, max_items=limit)
+            return await self.gc.get_all_pages(
+                "/me/messages", params=params, max_items=limit
+            )
         except Exception as e:
             log.warning(f"Email search error: {e}")
             return []
 
-    def _extract_vendor_info(self, sender_name: str, sender_email: str, body: str, subject: str) -> dict:
+    def _extract_vendor_info(
+        self, sender_name: str, sender_email: str, body: str, subject: str
+    ) -> dict:
         """Extract vendor name, phones, websites from email content."""
         vendor_name = sender_name.strip() if sender_name else ""
         if not vendor_name or vendor_name == sender_email:
@@ -481,16 +536,26 @@ class EmailMiner:
 
         phones = set()
         for match in PHONE_PATTERN.finditer(signature_block):
-            phone = re.sub(r'[^\d+]', '', match.group(1))
+            phone = re.sub(r"[^\d+]", "", match.group(1))
             if len(phone) >= 10:
                 phones.add(phone)
 
         websites = set()
         for match in WEBSITE_PATTERN.finditer(signature_block):
             domain = match.group(1).lower()
-            skip = {'gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com',
-                    'microsoft.com', 'google.com', 'facebook.com', 'linkedin.com',
-                    'twitter.com', 'instagram.com', 'youtube.com'}
+            skip = {
+                "gmail.com",
+                "yahoo.com",
+                "outlook.com",
+                "hotmail.com",
+                "microsoft.com",
+                "google.com",
+                "facebook.com",
+                "linkedin.com",
+                "twitter.com",
+                "instagram.com",
+                "youtube.com",
+            }
             if domain not in skip:
                 websites.add(domain)
 
@@ -512,15 +577,52 @@ class EmailMiner:
         candidates = MPN_PATTERN.findall(text.upper())
 
         false_positives = {
-            'HTTP', 'HTTPS', 'HTML', 'HREF', 'FONT', 'SIZE', 'COLOR',
-            'TABLE', 'STYLE', 'CLASS', 'WIDTH', 'HEIGHT', 'ALIGN',
-            'BORDER', 'CELLPADDING', 'CELLSPACING', 'COLSPAN',
-            'ROWSPAN', 'VALIGN', 'BGCOLOR', 'IMAGE', 'ARIAL',
-            'VERDANA', 'HELVETICA', 'SERIF', 'SANS', 'SPAN',
-            'MAILTO', 'SUBJECT', 'FROM', 'BEST', 'REGARDS',
-            'THANK', 'THANKS', 'PLEASE', 'HELLO', 'DEAR',
-            'SINCERELY', 'KIND', 'REGARDS', 'OFFER', 'QUOTE',
-            'PRICE', 'STOCK', 'AVAILABLE', 'QUANTITY',
+            "HTTP",
+            "HTTPS",
+            "HTML",
+            "HREF",
+            "FONT",
+            "SIZE",
+            "COLOR",
+            "TABLE",
+            "STYLE",
+            "CLASS",
+            "WIDTH",
+            "HEIGHT",
+            "ALIGN",
+            "BORDER",
+            "CELLPADDING",
+            "CELLSPACING",
+            "COLSPAN",
+            "ROWSPAN",
+            "VALIGN",
+            "BGCOLOR",
+            "IMAGE",
+            "ARIAL",
+            "VERDANA",
+            "HELVETICA",
+            "SERIF",
+            "SANS",
+            "SPAN",
+            "MAILTO",
+            "SUBJECT",
+            "FROM",
+            "BEST",
+            "REGARDS",
+            "THANK",
+            "THANKS",
+            "PLEASE",
+            "HELLO",
+            "DEAR",
+            "SINCERELY",
+            "KIND",
+            "REGARDS",
+            "OFFER",
+            "QUOTE",
+            "PRICE",
+            "STOCK",
+            "AVAILABLE",
+            "QUANTITY",
         }
 
         valid = set()
