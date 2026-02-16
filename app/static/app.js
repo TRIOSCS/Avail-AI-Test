@@ -309,15 +309,58 @@ function showList() {
     loadRequisitions();
 }
 
+function openDetailSitePicker() {
+    const picker = document.getElementById('detailSitePicker');
+    if (picker.style.display === 'none') {
+        picker.style.display = '';
+        document.getElementById('detailSiteSearch').focus();
+        if (typeof loadSiteOptions === 'function' && (!window._siteListCache || !window._siteListCache.length)) loadSiteOptions();
+        filterDetailSiteTypeahead('');
+    } else {
+        picker.style.display = 'none';
+    }
+}
+
+function filterDetailSiteTypeahead(query) {
+    const list = document.getElementById('detailSiteList');
+    if (!list) return;
+    const cache = window._siteListCache || [];
+    const q = query.toLowerCase().trim();
+    const matches = q ? cache.filter(s => s.label.toLowerCase().includes(q)).slice(0, 8) : cache.slice(0, 8);
+    list.innerHTML = matches.length
+        ? matches.map(s => '<div class="site-typeahead-item" onclick="selectDetailSite('+s.id+',\''+s.label.replace(/'/g,"\\'")+'\')">' + (typeof esc === 'function' ? esc(s.label) : s.label) + '</div>').join('')
+        : '<div class="site-typeahead-item" style="color:var(--muted)">No sites found</div>';
+    list.classList.add('show');
+}
+
+async function selectDetailSite(siteId, label) {
+    document.getElementById('detailSitePicker').style.display = 'none';
+    try {
+        await apiFetch(`/api/requisitions/${currentReqId}`, { method: 'PUT', body: { customer_site_id: siteId } });
+        document.getElementById('detailCustomer').textContent = label;
+        _reqCustomerMap[currentReqId] = label;
+        const reqInfo = _reqListData.find(r => r.id === currentReqId);
+        if (reqInfo) reqInfo.customer_site_id = siteId;
+        showToast('Customer site linked', 'success');
+    } catch (e) { showToast('Failed to link site', 'error'); }
+}
+
 function showDetail(id, name, tab) {
     currentReqId = id;
     currentReqName = name;
     try { localStorage.setItem('lastReqId', id); localStorage.setItem('lastReqName', name || ''); } catch(e) {}
     showView('view-detail');
     document.getElementById('detailTitle').textContent = name;
-    // Show customer display if available
+    // Show customer display — prompt to link if missing
     const custEl = document.getElementById('detailCustomer');
-    if (custEl) custEl.textContent = _reqCustomerMap[id] || '';
+    if (custEl) {
+        const custName = _reqCustomerMap[id];
+        custEl.textContent = custName || '+ Link Customer';
+        custEl.style.color = custName ? '' : 'var(--teal)';
+    }
+    // Hide site picker when switching requisitions
+    const picker = document.getElementById('detailSitePicker');
+    if (picker) picker.style.display = 'none';
     // Show Clone button only for archived/won/lost; set Submit vs Search All label
     const reqInfo = _reqListData.find(r => r.id === id);
     const cloneBtn = document.getElementById('cloneBtn');

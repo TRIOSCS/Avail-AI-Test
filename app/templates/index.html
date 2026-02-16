@@ -975,7 +975,13 @@
             <div>
                 <a class="back-link" onclick="showList()">← Back</a>
                 <div style="display:flex;align-items:center;gap:8px"><h2 id="detailTitle" onclick="editReqName(this)" title="Click to rename" style="cursor:pointer"></h2><span id="detailStatus" class="status-chip"></span></div>
-                <span id="detailCustomer" class="req-customer"></span>
+                <span id="detailCustomer" class="req-customer" onclick="openDetailSitePicker()" title="Click to link/change customer" style="cursor:pointer"></span>
+                <div id="detailSitePicker" style="display:none;margin-top:4px">
+                    <div class="site-typeahead" style="max-width:320px">
+                        <input id="detailSiteSearch" placeholder="Search customer site…" autocomplete="off" oninput="filterDetailSiteTypeahead(this.value)">
+                        <div class="site-typeahead-list" id="detailSiteList"></div>
+                    </div>
+                </div>
             </div>
             <div style="display:flex;gap:8px;align-items:center">
                 <button class="btn btn-ghost btn-sm" id="cloneBtn" onclick="cloneRequisition(currentReqId)" title="Clone this requisition" style="display:none">Clone</button>
