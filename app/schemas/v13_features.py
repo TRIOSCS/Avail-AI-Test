@@ -44,6 +44,25 @@ class PhoneCallLog(BaseModel):
     contact_name: str | None = None
 
 
+class VendorCallLog(BaseModel):
+    """Log a manual call against a known vendor."""
+
+    vendor_contact_id: int | None = None
+    phone: str | None = None
+    direction: Literal["outbound", "inbound"] = "outbound"
+    duration_seconds: int | None = None
+    contact_name: str | None = None
+    notes: str | None = None
+
+
+class VendorNoteLog(BaseModel):
+    """Log a manual note against a vendor."""
+
+    vendor_contact_id: int | None = None
+    contact_name: str | None = None
+    notes: str
+
+
 # ── Customer Ownership ──────────────────────────────────────────────
 
 

@@ -234,7 +234,18 @@ async def save_prospect_contact(
     if payload and payload.notes:
         pc.notes = payload.notes
     db.commit()
-    return {"ok": True, "id": pc.id}
+    return {
+        "ok": True,
+        "id": pc.id,
+        "contact": {
+            "full_name": pc.full_name,
+            "title": pc.title,
+            "email": pc.email,
+            "phone": pc.phone,
+            "linkedin_url": pc.linkedin_url,
+            "source": pc.source,
+        },
+    }
 
 
 @router.delete("/api/ai/prospect-contacts/{contact_id}")

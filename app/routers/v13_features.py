@@ -24,12 +24,14 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..database import get_db
 from ..dependencies import is_admin as _is_admin, require_user
-from ..models import ActivityLog, Company, User
+from ..models import ActivityLog, Company, User, VendorCard
 from ..schemas.v13_features import (
     BuyerProfileUpsert,
     PhoneCallLog,
     RoutingPairRequest,
     StrategicToggle,
+    VendorCallLog,
+    VendorNoteLog,
 )
 
 router = APIRouter(tags=["v13"])
@@ -146,10 +148,12 @@ def _activity_to_dict(a) -> dict:
         "channel": a.channel,
         "company_id": a.company_id,
         "vendor_card_id": a.vendor_card_id,
+        "vendor_contact_id": getattr(a, "vendor_contact_id", None),
         "contact_email": a.contact_email,
         "contact_phone": a.contact_phone,
         "contact_name": a.contact_name,
         "subject": a.subject,
+        "notes": getattr(a, "notes", None),
         "duration_seconds": a.duration_seconds,
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
@@ -214,6 +218,92 @@ async def log_phone_call(
     return {
         "status": "no_match",
         "message": "Phone number did not match any known contact",
+    }
+
+
+@router.post("/api/vendors/{vendor_id}/activities/call")
+async def log_vendor_phone_call(
+    vendor_id: int,
+    payload: VendorCallLog,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a manual phone call against a vendor card."""
+    card = db.get(VendorCard, vendor_id)
+    if not card:
+        raise HTTPException(404, "Vendor not found")
+
+    from app.services.activity_service import log_vendor_call
+
+    record = log_vendor_call(
+        user_id=user.id,
+        vendor_card_id=vendor_id,
+        vendor_contact_id=payload.vendor_contact_id,
+        direction=payload.direction,
+        phone=payload.phone,
+        duration_seconds=payload.duration_seconds,
+        contact_name=payload.contact_name,
+        notes=payload.notes,
+        db=db,
+    )
+    db.commit()
+    return {"status": "logged", "activity_id": record.id}
+
+
+@router.post("/api/vendors/{vendor_id}/activities/note")
+async def log_vendor_note_endpoint(
+    vendor_id: int,
+    payload: VendorNoteLog,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a manual note against a vendor card."""
+    card = db.get(VendorCard, vendor_id)
+    if not card:
+        raise HTTPException(404, "Vendor not found")
+
+    from app.services.activity_service import log_vendor_note
+
+    record = log_vendor_note(
+        user_id=user.id,
+        vendor_card_id=vendor_id,
+        vendor_contact_id=payload.vendor_contact_id,
+        notes=payload.notes,
+        contact_name=payload.contact_name,
+        db=db,
+    )
+    db.commit()
+    return {"status": "logged", "activity_id": record.id}
+
+
+@router.get("/api/vendors/{vendor_id}/activity-status")
+async def vendor_activity_status(
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get activity health status for a vendor (green/yellow/red indicator)."""
+    from app.services.activity_service import days_since_last_vendor_activity
+
+    card = db.get(VendorCard, vendor_id)
+    if not card:
+        raise HTTPException(404, "Vendor not found")
+
+    days = days_since_last_vendor_activity(vendor_id, db)
+
+    if days is None:
+        status = "no_activity"
+    elif days <= settings.customer_warning_days:
+        status = "green"
+    elif days <= settings.vendor_protection_warn_days:
+        status = "yellow"
+    else:
+        status = "red"
+
+    return {
+        "vendor_card_id": vendor_id,
+        "days_since_activity": days,
+        "status": status,
     }
 
 

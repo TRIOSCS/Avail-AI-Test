@@ -91,6 +91,9 @@ def _add_columns(conn) -> None:
         "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS material_tags_updated_at TIMESTAMP",
         # New offers indicator
         "ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS offers_viewed_at TIMESTAMP",
+        # v1.6.x — Vendor contact activity tracking
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS vendor_contact_id INTEGER REFERENCES vendor_contacts(id)",
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS notes TEXT",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
@@ -110,6 +113,7 @@ def _create_indexes(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_contact_user_status ON contacts(user_id, status, created_at)",
         "CREATE INDEX IF NOT EXISTS ix_vr_classification ON vendor_responses(classification)",
         "CREATE INDEX IF NOT EXISTS ix_vc_domain ON vendor_cards(domain)",
+        "CREATE INDEX IF NOT EXISTS ix_activity_vendor_contact ON activity_log(vendor_contact_id, created_at) WHERE vendor_contact_id IS NOT NULL",
     ]
     for stmt in stmts:
         _exec(conn, stmt)

@@ -1696,8 +1696,7 @@ async function openVendorPopup(cardId) {
     const vendorDomain = card.domain || (card.website ? card.website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
     html += `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
         <button class="btn-enrich" onclick="enrichVendor(${card.id},'${escAttr(vendorDomain)}')">Enrich</button>
-        ${vendorDomain ? `<button class="btn-enrich" onclick="openSuggestedContacts('vendor',${card.id},'${escAttr(vendorDomain)}','${escAttr(card.display_name)}')">Suggested Contacts</button>` : ''}
-        <button class="btn-ai" onclick="findAIContacts('vendor',${card.id},'${escAttr(card.display_name)}','${escAttr(vendorDomain)}')">🤖 Find Contacts</button>
+        <button class="btn-ai" onclick="findAIContacts('vendor',${card.id},'${escAttr(card.display_name)}','${escAttr(vendorDomain)}')">Find Contacts</button>
         <button class="btn-enrich" onclick="analyzeVendorMaterials(${card.id})">Analyze Materials</button>
     </div>`;
 
@@ -1732,6 +1731,19 @@ async function openVendorPopup(cardId) {
             <button class="btn btn-ghost btn-sm" onclick="openAddVendorContact(${card.id})">+ Add</button>
         </div>
         <div id="vpContactsList"><p class="vp-muted" style="font-size:11px">Loading contacts...</p></div>
+    </div>`;
+
+    // Recent Activity (loaded async)
+    html += `<div class="vp-section">
+        <div class="vp-label" style="display:flex;justify-content:space-between;align-items:center">
+            Recent Activity
+            <span id="vpActHealth-${card.id}" style="margin-right:auto;margin-left:8px"></span>
+            <span style="display:flex;gap:4px">
+                <button class="btn btn-ghost btn-sm" onclick="openVendorLogCallModal(${card.id},'${escAttr(card.display_name)}')">+ Log Call</button>
+                <button class="btn btn-ghost btn-sm" onclick="openVendorLogNoteModal(${card.id},'${escAttr(card.display_name)}')">+ Note</button>
+            </span>
+        </div>
+        <div id="vpActivityList-${card.id}"><p class="vp-muted" style="font-size:11px">Loading...</p></div>
     </div>`;
 
     // Material Profile (brands/manufacturers)
@@ -1813,8 +1825,10 @@ async function openVendorPopup(cardId) {
     document.getElementById('vendorPopupContent').innerHTML = html;
     document.getElementById('vendorPopup').classList.add('open');
 
-    // Load contacts and intel asynchronously
+    // Load contacts, activities, and intel asynchronously
     loadVendorContacts(card.id);
+    loadVendorActivities(card.id);
+    loadVendorActivityStatus(card.id);
     const intelEl = document.getElementById('vpIntelCard');
     if (intelEl && card.display_name) {
         loadCompanyIntel(card.display_name, vendorDomain, intelEl);
@@ -1944,6 +1958,103 @@ async function deleteVendorContact(cardId, contactId, name) {
         showToast('Contact removed', 'info');
         loadVendorContacts(cardId);
     } catch(e) { showToast('Failed to delete contact', 'error'); }
+}
+
+// ── Vendor Activity ──────────────────────────────────────────────────
+
+async function loadVendorActivities(cardId) {
+    const el = document.getElementById('vpActivityList-' + cardId);
+    if (!el) return;
+    try {
+        const activities = await apiFetch('/api/vendors/' + cardId + '/activities');
+        if (!activities.length) {
+            el.innerHTML = '<p class="vp-muted" style="font-size:11px">No activity recorded yet</p>';
+            return;
+        }
+        el.innerHTML = activities.slice(0, 10).map(a => {
+            const icons = { email_sent: '&#x1f4e4;', email_received: '&#x1f4e5;', call_outbound: '&#x1f4de;', call_inbound: '&#x1f4f2;', note: '&#x1f4dd;' };
+            const icon = icons[a.activity_type] || '&#x1f4cb;';
+            const label = (a.activity_type || '').replace(/_/g, ' ');
+            const dur = a.duration_seconds ? ' (' + Math.round(a.duration_seconds / 60) + 'm)' : '';
+            return `<div class="act-row">
+                <span class="act-row-icon">${icon}</span>
+                <div class="act-row-body">
+                    <span class="act-row-label">${esc(label)}</span>${dur}
+                    ${a.contact_name ? ' &mdash; ' + esc(a.contact_name) : ''}
+                    ${a.contact_email ? ' <span style="color:var(--muted)">' + esc(a.contact_email) + '</span>' : ''}
+                    ${a.subject ? '<div class="act-row-subject">' + esc(a.subject) + '</div>' : ''}
+                    ${a.notes ? '<div class="act-row-subject">' + esc(a.notes) + '</div>' : ''}
+                </div>
+                <span class="act-row-meta">${esc(a.user_name || '')}</span>
+                <span class="act-row-meta">${fmtRelative(a.created_at)}</span>
+            </div>`;
+        }).join('');
+    } catch(e) { console.error('loadVendorActivities:', e); el.innerHTML = '<p class="vp-muted" style="font-size:11px">Error loading activities</p>'; }
+}
+
+async function loadVendorActivityStatus(cardId) {
+    const el = document.getElementById('vpActHealth-' + cardId);
+    if (!el) return;
+    try {
+        const d = await apiFetch('/api/vendors/' + cardId + '/activity-status');
+        const colors = { green: 'var(--green)', yellow: 'var(--amber)', red: 'var(--red)', no_activity: 'var(--muted)' };
+        const labels = { green: 'Active', yellow: 'At risk', red: 'Stale', no_activity: 'No activity' };
+        const daysText = d.days_since_activity != null ? ' (' + d.days_since_activity + 'd)' : '';
+        el.innerHTML = `<span class="badge" style="background:color-mix(in srgb,${colors[d.status]} 15%,transparent);color:${colors[d.status]};font-size:9px;padding:1px 6px;border-radius:8px">${labels[d.status]}${daysText}</span>`;
+    } catch(e) { console.error('loadVendorActivityStatus:', e); }
+}
+
+function openVendorLogCallModal(cardId, vendorName) {
+    document.getElementById('vlcCardId').value = cardId;
+    document.getElementById('vlcVendorName').textContent = vendorName;
+    ['vlcPhone','vlcContactName','vlcDuration','vlcNotes'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('vlcDirection').value = 'outbound';
+    document.getElementById('vendorLogCallModal').classList.add('open');
+    setTimeout(() => document.getElementById('vlcPhone').focus(), 100);
+}
+
+async function saveVendorLogCall() {
+    const cardId = document.getElementById('vlcCardId').value;
+    const dur = parseInt(document.getElementById('vlcDuration').value);
+    const data = {
+        phone: document.getElementById('vlcPhone').value.trim() || null,
+        contact_name: document.getElementById('vlcContactName').value.trim() || null,
+        direction: document.getElementById('vlcDirection').value,
+        duration_seconds: isNaN(dur) ? null : dur,
+        notes: document.getElementById('vlcNotes').value.trim() || null,
+    };
+    try {
+        await apiFetch('/api/vendors/' + cardId + '/activities/call', { method: 'POST', body: data });
+        closeModal('vendorLogCallModal');
+        showToast('Call logged', 'success');
+        loadVendorActivities(parseInt(cardId));
+        loadVendorActivityStatus(parseInt(cardId));
+    } catch(e) { console.error('saveVendorLogCall:', e); showToast('Error logging call', 'error'); }
+}
+
+function openVendorLogNoteModal(cardId, vendorName) {
+    document.getElementById('vlnCardId').value = cardId;
+    document.getElementById('vlnVendorName').textContent = vendorName;
+    ['vlnContactName','vlnNotes'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('vendorLogNoteModal').classList.add('open');
+    setTimeout(() => document.getElementById('vlnNotes').focus(), 100);
+}
+
+async function saveVendorLogNote() {
+    const cardId = document.getElementById('vlnCardId').value;
+    const notes = document.getElementById('vlnNotes').value.trim();
+    if (!notes) { showToast('Note text is required', 'error'); return; }
+    const data = {
+        contact_name: document.getElementById('vlnContactName').value.trim() || null,
+        notes: notes,
+    };
+    try {
+        await apiFetch('/api/vendors/' + cardId + '/activities/note', { method: 'POST', body: data });
+        closeModal('vendorLogNoteModal');
+        showToast('Note added', 'success');
+        loadVendorActivities(parseInt(cardId));
+        loadVendorActivityStatus(parseInt(cardId));
+    } catch(e) { console.error('saveVendorLogNote:', e); showToast('Error adding note', 'error'); }
 }
 
 // ── Confirmed Quotes ─────────────────────────────────────────────────

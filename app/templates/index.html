@@ -1347,6 +1347,46 @@
     </div>
 </div>
 
+<!-- Vendor Log Call Modal -->
+<div id="vendorLogCallModal" class="modal-bg" onclick="if(event.target===this)closeModal('vendorLogCallModal')">
+    <div class="modal">
+        <h2>Log Vendor Call &mdash; <span id="vlcVendorName"></span></h2>
+        <input type="hidden" id="vlcCardId">
+        <div class="lo-form">
+            <div class="field"><label for="vlcPhone">Phone</label><input id="vlcPhone" type="tel" placeholder="+1 555-000-0000" onkeydown="if(event.key==='Enter')saveVendorLogCall()"></div>
+            <div class="field"><label for="vlcContactName">Contact Name</label><input id="vlcContactName" placeholder="Who did you speak to?"></div>
+            <div class="field"><label for="vlcDirection">Direction</label>
+                <select id="vlcDirection" style="background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;width:100%">
+                    <option value="outbound">Outbound</option>
+                    <option value="inbound">Inbound</option>
+                </select>
+            </div>
+            <div class="field"><label for="vlcDuration">Duration (seconds)</label><input id="vlcDuration" type="number" placeholder="120" min="0"></div>
+            <div class="field"><label for="vlcNotes">Notes</label><textarea id="vlcNotes" rows="3" placeholder="Call summary..." style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical"></textarea></div>
+        </div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('vendorLogCallModal')">Cancel</button>
+            <button class="btn btn-primary" onclick="saveVendorLogCall()">Log Call</button>
+        </div>
+    </div>
+</div>
+
+<!-- Vendor Log Note Modal -->
+<div id="vendorLogNoteModal" class="modal-bg" onclick="if(event.target===this)closeModal('vendorLogNoteModal')">
+    <div class="modal">
+        <h2>Add Note &mdash; <span id="vlnVendorName"></span></h2>
+        <input type="hidden" id="vlnCardId">
+        <div class="lo-form">
+            <div class="field"><label for="vlnContactName">Contact Name (optional)</label><input id="vlnContactName" placeholder="Related contact name"></div>
+            <div class="field"><label for="vlnNotes">Note *</label><textarea id="vlnNotes" rows="4" placeholder="Enter note..." required style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical"></textarea></div>
+        </div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('vendorLogNoteModal')">Cancel</button>
+            <button class="btn btn-primary" onclick="saveVendorLogNote()">Save Note</button>
+        </div>
+    </div>
+</div>
+
 <!-- Material Card Popup -->
 <div id="materialPopup" class="modal-bg" onclick="if(event.target===this)closeModal('materialPopup')">
     <div class="modal modal-lg">

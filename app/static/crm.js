@@ -1516,10 +1516,14 @@ async function findAIContacts(entityType, entityId, companyName, domain) {
     }
 }
 
+let _aiPanelContext = {};  // {entityType, entityId}
+
 function openAIContactsPanel(contacts, entityType, entityId) {
+    _aiPanelContext = { entityType, entityId };
     const old = document.getElementById('aiContactsBg');
     if (old) old.remove();
 
+    const isVendor = entityType === 'vendor';
     const bg = document.createElement('div');
     bg.id = 'aiContactsBg';
     bg.className = 'ai-panel-bg';
@@ -1527,12 +1531,12 @@ function openAIContactsPanel(contacts, entityType, entityId) {
     bg.innerHTML = `
         <div class="ai-panel">
             <div class="ai-panel-header">
-                <h3>AI-Found Contacts <span style="font-size:11px;color:var(--muted);font-weight:400">(${contacts.length})</span></h3>
+                <h3>Found Contacts <span style="font-size:11px;color:var(--muted);font-weight:400">(${contacts.length})</span></h3>
                 <button class="btn-close-ai" onclick="document.getElementById('aiContactsBg').remove()">✕</button>
             </div>
             <div style="max-height:400px;overflow-y:auto">
                 ${contacts.map(c => `
-                    <div class="ai-contact-row">
+                    <div class="ai-contact-row" id="aiRow${c.id}">
                         <div class="ai-contact-info">
                             <div class="ai-contact-name">${esc(c.full_name)}</div>
                             <div class="ai-contact-title">${esc(c.title || 'No title')}</div>
@@ -1545,7 +1549,10 @@ function openAIContactsPanel(contacts, entityType, entityId) {
                         <div class="ai-contact-actions">
                             <span class="badge ${c.confidence === 'high' ? 'badge-green' : c.confidence === 'medium' ? 'badge-yellow' : 'badge-gray'}"
                                   title="Source: ${esc(c.source)}">${esc(c.confidence)}</span>
-                            ${!c.is_saved ? `<button class="btn btn-ghost btn-sm" id="aiSave${c.id}" onclick="saveAIContact(${c.id})" title="Save contact">Save</button>` : '<span class="badge badge-green">Saved</span>'}
+                            ${!c.is_saved
+                                ? `<button class="btn btn-ghost btn-sm" id="aiSave${c.id}" onclick="saveAIContact(${c.id})" title="${isVendor ? 'Add to vendor card' : 'Save contact'}">${isVendor ? 'Add' : 'Save'}</button>`
+                                : '<span class="badge badge-green">Added</span>'}
+                            <button class="btn btn-danger btn-sm" onclick="deleteAIContact(${c.id})" title="Remove contact">✕</button>
                         </div>
                     </div>
                 `).join('')}
@@ -1562,14 +1569,48 @@ async function saveAIContact(contactId) {
     const btn = document.getElementById(`aiSave${contactId}`);
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
     try {
-        await apiFetch(`/api/ai/prospect-contacts/${contactId}/save`, {
+        // First mark as saved in prospect_contacts
+        const pc = await apiFetch(`/api/ai/prospect-contacts/${contactId}/save`, {
             method: 'POST', body: {}
         });
-        showToast('Contact saved', 'success');
-        if (btn) { btn.outerHTML = '<span class="badge badge-green">Saved</span>'; }
+        // If it's a vendor, also add to vendor_contacts so it shows on the card
+        if (_aiPanelContext.entityType === 'vendor' && _aiPanelContext.entityId) {
+            const contact = pc.contact || pc;
+            await apiFetch('/api/suggested-contacts/add-to-vendor', {
+                method: 'POST', body: {
+                    vendor_card_id: _aiPanelContext.entityId,
+                    contacts: [{
+                        full_name: contact.full_name || '',
+                        title: contact.title || '',
+                        email: contact.email || '',
+                        phone: contact.phone || '',
+                        linkedin_url: contact.linkedin_url || '',
+                        source: contact.source || 'ai',
+                    }]
+                }
+            });
+            showToast('Contact added to vendor', 'success');
+            // Refresh vendor contacts in background
+            loadVendorContacts(_aiPanelContext.entityId);
+        } else {
+            showToast('Contact saved', 'success');
+        }
+        if (btn) { btn.outerHTML = '<span class="badge badge-green">Added</span>'; }
     } catch (e) {
         showToast('Save error', 'error');
-        if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+        if (btn) { btn.disabled = false; btn.textContent = _aiPanelContext.entityType === 'vendor' ? 'Add' : 'Save'; }
+    }
+}
+
+async function deleteAIContact(contactId) {
+    if (!confirm('Remove this contact?')) return;
+    try {
+        await apiFetch(`/api/ai/prospect-contacts/${contactId}`, { method: 'DELETE' });
+        const row = document.getElementById(`aiRow${contactId}`);
+        if (row) row.remove();
+        showToast('Contact removed', 'info');
+    } catch (e) {
+        showToast('Delete error', 'error');
     }
 }
 

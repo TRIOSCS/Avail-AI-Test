@@ -55,7 +55,7 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
     if vc:
         card = db.get(VendorCard, vc.vendor_card_id)
         if card:
-            return {"type": "vendor", "id": card.id, "name": card.display_name}
+            return {"type": "vendor", "id": card.id, "name": card.display_name, "vendor_contact_id": vc.id}
 
     # 3. Domain match against companies
     if domain and domain not in _GENERIC_DOMAINS:
@@ -115,7 +115,7 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
         if vc_digits and vc_digits[-10:] == suffix:
             card = db.get(VendorCard, vc.vendor_card_id)
             if card:
-                return {"type": "vendor", "id": card.id, "name": card.display_name}
+                return {"type": "vendor", "id": card.id, "name": card.display_name, "vendor_contact_id": vc.id}
 
     return None
 
@@ -159,6 +159,7 @@ def log_email_activity(
         channel="email",
         company_id=match["id"] if match["type"] == "company" else None,
         vendor_card_id=match["id"] if match["type"] == "vendor" else None,
+        vendor_contact_id=match.get("vendor_contact_id") if match["type"] == "vendor" else None,
         contact_email=email_addr,
         contact_name=contact_name,
         subject=subject,
@@ -169,6 +170,7 @@ def log_email_activity(
 
     # Update last_activity_at on the matched entity
     _update_last_activity(match, db, user_id)
+    _update_vendor_contact_stats(match, db)
 
     log.info(
         f"Activity logged: {activity_type} → {match['type']} '{match['name']}' by user {user_id}"
@@ -206,6 +208,7 @@ def log_call_activity(
         channel="phone",
         company_id=match["id"] if match["type"] == "company" else None,
         vendor_card_id=match["id"] if match["type"] == "vendor" else None,
+        vendor_contact_id=match.get("vendor_contact_id") if match["type"] == "vendor" else None,
         contact_phone=phone,
         contact_name=contact_name,
         duration_seconds=duration_seconds,
@@ -215,6 +218,7 @@ def log_call_activity(
     db.flush()
 
     _update_last_activity(match, db, user_id)
+    _update_vendor_contact_stats(match, db)
 
     log.info(
         f"Activity logged: {activity_type} → {match['type']} '{match['name']}' by user {user_id}"
@@ -303,6 +307,113 @@ def _update_last_activity(match: dict, db: Session, user_id: int | None = None):
         db.query(VendorCard).filter(VendorCard.id == match["id"]).update(
             {"last_activity_at": now}, synchronize_session=False
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  VENDOR-SPECIFIC MANUAL LOGGING
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def log_vendor_call(
+    user_id: int,
+    vendor_card_id: int,
+    vendor_contact_id: int | None,
+    direction: str,
+    phone: str | None,
+    duration_seconds: int | None,
+    contact_name: str | None,
+    notes: str | None,
+    db: Session,
+) -> ActivityLog:
+    """Log a manual call against a known vendor (from vendor popup)."""
+    activity_type = f"call_{direction}"
+    record = ActivityLog(
+        user_id=user_id,
+        activity_type=activity_type,
+        channel="phone",
+        vendor_card_id=vendor_card_id,
+        vendor_contact_id=vendor_contact_id,
+        contact_phone=phone,
+        contact_name=contact_name,
+        duration_seconds=duration_seconds,
+        notes=notes,
+    )
+    db.add(record)
+    db.flush()
+
+    now = datetime.now(timezone.utc)
+    db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
+        {"last_activity_at": now}, synchronize_session=False
+    )
+    if vendor_contact_id:
+        _increment_vendor_contact(vendor_contact_id, db)
+
+    log.info(f"Activity logged: {activity_type} -> vendor {vendor_card_id} by user {user_id}")
+    return record
+
+
+def log_vendor_note(
+    user_id: int,
+    vendor_card_id: int,
+    vendor_contact_id: int | None,
+    notes: str,
+    contact_name: str | None,
+    db: Session,
+) -> ActivityLog:
+    """Log a manual note against a vendor."""
+    record = ActivityLog(
+        user_id=user_id,
+        activity_type="note",
+        channel="manual",
+        vendor_card_id=vendor_card_id,
+        vendor_contact_id=vendor_contact_id,
+        contact_name=contact_name,
+        notes=notes,
+    )
+    db.add(record)
+    db.flush()
+
+    now = datetime.now(timezone.utc)
+    db.query(VendorCard).filter(VendorCard.id == vendor_card_id).update(
+        {"last_activity_at": now}, synchronize_session=False
+    )
+    if vendor_contact_id:
+        _increment_vendor_contact(vendor_contact_id, db)
+
+    log.info(f"Activity logged: note -> vendor {vendor_card_id} by user {user_id}")
+    return record
+
+
+def days_since_last_vendor_activity(vendor_card_id: int, db: Session) -> int | None:
+    """Days since last activity on a vendor card. None if no activity ever."""
+    latest = (
+        db.query(func.max(ActivityLog.created_at))
+        .filter(ActivityLog.vendor_card_id == vendor_card_id)
+        .scalar()
+    )
+    if not latest:
+        return None
+    delta = datetime.now(timezone.utc) - latest.replace(tzinfo=timezone.utc)
+    return delta.days
+
+
+def _update_vendor_contact_stats(match: dict, db: Session):
+    """Increment interaction_count and set last_interaction_at on matched VendorContact."""
+    vc_id = match.get("vendor_contact_id")
+    if vc_id:
+        _increment_vendor_contact(vc_id, db)
+
+
+def _increment_vendor_contact(vendor_contact_id: int, db: Session):
+    """Increment a VendorContact's interaction stats."""
+    now = datetime.now(timezone.utc)
+    db.query(VendorContact).filter(VendorContact.id == vendor_contact_id).update(
+        {
+            "interaction_count": VendorContact.interaction_count + 1,
+            "last_interaction_at": now,
+        },
+        synchronize_session=False,
+    )
 
 
 # Skip generic email providers for domain matching

@@ -63,8 +63,9 @@ def test_activity_to_dict_includes_all_keys():
     from app.routers.v13_features import _activity_to_dict
     expected = {
         "id", "user_id", "user_name", "activity_type", "channel",
-        "company_id", "vendor_card_id", "contact_email", "contact_phone",
-        "contact_name", "subject", "duration_seconds", "created_at",
+        "company_id", "vendor_card_id", "vendor_contact_id",
+        "contact_email", "contact_phone",
+        "contact_name", "subject", "notes", "duration_seconds", "created_at",
     }
     assert set(_activity_to_dict(_make_activity()).keys()) == expected
 

@@ -1089,19 +1089,20 @@ class IntelCache(Base):
 
 
 class ActivityLog(Base):
-    """Auto-logged activity — no manual entry. System events only."""
+    """Activity log — system events (email, phone) and manual entries (call, note)."""
 
     __tablename__ = "activity_log"
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     activity_type = Column(
         String(20), nullable=False
-    )  # email_sent, email_received, call_outbound, call_inbound
-    channel = Column(String(20), nullable=False)  # email, phone
+    )  # email_sent, email_received, call_outbound, call_inbound, note
+    channel = Column(String(20), nullable=False)  # email, phone, manual
 
     # Polymorphic link — at most one set
     company_id = Column(Integer, ForeignKey("companies.id"))
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"))
+    vendor_contact_id = Column(Integer, ForeignKey("vendor_contacts.id"))
 
     # Contact snapshot
     contact_email = Column(String(255))
@@ -1112,12 +1113,14 @@ class ActivityLog(Base):
     subject = Column(String(500))
     duration_seconds = Column(Integer)
     external_id = Column(String(255))  # Graph message ID or 8x8 call ID
+    notes = Column(Text)  # manual call/note text
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User", foreign_keys=[user_id])
     company = relationship("Company", foreign_keys=[company_id])
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
+    vendor_contact = relationship("VendorContact", foreign_keys=[vendor_contact_id])
 
     __table_args__ = (
         Index(
@@ -1131,6 +1134,12 @@ class ActivityLog(Base):
             "vendor_card_id",
             "created_at",
             postgresql_where=Column("vendor_card_id").isnot(None),
+        ),
+        Index(
+            "ix_activity_vendor_contact",
+            "vendor_contact_id",
+            "created_at",
+            postgresql_where=Column("vendor_contact_id").isnot(None),
         ),
         Index("ix_activity_user", "user_id", "created_at"),
         Index(
