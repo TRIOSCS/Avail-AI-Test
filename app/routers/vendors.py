@@ -38,7 +38,7 @@ from ..database import get_db
 from ..dependencies import require_user, require_buyer
 from ..models import (
     User, VendorCard, VendorContact, VendorReview, Contact, VendorResponse,
-    MaterialCard, MaterialVendorHistory, Offer, Sighting,
+    MaterialCard, MaterialVendorHistory, Offer, Sighting, Company,
 )
 from ..vendor_utils import normalize_vendor_name
 from ..search_service import normalize_mpn
@@ -215,6 +215,43 @@ async def list_vendors(request: Request, user: User = Depends(require_user), db:
             "avg_rating": avg_rating, "review_count": review_count,
         })
     return {"vendors": results, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/api/autocomplete/names")
+async def autocomplete_names(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lightweight name autocomplete across VendorCards and Companies."""
+    q = request.query_params.get("q", "").strip().lower()
+    if len(q) < 2:
+        return []
+    limit = min(int(request.query_params.get("limit", "8")), 20)
+    safe_q = q.replace("%", r"\%").replace("_", r"\_")
+
+    vendors = (
+        db.query(VendorCard.id, VendorCard.display_name)
+        .filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
+        .order_by(VendorCard.display_name)
+        .limit(limit)
+        .all()
+    )
+    companies = (
+        db.query(Company.id, Company.name)
+        .filter(Company.is_active == True, Company.name.ilike(f"%{safe_q}%"))
+        .order_by(Company.name)
+        .limit(limit)
+        .all()
+    )
+
+    results = []
+    for v in vendors:
+        results.append({"id": v.id, "name": v.display_name, "type": "vendor"})
+    for c in companies:
+        results.append({"id": c.id, "name": c.name, "type": "customer"})
+    results.sort(key=lambda r: r["name"].lower())
+    return results[:limit]
 
 
 @router.get("/api/vendors/{card_id}")
@@ -874,16 +911,22 @@ async def import_stock_list_standalone(request: Request,
     rows = parse_tabular_file(content, file.filename or "upload.csv")
 
     # Upsert VendorCard
+    vendor_website = (form.get("vendor_website") or "").strip()
     norm_vendor = normalize_vendor_name(vendor_name)
     vendor_card = db.query(VendorCard).filter_by(normalized_name=norm_vendor).first()
+    new_vendor = False
     if not vendor_card:
+        domain = ""
+        if vendor_website:
+            domain = vendor_website.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower()
         vendor_card = VendorCard(
             normalized_name=norm_vendor, display_name=vendor_name,
-            emails=[], phones=[],
+            domain=domain or None, emails=[], phones=[],
         )
         db.add(vendor_card)
         try:
             db.flush()
+            new_vendor = True
         except IntegrityError:
             db.rollback()
             vendor_card = db.query(VendorCard).filter_by(normalized_name=norm_vendor).first()
@@ -945,11 +988,19 @@ async def import_stock_list_standalone(request: Request,
     vendor_card.sighting_count = (vendor_card.sighting_count or 0) + imported
     db.commit()
 
+    # Trigger enrichment for new vendor with domain
+    enrich_triggered = False
+    if new_vendor and vendor_card.domain and not vendor_card.last_enriched_at:
+        if settings.clay_api_key or settings.explorium_api_key or settings.anthropic_api_key:
+            asyncio.create_task(_background_enrich_vendor(vendor_card.id, vendor_card.domain, vendor_card.display_name))
+            enrich_triggered = True
+
     return {
         "imported_rows": imported,
         "skipped_rows": skipped,
         "total_rows": len(rows),
         "vendor_name": vendor_name,
+        "enrich_triggered": enrich_triggered,
     }
 
 
@@ -1144,22 +1195,44 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
         if not card:
             return
 
-        # Fetch top 200 parts for this vendor
-        rows = (
+        # Fetch parts from both MaterialVendorHistory and Sightings
+        parts_list = []
+        seen_mpns = set()
+
+        # 1. MaterialVendorHistory (long-term tracked)
+        mvh_rows = (
             db.query(MaterialVendorHistory, MaterialCard)
             .join(MaterialCard, MaterialVendorHistory.material_card_id == MaterialCard.id)
             .filter(MaterialVendorHistory.vendor_name == card.normalized_name)
             .order_by(MaterialVendorHistory.times_seen.desc())
+            .limit(150)
+            .all()
+        )
+        for mvh, mc in mvh_rows:
+            key = (mc.display_mpn or "").lower()
+            if key and key not in seen_mpns:
+                seen_mpns.add(key)
+                parts_list.append(f"{mc.display_mpn} — {mvh.last_manufacturer or mc.manufacturer or 'unknown'}")
+
+        # 2. Sightings (search results) — fill remaining slots
+        sighting_rows = (
+            db.query(Sighting.mpn_matched, Sighting.manufacturer)
+            .filter(sqlfunc.lower(sqlfunc.trim(Sighting.vendor_name)) == card.normalized_name)
+            .filter(Sighting.mpn_matched.isnot(None), Sighting.mpn_matched != "")
+            .order_by(Sighting.created_at.desc())
             .limit(200)
             .all()
         )
-        if not rows:
-            return
+        for mpn, mfr in sighting_rows:
+            key = (mpn or "").lower()
+            if key and key not in seen_mpns:
+                seen_mpns.add(key)
+                parts_list.append(f"{mpn} — {mfr or 'unknown'}")
+            if len(parts_list) >= 200:
+                break
 
-        # Build part list for AI
-        parts_list = []
-        for mvh, mc in rows:
-            parts_list.append(f"{mc.display_mpn} — {mvh.last_manufacturer or mc.manufacturer or 'unknown'}")
+        if not parts_list:
+            return
 
         prompt = (
             f"Analyze this vendor's part inventory and classify them.\n\n"

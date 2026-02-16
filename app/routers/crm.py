@@ -193,6 +193,9 @@ async def list_companies(
 async def create_company(payload: CompanyCreate, user: User = Depends(require_user), db: Session = Depends(get_db)):
     from ..enrichment_service import normalize_company_input
     clean_name, clean_domain = await normalize_company_input(payload.name, payload.domain or "")
+    # Extract domain from website if no explicit domain
+    if not clean_domain and payload.website:
+        clean_domain = payload.website.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower()
     company = Company(
         name=clean_name, website=payload.website,
         industry=payload.industry, notes=payload.notes,
@@ -200,7 +203,33 @@ async def create_company(payload: CompanyCreate, user: User = Depends(require_us
     )
     db.add(company)
     db.commit()
-    return {"id": company.id, "name": company.name}
+
+    # Auto-enrich if domain is available
+    enrich_triggered = False
+    domain = company.domain or ""
+    if domain and (settings.clay_api_key or settings.explorium_api_key or settings.anthropic_api_key):
+        import asyncio
+        from ..enrichment_service import enrich_entity, apply_enrichment_to_company
+        async def _enrich_company_bg(cid, d, n):
+            from ..database import SessionLocal
+            try:
+                enrichment = await enrich_entity(d, n)
+                if not enrichment:
+                    return
+                s = SessionLocal()
+                try:
+                    c = s.get(Company, cid)
+                    if c:
+                        apply_enrichment_to_company(c, enrichment)
+                        s.commit()
+                finally:
+                    s.close()
+            except Exception:
+                logger.exception("Background enrichment failed for company %d", cid)
+        asyncio.create_task(_enrich_company_bg(company.id, domain, company.name))
+        enrich_triggered = True
+
+    return {"id": company.id, "name": company.name, "enrich_triggered": enrich_triggered}
 
 
 @router.put("/api/companies/{company_id}")
@@ -657,6 +686,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
             "unit_price": float(o.unit_price) if o.unit_price else None,
             "lead_time": o.lead_time, "date_code": o.date_code,
             "condition": o.condition, "packaging": o.packaging,
+            "firmware": o.firmware, "hardware_code": o.hardware_code,
             "moq": o.moq, "source": o.source, "status": o.status,
             "notes": o.notes,
             "entered_by": o.entered_by.name if o.entered_by else None,
@@ -685,14 +715,31 @@ async def create_offer(
         raise HTTPException(404)
     norm_name = normalize_vendor_name(payload.vendor_name)
     card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
+    enrich_triggered = False
+    if not card:
+        domain = ""
+        if payload.vendor_website:
+            domain = payload.vendor_website.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower()
+        card = VendorCard(
+            normalized_name=norm_name, display_name=payload.vendor_name,
+            domain=domain or None, emails=[], phones=[],
+        )
+        db.add(card)
+        db.flush()
+        if domain and (settings.clay_api_key or settings.explorium_api_key or settings.anthropic_api_key):
+            import asyncio
+            from ..routers.vendors import _background_enrich_vendor
+            asyncio.create_task(_background_enrich_vendor(card.id, domain, card.display_name))
+            enrich_triggered = True
     offer = Offer(
         requisition_id=req_id, requirement_id=payload.requirement_id,
-        vendor_card_id=card.id if card else None,
-        vendor_name=card.display_name if card else payload.vendor_name,
+        vendor_card_id=card.id,
+        vendor_name=card.display_name,
         mpn=payload.mpn, manufacturer=payload.manufacturer,
         qty_available=payload.qty_available, unit_price=payload.unit_price,
         lead_time=payload.lead_time, date_code=payload.date_code,
         condition=payload.condition, packaging=payload.packaging,
+        firmware=payload.firmware, hardware_code=payload.hardware_code,
         moq=payload.moq, source=payload.source,
         vendor_response_id=payload.vendor_response_id,
         entered_by_id=user.id, notes=payload.notes,

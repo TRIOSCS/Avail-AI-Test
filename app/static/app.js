@@ -68,8 +68,96 @@ function stars(avg, count) {
     return s;
 }
 
+// ── Name Autocomplete ───────────────────────────────────────────────────
+function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
+    const input = document.getElementById(inputId);
+    const list  = document.getElementById(listId);
+    if (!input || !list) return;
+    const minLen = opts.minLen || 2;
+    const filterType = opts.types || 'all';
+    const websiteId = opts.websiteId || null;
+    let _matched = false;
+
+    function showWebsite(show) {
+        if (!websiteId) return;
+        const el = document.getElementById(websiteId);
+        const row = el?.closest('.ac-website-row') || el;
+        if (row) row.style.display = show ? '' : 'none';
+    }
+
+    const doSearch = debounce(async function(query) {
+        if (query.length < minLen) { list.classList.remove('show'); return; }
+        try {
+            const results = await apiFetch('/api/autocomplete/names?q=' + encodeURIComponent(query) + '&limit=8');
+            const filtered = filterType === 'all' ? results : results.filter(r => r.type === filterType);
+            if (!filtered.length) {
+                list.innerHTML = '<div class="site-typeahead-item" style="color:var(--muted)">New — enter website for enrichment</div>';
+                _matched = false;
+                showWebsite(true);
+            } else {
+                list.innerHTML = filtered.map(r =>
+                    '<div class="site-typeahead-item" data-id="' + r.id + '" data-type="' + r.type + '" data-name="' + escAttr(r.name) + '">'
+                    + esc(r.name)
+                    + ' <span class="ac-badge ac-' + r.type + '">' + r.type + '</span>'
+                    + '</div>'
+                ).join('');
+                _matched = false;
+                showWebsite(true);
+            }
+            list.classList.add('show');
+        } catch (e) { console.error('autocomplete:', e); list.classList.remove('show'); }
+    }, 250);
+
+    input.addEventListener('input', function() {
+        _matched = false;
+        if (hiddenId) { const h = document.getElementById(hiddenId); if (h) h.value = ''; }
+        showWebsite(true);
+        doSearch(input.value.trim());
+    });
+    input.addEventListener('focus', function() {
+        if (input.value.trim().length >= minLen) doSearch(input.value.trim());
+    });
+    list.addEventListener('click', function(e) {
+        const item = e.target.closest('.site-typeahead-item');
+        if (!item || !item.dataset.name) return;
+        input.value = item.dataset.name;
+        _matched = true;
+        if (hiddenId) { const h = document.getElementById(hiddenId); if (h) h.value = item.dataset.type + ':' + item.dataset.id; }
+        list.classList.remove('show');
+        showWebsite(false);
+    });
+    document.addEventListener('click', function(e) {
+        if (!e.target.closest('#' + inputId) && !e.target.closest('#' + listId)) list.classList.remove('show');
+    });
+    input.addEventListener('keydown', function(e) {
+        if (!list.classList.contains('show')) return;
+        const items = list.querySelectorAll('.site-typeahead-item[data-name]');
+        if (!items.length) return;
+        let idx = Array.from(items).findIndex(el => el.classList.contains('active'));
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            items.forEach(el => el.classList.remove('active'));
+            idx = (idx + 1) % items.length;
+            items[idx].classList.add('active');
+            items[idx].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            items.forEach(el => el.classList.remove('active'));
+            idx = idx <= 0 ? items.length - 1 : idx - 1;
+            items[idx].classList.add('active');
+            items[idx].scrollIntoView({ block: 'nearest' });
+        } else if (e.key === 'Enter' && idx >= 0) {
+            e.preventDefault();
+            items[idx].click();
+        } else if (e.key === 'Escape') {
+            list.classList.remove('show');
+        }
+    });
+}
+
 // ── Init ────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
+    initNameAutocomplete('stockVendorName', 'stockVendorNameList', null, { types: 'vendor', websiteId: 'stockVendorWebsite' });
     await loadRequisitions();
     // Restore last viewed requisition on page reload
     try {
@@ -446,7 +534,7 @@ async function loadRequirements() {
     const el = document.getElementById('reqTable');
     const filterBar = document.getElementById('reqFilterBar');
     if (!reqData.length) {
-        el.innerHTML = '<tr><td colspan="6" class="empty">No parts yet — add one below</td></tr>';
+        el.innerHTML = '<tr><td colspan="11" class="empty">No parts yet — add one below</td></tr>';
         if (filterBar) filterBar.style.display = 'none';
         return;
     }
@@ -485,9 +573,14 @@ function renderRequirementsTable() {
         const subsText = (r.substitutes || []).length ? r.substitutes.join(', ') : '—';
         return `<tr data-req-id="${r.id}">
             <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'primary_mpn')" title="Click to edit">${esc(r.primary_mpn || '—')}</td>
-            <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'target_qty')" title="Click to edit" style="width:55px">${r.target_qty}</td>
+            <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'target_qty')" title="Click to edit" style="width:50px">${r.target_qty}</td>
             <td class="req-edit-cell" onclick="editReqCell(this,${r.id},'substitutes')" title="Click to edit" style="font-size:11px;color:var(--text2)">${esc(subsText)}</td>
             <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'target_price')" title="Click to edit" style="width:64px;color:${r.target_price ? 'var(--teal)' : 'var(--muted)'}">${r.target_price != null ? '$' + parseFloat(r.target_price).toFixed(2) : '—'}</td>
+            <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'firmware')" title="Click to edit" style="font-size:11px">${esc(r.firmware || '—')}</td>
+            <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'date_codes')" title="Click to edit" style="font-size:11px">${esc(r.date_codes || '—')}</td>
+            <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'hardware_codes')" title="Click to edit" style="font-size:11px">${esc(r.hardware_codes || '—')}</td>
+            <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'packaging')" title="Click to edit" style="font-size:11px">${esc(r.packaging || '—')}</td>
+            <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'condition')" title="Click to edit" style="font-size:11px">${esc(r.condition || '—')}</td>
             <td class="mono">${r.sighting_count}</td>
             <td><button class="btn btn-danger btn-sm" onclick="deleteReq(${r.id})" title="Remove">✕</button></td>
         </tr>`;
@@ -2555,6 +2648,8 @@ async function doStockImport() {
         const form = new FormData();
         form.append('file', file);
         form.append('vendor_name', vendorName);
+        const vendorWebsite = document.getElementById('stockVendorWebsite')?.value?.trim();
+        if (vendorWebsite) form.append('vendor_website', vendorWebsite);
 
         const res = await fetch('/api/materials/import-stock', {
             method: 'POST', body: form

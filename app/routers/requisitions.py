@@ -168,6 +168,11 @@ async def list_requirements(req_id: int, user: User = Depends(require_user), db:
             "target_price": float(r.target_price) if r.target_price else None,
             "substitutes": r.substitutes or [],
             "sighting_count": vendor_counts.get(r.id, 0),
+            "firmware": r.firmware or "",
+            "date_codes": r.date_codes or "",
+            "hardware_codes": r.hardware_codes or "",
+            "packaging": r.packaging or "",
+            "condition": r.condition or "",
         })
     return results
 
@@ -264,6 +269,16 @@ async def update_requirement(item_id: int, data: RequirementUpdate, user: User =
         r.substitutes = data.substitutes[:20]
     if data.target_price is not None:
         r.target_price = data.target_price
+    if data.firmware is not None:
+        r.firmware = data.firmware.strip()
+    if data.date_codes is not None:
+        r.date_codes = data.date_codes.strip()
+    if data.hardware_codes is not None:
+        r.hardware_codes = data.hardware_codes.strip()
+    if data.packaging is not None:
+        r.packaging = data.packaging.strip()
+    if data.condition is not None:
+        r.condition = data.condition.strip()
     db.commit()
     return {"ok": True}
 

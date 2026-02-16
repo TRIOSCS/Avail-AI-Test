@@ -158,11 +158,14 @@ class OfferCreate(BaseModel):
     date_code: str | None = None
     condition: str = "New"
     packaging: str | None = None
+    firmware: str | None = None
+    hardware_code: str | None = None
     moq: int | None = None
     source: str = "manual"
     vendor_response_id: int | None = None
     notes: str | None = None
     status: Literal["active", "expired", "won", "lost"] = "active"
+    vendor_website: str | None = None
 
     @field_validator("mpn", "vendor_name")
     @classmethod
@@ -183,6 +186,8 @@ class OfferUpdate(BaseModel):
     date_code: str | None = None
     condition: str | None = None
     packaging: str | None = None
+    firmware: str | None = None
+    hardware_code: str | None = None
     moq: int | None = None
     notes: str | None = None
     status: Literal["active", "expired", "won", "lost"] | None = None

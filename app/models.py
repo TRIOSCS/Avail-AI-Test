@@ -172,6 +172,11 @@ class Requirement(Base):
     target_price = Column(Numeric(12, 4))
     substitutes = Column(JSON, default=list)
     notes = Column(Text)
+    firmware = Column(String(100))
+    date_codes = Column(String(100))
+    hardware_codes = Column(String(100))
+    packaging = Column(String(100))
+    condition = Column(String(50))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="requirements")
@@ -240,6 +245,8 @@ class Offer(Base):
     date_code = Column(String(100))
     condition = Column(String(50))
     packaging = Column(String(100))
+    firmware = Column(String(100))
+    hardware_code = Column(String(100))
     moq = Column(Integer)
     valid_until = Column(Date)
 

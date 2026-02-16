@@ -67,6 +67,11 @@ class RequirementUpdate(BaseModel):
     target_qty: int | None = None
     target_price: float | None = None
     substitutes: list[str] | None = None
+    firmware: str | None = None
+    date_codes: str | None = None
+    hardware_codes: str | None = None
+    packaging: str | None = None
+    condition: str | None = None
 
 
 class RequirementOut(BaseModel):

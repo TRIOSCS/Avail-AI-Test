@@ -661,7 +661,10 @@
         .site-typeahead-list{position:absolute;top:100%;left:0;right:0;background:var(--white);border:1px solid var(--border);border-radius:6px;max-height:160px;overflow-y:auto;z-index:10;display:none;box-shadow:0 4px 16px rgba(0,0,0,.08)}
         .site-typeahead-list.show{display:block}
         .site-typeahead-item{padding:8px 10px;font-size:12px;cursor:pointer;transition:.1s}
-        .site-typeahead-item:hover{background:var(--bg)}
+        .site-typeahead-item:hover,.site-typeahead-item.active{background:var(--bg)}
+        .ac-badge{font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;text-transform:uppercase;letter-spacing:.3px;font-weight:600;opacity:.7}
+        .ac-vendor{background:var(--teal-light,#e0f5f0);color:var(--teal,#0d9488)}
+        .ac-customer{background:#f0e6ff;color:#6b3fa0}
 
         @media(max-width:768px){
             .dash-metrics{grid-template-columns:repeat(2,1fr)}
@@ -924,14 +927,15 @@
                     <span class="filter-count" id="reqFilterCount"></span>
                 </div>
                 <table class="tbl">
-                    <thead><tr><th style="width:35%">Part Number</th><th style="width:55px">Qty</th><th>Substitutes</th><th style="width:70px">Target $</th><th style="width:55px">Sources</th><th style="width:36px"></th></tr></thead>
+                    <thead><tr><th>Part Number</th><th style="width:50px">Qty</th><th>Substitutes</th><th style="width:64px">Target $</th><th style="width:60px">FW</th><th style="width:60px">DC</th><th style="width:60px">HW</th><th style="width:55px">Pkg</th><th style="width:55px">Cond</th><th style="width:45px">Src</th><th style="width:30px"></th></tr></thead>
                     <tbody id="reqTable"></tbody>
                     <tfoot>
                         <tr class="add-row">
                             <td><input id="fMpn" placeholder="Enter part number…" onkeydown="if(event.key==='Enter')addReq()"></td>
-                            <td><input id="fQty" type="number" value="1" min="1" style="width:56px" onkeydown="if(event.key==='Enter')addReq()"></td>
-                            <td><input id="fSubs" placeholder="Comma-separated alternates…" onkeydown="if(event.key==='Enter')addReq()"></td>
-                            <td><input id="fTarget" type="number" step="0.01" min="0" placeholder="—" style="width:64px" onkeydown="if(event.key==='Enter')addReq()"></td>
+                            <td><input id="fQty" type="number" value="1" min="1" style="width:50px" onkeydown="if(event.key==='Enter')addReq()"></td>
+                            <td><input id="fSubs" placeholder="Alternates…" onkeydown="if(event.key==='Enter')addReq()"></td>
+                            <td><input id="fTarget" type="number" step="0.01" min="0" placeholder="—" style="width:60px" onkeydown="if(event.key==='Enter')addReq()"></td>
+                            <td colspan="5"></td>
                             <td></td>
                             <td><button class="btn btn-primary btn-sm" onclick="addReq()" title="Add">+</button></td>
                         </tr>
@@ -1076,7 +1080,8 @@
         <div id="stockImportArea" data-role="buyer" style="display:none;margin-bottom:12px" class="card">
             <strong style="font-size:12px;color:var(--muted)">Import a vendor stock list — all rows stored as material cards with vendor history</strong>
             <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
-                <input id="stockVendorName" placeholder="Vendor name (required)…" required aria-label="Vendor name for stock import" style="flex:1;min-width:150px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+                <div class="site-typeahead" style="flex:1;min-width:150px"><input id="stockVendorName" placeholder="Vendor name (required)…" required aria-label="Vendor name for stock import" autocomplete="off" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)"><div class="site-typeahead-list" id="stockVendorNameList"></div></div>
+                <input id="stockVendorWebsite" placeholder="Website (for new vendor)" class="ac-website-inline" style="display:none;flex:0 0 180px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px">
                 <input type="file" id="stockFileInput" accept=".csv,.xlsx,.xls,.tsv" style="display:none" onchange="showFileReady('stockFileInput','stockFileReady','stockFileName')">
                 <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stockFileInput').click()">Choose File</button>
             </div>
@@ -1203,7 +1208,7 @@
 <div id="newCompanyModal" class="modal-bg" onclick="if(event.target===this)closeModal('newCompanyModal')">
     <div class="modal">
         <h2>New Company</h2>
-        <div class="field"><label for="ncName">Company Name</label><input id="ncName" placeholder="e.g. Siemens" required onkeydown="if(event.key==='Enter')createCompany()"></div>
+        <div class="field"><label for="ncName">Company Name</label><div class="site-typeahead"><input id="ncName" placeholder="e.g. Siemens" required autocomplete="off" onkeydown="if(event.key==='Enter'&&!document.getElementById('ncNameList').classList.contains('show'))createCompany()"><div class="site-typeahead-list" id="ncNameList"></div></div></div>
         <div class="field"><label for="ncWebsite">Website</label><input id="ncWebsite" placeholder="siemens.com" type="url"></div>
         <div class="field"><label for="ncIndustry">Industry</label><input id="ncIndustry" placeholder="Medical, Industrial, etc."></div>
         <div class="mactions">
@@ -1260,7 +1265,8 @@
         <h2>Log Vendor Offer</h2>
         <div class="lo-form">
             <div class="field field-full"><label>Part Number</label><select id="loMpn" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--input);font-size:12px"></select></div>
-            <div class="field field-full"><label>Vendor Name</label><input id="loVendor" placeholder="Type vendor name…"></div>
+            <div class="field field-full"><label>Vendor Name</label><div class="site-typeahead"><input id="loVendor" placeholder="Type vendor name…" autocomplete="off"><div class="site-typeahead-list" id="loVendorList"></div></div></div>
+            <div class="field field-full ac-website-row" id="loWebsiteRow" style="display:none"><label>Website <span style="color:var(--muted);font-weight:400">(new vendor — enter for enrichment)</span></label><input id="loWebsite" placeholder="e.g. arrowelectronics.com"></div>
             <div class="field"><label>Qty Available</label><input id="loQty" type="number" placeholder="10000"></div>
             <div class="field"><label>Unit Price ($)</label><input id="loPrice" type="number" step="0.0001" placeholder="0.2500"></div>
             <div class="field"><label>Lead Time</label><input id="loLead" placeholder="4–6 wks"></div>
@@ -1270,6 +1276,9 @@
                 </select>
             </div>
             <div class="field"><label>Date Code</label><input id="loDC" placeholder="2024+"></div>
+            <div class="field"><label>Firmware</label><input id="loFirmware" placeholder="v2.1"></div>
+            <div class="field"><label>Hardware Rev</label><input id="loHardware" placeholder="Rev C"></div>
+            <div class="field"><label>Packaging</label><input id="loPackaging" placeholder="Reel, Tray…"></div>
             <div class="field"><label>MOQ</label><input id="loMoq" type="number" placeholder="1000"></div>
             <div class="field field-full">
                 <label>Source</label>

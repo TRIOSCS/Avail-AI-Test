@@ -270,10 +270,11 @@ function renderOffers() {
         const offersHtml = group.offers.length ? group.offers.map(o => {
             const checked = selectedOffers.has(o.id) ? 'checked' : '';
             const isRef = o.status === 'reference';
+            const details = [o.firmware && 'FW: '+esc(o.firmware), o.hardware_code && 'HW: '+esc(o.hardware_code), o.packaging && 'Pkg: '+esc(o.packaging)].filter(Boolean).join(' · ');
             return `
             <tr class="${isRef ? 'offer-ref' : ''}">
                 <td><input type="checkbox" ${checked} ${isRef ? 'disabled' : ''} onchange="toggleOfferSelect(${o.id},this.checked)"></td>
-                <td>${esc(o.vendor_name)}</td>
+                <td>${esc(o.vendor_name)}${details ? '<div class="sc-detail" style="font-size:10px;color:var(--muted)">'+details+'</div>' : ''}</td>
                 <td>${o.unit_price != null ? '$'+Number(o.unit_price).toFixed(4) : '—'}</td>
                 <td>${o.qty_available != null ? o.qty_available.toLocaleString() : '—'}</td>
                 <td>${esc(o.lead_time || '—')}</td>
@@ -334,9 +335,13 @@ async function saveOffer(andNext) {
         lead_time: document.getElementById('loLead').value.trim(),
         condition: document.getElementById('loCond').value,
         date_code: document.getElementById('loDC').value.trim(),
+        firmware: document.getElementById('loFirmware').value.trim() || null,
+        hardware_code: document.getElementById('loHardware').value.trim() || null,
+        packaging: document.getElementById('loPackaging').value.trim() || null,
         moq: parseInt(document.getElementById('loMoq').value) || null,
         source: document.querySelector('input[name="loSource"]:checked')?.value || 'manual',
         notes: document.getElementById('loNotes').value.trim(),
+        vendor_website: document.getElementById('loWebsite').value.trim() || null,
     };
     if (!data.vendor_name || !data.mpn) return;
     try {
@@ -349,8 +354,9 @@ async function saveOffer(andNext) {
         showToast('Offer from ' + data.vendor_name + ' saved', 'success');
         notifyStatusChange(result);
         if (andNext) {
-            ['loVendor','loQty','loPrice','loLead','loDC','loMoq','loNotes'].forEach(id => document.getElementById(id).value = '');
+            ['loVendor','loQty','loPrice','loLead','loDC','loFirmware','loHardware','loPackaging','loMoq','loNotes','loWebsite'].forEach(id => document.getElementById(id).value = '');
             document.getElementById('loCond').value = 'New';
+            document.getElementById('loWebsiteRow').style.display = 'none';
             document.getElementById('loVendor').focus();
         } else {
             closeModal('logOfferModal');
@@ -914,6 +920,8 @@ async function enrichVendor(cardId, domain) {
 document.addEventListener('DOMContentLoaded', function() {
     loadUserOptions('asSiteOwner');
     loadSiteOptions();
+    initNameAutocomplete('loVendor', 'loVendorList', null, { types: 'vendor', websiteId: 'loWebsite' });
+    initNameAutocomplete('ncName', 'ncNameList', null, { types: 'all' });
 });
 
 
