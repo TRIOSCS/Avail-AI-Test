@@ -2143,30 +2143,26 @@ async function loadProactiveScorecard() {
 
 function renderProactiveScorecard(data) {
     const el = document.getElementById('proactiveScorecardPanel');
-    const cards = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
-        <div class="card" style="text-align:center;padding:20px">
-            <div style="font-size:28px;font-weight:700;color:var(--teal)">${data.total_sent}</div>
-            <div style="font-size:11px;color:var(--muted)">Offers Sent</div>
+    const summaryCards = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin-bottom:20px">
+        <div class="card" style="text-align:center;padding:16px">
+            <div style="font-size:24px;font-weight:700;color:var(--teal)">${data.total_sent}</div>
+            <div style="font-size:11px;color:var(--muted)">Total Sent</div>
         </div>
-        <div class="card" style="text-align:center;padding:20px">
-            <div style="font-size:28px;font-weight:700;color:var(--green)">${data.total_converted}</div>
-            <div style="font-size:11px;color:var(--muted)">POs Received</div>
+        <div class="card" style="text-align:center;padding:16px">
+            <div style="font-size:24px;font-weight:700;color:var(--green)">${data.total_converted}</div>
+            <div style="font-size:11px;color:var(--muted)">Total Converted</div>
         </div>
-        <div class="card" style="text-align:center;padding:20px">
-            <div style="font-size:28px;font-weight:700;color:var(--text)">${data.conversion_rate}%</div>
-            <div style="font-size:11px;color:var(--muted)">Conversion Rate</div>
+        <div class="card" style="text-align:center;padding:16px">
+            <div style="font-size:24px;font-weight:700;color:var(--text)">${data.conversion_rate}%</div>
+            <div style="font-size:11px;color:var(--muted)">Overall Rate</div>
         </div>
-        <div class="card" style="text-align:center;padding:20px">
-            <div style="font-size:28px;font-weight:700;color:var(--amber)">$${Number(data.anticipated_revenue||0).toLocaleString()}</div>
-            <div style="font-size:11px;color:var(--muted)">Anticipated Revenue</div>
-        </div>
-        <div class="card" style="text-align:center;padding:20px">
-            <div style="font-size:28px;font-weight:700;color:var(--green)">$${Number(data.converted_revenue||0).toLocaleString()}</div>
+        <div class="card" style="text-align:center;padding:16px">
+            <div style="font-size:24px;font-weight:700;color:var(--green)">$${Number(data.converted_revenue||0).toLocaleString()}</div>
             <div style="font-size:11px;color:var(--muted)">Won Revenue</div>
         </div>
-        <div class="card" style="text-align:center;padding:20px">
-            <div style="font-size:28px;font-weight:700;color:var(--green)">$${Number(data.gross_profit||0).toLocaleString()}</div>
+        <div class="card" style="text-align:center;padding:16px">
+            <div style="font-size:24px;font-weight:700;color:var(--green)">$${Number(data.gross_profit||0).toLocaleString()}</div>
             <div style="font-size:11px;color:var(--muted)">Gross Profit</div>
         </div>
     </div>`;
@@ -2174,22 +2170,36 @@ function renderProactiveScorecard(data) {
     let breakdownHtml = '';
     if (data.breakdown && data.breakdown.length) {
         breakdownHtml = `
-        <h3 style="margin-bottom:8px;font-size:14px">Per Salesperson</h3>
+        <h3 style="margin:16px 0 8px;font-size:14px;font-weight:600">Salesperson Scorecard</h3>
+        <div style="overflow-x:auto">
         <table class="tbl">
-            <thead><tr><th>Name</th><th>Sent</th><th>Converted</th><th>Revenue</th><th>Gross Profit</th></tr></thead>
-            <tbody>${data.breakdown.map(b => `
-                <tr>
-                    <td><strong>${esc(b.salesperson_name)}</strong></td>
-                    <td>${b.sent}</td>
-                    <td>${b.converted}</td>
-                    <td>$${Number(b.revenue||0).toLocaleString()}</td>
-                    <td>$${Number(b.gross_profit||0).toLocaleString()}</td>
-                </tr>
-            `).join('')}</tbody>
-        </table>`;
+            <thead><tr>
+                <th>Salesperson</th>
+                <th style="text-align:right">Sent</th>
+                <th style="text-align:right">Converted</th>
+                <th style="text-align:right">Rate</th>
+                <th style="text-align:right">Anticipated</th>
+                <th style="text-align:right">Won Revenue</th>
+                <th style="text-align:right">Gross Profit</th>
+            </tr></thead>
+            <tbody>${data.breakdown.map((b, i) => {
+                const medal = i === 0 ? ' 🥇' : i === 1 ? ' 🥈' : i === 2 ? ' 🥉' : '';
+                const rateColor = b.conversion_rate >= 30 ? 'var(--green)' : b.conversion_rate >= 15 ? 'var(--amber)' : 'var(--muted)';
+                return `<tr>
+                    <td><strong>${esc(b.salesperson_name)}</strong>${medal}</td>
+                    <td style="text-align:right">${b.sent}</td>
+                    <td style="text-align:right">${b.converted}</td>
+                    <td style="text-align:right;color:${rateColor};font-weight:600">${b.conversion_rate}%</td>
+                    <td style="text-align:right;color:var(--amber)">$${Number(b.anticipated_revenue||0).toLocaleString()}</td>
+                    <td style="text-align:right;color:var(--green)">$${Number(b.revenue||0).toLocaleString()}</td>
+                    <td style="text-align:right;color:var(--green)">$${Number(b.gross_profit||0).toLocaleString()}</td>
+                </tr>`;
+            }).join('')}</tbody>
+        </table>
+        </div>`;
     }
 
-    el.innerHTML = cards + breakdownHtml;
+    el.innerHTML = summaryCards + breakdownHtml;
 }
 
 // ── Performance Tracking ─────────────────────────────────────────────
@@ -2499,6 +2509,7 @@ function renderAdminUsers() {
             <td><select onchange="updateUserRole(${u.id}, this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
                 <option value="buyer" ${u.role==='buyer'?'selected':''}>Buyer</option>
                 <option value="sales" ${u.role==='sales'?'selected':''}>Sales</option>
+                <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
             </select></td>
             <td>${u.m365_connected ? '<span style="color:var(--teal)">Connected</span>' : '<span style="color:var(--muted)">—</span>'}</td>
             <td><button class="btn btn-ghost btn-sm" onclick="deleteAdminUser(${u.id}, '${(u.name||u.email).replace(/'/g,"\\'")}')">Delete</button></td>

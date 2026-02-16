@@ -889,7 +889,7 @@
                 <button id="navMaterials" onclick="showMaterials();setNav(this)">Materials</button>
                 <button id="navBuyPlans" onclick="showBuyPlans();setNav(this)" style="display:none">Buy Plans</button>
                 <button id="navProactive" onclick="showProactiveOffers();setNav(this)" style="display:none">Proactive <span id="proactiveBadge" class="nav-badge" style="display:none"></span></button>
-                <button id="navPerformance" onclick="showPerformance();setNav(this)" style="display:none">Performance</button>
+                <button id="navPerformance" onclick="showPerformance();setNav(this)" style="display:none">Scorecards</button>
             </div>
         </div>
         <div class="user">
@@ -1553,7 +1553,7 @@
     <!-- VIEW: Performance Tracking -->
     <div id="view-performance" style="display:none">
         <div class="vendor-header">
-            <h2>Performance</h2>
+            <h2>Scorecards</h2>
         </div>
         <div class="tabs" id="perfTabs">
             <button class="tab on" onclick="switchPerfTab('vendors',this)">Vendor Scorecard</button>
@@ -1588,6 +1588,7 @@
                     <select id="newUserRole" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
                         <option value="buyer">Buyer</option>
                         <option value="sales">Sales</option>
+                        <option value="admin">Admin</option>
                     </select>
                     <button class="btn btn-primary" onclick="createUser()">Create User</button>
                 </div>

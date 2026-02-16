@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import require_buyer, require_user
+from ..dependencies import is_admin as _is_admin, require_buyer, require_user
 from ..models import (
     BuyPlan,
     Company,
@@ -523,7 +523,7 @@ async def acctivate_discover_schema(
     user: User = Depends(require_user), db: Session = Depends(get_db),
 ):
     """Run schema discovery against Acctivate SQL Server."""
-    if user.email.lower() not in settings.admin_emails:
+    if not _is_admin(user):
         raise HTTPException(403, "Admin only")
     if not settings.acctivate_host:
         raise HTTPException(400, "ACCTIVATE_HOST not configured")
@@ -540,7 +540,7 @@ async def acctivate_run_sync(
     user: User = Depends(require_user), db: Session = Depends(get_db),
 ):
     """Manually trigger an Acctivate sync run."""
-    if user.email.lower() not in settings.admin_emails:
+    if not _is_admin(user):
         raise HTTPException(403, "Admin only")
     if not settings.acctivate_host:
         raise HTTPException(400, "ACCTIVATE_HOST not configured")
@@ -555,7 +555,7 @@ async def get_sync_logs(
     user: User = Depends(require_user), db: Session = Depends(get_db),
 ):
     """View recent sync log entries."""
-    if user.email.lower() not in settings.admin_emails:
+    if not _is_admin(user):
         raise HTTPException(403, "Admin only")
     q = db.query(SyncLog).order_by(SyncLog.started_at.desc())
     if source:
@@ -1238,8 +1238,7 @@ async def list_buy_plans(
     query = db.query(BuyPlan).order_by(BuyPlan.created_at.desc())
     if status:
         query = query.filter(BuyPlan.status == status)
-    is_admin = user.email.lower() in settings.admin_emails
-    if not is_admin:
+    if not _is_admin(user):
         if user.role == "sales":
             query = query.filter(BuyPlan.submitted_by_id == user.id)
         # Buyers see all (they need to check which plans have their offers)
@@ -1264,7 +1263,7 @@ async def approve_buy_plan(
     user: User = Depends(require_user), db: Session = Depends(get_db),
 ):
     """Manager approves the buy plan (admin only)."""
-    if user.email.lower() not in settings.admin_emails:
+    if not _is_admin(user):
         raise HTTPException(403, "Admin approval required")
     plan = db.get(BuyPlan, plan_id)
     if not plan:
@@ -1296,7 +1295,7 @@ async def reject_buy_plan(
     user: User = Depends(require_user), db: Session = Depends(get_db),
 ):
     """Manager rejects the buy plan (admin only)."""
-    if user.email.lower() not in settings.admin_emails:
+    if not _is_admin(user):
         raise HTTPException(403, "Admin rejection required")
     plan = db.get(BuyPlan, plan_id)
     if not plan:

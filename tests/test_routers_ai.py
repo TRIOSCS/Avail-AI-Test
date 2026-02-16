@@ -19,13 +19,13 @@ import pytest
 
 @pytest.fixture
 def mike_user():
-    u = SimpleNamespace(email="mike@trioscs.com", id=1, name="Mike")
+    u = SimpleNamespace(email="mike@trioscs.com", id=1, name="Mike", role="admin")
     return u
 
 
 @pytest.fixture
 def other_user():
-    u = SimpleNamespace(email="buyer@trioscs.com", id=2, name="Buyer")
+    u = SimpleNamespace(email="buyer@trioscs.com", id=2, name="Buyer", role="buyer")
     return u
 
 
@@ -50,20 +50,26 @@ def test_ai_enabled_all(other_user):
 
 
 def test_ai_enabled_mike_only_allows_mike(mike_user):
-    with patch("app.routers.ai.settings", _make_settings("mike_only")):
+    mock_settings = _make_settings("mike_only")
+    with patch("app.routers.ai.settings", mock_settings), \
+         patch("app.dependencies.settings", mock_settings):
         from app.routers.ai import _ai_enabled
         assert _ai_enabled(mike_user) is True
 
 
 def test_ai_enabled_mike_only_blocks_other(other_user):
-    with patch("app.routers.ai.settings", _make_settings("mike_only")):
+    mock_settings = _make_settings("mike_only")
+    with patch("app.routers.ai.settings", mock_settings), \
+         patch("app.dependencies.settings", mock_settings):
         from app.routers.ai import _ai_enabled
         assert _ai_enabled(other_user) is False
 
 
 def test_ai_enabled_mike_only_case_insensitive():
-    user = SimpleNamespace(email="MIKE@TRIOSCS.COM", id=1, name="Mike")
-    with patch("app.routers.ai.settings", _make_settings("mike_only")):
+    user = SimpleNamespace(email="MIKE@TRIOSCS.COM", id=1, name="Mike", role="admin")
+    mock_settings = _make_settings("mike_only")
+    with patch("app.routers.ai.settings", mock_settings), \
+         patch("app.dependencies.settings", mock_settings):
         from app.routers.ai import _ai_enabled
         assert _ai_enabled(user) is True
 

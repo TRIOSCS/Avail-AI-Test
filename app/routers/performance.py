@@ -6,9 +6,8 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from ..config import settings
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import require_user, is_admin as _is_admin
 from ..models import User
 
 router = APIRouter(tags=["performance"])
@@ -47,7 +46,7 @@ def refresh_vendor_scorecards(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    if user.email.lower() not in settings.admin_emails:
+    if not _is_admin(user):
         raise HTTPException(403, "Admin required")
     from ..services.performance_service import compute_all_vendor_scorecards
     result = compute_all_vendor_scorecards(db)
@@ -85,7 +84,7 @@ def refresh_buyer_leaderboard(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    if user.email.lower() not in settings.admin_emails:
+    if not _is_admin(user):
         raise HTTPException(403, "Admin required")
     from ..services.performance_service import compute_buyer_leaderboard
     m = date.today().replace(day=1)

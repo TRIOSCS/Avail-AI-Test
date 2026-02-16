@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import is_admin as _is_admin, require_user
 from ..schemas.ai import (
     ProspectContactSave,
     ProspectFinderRequest,
@@ -50,7 +50,7 @@ def _ai_enabled(user: User) -> bool:
     if flag == "off":
         return False
     if flag == "mike_only":
-        return user.email.lower() in settings.admin_emails
+        return _is_admin(user)
     return True  # "all"
 
 

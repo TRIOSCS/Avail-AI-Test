@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import is_admin as _is_admin, require_user
 from ..models import ActivityLog, Company, Offer, User
 from ..schemas.v13_features import (
     BuyerProfileUpsert, PhoneCallLog, RoutingPairRequest, StrategicToggle,
@@ -95,7 +95,7 @@ async def upsert_buyer_profile(
     user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     """Create or update a buyer profile. Admin or self only."""
-    if user.email.lower() not in settings.admin_emails and user.id != user_id:
+    if not _is_admin(user) and user.id != user_id:
         raise HTTPException(403, "Only admins can edit other buyers' profiles")
 
     target = db.get(User, user_id)
@@ -277,7 +277,7 @@ async def toggle_strategic(
     user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     """Toggle a company's strategic flag (admin/manager only)."""
-    if user.email.lower() not in settings.admin_emails:
+    if not _is_admin(user):
         raise HTTPException(403, "Admin only")
 
     company = db.get(Company, company_id)
@@ -304,7 +304,7 @@ async def toggle_strategic(
 @router.get("/api/sales/manager-digest")
 async def manager_digest(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get the manager digest data (admin only)."""
-    if user.email.lower() not in settings.admin_emails:
+    if not _is_admin(user):
         raise HTTPException(403, "Admin only")
     from app.services.ownership_service import get_manager_digest
     return get_manager_digest(db)
@@ -382,7 +382,7 @@ async def create_routing(
     payload: RoutingPairRequest, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     """Manually trigger routing assignment for a requirement+vendor pair."""
-    if user.email.lower() not in settings.admin_emails:
+    if not _is_admin(user):
         raise HTTPException(403, "Admin only")
 
     from app.services.routing_service import create_routing_assignment
@@ -417,7 +417,7 @@ async def reconfirm_offer_endpoint(
 @router.post("/api/admin/reload-routing-maps")
 async def reload_routing_maps_endpoint(user: User = Depends(require_user)):
     """Reload brand/commodity and country/region maps from config JSON (admin only)."""
-    if user.email.lower() not in settings.admin_emails:
+    if not _is_admin(user):
         raise HTTPException(403, "Admin only")
     from app.routing_maps import load_routing_maps, get_brand_commodity_map, get_country_region_map
     try:

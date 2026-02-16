@@ -41,7 +41,8 @@ SCOPES = "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request, db: Session = Depends(get_db)):
     user = get_user(request, db)
-    is_admin = user.email.lower() in settings.admin_emails if user else False
+    from ..dependencies import is_admin as _is_admin
+    is_admin = _is_admin(user) if user else False
     return templates.TemplateResponse("index.html", {
         "request": request,
         "logged_in": user is not None,

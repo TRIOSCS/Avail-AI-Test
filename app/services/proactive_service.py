@@ -528,11 +528,14 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
             u_conv = sum(1 for o in user_offers if o.status == "converted")
             u_rev = sum(float(o.total_sell or 0) for o in user_offers if o.status == "converted")
             u_cost = sum(float(o.total_cost or 0) for o in user_offers if o.status == "converted")
+            u_pending = sum(float(o.total_sell or 0) for o in user_offers if o.status == "sent")
             breakdown.append({
                 "salesperson_id": sid,
                 "salesperson_name": sales_map.get(sid, "Unknown"),
                 "sent": u_sent,
                 "converted": u_conv,
+                "conversion_rate": round(u_conv / u_sent * 100, 1) if u_sent > 0 else 0,
+                "anticipated_revenue": round(u_pending, 2),
                 "revenue": round(u_rev, 2),
                 "gross_profit": round(u_rev - u_cost, 2),
             })

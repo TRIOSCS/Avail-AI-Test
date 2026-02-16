@@ -118,10 +118,10 @@ async def proactive_scorecard(
     user: User = Depends(require_user), db: Session = Depends(get_db),
 ):
     """Proactive offer scorecard. Admins can see all, sales see own."""
-    from ..config import settings
+    from ..dependencies import is_admin as _is_admin
     from ..services.proactive_service import get_scorecard
 
-    is_admin = user.email.lower() in settings.admin_emails
+    is_admin = _is_admin(user)
     if salesperson_id and not is_admin:
         salesperson_id = user.id  # Non-admin can only see own
     if not is_admin and not salesperson_id:

@@ -396,14 +396,14 @@ _seed_api_sources()
 # ── Shared dependencies (auth, query helpers) ────────────────────────────
 from .dependencies import (
     get_user, require_user, require_buyer, user_reqs_query,
-    get_req_for_user, require_fresh_token,
+    get_req_for_user, require_fresh_token, is_admin as _is_admin,
 )
 
 
 @app.get("/api/scheduler-status")
 async def scheduler_status(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Diagnostic endpoint — shows scheduler state for all M365 users."""
-    if user.email.lower() not in settings.admin_emails:
+    if not _is_admin(user):
         raise HTTPException(403, "Admin only")
     users = db.query(User).all()
     result = []

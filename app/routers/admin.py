@@ -9,17 +9,18 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from ..config import settings
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import require_user, is_admin
 from ..models import User, Company, CustomerSite, SiteContact, VendorCard, VendorContact
 
 router = APIRouter(tags=["admin"])
 log = logging.getLogger(__name__)
 
+VALID_ROLES = ("buyer", "sales", "admin")
+
 
 def _require_admin(user: User):
-    if user.email.lower() not in settings.admin_emails:
+    if not is_admin(user):
         raise HTTPException(403, "Admin access required")
 
 
@@ -60,8 +61,8 @@ def create_user(
     db: Session = Depends(get_db),
 ):
     _require_admin(user)
-    if body.role not in ("buyer", "sales"):
-        raise HTTPException(400, "Role must be 'buyer' or 'sales'")
+    if body.role not in VALID_ROLES:
+        raise HTTPException(400, "Role must be 'buyer', 'sales', or 'admin'")
     existing = db.query(User).filter(User.email == body.email.lower().strip()).first()
     if existing:
         raise HTTPException(409, "User with this email already exists")
@@ -89,8 +90,8 @@ def update_user(
     if body.name is not None:
         target.name = body.name.strip()
     if body.role is not None:
-        if body.role not in ("buyer", "sales"):
-            raise HTTPException(400, "Role must be 'buyer' or 'sales'")
+        if body.role not in VALID_ROLES:
+            raise HTTPException(400, "Role must be 'buyer', 'sales', or 'admin'")
         target.role = body.role
     db.commit()
     return {"id": target.id, "name": target.name, "email": target.email, "role": target.role}

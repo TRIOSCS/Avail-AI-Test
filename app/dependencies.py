@@ -51,6 +51,19 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
+def is_admin(user: User) -> bool:
+    """Check if user has admin privileges (by email list or role)."""
+    return user.email.lower() in settings.admin_emails or user.role == "admin"
+
+
+def require_admin(request: Request, db: Session = Depends(get_db)) -> User:
+    """Dependency: raises 403 if user is not an admin."""
+    user = require_user(request, db)
+    if not is_admin(user):
+        raise HTTPException(403, "Admin access required")
+    return user
+
+
 def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
     """Dependency: requires buyer role for RFQ actions."""
     user = require_user(request, db)
