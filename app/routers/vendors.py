@@ -15,6 +15,7 @@ Called by: main.py (router mount)
 Depends on: models, dependencies, vendor_utils, config
 """
 
+import asyncio
 from datetime import datetime, timezone
 import ipaddress
 import logging
@@ -46,6 +47,13 @@ log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["vendors"])
 
+# Generic email domains — not useful for vendor enrichment
+_GENERIC_EMAIL_DOMAINS = frozenset({
+    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "aol.com",
+    "icloud.com", "live.com", "msn.com", "protonmail.com", "mail.com",
+    "yandex.com", "zoho.com", "gmx.com", "fastmail.com",
+})
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -58,6 +66,28 @@ def get_or_create_card(vendor_name: str, db: Session) -> VendorCard:
         db.add(card)
         db.commit()
     return card
+
+
+async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str):
+    """Fire-and-forget enrichment for a vendor card. Runs in background."""
+    from ..enrichment_service import enrich_entity, apply_enrichment_to_vendor
+    from ..database import SessionLocal
+    try:
+        enrichment = await enrich_entity(domain, vendor_name)
+        if not enrichment:
+            return
+        db = SessionLocal()
+        try:
+            card = db.get(VendorCard, card_id)
+            if card:
+                apply_enrichment_to_vendor(card, enrichment)
+                db.commit()
+                log.info("Background enrichment completed for vendor %s (card %d): %s",
+                         vendor_name, card_id, enrichment.get("source", "unknown"))
+        finally:
+            db.close()
+    except Exception:
+        log.exception("Background enrichment failed for vendor card %d", card_id)
 
 
 def card_to_dict(card: VendorCard, db: Session) -> dict:
@@ -646,13 +676,62 @@ async def vendor_email_metrics(card_id: int, user: User = Depends(require_user),
 
 @router.post("/api/vendor-card/add-email")
 async def add_email_to_card(payload: VendorEmailAdd, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    """Quick-add an email to a vendor card (manual entries go to top)."""
+    """Quick-add an email to a vendor card.
+
+    Also creates a VendorContact record, extracts domain for the card,
+    and triggers background enrichment if a business domain is found.
+    """
     card = get_or_create_card(payload.vendor_name, db)
+
+    # 1. Add to legacy emails[] JSON array (existing behavior)
     emails = [e for e in (card.emails or []) if isinstance(e, str) and e.lower() != payload.email]
     emails.insert(0, payload.email)  # Manual entries go to the top
     card.emails = emails
+
+    # 2. Create VendorContact if not already present
+    contact_created = False
+    existing_contact = db.query(VendorContact).filter_by(
+        vendor_card_id=card.id, email=payload.email
+    ).first()
+    if not existing_contact:
+        vc = VendorContact(
+            vendor_card_id=card.id,
+            email=payload.email,
+            contact_type="company",
+            source="rfq_manual",
+            confidence=80,
+            is_verified=False,
+        )
+        db.add(vc)
+        contact_created = True
+
+    # 3. Extract domain and set on card (skip generic email providers)
+    domain_extracted = None
+    domain_part = payload.email.split("@")[1] if "@" in payload.email else None
+    if domain_part and domain_part not in _GENERIC_EMAIL_DOMAINS:
+        domain_extracted = domain_part
+        if not card.domain:
+            card.domain = domain_extracted
+
     db.commit()
-    return {"ok": True, "card_id": card.id, "emails": card.emails}
+
+    # 4. Fire background enrichment if we have a usable domain and card not yet enriched
+    enrich_triggered = False
+    if domain_extracted and not card.last_enriched_at:
+        if settings.clay_api_key or settings.explorium_api_key or settings.anthropic_api_key:
+            asyncio.create_task(
+                _background_enrich_vendor(card.id, domain_extracted, card.display_name)
+            )
+            enrich_triggered = True
+
+    return {
+        "ok": True,
+        "card_id": card.id,
+        "emails": card.emails,
+        "contact_created": contact_created,
+        "domain": card.domain,
+        "enrich_triggered": enrich_triggered,
+    }
 
 
 # ── Material Cards ──────────────────────────────────────────────────────

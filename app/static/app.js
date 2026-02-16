@@ -2105,16 +2105,35 @@ function fmtRelative(iso) {
     return d.toLocaleDateString();
 }
 
+function threadSearchFilter(query) {
+    const wrap = document.getElementById('threadEntries');
+    if (!wrap) return;
+    const entries = wrap.querySelectorAll('[data-searchable]');
+    const q = query.toLowerCase().trim();
+    let visible = 0;
+    entries.forEach(el => {
+        if (!q || el.dataset.searchable.includes(q)) {
+            el.style.display = '';
+            visible++;
+        } else {
+            el.style.display = 'none';
+        }
+    });
+    const noResults = document.getElementById('threadNoResults');
+    if (noResults) noResults.style.display = (q && !visible) ? '' : 'none';
+}
+
 async function viewThread(vendorName) {
     // Find contacts + responses for this vendor
     const v = (activityData.vendors || []).find(x => x.vendor_name === vendorName);
     if (!v) return;
 
-    let html = '<div style="max-height:60vh;overflow-y:auto">';
+    let html = '<div id="threadEntries" style="max-height:60vh;overflow-y:auto">';
 
     // Outbound contacts
     for (const c of (v.contacts || [])) {
-        html += `<div style="margin-bottom:12px;padding:10px 14px;background:var(--teal-light);border-radius:8px;border:1px solid rgba(26,127,155,.15)">
+        const searchText = [c.vendor_contact, c.subject, c.user_name, ...(c.parts_included||[])].filter(Boolean).join(' ').toLowerCase();
+        html += `<div data-searchable="${escAttr(searchText)}" style="margin-bottom:12px;padding:10px 14px;background:var(--teal-light);border-radius:8px;border:1px solid rgba(26,127,155,.15)">
             <div style="font-size:11px;color:var(--teal);font-weight:600;margin-bottom:4px">
                 ${c.contact_type === 'email' ? '✉ Sent' : '📞 Called'} · ${esc(c.vendor_contact||'')} · ${fmtDateTime(c.created_at)} · by ${esc(c.user_name||'')}
             </div>
@@ -2127,6 +2146,8 @@ async function viewThread(vendorName) {
     for (const r of (v.responses || [])) {
         const pd = r.parsed_data;
         let bodyHtml = '';
+        // Build searchable text for this response
+        const searchParts = [r.vendor_email, r.subject];
         if (pd && pd.parts && pd.parts.length) {
             const clsColors = {quote_provided:'#10b981',no_stock:'#ef4444',counter_offer:'#f59e0b',clarification_needed:'#6366f1',ooo_bounce:'#9ca3af',follow_up:'#3b82f6'};
             const clsLabels = {quote_provided:'Quote Provided',no_stock:'No Stock',counter_offer:'Counter Offer',clarification_needed:'Clarification Needed',ooo_bounce:'OOO / Bounce',follow_up:'Follow Up'};
@@ -2147,16 +2168,23 @@ async function viewThread(vendorName) {
                     <td style="padding:3px 6px">${esc(p.lead_time||'\u2014')}</td>
                     <td style="padding:3px 6px">${esc(p.condition||'\u2014')}</td>
                 </tr>`;
+                searchParts.push(p.mpn, p.status, p.lead_time, p.condition);
             }
             bodyHtml += '</table>';
-            if (pd.vendor_notes) bodyHtml += `<div style="font-size:11px;color:var(--text2);font-style:italic">${esc(pd.vendor_notes)}</div>`;
+            if (pd.vendor_notes) {
+                bodyHtml += `<div style="font-size:11px;color:var(--text2);font-style:italic">${esc(pd.vendor_notes)}</div>`;
+                searchParts.push(pd.vendor_notes);
+            }
+            searchParts.push(clsLabels[cls] || cls);
         } else {
             // Fallback: plain text snippet when no parsed data
             const snippet = (r.body||'').replace(/<[^>]*>/g,'').replace(/&nbsp;/g,' ').replace(/\s+/g,' ').trim().slice(0,300);
             bodyHtml = `<div style="font-size:11px;color:var(--text2);white-space:pre-wrap">${esc(snippet || 'No content available')}</div>`;
+            searchParts.push(snippet);
         }
 
-        html += `<div style="margin-bottom:12px;padding:10px 14px;background:var(--green-light);border-radius:8px;border:1px solid rgba(16,185,129,.15)">
+        const searchText = searchParts.filter(Boolean).join(' ').toLowerCase();
+        html += `<div data-searchable="${escAttr(searchText)}" style="margin-bottom:12px;padding:10px 14px;background:var(--green-light);border-radius:8px;border:1px solid rgba(16,185,129,.15)">
             <div style="font-size:11px;color:var(--green);font-weight:600;margin-bottom:4px">
                 ✅ Reply from ${esc(r.vendor_email||'')} · ${fmtDateTime(r.received_at)}
             </div>
@@ -2169,6 +2197,7 @@ async function viewThread(vendorName) {
         html += '<p class="empty">No thread data available</p>';
     }
 
+    html += '<p id="threadNoResults" class="empty" style="display:none">No entries match your search</p>';
     html += '</div>';
 
     // Show in a simple modal
@@ -2178,13 +2207,15 @@ async function viewThread(vendorName) {
         const m = document.createElement('div');
         m.id = 'threadModal';
         m.className = 'modal-bg';
-        m.innerHTML = `<div class="modal modal-lg"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px"><h2 id="threadTitle"></h2><button class="btn btn-ghost btn-sm" onclick="closeModal('threadModal')">✕ Close</button></div><div id="threadContent"></div></div>`;
+        m.innerHTML = `<div class="modal modal-lg"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h2 id="threadTitle"></h2><button class="btn btn-ghost btn-sm" onclick="closeModal('threadModal')">✕ Close</button></div><input id="threadSearch" type="text" placeholder="Search thread..." oninput="threadSearchFilter(this.value)" style="width:100%;padding:7px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;margin-bottom:12px;outline:none;background:var(--bg2)"><div id="threadContent"></div></div>`;
         m.addEventListener('click', e => { if (e.target === m) closeModal('threadModal'); });
         document.body.appendChild(m);
     }
     document.getElementById('threadTitle').textContent = `Thread: ${vendorName}`;
     document.getElementById('threadContent').innerHTML = html;
+    document.getElementById('threadSearch').value = '';
     document.getElementById('threadModal').classList.add('open');
+    document.getElementById('threadSearch').focus();
 }
 
 
