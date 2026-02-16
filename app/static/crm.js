@@ -1395,7 +1395,7 @@ function renderSuggestedContacts() {
                 <div class="sc-title">${esc(c.title || 'No title')}</div>
                 <div class="sc-meta">
                     ${c.email ? '<span>✉ ' + esc(c.email) + '</span>' : ''}
-                    ${c.phone ? '<span>☎ ' + esc(c.phone) + '</span>' : ''}
+                    ${c.phone ? '<a href="tel:' + escAttr(c.phone) + '" onclick="event.stopPropagation()">☎ ' + esc(c.phone) + '</a>' : ''}
                     ${c.linkedin_url ? '<a href="' + escAttr(c.linkedin_url) + '" target="_blank" onclick="event.stopPropagation()">LinkedIn ↗</a>' : ''}
                     ${c.location ? '<span>📍 ' + esc(c.location) + '</span>' : ''}
                 </div>
@@ -1565,7 +1565,7 @@ function openAIContactsPanel(contacts, entityType, entityId) {
                             <div class="ai-contact-title">${esc(c.title || 'No title')}</div>
                             <div class="ai-contact-meta">
                                 ${c.email ? `<span>✉ ${esc(c.email)}</span>` : ''}
-                                ${c.phone ? `<span>☎ ${esc(c.phone)}</span>` : ''}
+                                ${c.phone ? `<a href="tel:${escAttr(c.phone)}">☎ ${esc(c.phone)}</a>` : ''}
                                 ${c.linkedin_url ? `<a href="${escAttr(c.linkedin_url)}" target="_blank">LinkedIn ↗</a>` : ''}
                             </div>
                         </div>
