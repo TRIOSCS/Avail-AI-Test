@@ -8,6 +8,12 @@ let crmOffers = [];
 let crmQuote = null;
 let selectedOffers = new Set();
 
+function autoLogCrmCall(phone) {
+    apiFetch('/api/activities/call', {
+        method: 'POST', body: { phone: phone, direction: 'outbound' }
+    }).catch(function(e) { console.error('autoLogCrmCall:', e); });
+}
+
 // ── Customers View ─────────────────────────────────────────────────────
 
 async function showCustomers() {
@@ -109,7 +115,7 @@ async function toggleSiteDetail(siteId) {
                         ${c.title ? '<div class="si-contact-title">' + esc(c.title) + '</div>' : ''}
                         <div class="si-contact-meta">
                             ${c.email ? '<a href="mailto:'+esc(c.email)+'" title="'+escAttr(c.email)+'">'+esc(c.email)+'</a>' : ''}
-                            ${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" class="si-contact-phone">'+esc(c.phone)+'</a>' : ''}
+                            ${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" class="si-contact-phone" onclick="autoLogCrmCall(\''+escAttr(c.phone)+'\')">'+esc(c.phone)+'</a>' : ''}
                         </div>
                         ${c.notes ? '<div class="si-contact-notes">'+esc(c.notes)+'</div>' : ''}
                     </div>
@@ -1395,7 +1401,7 @@ function renderSuggestedContacts() {
                 <div class="sc-title">${esc(c.title || 'No title')}</div>
                 <div class="sc-meta">
                     ${c.email ? '<span>✉ ' + esc(c.email) + '</span>' : ''}
-                    ${c.phone ? '<a href="tel:' + escAttr(c.phone) + '" onclick="event.stopPropagation()">☎ ' + esc(c.phone) + '</a>' : ''}
+                    ${c.phone ? '<a href="tel:' + escAttr(c.phone) + '" onclick="event.stopPropagation();autoLogCrmCall(\'' + escAttr(c.phone) + '\')">☎ ' + esc(c.phone) + '</a>' : ''}
                     ${c.linkedin_url ? '<a href="' + escAttr(c.linkedin_url) + '" target="_blank" onclick="event.stopPropagation()">LinkedIn ↗</a>' : ''}
                     ${c.location ? '<span>📍 ' + esc(c.location) + '</span>' : ''}
                 </div>
@@ -1565,7 +1571,7 @@ function openAIContactsPanel(contacts, entityType, entityId) {
                             <div class="ai-contact-title">${esc(c.title || 'No title')}</div>
                             <div class="ai-contact-meta">
                                 ${c.email ? `<span>✉ ${esc(c.email)}</span>` : ''}
-                                ${c.phone ? `<a href="tel:${escAttr(c.phone)}">☎ ${esc(c.phone)}</a>` : ''}
+                                ${c.phone ? `<a href="tel:${escAttr(c.phone)}" onclick="autoLogCrmCall('${escAttr(c.phone)}')">☎ ${esc(c.phone)}</a>` : ''}
                                 ${c.linkedin_url ? `<a href="${escAttr(c.linkedin_url)}" target="_blank">LinkedIn ↗</a>` : ''}
                             </div>
                         </div>

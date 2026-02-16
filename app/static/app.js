@@ -1888,7 +1888,7 @@ async function loadVendorContacts(cardId) {
                     <div class="si-contact-meta">
                         ${c.email ? '<a href="mailto:' + escAttr(c.email) + '">' + esc(c.email) + '</a>' : ''}
                         ${c.email && c.phone ? ' &middot; ' : ''}
-                        ${c.phone ? '<a href="tel:' + escAttr(c.phone) + '">' + esc(c.phone) + '</a>' : ''}
+                        ${c.phone ? '<a href="tel:' + escAttr(c.phone) + '" onclick="autoLogVendorCall(' + cardId + ',\'' + escAttr(c.phone) + '\')">' + esc(c.phone) + '</a>' : ''}
                     </div>
                     ${c.label ? '<div style="font-size:10px;color:var(--muted)">' + esc(c.label) + '</div>' : ''}
                 </div>
@@ -2014,6 +2014,15 @@ function openVendorLogCallModal(cardId, vendorName, reqId) {
     setTimeout(() => document.getElementById('vlcPhone').focus(), 100);
 }
 
+function autoLogVendorCall(cardId, phone) {
+    apiFetch('/api/vendors/' + cardId + '/activities/call', {
+        method: 'POST', body: { phone: phone, direction: 'outbound' }
+    }).then(function() {
+        loadVendorActivities(parseInt(cardId));
+        loadVendorActivityStatus(parseInt(cardId));
+    }).catch(function(e) { console.error('autoLogVendorCall:', e); });
+}
+
 function placeVendorCall(cardId, vendorName, reqId, phone) {
     if (!phone) {
         showToast('No phone number on file for ' + vendorName, 'error');
@@ -2026,7 +2035,7 @@ function placeVendorCall(cardId, vendorName, reqId, phone) {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    // After a short delay, open the log modal pre-filled so user can record the call
+    // After a short delay, open the log modal so user can add notes/duration
     setTimeout(function() {
         document.getElementById('vlcCardId').value = cardId;
         document.getElementById('vlcVendorName').textContent = vendorName;
@@ -2777,7 +2786,7 @@ async function viewThread(vendorName) {
             const labelColor = isCall ? 'var(--amber)' : 'var(--muted)';
             const durationStr = isCall && a.duration_seconds ? (' · ' + Math.floor(a.duration_seconds/60) + 'm ' + (a.duration_seconds%60) + 's') : '';
             const contactStr = a.contact_name ? (' · ' + esc(a.contact_name)) : '';
-            const phoneStr = isCall && a.contact_phone ? (' · <a href="tel:' + escAttr(a.contact_phone) + '" style="color:inherit;text-decoration:underline">' + esc(a.contact_phone) + '</a>') : '';
+            const phoneStr = isCall && a.contact_phone ? (' · <a href="tel:' + escAttr(a.contact_phone) + '" style="color:inherit;text-decoration:underline"' + (v.vendor_card_id ? ' onclick="autoLogVendorCall(' + v.vendor_card_id + ',\'' + escAttr(a.contact_phone) + '\')"' : '') + '>' + esc(a.contact_phone) + '</a>') : '';
             const searchText = [a.contact_name, a.contact_phone, a.notes, a.user_name, label].filter(Boolean).join(' ').toLowerCase();
             html += '<div data-searchable="' + escAttr(searchText) + '" style="margin-bottom:12px;padding:10px 14px;background:' + bgColor + ';border-radius:8px;border:1px solid ' + borderColor + '">'
                 + '<div style="font-size:11px;color:' + labelColor + ';font-weight:600;margin-bottom:4px">'
