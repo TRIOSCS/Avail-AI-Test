@@ -620,6 +620,13 @@
         .offer-table{margin-bottom:0}
         .offer-table tr.offer-ref{opacity:.5}
         .offer-ref-badge{font-size:9px;color:var(--muted);font-style:italic}
+        .tab.tab-new{background:#22c55e;color:#fff}
+        .tab.tab-new.on{background:#16a34a}
+        .tab.tab-urgent{background:#dc2626;color:#fff}
+        .tab.tab-urgent.on{background:#b91c1c}
+        .new-offers-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-left:4px;vertical-align:middle;animation:pulse-dot 2s ease-in-out infinite}
+        .new-offers-dot.red{background:#dc2626}
+        @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
 
         /* Quote tab */
         .quote-header{display:flex;justify-content:space-between;align-items:flex-start;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:12px}
@@ -829,6 +836,7 @@
                 <button id="navVendors" onclick="showVendors();setNav(this)">Vendors</button>
                 <button id="navMaterials" onclick="showMaterials();setNav(this)">Materials</button>
                 <button id="navSources" onclick="showSources();setNav(this)">Data Sources</button>
+                <button id="navBuyPlans" onclick="showBuyPlans();setNav(this)" style="display:none">Buy Plans</button>
             </div>
         </div>
         <div class="user">
@@ -1106,6 +1114,21 @@
         </div>
         <div id="sourcesList"><p class="empty">Loading…</p></div>
     </div>
+
+    <!-- VIEW: Buy Plans (admin only) -->
+    <div id="view-buyplans" style="display:none">
+        <div class="vendor-header">
+            <h2>Buy Plans</h2>
+            <div style="display:flex;gap:6px">
+                <button class="filter-pill on" data-bp-status="" onclick="setBpFilter('',this)">All</button>
+                <button class="filter-pill" data-bp-status="pending_approval" onclick="setBpFilter('pending_approval',this)">Pending</button>
+                <button class="filter-pill" data-bp-status="approved" onclick="setBpFilter('approved',this)">Approved</button>
+                <button class="filter-pill" data-bp-status="po_entered" onclick="setBpFilter('po_entered',this)">PO Entered</button>
+                <button class="filter-pill" data-bp-status="po_confirmed" onclick="setBpFilter('po_confirmed',this)">Confirmed</button>
+            </div>
+        </div>
+        <div id="buyPlansList"><p class="empty">Loading…</p></div>
+    </div>
 </div>
 
 <!-- New Requisition Modal -->
@@ -1280,21 +1303,53 @@
             <div class="field"><label>Hardware Rev</label><input id="loHardware" placeholder="Rev C"></div>
             <div class="field"><label>Packaging</label><input id="loPackaging" placeholder="Reel, Tray…"></div>
             <div class="field"><label>MOQ</label><input id="loMoq" type="number" placeholder="1000"></div>
+            <div class="field field-full"><label>Notes</label><input id="loNotes" placeholder="Optional notes…"></div>
             <div class="field field-full">
-                <label>Source</label>
-                <div class="lo-sources">
-                    <label><input type="radio" name="loSource" value="manual" checked> Manual entry</label>
-                    <label><input type="radio" name="loSource" value="email"> Email quote</label>
-                    <label><input type="radio" name="loSource" value="phone"> Phone quote</label>
-                    <label><input type="radio" name="loSource" value="search"> Search result</label>
+                <label>Attachments</label>
+                <div id="loAttachments" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
+                <div style="display:flex;gap:6px">
+                    <label class="btn btn-ghost btn-sm" style="cursor:pointer">
+                        Upload File <input type="file" id="loFileInput" multiple accept="image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx" style="display:none" onchange="handleOfferFileSelect(this)">
+                    </label>
+                    <button class="btn btn-ghost btn-sm" onclick="openOneDrivePicker()">Browse OneDrive</button>
                 </div>
             </div>
-            <div class="field field-full"><label>Notes</label><input id="loNotes" placeholder="Optional notes…"></div>
         </div>
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('logOfferModal')">Cancel</button>
             <button class="btn btn-ghost" onclick="saveOffer(true)">Save &amp; Next</button>
             <button class="btn btn-primary" onclick="saveOffer(false)">Save &amp; Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- OneDrive Browser Modal -->
+<div id="oneDriveModal" class="modal-bg" onclick="if(event.target===this)closeModal('oneDriveModal')">
+    <div class="modal modal-lg">
+        <h2>Browse OneDrive</h2>
+        <div id="odBreadcrumb" style="font-size:12px;color:var(--muted);margin-bottom:8px">
+            <a onclick="browseOneDrive('')" style="cursor:pointer;color:var(--teal)">Root</a>
+        </div>
+        <div id="odFileList" style="max-height:400px;overflow-y:auto"><p class="empty">Loading…</p></div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('oneDriveModal')">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Buy Plan Modal -->
+<div id="buyPlanModal" class="modal-bg" onclick="if(event.target===this)closeModal('buyPlanModal')">
+    <div class="modal modal-lg">
+        <h2>Mark Won &amp; Submit Buy Plan</h2>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Select which items to purchase. This will be sent to management for approval.</p>
+        <table class="tbl" style="margin-bottom:12px">
+            <thead><tr><th style="width:30px"></th><th>MPN</th><th>Mfr</th><th>Qty</th><th>Unit Cost</th><th>Line Total</th><th>Lead</th></tr></thead>
+            <tbody id="bpItems"></tbody>
+        </table>
+        <div style="text-align:right;font-weight:600;margin-bottom:12px">Total Cost: <span id="bpTotal"></span></div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('buyPlanModal')">Cancel</button>
+            <button class="btn btn-success" onclick="submitBuyPlan()">Mark Won &amp; Submit Buy Plan</button>
         </div>
     </div>
 </div>

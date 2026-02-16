@@ -19,7 +19,7 @@ Depends on: models, dependencies, vendor_utils, config, enrichment_service,
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
@@ -28,10 +28,12 @@ from ..config import settings
 from ..database import get_db
 from ..dependencies import require_buyer, require_user
 from ..models import (
+    BuyPlan,
     Company,
     CustomerSite,
     InventorySnapshot,
     Offer,
+    OfferAttachment,
     Quote,
     Requirement,
     Requisition,
@@ -673,11 +675,23 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
     offers = db.query(Offer).filter(Offer.requisition_id == req_id).order_by(
         Offer.requirement_id, Offer.unit_price,
     ).all()
+    # Detect unseen offers before marking as viewed
+    latest_offer_at = max((o.created_at for o in offers), default=None)
+    has_new = bool(latest_offer_at and (not req.offers_viewed_at or latest_offer_at > req.offers_viewed_at))
+    # Mark as viewed if the requisition owner is viewing
+    if offers and user.id == req.created_by:
+        req.offers_viewed_at = datetime.now(timezone.utc)
+        db.commit()
     groups: dict[int, list] = {}
     for o in offers:
         key = o.requirement_id or 0
         if key not in groups:
             groups[key] = []
+        atts = [{
+            "id": a.id, "file_name": a.file_name,
+            "onedrive_url": a.onedrive_url, "thumbnail_url": a.thumbnail_url,
+            "content_type": a.content_type,
+        } for a in (o.attachments or [])]
         groups[key].append({
             "id": o.id, "requirement_id": o.requirement_id,
             "vendor_name": o.vendor_name, "vendor_card_id": o.vendor_card_id,
@@ -691,6 +705,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
             "notes": o.notes,
             "entered_by": o.entered_by.name if o.entered_by else None,
             "created_at": o.created_at.isoformat() if o.created_at else None,
+            "attachments": atts,
         })
     result = []
     for r in req.requirements:
@@ -701,7 +716,11 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
             "target_qty": r.target_qty, "target_price": target,
             "last_quoted": last_q, "offers": groups.get(r.id, []),
         })
-    return result
+    return {
+        "has_new_offers": has_new,
+        "latest_offer_at": latest_offer_at.isoformat() if latest_offer_at else None,
+        "groups": result,
+    }
 
 
 @router.post("/api/requisitions/{req_id}/offers")
@@ -775,6 +794,159 @@ async def delete_offer(offer_id: int, user: User = Depends(require_user), db: Se
     db.delete(offer)
     db.commit()
     return {"ok": True}
+
+
+# ── Offer Attachments (OneDrive) ─────────────────────────────────────────
+
+
+@router.post("/api/offers/{offer_id}/attachments")
+async def upload_offer_attachment(
+    offer_id: int,
+    file: UploadFile = File(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Upload a file to OneDrive and attach it to an offer."""
+    offer = db.get(Offer, offer_id)
+    if not offer:
+        raise HTTPException(404)
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 10 MB)")
+    # Upload to OneDrive: AvailAI/Offers/{req_id}/{filename}
+    from ..utils.graph_client import GraphClient
+    if not user.access_token:
+        raise HTTPException(401, "Microsoft account not connected — please re-login")
+    gc = GraphClient(user.access_token)
+    safe_name = file.filename.replace("/", "_").replace("\\", "_")
+    drive_path = f"/me/drive/root:/AvailAI/Offers/{offer.requisition_id}/{safe_name}:/content"
+    import httpx
+    async with httpx.AsyncClient(timeout=30) as client:
+        resp = await client.put(
+            f"https://graph.microsoft.com/v1.0{drive_path}",
+            content=content,
+            headers={
+                "Authorization": f"Bearer {user.access_token}",
+                "Content-Type": file.content_type or "application/octet-stream",
+            },
+        )
+    if resp.status_code not in (200, 201):
+        logger.error(f"OneDrive upload failed: {resp.status_code} {resp.text[:300]}")
+        raise HTTPException(502, "Failed to upload to OneDrive")
+    result = resp.json()
+    att = OfferAttachment(
+        offer_id=offer_id,
+        file_name=safe_name,
+        onedrive_item_id=result.get("id"),
+        onedrive_url=result.get("webUrl"),
+        content_type=file.content_type,
+        size_bytes=len(content),
+        uploaded_by_id=user.id,
+    )
+    db.add(att)
+    db.commit()
+    return {
+        "id": att.id, "file_name": att.file_name,
+        "onedrive_url": att.onedrive_url,
+        "content_type": att.content_type,
+    }
+
+
+@router.post("/api/offers/{offer_id}/attachments/onedrive")
+async def attach_from_onedrive(
+    offer_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Attach an existing OneDrive file to an offer by item ID."""
+    offer = db.get(Offer, offer_id)
+    if not offer:
+        raise HTTPException(404)
+    body = await request.json()
+    item_id = body.get("item_id")
+    if not item_id:
+        raise HTTPException(400, "item_id required")
+    from ..utils.graph_client import GraphClient
+    if not user.access_token:
+        raise HTTPException(401, "Microsoft account not connected")
+    gc = GraphClient(user.access_token)
+    item = await gc.get_json(f"/me/drive/items/{item_id}")
+    if "error" in item:
+        raise HTTPException(404, "OneDrive item not found")
+    att = OfferAttachment(
+        offer_id=offer_id,
+        file_name=item.get("name", "file"),
+        onedrive_item_id=item_id,
+        onedrive_url=item.get("webUrl"),
+        content_type=item.get("file", {}).get("mimeType"),
+        size_bytes=item.get("size"),
+        uploaded_by_id=user.id,
+    )
+    db.add(att)
+    db.commit()
+    return {
+        "id": att.id, "file_name": att.file_name,
+        "onedrive_url": att.onedrive_url,
+        "content_type": att.content_type,
+    }
+
+
+@router.delete("/api/offer-attachments/{att_id}")
+async def delete_offer_attachment(
+    att_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    att = db.get(OfferAttachment, att_id)
+    if not att:
+        raise HTTPException(404)
+    # Delete from OneDrive if we have the item ID
+    if att.onedrive_item_id and user.access_token:
+        from ..utils.graph_client import GraphClient
+        gc = GraphClient(user.access_token)
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=15) as client:
+                await client.delete(
+                    f"https://graph.microsoft.com/v1.0/me/drive/items/{att.onedrive_item_id}",
+                    headers={"Authorization": f"Bearer {user.access_token}"},
+                )
+        except Exception:
+            logger.warning(f"Failed to delete OneDrive item {att.onedrive_item_id}")
+    db.delete(att)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/api/onedrive/browse")
+async def browse_onedrive(
+    path: str = "",
+    user: User = Depends(require_user),
+):
+    """Browse user's OneDrive files for the picker."""
+    if not user.access_token:
+        raise HTTPException(401, "Microsoft account not connected")
+    from ..utils.graph_client import GraphClient
+    gc = GraphClient(user.access_token)
+    if path:
+        data = await gc.get_json(f"/me/drive/root:/{path}:/children",
+                                  params={"$top": "50", "$select": "id,name,size,file,folder,webUrl,lastModifiedDateTime"})
+    else:
+        data = await gc.get_json("/me/drive/root/children",
+                                  params={"$top": "50", "$select": "id,name,size,file,folder,webUrl,lastModifiedDateTime"})
+    if "error" in data:
+        raise HTTPException(502, "Failed to browse OneDrive")
+    items = data.get("value", [])
+    return [{
+        "id": i["id"],
+        "name": i["name"],
+        "is_folder": "folder" in i,
+        "size": i.get("size"),
+        "mime_type": i.get("file", {}).get("mimeType"),
+        "web_url": i.get("webUrl"),
+        "modified_at": i.get("lastModifiedDateTime"),
+    } for i in items]
 
 
 # ── Quotes ───────────────────────────────────────────────────────────────
@@ -963,6 +1135,254 @@ async def reopen_quote(
         quote.result_at = None
         db.commit()
         return quote_to_dict(quote)
+
+
+# ── Buy Plans ────────────────────────────────────────────────────────────
+
+
+def _buyplan_to_dict(bp: BuyPlan) -> dict:
+    return {
+        "id": bp.id,
+        "requisition_id": bp.requisition_id,
+        "requisition_name": bp.requisition.name if bp.requisition else None,
+        "quote_id": bp.quote_id,
+        "status": bp.status,
+        "line_items": bp.line_items or [],
+        "manager_notes": bp.manager_notes,
+        "rejection_reason": bp.rejection_reason,
+        "submitted_by": bp.submitted_by.name if bp.submitted_by else None,
+        "submitted_by_id": bp.submitted_by_id,
+        "approved_by": bp.approved_by.name if bp.approved_by else None,
+        "approved_by_id": bp.approved_by_id,
+        "submitted_at": bp.submitted_at.isoformat() if bp.submitted_at else None,
+        "approved_at": bp.approved_at.isoformat() if bp.approved_at else None,
+        "rejected_at": bp.rejected_at.isoformat() if bp.rejected_at else None,
+    }
+
+
+@router.post("/api/quotes/{quote_id}/buy-plan")
+async def submit_buy_plan(
+    quote_id: int, request: Request,
+    user: User = Depends(require_user), db: Session = Depends(get_db),
+):
+    """Submit a buy plan when marking a quote as Won."""
+    quote = db.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404)
+    body = await request.json()
+    offer_ids = body.get("offer_ids", [])
+    if not offer_ids:
+        raise HTTPException(400, "At least one offer must be selected")
+
+    # Build buy plan line items from selected offers
+    offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
+    line_items = []
+    for o in offers:
+        line_items.append({
+            "offer_id": o.id,
+            "mpn": o.mpn,
+            "vendor_name": o.vendor_name,
+            "manufacturer": o.manufacturer,
+            "qty": o.qty_available or 0,
+            "cost_price": float(o.unit_price) if o.unit_price else 0,
+            "lead_time": o.lead_time,
+            "condition": o.condition,
+            "entered_by_id": o.entered_by_id,
+            "po_number": None,
+            "po_sent_at": None,
+            "po_recipient": None,
+            "po_verified": False,
+        })
+
+    import secrets
+    plan = BuyPlan(
+        requisition_id=quote.requisition_id,
+        quote_id=quote_id,
+        status="pending_approval",
+        line_items=line_items,
+        submitted_by_id=user.id,
+        approval_token=secrets.token_urlsafe(32),
+    )
+    db.add(plan)
+
+    # Mark quote as won
+    quote.result = "won"
+    quote.result_at = datetime.now(timezone.utc)
+    quote.status = "won"
+    quote.won_revenue = quote.subtotal
+    req = db.get(Requisition, quote.requisition_id)
+    if req:
+        req.status = "won"
+    db.commit()
+
+    # Send notifications asynchronously
+    import asyncio
+    from ..services.buyplan_service import notify_buyplan_submitted
+    asyncio.create_task(notify_buyplan_submitted(plan, db))
+
+    return {
+        "ok": True,
+        "buy_plan_id": plan.id,
+        "status": "pending_approval",
+        "req_status": req.status if req else None,
+        "status_changed": True,
+    }
+
+
+@router.get("/api/buy-plans")
+async def list_buy_plans(
+    status: str = "",
+    user: User = Depends(require_user), db: Session = Depends(get_db),
+):
+    """List buy plans. Admins see all, sales see own, buyers see their offers."""
+    query = db.query(BuyPlan).order_by(BuyPlan.created_at.desc())
+    if status:
+        query = query.filter(BuyPlan.status == status)
+    is_admin = user.email.lower() in settings.admin_emails
+    if not is_admin:
+        if user.role == "sales":
+            query = query.filter(BuyPlan.submitted_by_id == user.id)
+        # Buyers see all (they need to check which plans have their offers)
+    plans = query.all()
+    return [_buyplan_to_dict(p) for p in plans]
+
+
+@router.get("/api/buy-plans/{plan_id}")
+async def get_buy_plan(
+    plan_id: int,
+    user: User = Depends(require_user), db: Session = Depends(get_db),
+):
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise HTTPException(404)
+    return _buyplan_to_dict(plan)
+
+
+@router.put("/api/buy-plans/{plan_id}/approve")
+async def approve_buy_plan(
+    plan_id: int, request: Request,
+    user: User = Depends(require_user), db: Session = Depends(get_db),
+):
+    """Manager approves the buy plan (admin only)."""
+    if user.email.lower() not in settings.admin_emails:
+        raise HTTPException(403, "Admin approval required")
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise HTTPException(404)
+    if plan.status != "pending_approval":
+        raise HTTPException(400, f"Cannot approve plan in status: {plan.status}")
+
+    body = await request.json()
+    if "line_items" in body:
+        plan.line_items = body["line_items"]
+    if "manager_notes" in body:
+        plan.manager_notes = body["manager_notes"]
+
+    plan.status = "approved"
+    plan.approved_by_id = user.id
+    plan.approved_at = datetime.now(timezone.utc)
+    db.commit()
+
+    import asyncio
+    from ..services.buyplan_service import notify_buyplan_approved
+    asyncio.create_task(notify_buyplan_approved(plan, db))
+
+    return {"ok": True, "status": "approved"}
+
+
+@router.put("/api/buy-plans/{plan_id}/reject")
+async def reject_buy_plan(
+    plan_id: int, request: Request,
+    user: User = Depends(require_user), db: Session = Depends(get_db),
+):
+    """Manager rejects the buy plan (admin only)."""
+    if user.email.lower() not in settings.admin_emails:
+        raise HTTPException(403, "Admin rejection required")
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise HTTPException(404)
+    if plan.status != "pending_approval":
+        raise HTTPException(400, f"Cannot reject plan in status: {plan.status}")
+
+    body = await request.json()
+    plan.rejection_reason = body.get("reason", "")
+    plan.status = "rejected"
+    plan.approved_by_id = user.id  # reuse field for who acted
+    plan.rejected_at = datetime.now(timezone.utc)
+    db.commit()
+
+    import asyncio
+    from ..services.buyplan_service import notify_buyplan_rejected
+    asyncio.create_task(notify_buyplan_rejected(plan, db))
+
+    return {"ok": True, "status": "rejected"}
+
+
+@router.put("/api/buy-plans/{plan_id}/po")
+async def enter_po_number(
+    plan_id: int, request: Request,
+    user: User = Depends(require_user), db: Session = Depends(get_db),
+):
+    """Buyer enters PO number for a line item."""
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise HTTPException(404)
+    if plan.status not in ("approved", "po_entered"):
+        raise HTTPException(400, f"Cannot enter PO for plan in status: {plan.status}")
+
+    body = await request.json()
+    line_index = body.get("line_index")
+    po_number = body.get("po_number", "").strip()
+    if line_index is None or not po_number:
+        raise HTTPException(400, "line_index and po_number required")
+    if line_index < 0 or line_index >= len(plan.line_items or []):
+        raise HTTPException(400, "Invalid line_index")
+
+    plan.line_items[line_index]["po_number"] = po_number
+    plan.status = "po_entered"
+
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(plan, "line_items")
+    db.commit()
+
+    # Trigger PO verification in background
+    import asyncio
+    from ..services.buyplan_service import verify_po_sent
+    asyncio.create_task(verify_po_sent(plan, db))
+
+    return {"ok": True, "status": "po_entered"}
+
+
+@router.get("/api/buy-plans/{plan_id}/verify-po")
+async def check_po_verification(
+    plan_id: int,
+    user: User = Depends(require_user), db: Session = Depends(get_db),
+):
+    """Check PO verification status — re-scan if needed."""
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise HTTPException(404)
+
+    from ..services.buyplan_service import verify_po_sent
+    results = await verify_po_sent(plan, db)
+    return {
+        "plan_id": plan.id,
+        "status": plan.status,
+        "verifications": results,
+        "line_items": plan.line_items,
+    }
+
+
+@router.get("/api/buy-plans/for-quote/{quote_id}")
+async def get_buyplan_for_quote(
+    quote_id: int,
+    user: User = Depends(require_user), db: Session = Depends(get_db),
+):
+    """Get the buy plan associated with a quote (if any)."""
+    plan = db.query(BuyPlan).filter(BuyPlan.quote_id == quote_id).first()
+    if not plan:
+        return None
+    return _buyplan_to_dict(plan)
 
 
 # ── Pricing History ──────────────────────────────────────────────────────

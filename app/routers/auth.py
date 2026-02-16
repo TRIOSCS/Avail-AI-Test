@@ -35,7 +35,7 @@ router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
 AZURE_AUTH = f"https://login.microsoftonline.com/{settings.azure_tenant_id}/oauth2/v2.0"
-SCOPES = "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read"
+SCOPES = "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read Files.ReadWrite Chat.ReadWrite"
 
 
 @router.get("/", response_class=HTMLResponse)

@@ -277,6 +277,22 @@ async def _scheduler_tick():
                 log.error(f"Routing expiration error: {e}")
                 db.rollback()
 
+        # ── Buy Plan PO verification scan (every tick) ──
+        try:
+            from .models import BuyPlan
+            from .services.buyplan_service import verify_po_sent
+            unverified_plans = db.query(BuyPlan).filter(
+                BuyPlan.status == "po_entered"
+            ).all()
+            for plan in unverified_plans:
+                try:
+                    await verify_po_sent(plan, db)
+                except Exception as e:
+                    log.error(f"PO verify error for plan {plan.id}: {e}")
+        except Exception as e:
+            log.error(f"PO verification scan error: {e}")
+            db.rollback()
+
     except Exception as e:
         log.error(f"Scheduler batch error: {e}")
     finally:

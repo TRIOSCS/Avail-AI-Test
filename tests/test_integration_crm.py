@@ -125,9 +125,11 @@ def test_list_offers(client):
     resp = client.get(f"/api/requisitions/{req_id}/offers")
     assert resp.status_code == 200
     data = resp.json()
-    # Response is grouped by requirement — each group has an "offers" list
-    assert len(data) >= 1
-    total_offers = sum(len(g["offers"]) for g in data)
+    # Response is wrapped: {has_new_offers, groups}
+    assert "groups" in data
+    groups = data["groups"]
+    assert len(groups) >= 1
+    total_offers = sum(len(g["offers"]) for g in groups)
     assert total_offers >= 2
 
 

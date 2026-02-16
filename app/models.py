@@ -151,6 +151,7 @@ class Requisition(Base):
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_searched_at = Column(DateTime)
+    offers_viewed_at = Column(DateTime)
 
     creator = relationship("User", back_populates="requisitions")
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
@@ -267,12 +268,35 @@ class Offer(Base):
     requisition = relationship("Requisition", back_populates="offers")
     requirement = relationship("Requirement", back_populates="offers")
     entered_by = relationship("User", foreign_keys=[entered_by_id])
+    attachments = relationship("OfferAttachment", back_populates="offer", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_offers_req", "requisition_id"),
         Index("ix_offers_requirement", "requirement_id"),
         Index("ix_offers_vendor", "vendor_card_id"),
         Index("ix_offers_mpn", "mpn"),
+    )
+
+
+class OfferAttachment(Base):
+    """File attachment on a vendor offer (stored in OneDrive)."""
+    __tablename__ = "offer_attachments"
+    id = Column(Integer, primary_key=True)
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False)
+    file_name = Column(String(500), nullable=False)
+    onedrive_item_id = Column(String(500))
+    onedrive_url = Column(Text)
+    thumbnail_url = Column(Text)
+    content_type = Column(String(100))
+    size_bytes = Column(Integer)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    offer = relationship("Offer", back_populates="attachments")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
+
+    __table_args__ = (
+        Index("ix_offer_attachments_offer", "offer_id"),
     )
 
 
@@ -320,6 +344,47 @@ class Quote(Base):
         Index("ix_quotes_req", "requisition_id"),
         Index("ix_quotes_site", "customer_site_id"),
         Index("ix_quotes_status", "status"),
+    )
+
+
+class BuyPlan(Base):
+    """Purchase plan submitted after a quote is won — requires manager approval."""
+    __tablename__ = "buy_plans"
+    id = Column(Integer, primary_key=True)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
+    quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False)
+
+    status = Column(String(30), default="pending_approval")
+    # pending_approval | approved | rejected | po_entered | po_confirmed | complete
+
+    line_items = Column(JSON, nullable=False, default=list)
+    # [{offer_id, mpn, vendor_name, qty, cost_price, lead_time, condition,
+    #   entered_by_id, po_number, po_sent_at, po_recipient, po_verified}]
+
+    manager_notes = Column(Text)
+    rejection_reason = Column(Text)
+
+    submitted_by_id = Column(Integer, ForeignKey("users.id"))
+    approved_by_id = Column(Integer, ForeignKey("users.id"))
+
+    submitted_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    approved_at = Column(DateTime)
+    rejected_at = Column(DateTime)
+
+    approval_token = Column(String(100), unique=True)
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    requisition = relationship("Requisition", foreign_keys=[requisition_id])
+    quote = relationship("Quote", foreign_keys=[quote_id])
+    submitted_by = relationship("User", foreign_keys=[submitted_by_id])
+    approved_by = relationship("User", foreign_keys=[approved_by_id])
+
+    __table_args__ = (
+        Index("ix_buyplans_req", "requisition_id"),
+        Index("ix_buyplans_quote", "quote_id"),
+        Index("ix_buyplans_status", "status"),
+        Index("ix_buyplans_token", "approval_token"),
     )
 
 

@@ -237,12 +237,19 @@ async function openEditSiteModal(siteId) {
 
 // ── Offers Tab ─────────────────────────────────────────────────────────
 
+let _hasNewOffers = false;
+let _latestOfferAt = null;
+let _pendingOfferFiles = [];  // Files queued for upload after offer save
+
 async function loadOffers() {
     if (!currentReqId) return;
     try {
         const res = await fetch('/api/requisitions/' + currentReqId + '/offers');
         if (!res.ok) return;
-        crmOffers = await res.json();
+        const data = await res.json();
+        _hasNewOffers = data.has_new_offers || false;
+        _latestOfferAt = data.latest_offer_at || null;
+        crmOffers = data.groups || [];
         selectedOffers.clear();
         renderOffers();
         updateOfferTabBadge();
@@ -254,6 +261,16 @@ function updateOfferTabBadge() {
     document.querySelectorAll('.tab').forEach(t => {
         if (t.textContent.match(/^Offers/)) {
             t.textContent = totalOffers ? 'Offers (' + totalOffers + ')' : 'Offers';
+            t.classList.remove('tab-new', 'tab-urgent');
+            if (_hasNewOffers && totalOffers && _latestOfferAt) {
+                const hoursAgo = (Date.now() - new Date(_latestOfferAt).getTime()) / 3600000;
+                if (hoursAgo < 12) {
+                    t.classList.add('tab-new');
+                } else if (hoursAgo < 96) {
+                    t.classList.add('tab-urgent');
+                }
+                // > 96h: no highlight (auto-clear)
+            }
         }
     });
 }
@@ -270,19 +287,24 @@ function renderOffers() {
         const offersHtml = group.offers.length ? group.offers.map(o => {
             const checked = selectedOffers.has(o.id) ? 'checked' : '';
             const isRef = o.status === 'reference';
-            const details = [o.firmware && 'FW: '+esc(o.firmware), o.hardware_code && 'HW: '+esc(o.hardware_code), o.packaging && 'Pkg: '+esc(o.packaging)].filter(Boolean).join(' · ');
+            const subDetails = [o.firmware && 'FW: '+esc(o.firmware), o.hardware_code && 'HW: '+esc(o.hardware_code), o.packaging && 'Pkg: '+esc(o.packaging)].filter(Boolean).join(' · ');
+            const noteStr = o.notes ? '<div style="font-size:10px;color:var(--text2);margin-top:2px">'+esc(o.notes)+'</div>' : '';
+            const attHtml = (o.attachments||[]).map(a => `<a href="${esc(a.onedrive_url||'#')}" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:underline">${esc(a.file_name)}</a>`).join(' ');
+            const enteredStr = o.entered_by ? '<span style="font-size:10px;color:var(--muted)">by '+esc(o.entered_by)+'</span>' : '';
             return `
             <tr class="${isRef ? 'offer-ref' : ''}">
                 <td><input type="checkbox" ${checked} ${isRef ? 'disabled' : ''} onchange="toggleOfferSelect(${o.id},this.checked)"></td>
-                <td>${esc(o.vendor_name)}${details ? '<div class="sc-detail" style="font-size:10px;color:var(--muted)">'+details+'</div>' : ''}</td>
+                <td>${esc(o.vendor_name)}${subDetails ? '<div class="sc-detail" style="font-size:10px;color:var(--muted)">'+subDetails+'</div>' : ''}${noteStr}${attHtml ? '<div style="margin-top:2px">'+attHtml+'</div>' : ''}</td>
                 <td>${o.unit_price != null ? '$'+Number(o.unit_price).toFixed(4) : '—'}</td>
                 <td>${o.qty_available != null ? o.qty_available.toLocaleString() : '—'}</td>
                 <td>${esc(o.lead_time || '—')}</td>
                 <td>${esc(o.condition || '—')}</td>
                 <td>${esc(o.date_code || '—')}</td>
+                <td>${o.moq ? o.moq.toLocaleString() : '—'}</td>
+                <td>${enteredStr}</td>
                 <td>${isRef ? '<span class="offer-ref-badge">ref</span>' : '<button class="btn btn-danger btn-sm" onclick="deleteOffer('+o.id+')" title="Remove offer" style="padding:2px 6px;font-size:10px">✕</button>'}</td>
             </tr>`;
-        }).join('') : '<tr><td colspan="8" class="empty" style="padding:8px">No offers for this part</td></tr>';
+        }).join('') : '<tr><td colspan="10" class="empty" style="padding:8px">No offers for this part</td></tr>';
         return `
         <div class="offer-group">
             <div class="offer-group-header">
@@ -293,7 +315,7 @@ function renderOffers() {
                 <button class="btn btn-ghost btn-sm" onclick="openPricingHistory('${escAttr(group.mpn)}')">📊</button>
             </div>
             <table class="tbl offer-table">
-                <thead><tr><th style="width:30px"></th><th>Vendor</th><th>Price</th><th>Avail</th><th>Lead</th><th>Cond</th><th>DC</th><th style="width:40px"></th></tr></thead>
+                <thead><tr><th style="width:30px"></th><th>Vendor</th><th>Price</th><th>Avail</th><th>Lead</th><th>Cond</th><th>DC</th><th>MOQ</th><th>By</th><th style="width:40px"></th></tr></thead>
                 <tbody>${offersHtml}</tbody>
             </table>
         </div>`;
@@ -317,6 +339,8 @@ function updateBuildQuoteBtn() {
 
 function openLogOfferModal() {
     document.getElementById('logOfferModal').classList.add('open');
+    _pendingOfferFiles = [];
+    document.getElementById('loAttachments').innerHTML = '';
     const sel = document.getElementById('loMpn');
     sel.innerHTML = crmOffers.map(g => '<option value="' + g.requirement_id + '" data-mpn="' + escAttr(g.mpn) + '">' + esc(g.mpn) + ' (need ' + g.target_qty + ')</option>').join('');
     setTimeout(() => document.getElementById('loVendor').focus(), 100);
@@ -339,7 +363,6 @@ async function saveOffer(andNext) {
         hardware_code: document.getElementById('loHardware').value.trim() || null,
         packaging: document.getElementById('loPackaging').value.trim() || null,
         moq: parseInt(document.getElementById('loMoq').value) || null,
-        source: document.querySelector('input[name="loSource"]:checked')?.value || 'manual',
         notes: document.getElementById('loNotes').value.trim(),
         vendor_website: document.getElementById('loWebsite').value.trim() || null,
     };
@@ -351,18 +374,142 @@ async function saveOffer(andNext) {
         });
         if (!res.ok) { showToast('Failed to save offer', 'error'); return; }
         const result = await res.json();
+        // Upload pending attachments
+        if (_pendingOfferFiles.length && result.id) {
+            for (const f of _pendingOfferFiles) {
+                try {
+                    if (f._onedrive_item_id) {
+                        await apiFetch('/api/offers/' + result.id + '/attachments/onedrive', {
+                            method: 'POST', body: { item_id: f._onedrive_item_id }
+                        });
+                    } else {
+                        const fd = new FormData();
+                        fd.append('file', f);
+                        await fetch('/api/offers/' + result.id + '/attachments', { method: 'POST', body: fd });
+                    }
+                } catch (e) { console.error('Attachment upload failed:', e); }
+            }
+        }
+        _pendingOfferFiles = [];
         showToast('Offer from ' + data.vendor_name + ' saved', 'success');
         notifyStatusChange(result);
         if (andNext) {
             ['loVendor','loQty','loPrice','loLead','loDC','loFirmware','loHardware','loPackaging','loMoq','loNotes','loWebsite'].forEach(id => document.getElementById(id).value = '');
             document.getElementById('loCond').value = 'New';
             document.getElementById('loWebsiteRow').style.display = 'none';
+            document.getElementById('loAttachments').innerHTML = '';
             document.getElementById('loVendor').focus();
         } else {
             closeModal('logOfferModal');
         }
         loadOffers();
     } catch (e) { console.error('saveOffer:', e); showToast('Error saving offer', 'error'); }
+}
+
+function handleOfferFileSelect(input) {
+    const files = Array.from(input.files);
+    _pendingOfferFiles.push(...files);
+    renderPendingAttachments();
+    input.value = '';
+}
+
+function renderPendingAttachments() {
+    const el = document.getElementById('loAttachments');
+    el.innerHTML = _pendingOfferFiles.map((f, i) =>
+        `<span class="badge" style="background:var(--bg3);font-size:10px;padding:2px 8px;display:inline-flex;align-items:center;gap:4px">
+            ${esc(f.name)} <button onclick="_pendingOfferFiles.splice(${i},1);renderPendingAttachments()" style="border:none;background:none;cursor:pointer;color:var(--muted);font-size:12px">✕</button>
+        </span>`
+    ).join('');
+}
+
+// ── OneDrive Browser ────────────────────────────────────────────────────
+
+let _odCurrentPath = '';
+let _odTargetOfferId = null;
+
+function openOneDrivePicker(offerId) {
+    _odTargetOfferId = offerId || null;
+    _odCurrentPath = '';
+    document.getElementById('oneDriveModal').classList.add('open');
+    browseOneDrive('');
+}
+
+async function browseOneDrive(path) {
+    _odCurrentPath = path;
+    const el = document.getElementById('odFileList');
+    el.innerHTML = '<p class="empty">Loading…</p>';
+    // Update breadcrumb
+    const bc = document.getElementById('odBreadcrumb');
+    const parts = path ? path.split('/').filter(Boolean) : [];
+    let bcHtml = '<a onclick="browseOneDrive(\'\')" style="cursor:pointer;color:var(--teal)">Root</a>';
+    let cumPath = '';
+    for (const p of parts) {
+        cumPath += (cumPath ? '/' : '') + p;
+        const cp = cumPath;
+        bcHtml += ' / <a onclick="browseOneDrive(\'' + escAttr(cp) + '\')" style="cursor:pointer;color:var(--teal)">' + esc(p) + '</a>';
+    }
+    bc.innerHTML = bcHtml;
+    try {
+        const url = '/api/onedrive/browse' + (path ? '?path=' + encodeURIComponent(path) : '');
+        const items = await apiFetch(url);
+        if (!items.length) {
+            el.innerHTML = '<p class="empty">Empty folder</p>';
+            return;
+        }
+        el.innerHTML = items.map(i => {
+            if (i.is_folder) {
+                const folderPath = path ? path + '/' + i.name : i.name;
+                return `<div class="card card-clickable" style="padding:8px 12px;margin-bottom:4px" onclick="browseOneDrive('${escAttr(folderPath)}')">
+                    <span style="font-size:13px">📁 ${esc(i.name)}</span>
+                </div>`;
+            }
+            return `<div class="card" style="padding:8px 12px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">
+                <span style="font-size:13px">📄 ${esc(i.name)} <span style="color:var(--muted);font-size:10px">${i.size ? (i.size/1024).toFixed(0)+'KB' : ''}</span></span>
+                <button class="btn btn-primary btn-sm" onclick="selectOneDriveFile('${escAttr(i.id)}')">Attach</button>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        el.innerHTML = '<p class="empty">Failed to load — check Microsoft connection</p>';
+        console.error('browseOneDrive:', e);
+    }
+}
+
+async function selectOneDriveFile(itemId) {
+    if (_odTargetOfferId) {
+        // Attach directly to an existing offer
+        try {
+            await apiFetch('/api/offers/' + _odTargetOfferId + '/attachments/onedrive', {
+                method: 'POST', body: { item_id: itemId }
+            });
+            showToast('File attached', 'success');
+            closeModal('oneDriveModal');
+            loadOffers();
+        } catch (e) { showToast('Failed to attach', 'error'); }
+    } else {
+        // Fetch file info and add to pending list (pre-save flow)
+        try {
+            const items = await apiFetch('/api/onedrive/browse' + (_odCurrentPath ? '?path=' + encodeURIComponent(_odCurrentPath) : ''));
+            const item = items.find(i => i.id === itemId);
+            if (item) {
+                // Store as a special OneDrive reference in pending files
+                const odRef = new File([], item.name);
+                odRef._onedrive_item_id = itemId;
+                odRef._onedrive_name = item.name;
+                _pendingOfferFiles.push(odRef);
+                renderPendingAttachments();
+            }
+            closeModal('oneDriveModal');
+        } catch (e) { showToast('Failed to select file', 'error'); }
+    }
+}
+
+async function deleteOfferAttachment(attId) {
+    if (!confirm('Remove this attachment?')) return;
+    try {
+        await apiFetch('/api/offer-attachments/' + attId, { method: 'DELETE' });
+        showToast('Attachment removed', 'info');
+        loadOffers();
+    } catch (e) { showToast('Failed to remove attachment', 'error'); }
 }
 
 async function deleteOffer(offerId) {
@@ -386,6 +533,7 @@ async function loadQuote() {
         crmQuote = await res.json();
         renderQuote();
         updateQuoteTabBadge();
+        if (crmQuote && crmQuote.status === 'won') loadBuyPlan();
     } catch (e) { console.error('loadQuote:', e); crmQuote = null; renderQuote(); }
 }
 
@@ -474,7 +622,8 @@ function renderQuote() {
     <div class="quote-notes">
         <label>Notes<br><textarea id="qtNotes" rows="2" style="width:100%">${esc(q.notes||'')}</textarea></label>
     </div>
-    <div class="quote-actions">${statusActions[q.status] || ''}</div>`;
+    <div class="quote-actions">${statusActions[q.status] || ''}</div>
+    <div id="buyPlanSection"></div>`;
 }
 
 function updateQuoteLine(idx, newSellPrice) {
@@ -556,7 +705,11 @@ async function markQuoteSent() {
 
 async function markQuoteResult(result) {
     if (!crmQuote) return;
-    if (result === 'won' && !confirm('Mark as Won? Revenue: $' + Number(crmQuote.subtotal||0).toLocaleString())) return;
+    if (result === 'won') {
+        // Open buy plan modal instead of simple confirm
+        openBuyPlanModal();
+        return;
+    }
     try {
         const res = await fetch('/api/quotes/' + crmQuote.id + '/result', {
             method: 'POST', headers: {'Content-Type': 'application/json'},
@@ -564,7 +717,7 @@ async function markQuoteResult(result) {
         });
         if (!res.ok) { showToast('Failed to update result', 'error'); return; }
         const resultData = await res.json();
-        showToast(result === 'won' ? 'Quote marked as Won!' : 'Quote updated', result === 'won' ? 'success' : 'info');
+        showToast('Quote updated', 'info');
         notifyStatusChange(resultData);
         loadQuote();
     } catch (e) { console.error('markQuoteResult:', e); showToast('Error updating result', 'error'); }
@@ -572,6 +725,298 @@ async function markQuoteResult(result) {
 
 function openLostModal() {
     document.getElementById('lostModal').classList.add('open');
+}
+
+// ── Buy Plan ────────────────────────────────────────────────────────────
+
+let _currentBuyPlan = null;
+
+function openBuyPlanModal() {
+    if (!crmQuote) return;
+    const modal = document.getElementById('buyPlanModal');
+    modal.classList.add('open');
+    const items = (crmQuote.line_items || []).map((item, i) => `
+        <tr>
+            <td><input type="checkbox" class="bp-check" data-idx="${i}" checked></td>
+            <td>${esc(item.mpn)}</td>
+            <td>${esc(item.manufacturer || '—')}</td>
+            <td>${(item.qty||0).toLocaleString()}</td>
+            <td>$${Number(item.cost_price||0).toFixed(4)}</td>
+            <td>$${(Number(item.qty||0) * Number(item.cost_price||0)).toFixed(2)}</td>
+            <td>${esc(item.lead_time || '—')}</td>
+        </tr>
+    `).join('');
+    document.getElementById('bpItems').innerHTML = items;
+    document.getElementById('bpTotal').textContent = '$' + Number(crmQuote.total_cost||0).toLocaleString();
+}
+
+async function submitBuyPlan() {
+    if (!crmQuote) return;
+    const checks = document.querySelectorAll('.bp-check:checked');
+    const selectedIndices = Array.from(checks).map(c => parseInt(c.dataset.idx));
+    if (!selectedIndices.length) { showToast('Select at least one item', 'error'); return; }
+
+    // Get offer IDs from line items
+    const offerIds = selectedIndices
+        .map(i => (crmQuote.line_items || [])[i]?.offer_id)
+        .filter(Boolean);
+    if (!offerIds.length) { showToast('No offer IDs found', 'error'); return; }
+
+    try {
+        const res = await apiFetch('/api/quotes/' + crmQuote.id + '/buy-plan', {
+            method: 'POST', body: { offer_ids: offerIds }
+        });
+        showToast('Buy plan submitted for approval!', 'success');
+        closeModal('buyPlanModal');
+        notifyStatusChange(res);
+        loadQuote();
+    } catch (e) {
+        console.error('submitBuyPlan:', e);
+        showToast('Failed to submit buy plan', 'error');
+    }
+}
+
+async function loadBuyPlan() {
+    if (!crmQuote) return;
+    try {
+        _currentBuyPlan = await apiFetch('/api/buy-plans/for-quote/' + crmQuote.id);
+    } catch (e) { _currentBuyPlan = null; }
+    renderBuyPlanStatus();
+}
+
+function renderBuyPlanStatus() {
+    const el = document.getElementById('buyPlanSection');
+    if (!el) return;
+    if (!_currentBuyPlan) { el.innerHTML = ''; return; }
+    const bp = _currentBuyPlan;
+    const isAdmin = window.userRole === 'admin' || (window.userEmail && window.userEmail.toLowerCase() === 'mkhoury@trioscs.com');
+    const isBuyer = window.userRole === 'buyer';
+
+    const statusColors = {
+        pending_approval: '#f59e0b',
+        approved: '#16a34a',
+        rejected: '#dc2626',
+        po_entered: '#2563eb',
+        po_confirmed: '#16a34a',
+        complete: '#16a34a',
+    };
+    const statusLabels = {
+        pending_approval: 'Pending Approval',
+        approved: 'Approved — Awaiting PO',
+        rejected: 'Rejected',
+        po_entered: 'PO Entered — Verifying',
+        po_confirmed: 'PO Confirmed',
+        complete: 'Complete',
+    };
+
+    const statusColor = statusColors[bp.status] || 'var(--muted)';
+    const statusLabel = statusLabels[bp.status] || bp.status;
+
+    let itemsHtml = (bp.line_items || []).map((item, i) => {
+        const poCell = (isBuyer && bp.status === 'approved') || (isBuyer && bp.status === 'po_entered' && !item.po_number)
+            ? `<input type="text" class="po-input" data-idx="${i}" placeholder="PO#" value="${esc(item.po_number||'')}" style="width:100px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px">`
+            : (item.po_number ? `<span style="font-weight:600">${esc(item.po_number)}</span>` : '—');
+        const verifyIcon = item.po_verified
+            ? '<span style="color:#16a34a" title="Verified">✓</span>'
+            : (item.po_number ? '<span style="color:#f59e0b" title="Unverified">⏳</span>' : '');
+        const poDetails = item.po_verified
+            ? `<div style="font-size:10px;color:var(--muted)">Sent to ${esc(item.po_recipient||'')} at ${item.po_sent_at||''}</div>`
+            : '';
+        return `<tr>
+            <td>${esc(item.mpn)}</td>
+            <td>${esc(item.vendor_name)}</td>
+            <td>${(item.qty||0).toLocaleString()}</td>
+            <td>$${Number(item.cost_price||0).toFixed(4)}</td>
+            <td>${esc(item.lead_time||'—')}</td>
+            <td>${poCell} ${verifyIcon}${poDetails}</td>
+        </tr>`;
+    }).join('');
+
+    let actionsHtml = '';
+    if (isAdmin && bp.status === 'pending_approval') {
+        actionsHtml = `
+            <div style="display:flex;gap:8px;margin-top:12px">
+                <textarea id="bpManagerNotes" placeholder="Manager notes (optional)…" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;min-height:40px"></textarea>
+            </div>
+            <div style="display:flex;gap:8px;margin-top:8px">
+                <button class="btn btn-success" onclick="approveBuyPlan()">Approve</button>
+                <button class="btn btn-danger" onclick="openRejectBuyPlanModal()">Reject</button>
+            </div>`;
+    }
+    if (isBuyer && (bp.status === 'approved' || bp.status === 'po_entered')) {
+        actionsHtml = `
+            <div style="margin-top:12px">
+                <button class="btn btn-primary" onclick="saveBuyPlanPOs()">Save PO Numbers</button>
+                <button class="btn btn-ghost" onclick="verifyBuyPlanPOs()">Verify PO Sent</button>
+            </div>`;
+    }
+
+    el.innerHTML = `
+        <div class="card" style="margin-top:16px;border-left:4px solid ${statusColor}">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <div>
+                    <strong>Buy Plan</strong>
+                    <span class="status-badge" style="background:${statusColor};color:#fff;margin-left:8px">${statusLabel}</span>
+                </div>
+                <span style="font-size:11px;color:var(--muted)">Submitted by ${esc(bp.submitted_by||'')} ${bp.submitted_at ? '· '+fmtDateTime(bp.submitted_at) : ''}</span>
+            </div>
+            ${bp.manager_notes ? '<p style="font-size:12px;color:var(--text2);margin-bottom:8px"><em>Manager: '+esc(bp.manager_notes)+'</em></p>' : ''}
+            ${bp.rejection_reason ? '<p style="font-size:12px;color:#dc2626;margin-bottom:8px"><strong>Rejected:</strong> '+esc(bp.rejection_reason)+'</p>' : ''}
+            <table class="tbl" style="margin-bottom:0">
+                <thead><tr><th>MPN</th><th>Vendor</th><th>Qty</th><th>Cost</th><th>Lead</th><th>PO</th></tr></thead>
+                <tbody>${itemsHtml}</tbody>
+            </table>
+            ${actionsHtml}
+        </div>`;
+}
+
+async function approveBuyPlan() {
+    if (!_currentBuyPlan) return;
+    const notes = document.getElementById('bpManagerNotes')?.value?.trim() || '';
+    try {
+        await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/approve', {
+            method: 'PUT', body: { manager_notes: notes }
+        });
+        showToast('Buy plan approved — buyers notified', 'success');
+        loadBuyPlan();
+    } catch (e) { showToast('Failed to approve', 'error'); }
+}
+
+function openRejectBuyPlanModal() {
+    const reason = prompt('Rejection reason:');
+    if (reason === null) return;
+    rejectBuyPlan(reason);
+}
+
+async function rejectBuyPlan(reason) {
+    if (!_currentBuyPlan) return;
+    try {
+        await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/reject', {
+            method: 'PUT', body: { reason }
+        });
+        showToast('Buy plan rejected', 'info');
+        loadBuyPlan();
+    } catch (e) { showToast('Failed to reject', 'error'); }
+}
+
+async function saveBuyPlanPOs() {
+    if (!_currentBuyPlan) return;
+    const inputs = document.querySelectorAll('.po-input');
+    let saved = 0;
+    for (const input of inputs) {
+        const idx = parseInt(input.dataset.idx);
+        const po = input.value.trim();
+        if (!po) continue;
+        try {
+            await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/po', {
+                method: 'PUT', body: { line_index: idx, po_number: po }
+            });
+            saved++;
+        } catch (e) { console.error('Failed to save PO for line', idx, e); }
+    }
+    if (saved) showToast(saved + ' PO number(s) saved', 'success');
+    loadBuyPlan();
+}
+
+async function verifyBuyPlanPOs() {
+    if (!_currentBuyPlan) return;
+    showToast('Scanning sent emails for PO verification…', 'info');
+    try {
+        const result = await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/verify-po');
+        const verified = Object.values(result.verifications || {}).filter(v => v.verified).length;
+        const total = Object.keys(result.verifications || {}).length;
+        showToast(verified + '/' + total + ' POs verified', verified === total ? 'success' : 'info');
+        _currentBuyPlan = { ..._currentBuyPlan, line_items: result.line_items, status: result.status };
+        renderBuyPlanStatus();
+    } catch (e) { showToast('Verification failed', 'error'); }
+}
+
+// ── Buy Plans Admin List ──────────────────────────────────────────────
+
+let _bpFilter = '';
+let _buyPlans = [];
+
+async function showBuyPlans() {
+    showView('view-buyplans');
+    currentReqId = null;
+    await loadBuyPlans();
+}
+
+async function loadBuyPlans() {
+    try {
+        let url = '/api/buy-plans';
+        if (_bpFilter) url += '?status=' + encodeURIComponent(_bpFilter);
+        _buyPlans = await apiFetch(url);
+        renderBuyPlansList();
+    } catch (e) {
+        showToast('Failed to load buy plans', 'error');
+    }
+}
+
+function setBpFilter(status, btn) {
+    _bpFilter = status;
+    document.querySelectorAll('[data-bp-status]').forEach(b => b.classList.remove('on'));
+    if (btn) btn.classList.add('on');
+    loadBuyPlans();
+}
+
+function renderBuyPlansList() {
+    const el = document.getElementById('buyPlansList');
+    if (!_buyPlans.length) {
+        el.innerHTML = '<p class="empty">No buy plans found</p>';
+        return;
+    }
+    const statusColors = {
+        pending_approval: 'var(--amber)',
+        approved: 'var(--green)',
+        rejected: 'var(--red)',
+        po_entered: '#2563eb',
+        po_confirmed: 'var(--green)',
+        complete: 'var(--green)',
+    };
+    const statusLabels = {
+        pending_approval: 'Pending',
+        approved: 'Approved',
+        rejected: 'Rejected',
+        po_entered: 'PO Entered',
+        po_confirmed: 'Confirmed',
+        complete: 'Complete',
+    };
+    el.innerHTML = _buyPlans.map(bp => {
+        const color = statusColors[bp.status] || 'var(--muted)';
+        const label = statusLabels[bp.status] || bp.status;
+        const itemCount = (bp.line_items || []).length;
+        const total = (bp.line_items || []).reduce((s, li) => s + (Number(li.qty)||0) * (Number(li.cost_price)||0), 0);
+        return `
+        <div class="card card-clickable" style="border-left:4px solid ${color}" onclick="openBuyPlanDetail(${bp.id})">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+                <div>
+                    <strong>${esc(bp.requisition_name || 'Requisition #' + bp.requisition_id)}</strong>
+                    <span class="status-badge" style="background:${color};color:#fff;margin-left:8px;font-size:10px">${label}</span>
+                </div>
+                <span style="font-size:11px;color:var(--muted)">${bp.submitted_at ? fmtDateTime(bp.submitted_at) : ''}</span>
+            </div>
+            <div style="font-size:12px;color:var(--text2);margin-top:6px">
+                ${itemCount} item${itemCount !== 1 ? 's' : ''} · $${total.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}
+                · Submitted by ${esc(bp.submitted_by || '—')}
+                ${bp.approved_by ? ' · Approved by ' + esc(bp.approved_by) : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+async function openBuyPlanDetail(planId) {
+    try {
+        _currentBuyPlan = await apiFetch('/api/buy-plans/' + planId);
+    } catch (e) { showToast('Failed to load buy plan', 'error'); return; }
+    // Re-render inline — reuse renderBuyPlanStatus into a modal-like overlay
+    const el = document.getElementById('buyPlansList');
+    const backBtn = `<button class="btn btn-ghost" onclick="loadBuyPlans()" style="margin-bottom:12px">← Back to list</button>`;
+    el.innerHTML = backBtn;
+    const section = document.createElement('div');
+    section.id = 'buyPlanSection';
+    el.appendChild(section);
+    renderBuyPlanStatus();
 }
 
 async function submitLost() {

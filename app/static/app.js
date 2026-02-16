@@ -246,11 +246,14 @@ function applyRoleGating() {
         roleBadge.textContent = window.userRole === 'buyer' ? 'Buyer' : 'Sales';
         roleBadge.className = `role-badge role-${window.userRole}`;
     }
+    // Show Buy Plans nav for admins
+    const bpNav = document.getElementById('navBuyPlans');
+    if (bpNav && window.__isAdmin) bpNav.style.display = '';
 }
 function isBuyer() { return window.userRole === 'buyer'; }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-detail', 'view-vendors', 'view-materials', 'view-sources', 'view-customers'];
+const ALL_VIEWS = ['view-list', 'view-detail', 'view-vendors', 'view-materials', 'view-sources', 'view-customers', 'view-buyplans'];
 
 function showView(viewId) {
     for (const id of ALL_VIEWS) {
@@ -313,6 +316,11 @@ function showDetail(id, name) {
     }
     loadRequirements();
     loadActivity();
+    // Set initial new-offers state from list data before loadOffers runs
+    if (reqInfo && typeof _hasNewOffers !== 'undefined') {
+        _hasNewOffers = reqInfo.has_new_offers || false;
+        if (typeof _latestOfferAt !== 'undefined') _latestOfferAt = reqInfo.latest_offer_at || null;
+    }
     if (typeof loadOffers === 'function') loadOffers();
     if (typeof loadQuote === 'function') loadQuote();
     // Restore last active tab or default to requirements
@@ -443,11 +451,21 @@ function renderReqList() {
         if (r.reply_count > 0) {
             replyBadge = `<span class="badge" style="background:var(--bg3);color:var(--text2);font-size:10px;padding:2px 8px">💬 ${r.reply_count} repl${r.reply_count !== 1 ? 'ies' : 'y'}</span>`;
         }
+        let newOffersDot = '';
+        if (r.has_new_offers && r.latest_offer_at) {
+            const hoursAgo = (Date.now() - new Date(r.latest_offer_at).getTime()) / 3600000;
+            if (hoursAgo < 12) {
+                newOffersDot = '<span class="new-offers-dot" title="New offers"></span>';
+            } else if (hoursAgo < 96) {
+                newOffersDot = '<span class="new-offers-dot red" title="New offers — unreviewed"></span>';
+            }
+            // > 96h: no dot shown (auto-clear)
+        }
         return `
         <div class="card card-clickable ${isArchived ? 'req-archived' : ''}" onclick="showDetail(${r.id}, '${escAttr(r.name)}')">
             <div class="req-card">
                 <div style="flex:1">
-                    <div class="req-name">${esc(r.name)} ${statusBadge}</div>
+                    <div class="req-name">${esc(r.name)} ${statusBadge} ${newOffersDot}</div>
                     ${custDisplay}
                     ${replyBadge}
                 </div>

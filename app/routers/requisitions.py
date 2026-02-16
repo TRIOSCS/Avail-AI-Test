@@ -31,7 +31,7 @@ from ..dependencies import get_req_for_user, require_buyer, require_user
 from ..search_service import search_requirement, normalize_mpn, sighting_to_dict, _get_material_history, _history_to_result
 from .rfq import _enrich_with_vendor_cards
 from ..file_utils import parse_num, parse_tabular_file
-from ..models import Contact, Requirement, Requisition, Sighting, User, VendorResponse
+from ..models import Contact, Offer, Requirement, Requisition, Sighting, User, VendorResponse
 
 router = APIRouter(tags=["requisitions"])
 
@@ -67,9 +67,29 @@ async def list_requisitions(q: str = "", status: str = "", user: User = Depends(
         .scalar_subquery()
         .label("latest_reply_at")
     )
+    # Detect unseen offers: latest offer created_at > offers_viewed_at (or viewed_at is NULL and offers exist)
+    from sqlalchemy import case, and_, or_, literal
+    latest_offer_sq = (
+        select(sqlfunc.max(Offer.created_at))
+        .where(Offer.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+    )
+    has_new_offers_sq = case(
+        (and_(
+            latest_offer_sq.isnot(None),
+            or_(
+                Requisition.offers_viewed_at.is_(None),
+                latest_offer_sq > Requisition.offers_viewed_at,
+            ),
+        ), literal(True)),
+        else_=literal(False),
+    ).label("has_new_offers")
 
+    latest_offer_at_sq = latest_offer_sq.label("latest_offer_at")
     query = db.query(
-        Requisition, req_count_sq, contact_count_sq, reply_count_sq, latest_reply_sq
+        Requisition, req_count_sq, contact_count_sq, reply_count_sq, latest_reply_sq,
+        has_new_offers_sq, latest_offer_at_sq,
     )
     if user.role == "sales":
         query = query.filter(Requisition.created_by == user.id)
@@ -87,7 +107,7 @@ async def list_requisitions(q: str = "", status: str = "", user: User = Depends(
     # Pre-load creator names for buyers (they see all reqs)
     creator_names = {}
     if user.role == "buyer":
-        creator_ids = {r.created_by for r, _, _, _, _ in rows if r.created_by}
+        creator_ids = {r.created_by for r, _, _, _, _, _, _ in rows if r.created_by}
         if creator_ids:
             creators = db.query(User.id, User.name, User.email).filter(User.id.in_(creator_ids)).all()
             creator_names = {u.id: u.name or u.email.split("@")[0] for u in creators}
@@ -104,11 +124,13 @@ async def list_requisitions(q: str = "", status: str = "", user: User = Depends(
         "contact_count": con_cnt,
         "reply_count": reply_cnt or 0,
         "latest_reply_at": latest_reply.isoformat() if latest_reply else None,
+        "has_new_offers": bool(has_new),
+        "latest_offer_at": latest_offer.isoformat() if latest_offer else None,
         "created_by_name": creator_names.get(r.created_by, "") if user.role == "buyer" else None,
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "last_searched_at": r.last_searched_at.isoformat() if r.last_searched_at else None,
         "cloned_from_id": r.cloned_from_id,
-    } for r, req_cnt, con_cnt, reply_cnt, latest_reply in rows]
+    } for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer in rows]
 
 
 @router.post("/api/requisitions", response_model=RequisitionOut)

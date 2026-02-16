@@ -84,6 +84,8 @@ def _add_columns(conn) -> None:
         "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS brand_tags JSON DEFAULT '[]'",
         "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS commodity_tags JSON DEFAULT '[]'",
         "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS material_tags_updated_at TIMESTAMP",
+        # New offers indicator
+        "ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS offers_viewed_at TIMESTAMP",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
@@ -204,6 +206,34 @@ def _create_crm_tables(conn) -> None:
             created_at TIMESTAMP DEFAULT NOW(),
             updated_at TIMESTAMP DEFAULT NOW()
         )""",
+        """CREATE TABLE IF NOT EXISTS offer_attachments (
+            id SERIAL PRIMARY KEY,
+            offer_id INTEGER NOT NULL REFERENCES offers(id) ON DELETE CASCADE,
+            file_name VARCHAR(500) NOT NULL,
+            onedrive_item_id VARCHAR(500),
+            onedrive_url TEXT,
+            thumbnail_url TEXT,
+            content_type VARCHAR(100),
+            size_bytes INTEGER,
+            uploaded_by_id INTEGER REFERENCES users(id),
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS buy_plans (
+            id SERIAL PRIMARY KEY,
+            requisition_id INTEGER NOT NULL REFERENCES requisitions(id) ON DELETE CASCADE,
+            quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
+            status VARCHAR(30) DEFAULT 'pending_approval',
+            line_items JSON NOT NULL DEFAULT '[]',
+            manager_notes TEXT,
+            rejection_reason TEXT,
+            submitted_by_id INTEGER REFERENCES users(id),
+            approved_by_id INTEGER REFERENCES users(id),
+            submitted_at TIMESTAMP DEFAULT NOW(),
+            approved_at TIMESTAMP,
+            rejected_at TIMESTAMP,
+            approval_token VARCHAR(100) UNIQUE,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
     ]
     for stmt in crm_tables:
         _exec(conn, stmt)
@@ -257,6 +287,11 @@ def _create_crm_indexes(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_quotes_status ON quotes(status)",
         "CREATE INDEX IF NOT EXISTS ix_site_contacts_site ON site_contacts(customer_site_id)",
         "CREATE INDEX IF NOT EXISTS ix_site_contacts_email ON site_contacts(email)",
+        "CREATE INDEX IF NOT EXISTS ix_offer_attachments_offer ON offer_attachments(offer_id)",
+        "CREATE INDEX IF NOT EXISTS ix_buyplans_req ON buy_plans(requisition_id)",
+        "CREATE INDEX IF NOT EXISTS ix_buyplans_quote ON buy_plans(quote_id)",
+        "CREATE INDEX IF NOT EXISTS ix_buyplans_status ON buy_plans(status)",
+        "CREATE INDEX IF NOT EXISTS ix_buyplans_token ON buy_plans(approval_token)",
     ]
     for stmt in stmts:
         _exec(conn, stmt)

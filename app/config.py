@@ -77,6 +77,11 @@ class Settings:
     # Admin
     admin_emails: list = [e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "mkhoury@trioscs.com").split(",") if e.strip()]
 
+    # Microsoft Teams (Buy Plan notifications)
+    teams_webhook_url: str = os.getenv("TEAMS_WEBHOOK_URL", "")
+    teams_team_id: str = os.getenv("TEAMS_TEAM_ID", "")
+    teams_channel_id: str = os.getenv("TEAMS_CHANNEL_ID", "")
+
     # Activity tracking & customer ownership (v1.3.0)
     activity_tracking_enabled: bool = os.getenv("ACTIVITY_TRACKING_ENABLED", "true").lower() == "true"
     customer_inactivity_days: int = int(os.getenv("CUSTOMER_INACTIVITY_DAYS", "30"))
