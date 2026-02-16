@@ -1669,9 +1669,9 @@ async def approve_buy_plan(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Manager approves the buy plan (admin only)."""
-    if not _is_admin(user):
-        raise HTTPException(403, "Admin approval required")
+    """Manager/admin approves the buy plan."""
+    if user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Manager or admin approval required")
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise HTTPException(404)
@@ -1717,9 +1717,9 @@ async def reject_buy_plan(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Manager rejects the buy plan (admin only)."""
-    if not _is_admin(user):
-        raise HTTPException(403, "Admin rejection required")
+    """Manager/admin rejects the buy plan."""
+    if user.role not in ("admin", "manager"):
+        raise HTTPException(403, "Manager or admin rejection required")
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise HTTPException(404)

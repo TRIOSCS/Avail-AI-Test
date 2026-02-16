@@ -32,6 +32,11 @@ class RequisitionOut(BaseModel):
     name: str
 
 
+class RequisitionUpdate(BaseModel):
+    name: str | None = None
+    customer_site_id: int | None = None
+
+
 class RequisitionArchiveOut(BaseModel):
     ok: bool = True
     status: str

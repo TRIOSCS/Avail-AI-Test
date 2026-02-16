@@ -245,14 +245,16 @@ window.addEventListener('beforeunload', () => clearInterval(_m365Timer));
 
 // ── Role-Based UI Gating ────────────────────────────────────────────────
 function applyRoleGating() {
-    // Elements with data-role="buyer" are hidden for sales users
+    // Elements with data-role="buyer" are visible for buyer, manager, and admin
+    const canBuy = ['buyer','manager','admin'].includes(window.userRole) || window.__isAdmin;
     document.querySelectorAll('[data-role="buyer"]').forEach(el => {
-        el.style.display = window.userRole === 'buyer' ? '' : 'none';
+        el.style.display = canBuy ? '' : 'none';
     });
     // Role badge hidden — keep element for JS role gating but don't display
     const roleBadge = document.getElementById('roleBadge');
     if (roleBadge) {
-        roleBadge.textContent = window.userRole === 'buyer' ? 'Buyer' : 'Sales';
+        const roleLabels = {buyer:'Buyer', sales:'Sales', manager:'Manager', admin:'Admin', dev_assistant:'Dev'};
+        roleBadge.textContent = roleLabels[window.userRole] || window.userRole;
         roleBadge.className = `role-badge role-${window.userRole}`;
         roleBadge.style.display = 'none';
     }
@@ -276,7 +278,7 @@ function applyRoleGating() {
         document.querySelectorAll('.settings-tab-users, .settings-tab-scoring').forEach(el => el.style.display = 'none');
     }
 }
-function isBuyer() { return window.userRole === 'buyer'; }
+function isBuyer() { return ['buyer','manager','admin'].includes(window.userRole) || window.__isAdmin; }
 
 async function refreshProactiveBadge() {
     try {
@@ -694,6 +696,34 @@ function editReqCell(td, reqId, field) {
     input.addEventListener('keydown', e => {
         if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
         if (e.key === 'Escape') { loadRequirements(); }
+    });
+}
+
+function editReqName(h2) {
+    if (h2.querySelector('input')) return;
+    const current = currentReqName || h2.textContent;
+    const input = document.createElement('input');
+    input.className = 'req-edit-input';
+    input.value = current;
+    input.style.cssText = 'font-size:18px;font-weight:700;width:300px';
+    h2.textContent = '';
+    h2.appendChild(input);
+    input.focus();
+    input.select();
+    const save = async () => {
+        const val = input.value.trim();
+        if (!val || val === current) { h2.textContent = current; return; }
+        try {
+            await apiFetch(`/api/requisitions/${currentReqId}`, { method: 'PUT', body: { name: val } });
+            currentReqName = val;
+            h2.textContent = val;
+            loadList();
+        } catch(e) { h2.textContent = current; showToast('Failed to rename', 'error'); }
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { h2.textContent = current; }
     });
 }
 

@@ -369,7 +369,7 @@ function renderOffers() {
                 <td>${esc(o.date_code || '—')}</td>
                 <td>${o.moq ? o.moq.toLocaleString() : '—'}</td>
                 <td>${enteredStr}</td>
-                <td>${isRef ? '<span class="offer-ref-badge">ref</span>' : '<button class="btn btn-danger btn-sm" onclick="deleteOffer('+o.id+')" title="Remove offer" style="padding:2px 6px;font-size:10px">✕</button>'}</td>
+                <td>${isRef ? '<span class="offer-ref-badge">ref</span>' : '<button class="btn btn-ghost btn-sm" onclick="openEditOffer('+o.id+')" title="Edit offer" style="padding:2px 6px;font-size:10px">✎</button><button class="btn btn-danger btn-sm" onclick="deleteOffer('+o.id+')" title="Remove offer" style="padding:2px 6px;font-size:10px">✕</button>'}</td>
             </tr>`;
         }).join('') : '<tr><td colspan="10" class="empty" style="padding:8px">No offers for this part</td></tr>';
         return `
@@ -587,6 +587,54 @@ async function deleteOffer(offerId) {
     } catch (e) { console.error('deleteOffer:', e); showToast('Error deleting offer', 'error'); }
 }
 
+function openEditOffer(offerId) {
+    // Find the offer across all groups
+    let offer = null;
+    for (const g of crmOffers) {
+        offer = g.offers.find(o => o.id === offerId);
+        if (offer) break;
+    }
+    if (!offer) return;
+    document.getElementById('eoOfferId').value = offerId;
+    document.getElementById('eoVendor').value = offer.vendor_name || '';
+    document.getElementById('eoQty').value = offer.qty_available || '';
+    document.getElementById('eoPrice').value = offer.unit_price || '';
+    document.getElementById('eoLead').value = offer.lead_time || '';
+    document.getElementById('eoCond').value = offer.condition || 'New';
+    document.getElementById('eoDC').value = offer.date_code || '';
+    document.getElementById('eoFirmware').value = offer.firmware || '';
+    document.getElementById('eoHardware').value = offer.hardware_code || '';
+    document.getElementById('eoPackaging').value = offer.packaging || '';
+    document.getElementById('eoMoq').value = offer.moq || '';
+    document.getElementById('eoNotes').value = offer.notes || '';
+    document.getElementById('eoStatus').value = offer.status || 'active';
+    document.getElementById('editOfferModal').classList.add('open');
+}
+
+async function updateOffer() {
+    const offerId = document.getElementById('eoOfferId').value;
+    const data = {
+        vendor_name: document.getElementById('eoVendor').value.trim(),
+        qty_available: parseInt(document.getElementById('eoQty').value) || null,
+        unit_price: parseFloat(document.getElementById('eoPrice').value) || null,
+        lead_time: document.getElementById('eoLead').value.trim() || null,
+        condition: document.getElementById('eoCond').value,
+        date_code: document.getElementById('eoDC').value.trim() || null,
+        firmware: document.getElementById('eoFirmware').value.trim() || null,
+        hardware_code: document.getElementById('eoHardware').value.trim() || null,
+        packaging: document.getElementById('eoPackaging').value.trim() || null,
+        moq: parseInt(document.getElementById('eoMoq').value) || null,
+        notes: document.getElementById('eoNotes').value.trim() || null,
+        status: document.getElementById('eoStatus').value,
+    };
+    try {
+        await apiFetch('/api/offers/' + offerId, { method: 'PUT', body: data });
+        closeModal('editOfferModal');
+        showToast('Offer updated', 'success');
+        loadOffers();
+    } catch (e) { console.error('updateOffer:', e); showToast('Error updating offer', 'error'); }
+}
+
 // ── Quote Tab ──────────────────────────────────────────────────────────
 
 async function loadQuote() {
@@ -666,7 +714,7 @@ function renderQuote() {
     el.innerHTML = `
     <div class="quote-header">
         <div style="display:flex;align-items:center;gap:12px">
-            <img src="/static/avail_logo.png" alt="TRIO" style="height:40px">
+            <img src="/static/avail_logo.png" alt="TRIO" style="height:60px">
             <div>
                 <div style="font-weight:700;font-size:13px;color:var(--text)">Trio Supply Chain Solutions</div>
                 <div style="font-size:11px;color:var(--muted)">info@trioscs.com</div>
@@ -861,8 +909,8 @@ function renderBuyPlanStatus() {
     if (!el) return;
     if (!_currentBuyPlan) { el.innerHTML = ''; return; }
     const bp = _currentBuyPlan;
-    const isAdmin = window.userRole === 'admin' || (window.userEmail && window.userEmail.toLowerCase() === 'mkhoury@trioscs.com');
-    const isBuyer = window.userRole === 'buyer';
+    const isAdmin = window.__isAdmin || window.userRole === 'admin';
+    const isBuyer = ['buyer','manager','admin'].includes(window.userRole) || window.__isAdmin;
 
     const statusColors = {
         pending_approval: 'var(--amber)',
@@ -905,7 +953,8 @@ function renderBuyPlanStatus() {
     }).join('');
 
     let actionsHtml = '';
-    if (isAdmin && bp.status === 'pending_approval') {
+    const canApprove = isAdmin || window.userRole === 'manager';
+    if (canApprove && bp.status === 'pending_approval') {
         actionsHtml = `
             <div style="display:flex;gap:8px;margin-top:12px">
                 <textarea id="bpManagerNotes" placeholder="Manager notes (optional)…" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;min-height:40px"></textarea>

@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 
 from ..schemas.requisitions import (
     RequisitionCreate,
+    RequisitionUpdate,
     RequirementCreate,
     RequirementUpdate,
     RequisitionOut,
@@ -223,6 +224,24 @@ async def toggle_archive(
         req.status = "archived"
     db.commit()
     return {"ok": True, "status": req.status}
+
+
+@router.put("/api/requisitions/{req_id}")
+async def update_requisition(
+    req_id: int,
+    body: RequisitionUpdate,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404)
+    if body.name is not None:
+        req.name = body.name.strip() or req.name
+    if body.customer_site_id is not None:
+        req.customer_site_id = body.customer_site_id
+    db.commit()
+    return {"ok": True, "name": req.name}
 
 
 # ── Requirements ─────────────────────────────────────────────────────────
