@@ -102,6 +102,8 @@ async def get_activity(req_id: int, user: User = Depends(require_user), db: Sess
             "parts_included": c.parts_included or [],
             "created_at": c.created_at.isoformat() if c.created_at else None,
             "user_name": c.user.name if c.user else "",
+            "status": c.status or "sent",
+            "status_updated_at": c.status_updated_at.isoformat() if c.status_updated_at else None,
         })
         vendors[vk]["contact_types"].add(c.contact_type)
         for p in (c.parts_included or []):
@@ -127,9 +129,30 @@ async def get_activity(req_id: int, user: User = Depends(require_user), db: Sess
     for vk, v in vendors.items():
         last_contact = v["contacts"][0] if v["contacts"] else None
         has_response = len(v["responses"]) > 0
+
+        # Derive vendor-level status from best contact status + responses
+        # Priority: quoted > declined > replied > responded > opened > awaiting
+        contact_statuses = {c.get("status", "sent") for c in v["contacts"]}
+        if has_response or "quoted" in contact_statuses:
+            if "quoted" in contact_statuses:
+                vendor_status = "quoted"
+            elif "declined" in contact_statuses:
+                # Has responses, at least one declined
+                vendor_status = "replied" if (contact_statuses - {"declined", "sent", "opened"}) else "declined"
+            else:
+                vendor_status = "replied"
+        elif "responded" in contact_statuses:
+            vendor_status = "replied"
+        elif "declined" in contact_statuses:
+            vendor_status = "declined"
+        elif "opened" in contact_statuses:
+            vendor_status = "opened"
+        else:
+            vendor_status = "awaiting"
+
         result.append({
             "vendor_name": v["vendor_name"],
-            "status": "replied" if has_response else "awaiting",
+            "status": vendor_status,
             "contact_count": len(v["contacts"]),
             "contact_types": sorted(v["contact_types"]),
             "all_parts": sorted(v["all_parts"]),
@@ -145,10 +168,12 @@ async def get_activity(req_id: int, user: User = Depends(require_user), db: Sess
 
     # Summary counts
     sent = len(result)
-    replied = sum(1 for r in result if r["status"] == "replied")
-    awaiting = sent - replied
+    replied = sum(1 for r in result if r["status"] in ("replied", "quoted"))
+    opened = sum(1 for r in result if r["status"] == "opened")
+    declined = sum(1 for r in result if r["status"] == "declined")
+    awaiting = sent - replied - opened - declined
 
-    return {"vendors": result, "summary": {"sent": sent, "replied": replied, "awaiting": awaiting}}
+    return {"vendors": result, "summary": {"sent": sent, "replied": replied, "opened": opened, "awaiting": awaiting}}
 
 
 
