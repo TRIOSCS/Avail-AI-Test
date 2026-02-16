@@ -422,6 +422,9 @@ def _create_performance_tables(conn) -> None:
         "ALTER TABLE vendor_metrics_snapshot ADD COLUMN IF NOT EXISTS quote_conversion FLOAT",
         "ALTER TABLE vendor_metrics_snapshot ADD COLUMN IF NOT EXISTS po_conversion FLOAT",
         "ALTER TABLE vendor_metrics_snapshot ADD COLUMN IF NOT EXISTS avg_review_rating FLOAT",
+        # v1.5.2 — Stock list credit in buyer scorecard
+        "ALTER TABLE buyer_leaderboard_snapshot ADD COLUMN IF NOT EXISTS stock_lists_uploaded INTEGER DEFAULT 0",
+        "ALTER TABLE buyer_leaderboard_snapshot ADD COLUMN IF NOT EXISTS points_stock INTEGER DEFAULT 0",
     ]:
         _exec(conn, col_stmt)
     indexes = [

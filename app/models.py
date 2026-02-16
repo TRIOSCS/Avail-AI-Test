@@ -514,11 +514,13 @@ class BuyerLeaderboardSnapshot(Base):
     offers_quoted = Column(Integer, default=0)
     offers_in_buyplan = Column(Integer, default=0)
     offers_po_confirmed = Column(Integer, default=0)
+    stock_lists_uploaded = Column(Integer, default=0)
 
     points_offers = Column(Integer, default=0)
     points_quoted = Column(Integer, default=0)
     points_buyplan = Column(Integer, default=0)
     points_po = Column(Integer, default=0)
+    points_stock = Column(Integer, default=0)
     total_points = Column(Integer, default=0)
 
     rank = Column(Integer)

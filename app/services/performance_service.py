@@ -42,6 +42,7 @@ PTS_LOGGED = 1
 PTS_QUOTED = 3
 PTS_BUYPLAN = 5
 PTS_PO_CONFIRMED = 8
+PTS_STOCK_LIST = 2
 
 GRACE_DAYS = 7
 
@@ -491,11 +492,19 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
         in_buyplan = sum(1 for oid in offer_ids if oid in buyplan_offer_ids)
         po_confirmed = sum(1 for oid in offer_ids if oid in po_confirmed_offer_ids)
 
+        # Stock lists uploaded in this month (unique, non-duplicate)
+        stock_uploaded = db.query(StockListHash).filter(
+            StockListHash.user_id == buyer.id,
+            StockListHash.first_seen_at >= month_start_dt,
+            StockListHash.first_seen_at < month_end_dt,
+        ).count()
+
         pts_logged = logged * PTS_LOGGED
         pts_quoted = quoted * PTS_QUOTED
         pts_buyplan = in_buyplan * PTS_BUYPLAN
         pts_po = po_confirmed * PTS_PO_CONFIRMED
-        total = pts_logged + pts_quoted + pts_buyplan + pts_po
+        pts_stock = stock_uploaded * PTS_STOCK_LIST
+        total = pts_logged + pts_quoted + pts_buyplan + pts_po + pts_stock
 
         entries.append({
             "user_id": buyer.id,
@@ -503,10 +512,12 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
             "offers_quoted": quoted,
             "offers_in_buyplan": in_buyplan,
             "offers_po_confirmed": po_confirmed,
+            "stock_lists_uploaded": stock_uploaded,
             "points_offers": pts_logged,
             "points_quoted": pts_quoted,
             "points_buyplan": pts_buyplan,
             "points_po": pts_po,
+            "points_stock": pts_stock,
             "total_points": total,
         })
 
@@ -532,10 +543,12 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
         snap.offers_quoted = entry["offers_quoted"]
         snap.offers_in_buyplan = entry["offers_in_buyplan"]
         snap.offers_po_confirmed = entry["offers_po_confirmed"]
+        snap.stock_lists_uploaded = entry["stock_lists_uploaded"]
         snap.points_offers = entry["points_offers"]
         snap.points_quoted = entry["points_quoted"]
         snap.points_buyplan = entry["points_buyplan"]
         snap.points_po = entry["points_po"]
+        snap.points_stock = entry["points_stock"]
         snap.total_points = entry["total_points"]
         snap.rank = entry["rank"]
         snap.updated_at = datetime.now(timezone.utc)
@@ -561,10 +574,12 @@ def get_buyer_leaderboard(db: Session, month: date) -> list[dict]:
         "offers_quoted": snap.offers_quoted,
         "offers_in_buyplan": snap.offers_in_buyplan,
         "offers_po_confirmed": snap.offers_po_confirmed,
+        "stock_lists_uploaded": snap.stock_lists_uploaded or 0,
         "points_offers": snap.points_offers,
         "points_quoted": snap.points_quoted,
         "points_buyplan": snap.points_buyplan,
         "points_po": snap.points_po,
+        "points_stock": snap.points_stock or 0,
         "total_points": snap.total_points,
     } for snap, user_name in rows]
 

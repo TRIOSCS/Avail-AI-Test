@@ -2383,7 +2383,7 @@ function renderBuyerLeaderboard(data, months) {
 
     html += `<table class="perf-table"><thead><tr>
         <th>#</th><th>Buyer</th>
-        <th>Offers (x1)</th><th>Quoted (x3)</th><th>Buy Plan (x5)</th><th>PO Confirmed (x8)</th>
+        <th>Offers (x1)</th><th>Quoted (x3)</th><th>Buy Plan (x5)</th><th>PO Confirmed (x8)</th><th>Stock Lists (x2)</th>
         <th>Total</th>
     </tr></thead><tbody>`;
 
@@ -2398,6 +2398,7 @@ function renderBuyerLeaderboard(data, months) {
             <td>${e.offers_quoted} <span class="pts">(${e.points_quoted})</span></td>
             <td>${e.offers_in_buyplan} <span class="pts">(${e.points_buyplan})</span></td>
             <td>${e.offers_po_confirmed} <span class="pts">(${e.points_po})</span></td>
+            <td>${e.stock_lists_uploaded || 0} <span class="pts">(${e.points_stock || 0})</span></td>
             <td><strong>${e.total_points}</strong></td>
         </tr>`;
     }
