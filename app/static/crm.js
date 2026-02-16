@@ -1887,3 +1887,307 @@ async function saveLogCall() {
         if (healthEl) { delete healthEl.dataset.loaded; loadCompanyActivityStatus(parseInt(companyId)); }
     } catch(e) { console.error('saveLogCall:', e); showToast('Error logging call', 'error'); }
 }
+
+// ── Proactive Offers ──────────────────────────────────────────────────
+
+let _proactiveMatches = [];
+let _proactiveSent = [];
+let _proactiveTab = 'matches';
+let _proactiveSendSiteId = null;
+let _proactiveSendMatchIds = [];
+let _proactiveSiteContacts = [];
+
+async function showProactiveOffers() {
+    showView('view-proactive');
+    currentReqId = null;
+    switchProactiveTab('matches');
+}
+
+function switchProactiveTab(tab, btn) {
+    _proactiveTab = tab;
+    document.querySelectorAll('#proactiveTabs .tab').forEach(t => t.classList.remove('on'));
+    if (btn) btn.classList.add('on');
+    else document.querySelectorAll('#proactiveTabs .tab').forEach(t => {
+        if (t.textContent.toLowerCase().includes(tab)) t.classList.add('on');
+    });
+    document.getElementById('proactiveMatchesPanel').style.display = tab === 'matches' ? '' : 'none';
+    document.getElementById('proactiveSentPanel').style.display = tab === 'sent' ? '' : 'none';
+    document.getElementById('proactiveScorecardPanel').style.display = tab === 'scorecard' ? '' : 'none';
+    if (tab === 'matches') loadProactiveMatches();
+    else if (tab === 'sent') loadProactiveSent();
+    else if (tab === 'scorecard') loadProactiveScorecard();
+}
+
+async function loadProactiveMatches() {
+    try {
+        _proactiveMatches = await apiFetch('/api/proactive/matches');
+        renderProactiveMatches();
+    } catch (e) { showToast('Failed to load matches', 'error'); }
+}
+
+function renderProactiveMatches() {
+    const el = document.getElementById('proactiveMatchesPanel');
+    if (!_proactiveMatches.length) {
+        el.innerHTML = '<p class="empty">No proactive matches yet. When buyers log offers for parts your archived customers needed, matches will appear here.</p>';
+        return;
+    }
+    el.innerHTML = _proactiveMatches.map(group => {
+        const matchRows = group.matches.map(m => `
+            <tr>
+                <td><input type="checkbox" class="pm-check" data-id="${m.id}" data-site="${group.customer_site_id}" checked></td>
+                <td><strong>${esc(m.mpn)}</strong></td>
+                <td>${esc(m.manufacturer || '')}</td>
+                <td>${esc(m.vendor_name)}</td>
+                <td>${(m.qty_available||0).toLocaleString()}</td>
+                <td>${m.unit_price != null ? '$' + Number(m.unit_price).toFixed(4) : '—'}</td>
+                <td>${esc(m.condition || '')}</td>
+                <td>${esc(m.lead_time || '')}</td>
+                <td style="font-size:10px;color:var(--muted)">${esc(m.original_req_name || '')}</td>
+            </tr>
+        `).join('');
+        return `
+        <div class="card" style="margin-bottom:12px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                <div>
+                    <strong>${esc(group.company_name)}</strong>
+                    ${group.site_name ? ' — ' + esc(group.site_name) : ''}
+                    <span style="font-size:11px;color:var(--muted);margin-left:8px">${group.matches.length} match${group.matches.length !== 1 ? 'es' : ''}</span>
+                </div>
+                <div style="display:flex;gap:6px">
+                    <button class="btn btn-primary btn-sm" onclick="openProactiveSendModal(${group.customer_site_id})">Send to Customer</button>
+                    <button class="btn btn-ghost btn-sm" onclick="dismissProactiveGroup(${group.customer_site_id})">Dismiss</button>
+                </div>
+            </div>
+            <table class="tbl">
+                <thead><tr><th></th><th>MPN</th><th>Mfr</th><th>Vendor</th><th>Qty</th><th>Price</th><th>Cond</th><th>Lead</th><th>Orig. Req</th></tr></thead>
+                <tbody>${matchRows}</tbody>
+            </table>
+        </div>`;
+    }).join('');
+}
+
+async function dismissProactiveGroup(siteId) {
+    const ids = [];
+    _proactiveMatches.forEach(g => {
+        if (g.customer_site_id === siteId) g.matches.forEach(m => ids.push(m.id));
+    });
+    if (!ids.length) return;
+    try {
+        await apiFetch('/api/proactive/dismiss', { method: 'POST', body: { match_ids: ids } });
+        showToast('Matches dismissed', 'info');
+        loadProactiveMatches();
+        if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
+    } catch (e) { showToast('Failed to dismiss', 'error'); }
+}
+
+async function openProactiveSendModal(siteId) {
+    _proactiveSendSiteId = siteId;
+    // Get selected match IDs for this site
+    const checks = document.querySelectorAll(`.pm-check[data-site="${siteId}"]:checked`);
+    _proactiveSendMatchIds = Array.from(checks).map(c => parseInt(c.dataset.id));
+    if (!_proactiveSendMatchIds.length) { showToast('Select at least one item', 'error'); return; }
+
+    // Load contacts
+    try {
+        _proactiveSiteContacts = await apiFetch('/api/proactive/contacts/' + siteId);
+    } catch (e) { _proactiveSiteContacts = []; }
+
+    // Find group for company name
+    const group = _proactiveMatches.find(g => g.customer_site_id === siteId);
+    const companyName = group ? group.company_name : '';
+
+    // Populate modal
+    document.getElementById('psSiteId').value = siteId;
+    document.getElementById('psSubject').value = 'Parts Available — ' + companyName;
+    document.getElementById('psNotes').value = '';
+
+    // Render contacts
+    const contactsEl = document.getElementById('psContacts');
+    if (!_proactiveSiteContacts.length) {
+        contactsEl.innerHTML = '<p class="empty">No contacts on this customer site</p>';
+    } else {
+        contactsEl.innerHTML = _proactiveSiteContacts.map(c => `
+            <label style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                <input type="checkbox" class="ps-contact" value="${c.id}" ${c.is_primary ? 'checked' : ''}>
+                ${esc(c.full_name)} ${c.email ? '<span style="color:var(--muted);font-size:11px">(' + esc(c.email) + ')</span>' : ''}
+                ${c.is_primary ? '<span style="font-size:10px;color:var(--teal)">Primary</span>' : ''}
+            </label>
+        `).join('');
+    }
+
+    // Render items with sell price inputs
+    const itemsEl = document.getElementById('psItems');
+    const selectedMatches = [];
+    if (group) {
+        group.matches.forEach(m => {
+            if (_proactiveSendMatchIds.includes(m.id)) selectedMatches.push(m);
+        });
+    }
+    itemsEl.innerHTML = selectedMatches.map(m => {
+        const defaultSell = m.unit_price ? (m.unit_price * 1.3).toFixed(4) : '0';
+        return `<tr>
+            <td>${esc(m.mpn)}</td>
+            <td>${esc(m.vendor_name)}</td>
+            <td>${(m.qty_available||0).toLocaleString()}</td>
+            <td>$${m.unit_price != null ? Number(m.unit_price).toFixed(4) : '—'}</td>
+            <td><input type="number" step="0.0001" class="ps-sell" data-id="${m.id}" value="${defaultSell}" style="width:90px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px" oninput="updateProactivePreview()"></td>
+            <td class="ps-margin" data-id="${m.id}"></td>
+        </tr>`;
+    }).join('');
+    updateProactivePreview();
+
+    document.getElementById('proactiveSendModal').classList.add('open');
+}
+
+function updateProactivePreview() {
+    let totalSell = 0, totalCost = 0;
+    document.querySelectorAll('.ps-sell').forEach(input => {
+        const id = input.dataset.id;
+        const sell = parseFloat(input.value) || 0;
+        const group = _proactiveMatches.find(g => g.customer_site_id === _proactiveSendSiteId);
+        const match = group ? group.matches.find(m => m.id === parseInt(id)) : null;
+        const cost = match ? (match.unit_price || 0) : 0;
+        const qty = match ? (match.qty_available || 0) : 0;
+        const margin = sell > 0 ? ((sell - cost) / sell * 100).toFixed(1) : '0.0';
+        const marginEl = document.querySelector(`.ps-margin[data-id="${id}"]`);
+        if (marginEl) marginEl.textContent = margin + '%';
+        totalSell += sell * qty;
+        totalCost += cost * qty;
+    });
+    const totalMargin = totalSell > 0 ? ((totalSell - totalCost) / totalSell * 100).toFixed(1) : '0.0';
+    const previewEl = document.getElementById('psPreview');
+    if (previewEl) previewEl.innerHTML = `Revenue: <strong>$${totalSell.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong> · Margin: <strong>${totalMargin}%</strong> · Profit: <strong>$${(totalSell - totalCost).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong>`;
+}
+
+async function sendProactiveOffer() {
+    const contactIds = Array.from(document.querySelectorAll('.ps-contact:checked')).map(c => parseInt(c.value));
+    if (!contactIds.length) { showToast('Select at least one contact', 'error'); return; }
+
+    const sellPrices = {};
+    document.querySelectorAll('.ps-sell').forEach(input => {
+        sellPrices[input.dataset.id] = parseFloat(input.value) || 0;
+    });
+
+    try {
+        await apiFetch('/api/proactive/send', {
+            method: 'POST',
+            body: {
+                match_ids: _proactiveSendMatchIds,
+                contact_ids: contactIds,
+                sell_prices: sellPrices,
+                subject: document.getElementById('psSubject').value.trim(),
+                notes: document.getElementById('psNotes').value.trim() || null,
+            }
+        });
+        showToast('Proactive offer sent!', 'success');
+        closeModal('proactiveSendModal');
+        loadProactiveMatches();
+        if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
+    } catch (e) { showToast('Failed to send', 'error'); }
+}
+
+async function loadProactiveSent() {
+    try {
+        _proactiveSent = await apiFetch('/api/proactive/offers');
+        renderProactiveSent();
+    } catch (e) { showToast('Failed to load sent offers', 'error'); }
+}
+
+function renderProactiveSent() {
+    const el = document.getElementById('proactiveSentPanel');
+    if (!_proactiveSent.length) {
+        el.innerHTML = '<p class="empty">No proactive offers sent yet</p>';
+        return;
+    }
+    const statusColors = { sent: 'var(--teal)', replied: 'var(--amber)', converted: 'var(--green)', expired: 'var(--muted)' };
+    el.innerHTML = _proactiveSent.map(po => {
+        const color = statusColors[po.status] || 'var(--muted)';
+        const itemCount = (po.line_items || []).length;
+        const convertBtn = po.status === 'sent' || po.status === 'replied'
+            ? `<button class="btn btn-success btn-sm" onclick="convertProactiveOffer(${po.id})" style="margin-top:8px">Convert to Win</button>`
+            : '';
+        return `
+        <div class="card" style="margin-bottom:8px;border-left:4px solid ${color}">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+                <div>
+                    <strong>${esc(po.company_name)}</strong>
+                    ${po.site_name ? ' — ' + esc(po.site_name) : ''}
+                    <span class="status-badge" style="background:${color};color:#fff;margin-left:8px;font-size:10px">${po.status}</span>
+                </div>
+                <span style="font-size:11px;color:var(--muted)">${po.sent_at ? fmtDateTime(po.sent_at) : ''}</span>
+            </div>
+            <div style="font-size:12px;color:var(--text2);margin-top:4px">
+                ${itemCount} item${itemCount !== 1 ? 's' : ''} · Revenue: $${Number(po.total_sell||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}
+                · To: ${(po.recipient_emails||[]).join(', ')}
+            </div>
+            ${convertBtn}
+        </div>`;
+    }).join('');
+}
+
+async function convertProactiveOffer(offerId) {
+    if (!confirm('Convert this proactive offer to a Win? This will create a requisition, quote, and buy plan.')) return;
+    try {
+        const result = await apiFetch('/api/proactive/convert/' + offerId, { method: 'POST' });
+        showToast('Converted! Requisition #' + result.requisition_id + ' created with buy plan.', 'success');
+        loadProactiveSent();
+    } catch (e) { showToast('Conversion failed', 'error'); }
+}
+
+async function loadProactiveScorecard() {
+    try {
+        const data = await apiFetch('/api/proactive/scorecard');
+        renderProactiveScorecard(data);
+    } catch (e) { showToast('Failed to load scorecard', 'error'); }
+}
+
+function renderProactiveScorecard(data) {
+    const el = document.getElementById('proactiveScorecardPanel');
+    const cards = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-bottom:20px">
+        <div class="card" style="text-align:center;padding:20px">
+            <div style="font-size:28px;font-weight:700;color:var(--teal)">${data.total_sent}</div>
+            <div style="font-size:11px;color:var(--muted)">Offers Sent</div>
+        </div>
+        <div class="card" style="text-align:center;padding:20px">
+            <div style="font-size:28px;font-weight:700;color:var(--green)">${data.total_converted}</div>
+            <div style="font-size:11px;color:var(--muted)">POs Received</div>
+        </div>
+        <div class="card" style="text-align:center;padding:20px">
+            <div style="font-size:28px;font-weight:700;color:var(--text)">${data.conversion_rate}%</div>
+            <div style="font-size:11px;color:var(--muted)">Conversion Rate</div>
+        </div>
+        <div class="card" style="text-align:center;padding:20px">
+            <div style="font-size:28px;font-weight:700;color:var(--amber)">$${Number(data.anticipated_revenue||0).toLocaleString()}</div>
+            <div style="font-size:11px;color:var(--muted)">Anticipated Revenue</div>
+        </div>
+        <div class="card" style="text-align:center;padding:20px">
+            <div style="font-size:28px;font-weight:700;color:var(--green)">$${Number(data.converted_revenue||0).toLocaleString()}</div>
+            <div style="font-size:11px;color:var(--muted)">Won Revenue</div>
+        </div>
+        <div class="card" style="text-align:center;padding:20px">
+            <div style="font-size:28px;font-weight:700;color:var(--green)">$${Number(data.gross_profit||0).toLocaleString()}</div>
+            <div style="font-size:11px;color:var(--muted)">Gross Profit</div>
+        </div>
+    </div>`;
+
+    let breakdownHtml = '';
+    if (data.breakdown && data.breakdown.length) {
+        breakdownHtml = `
+        <h3 style="margin-bottom:8px;font-size:14px">Per Salesperson</h3>
+        <table class="tbl">
+            <thead><tr><th>Name</th><th>Sent</th><th>Converted</th><th>Revenue</th><th>Gross Profit</th></tr></thead>
+            <tbody>${data.breakdown.map(b => `
+                <tr>
+                    <td><strong>${esc(b.salesperson_name)}</strong></td>
+                    <td>${b.sent}</td>
+                    <td>${b.converted}</td>
+                    <td>$${Number(b.revenue||0).toLocaleString()}</td>
+                    <td>$${Number(b.gross_profit||0).toLocaleString()}</td>
+                </tr>
+            `).join('')}</tbody>
+        </table>`;
+    }
+
+    el.innerHTML = cards + breakdownHtml;
+}

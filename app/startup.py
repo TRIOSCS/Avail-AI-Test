@@ -33,6 +33,7 @@ def run_startup_migrations() -> None:
         _create_crm_tables(conn)
         _add_crm_columns(conn)
         _create_crm_indexes(conn)
+        _create_proactive_tables(conn)
     log.info("Startup migrations complete")
 
 
@@ -295,3 +296,65 @@ def _create_crm_indexes(conn) -> None:
     ]
     for stmt in stmts:
         _exec(conn, stmt)
+
+
+def _create_proactive_tables(conn) -> None:
+    """Proactive offers — matching, sending, throttle."""
+    tables = [
+        """CREATE TABLE IF NOT EXISTS proactive_matches (
+            id SERIAL PRIMARY KEY,
+            offer_id INTEGER NOT NULL REFERENCES offers(id) ON DELETE CASCADE,
+            requirement_id INTEGER NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
+            requisition_id INTEGER NOT NULL REFERENCES requisitions(id) ON DELETE CASCADE,
+            customer_site_id INTEGER NOT NULL REFERENCES customer_sites(id),
+            salesperson_id INTEGER NOT NULL REFERENCES users(id),
+            mpn VARCHAR(255) NOT NULL,
+            status VARCHAR(20) DEFAULT 'new',
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS proactive_offers (
+            id SERIAL PRIMARY KEY,
+            customer_site_id INTEGER NOT NULL REFERENCES customer_sites(id),
+            salesperson_id INTEGER NOT NULL REFERENCES users(id),
+            line_items JSON NOT NULL DEFAULT '[]',
+            recipient_contact_ids JSON DEFAULT '[]',
+            recipient_emails JSON DEFAULT '[]',
+            subject VARCHAR(500),
+            email_body_html TEXT,
+            graph_message_id VARCHAR(500),
+            status VARCHAR(20) DEFAULT 'sent',
+            sent_at TIMESTAMP DEFAULT NOW(),
+            converted_requisition_id INTEGER REFERENCES requisitions(id),
+            converted_quote_id INTEGER REFERENCES quotes(id),
+            converted_at TIMESTAMP,
+            total_sell NUMERIC(12,2),
+            total_cost NUMERIC(12,2),
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS proactive_throttle (
+            id SERIAL PRIMARY KEY,
+            mpn VARCHAR(255) NOT NULL,
+            customer_site_id INTEGER NOT NULL REFERENCES customer_sites(id) ON DELETE CASCADE,
+            last_offered_at TIMESTAMP NOT NULL,
+            proactive_offer_id INTEGER REFERENCES proactive_offers(id)
+        )""",
+    ]
+    for stmt in tables:
+        _exec(conn, stmt)
+    indexes = [
+        "CREATE INDEX IF NOT EXISTS ix_pm_offer ON proactive_matches(offer_id)",
+        "CREATE INDEX IF NOT EXISTS ix_pm_req ON proactive_matches(requisition_id)",
+        "CREATE INDEX IF NOT EXISTS ix_pm_site ON proactive_matches(customer_site_id)",
+        "CREATE INDEX IF NOT EXISTS ix_pm_sales ON proactive_matches(salesperson_id)",
+        "CREATE INDEX IF NOT EXISTS ix_pm_status ON proactive_matches(status)",
+        "CREATE INDEX IF NOT EXISTS ix_pm_mpn_site ON proactive_matches(mpn, customer_site_id)",
+        "CREATE INDEX IF NOT EXISTS ix_poff_site ON proactive_offers(customer_site_id)",
+        "CREATE INDEX IF NOT EXISTS ix_poff_sales ON proactive_offers(salesperson_id)",
+        "CREATE INDEX IF NOT EXISTS ix_poff_status ON proactive_offers(status)",
+        "CREATE INDEX IF NOT EXISTS ix_poff_sent ON proactive_offers(sent_at)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_pt_mpn_site ON proactive_throttle(mpn, customer_site_id)",
+        "CREATE INDEX IF NOT EXISTS ix_pt_last_offered ON proactive_throttle(last_offered_at)",
+    ]
+    for stmt in indexes:
+        _exec(conn, stmt)
+    conn.commit()

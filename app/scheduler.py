@@ -293,6 +293,17 @@ async def _scheduler_tick():
             log.error(f"PO verification scan error: {e}")
             db.rollback()
 
+        # ── Proactive offer matching (every tick) ──
+        if settings.proactive_matching_enabled:
+            try:
+                from .services.proactive_service import scan_new_offers_for_matches
+                result = scan_new_offers_for_matches(db)
+                if result.get("matches_created"):
+                    log.info(f"Proactive matching: {result['matches_created']} new matches from {result['scanned']} offers")
+            except Exception as e:
+                log.error(f"Proactive matching error: {e}")
+                db.rollback()
+
     except Exception as e:
         log.error(f"Scheduler batch error: {e}")
     finally:

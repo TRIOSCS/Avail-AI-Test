@@ -93,4 +93,9 @@ class Settings:
     routing_window_hours: int = int(os.getenv("ROUTING_WINDOW_HOURS", "48"))
     collision_lookback_days: int = int(os.getenv("COLLISION_LOOKBACK_DAYS", "7"))
 
+    # Proactive offers
+    proactive_matching_enabled: bool = os.getenv("PROACTIVE_MATCHING_ENABLED", "true").lower() == "true"
+    proactive_archive_age_days: int = int(os.getenv("PROACTIVE_ARCHIVE_AGE_DAYS", "30"))
+    proactive_throttle_days: int = int(os.getenv("PROACTIVE_THROTTLE_DAYS", "21"))
+
 settings = Settings()

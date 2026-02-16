@@ -249,11 +249,28 @@ function applyRoleGating() {
     // Show Buy Plans nav for admins
     const bpNav = document.getElementById('navBuyPlans');
     if (bpNav && window.__isAdmin) bpNav.style.display = '';
+    // Proactive nav visible for sales + admin
+    const pNav = document.getElementById('navProactive');
+    if (pNav && (window.userRole === 'sales' || window.__isAdmin)) {
+        pNav.style.display = '';
+        refreshProactiveBadge();
+    }
 }
 function isBuyer() { return window.userRole === 'buyer'; }
 
+async function refreshProactiveBadge() {
+    try {
+        const data = await apiFetch('/api/proactive/count');
+        const badge = document.getElementById('proactiveBadge');
+        if (badge) {
+            if (data.count > 0) { badge.textContent = data.count; badge.style.display = ''; }
+            else { badge.style.display = 'none'; }
+        }
+    } catch (e) {}
+}
+
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-detail', 'view-vendors', 'view-materials', 'view-sources', 'view-customers', 'view-buyplans'];
+const ALL_VIEWS = ['view-list', 'view-detail', 'view-vendors', 'view-materials', 'view-sources', 'view-customers', 'view-buyplans', 'view-proactive'];
 
 function showView(viewId) {
     for (const id of ALL_VIEWS) {

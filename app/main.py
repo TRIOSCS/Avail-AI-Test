@@ -437,6 +437,5 @@ from .routers.requisitions import router as reqs_router
 app.include_router(reqs_router)
 from .routers.rfq import router as rfq_router
 app.include_router(rfq_router)
-
-
-
+from .routers.proactive import router as proactive_router
+app.include_router(proactive_router)

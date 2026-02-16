@@ -628,6 +628,33 @@
         .new-offers-dot.red{background:#dc2626}
         @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
 
+        /* Nav badge */
+        .nav-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--red);color:#fff;font-size:9px;font-weight:700;margin-left:4px;line-height:1}
+
+        /* Proactive */
+        .proactive-group{background:var(--white);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:10px}
+        .proactive-group h3{font-size:14px;font-weight:700;margin-bottom:8px}
+        .proactive-match{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--bg);font-size:12px}
+        .proactive-match:last-child{border-bottom:none}
+        .proactive-match label{display:flex;align-items:center;gap:6px;cursor:pointer;flex:1}
+        .proactive-match .pm-mpn{font-family:'JetBrains Mono',monospace;font-weight:600;min-width:120px}
+        .proactive-match .pm-vendor{color:var(--text2);min-width:100px}
+        .proactive-match .pm-detail{color:var(--muted)}
+        .proactive-actions{display:flex;gap:6px;margin-top:10px}
+        .proactive-offer-card{background:var(--white);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:8px}
+        .proactive-offer-card .po-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+        .proactive-offer-card .po-header strong{font-size:13px}
+        .proactive-offer-card .po-items{font-size:12px;color:var(--text2);margin-bottom:6px}
+        .proactive-offer-card .po-footer{display:flex;gap:16px;font-size:11px;color:var(--muted)}
+        .scorecard-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:20px}
+        .scorecard-card{background:var(--white);border:1px solid var(--border);border-radius:8px;padding:16px;text-align:center}
+        .scorecard-card .sc-value{font-size:28px;font-weight:800;color:var(--teal);font-family:'JetBrains Mono',monospace}
+        .scorecard-card .sc-label{font-size:11px;color:var(--muted);margin-top:4px;text-transform:uppercase;font-weight:600;letter-spacing:.3px}
+        .sell-price-input{width:80px;padding:4px 6px;border:1px solid var(--border);border-radius:4px;font-size:12px;font-family:'JetBrains Mono',monospace;text-align:right}
+        .send-preview{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:10px 14px;margin-top:10px;font-size:12px}
+        .send-preview .sp-row{display:flex;justify-content:space-between;padding:2px 0}
+        .send-preview .sp-total{font-weight:700;border-top:1px solid var(--border);margin-top:4px;padding-top:4px}
+
         /* Quote tab */
         .quote-header{display:flex;justify-content:space-between;align-items:flex-start;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:8px;margin-bottom:12px}
         .quote-header strong{font-size:15px;font-family:'JetBrains Mono',monospace}
@@ -837,6 +864,7 @@
                 <button id="navMaterials" onclick="showMaterials();setNav(this)">Materials</button>
                 <button id="navSources" onclick="showSources();setNav(this)">Data Sources</button>
                 <button id="navBuyPlans" onclick="showBuyPlans();setNav(this)" style="display:none">Buy Plans</button>
+                <button id="navProactive" onclick="showProactiveOffers();setNav(this)" style="display:none">Proactive <span id="proactiveBadge" class="nav-badge" style="display:none"></span></button>
             </div>
         </div>
         <div class="user">
@@ -1128,6 +1156,21 @@
             </div>
         </div>
         <div id="buyPlansList"><p class="empty">Loading…</p></div>
+    </div>
+
+    <!-- VIEW: Proactive Offers -->
+    <div id="view-proactive" style="display:none">
+        <div class="vendor-header">
+            <h2>Proactive Offers</h2>
+        </div>
+        <div class="tabs" id="proactiveTabs">
+            <button class="tab on" onclick="switchProactiveTab('matches',this)">Matches</button>
+            <button class="tab" onclick="switchProactiveTab('sent',this)">Sent</button>
+            <button class="tab" onclick="switchProactiveTab('scorecard',this)">Scorecard</button>
+        </div>
+        <div id="proactiveMatchesPanel"><p class="empty">Loading…</p></div>
+        <div id="proactiveSentPanel" style="display:none"><p class="empty">Loading…</p></div>
+        <div id="proactiveScorecardPanel" style="display:none"><p class="empty">Loading…</p></div>
     </div>
 </div>
 
@@ -1434,6 +1477,44 @@
 </div>
 
 <!-- Compare Offers Modal -->
+
+<!-- Proactive Send Modal -->
+<div id="proactiveSendModal" class="modal-bg" onclick="if(event.target===this)closeModal('proactiveSendModal')">
+    <div class="modal" style="max-width:680px">
+        <h2>Send Proactive Offer</h2>
+        <p id="psmCustomer" style="font-size:13px;color:var(--text2);margin-bottom:12px"></p>
+
+        <div style="margin-bottom:12px">
+            <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Selected Items</label>
+            <table class="offer-table" style="width:100%;font-size:12px">
+                <thead><tr><th>MPN</th><th>Vendor</th><th>Qty</th><th>Cost</th><th>Sell Price</th><th>Condition</th></tr></thead>
+                <tbody id="psmItems"></tbody>
+            </table>
+        </div>
+
+        <div class="send-preview" id="psmPreview"></div>
+
+        <div style="margin-top:12px">
+            <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Contacts</label>
+            <div id="psmContacts" style="font-size:12px"><span class="empty">Loading contacts…</span></div>
+        </div>
+
+        <div class="field" style="margin-top:12px">
+            <label for="psmSubject">Subject</label>
+            <input id="psmSubject" placeholder="Parts Available — Company">
+        </div>
+
+        <div class="field" style="margin-top:8px">
+            <label for="psmNotes">Notes (optional)</label>
+            <textarea id="psmNotes" rows="3" placeholder="Add a personal message…" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical"></textarea>
+        </div>
+
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('proactiveSendModal')">Cancel</button>
+            <button class="btn btn-primary" id="psmSendBtn" onclick="sendProactiveOffer()">Send Email</button>
+        </div>
+    </div>
+</div>
 
 <script>
 window.__userName = "{{ user_name }}";
