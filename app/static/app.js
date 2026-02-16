@@ -2035,19 +2035,17 @@ function placeVendorCall(cardId, vendorName, reqId, phone) {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    // After a short delay, open the log modal so user can add notes/duration
-    setTimeout(function() {
-        document.getElementById('vlcCardId').value = cardId;
-        document.getElementById('vlcVendorName').textContent = vendorName;
-        document.getElementById('vlcPhone').value = phone;
-        document.getElementById('vlcContactName').value = '';
-        document.getElementById('vlcDuration').value = '';
-        document.getElementById('vlcNotes').value = '';
-        document.getElementById('vlcDirection').value = 'outbound';
-        window._vlcReqId = reqId || null;
-        document.getElementById('vendorLogCallModal').classList.add('open');
-        setTimeout(function() { document.getElementById('vlcNotes').focus(); }, 300);
-    }, 500);
+    // Silently log the call timestamp
+    var body = { phone: phone, direction: 'outbound' };
+    if (reqId) body.requisition_id = reqId;
+    apiFetch('/api/vendors/' + cardId + '/activities/call', {
+        method: 'POST', body: body
+    }).then(function() {
+        showToast('Call logged', 'success');
+        if (reqId) loadActivity();
+        else loadVendorActivities(parseInt(cardId));
+        loadVendorActivityStatus(parseInt(cardId));
+    }).catch(function(e) { console.error('placeVendorCall:', e); });
 }
 
 async function saveVendorLogCall() {

@@ -217,11 +217,21 @@ async def get_activity(
         for p in c.parts_included or []:
             vendors[vk]["all_parts"].add(p)
 
+    # Build contact_id → vendor_name lookup so responses group with their outbound contact
+    contact_vendor_map = {c.id: c.vendor_name for c in contacts}
+
     for r in responses:
-        vk = normalize_vendor_name(r.vendor_name)
+        # Group under the linked contact's vendor name when available,
+        # so replies from "John Smith" appear under "Acme Corp" thread
+        group_name = (
+            contact_vendor_map.get(r.contact_id, r.vendor_name)
+            if r.contact_id
+            else r.vendor_name
+        )
+        vk = normalize_vendor_name(group_name)
         if vk not in vendors:
             vendors[vk] = {
-                "vendor_name": r.vendor_name,
+                "vendor_name": group_name,
                 "contacts": [],
                 "responses": [],
                 "activities": [],
