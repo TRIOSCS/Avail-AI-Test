@@ -1479,6 +1479,32 @@ function renderRfqMessage() {
     }
 }
 
+async function generateSmartRFQForModal() {
+    const sample = rfqVendorData.find(v => _vendorHasPartsToSend(v));
+    if (!sample) { showToast('No vendor with parts selected', 'error'); return; }
+    const parts = [...sample.new_listing, ...sample.new_other];
+    if (sample.include_repeats) parts.push(...sample.repeat_listing, ...sample.repeat_other);
+    if (!parts.length) { showToast('No parts to draft for', 'error'); return; }
+    const btn = document.querySelector('[onclick*="generateSmartRFQ"]');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ Drafting…'; }
+    try {
+        const data = await apiFetch('/api/ai/draft-rfq', {
+            method: 'POST', body: { vendor_name: sample.vendor_name, parts }
+        });
+        if (data.available && data.body) {
+            document.getElementById('rfqBody').value = data.body;
+            showToast('Smart draft generated', 'success');
+        } else {
+            showToast(data.reason || 'Draft generation failed', 'error');
+        }
+    } catch (e) {
+        console.error('generateSmartRFQForModal:', e);
+        showToast('Smart draft failed — using template', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '🤖 Smart Draft'; }
+    }
+}
+
 function rfqSelectEmail(idx, value) {
     if (value === '__custom__') {
         const custom = prompt('Enter email address:');
