@@ -80,6 +80,10 @@ def _add_columns(conn) -> None:
         "ALTER TABLE vendor_responses ADD COLUMN IF NOT EXISTS classification VARCHAR(50)",
         "ALTER TABLE vendor_responses ADD COLUMN IF NOT EXISTS needs_action BOOLEAN DEFAULT false",
         "ALTER TABLE vendor_responses ADD COLUMN IF NOT EXISTS action_hint VARCHAR(255)",
+        # AI material intelligence
+        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS brand_tags JSON DEFAULT '[]'",
+        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS commodity_tags JSON DEFAULT '[]'",
+        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS material_tags_updated_at TIMESTAMP",
     ]
     for stmt in stmts:
         _exec(conn, stmt)

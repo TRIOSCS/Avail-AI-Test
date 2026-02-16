@@ -431,6 +431,11 @@ class VendorCard(Base):
     total_revenue = Column(Float, default=0)
     last_activity_at = Column(DateTime)
 
+    # AI-generated material intelligence
+    brand_tags = Column(JSON, default=list)           # ["IBM", "Dell", "HP"]
+    commodity_tags = Column(JSON, default=list)        # ["CPU", "HDD", "DDR", "LCD"]
+    material_tags_updated_at = Column(DateTime)
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc),
                         onupdate=lambda: datetime.now(timezone.utc))

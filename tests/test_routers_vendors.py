@@ -32,6 +32,7 @@ def _make_vendor_card(**overrides) -> SimpleNamespace:
         engagement_score=72.5, total_outreach=20, total_responses=14,
         ghost_rate=0.3, response_velocity_hours=4.2,
         last_contact_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
+        brand_tags=[], commodity_tags=[], material_tags_updated_at=None,
         created_at=datetime(2025, 11, 1, tzinfo=timezone.utc),
         updated_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
     )

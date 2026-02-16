@@ -38,7 +38,7 @@ from ..database import get_db
 from ..dependencies import require_user, require_buyer
 from ..models import (
     User, VendorCard, VendorContact, VendorReview, Contact, VendorResponse,
-    MaterialCard, MaterialVendorHistory,
+    MaterialCard, MaterialVendorHistory, Offer, Sighting,
 )
 from ..vendor_utils import normalize_vendor_name
 from ..search_service import normalize_mpn
@@ -88,6 +88,13 @@ async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str)
             db.close()
     except Exception:
         log.exception("Background enrichment failed for vendor card %d", card_id)
+
+    # Also run AI material analysis if vendor has sighting data
+    if settings.anthropic_api_key:
+        try:
+            await _analyze_vendor_materials(card_id)
+        except Exception:
+            log.exception("Background material analysis failed for vendor card %d", card_id)
 
 
 def card_to_dict(card: VendorCard, db: Session) -> dict:
@@ -161,6 +168,9 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
         "ghost_rate": card.ghost_rate,
         "response_velocity_hours": card.response_velocity_hours,
         "last_contact_at": card.last_contact_at.isoformat() if card.last_contact_at else None,
+        "brand_tags": card.brand_tags or [],
+        "commodity_tags": card.commodity_tags or [],
+        "material_tags_updated_at": card.material_tags_updated_at.isoformat() if card.material_tags_updated_at else None,
         "created_at": card.created_at.isoformat() if card.created_at else None,
         "updated_at": card.updated_at.isoformat() if card.updated_at else None,
     }
@@ -987,4 +997,236 @@ async def get_vendor_offer_history(card_id: int, request: Request,
             "last_seen": mvh.last_seen.isoformat() if mvh.last_seen else None,
             "material_card_id": mc.id,
         } for mvh, mc in results],
+    }
+
+
+# ── Confirmed Offers (Buyer-entered quotes) ─────────────────────────────
+
+@router.get("/api/vendors/{card_id}/confirmed-offers")
+async def get_vendor_confirmed_offers(card_id: int, request: Request,
+                                       user: User = Depends(require_user),
+                                       db: Session = Depends(get_db)):
+    """Confirmed quotes manually entered by buyers for this vendor."""
+    card = db.get(VendorCard, card_id)
+    if not card:
+        raise HTTPException(404, "Vendor not found")
+
+    q = request.query_params.get("q", "").strip().lower()
+    limit = min(int(request.query_params.get("limit", "50")), 200)
+    offset = max(int(request.query_params.get("offset", "0")), 0)
+
+    query = db.query(Offer).filter(Offer.vendor_card_id == card_id)
+    if q:
+        safe_q = q.replace("%", r"\%").replace("_", r"\_")
+        query = query.filter(Offer.mpn.ilike(f"%{safe_q}%"))
+
+    total = query.count()
+    rows = query.order_by(Offer.created_at.desc()).offset(offset).limit(limit).all()
+
+    return {
+        "vendor_name": card.display_name,
+        "total": total,
+        "items": [{
+            "id": o.id,
+            "mpn": o.mpn,
+            "manufacturer": o.manufacturer or "",
+            "qty_available": o.qty_available,
+            "unit_price": float(o.unit_price) if o.unit_price is not None else None,
+            "currency": o.currency or "USD",
+            "lead_time": o.lead_time or "",
+            "condition": o.condition or "",
+            "status": o.status or "active",
+            "notes": o.notes or "",
+            "entered_by": o.entered_by.name if o.entered_by else "",
+            "requisition_id": o.requisition_id,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+        } for o in rows],
+    }
+
+
+# ── Parts Sightings Summary ─────────────────────────────────────────────
+
+@router.get("/api/vendors/{card_id}/parts-summary")
+async def get_vendor_parts_summary(card_id: int, request: Request,
+                                    user: User = Depends(require_user),
+                                    db: Session = Depends(get_db)):
+    """Parts this vendor has been seen with, grouped by MPN with counts and date ranges."""
+    card = db.get(VendorCard, card_id)
+    if not card:
+        raise HTTPException(404, "Vendor not found")
+
+    norm = card.normalized_name
+    q = request.query_params.get("q", "").strip().lower()
+    limit = min(int(request.query_params.get("limit", "100")), 500)
+    offset = max(int(request.query_params.get("offset", "0")), 0)
+
+    # Combine sightings and material_vendor_history into a unified parts summary
+    q_filter = ""
+    if q:
+        safe_q = q.replace("'", "''").replace("%", r"\%").replace("_", r"\_")
+        q_filter = f"AND LOWER(mpn) LIKE '%{safe_q}%'"
+
+    rows = db.execute(sqltext(f"""
+        SELECT mpn, manufacturer, sighting_count, first_seen, last_seen, last_price, last_qty
+        FROM (
+            SELECT
+                COALESCE(mpn_matched, '') as mpn,
+                MAX(manufacturer) as manufacturer,
+                COUNT(*) as sighting_count,
+                MIN(created_at) as first_seen,
+                MAX(created_at) as last_seen,
+                (array_agg(unit_price ORDER BY created_at DESC))[1] as last_price,
+                (array_agg(qty_available ORDER BY created_at DESC))[1] as last_qty
+            FROM sightings
+            WHERE LOWER(TRIM(vendor_name)) = :norm
+              AND mpn_matched IS NOT NULL AND mpn_matched != ''
+            GROUP BY COALESCE(mpn_matched, '')
+            UNION ALL
+            SELECT
+                mc.display_mpn as mpn,
+                COALESCE(mvh.last_manufacturer, mc.manufacturer, '') as manufacturer,
+                mvh.times_seen as sighting_count,
+                mvh.first_seen,
+                mvh.last_seen,
+                mvh.last_price,
+                mvh.last_qty
+            FROM material_vendor_history mvh
+            JOIN material_cards mc ON mc.id = mvh.material_card_id
+            WHERE mvh.vendor_name = :norm
+        ) combined
+        WHERE mpn != '' {q_filter}
+        ORDER BY last_seen DESC NULLS LAST
+        OFFSET :off LIMIT :lim
+    """), {"norm": norm, "off": offset, "lim": limit}).fetchall()
+
+    # Get total count
+    total = db.execute(sqltext(f"""
+        SELECT COUNT(*) FROM (
+            SELECT DISTINCT COALESCE(mpn_matched, '') as mpn FROM sightings
+            WHERE LOWER(TRIM(vendor_name)) = :norm AND mpn_matched IS NOT NULL AND mpn_matched != ''
+            UNION
+            SELECT DISTINCT mc.display_mpn as mpn FROM material_vendor_history mvh
+            JOIN material_cards mc ON mc.id = mvh.material_card_id
+            WHERE mvh.vendor_name = :norm
+        ) all_mpns
+        WHERE mpn != '' {q_filter}
+    """), {"norm": norm}).scalar() or 0
+
+    return {
+        "vendor_name": card.display_name,
+        "total": total,
+        "items": [{
+            "mpn": r[0],
+            "manufacturer": r[1] or "",
+            "sighting_count": r[2] or 1,
+            "first_seen": r[3].isoformat() if r[3] else None,
+            "last_seen": r[4].isoformat() if r[4] else None,
+            "last_price": r[5],
+            "last_qty": r[6],
+        } for r in rows],
+    }
+
+
+# ── AI Material Analysis ────────────────────────────────────────────────
+
+async def _analyze_vendor_materials(card_id: int, db_session=None):
+    """Analyze a vendor's MaterialVendorHistory to generate brand and commodity tags.
+
+    If db_session is None, creates its own session (for background use).
+    """
+    from ..utils.claude_client import claude_json
+    from ..database import SessionLocal
+
+    own_session = db_session is None
+    db = db_session or SessionLocal()
+    try:
+        card = db.get(VendorCard, card_id)
+        if not card:
+            return
+
+        # Fetch top 200 parts for this vendor
+        rows = (
+            db.query(MaterialVendorHistory, MaterialCard)
+            .join(MaterialCard, MaterialVendorHistory.material_card_id == MaterialCard.id)
+            .filter(MaterialVendorHistory.vendor_name == card.normalized_name)
+            .order_by(MaterialVendorHistory.times_seen.desc())
+            .limit(200)
+            .all()
+        )
+        if not rows:
+            return
+
+        # Build part list for AI
+        parts_list = []
+        for mvh, mc in rows:
+            parts_list.append(f"{mc.display_mpn} — {mvh.last_manufacturer or mc.manufacturer or 'unknown'}")
+
+        prompt = (
+            f"Analyze this vendor's part inventory and classify them.\n\n"
+            f"Vendor: {card.display_name}\n"
+            f"Parts they carry ({len(parts_list)} samples):\n"
+            + "\n".join(parts_list[:200])
+            + "\n\n"
+            "Return JSON with two arrays:\n"
+            '- "brands": major brands/manufacturers this vendor carries (e.g., "IBM", "Dell", "HP", "Intel", "Samsung"). '
+            "Only include brands with clear evidence from the parts list. Max 15.\n"
+            '- "commodities": commodity categories of parts they carry (e.g., "CPU", "HDD", "DDR", "LCD", '
+            '"SSD", "Power Supply", "Network Card", "Motherboard", "Memory", "GPU", "Cable", "Connector"). '
+            "Use short, standard industry terms. Max 15.\n\n"
+            "Return ONLY the JSON object, no explanation."
+        )
+
+        result = await claude_json(
+            prompt,
+            system="You are a parts classification expert for the electronic components and IT hardware industry. "
+                   "Analyze part numbers and manufacturers to identify brands and commodity categories.",
+            model_tier="fast",
+            max_tokens=512,
+        )
+
+        if not result or not isinstance(result, dict):
+            return
+
+        brands = result.get("brands", [])
+        commodities = result.get("commodities", [])
+
+        # Validate: must be lists of strings
+        if isinstance(brands, list):
+            card.brand_tags = [str(b).strip() for b in brands if b][:15]
+        if isinstance(commodities, list):
+            card.commodity_tags = [str(c).strip() for c in commodities if c][:15]
+        card.material_tags_updated_at = datetime.now(timezone.utc)
+        db.commit()
+
+        log.info("Material tags updated for vendor %s (card %d): %d brands, %d commodities",
+                 card.display_name, card_id, len(card.brand_tags), len(card.commodity_tags))
+    except Exception:
+        log.exception("Material analysis failed for vendor card %d", card_id)
+        if own_session:
+            db.rollback()
+    finally:
+        if own_session:
+            db.close()
+
+
+@router.post("/api/vendors/{card_id}/analyze-materials")
+async def analyze_vendor_materials(card_id: int,
+                                    user: User = Depends(require_buyer),
+                                    db: Session = Depends(get_db)):
+    """On-demand AI analysis of vendor's material inventory to generate brand/commodity tags."""
+    card = db.get(VendorCard, card_id)
+    if not card:
+        raise HTTPException(404, "Vendor not found")
+
+    if not settings.anthropic_api_key:
+        raise HTTPException(503, "AI not configured — set ANTHROPIC_API_KEY in .env")
+
+    await _analyze_vendor_materials(card_id, db_session=db)
+
+    # Refresh after update
+    db.refresh(card)
+    return {
+        "ok": True,
+        "brand_tags": card.brand_tags or [],
+        "commodity_tags": card.commodity_tags or [],
     }

@@ -1405,12 +1405,29 @@ async function openVendorPopup(cardId) {
         if (card.hq_country && card.hq_country !== 'US') html += `<span class="enrich-tag">${esc(card.hq_country)}</span>`;
         html += '</div>';
     }
+    // Material tags (AI-generated brands + commodities)
+    const hasTags = (card.brand_tags && card.brand_tags.length) || (card.commodity_tags && card.commodity_tags.length);
+    if (hasTags) {
+        html += '<div style="margin-top:6px">';
+        if (card.brand_tags && card.brand_tags.length) {
+            html += '<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">';
+            html += card.brand_tags.map(b => `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;background:rgba(59,130,246,.12);color:#3b82f6">${esc(b)}</span>`).join('');
+            html += '</div>';
+        }
+        if (card.commodity_tags && card.commodity_tags.length) {
+            html += '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+            html += card.commodity_tags.map(c => `<span style="display:inline-block;padding:2px 8px;border-radius:12px;font-size:10px;font-weight:600;background:rgba(245,158,11,.12);color:#d97706">${esc(c)}</span>`).join('');
+            html += '</div>';
+        }
+        html += '</div>';
+    }
     // Action buttons
     const vendorDomain = card.domain || (card.website ? card.website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
     html += `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
         <button class="btn-enrich" onclick="enrichVendor(${card.id},'${escAttr(vendorDomain)}')">Enrich</button>
         ${vendorDomain ? `<button class="btn-enrich" onclick="openSuggestedContacts('vendor',${card.id},'${escAttr(vendorDomain)}','${escAttr(card.display_name)}')">Suggested Contacts</button>` : ''}
         <button class="btn-ai" onclick="findAIContacts('vendor',${card.id},'${escAttr(card.display_name)}','${escAttr(vendorDomain)}')">🤖 Find Contacts</button>
+        <button class="btn-enrich" onclick="analyzeVendorMaterials(${card.id})">Analyze Materials</button>
     </div>`;
 
     // Engagement Score (from Email Mining v2)
@@ -1462,21 +1479,35 @@ async function openVendorPopup(cardId) {
         html += '</div>';
     }
 
-    // Offer History (collapsible, searchable)
+    // Confirmed Quotes (buyer-entered offers)
     html += `<div class="vp-section">
         <div class="vp-label" style="display:flex;justify-content:space-between;align-items:center">
-            Offer History
-            <button class="btn btn-ghost btn-sm" onclick="toggleOfferHistory(${card.id})">See Offer History</button>
+            Confirmed Quotes
+            <button class="btn btn-ghost btn-sm" onclick="toggleConfirmedQuotes(${card.id})">View Quotes</button>
         </div>
-        <div id="vpOfferHistory" style="display:none">
+        <div id="vpConfirmedQuotes" style="display:none">
+            <div id="vpConfirmedQuotesList"><p class="vp-muted" style="font-size:11px">Loading...</p></div>
+        </div>
+    </div>`;
+
+    // Parts Sightings (collapsible, searchable summary)
+    html += `<div class="vp-section">
+        <div class="vp-label" style="display:flex;justify-content:space-between;align-items:center">
+            Parts Sightings
+            <span style="display:flex;align-items:center;gap:6px">
+                ${card.unique_parts ? `<span style="font-size:10px;padding:2px 8px;border-radius:10px;background:var(--surface);border:1px solid var(--border);color:var(--text2);font-weight:600">${card.unique_parts} parts</span>` : ''}
+                <button class="btn btn-ghost btn-sm" onclick="togglePartsSightings(${card.id})">View Parts</button>
+            </span>
+        </div>
+        <div id="vpPartsSightings" style="display:none">
             <div style="margin-bottom:8px">
-                <input id="vpOfferHistorySearch" placeholder="Search by MPN..."
+                <input id="vpPartsSightingsSearch" placeholder="Search by MPN..."
                     style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px"
-                    oninput="debounceOfferSearch(${card.id})">
+                    oninput="debouncePartsSightingsSearch(${card.id})">
             </div>
-            <div id="vpOfferHistoryList"><p class="vp-muted" style="font-size:11px">Loading...</p></div>
-            <div id="vpOfferHistoryMore" style="display:none;text-align:center;margin-top:8px">
-                <button class="btn btn-ghost btn-sm" onclick="loadMoreOfferHistory(${card.id})">Load More</button>
+            <div id="vpPartsSightingsList"><p class="vp-muted" style="font-size:11px">Loading...</p></div>
+            <div id="vpPartsSightingsMore" style="display:none;text-align:center;margin-top:8px">
+                <button class="btn btn-ghost btn-sm" onclick="loadMorePartsSightings(${card.id})">Load More</button>
             </div>
         </div>
     </div>`;
@@ -1646,76 +1677,132 @@ async function deleteVendorContact(cardId, contactId, name) {
     } catch(e) { showToast('Failed to delete contact', 'error'); }
 }
 
-// ── Vendor Offer History ──────────────────────────────────────────────
+// ── Confirmed Quotes ─────────────────────────────────────────────────
 
-let _offerHistoryOffset = 0;
-const _debouncedOfferSearch = debounce((cardId) => {
-    const q = (document.getElementById('vpOfferHistorySearch') || {}).value || '';
-    loadOfferHistory(cardId, q);
-}, 300);
-function debounceOfferSearch(cardId) { _debouncedOfferSearch(cardId); }
-
-function toggleOfferHistory(cardId) {
-    const el = document.getElementById('vpOfferHistory');
+function toggleConfirmedQuotes(cardId) {
+    const el = document.getElementById('vpConfirmedQuotes');
     if (el.style.display === 'none') {
         el.style.display = '';
-        _offerHistoryOffset = 0;
-        loadOfferHistory(cardId, '');
+        loadConfirmedQuotes(cardId);
     } else {
         el.style.display = 'none';
     }
 }
 
-async function loadOfferHistory(cardId, query) {
-    _offerHistoryOffset = 0;
-    const q = (query || '').trim();
-    const listEl = document.getElementById('vpOfferHistoryList');
-    const moreEl = document.getElementById('vpOfferHistoryMore');
+async function loadConfirmedQuotes(cardId) {
+    const listEl = document.getElementById('vpConfirmedQuotesList');
     listEl.innerHTML = '<p class="vp-muted" style="font-size:11px">Loading...</p>';
-
     try {
-        const data = await apiFetch(`/api/vendors/${cardId}/offer-history?q=${encodeURIComponent(q)}&limit=50`);
+        const data = await apiFetch(`/api/vendors/${cardId}/confirmed-offers?limit=50`);
         if (!data.items.length) {
-            listEl.innerHTML = '<p class="vp-muted" style="font-size:11px;font-style:italic">No offer history found</p>';
-            moreEl.style.display = 'none';
+            listEl.innerHTML = '<p class="vp-muted" style="font-size:11px;font-style:italic">No confirmed quotes yet</p>';
             return;
         }
-        listEl.innerHTML = renderOfferHistoryItems(data.items);
-        _offerHistoryOffset = data.items.length;
-        moreEl.style.display = data.items.length < data.total ? '' : 'none';
+        listEl.innerHTML = data.items.map(o => {
+            const priceStr = o.unit_price != null ? `${o.currency || '$'}${o.unit_price.toFixed(2)}` : '--';
+            const qtyStr = o.qty_available != null ? o.qty_available.toLocaleString() : '--';
+            const statusCls = o.status === 'active' ? 'color:#10b981' : 'color:var(--text2)';
+            return `<div class="mp-vh-row">
+                <span class="mp-vh-vendor" style="font-weight:600;font-family:'JetBrains Mono',monospace;font-size:11px">${esc(o.mpn)}</span>
+                <span class="mp-vh-detail">${esc(o.manufacturer)}</span>
+                <span class="mp-vh-detail">Qty: ${qtyStr}</span>
+                <span class="mp-vh-detail" style="font-weight:600">${priceStr}</span>
+                ${o.lead_time ? `<span class="mp-vh-detail">${esc(o.lead_time)}</span>` : ''}
+                ${o.condition ? `<span class="badge b-src" style="font-size:9px;padding:1px 6px">${esc(o.condition)}</span>` : ''}
+                <span style="font-size:10px;${statusCls}">${esc(o.status)}</span>
+                <span class="mp-vh-detail" style="margin-left:auto">${esc(o.entered_by)} · ${o.created_at ? fmtDate(o.created_at) : '--'}</span>
+            </div>`;
+        }).join('');
     } catch(e) {
-        listEl.innerHTML = '<p class="vp-muted">Error loading offer history</p>';
+        listEl.innerHTML = '<p class="vp-muted">Error loading quotes</p>';
     }
 }
 
-async function loadMoreOfferHistory(cardId) {
-    const q = (document.getElementById('vpOfferHistorySearch') || {}).value || '';
-    const listEl = document.getElementById('vpOfferHistoryList');
-    const moreEl = document.getElementById('vpOfferHistoryMore');
+// ── Parts Sightings ─────────────────────────────────────────────────
+
+let _partsSightingsOffset = 0;
+const _debouncedPartsSightingsSearch = debounce((cardId) => {
+    const q = (document.getElementById('vpPartsSightingsSearch') || {}).value || '';
+    loadPartsSightings(cardId, q);
+}, 300);
+function debouncePartsSightingsSearch(cardId) { _debouncedPartsSightingsSearch(cardId); }
+
+function togglePartsSightings(cardId) {
+    const el = document.getElementById('vpPartsSightings');
+    if (el.style.display === 'none') {
+        el.style.display = '';
+        _partsSightingsOffset = 0;
+        loadPartsSightings(cardId, '');
+    } else {
+        el.style.display = 'none';
+    }
+}
+
+async function loadPartsSightings(cardId, query) {
+    _partsSightingsOffset = 0;
+    const q = (query || '').trim();
+    const listEl = document.getElementById('vpPartsSightingsList');
+    const moreEl = document.getElementById('vpPartsSightingsMore');
+    listEl.innerHTML = '<p class="vp-muted" style="font-size:11px">Loading...</p>';
 
     try {
-        const data = await apiFetch(`/api/vendors/${cardId}/offer-history?q=${encodeURIComponent(q)}&limit=50&offset=${_offerHistoryOffset}`);
-        listEl.innerHTML += renderOfferHistoryItems(data.items);
-        _offerHistoryOffset += data.items.length;
-        moreEl.style.display = _offerHistoryOffset < data.total ? '' : 'none';
+        const data = await apiFetch(`/api/vendors/${cardId}/parts-summary?q=${encodeURIComponent(q)}&limit=50`);
+        if (!data.items.length) {
+            listEl.innerHTML = '<p class="vp-muted" style="font-size:11px;font-style:italic">No part sightings found</p>';
+            moreEl.style.display = 'none';
+            return;
+        }
+        listEl.innerHTML = renderPartsSightingItems(data.items);
+        _partsSightingsOffset = data.items.length;
+        moreEl.style.display = data.items.length < data.total ? '' : 'none';
+    } catch(e) {
+        listEl.innerHTML = '<p class="vp-muted">Error loading sightings</p>';
+    }
+}
+
+async function loadMorePartsSightings(cardId) {
+    const q = (document.getElementById('vpPartsSightingsSearch') || {}).value || '';
+    const listEl = document.getElementById('vpPartsSightingsList');
+    const moreEl = document.getElementById('vpPartsSightingsMore');
+
+    try {
+        const data = await apiFetch(`/api/vendors/${cardId}/parts-summary?q=${encodeURIComponent(q)}&limit=50&offset=${_partsSightingsOffset}`);
+        listEl.innerHTML += renderPartsSightingItems(data.items);
+        _partsSightingsOffset += data.items.length;
+        moreEl.style.display = _partsSightingsOffset < data.total ? '' : 'none';
     } catch(e) {}
 }
 
-function renderOfferHistoryItems(items) {
+function renderPartsSightingItems(items) {
     return items.map(i => {
-        const priceStr = i.price != null ? '$' + i.price.toFixed(2) : '--';
-        const qtyStr = i.qty != null ? i.qty.toLocaleString() : '--';
-        const srcBadge = i.source_type ? `<span class="badge b-src" style="font-size:9px;padding:1px 6px">${esc(i.source_type)}</span>` : '';
-        return `<div class="mp-vh-row" style="cursor:pointer" onclick="openMaterialPopup(${i.material_card_id})">
+        const priceStr = i.last_price != null ? '$' + i.last_price.toFixed(2) : '--';
+        const qtyStr = i.last_qty != null ? i.last_qty.toLocaleString() : '--';
+        const dateRange = i.first_seen && i.last_seen && i.first_seen !== i.last_seen
+            ? `${fmtDate(i.first_seen)} — ${fmtDate(i.last_seen)}`
+            : (i.last_seen ? fmtDate(i.last_seen) : '--');
+        return `<div class="mp-vh-row">
             <span class="mp-vh-vendor" style="font-weight:600;font-family:'JetBrains Mono',monospace;font-size:11px">${esc(i.mpn)}</span>
-            ${srcBadge}
             <span class="mp-vh-detail">${esc(i.manufacturer)}</span>
             <span class="mp-vh-detail">Qty: ${qtyStr}</span>
             <span class="mp-vh-detail">Price: ${priceStr}</span>
-            <span class="mp-vh-times">${i.times_seen}x</span>
-            <span class="mp-vh-detail">Last: ${i.last_seen ? fmtDate(i.last_seen) : '--'}</span>
+            <span class="mp-vh-times" title="Times seen">${i.sighting_count}x</span>
+            <span class="mp-vh-detail">${dateRange}</span>
         </div>`;
     }).join('');
+}
+
+// ── Analyze Vendor Materials (AI) ───────────────────────────────────
+
+async function analyzeVendorMaterials(cardId) {
+    showToast('Analyzing materials...', 'info');
+    try {
+        const data = await apiFetch(`/api/vendors/${cardId}/analyze-materials`, { method: 'POST' });
+        const count = (data.brand_tags || []).length + (data.commodity_tags || []).length;
+        showToast(`Found ${count} material tags`, 'success');
+        openVendorPopup(cardId); // Refresh popup to show new tags
+    } catch(e) {
+        showToast('Material analysis failed', 'error');
+    }
 }
 
 // ── Vendors Tab ────────────────────────────────────────────────────────
