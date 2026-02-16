@@ -15,6 +15,7 @@ Called by: main.py (router mount)
 Depends on: models, dependencies, vendor_utils, config
 """
 
+from datetime import datetime, timezone
 import ipaddress
 import logging
 import re
@@ -26,7 +27,7 @@ from sqlalchemy import func as sqlfunc, text as sqltext
 
 from ..schemas.vendors import (
     MaterialCardUpdate, VendorBlacklistToggle, VendorCardUpdate,
-    VendorContactCreate, VendorContactLookup, VendorEmailAdd, VendorReviewCreate,
+    VendorContactCreate, VendorContactUpdate, VendorContactLookup, VendorEmailAdd, VendorReviewCreate,
 )
 from sqlalchemy.orm import Session
 
@@ -63,20 +64,34 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
     reviews = db.query(VendorReview).filter_by(vendor_card_id=card.id).all()
     avg = round(sum(r.rating for r in reviews) / len(reviews), 1) if reviews else None
 
-    # Material profile: brands/manufacturers this vendor carries
-    # Exact match on normalized vendor name (uses ix_sight_vendor index)
+    # Material profile: brands/manufacturers this vendor carries (sightings + stock imports)
     norm = card.normalized_name
-    mfr_rows = db.execute(sqltext(
-        "SELECT manufacturer, COUNT(*) as cnt FROM sightings "
-        "WHERE LOWER(TRIM(vendor_name)) = :norm AND manufacturer IS NOT NULL AND manufacturer != '' "
-        "GROUP BY manufacturer ORDER BY cnt DESC LIMIT 15"
-    ), {"norm": norm}).fetchall()
+    mfr_rows = db.execute(sqltext("""
+        SELECT manufacturer, SUM(cnt) as total FROM (
+            SELECT manufacturer, COUNT(*) as cnt FROM sightings
+            WHERE LOWER(TRIM(vendor_name)) = :norm
+              AND manufacturer IS NOT NULL AND manufacturer != ''
+            GROUP BY manufacturer
+            UNION ALL
+            SELECT last_manufacturer as manufacturer, COUNT(*) as cnt FROM material_vendor_history
+            WHERE vendor_name = :norm
+              AND last_manufacturer IS NOT NULL AND last_manufacturer != ''
+            GROUP BY last_manufacturer
+        ) combined
+        GROUP BY manufacturer ORDER BY total DESC LIMIT 15
+    """), {"norm": norm}).fetchall()
     brands = [{"name": r[0], "count": r[1]} for r in mfr_rows]
 
-    mpn_count = db.execute(sqltext(
-        "SELECT COUNT(DISTINCT mpn_matched) FROM sightings "
-        "WHERE LOWER(TRIM(vendor_name)) = :norm AND mpn_matched IS NOT NULL"
-    ), {"norm": norm}).scalar() or 0
+    mpn_count = db.execute(sqltext("""
+        SELECT COUNT(*) FROM (
+            SELECT DISTINCT mpn_matched as mpn FROM sightings
+            WHERE LOWER(TRIM(vendor_name)) = :norm AND mpn_matched IS NOT NULL
+            UNION
+            SELECT DISTINCT mc.normalized_mpn as mpn FROM material_vendor_history mvh
+            JOIN material_cards mc ON mc.id = mvh.material_card_id
+            WHERE mvh.vendor_name = :norm
+        ) all_mpns
+    """), {"norm": norm}).scalar() or 0
 
     return {
         "id": card.id,
@@ -516,6 +531,45 @@ async def add_vendor_contact(card_id: int, payload: VendorContactCreate,
     return {"id": vc.id, "message": "Contact added", "duplicate": False}
 
 
+@router.put("/api/vendors/{card_id}/contacts/{contact_id}")
+async def update_vendor_contact(card_id: int, contact_id: int, payload: VendorContactUpdate,
+                                 user: User = Depends(require_buyer), db: Session = Depends(get_db)):
+    """Update a structured vendor contact."""
+    vc = db.query(VendorContact).filter_by(id=contact_id, vendor_card_id=card_id).first()
+    if not vc:
+        raise HTTPException(404, "Contact not found")
+
+    old_email = vc.email
+
+    if payload.full_name is not None:
+        vc.full_name = payload.full_name
+        vc.contact_type = "individual" if payload.full_name else "company"
+    if payload.title is not None:
+        vc.title = payload.title
+    if payload.email is not None and payload.email != old_email:
+        existing = db.query(VendorContact).filter_by(vendor_card_id=card_id, email=payload.email).first()
+        if existing and existing.id != contact_id:
+            raise HTTPException(409, "Another contact already has this email")
+        vc.email = payload.email
+    if payload.label is not None:
+        vc.label = payload.label
+    if payload.phone is not None:
+        vc.phone = payload.phone
+
+    vc.last_seen_at = datetime.now(timezone.utc)
+
+    # Sync legacy emails[] array
+    card = db.query(VendorCard).filter_by(id=card_id).first()
+    if card and old_email != vc.email:
+        if old_email and card.emails and old_email in card.emails:
+            card.emails = [e for e in card.emails if e != old_email]
+        if vc.email and vc.email not in (card.emails or []):
+            card.emails = (card.emails or []) + [vc.email]
+
+    db.commit()
+    return {"ok": True, "id": vc.id}
+
+
 @router.delete("/api/vendors/{card_id}/contacts/{contact_id}")
 async def delete_vendor_contact(card_id: int, contact_id: int,
                                  user: User = Depends(require_buyer), db: Session = Depends(get_db)):
@@ -698,3 +752,145 @@ async def delete_material(card_id: int, user: User = Depends(require_user), db: 
     db.delete(card)
     db.commit()
     return {"ok": True}
+
+
+# ── Standalone Stock Import ────────────────────────────────────────────
+
+@router.post("/api/materials/import-stock")
+async def import_stock_list_standalone(request: Request,
+                                        user: User = Depends(require_buyer),
+                                        db: Session = Depends(get_db)):
+    """Import a vendor stock list — stores ALL rows as MaterialCard + MaterialVendorHistory."""
+    form = await request.form()
+    file = form.get("file")
+    vendor_name = (form.get("vendor_name") or "").strip()
+    if not file:
+        raise HTTPException(400, "No file uploaded")
+    if not vendor_name:
+        raise HTTPException(400, "Vendor name is required")
+
+    content = await file.read()
+    if len(content) > 10_000_000:
+        raise HTTPException(413, "File too large — 10MB maximum")
+
+    from ..file_utils import parse_tabular_file, normalize_stock_row
+
+    rows = parse_tabular_file(content, file.filename or "upload.csv")
+
+    # Upsert VendorCard
+    norm_vendor = normalize_vendor_name(vendor_name)
+    vendor_card = db.query(VendorCard).filter_by(normalized_name=norm_vendor).first()
+    if not vendor_card:
+        vendor_card = VendorCard(
+            normalized_name=norm_vendor, display_name=vendor_name,
+            emails=[], phones=[],
+        )
+        db.add(vendor_card)
+        db.flush()
+
+    imported = 0
+    skipped = 0
+
+    for raw_row in rows:
+        parsed = normalize_stock_row(raw_row)
+        if not parsed:
+            skipped += 1
+            continue
+
+        norm = normalize_mpn(parsed["mpn"])
+        if not norm:
+            skipped += 1
+            continue
+
+        # Upsert MaterialCard
+        card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
+        if not card:
+            card = MaterialCard(
+                normalized_mpn=norm,
+                display_mpn=parsed["mpn"].strip(),
+                manufacturer=parsed.get("manufacturer") or "",
+            )
+            db.add(card)
+            db.flush()
+
+        # Upsert MaterialVendorHistory
+        mvh = db.query(MaterialVendorHistory).filter_by(
+            material_card_id=card.id, vendor_name=norm_vendor
+        ).first()
+        if mvh:
+            mvh.last_seen = datetime.now(timezone.utc)
+            mvh.times_seen = (mvh.times_seen or 0) + 1
+            if parsed.get("qty") is not None:
+                mvh.last_qty = parsed["qty"]
+            if parsed.get("price") is not None:
+                mvh.last_price = parsed["price"]
+            if parsed.get("manufacturer"):
+                mvh.last_manufacturer = parsed["manufacturer"]
+            mvh.source_type = "stock_list"
+        else:
+            mvh = MaterialVendorHistory(
+                material_card_id=card.id, vendor_name=norm_vendor,
+                source_type="stock_list", source="stock_list",
+                last_qty=parsed.get("qty"), last_price=parsed.get("price"),
+                last_manufacturer=parsed.get("manufacturer") or "",
+            )
+            db.add(mvh)
+
+        imported += 1
+
+    vendor_card.sighting_count = (vendor_card.sighting_count or 0) + imported
+    db.commit()
+
+    return {
+        "imported_rows": imported,
+        "skipped_rows": skipped,
+        "total_rows": len(rows),
+        "vendor_name": vendor_name,
+    }
+
+
+# ── Vendor Offer History ──────────────────────────────────────────────
+
+@router.get("/api/vendors/{card_id}/offer-history")
+async def get_vendor_offer_history(card_id: int, request: Request,
+                                    user: User = Depends(require_user),
+                                    db: Session = Depends(get_db)):
+    """All parts this vendor has ever offered, from MaterialVendorHistory."""
+    card = db.get(VendorCard, card_id)
+    if not card:
+        raise HTTPException(404)
+
+    q = request.query_params.get("q", "").strip().lower()
+    limit = min(int(request.query_params.get("limit", "100")), 500)
+    offset = max(int(request.query_params.get("offset", "0")), 0)
+
+    query = (
+        db.query(MaterialVendorHistory, MaterialCard)
+        .join(MaterialCard, MaterialVendorHistory.material_card_id == MaterialCard.id)
+        .filter(MaterialVendorHistory.vendor_name == card.normalized_name)
+    )
+    if q:
+        safe_q = q.replace("%", r"\%").replace("_", r"\_")
+        query = query.filter(MaterialCard.normalized_mpn.ilike(f"%{safe_q}%"))
+
+    total = query.count()
+    results = query.order_by(MaterialVendorHistory.last_seen.desc()).offset(offset).limit(limit).all()
+
+    return {
+        "vendor_name": card.display_name,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "items": [{
+            "mpn": mc.display_mpn,
+            "manufacturer": mvh.last_manufacturer or mc.manufacturer or "",
+            "qty": mvh.last_qty,
+            "price": mvh.last_price,
+            "currency": mvh.last_currency or "USD",
+            "source_type": mvh.source_type,
+            "times_seen": mvh.times_seen or 1,
+            "first_seen": mvh.first_seen.isoformat() if mvh.first_seen else None,
+            "last_seen": mvh.last_seen.isoformat() if mvh.last_seen else None,
+            "material_card_id": mc.id,
+        } for mvh, mc in results],
+    }

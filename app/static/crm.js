@@ -56,13 +56,14 @@ function renderCustomers() {
             : '';
         const domain = c.domain || (c.website ? c.website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
         return `
-        <div class="card cust-card">
-            <div class="cust-header" onclick="this.parentElement.classList.toggle('expanded')">
+        <div class="card cust-card" id="custCard-${c.id}">
+            <div class="cust-header" onclick="toggleCompanyCard(this.parentElement,${c.id})">
                 <span class="cust-expand">▶</span>
                 <span class="cust-name">${esc(c.name)}</span>
                 ${domain ? '<span style="font-size:10px;color:var(--muted)">' + esc(domain) + '</span>' : ''}
                 <span class="cust-count">${c.site_count} site${c.site_count !== 1 ? 's' : ''}</span>
-                <span style="margin-left:auto;display:flex;gap:4px" onclick="event.stopPropagation()">
+                <span id="actHealth-${c.id}" style="margin-left:4px"></span>
+                <span style="margin-left:auto;display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">
                     <button class="btn-enrich" onclick="enrichCompany(${c.id},'${escAttr(domain)}')">Enrich</button>
                     ${domain ? '<button class="btn-enrich" onclick="openSuggestedContacts(\'company\','+c.id+',\''+escAttr(domain)+'\',\''+escAttr(c.name)+'\')">Suggested Contacts</button>' : ''}
                 </span>
@@ -72,6 +73,13 @@ function renderCustomers() {
                 <div class="cust-add-site">
                     <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openAddSiteModal(${c.id},'${escAttr(c.name)}')">+ Add Site</button>
                 </div>
+            </div>
+            <div id="actSection-${c.id}" class="cust-activity-section" style="display:none">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                    <span class="si-contacts-title">Recent Activity</span>
+                    <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openLogCallModal(${c.id},'${escAttr(c.name)}')">+ Log Call</button>
+                </div>
+                <div id="actList-${c.id}"><p class="empty" style="padding:4px;font-size:11px">Loading...</p></div>
             </div>
         </div>`;
     }).join('');
@@ -1349,4 +1357,103 @@ async function generateSmartRFQForModal() {
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = '🤖 Smart Draft'; }
     }
+}
+
+// ── Company Activity Tracking ─────────────────────────────────────────
+
+function toggleCompanyCard(cardEl, companyId) {
+    cardEl.classList.toggle('expanded');
+    if (cardEl.classList.contains('expanded')) {
+        loadCompanyActivityStatus(companyId);
+        loadCompanyActivities(companyId);
+    }
+}
+
+async function loadCompanyActivityStatus(companyId) {
+    const el = document.getElementById('actHealth-' + companyId);
+    if (!el || el.dataset.loaded) return;
+    try {
+        const res = await fetch('/api/companies/' + companyId + '/activity-status');
+        if (!res.ok) return;
+        const d = await res.json();
+        const colors = { green: 'var(--green)', yellow: 'var(--amber)', red: 'var(--red)', no_activity: 'var(--muted)' };
+        const labels = { green: 'Active', yellow: 'At risk', red: 'Stale', no_activity: 'No activity' };
+        const daysText = d.days_since_activity != null ? ' (' + d.days_since_activity + 'd)' : '';
+        el.innerHTML = `<span class="badge" style="background:color-mix(in srgb,${colors[d.status]} 15%,transparent);color:${colors[d.status]};font-size:9px;padding:1px 6px;border-radius:8px">${labels[d.status]}${daysText}</span>`;
+        el.dataset.loaded = '1';
+    } catch(e) { console.error('loadActivityStatus:', e); }
+}
+
+async function loadCompanyActivities(companyId) {
+    const section = document.getElementById('actSection-' + companyId);
+    const el = document.getElementById('actList-' + companyId);
+    if (!section || !el) return;
+    section.style.display = 'block';
+    try {
+        const res = await fetch('/api/companies/' + companyId + '/activities');
+        if (!res.ok) { el.innerHTML = '<p class="empty" style="font-size:11px">Failed to load</p>'; return; }
+        const activities = await res.json();
+        if (!activities.length) {
+            el.innerHTML = '<p class="empty" style="padding:4px;font-size:11px">No activity recorded yet</p>';
+            return;
+        }
+        el.innerHTML = activities.slice(0, 10).map(a => {
+            const icons = { email_sent: '&#x1f4e4;', email_received: '&#x1f4e5;', call_outbound: '&#x1f4de;', call_inbound: '&#x1f4f2;', ownership_warning: '&#x26a0;&#xfe0f;' };
+            const icon = icons[a.activity_type] || '&#x1f4cb;';
+            const label = (a.activity_type || '').replace(/_/g, ' ');
+            const dur = a.duration_seconds ? ' (' + Math.round(a.duration_seconds / 60) + 'm)' : '';
+            return `<div class="act-row">
+                <span class="act-row-icon">${icon}</span>
+                <div class="act-row-body">
+                    <span class="act-row-label">${esc(label)}</span>${dur}
+                    ${a.contact_name ? ' &mdash; ' + esc(a.contact_name) : ''}
+                    ${a.contact_email ? ' <span style="color:var(--muted)">' + esc(a.contact_email) + '</span>' : ''}
+                    ${a.subject ? '<div class="act-row-subject">' + esc(a.subject) + '</div>' : ''}
+                </div>
+                <span class="act-row-meta">${esc(a.user_name || '')}</span>
+                <span class="act-row-meta">${typeof fmtRelative === 'function' ? fmtRelative(a.created_at) : (a.created_at || '').slice(0, 10)}</span>
+            </div>`;
+        }).join('');
+    } catch(e) { console.error('loadCompanyActivities:', e); el.innerHTML = '<p class="empty" style="font-size:11px">Error</p>'; }
+}
+
+function openLogCallModal(companyId, companyName) {
+    document.getElementById('lcCompanyId').value = companyId;
+    document.getElementById('lcCompanyName').textContent = companyName;
+    ['lcPhone','lcContactName','lcDuration'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('lcDirection').value = 'outbound';
+    document.getElementById('logCallModal').classList.add('open');
+    setTimeout(() => document.getElementById('lcPhone').focus(), 100);
+}
+
+async function saveLogCall() {
+    const companyId = document.getElementById('lcCompanyId').value;
+    const data = {
+        phone: document.getElementById('lcPhone').value.trim(),
+        contact_name: document.getElementById('lcContactName').value.trim() || null,
+        direction: document.getElementById('lcDirection').value,
+        duration_seconds: parseInt(document.getElementById('lcDuration').value) || null,
+    };
+    if (!data.phone) { showToast('Phone number is required', 'error'); return; }
+    try {
+        const res = await fetch('/api/activities/call', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) { showToast('Failed to log call', 'error'); return; }
+        const result = await res.json();
+        closeModal('logCallModal');
+        if (result.status === 'no_match') {
+            showToast('Call logged but phone did not match any known contact', 'info');
+        } else {
+            showToast('Call logged', 'success');
+        }
+        // Refresh activity section
+        const el = document.getElementById('actList-' + companyId);
+        if (el) el.innerHTML = '<p class="empty" style="padding:4px;font-size:11px">Loading...</p>';
+        loadCompanyActivities(parseInt(companyId));
+        const healthEl = document.getElementById('actHealth-' + companyId);
+        if (healthEl) { delete healthEl.dataset.loaded; loadCompanyActivityStatus(parseInt(companyId)); }
+    } catch(e) { console.error('saveLogCall:', e); showToast('Error logging call', 'error'); }
 }

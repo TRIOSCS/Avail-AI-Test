@@ -423,6 +423,13 @@
             .mp-vh-row{flex-wrap:wrap;gap:4px}
             .mp-vh-vendor{min-width:100px}
 
+            /* CRM customers — responsive */
+            .cust-sites{padding:8px 10px}
+            .cust-site{flex-wrap:wrap;gap:6px}
+            .cust-site-name{min-width:auto;flex:1 1 100%}
+            .cust-site-owner,.cust-site-reqs{font-size:11px}
+            .cust-add-site{text-align:center}
+
             /* Vendor list */
             .vendor-header{flex-direction:column;gap:8px;align-items:stretch}
             .vendor-search{width:100%;font-size:16px}
@@ -596,6 +603,15 @@
         .si-contact-notes{font-size:10px;color:var(--muted);margin-top:1px}
         .si-contact-actions{display:flex;gap:4px;flex-shrink:0}
 
+        /* CRM Activity rows */
+        .cust-activity-section{border-top:1px solid var(--border);margin-top:8px;padding-top:8px}
+        .act-row{display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid rgba(0,0,0,.04);font-size:11px}
+        .act-row-icon{flex-shrink:0;width:18px;text-align:center}
+        .act-row-body{flex:1;min-width:0}
+        .act-row-label{font-weight:600;text-transform:capitalize}
+        .act-row-subject{color:var(--text2);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .act-row-meta{color:var(--muted);white-space:nowrap;font-size:10px;flex-shrink:0}
+
         /* Offers tab */
         .offer-group{margin-bottom:16px;background:var(--white);border:1px solid var(--border);border-radius:8px;overflow:hidden}
         .offer-group-header{display:flex;align-items:center;gap:12px;padding:10px 14px;background:var(--surface);border-bottom:1px solid var(--border);font-size:12px}
@@ -657,6 +673,15 @@
             .offer-group-header{flex-wrap:wrap}
             .si-contact{flex-direction:column;align-items:flex-start;gap:4px}
             .si-contact-actions{width:100%;justify-content:flex-end}
+            /* CRM company cards */
+            .cust-header{flex-wrap:wrap;gap:6px}
+            .cust-header>span:last-child{width:100%;justify-content:flex-start}
+            .cust-activity-section{padding:6px 0}
+            .act-row{flex-wrap:wrap;gap:4px}
+            .act-row-meta{font-size:9px}
+            /* Vendor contacts in popup */
+            #vpContactsList .si-contact{flex-direction:column;align-items:flex-start;gap:4px}
+            #vpContactsList .si-contact-actions{width:100%;justify-content:flex-end}
         }
 
         /* Suggested Contacts */
@@ -756,6 +781,16 @@
             .ai-contact-row{flex-direction:column;gap:6px}
             .ai-contact-actions{width:100%;justify-content:flex-end}
             .intel-meta{flex-direction:column;gap:4px}
+        }
+
+        /* Tablet breakpoint */
+        @media(min-width:769px) and (max-width:1024px){
+            .shell{max-width:100%;padding:12px 16px}
+            .lo-form{grid-template-columns:1fr 1fr}
+            .src-grid{grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
+            .cust-header>span:last-child{flex-wrap:wrap}
+            .topbar-nav button{padding:6px 10px;font-size:11px}
+            .modal-lg{max-width:90%}
         }
     </style>
 </head>
@@ -1032,12 +1067,9 @@
             </div>
         </div>
         <div id="stockImportArea" data-role="buyer" style="display:none;margin-bottom:12px" class="card">
-            <strong style="font-size:12px;color:var(--muted)">Import a vendor stock list — matching MPNs create material cards and sightings</strong>
+            <strong style="font-size:12px;color:var(--muted)">Import a vendor stock list — all rows stored as material cards with vendor history</strong>
             <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
-                <select id="stockReqSelect" style="flex:1;min-width:150px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px">
-                    <option value="">Select requisition to match against…</option>
-                </select>
-                <input id="stockVendorName" placeholder="Vendor name…" style="flex:1;min-width:120px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+                <input id="stockVendorName" placeholder="Vendor name (required)…" style="flex:1;min-width:150px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
                 <input type="file" id="stockFileInput" accept=".csv,.xlsx,.xls,.tsv" style="display:none" onchange="showFileReady('stockFileInput','stockFileReady','stockFileName')">
                 <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stockFileInput').click()">Choose File</button>
             </div>
@@ -1126,6 +1158,26 @@
         <div id="vendorPopupContent"><p class="empty">Loading…</p></div>
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('vendorPopup')">Close</button>
+        </div>
+    </div>
+</div>
+
+<!-- Vendor Contact Modal -->
+<div id="vendorContactModal" class="modal-bg" onclick="if(event.target===this)closeModal('vendorContactModal')">
+    <div class="modal">
+        <h2 id="vendorContactModalTitle">Add Vendor Contact</h2>
+        <input type="hidden" id="vcCardId">
+        <input type="hidden" id="vcContactId">
+        <div class="lo-form">
+            <div class="field"><label>Email *</label><input id="vcEmail" type="email" placeholder="email@vendor.com" onkeydown="if(event.key==='Enter')saveVendorContact()"></div>
+            <div class="field"><label>Name</label><input id="vcFullName" placeholder="Full name"></div>
+            <div class="field"><label>Job Title</label><input id="vcTitle" placeholder="e.g. Sales Manager"></div>
+            <div class="field"><label>Phone</label><input id="vcPhone" placeholder="+1 555-000-0000"></div>
+            <div class="field"><label>Label</label><input id="vcLabel" placeholder="Sales, Support, etc." value="Sales"></div>
+        </div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('vendorContactModal')">Cancel</button>
+            <button class="btn btn-primary" onclick="saveVendorContact()">Save Contact</button>
         </div>
     </div>
 </div>
@@ -1283,6 +1335,29 @@
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('siteContactModal')">Cancel</button>
             <button class="btn btn-primary" onclick="saveSiteContact()">Save Contact</button>
+        </div>
+    </div>
+</div>
+
+<!-- Log Call Modal -->
+<div id="logCallModal" class="modal-bg" onclick="if(event.target===this)closeModal('logCallModal')">
+    <div class="modal">
+        <h2>Log Phone Call &mdash; <span id="lcCompanyName"></span></h2>
+        <input type="hidden" id="lcCompanyId">
+        <div class="lo-form">
+            <div class="field"><label>Phone *</label><input id="lcPhone" placeholder="+1 555-000-0000" onkeydown="if(event.key==='Enter')saveLogCall()"></div>
+            <div class="field"><label>Contact Name</label><input id="lcContactName" placeholder="Who did you speak to?"></div>
+            <div class="field"><label>Direction</label>
+                <select id="lcDirection" style="background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;width:100%">
+                    <option value="outbound">Outbound</option>
+                    <option value="inbound">Inbound</option>
+                </select>
+            </div>
+            <div class="field"><label>Duration (seconds)</label><input id="lcDuration" type="number" placeholder="120"></div>
+        </div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('logCallModal')">Cancel</button>
+            <button class="btn btn-primary" onclick="saveLogCall()">Log Call</button>
         </div>
     </div>
 </div>

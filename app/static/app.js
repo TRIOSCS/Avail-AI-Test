@@ -1452,19 +1452,14 @@ async function openVendorPopup(cardId) {
     // Intel Card container (loaded async)
     html += `<div id="vpIntelCard"></div>`;
 
-    // Emails
-    html += '<div class="vp-section"><div class="vp-label">Emails</div>';
-    html += card.emails.length
-        ? card.emails.map(e => `<div class="vp-item"><a href="mailto:${escAttr(e)}">${esc(e)}</a></div>`).join('')
-        : '<div class="vp-item vp-muted">No emails on file</div>';
-    html += '</div>';
-
-    // Phones
-    html += '<div class="vp-section"><div class="vp-label">Phones</div>';
-    html += card.phones.length
-        ? card.phones.map(p => `<div class="vp-item"><a href="tel:${escAttr(p)}">${esc(p)}</a></div>`).join('')
-        : '<div class="vp-item vp-muted">No phone numbers on file</div>';
-    html += '</div>';
+    // Contacts (structured — loaded async)
+    html += `<div class="vp-section">
+        <div class="vp-label" style="display:flex;justify-content:space-between;align-items:center">
+            Contacts
+            <button class="btn btn-ghost btn-sm" onclick="openAddVendorContact(${card.id})">+ Add</button>
+        </div>
+        <div id="vpContactsList"><p class="vp-muted" style="font-size:11px">Loading contacts...</p></div>
+    </div>`;
 
     // Material Profile (brands/manufacturers)
     const brands = card.brands || [];
@@ -1481,6 +1476,25 @@ async function openVendorPopup(cardId) {
         }
         html += '</div>';
     }
+
+    // Offer History (collapsible, searchable)
+    html += `<div class="vp-section">
+        <div class="vp-label" style="display:flex;justify-content:space-between;align-items:center">
+            Offer History
+            <button class="btn btn-ghost btn-sm" onclick="toggleOfferHistory(${card.id})">See Offer History</button>
+        </div>
+        <div id="vpOfferHistory" style="display:none">
+            <div style="margin-bottom:8px">
+                <input id="vpOfferHistorySearch" placeholder="Search by MPN..."
+                    style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px"
+                    oninput="debounceOfferSearch(${card.id})">
+            </div>
+            <div id="vpOfferHistoryList"><p class="vp-muted" style="font-size:11px">Loading...</p></div>
+            <div id="vpOfferHistoryMore" style="display:none;text-align:center;margin-top:8px">
+                <button class="btn btn-ghost btn-sm" onclick="loadMoreOfferHistory(${card.id})">Load More</button>
+            </div>
+        </div>
+    </div>`;
 
     // Reviews
     html += '<div class="vp-section"><div class="vp-label">Reviews</div>';
@@ -1512,7 +1526,8 @@ async function openVendorPopup(cardId) {
     document.getElementById('vendorPopupContent').innerHTML = html;
     document.getElementById('vendorPopup').classList.add('open');
 
-    // Load company intel card asynchronously
+    // Load contacts and intel asynchronously
+    loadVendorContacts(card.id);
     const intelEl = document.getElementById('vpIntelCard');
     if (intelEl && card.display_name) {
         loadCompanyIntel(card.display_name, vendorDomain, intelEl);
@@ -1548,6 +1563,194 @@ async function vpToggleBlacklist(cardId, blacklisted) {
         openVendorPopup(cardId);
         if (currentReqId && Object.keys(searchResults).length) renderSources();
     }
+}
+
+// ── Vendor Contacts CRUD ──────────────────────────────────────────────
+
+async function loadVendorContacts(cardId) {
+    const el = document.getElementById('vpContactsList');
+    if (!el) return;
+    try {
+        const res = await fetch(`/api/vendors/${cardId}/contacts`);
+        if (!res.ok) { el.innerHTML = '<p class="vp-muted" style="font-size:11px">Failed to load contacts</p>'; return; }
+        const contacts = await res.json();
+        if (!contacts.length) {
+            el.innerHTML = '<p class="vp-muted" style="font-size:11px">No contacts on file</p>';
+            return;
+        }
+        el.innerHTML = contacts.map(c => {
+            const srcBadge = `<span class="badge b-src" style="font-size:9px;padding:1px 6px">${esc(c.source || 'manual')}</span>`;
+            const confClass = c.confidence >= 80 ? 'badge-green' : c.confidence >= 50 ? 'badge-yellow' : 'badge-gray';
+            const confBadge = `<span class="badge ${confClass}" style="font-size:9px;padding:1px 6px">${c.confidence}%</span>`;
+            const verBadge = c.is_verified ? '<span class="badge badge-green" style="font-size:9px;padding:1px 6px">Verified</span>' : '';
+            return `<div class="si-contact" style="padding:6px 0;border-bottom:1px solid var(--border)">
+                <div class="si-contact-info" style="flex:1;min-width:0">
+                    <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">
+                        <span class="si-contact-name">${esc(c.full_name || c.email)}</span>
+                        ${srcBadge} ${confBadge} ${verBadge}
+                    </div>
+                    ${c.title ? '<div style="font-size:11px;color:var(--text2)">' + esc(c.title) + '</div>' : ''}
+                    <div class="si-contact-meta">
+                        ${c.email ? '<a href="mailto:' + escAttr(c.email) + '">' + esc(c.email) + '</a>' : ''}
+                        ${c.email && c.phone ? ' &middot; ' : ''}
+                        ${c.phone ? '<span>' + esc(c.phone) + '</span>' : ''}
+                    </div>
+                    ${c.label ? '<div style="font-size:10px;color:var(--muted)">' + esc(c.label) + '</div>' : ''}
+                </div>
+                <div class="si-contact-actions" style="display:flex;gap:4px;align-items:center;flex-shrink:0">
+                    <button class="btn btn-ghost btn-sm" onclick="openEditVendorContact(${cardId},${c.id})">Edit</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteVendorContact(${cardId},${c.id},'${escAttr(c.full_name || c.email)}')">✕</button>
+                </div>
+            </div>`;
+        }).join('');
+    } catch(e) { console.error('loadVendorContacts:', e); el.innerHTML = '<p class="vp-muted" style="font-size:11px">Error loading contacts</p>'; }
+}
+
+function openAddVendorContact(cardId) {
+    document.getElementById('vcCardId').value = cardId;
+    document.getElementById('vcContactId').value = '';
+    document.getElementById('vendorContactModalTitle').textContent = 'Add Vendor Contact';
+    ['vcFullName','vcTitle','vcEmail','vcPhone','vcLabel'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('vcLabel').value = 'Sales';
+    document.getElementById('vendorContactModal').classList.add('open');
+    setTimeout(() => document.getElementById('vcEmail').focus(), 100);
+}
+
+async function openEditVendorContact(cardId, contactId) {
+    try {
+        const res = await fetch('/api/vendors/' + cardId + '/contacts');
+        if (!res.ok) { showToast('Failed to load contacts', 'error'); return; }
+        const contacts = await res.json();
+        const c = contacts.find(x => x.id === contactId);
+        if (!c) { showToast('Contact not found', 'error'); return; }
+        document.getElementById('vcCardId').value = cardId;
+        document.getElementById('vcContactId').value = contactId;
+        document.getElementById('vendorContactModalTitle').textContent = 'Edit Vendor Contact';
+        document.getElementById('vcFullName').value = c.full_name || '';
+        document.getElementById('vcTitle').value = c.title || '';
+        document.getElementById('vcEmail').value = c.email || '';
+        document.getElementById('vcPhone').value = c.phone || '';
+        document.getElementById('vcLabel').value = c.label || '';
+        document.getElementById('vendorContactModal').classList.add('open');
+        setTimeout(() => document.getElementById('vcFullName').focus(), 100);
+    } catch(e) { console.error('openEditVendorContact:', e); showToast('Error loading contact', 'error'); }
+}
+
+async function saveVendorContact() {
+    const cardId = document.getElementById('vcCardId').value;
+    const contactId = document.getElementById('vcContactId').value;
+    const data = {
+        full_name: document.getElementById('vcFullName').value.trim() || null,
+        title: document.getElementById('vcTitle').value.trim() || null,
+        email: document.getElementById('vcEmail').value.trim(),
+        phone: document.getElementById('vcPhone').value.trim() || null,
+        label: document.getElementById('vcLabel').value.trim() || 'Sales',
+    };
+    if (!data.email) { showToast('Email is required', 'error'); return; }
+    try {
+        const url = contactId
+            ? '/api/vendors/' + cardId + '/contacts/' + contactId
+            : '/api/vendors/' + cardId + '/contacts';
+        const res = await fetch(url, {
+            method: contactId ? 'PUT' : 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(data)
+        });
+        if (!res.ok) { showToast('Failed to save contact', 'error'); return; }
+        closeModal('vendorContactModal');
+        showToast(contactId ? 'Contact updated' : 'Contact added', 'success');
+        loadVendorContacts(parseInt(cardId));
+    } catch(e) { console.error('saveVendorContact:', e); showToast('Error saving contact', 'error'); }
+}
+
+async function deleteVendorContact(cardId, contactId, name) {
+    if (!confirm('Remove contact "' + name + '"?')) return;
+    try {
+        const res = await fetch('/api/vendors/' + cardId + '/contacts/' + contactId, { method: 'DELETE' });
+        if (!res.ok) { showToast('Failed to delete contact', 'error'); return; }
+        showToast('Contact removed', 'info');
+        loadVendorContacts(cardId);
+    } catch(e) { console.error('deleteVendorContact:', e); showToast('Error deleting contact', 'error'); }
+}
+
+// ── Vendor Offer History ──────────────────────────────────────────────
+
+let _offerHistoryOffset = 0;
+let _offerSearchTimer = null;
+
+function debounceOfferSearch(cardId) {
+    clearTimeout(_offerSearchTimer);
+    _offerSearchTimer = setTimeout(() => {
+        const q = (document.getElementById('vpOfferHistorySearch') || {}).value || '';
+        loadOfferHistory(cardId, q);
+    }, 300);
+}
+
+function toggleOfferHistory(cardId) {
+    const el = document.getElementById('vpOfferHistory');
+    if (el.style.display === 'none') {
+        el.style.display = '';
+        _offerHistoryOffset = 0;
+        loadOfferHistory(cardId, '');
+    } else {
+        el.style.display = 'none';
+    }
+}
+
+async function loadOfferHistory(cardId, query) {
+    _offerHistoryOffset = 0;
+    const q = (query || '').trim();
+    const listEl = document.getElementById('vpOfferHistoryList');
+    const moreEl = document.getElementById('vpOfferHistoryMore');
+    listEl.innerHTML = '<p class="vp-muted" style="font-size:11px">Loading...</p>';
+
+    try {
+        const res = await fetch(`/api/vendors/${cardId}/offer-history?q=${encodeURIComponent(q)}&limit=50`);
+        if (!res.ok) { listEl.innerHTML = '<p class="vp-muted">Failed to load</p>'; return; }
+        const data = await res.json();
+        if (!data.items.length) {
+            listEl.innerHTML = '<p class="vp-muted" style="font-size:11px;font-style:italic">No offer history found</p>';
+            moreEl.style.display = 'none';
+            return;
+        }
+        listEl.innerHTML = renderOfferHistoryItems(data.items);
+        _offerHistoryOffset = data.items.length;
+        moreEl.style.display = data.items.length < data.total ? '' : 'none';
+    } catch(e) {
+        listEl.innerHTML = '<p class="vp-muted">Error loading offer history</p>';
+    }
+}
+
+async function loadMoreOfferHistory(cardId) {
+    const q = (document.getElementById('vpOfferHistorySearch') || {}).value || '';
+    const listEl = document.getElementById('vpOfferHistoryList');
+    const moreEl = document.getElementById('vpOfferHistoryMore');
+
+    try {
+        const res = await fetch(`/api/vendors/${cardId}/offer-history?q=${encodeURIComponent(q)}&limit=50&offset=${_offerHistoryOffset}`);
+        if (!res.ok) return;
+        const data = await res.json();
+        listEl.innerHTML += renderOfferHistoryItems(data.items);
+        _offerHistoryOffset += data.items.length;
+        moreEl.style.display = _offerHistoryOffset < data.total ? '' : 'none';
+    } catch(e) {}
+}
+
+function renderOfferHistoryItems(items) {
+    return items.map(i => {
+        const priceStr = i.price != null ? '$' + i.price.toFixed(2) : '--';
+        const qtyStr = i.qty != null ? i.qty.toLocaleString() : '--';
+        const srcBadge = i.source_type ? `<span class="badge b-src" style="font-size:9px;padding:1px 6px">${esc(i.source_type)}</span>` : '';
+        return `<div class="mp-vh-row" style="cursor:pointer" onclick="openMaterialPopup(${i.material_card_id})">
+            <span class="mp-vh-vendor" style="font-weight:600;font-family:'JetBrains Mono',monospace;font-size:11px">${esc(i.mpn)}</span>
+            ${srcBadge}
+            <span class="mp-vh-detail">${esc(i.manufacturer)}</span>
+            <span class="mp-vh-detail">Qty: ${qtyStr}</span>
+            <span class="mp-vh-detail">Price: ${priceStr}</span>
+            <span class="mp-vh-times">${i.times_seen}x</span>
+            <span class="mp-vh-detail">Last: ${i.last_seen ? fmtDate(i.last_seen) : '--'}</span>
+        </div>`;
+    }).join('');
 }
 
 // ── Vendors Tab ────────────────────────────────────────────────────────
@@ -2212,44 +2415,26 @@ async function runEmailScan() {
 
 
 // ── Stock List Import ────────────────────────────────────────────────────
-async function toggleStockImport() {
+function toggleStockImport() {
     const el = document.getElementById('stockImportArea');
-    const isHidden = el.style.display === 'none';
-    el.style.display = isHidden ? '' : 'none';
-    if (isHidden) {
-        // Populate requisition dropdown
-        const sel = document.getElementById('stockReqSelect');
-        try {
-            const res = await fetch('/api/requisitions');
-            const data = await res.json();
-            sel.innerHTML = '<option value="">Select requisition to match against…</option>';
-            for (const r of data.filter(r => r.status !== 'archived')) {
-                sel.innerHTML += `<option value="${r.id}">${esc(r.name)} (${r.requirement_count} parts)</option>`;
-            }
-            // Pre-select current requisition if we have one
-            if (currentReqId) sel.value = currentReqId;
-        } catch(e) {}
-    }
+    el.style.display = el.style.display === 'none' ? '' : 'none';
 }
 
 async function doStockImport() {
     const fileInput = document.getElementById('stockFileInput');
     const vendorInput = document.getElementById('stockVendorName');
-    const reqSelect = document.getElementById('stockReqSelect');
     const statusEl = document.getElementById('stockImportStatus');
     const file = fileInput.files[0];
     if (!file) return;
 
-    const reqId = reqSelect.value;
-    if (!reqId) {
+    const vendorName = vendorInput.value.trim();
+    if (!vendorName) {
         statusEl.className = 'ustatus err'; statusEl.style.display = 'block';
-        statusEl.textContent = 'Please select a requisition to match against';
+        statusEl.textContent = 'Please enter a vendor name';
         return;
     }
 
-    const vendorName = vendorInput.value.trim() || file.name.replace(/\.[^.]+$/, '');
-
-    statusEl.className = 'ustatus load'; statusEl.textContent = '⏳ Importing…'; statusEl.style.display = 'block';
+    statusEl.className = 'ustatus load'; statusEl.textContent = 'Importing...'; statusEl.style.display = 'block';
     document.getElementById('stockFileReady').style.display = 'none';
 
     try {
@@ -2257,27 +2442,21 @@ async function doStockImport() {
         form.append('file', file);
         form.append('vendor_name', vendorName);
 
-        const res = await fetch(`/api/requisitions/${reqId}/import-stock`, {
+        const res = await fetch('/api/materials/import-stock', {
             method: 'POST', body: form
         });
         const data = await res.json();
         if (res.ok) {
             statusEl.className = 'ustatus ok';
-            statusEl.textContent = `✅ Imported ${data.imported_rows} rows — ${data.matched_sightings} matched sightings created`;
+            statusEl.textContent = `Imported ${data.imported_rows} parts from ${esc(data.vendor_name)} (${data.skipped_rows} rows skipped)`;
+            if (typeof loadMaterialList === 'function') loadMaterialList();
         } else {
             statusEl.className = 'ustatus err';
             statusEl.textContent = data.detail || 'Import failed';
         }
         fileInput.value = '';
-        // Refresh search results if we have them for this req
-        if (searchResultsCache[reqId]) {
-            // If viewing this req, refresh
-            if (currentReqId == reqId && Object.keys(searchResults).length) {
-                searchAll();
-            }
-        }
     } catch(e) {
         statusEl.className = 'ustatus err';
-        statusEl.textContent = '❌ Import failed: ' + e.message;
+        statusEl.textContent = 'Import failed: ' + e.message;
     }
 }

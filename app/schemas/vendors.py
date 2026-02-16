@@ -105,6 +105,22 @@ class VendorContactCreate(BaseModel):
         return v
 
 
+class VendorContactUpdate(BaseModel):
+    full_name: str | None = None
+    title: str | None = None
+    email: str | None = None
+    label: str | None = None
+    phone: str | None = None
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def clean_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip().lower()
+        return v or None
+
+
 class VendorEmailAdd(BaseModel):
     vendor_name: str
     email: str
