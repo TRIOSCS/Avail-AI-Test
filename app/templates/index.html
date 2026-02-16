@@ -564,7 +564,7 @@
         .status-quoted{background:#dbeafe;color:#2563eb}
         .status-won{background:var(--green-light);color:var(--green)}
         .status-lost{background:var(--red-light);color:var(--red)}
-        .status-reopened{background:#fef3c7;color:#92400e}
+        .status-reopened{background:var(--teal-light);color:var(--teal)}
         .status-archived{background:var(--bg);color:var(--muted)}
         .status-draft{background:var(--bg);color:var(--text2)}
         .status-chip{display:inline-block;font-size:10px;font-weight:700;padding:3px 10px;border-radius:10px;text-transform:uppercase;letter-spacing:.4px;transition:all .3s}
@@ -638,6 +638,16 @@
         .new-offers-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#22c55e;margin-left:4px;vertical-align:middle;animation:pulse-dot 2s ease-in-out infinite}
         .new-offers-dot.red{background:#dc2626}
         @keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.4}}
+
+        /* Offer filter bar */
+        .offer-filter-bar{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+        .offer-filter-bar .filter-pills{flex-shrink:0}
+        .offer-sort{padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--white);color:var(--text2);font-size:11px;font-weight:600;cursor:pointer;outline:none;appearance:auto}
+        .offer-expired{opacity:.55}
+
+        /* Meta-link — subtle clickable text */
+        .meta-link{color:var(--text2);text-decoration:none;font-size:11px;transition:color .15s;cursor:pointer}
+        .meta-link:hover{color:var(--teal)}
 
         /* Nav badge */
         .nav-badge{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--red);color:#fff;font-size:9px;font-weight:700;margin-left:4px;line-height:1}

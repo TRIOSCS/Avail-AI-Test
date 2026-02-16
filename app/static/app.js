@@ -306,7 +306,7 @@ function showList() {
     loadRequisitions();
 }
 
-function showDetail(id, name) {
+function showDetail(id, name, tab) {
     currentReqId = id;
     currentReqName = name;
     try { localStorage.setItem('lastReqId', id); localStorage.setItem('lastReqName', name || ''); } catch(e) {}
@@ -360,7 +360,7 @@ function showDetail(id, name) {
     if (typeof loadOffers === 'function') loadOffers();
     if (typeof loadQuote === 'function') loadQuote();
     // Restore last active tab or default to requirements
-    const lastTab = activeTabCache[id] || 'requirements';
+    const lastTab = tab || activeTabCache[id] || 'requirements';
     const tabMap = {requirements:0, sources:1, activity:2, offers:3, quote:4};
     const tabBtns = document.querySelectorAll('.tab');
     switchTab(lastTab, tabBtns[tabMap[lastTab] || 0]);

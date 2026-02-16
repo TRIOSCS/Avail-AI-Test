@@ -240,6 +240,8 @@ async function openEditSiteModal(siteId) {
 let _hasNewOffers = false;
 let _latestOfferAt = null;
 let _pendingOfferFiles = [];  // Files queued for upload after offer save
+let _offerStatusFilter = 'all';
+let _offerSort = 'newest';
 
 async function loadOffers() {
     if (!currentReqId) return;
@@ -273,24 +275,66 @@ function updateOfferTabBadge() {
     });
 }
 
+function setOfferFilter(status, btn) {
+    _offerStatusFilter = status;
+    document.querySelectorAll('#offerFilterBar .filter-pill').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    renderOffers();
+}
+
+function setOfferSort(val) {
+    _offerSort = val;
+    renderOffers();
+}
+
+function _sortOffers(offers) {
+    const sorted = [...offers];
+    switch (_offerSort) {
+        case 'price_asc':  return sorted.sort((a, b) => (a.unit_price ?? Infinity) - (b.unit_price ?? Infinity));
+        case 'price_desc': return sorted.sort((a, b) => (b.unit_price ?? -1) - (a.unit_price ?? -1));
+        case 'vendor':     return sorted.sort((a, b) => (a.vendor_name || '').localeCompare(b.vendor_name || ''));
+        default:           return sorted;  // newest = server order
+    }
+}
+
 function renderOffers() {
     const el = document.getElementById('offersContent');
     if (!crmOffers.length) {
         el.innerHTML = '<p class="empty">No offers yet — log vendor offers as they come in</p>';
         return;
     }
-    el.innerHTML = crmOffers.map(group => {
+    const filterBar = `<div id="offerFilterBar" class="offer-filter-bar">
+        <div class="filter-pills">
+            <button class="filter-pill ${_offerStatusFilter==='all'?'on':''}" onclick="setOfferFilter('all',this)">All</button>
+            <button class="filter-pill ${_offerStatusFilter==='active'?'on':''}" onclick="setOfferFilter('active',this)">Active</button>
+            <button class="filter-pill ${_offerStatusFilter==='expired'?'on':''}" onclick="setOfferFilter('expired',this)">Expired</button>
+        </div>
+        <select class="offer-sort" onchange="setOfferSort(this.value)">
+            <option value="newest" ${_offerSort==='newest'?'selected':''}>Newest</option>
+            <option value="price_asc" ${_offerSort==='price_asc'?'selected':''}>Price ↑</option>
+            <option value="price_desc" ${_offerSort==='price_desc'?'selected':''}>Price ↓</option>
+            <option value="vendor" ${_offerSort==='vendor'?'selected':''}>Vendor A→Z</option>
+        </select>
+    </div>`;
+    const groupsHtml = crmOffers.map(group => {
         const targetStr = group.target_price ? '$' + Number(group.target_price).toFixed(4) : 'no target';
         const lastQ = group.last_quoted ? 'last: $' + Number(group.last_quoted.sell_price).toFixed(4) : '';
-        const offersHtml = group.offers.length ? group.offers.map(o => {
+        let visibleOffers = group.offers;
+        if (_offerStatusFilter !== 'all') {
+            visibleOffers = visibleOffers.filter(o => (o.status || 'active') === _offerStatusFilter);
+        }
+        visibleOffers = _sortOffers(visibleOffers);
+        const offersHtml = visibleOffers.length ? visibleOffers.map(o => {
             const checked = selectedOffers.has(o.id) ? 'checked' : '';
             const isRef = o.status === 'reference';
+            const isExpired = o.status === 'expired';
+            const rowCls = isRef ? 'offer-ref' : (isExpired ? 'offer-expired' : '');
             const subDetails = [o.firmware && 'FW: '+esc(o.firmware), o.hardware_code && 'HW: '+esc(o.hardware_code), o.packaging && 'Pkg: '+esc(o.packaging)].filter(Boolean).join(' · ');
             const noteStr = o.notes ? '<div style="font-size:10px;color:var(--text2);margin-top:2px">'+esc(o.notes)+'</div>' : '';
             const attHtml = (o.attachments||[]).map(a => `<a href="${esc(a.onedrive_url||'#')}" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:underline">${esc(a.file_name)}</a>`).join(' ');
             const enteredStr = o.entered_by ? '<span style="font-size:10px;color:var(--muted)">by '+esc(o.entered_by)+'</span>' : '';
             return `
-            <tr class="${isRef ? 'offer-ref' : ''}">
+            <tr class="${rowCls}">
                 <td><input type="checkbox" ${checked} ${isRef ? 'disabled' : ''} onchange="toggleOfferSelect(${o.id},this.checked)"></td>
                 <td>${esc(o.vendor_name)}${subDetails ? '<div class="sc-detail" style="font-size:10px;color:var(--muted)">'+subDetails+'</div>' : ''}${noteStr}${attHtml ? '<div style="margin-top:2px">'+attHtml+'</div>' : ''}</td>
                 <td>${o.unit_price != null ? '$'+Number(o.unit_price).toFixed(4) : '—'}</td>
@@ -318,6 +362,7 @@ function renderOffers() {
             </table>
         </div>`;
     }).join('');
+    el.innerHTML = filterBar + groupsHtml;
     updateBuildQuoteBtn();
 }
 
