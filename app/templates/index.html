@@ -889,6 +889,12 @@
         .perf-table tr:hover{background:var(--surface)}
         .perf-table tr.cold-start{opacity:0.6}
         .perf-table tr.lb-highlight{background:rgba(74,111,165,0.08)}
+        .perf-table tr.sc-gold{background:rgba(255,215,0,0.12)}
+        .perf-table tr.sc-silver{background:rgba(192,192,192,0.15)}
+        .perf-table th.sortable{cursor:pointer;user-select:none}
+        .perf-table th.sortable:hover{color:var(--text)}
+        .perf-table th.sorted-asc::after{content:" ▲";font-size:9px}
+        .perf-table th.sorted-desc::after{content:" ▼";font-size:9px}
         .metric-cell{text-align:center;font-weight:600}
         .metric-cell.metric-green{color:#16a34a}
         .metric-cell.metric-yellow{color:#d97706}
@@ -1778,9 +1784,11 @@
         <div class="tabs" id="perfTabs">
             <button class="tab on" onclick="switchPerfTab('vendors',this)">Vendor Scorecard</button>
             <button class="tab" onclick="switchPerfTab('buyers',this)">Buyer Leaderboard</button>
+            <button class="tab" onclick="switchPerfTab('sales',this)">Salesperson Scorecard</button>
         </div>
         <div id="perfVendorPanel"><p class="empty">Loading...</p></div>
         <div id="perfBuyerPanel" style="display:none"><p class="empty">Loading...</p></div>
+        <div id="perfSalesPanel" style="display:none"><p class="empty">Loading...</p></div>
     </div>
 
     <!-- VIEW: Settings (admin + dev_assistant) -->

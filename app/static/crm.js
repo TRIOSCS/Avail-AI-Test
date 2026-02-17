@@ -2874,8 +2874,10 @@ function switchPerfTab(tab, btn) {
     else document.querySelector(`#perfTabs .tab[onclick*="${tab}"]`)?.classList.add('on');
     document.getElementById('perfVendorPanel').style.display = tab === 'vendors' ? '' : 'none';
     document.getElementById('perfBuyerPanel').style.display = tab === 'buyers' ? '' : 'none';
+    document.getElementById('perfSalesPanel').style.display = tab === 'sales' ? '' : 'none';
     if (tab === 'vendors') loadVendorScorecards();
-    else loadBuyerLeaderboard();
+    else if (tab === 'buyers') loadBuyerLeaderboard();
+    else if (tab === 'sales') loadSalespersonScorecard();
 }
 
 async function loadVendorScorecards(sortBy, order) {
@@ -3006,6 +3008,7 @@ function renderBuyerLeaderboard(data, months) {
     const totalPts = entries.reduce((s, e) => s + e.total_points, 0);
     const topScorer = entries.length ? entries[0].user_name : '—';
     const totalOffers = entries.reduce((s, e) => s + e.offers_logged, 0);
+    const ytdTotalPts = entries.reduce((s, e) => s + (e.ytd_total_points || 0), 0);
 
     let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <div>${monthSelector}</div>
@@ -3014,8 +3017,9 @@ function renderBuyerLeaderboard(data, months) {
 
     html += `<div class="perf-summary">
         <div class="perf-card"><div class="perf-card-num">${totalOffers}</div><div class="perf-card-label">Offers Logged</div></div>
-        <div class="perf-card"><div class="perf-card-num">${totalPts}</div><div class="perf-card-label">Total Points</div></div>
+        <div class="perf-card"><div class="perf-card-num">${totalPts}</div><div class="perf-card-label">Monthly Points</div></div>
         <div class="perf-card"><div class="perf-card-num">${topScorer}</div><div class="perf-card-label">Top Scorer</div></div>
+        <div class="perf-card"><div class="perf-card-num">${ytdTotalPts}</div><div class="perf-card-label">YTD Points</div></div>
     </div>`;
 
     if (!entries.length) {
@@ -3026,17 +3030,21 @@ function renderBuyerLeaderboard(data, months) {
 
     const currentEmail = (window.__userEmail || '').toLowerCase();
 
-    html += `<table class="perf-table"><thead><tr>
+    html += `<div style="overflow-x:auto"><table class="perf-table"><thead><tr>
         <th>#</th><th>Buyer</th>
         <th>Offers (x1)</th><th>Quoted (x3)</th><th>Buy Plan (x5)</th><th>PO Confirmed (x8)</th><th>Stock Lists (x2)</th>
         <th>Total</th>
+        <th style="border-left:2px solid var(--border)">YTD Offers</th><th>YTD PO Conf.</th><th>YTD Points</th>
     </tr></thead><tbody>`;
 
     for (const e of entries) {
         const isMe = e.user_name && currentEmail && entries.some(x => x.user_id === e.user_id);
-        const rowCls = isMe ? 'class="lb-highlight"' : '';
+        let rowCls = '';
+        if (e.rank === 1) rowCls = 'sc-gold';
+        else if (e.rank === 2) rowCls = 'sc-silver';
+        else if (isMe) rowCls = 'lb-highlight';
         const medal = e.rank === 1 ? ' 🥇' : e.rank === 2 ? ' 🥈' : e.rank === 3 ? ' 🥉' : '';
-        html += `<tr ${rowCls}>
+        html += `<tr class="${rowCls}">
             <td><strong>${e.rank}${medal}</strong></td>
             <td>${e.user_name || 'Unknown'}</td>
             <td>${e.offers_logged} <span class="pts">(${e.points_offers})</span></td>
@@ -3045,9 +3053,12 @@ function renderBuyerLeaderboard(data, months) {
             <td>${e.offers_po_confirmed} <span class="pts">(${e.points_po})</span></td>
             <td>${e.stock_lists_uploaded || 0} <span class="pts">(${e.points_stock || 0})</span></td>
             <td><strong>${e.total_points}</strong></td>
+            <td style="border-left:2px solid var(--border)">${e.ytd_offers_logged || 0}</td>
+            <td>${e.ytd_offers_po_confirmed || 0}</td>
+            <td><strong>${e.ytd_total_points || 0}</strong></td>
         </tr>`;
     }
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
     el.innerHTML = html;
 }
 
@@ -3060,7 +3071,160 @@ async function refreshBuyerLeaderboard() {
     }
 }
 
-// ── Settings (Admin) ─────────────────────────────────────────────────
+// ── Salesperson Scorecard ────────────────────────────────────────────
+
+let _salesScorecardMonth = null;
+let _salesScorecardData = null;
+let _salesSortCol = 'won_revenue';
+let _salesSortDir = 'desc';
+
+async function loadSalespersonScorecard(month) {
+    const el = document.getElementById('perfSalesPanel');
+    el.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        if (!month) {
+            _salesScorecardMonth = new Date().toISOString().slice(0,7);
+        } else {
+            _salesScorecardMonth = month;
+        }
+        const data = await apiFetch(`/api/performance/salespeople?month=${_salesScorecardMonth}`);
+        _salesScorecardData = data;
+        renderSalespersonScorecard(data);
+    } catch (e) {
+        el.innerHTML = '<p class="empty">No scorecard data available</p>';
+    }
+}
+
+function _sortSalesEntries(entries, col, dir) {
+    return entries.slice().sort((a, b) => {
+        let av, bv;
+        if (col.startsWith('ytd_')) {
+            const k = col.slice(4);
+            av = a.ytd[k] ?? 0;
+            bv = b.ytd[k] ?? 0;
+        } else {
+            av = a.monthly[col] ?? 0;
+            bv = b.monthly[col] ?? 0;
+        }
+        return dir === 'desc' ? bv - av : av - bv;
+    });
+}
+
+function sortSalesScorecard(col) {
+    if (_salesSortCol === col) {
+        _salesSortDir = _salesSortDir === 'desc' ? 'asc' : 'desc';
+    } else {
+        _salesSortCol = col;
+        _salesSortDir = 'desc';
+    }
+    if (_salesScorecardData) renderSalespersonScorecard(_salesScorecardData);
+}
+
+function renderSalespersonScorecard(data) {
+    const el = document.getElementById('perfSalesPanel');
+    const entries = data.entries || [];
+
+    // Month selector — last 12 months
+    const now = new Date();
+    let monthSelector = `<select onchange="loadSalespersonScorecard(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px">`;
+    for (let i = 0; i < 12; i++) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const val = d.toISOString().slice(0,7);
+        const label = d.toLocaleDateString('en-US', {month:'long', year:'numeric'});
+        monthSelector += `<option value="${val}" ${val === _salesScorecardMonth ? 'selected' : ''}>${label}</option>`;
+    }
+    monthSelector += '</select>';
+
+    // Summary cards
+    const totalRev = entries.reduce((s, e) => s + (e.monthly.won_revenue || 0), 0);
+    const totalOrders = entries.reduce((s, e) => s + (e.monthly.orders_won || 0), 0);
+    const totalQuotes = entries.reduce((s, e) => s + (e.monthly.quotes_sent || 0), 0);
+    const ytdRev = entries.reduce((s, e) => s + (e.ytd.won_revenue || 0), 0);
+
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+        <div>${monthSelector}</div>
+    </div>`;
+
+    html += `<div class="perf-summary">
+        <div class="perf-card"><div class="perf-card-num">$${totalRev.toLocaleString()}</div><div class="perf-card-label">Monthly Revenue</div></div>
+        <div class="perf-card"><div class="perf-card-num">${totalOrders}</div><div class="perf-card-label">Orders Won</div></div>
+        <div class="perf-card"><div class="perf-card-num">${totalQuotes}</div><div class="perf-card-label">Quotes Sent</div></div>
+        <div class="perf-card"><div class="perf-card-num">$${ytdRev.toLocaleString()}</div><div class="perf-card-label">YTD Revenue</div></div>
+    </div>`;
+
+    if (!entries.length) {
+        html += '<p class="empty">No data for this month</p>';
+        el.innerHTML = html;
+        return;
+    }
+
+    // Sort entries
+    const sorted = _sortSalesEntries(entries, _salesSortCol, _salesSortDir);
+
+    // Determine 1st/2nd by won_revenue for highlights
+    const byRev = entries.slice().sort((a, b) => (b.monthly.won_revenue || 0) - (a.monthly.won_revenue || 0));
+    const gold_id = byRev[0] && byRev[0].monthly.won_revenue > 0 ? byRev[0].user_id : null;
+    const silver_id = byRev[1] && byRev[1].monthly.won_revenue > 0 ? byRev[1].user_id : null;
+
+    const cols = [
+        {key:'new_accounts', label:'Accounts'},
+        {key:'new_contacts', label:'Contacts'},
+        {key:'calls_made', label:'Calls'},
+        {key:'emails_sent', label:'Emails/RFQs'},
+        {key:'requisitions_entered', label:'Reqs'},
+        {key:'quotes_sent', label:'Quotes Sent'},
+        {key:'orders_won', label:'Orders Won'},
+        {key:'won_revenue', label:'Revenue', fmt:'$'},
+        {key:'proactive_sent', label:'Proactive Sent'},
+        {key:'proactive_converted', label:'Proactive Conv.'},
+        {key:'proactive_revenue', label:'Proactive Rev.', fmt:'$'},
+        {key:'boms_uploaded', label:'Lists Uploaded'},
+    ];
+
+    const ytdCols = [
+        {key:'orders_won', label:'YTD Orders'},
+        {key:'won_revenue', label:'YTD Revenue', fmt:'$'},
+        {key:'proactive_revenue', label:'YTD Proactive Rev.', fmt:'$'},
+    ];
+
+    function thClass(key) {
+        let cls = 'sortable';
+        if (_salesSortCol === key) cls += _salesSortDir === 'desc' ? ' sorted-desc' : ' sorted-asc';
+        return cls;
+    }
+
+    html += `<div style="overflow-x:auto"><table class="perf-table"><thead><tr>
+        <th>#</th><th>Salesperson</th>`;
+    for (const c of cols) {
+        html += `<th class="${thClass(c.key)}" onclick="sortSalesScorecard('${c.key}')">${c.label}</th>`;
+    }
+    for (const c of ytdCols) {
+        html += `<th style="border-left:2px solid var(--border)" class="${thClass('ytd_'+c.key)}" onclick="sortSalesScorecard('ytd_${c.key}')">${c.label}</th>`;
+    }
+    html += '</tr></thead><tbody>';
+
+    for (let i = 0; i < sorted.length; i++) {
+        const e = sorted[i];
+        const rank = i + 1;
+        let rowCls = '';
+        let medal = '';
+        if (e.user_id === gold_id) { rowCls = 'class="sc-gold"'; medal = ' 🥇'; }
+        else if (e.user_id === silver_id) { rowCls = 'class="sc-silver"'; medal = ' 🥈'; }
+
+        html += `<tr ${rowCls}><td><strong>${rank}${medal}</strong></td><td>${e.user_name || 'Unknown'}</td>`;
+        for (const c of cols) {
+            const v = e.monthly[c.key] ?? 0;
+            html += `<td>${c.fmt === '$' ? '$' + Number(v).toLocaleString() : v}</td>`;
+        }
+        for (const c of ytdCols) {
+            const v = e.ytd[c.key] ?? 0;
+            html += `<td style="border-left:2px solid var(--border)">${c.fmt === '$' ? '$' + Number(v).toLocaleString() : v}</td>`;
+        }
+        html += '</tr>';
+    }
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
+}
 
 function toggleSettingsDropdown() {
     const dd = document.getElementById('settingsDropdownContent');

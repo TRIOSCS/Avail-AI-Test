@@ -15,7 +15,7 @@ from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func as sqlfunc
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
 from ..models import (
@@ -147,7 +147,11 @@ def get_matches_for_user(db: Session, user_id: int, status: str = "new") -> list
     )
     if status:
         query = query.filter(ProactiveMatch.status == status)
-    query = query.order_by(ProactiveMatch.created_at.desc())
+    query = query.options(
+        joinedload(ProactiveMatch.offer),
+        joinedload(ProactiveMatch.requisition),
+        joinedload(ProactiveMatch.customer_site).joinedload(CustomerSite.company),
+    ).order_by(ProactiveMatch.created_at.desc())
     matches = query.all()
 
     # Group by customer site
@@ -578,7 +582,6 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
     all_offers = query.all()
     sent = len(all_offers)
     converted = sum(1 for o in all_offers if o.status == "converted")
-    sum(float(o.total_sell or 0) for o in all_offers)
     converted_revenue = sum(
         float(o.total_sell or 0) for o in all_offers if o.status == "converted"
     )

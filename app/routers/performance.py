@@ -84,6 +84,24 @@ def list_leaderboard_months(
     return {"months": get_buyer_leaderboard_months(db)}
 
 
+@router.get("/api/performance/salespeople")
+def list_salesperson_scorecard(
+    month: str = Query(None, description="YYYY-MM format"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    from ..services.performance_service import get_salesperson_scorecard
+
+    if month:
+        try:
+            m = datetime.strptime(month, "%Y-%m").date()
+        except ValueError:
+            raise HTTPException(400, "Invalid month format — use YYYY-MM")
+    else:
+        m = date.today().replace(day=1)
+    return get_salesperson_scorecard(db, m)
+
+
 @router.post("/api/performance/buyers/refresh")
 def refresh_buyer_leaderboard(
     user: User = Depends(require_user),

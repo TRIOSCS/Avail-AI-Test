@@ -27,6 +27,12 @@ from ..models import (
     VendorMetricsSnapshot,
     BuyerLeaderboardSnapshot,
     StockListHash,
+    Company,
+    CustomerSite,
+    SiteContact,
+    ActivityLog,
+    Requisition,
+    ProactiveOffer,
 )
 
 log = logging.getLogger("avail.performance")
@@ -632,7 +638,7 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
 
 
 def get_buyer_leaderboard(db: Session, month: date) -> list[dict]:
-    """Return leaderboard for a given month."""
+    """Return leaderboard for a given month with YTD totals."""
     month_start = month.replace(day=1)
     rows = (
         db.query(BuyerLeaderboardSnapshot, User.name)
@@ -647,8 +653,41 @@ def get_buyer_leaderboard(db: Session, month: date) -> list[dict]:
         .all()
     )
 
-    return [
-        {
+    # Compute YTD totals: sum all snapshots from Jan through selected month
+    ytd_start = date(month_start.year, 1, 1)
+    ytd_rows = (
+        db.query(
+            BuyerLeaderboardSnapshot.user_id,
+            sqlfunc.sum(BuyerLeaderboardSnapshot.offers_logged).label("ytd_offers_logged"),
+            sqlfunc.sum(BuyerLeaderboardSnapshot.offers_quoted).label("ytd_offers_quoted"),
+            sqlfunc.sum(BuyerLeaderboardSnapshot.offers_in_buyplan).label("ytd_offers_in_buyplan"),
+            sqlfunc.sum(BuyerLeaderboardSnapshot.offers_po_confirmed).label("ytd_offers_po_confirmed"),
+            sqlfunc.sum(BuyerLeaderboardSnapshot.stock_lists_uploaded).label("ytd_stock_lists"),
+            sqlfunc.sum(BuyerLeaderboardSnapshot.total_points).label("ytd_total_points"),
+        )
+        .filter(
+            BuyerLeaderboardSnapshot.month >= ytd_start,
+            BuyerLeaderboardSnapshot.month <= month_start,
+        )
+        .group_by(BuyerLeaderboardSnapshot.user_id)
+        .all()
+    )
+    ytd_map = {
+        r.user_id: {
+            "ytd_offers_logged": r.ytd_offers_logged or 0,
+            "ytd_offers_quoted": r.ytd_offers_quoted or 0,
+            "ytd_offers_in_buyplan": r.ytd_offers_in_buyplan or 0,
+            "ytd_offers_po_confirmed": r.ytd_offers_po_confirmed or 0,
+            "ytd_stock_lists": r.ytd_stock_lists or 0,
+            "ytd_total_points": r.ytd_total_points or 0,
+        }
+        for r in ytd_rows
+    }
+
+    result = []
+    for snap, user_name in rows:
+        ytd = ytd_map.get(snap.user_id, {})
+        result.append({
             "user_id": snap.user_id,
             "user_name": user_name,
             "rank": snap.rank,
@@ -663,9 +702,11 @@ def get_buyer_leaderboard(db: Session, month: date) -> list[dict]:
             "points_po": snap.points_po,
             "points_stock": snap.points_stock or 0,
             "total_points": snap.total_points,
-        }
-        for snap, user_name in rows
-    ]
+            "ytd_offers_logged": ytd.get("ytd_offers_logged", 0),
+            "ytd_offers_po_confirmed": ytd.get("ytd_offers_po_confirmed", 0),
+            "ytd_total_points": ytd.get("ytd_total_points", 0),
+        })
+    return result
 
 
 def get_buyer_leaderboard_months(db: Session) -> list[str]:
@@ -737,4 +778,223 @@ def check_and_record_stock_list(
         "is_duplicate": False,
         "first_seen_at": slh.first_seen_at.isoformat(),
         "upload_count": 1,
+    }
+
+
+# ── Salesperson Scorecard ────────────────────────────────────────────
+
+
+def get_salesperson_scorecard(db: Session, month: date) -> dict:
+    """Compute 12 activity metrics for all active users (monthly + YTD)."""
+    month_start = month.replace(day=1)
+    if month_start.month == 12:
+        month_end = month_start.replace(year=month_start.year + 1, month=1)
+    else:
+        month_end = month_start.replace(month=month_start.month + 1)
+
+    ytd_start = date(month_start.year, 1, 1)
+
+    month_start_dt = datetime(
+        month_start.year, month_start.month, month_start.day, tzinfo=timezone.utc
+    )
+    month_end_dt = datetime(
+        month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc
+    )
+    ytd_start_dt = datetime(
+        ytd_start.year, ytd_start.month, ytd_start.day, tzinfo=timezone.utc
+    )
+
+    users = db.query(User).filter(User.is_active == True).all()  # noqa: E712
+
+    entries = []
+    for user in users:
+        monthly = _salesperson_metrics(db, user.id, month_start_dt, month_end_dt)
+        ytd = _salesperson_metrics(db, user.id, ytd_start_dt, month_end_dt)
+        entries.append({
+            "user_id": user.id,
+            "user_name": user.name or user.email,
+            "monthly": monthly,
+            "ytd": ytd,
+        })
+
+    # Default sort: won_revenue descending
+    entries.sort(key=lambda e: float(e["monthly"]["won_revenue"] or 0), reverse=True)
+
+    return {
+        "month": month_start.isoformat(),
+        "year": month_start.year,
+        "entries": entries,
+    }
+
+
+def _salesperson_metrics(
+    db: Session, user_id: int, start_dt: datetime, end_dt: datetime
+) -> dict:
+    """Compute all 12 metrics for a single user over a date range."""
+
+    # 1. New accounts added (Company.account_owner_id)
+    new_accounts = (
+        db.query(sqlfunc.count(Company.id))
+        .filter(
+            Company.account_owner_id == user_id,
+            Company.created_at >= start_dt,
+            Company.created_at < end_dt,
+        )
+        .scalar()
+        or 0
+    )
+
+    # 2. New contacts added (SiteContact via CustomerSite.owner_id)
+    new_contacts = (
+        db.query(sqlfunc.count(SiteContact.id))
+        .join(CustomerSite, CustomerSite.id == SiteContact.customer_site_id)
+        .filter(
+            CustomerSite.owner_id == user_id,
+            SiteContact.created_at >= start_dt,
+            SiteContact.created_at < end_dt,
+        )
+        .scalar()
+        or 0
+    )
+
+    # 3. Calls made (ActivityLog.activity_type='call_outbound')
+    calls_made = (
+        db.query(sqlfunc.count(ActivityLog.id))
+        .filter(
+            ActivityLog.user_id == user_id,
+            ActivityLog.activity_type == "call_outbound",
+            ActivityLog.created_at >= start_dt,
+            ActivityLog.created_at < end_dt,
+        )
+        .scalar()
+        or 0
+    )
+
+    # 4. Emails/RFQs sent (Contact.contact_type='email')
+    emails_sent = (
+        db.query(sqlfunc.count(Contact.id))
+        .filter(
+            Contact.user_id == user_id,
+            Contact.contact_type == "email",
+            Contact.created_at >= start_dt,
+            Contact.created_at < end_dt,
+        )
+        .scalar()
+        or 0
+    )
+
+    # 5. Requisitions entered (Requisition.created_by)
+    requisitions_entered = (
+        db.query(sqlfunc.count(Requisition.id))
+        .filter(
+            Requisition.created_by == user_id,
+            Requisition.created_at >= start_dt,
+            Requisition.created_at < end_dt,
+        )
+        .scalar()
+        or 0
+    )
+
+    # 6. Quotes sent (Quote.created_by_id where sent_at IS NOT NULL)
+    quotes_sent = (
+        db.query(sqlfunc.count(Quote.id))
+        .filter(
+            Quote.created_by_id == user_id,
+            Quote.sent_at.isnot(None),
+            Quote.sent_at >= start_dt,
+            Quote.sent_at < end_dt,
+        )
+        .scalar()
+        or 0
+    )
+
+    # 7. Orders won (Quote where result='won')
+    orders_won = (
+        db.query(sqlfunc.count(Quote.id))
+        .filter(
+            Quote.created_by_id == user_id,
+            Quote.result == "won",
+            Quote.result_at >= start_dt,
+            Quote.result_at < end_dt,
+        )
+        .scalar()
+        or 0
+    )
+
+    # 8. Won revenue (Quote.won_revenue)
+    won_revenue = (
+        db.query(sqlfunc.coalesce(sqlfunc.sum(Quote.won_revenue), 0))
+        .filter(
+            Quote.created_by_id == user_id,
+            Quote.result == "won",
+            Quote.result_at >= start_dt,
+            Quote.result_at < end_dt,
+        )
+        .scalar()
+        or 0
+    )
+
+    # 9. Proactive offers sent (ProactiveOffer.salesperson_id)
+    proactive_sent = (
+        db.query(sqlfunc.count(ProactiveOffer.id))
+        .filter(
+            ProactiveOffer.salesperson_id == user_id,
+            ProactiveOffer.sent_at >= start_dt,
+            ProactiveOffer.sent_at < end_dt,
+        )
+        .scalar()
+        or 0
+    )
+
+    # 10. Proactive offers converted (ProactiveOffer.status='converted')
+    proactive_converted = (
+        db.query(sqlfunc.count(ProactiveOffer.id))
+        .filter(
+            ProactiveOffer.salesperson_id == user_id,
+            ProactiveOffer.status == "converted",
+            ProactiveOffer.converted_at >= start_dt,
+            ProactiveOffer.converted_at < end_dt,
+        )
+        .scalar()
+        or 0
+    )
+
+    # 11. Proactive revenue (ProactiveOffer.total_sell where converted)
+    proactive_revenue = (
+        db.query(sqlfunc.coalesce(sqlfunc.sum(ProactiveOffer.total_sell), 0))
+        .filter(
+            ProactiveOffer.salesperson_id == user_id,
+            ProactiveOffer.status == "converted",
+            ProactiveOffer.converted_at >= start_dt,
+            ProactiveOffer.converted_at < end_dt,
+        )
+        .scalar()
+        or 0
+    )
+
+    # 12. BOMs uploaded (StockListHash.user_id)
+    boms_uploaded = (
+        db.query(sqlfunc.count(StockListHash.id))
+        .filter(
+            StockListHash.user_id == user_id,
+            StockListHash.first_seen_at >= start_dt,
+            StockListHash.first_seen_at < end_dt,
+        )
+        .scalar()
+        or 0
+    )
+
+    return {
+        "new_accounts": new_accounts,
+        "new_contacts": new_contacts,
+        "calls_made": calls_made,
+        "emails_sent": emails_sent,
+        "requisitions_entered": requisitions_entered,
+        "quotes_sent": quotes_sent,
+        "orders_won": orders_won,
+        "won_revenue": float(won_revenue),
+        "proactive_sent": proactive_sent,
+        "proactive_converted": proactive_converted,
+        "proactive_revenue": float(proactive_revenue),
+        "boms_uploaded": boms_uploaded,
     }
