@@ -1743,10 +1743,7 @@ async function openVendorPopup(cardId) {
     // Action buttons
     const vendorDomain = card.domain || (card.website ? card.website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
     html += `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
-        <button class="btn-enrich" onclick="enrichVendor(${card.id},'${escAttr(vendorDomain)}')">Enrich</button>
-        <button class="btn-ai" onclick="deepEnrichVendor(${card.id})">Deep Enrich</button>
-        <button class="btn-ai" onclick="findAIContacts('vendor',${card.id},'${escAttr(card.display_name)}','${escAttr(vendorDomain)}')">Find Contacts</button>
-        <button class="btn-enrich" onclick="analyzeVendorMaterials(${card.id})">Analyze Materials</button>
+        <button class="btn-enrich" onclick="unifiedEnrichVendor(${card.id})">Enrich</button>
     </div>`;
 
     // Engagement Score (from Email Mining v2)
@@ -2277,17 +2274,24 @@ function renderPartsSightingItems(items) {
     }).join('');
 }
 
-// ── Analyze Vendor Materials (AI) ───────────────────────────────────
+// ── Unified Vendor Enrichment ───────────────────────────────────────
 
-async function analyzeVendorMaterials(cardId) {
-    showToast('Analyzing materials...', 'info');
+async function unifiedEnrichVendor(cardId) {
+    showToast('Enriching vendor — this may take a moment…', 'info');
     try {
-        const data = await apiFetch(`/api/vendors/${cardId}/analyze-materials`, { method: 'POST' });
-        const count = (data.brand_tags || []).length + (data.commodity_tags || []).length;
-        showToast(`Found ${count} material tags`, 'success');
-        openVendorPopup(cardId); // Refresh popup to show new tags
-    } catch(e) {
-        showToast('Material analysis failed', 'error');
+        const res = await apiFetch(`/api/enrichment/vendor/${cardId}`, {
+            method: 'POST',
+            body: { force: true },
+        });
+        if (res.status === 'completed') {
+            const n = (res.enriched_fields || []).length;
+            showToast(`Enrichment complete — ${n} field${n !== 1 ? 's' : ''} updated`, 'success');
+        } else {
+            showToast('Enrichment: ' + (res.status || 'done'));
+        }
+        openVendorPopup(cardId);
+    } catch (e) {
+        showToast('Enrichment failed: ' + (e.message || e), 'error');
     }
 }
 

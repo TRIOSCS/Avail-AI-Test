@@ -250,16 +250,17 @@ def apply_queue_item(db, queue_item, user_id: int | None = None) -> bool:
 # ── Deep enrichment orchestrators ────────────────────────────────────
 
 
-async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None) -> dict:
+async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None, force: bool = False) -> dict:
     """Deep enrich a vendor card with all available sources.
 
-    1. Skip if recently enriched
+    1. Skip if recently enriched (unless force=True)
     2. Company enrichment via existing enrich_entity()
     3. Email verification via Hunter.io
     4. Contact discovery: Apollo → Hunter → RocketReach → Clearbit → dedupe
     5. Specialty detection
-    6. Confidence routing per field
-    7. Update deep_enrichment_at timestamp
+    6. AI material analysis
+    7. Confidence routing per field
+    8. Update deep_enrichment_at timestamp
     """
     from ..config import settings
     from ..models import VendorCard, VendorContact
@@ -268,16 +269,17 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None)
     if not card:
         return {"status": "not_found"}
 
-    # Skip if recently enriched
-    stale_days = settings.deep_enrichment_stale_days
-    if card.deep_enrichment_at:
-        age = datetime.now(timezone.utc) - (
-            card.deep_enrichment_at.replace(tzinfo=timezone.utc)
-            if card.deep_enrichment_at.tzinfo is None
-            else card.deep_enrichment_at
-        )
-        if age < timedelta(days=stale_days):
-            return {"status": "skipped", "reason": "recently_enriched"}
+    # Skip if recently enriched (bypass when force=True)
+    if not force:
+        stale_days = settings.deep_enrichment_stale_days
+        if card.deep_enrichment_at:
+            age = datetime.now(timezone.utc) - (
+                card.deep_enrichment_at.replace(tzinfo=timezone.utc)
+                if card.deep_enrichment_at.tzinfo is None
+                else card.deep_enrichment_at
+            )
+            if age < timedelta(days=stale_days):
+                return {"status": "skipped", "reason": "recently_enriched"}
 
     enriched_fields = []
     errors = []
@@ -361,6 +363,7 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None)
             errors.append(f"contact_discovery: {e}")
 
     # 4. Specialty detection
+    specialties = {}
     try:
         from .specialty_detector import analyze_vendor_specialties
         specialties = analyze_vendor_specialties(vendor_card_id, db)
@@ -387,6 +390,14 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None)
     except Exception as e:
         errors.append(f"specialty_detection: {e}")
 
+    # 5. AI material analysis (brand/commodity tags from part history)
+    try:
+        from ..routers.vendors import _analyze_vendor_materials
+        await _analyze_vendor_materials(vendor_card_id, db_session=db)
+        enriched_fields.append("material_tags")
+    except Exception as e:
+        errors.append(f"material_analysis: {e}")
+
     # Update timestamp
     card.deep_enrichment_at = datetime.now(timezone.utc)
     if specialties and specialties.get("confidence"):
@@ -406,7 +417,7 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None)
     }
 
 
-async def deep_enrich_company(company_id: int, db, job_id: int | None = None) -> dict:
+async def deep_enrich_company(company_id: int, db, job_id: int | None = None, force: bool = False) -> dict:
     """Deep enrich a company with all available sources."""
     from ..config import settings
     from ..models import Company
@@ -415,15 +426,17 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None) ->
     if not company:
         return {"status": "not_found"}
 
-    stale_days = settings.deep_enrichment_stale_days
-    if company.deep_enrichment_at:
-        age = datetime.now(timezone.utc) - (
-            company.deep_enrichment_at.replace(tzinfo=timezone.utc)
-            if company.deep_enrichment_at.tzinfo is None
-            else company.deep_enrichment_at
-        )
-        if age < timedelta(days=stale_days):
-            return {"status": "skipped", "reason": "recently_enriched"}
+    # Skip if recently enriched (bypass when force=True)
+    if not force:
+        stale_days = settings.deep_enrichment_stale_days
+        if company.deep_enrichment_at:
+            age = datetime.now(timezone.utc) - (
+                company.deep_enrichment_at.replace(tzinfo=timezone.utc)
+                if company.deep_enrichment_at.tzinfo is None
+                else company.deep_enrichment_at
+            )
+            if age < timedelta(days=stale_days):
+                return {"status": "skipped", "reason": "recently_enriched"}
 
     enriched_fields = []
     errors = []
@@ -477,6 +490,39 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None) ->
                         )
         except Exception as e:
             errors.append(f"clearbit: {e}")
+
+        # Contact discovery for company
+        try:
+            from ..enrichment_service import find_suggested_contacts
+            new_contacts = await find_suggested_contacts(domain, company.name)
+            from ..models import SiteContact, CustomerSite
+            # Find a site to attach contacts to
+            site = db.query(CustomerSite).filter(
+                CustomerSite.company_id == company_id
+            ).first()
+            if site and new_contacts:
+                existing_emails = {
+                    c.email.lower()
+                    for c in db.query(SiteContact).filter(
+                        SiteContact.customer_site_id == site.id,
+                        SiteContact.email.isnot(None),
+                    ).all()
+                }
+                for contact_data in new_contacts:
+                    email = (contact_data.get("email") or "").lower()
+                    if email and email not in existing_emails:
+                        sc = SiteContact(
+                            customer_site_id=site.id,
+                            full_name=contact_data.get("full_name"),
+                            title=contact_data.get("title"),
+                            email=email,
+                            phone=contact_data.get("phone"),
+                        )
+                        db.add(sc)
+                        existing_emails.add(email)
+                        enriched_fields.append(f"contact:{email}")
+        except Exception as e:
+            errors.append(f"contact_discovery: {e}")
 
     company.deep_enrichment_at = datetime.now(timezone.utc)
 

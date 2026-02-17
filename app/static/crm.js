@@ -117,9 +117,7 @@ function renderCustomers() {
                 <span id="actHealth-${c.id}" style="margin-left:4px"></span>
                 <span style="margin-left:auto;display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">
                     <button class="btn-enrich" onclick="openEditCompany(${c.id})">Edit</button>
-                    <button class="btn-enrich" onclick="enrichCompany(${c.id},'${escAttr(domain)}')">Enrich</button>
-                    <button class="btn-ai" onclick="deepEnrichCompany(${c.id})">Deep Enrich</button>
-                    ${domain ? '<button class="btn-enrich" onclick="openSuggestedContacts(\'company\','+c.id+',\''+escAttr(domain)+'\',\''+escAttr(c.name)+'\')">Suggested Contacts</button>' : ''}
+                    <button class="btn-enrich" onclick="unifiedEnrichCompany(${c.id})">Enrich</button>
                 </span>
             </div>
             ${enrichHtml}
@@ -208,8 +206,7 @@ async function toggleSiteDetail(siteId) {
                 </div>
                 <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
                     <button class="btn btn-ghost btn-sm" onclick="openEditSiteModal(${s.id})">Edit Site</button>
-                    <button class="btn-enrich" onclick="openSuggestedContacts('site',${s.id},'${escAttr(siteDomain)}','${escAttr(s.company_name || '')}')">Suggested Contacts</button>
-                    <button class="btn-ai" onclick="findAIContacts('site',${s.id},'${escAttr(s.company_name || '')}','${escAttr(siteDomain)}')">🤖 Find Contacts</button>
+                    <button class="btn-enrich" onclick="unifiedEnrichCompany(${s.company_id})">Enrich</button>
                 </div>
                 <div id="siteIntel-${s.id}"></div>
             </div>`;
@@ -2037,41 +2034,45 @@ async function addSelectedSuggestedContacts() {
 }
 
 
-// ── Company Enrichment ────────────────────────────────────────────────
+// ── Unified Enrichment ────────────────────────────────────────────────
 
-async function enrichCompany(companyId, domain) {
-    if (!domain) {
-        domain = prompt('Enter company domain (e.g. ibm.com):');
-        if (!domain) return;
-    }
-    showToast('Enriching…', 'info');
+async function unifiedEnrichCompany(companyId) {
+    showToast('Enriching company — this may take a moment…', 'info');
     try {
-        const data = await apiFetch('/api/enrich/company/' + companyId, {
-            method: 'POST', body: { domain }
+        const res = await apiFetch(`/api/enrichment/company/${companyId}`, {
+            method: 'POST',
+            body: { force: true },
         });
-        showToast(`Updated ${data.updated_fields.length} fields`, 'success');
+        if (res.status === 'completed') {
+            const n = (res.enriched_fields || []).length;
+            showToast(`Enrichment complete — ${n} field${n !== 1 ? 's' : ''} updated`, 'success');
+        } else {
+            showToast('Enrichment: ' + (res.status || 'done'));
+        }
         loadCustomers();
     } catch (e) {
-        console.error('enrichCompany:', e);
-        showToast('Enrichment error', 'error');
+        console.error('unifiedEnrichCompany:', e);
+        showToast('Enrichment failed: ' + (e.message || e), 'error');
     }
 }
 
-async function enrichVendor(cardId, domain) {
-    if (!domain) {
-        domain = prompt('Enter vendor domain (e.g. arrow.com):');
-        if (!domain) return;
-    }
-    showToast('Enriching…', 'info');
+async function unifiedEnrichVendor(vendorId) {
+    showToast('Enriching vendor — this may take a moment…', 'info');
     try {
-        const data = await apiFetch('/api/enrich/vendor/' + cardId, {
-            method: 'POST', body: { domain }
+        const res = await apiFetch(`/api/enrichment/vendor/${vendorId}`, {
+            method: 'POST',
+            body: { force: true },
         });
-        showToast(`Updated ${data.updated_fields.length} fields`, 'success');
-        openVendorPopup(cardId);
+        if (res.status === 'completed') {
+            const n = (res.enriched_fields || []).length;
+            showToast(`Enrichment complete — ${n} field${n !== 1 ? 's' : ''} updated`, 'success');
+        } else {
+            showToast('Enrichment: ' + (res.status || 'done'));
+        }
+        openVendorPopup(vendorId);
     } catch (e) {
-        console.error('enrichVendor:', e);
-        showToast('Enrichment error', 'error');
+        console.error('unifiedEnrichVendor:', e);
+        showToast('Enrichment failed: ' + (e.message || e), 'error');
     }
 }
 
@@ -4326,37 +4327,7 @@ async function refreshEnrichmentBadge() {
     } catch (e) { /* ignore */ }
 }
 
-async function deepEnrichVendor(vendorId) {
-    try {
-        showToast('Starting deep enrichment...');
-        const res = await apiFetch(`/api/enrichment/vendor/${vendorId}`, {method: 'POST'});
-        if (res.status === 'completed') {
-            showToast(`Enriched ${(res.enriched_fields || []).length} fields`);
-        } else if (res.status === 'skipped') {
-            showToast('Recently enriched — skipped', 'info');
-        } else {
-            showToast('Enrichment: ' + (res.status || 'done'));
-        }
-    } catch (e) {
-        showToast('Enrichment failed: ' + (e.message || e), 'error');
-    }
-}
-
-async function deepEnrichCompany(companyId) {
-    try {
-        showToast('Starting deep enrichment...');
-        const res = await apiFetch(`/api/enrichment/company/${companyId}`, {method: 'POST'});
-        if (res.status === 'completed') {
-            showToast(`Enriched ${(res.enriched_fields || []).length} fields`);
-        } else if (res.status === 'skipped') {
-            showToast('Recently enriched — skipped', 'info');
-        } else {
-            showToast('Enrichment: ' + (res.status || 'done'));
-        }
-    } catch (e) {
-        showToast('Enrichment failed: ' + (e.message || e), 'error');
-    }
-}
+// deepEnrichVendor and deepEnrichCompany replaced by unifiedEnrichVendor/unifiedEnrichCompany above
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Email Backfill & Website Scraping

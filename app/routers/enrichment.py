@@ -289,9 +289,14 @@ def api_cancel_job(
 # ── On-demand enrichment ─────────────────────────────────────────────
 
 
+class EnrichRequest(BaseModel):
+    force: bool = False
+
+
 @router.post("/api/enrichment/vendor/{vendor_id}")
 async def api_enrich_vendor(
     vendor_id: int,
+    body: EnrichRequest = EnrichRequest(),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -302,13 +307,14 @@ async def api_enrich_vendor(
     if not card:
         raise HTTPException(404, "Vendor not found")
 
-    result = await deep_enrich_vendor(vendor_id, db)
+    result = await deep_enrich_vendor(vendor_id, db, force=body.force)
     return result
 
 
 @router.post("/api/enrichment/company/{company_id}")
 async def api_enrich_company(
     company_id: int,
+    body: EnrichRequest = EnrichRequest(),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -319,7 +325,7 @@ async def api_enrich_company(
     if not company:
         raise HTTPException(404, "Company not found")
 
-    result = await deep_enrich_company(company_id, db)
+    result = await deep_enrich_company(company_id, db, force=body.force)
     return result
 
 
