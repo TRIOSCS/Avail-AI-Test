@@ -439,7 +439,7 @@ class BuyPlan(Base):
     )
 
     status = Column(String(30), default="pending_approval")
-    # pending_approval | approved | rejected | po_entered | po_confirmed | complete
+    # pending_approval | approved | rejected | po_entered | po_confirmed | complete | cancelled
 
     line_items = Column(JSON, nullable=False, default=list)
     # [{offer_id, mpn, vendor_name, qty, cost_price, lead_time, condition,
@@ -456,6 +456,11 @@ class BuyPlan(Base):
     submitted_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     approved_at = Column(DateTime)
     rejected_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    completed_by_id = Column(Integer, ForeignKey("users.id"))
+    cancelled_at = Column(DateTime)
+    cancelled_by_id = Column(Integer, ForeignKey("users.id"))
+    cancellation_reason = Column(Text)
 
     approval_token = Column(String(100), unique=True)
 
@@ -465,6 +470,8 @@ class BuyPlan(Base):
     quote = relationship("Quote", foreign_keys=[quote_id])
     submitted_by = relationship("User", foreign_keys=[submitted_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])
+    completed_by = relationship("User", foreign_keys=[completed_by_id])
+    cancelled_by = relationship("User", foreign_keys=[cancelled_by_id])
 
     __table_args__ = (
         Index("ix_buyplans_req", "requisition_id"),

@@ -298,6 +298,12 @@ def _add_crm_columns(conn) -> None:
         # v1.4.1: Buy plan remediation
         "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS sales_order_number VARCHAR(100)",
         "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS salesperson_notes TEXT",
+        # v1.4.2: Buy plan completion, cancellation, audit
+        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP",
+        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS completed_by_id INTEGER REFERENCES users(id)",
+        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP",
+        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS cancelled_by_id INTEGER REFERENCES users(id)",
+        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS cancellation_reason TEXT",
     ]
     for stmt in stmts:
         _exec(conn, stmt)

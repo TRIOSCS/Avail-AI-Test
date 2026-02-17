@@ -22,6 +22,29 @@ from ..models import ActivityLog, BuyPlan, Offer, User
 log = logging.getLogger("avail.buyplan")
 
 
+# ── Audit Trail ─────────────────────────────────────────────────────────
+
+
+def log_buyplan_activity(
+    db: Session,
+    user_id: int,
+    plan: "BuyPlan",
+    activity_type: str,
+    detail: str = "",
+):
+    """Create an ActivityLog entry for a buy plan state change."""
+    db.add(
+        ActivityLog(
+            user_id=user_id,
+            activity_type=activity_type,
+            channel="system",
+            requisition_id=plan.requisition_id,
+            subject=f"Buy plan #{plan.id}: {detail}" if detail else f"Buy plan #{plan.id}",
+            notes=f"plan_id={plan.id} status={plan.status}",
+        )
+    )
+
+
 # ── Email Notifications ──────────────────────────────────────────────────
 
 
@@ -88,6 +111,10 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
             <a href="{settings.app_url}/#buyplan/{plan.id}"
                style="background:#2563eb;color:white;padding:10px 24px;text-decoration:none;border-radius:5px;margin-right:8px">
                 Review & Approve
+            </a>
+            <a href="{settings.app_url}/#approve-token/{plan.approval_token}"
+               style="background:#16a34a;color:white;padding:10px 24px;text-decoration:none;border-radius:5px">
+                Quick Approve
             </a>
         </p>
         <p style="color:#6b7280;font-size:12px;margin-top:20px">
@@ -344,6 +371,99 @@ async def notify_buyplan_rejected(plan: BuyPlan, db: Session):
     await _send_teams_dm(
         submitter,
         f"Buy Plan #{plan.id} was rejected: {plan.rejection_reason or 'no reason given'}",
+    )
+
+
+async def notify_buyplan_completed(plan: BuyPlan, db: Session, completer_name: str):
+    """Notify the original submitter that their buy plan is complete."""
+    from ..scheduler import get_valid_token
+
+    submitter = db.get(User, plan.submitted_by_id)
+    if not submitter:
+        return
+
+    html_body = f"""
+    <div style="font-family:Arial,sans-serif;max-width:600px">
+        <h2 style="color:#16a34a">Buy Plan Complete</h2>
+        <p>Your buy plan for requisition <strong>#{plan.requisition_id}</strong>
+           has been marked complete by <strong>{completer_name}</strong>.</p>
+        <p>Sales Order: <strong>{plan.sales_order_number or 'N/A'}</strong></p>
+        <p style="margin-top:20px">
+            <a href="{settings.app_url}/#buyplan/{plan.id}"
+               style="background:#16a34a;color:white;padding:10px 24px;text-decoration:none;border-radius:5px">
+                View Details
+            </a>
+        </p>
+    </div>
+    """
+
+    try:
+        token = await get_valid_token(submitter, db)
+        if token:
+            from ..utils.graph_client import GraphClient
+
+            gc = GraphClient(token)
+            await gc.post_json(
+                "/me/sendMail",
+                {
+                    "message": {
+                        "subject": f"[AVAIL] Buy Plan Complete — #{plan.requisition_id}",
+                        "body": {"contentType": "HTML", "content": html_body},
+                        "toRecipients": [
+                            {"emailAddress": {"address": submitter.email}}
+                        ],
+                    },
+                    "saveToSentItems": "false",
+                },
+            )
+    except Exception as e:
+        log.error(f"Failed to send completion email to {submitter.email}: {e}")
+
+    db.add(
+        ActivityLog(
+            user_id=submitter.id,
+            activity_type="buyplan_completed",
+            channel="system",
+            subject=f"Buy plan #{plan.id} completed",
+        )
+    )
+    db.commit()
+
+    await _post_teams_channel(
+        f"**Buy Plan #{plan.id} — Complete**\n\n"
+        f"Completed by: {completer_name}\n"
+        f"[View in AVAIL]({settings.app_url}/#buyplan/{plan.id})"
+    )
+
+
+async def notify_buyplan_cancelled(plan: BuyPlan, db: Session):
+    """Notify relevant parties about cancellation."""
+    canceller = db.get(User, plan.cancelled_by_id)
+    canceller_name = canceller.name or canceller.email if canceller else "Unknown"
+
+    # If the canceller is the submitter, notify admins. Otherwise notify submitter.
+    if plan.cancelled_by_id == plan.submitted_by_id:
+        targets = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
+    else:
+        submitter = db.get(User, plan.submitted_by_id)
+        targets = [submitter] if submitter else []
+
+    reason_text = f" — {plan.cancellation_reason}" if plan.cancellation_reason else ""
+    for target in targets:
+        db.add(
+            ActivityLog(
+                user_id=target.id,
+                activity_type="buyplan_cancelled",
+                channel="system",
+                subject=f"Buy plan #{plan.id} cancelled by {canceller_name}{reason_text}",
+            )
+        )
+    db.commit()
+
+    await _post_teams_channel(
+        f"**Buy Plan #{plan.id} — Cancelled** by {canceller_name}\n\n"
+        + (f"Reason: {plan.cancellation_reason}\n" if plan.cancellation_reason else "")
+        + f"[View in AVAIL]({settings.app_url}/#buyplan/{plan.id})"
     )
 
 

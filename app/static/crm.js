@@ -1264,6 +1264,7 @@ function renderBuyPlanStatus() {
         po_entered: 'var(--blue)',
         po_confirmed: 'var(--green)',
         complete: 'var(--green)',
+        cancelled: 'var(--muted)',
     };
     const statusLabels = {
         pending_approval: 'Pending Approval',
@@ -1272,6 +1273,7 @@ function renderBuyPlanStatus() {
         po_entered: 'PO Entered \u2014 Verifying',
         po_confirmed: 'PO Confirmed',
         complete: 'Complete',
+        cancelled: 'Cancelled',
     };
 
     const statusColor = statusColors[bp.status] || 'var(--muted)';
@@ -1289,7 +1291,8 @@ function renderBuyPlanStatus() {
 
     let itemsHtml = (bp.line_items || []).map((item, i) => {
         const planQty = item.plan_qty || item.qty || 0;
-        const poCell = (isBuyer && bp.status === 'approved') || (isBuyer && bp.status === 'po_entered' && !item.po_number)
+        const poEditable = isBuyer && (bp.status === 'approved' || bp.status === 'po_entered');
+        const poCell = poEditable
             ? `<input type="text" class="po-input" data-idx="${i}" placeholder="PO#" value="${esc(item.po_number||'')}" style="width:100px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px">`
             : (item.po_number ? `<span style="font-weight:600">${esc(item.po_number)}</span>` : '\u2014');
         const verifyIcon = item.po_verified
@@ -1322,6 +1325,9 @@ function renderBuyPlanStatus() {
     if (bp.rejection_reason) {
         notesHtml += `<div style="background:#fef2f2;padding:8px 10px;border-left:3px solid var(--red);border-radius:4px;margin-bottom:8px;font-size:12px"><strong>Rejected:</strong> ${esc(bp.rejection_reason)}</div>`;
     }
+    if (bp.cancellation_reason) {
+        notesHtml += `<div style="background:#f3f4f6;padding:8px 10px;border-left:3px solid var(--muted);border-radius:4px;margin-bottom:8px;font-size:12px"><strong>Cancelled:</strong> ${esc(bp.cancellation_reason)}${bp.cancelled_by ? ' by '+esc(bp.cancelled_by) : ''}</div>`;
+    }
 
     let actionsHtml = '';
     const canApprove = isAdmin || window.userRole === 'manager';
@@ -1341,12 +1347,34 @@ function renderBuyPlanStatus() {
                 </div>
             </div>`;
     }
+    // Cancel button for pending plans (submitter or admin/manager)
+    if (bp.status === 'pending_approval') {
+        const canCancel = canApprove || bp.submitted_by_id === window.__userId;
+        if (canCancel) {
+            actionsHtml += `<div style="margin-top:8px"><button class="btn btn-ghost" onclick="cancelBuyPlan()">Cancel Plan</button></div>`;
+        }
+    }
     if (isBuyer && (bp.status === 'approved' || bp.status === 'po_entered')) {
         actionsHtml = `
             <div style="margin-top:12px">
                 <button class="btn btn-primary" onclick="saveBuyPlanPOs()">Save PO Numbers</button>
                 <button class="btn btn-ghost" onclick="verifyBuyPlanPOs()">Verify PO Sent</button>
             </div>`;
+    }
+    // Cancel button for approved plans with no POs (admin/manager only)
+    if (canApprove && bp.status === 'approved') {
+        const hasPOs = (bp.line_items || []).some(li => li.po_number);
+        if (!hasPOs) {
+            actionsHtml += `<div style="margin-top:8px"><button class="btn btn-ghost" onclick="cancelBuyPlan()">Cancel Plan</button></div>`;
+        }
+    }
+    // Complete button for po_confirmed (admin/manager)
+    if (canApprove && bp.status === 'po_confirmed') {
+        actionsHtml += `<div style="margin-top:12px"><button class="btn btn-success" onclick="completeBuyPlan()">Mark Complete</button></div>`;
+    }
+    // Resubmit button for rejected/cancelled
+    if (bp.status === 'rejected' || bp.status === 'cancelled') {
+        actionsHtml += `<div style="margin-top:12px"><button class="btn btn-primary" onclick="resubmitBuyPlan()">Resubmit Buy Plan</button></div>`;
     }
 
     el.innerHTML = `
@@ -1402,20 +1430,57 @@ async function rejectBuyPlan(reason) {
 async function saveBuyPlanPOs() {
     if (!_currentBuyPlan) return;
     const inputs = document.querySelectorAll('.po-input');
-    let saved = 0;
+    const entries = [];
     for (const input of inputs) {
         const idx = parseInt(input.dataset.idx);
         const po = input.value.trim();
-        if (!po) continue;
-        try {
-            await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/po', {
-                method: 'PUT', body: { line_index: idx, po_number: po }
-            });
-            saved++;
-        } catch (e) { console.error('Failed to save PO for line', idx, e); }
+        entries.push({ line_index: idx, po_number: po || null });
     }
-    if (saved) showToast(saved + ' PO number(s) saved', 'success');
-    loadBuyPlan();
+    if (!entries.length) { showToast('No PO fields found', 'error'); return; }
+    try {
+        const result = await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/po-bulk', {
+            method: 'PUT', body: { entries }
+        });
+        showToast(result.changes + ' PO number(s) updated', 'success');
+        loadBuyPlan();
+    } catch (e) { showToast('Failed to save POs: ' + (e.message || e), 'error'); }
+}
+
+async function completeBuyPlan() {
+    if (!_currentBuyPlan) return;
+    if (!confirm('Mark this buy plan as complete?')) return;
+    try {
+        await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/complete', { method: 'PUT' });
+        showToast('Buy plan marked complete', 'success');
+        loadBuyPlan();
+    } catch (e) { showToast('Failed to complete: ' + (e.message || e), 'error'); }
+}
+
+async function cancelBuyPlan() {
+    if (!_currentBuyPlan) return;
+    const reason = prompt('Cancellation reason (optional):');
+    if (reason === null) return;
+    try {
+        await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/cancel', {
+            method: 'PUT', body: { reason }
+        });
+        showToast('Buy plan cancelled', 'info');
+        loadBuyPlan();
+    } catch (e) { showToast('Failed to cancel: ' + (e.message || e), 'error'); }
+}
+
+async function resubmitBuyPlan() {
+    if (!_currentBuyPlan) return;
+    const notes = prompt('Updated notes for resubmission (optional):');
+    if (notes === null) return;
+    try {
+        const res = await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/resubmit', {
+            method: 'PUT', body: { salesperson_notes: notes }
+        });
+        showToast('Buy plan resubmitted for approval', 'success');
+        _currentBuyPlan = await apiFetch('/api/buy-plans/' + res.new_plan_id);
+        renderBuyPlanStatus();
+    } catch (e) { showToast('Failed to resubmit: ' + (e.message || e), 'error'); }
 }
 
 async function verifyBuyPlanPOs() {
@@ -1473,6 +1538,7 @@ function renderBuyPlansList() {
         po_entered: 'var(--blue)',
         po_confirmed: 'var(--green)',
         complete: 'var(--green)',
+        cancelled: 'var(--muted)',
     };
     const statusLabels = {
         pending_approval: 'Pending',
@@ -1481,6 +1547,7 @@ function renderBuyPlansList() {
         po_entered: 'PO Entered',
         po_confirmed: 'Confirmed',
         complete: 'Complete',
+        cancelled: 'Cancelled',
     };
     el.innerHTML = _buyPlans.map(bp => {
         const color = statusColors[bp.status] || 'var(--muted)';
@@ -1513,12 +1580,93 @@ async function openBuyPlanDetail(planId) {
     } catch (e) { showToast('Failed to load buy plan', 'error'); return; }
     // Re-render inline — reuse renderBuyPlanStatus into a modal-like overlay
     const el = document.getElementById('buyPlansList');
-    const backBtn = `<button class="btn btn-ghost" onclick="loadBuyPlans()" style="margin-bottom:12px">← Back to list</button>`;
+    const backBtn = `<button class="btn btn-ghost" onclick="loadBuyPlans()" style="margin-bottom:12px">\u2190 Back to list</button>`;
     el.innerHTML = backBtn;
     const section = document.createElement('div');
     section.id = 'buyPlanSection';
     el.appendChild(section);
     renderBuyPlanStatus();
+}
+
+// ── Token-Based Approval ────────────────────────────────────────────────
+
+async function checkTokenApproval() {
+    if (!location.hash.startsWith('#approve-token/')) return false;
+    const token = location.hash.replace('#approve-token/', '');
+    if (!token) return false;
+    try {
+        const bp = await fetch('/api/buy-plans/token/' + encodeURIComponent(token)).then(r => {
+            if (!r.ok) throw new Error('Invalid token');
+            return r.json();
+        });
+        showView('view-buyplans');
+        const el = document.getElementById('buyPlansList');
+        const statusLabel = bp.status === 'pending_approval' ? 'Pending Approval' : bp.status;
+        el.innerHTML = `
+            <div class="card" style="max-width:600px;margin:40px auto;border-left:4px solid var(--amber)">
+                <h2 style="margin-bottom:16px">Buy Plan Approval</h2>
+                <div style="background:var(--bg2);padding:10px;border-radius:6px;margin-bottom:12px;font-size:12px">
+                    ${bp.customer_name ? '<div><strong>Customer:</strong> '+bp.customer_name+'</div>' : ''}
+                    ${bp.quote_number ? '<div><strong>Quote:</strong> '+bp.quote_number+'</div>' : ''}
+                    <div><strong>Status:</strong> ${statusLabel}</div>
+                    <div><strong>Submitted by:</strong> ${bp.submitted_by || '\u2014'}</div>
+                    <div><strong>Items:</strong> ${(bp.line_items||[]).length} line items</div>
+                </div>
+                ${bp.salesperson_notes ? '<div style="background:#f0f9ff;padding:8px 10px;border-left:3px solid #2563eb;border-radius:4px;margin-bottom:12px;font-size:12px"><strong>Salesperson:</strong> '+bp.salesperson_notes+'</div>' : ''}
+                <table class="tbl" style="margin-bottom:12px">
+                    <thead><tr><th>MPN</th><th>Vendor</th><th>Plan Qty</th><th>Cost</th><th>Lead</th></tr></thead>
+                    <tbody>${(bp.line_items||[]).map(li => '<tr><td>'+li.mpn+'</td><td>'+li.vendor_name+'</td><td>'+(li.plan_qty||li.qty||0)+'</td><td>$'+(Number(li.cost_price||0).toFixed(4))+'</td><td>'+(li.lead_time||'\u2014')+'</td></tr>').join('')}</tbody>
+                </table>
+                ${bp.status === 'pending_approval' ? `
+                <div style="margin-top:16px">
+                    <div class="field" style="margin-bottom:8px">
+                        <label style="font-weight:600;font-size:12px">Acctivate Sales Order # <span style="color:var(--red)">*</span></label>
+                        <input type="text" id="tokenSoNumber" placeholder="Enter Acctivate SO#" style="width:200px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)">
+                    </div>
+                    <div style="margin-bottom:8px">
+                        <textarea id="tokenManagerNotes" placeholder="Manager notes (optional)..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;min-height:40px"></textarea>
+                    </div>
+                    <div style="display:flex;gap:8px">
+                        <button class="btn btn-success" onclick="tokenApprovePlan('${token}')">Approve</button>
+                        <button class="btn btn-danger" onclick="tokenRejectPlan('${token}')">Reject</button>
+                    </div>
+                </div>` : '<p style="color:var(--muted);font-size:12px">This plan is no longer pending approval (status: '+statusLabel+').</p>'}
+            </div>`;
+        return true;
+    } catch (e) {
+        showToast('Invalid or expired approval link', 'error');
+        return false;
+    }
+}
+
+async function tokenApprovePlan(token) {
+    const soNumber = document.getElementById('tokenSoNumber')?.value?.trim() || '';
+    if (!soNumber) { showToast('Acctivate Sales Order # is required', 'error'); return; }
+    const notes = document.getElementById('tokenManagerNotes')?.value?.trim() || '';
+    try {
+        await fetch('/api/buy-plans/token/' + encodeURIComponent(token) + '/approve', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ sales_order_number: soNumber, manager_notes: notes })
+        }).then(r => { if (!r.ok) throw new Error('Approval failed'); return r.json(); });
+        showToast('Buy plan approved — buyers notified', 'success');
+        location.hash = '';
+        checkTokenApproval();
+    } catch (e) { showToast('Failed to approve: ' + (e.message || e), 'error'); }
+}
+
+async function tokenRejectPlan(token) {
+    const reason = prompt('Rejection reason:');
+    if (reason === null) return;
+    try {
+        await fetch('/api/buy-plans/token/' + encodeURIComponent(token) + '/reject', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ reason })
+        }).then(r => { if (!r.ok) throw new Error('Rejection failed'); return r.json(); });
+        showToast('Buy plan rejected', 'info');
+        location.hash = '';
+    } catch (e) { showToast('Failed to reject: ' + (e.message || e), 'error'); }
 }
 
 async function submitLost() {
@@ -1862,6 +2010,8 @@ document.addEventListener('DOMContentLoaded', function() {
     loadSiteOptions();
     initNameAutocomplete('loVendor', 'loVendorList', null, { types: 'vendor', websiteId: 'loWebsite' });
     initNameAutocomplete('ncName', 'ncNameList', null, { types: 'all' });
+    // Check for token-based approval links
+    checkTokenApproval();
 });
 
 

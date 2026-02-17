@@ -1800,6 +1800,11 @@ def _buyplan_to_dict(bp: BuyPlan) -> dict:
         "submitted_at": bp.submitted_at.isoformat() if bp.submitted_at else None,
         "approved_at": bp.approved_at.isoformat() if bp.approved_at else None,
         "rejected_at": bp.rejected_at.isoformat() if bp.rejected_at else None,
+        "completed_at": bp.completed_at.isoformat() if bp.completed_at else None,
+        "completed_by": bp.completed_by.name if bp.completed_by else None,
+        "cancelled_at": bp.cancelled_at.isoformat() if bp.cancelled_at else None,
+        "cancelled_by": bp.cancelled_by.name if bp.cancelled_by else None,
+        "cancellation_reason": bp.cancellation_reason,
     }
 
 
@@ -1874,6 +1879,11 @@ async def submit_buy_plan(
     for o in offers:
         o.status = "won"
 
+    from ..services.buyplan_service import log_buyplan_activity
+
+    log_buyplan_activity(
+        db, user.id, plan, "buyplan_submitted", f"submitted for quote #{quote_id}"
+    )
     db.commit()
 
     # Send notifications asynchronously (uses its own DB session to avoid
@@ -1923,6 +1933,116 @@ async def list_buy_plans(
     return [_buyplan_to_dict(p) for p in plans]
 
 
+@router.get("/api/buy-plans/token/{token}")
+async def get_buyplan_by_token(
+    token: str,
+    db: Session = Depends(get_db),
+):
+    """Public: get buy plan by approval token (no auth required)."""
+    plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
+    if not plan:
+        raise HTTPException(404, "Invalid or expired token")
+    return _buyplan_to_dict(plan)
+
+
+@router.put("/api/buy-plans/token/{token}/approve")
+async def approve_buyplan_by_token(
+    token: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Public: approve buy plan via token link in email."""
+    plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
+    if not plan:
+        raise HTTPException(404, "Invalid or expired token")
+    if plan.status != "pending_approval":
+        raise HTTPException(400, f"Cannot approve plan in status: {plan.status}")
+
+    body = await request.json()
+    so_number = (body.get("sales_order_number") or "").strip()
+    if not so_number:
+        raise HTTPException(400, "Acctivate Sales Order # is required")
+
+    plan.sales_order_number = so_number
+    if "manager_notes" in body:
+        plan.manager_notes = body["manager_notes"]
+
+    plan.status = "approved"
+    plan.approved_at = datetime.now(timezone.utc)
+    # approved_by_id stays None (token-based, no logged-in user)
+
+    from ..services.buyplan_service import log_buyplan_activity
+
+    log_buyplan_activity(
+        db, plan.submitted_by_id, plan, "buyplan_approved", "approved via email token"
+    )
+    db.commit()
+
+    import asyncio
+    from ..services.buyplan_service import notify_buyplan_approved
+
+    async def _bg(plan_id):
+        from ..database import SessionLocal
+
+        bg_db = SessionLocal()
+        try:
+            bg_plan = bg_db.get(BuyPlan, plan_id)
+            if bg_plan:
+                await notify_buyplan_approved(bg_plan, bg_db)
+        except Exception:
+            logger.exception("Background notify_buyplan_approved (token) failed")
+        finally:
+            bg_db.close()
+
+    asyncio.create_task(_bg(plan.id))
+    return {"ok": True, "status": "approved"}
+
+
+@router.put("/api/buy-plans/token/{token}/reject")
+async def reject_buyplan_by_token(
+    token: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Public: reject buy plan via token link in email."""
+    plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
+    if not plan:
+        raise HTTPException(404, "Invalid or expired token")
+    if plan.status != "pending_approval":
+        raise HTTPException(400, f"Cannot reject plan in status: {plan.status}")
+
+    body = await request.json()
+    plan.rejection_reason = body.get("reason", "")
+    plan.status = "rejected"
+    plan.rejected_at = datetime.now(timezone.utc)
+
+    from ..services.buyplan_service import log_buyplan_activity
+
+    log_buyplan_activity(
+        db, plan.submitted_by_id, plan, "buyplan_rejected", "rejected via email token"
+    )
+    db.commit()
+
+    import asyncio
+    from ..services.buyplan_service import notify_buyplan_rejected
+
+    async def _bg(plan_id):
+        from ..database import SessionLocal
+
+        bg_db = SessionLocal()
+        try:
+            bg_plan = bg_db.get(BuyPlan, plan_id)
+            if bg_plan:
+                await notify_buyplan_rejected(bg_plan, bg_db)
+        except Exception:
+            logger.exception("Background notify_buyplan_rejected (token) failed")
+        finally:
+            bg_db.close()
+
+    asyncio.create_task(_bg(plan.id))
+    return {"ok": True, "status": "rejected"}
+
+
 @router.get("/api/buy-plans/{plan_id}")
 async def get_buy_plan(
     plan_id: int,
@@ -1965,6 +2085,12 @@ async def approve_buy_plan(
     plan.status = "approved"
     plan.approved_by_id = user.id
     plan.approved_at = datetime.now(timezone.utc)
+
+    from ..services.buyplan_service import log_buyplan_activity
+
+    log_buyplan_activity(
+        db, user.id, plan, "buyplan_approved", f"approved with SO# {so_number}"
+    )
     db.commit()
 
     import asyncio
@@ -2009,6 +2135,12 @@ async def reject_buy_plan(
     plan.status = "rejected"
     plan.approved_by_id = user.id  # reuse field for who acted
     plan.rejected_at = datetime.now(timezone.utc)
+
+    from ..services.buyplan_service import log_buyplan_activity
+
+    log_buyplan_activity(
+        db, user.id, plan, "buyplan_rejected", plan.rejection_reason or "no reason"
+    )
     db.commit()
 
     import asyncio
@@ -2059,8 +2191,12 @@ async def enter_po_number(
     plan.status = "po_entered"
 
     from sqlalchemy.orm.attributes import flag_modified
+    from ..services.buyplan_service import log_buyplan_activity
 
     flag_modified(plan, "line_items")
+    log_buyplan_activity(
+        db, user.id, plan, "buyplan_po_entered", f"line {line_index} PO: {po_number}"
+    )
     db.commit()
 
     # Trigger PO verification in background (own session for safety)
@@ -2107,14 +2243,353 @@ async def check_po_verification(
     }
 
 
+@router.put("/api/buy-plans/{plan_id}/complete")
+async def complete_buy_plan(
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Admin/manager marks a buy plan as complete."""
+    if not _is_admin(user) and user.role != "manager":
+        raise HTTPException(403, "Admin or manager required")
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise HTTPException(404)
+    if plan.status != "po_confirmed":
+        raise HTTPException(
+            400, f"Can only complete from po_confirmed, current: {plan.status}"
+        )
+
+    plan.status = "complete"
+    plan.completed_at = datetime.now(timezone.utc)
+    plan.completed_by_id = user.id
+
+    from ..services.buyplan_service import log_buyplan_activity
+
+    log_buyplan_activity(db, user.id, plan, "buyplan_completed", "marked complete")
+    db.commit()
+
+    import asyncio
+    from ..services.buyplan_service import notify_buyplan_completed
+
+    async def _bg_notify_complete(plan_id: int, completer_name: str):
+        from ..database import SessionLocal
+
+        bg_db = SessionLocal()
+        try:
+            bg_plan = bg_db.get(BuyPlan, plan_id)
+            if bg_plan:
+                await notify_buyplan_completed(bg_plan, bg_db, completer_name)
+        except Exception:
+            logger.exception("Background notify_buyplan_completed failed")
+        finally:
+            bg_db.close()
+
+    asyncio.create_task(
+        _bg_notify_complete(plan.id, user.name or user.email)
+    )
+
+    return {"ok": True, "status": "complete"}
+
+
+@router.put("/api/buy-plans/{plan_id}/cancel")
+async def cancel_buy_plan(
+    plan_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Cancel a buy plan. Submitter can cancel from pending_approval.
+    Admin/manager can cancel from pending_approval or approved (before POs)."""
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise HTTPException(404)
+
+    is_mgr = _is_admin(user) or user.role == "manager"
+    is_submitter = plan.submitted_by_id == user.id
+
+    if plan.status == "pending_approval":
+        if not is_submitter and not is_mgr:
+            raise HTTPException(
+                403, "Only submitter or admin/manager can cancel pending plans"
+            )
+    elif plan.status == "approved":
+        if not is_mgr:
+            raise HTTPException(403, "Only admin/manager can cancel approved plans")
+        has_pos = any(
+            item.get("po_number") for item in (plan.line_items or [])
+        )
+        if has_pos:
+            raise HTTPException(
+                400, "Cannot cancel — PO numbers already entered. Remove POs first."
+            )
+    else:
+        raise HTTPException(400, f"Cannot cancel plan in status: {plan.status}")
+
+    body = await request.json()
+    reason = (body.get("reason") or "").strip()
+
+    plan.status = "cancelled"
+    plan.cancelled_at = datetime.now(timezone.utc)
+    plan.cancelled_by_id = user.id
+    plan.cancellation_reason = reason or None
+
+    # Revert quote/req/offer statuses
+    quote = db.get(Quote, plan.quote_id)
+    req = db.get(Requisition, plan.requisition_id) if plan.requisition_id else None
+    if quote:
+        quote.status = "sent"
+        quote.result = None
+        quote.result_at = None
+        quote.won_revenue = None
+    if req:
+        req.status = "active"
+    offer_ids = [
+        item.get("offer_id")
+        for item in (plan.line_items or [])
+        if item.get("offer_id")
+    ]
+    if offer_ids:
+        offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
+        for o in offers:
+            if o.status == "won":
+                o.status = "active"
+
+    from ..services.buyplan_service import log_buyplan_activity
+
+    log_buyplan_activity(
+        db, user.id, plan, "buyplan_cancelled", reason or "cancelled"
+    )
+    db.commit()
+
+    import asyncio
+    from ..services.buyplan_service import notify_buyplan_cancelled
+
+    async def _bg_notify_cancelled(plan_id: int):
+        from ..database import SessionLocal
+
+        bg_db = SessionLocal()
+        try:
+            bg_plan = bg_db.get(BuyPlan, plan_id)
+            if bg_plan:
+                await notify_buyplan_cancelled(bg_plan, bg_db)
+        except Exception:
+            logger.exception("Background notify_buyplan_cancelled failed")
+        finally:
+            bg_db.close()
+
+    asyncio.create_task(_bg_notify_cancelled(plan.id))
+
+    return {"ok": True, "status": "cancelled"}
+
+
+@router.put("/api/buy-plans/{plan_id}/resubmit")
+async def resubmit_buy_plan(
+    plan_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Resubmit a rejected or cancelled buy plan as a new plan."""
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise HTTPException(404)
+    if plan.status not in ("rejected", "cancelled"):
+        raise HTTPException(
+            400, f"Can only resubmit from rejected/cancelled, current: {plan.status}"
+        )
+
+    body = await request.json()
+    salesperson_notes = (body.get("salesperson_notes") or "").strip()
+
+    import secrets
+
+    new_plan = BuyPlan(
+        requisition_id=plan.requisition_id,
+        quote_id=plan.quote_id,
+        status="pending_approval",
+        salesperson_notes=salesperson_notes or plan.salesperson_notes,
+        line_items=[
+            {
+                **item,
+                "po_number": None,
+                "po_entered_at": None,
+                "po_sent_at": None,
+                "po_recipient": None,
+                "po_verified": False,
+            }
+            for item in (plan.line_items or [])
+        ],
+        submitted_by_id=user.id,
+        approval_token=secrets.token_urlsafe(32),
+    )
+    db.add(new_plan)
+
+    # Re-mark quote/req/offers as won
+    quote = db.get(Quote, plan.quote_id)
+    req = db.get(Requisition, plan.requisition_id) if plan.requisition_id else None
+    if quote:
+        quote.status = "won"
+        quote.result = "won"
+        quote.result_at = datetime.now(timezone.utc)
+        quote.won_revenue = quote.subtotal
+    if req:
+        req.status = "won"
+    offer_ids = [
+        item.get("offer_id")
+        for item in (plan.line_items or [])
+        if item.get("offer_id")
+    ]
+    if offer_ids:
+        offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
+        for o in offers:
+            o.status = "won"
+
+    from ..services.buyplan_service import log_buyplan_activity
+
+    log_buyplan_activity(
+        db, user.id, new_plan, "buyplan_resubmitted",
+        f"resubmitted from plan #{plan.id}",
+    )
+    db.commit()
+
+    import asyncio
+    from ..services.buyplan_service import notify_buyplan_submitted
+
+    async def _bg_notify(plan_id: int):
+        from ..database import SessionLocal
+
+        bg_db = SessionLocal()
+        try:
+            bg_plan = bg_db.get(BuyPlan, plan_id)
+            if bg_plan:
+                await notify_buyplan_submitted(bg_plan, bg_db)
+        except Exception:
+            logger.exception("Background notify_buyplan_submitted failed")
+        finally:
+            bg_db.close()
+
+    asyncio.create_task(_bg_notify(new_plan.id))
+
+    return {"ok": True, "new_plan_id": new_plan.id, "status": "pending_approval"}
+
+
+@router.put("/api/buy-plans/{plan_id}/po-bulk")
+async def bulk_po_entry(
+    plan_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Bulk add/edit/clear PO numbers for line items."""
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise HTTPException(404)
+    if plan.status not in ("approved", "po_entered"):
+        raise HTTPException(
+            400, f"Cannot modify POs for plan in status: {plan.status}"
+        )
+
+    body = await request.json()
+    entries = body.get("entries", [])
+    if not entries:
+        raise HTTPException(400, "No PO entries provided")
+
+    from sqlalchemy.orm.attributes import flag_modified
+    from ..services.buyplan_service import log_buyplan_activity
+
+    now = datetime.now(timezone.utc).isoformat()
+    changes = 0
+
+    for entry in entries:
+        idx = entry.get("line_index")
+        po = (entry.get("po_number") or "").strip() or None
+
+        if idx is None or idx < 0 or idx >= len(plan.line_items or []):
+            continue
+
+        item = plan.line_items[idx]
+        old_po = item.get("po_number")
+
+        if po:
+            if old_po and old_po != po:
+                # Edit: reset verification
+                item["po_verified"] = False
+                item["po_sent_at"] = None
+                item["po_recipient"] = None
+                log_buyplan_activity(
+                    db, user.id, plan, "buyplan_po_updated",
+                    f"line {idx} PO changed: {old_po} -> {po}",
+                )
+                changes += 1
+            elif not old_po:
+                log_buyplan_activity(
+                    db, user.id, plan, "buyplan_po_entered",
+                    f"line {idx} PO: {po}",
+                )
+                changes += 1
+            item["po_number"] = po
+            item["po_entered_at"] = now
+        else:
+            # Clear PO
+            if old_po:
+                log_buyplan_activity(
+                    db, user.id, plan, "buyplan_po_updated",
+                    f"line {idx} PO cleared (was {old_po})",
+                )
+                changes += 1
+            item["po_number"] = None
+            item["po_entered_at"] = None
+            item["po_sent_at"] = None
+            item["po_recipient"] = None
+            item["po_verified"] = False
+
+    # Determine new status
+    has_any_po = any(item.get("po_number") for item in plan.line_items)
+    if has_any_po:
+        plan.status = "po_entered"
+    else:
+        plan.status = "approved"
+
+    flag_modified(plan, "line_items")
+    db.commit()
+
+    # Trigger verification in background
+    if has_any_po:
+        import asyncio
+        from ..services.buyplan_service import verify_po_sent
+
+        async def _bg_verify(plan_id):
+            from ..database import SessionLocal
+
+            bg_db = SessionLocal()
+            try:
+                bg_plan = bg_db.get(BuyPlan, plan_id)
+                if bg_plan:
+                    await verify_po_sent(bg_plan, bg_db)
+            except Exception:
+                logger.exception("Background verify_po_sent (bulk) failed")
+            finally:
+                bg_db.close()
+
+        asyncio.create_task(_bg_verify(plan.id))
+
+    return {"ok": True, "status": plan.status, "changes": changes}
+
+
 @router.get("/api/buy-plans/for-quote/{quote_id}")
 async def get_buyplan_for_quote(
     quote_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Get the buy plan associated with a quote (if any)."""
-    plan = db.query(BuyPlan).filter(BuyPlan.quote_id == quote_id).first()
+    """Get the buy plan associated with a quote (newest if multiple exist)."""
+    plan = (
+        db.query(BuyPlan)
+        .filter(BuyPlan.quote_id == quote_id)
+        .order_by(BuyPlan.created_at.desc())
+        .first()
+    )
     if not plan:
         return None
     return _buyplan_to_dict(plan)
