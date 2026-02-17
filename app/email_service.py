@@ -1,6 +1,7 @@
 """Email service — batch RFQ sending, inbox monitoring, AI parsing."""
 
 import asyncio
+import json
 import logging
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
@@ -833,6 +834,16 @@ async def process_batch_results(db: Session) -> int:
                 continue  # Already parsed (e.g., by sequential fallback)
 
             if parsed_data:
+                # Claude may return tool input as a JSON string
+                if isinstance(parsed_data, str):
+                    try:
+                        parsed_data = json.loads(parsed_data)
+                    except (json.JSONDecodeError, TypeError):
+                        log.warning(f"Batch item {custom_id}: unparseable string result")
+                        continue
+                if not isinstance(parsed_data, dict):
+                    continue
+
                 # Normalize extracted values
                 _normalize_parsed_parts(parsed_data)
 

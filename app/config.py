@@ -170,7 +170,7 @@ class Settings:
         if e.strip()
     ]
     buyplan_auto_complete_hour: int = int(os.getenv("BUYPLAN_AUTO_COMPLETE_HOUR", "18"))
-    buyplan_auto_complete_tz: str = os.getenv("BUYPLAN_AUTO_COMPLETE_TZ", "US/Eastern")
+    buyplan_auto_complete_tz: str = os.getenv("BUYPLAN_AUTO_COMPLETE_TZ", "America/New_York")
     po_verify_interval_min: int = int(os.getenv("PO_VERIFY_INTERVAL_MIN", "30"))
 
 
