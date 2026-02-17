@@ -106,7 +106,10 @@ class Company(Base):
     )
     account_owner = relationship("User", foreign_keys=[account_owner_id])
 
-    __table_args__ = (Index("ix_companies_name", "name"),)
+    __table_args__ = (
+        Index("ix_companies_name", "name"),
+        Index("ix_companies_account_owner", "account_owner_id"),
+    )
 
 
 class CustomerSite(Base):
@@ -203,6 +206,8 @@ class Requisition(Base):
     __table_args__ = (
         Index("ix_requisitions_status", "status"),
         Index("ix_requisitions_created_by", "created_by"),
+        Index("ix_requisitions_site", "customer_site_id"),
+        Index("ix_requisitions_created_at", "created_at"),
     )
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
@@ -299,6 +304,8 @@ class Sighting(Base):
     __table_args__ = (
         Index("ix_sightings_vendor_name", "vendor_name"),
         Index("ix_sight_req", "requirement_id"),
+        Index("ix_sightings_source_company", "source_company_id"),
+        Index("ix_sightings_req_vendor", "requirement_id", "vendor_name"),
     )
 
 
@@ -360,6 +367,8 @@ class Offer(Base):
         Index("ix_offers_requirement", "requirement_id"),
         Index("ix_offers_vendor", "vendor_card_id"),
         Index("ix_offers_mpn", "mpn"),
+        Index("ix_offers_status", "status"),
+        Index("ix_offers_entered_by", "entered_by_id"),
     )
 
 
@@ -437,6 +446,7 @@ class Quote(Base):
         Index("ix_quotes_req", "requisition_id"),
         Index("ix_quotes_site", "customer_site_id"),
         Index("ix_quotes_status", "status"),
+        Index("ix_quotes_created_by", "created_by_id"),
     )
 
 
@@ -752,7 +762,13 @@ class VendorResponse(Base):
     )  # conversation_id, subject_token, email_exact, domain, unmatched
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    __table_args__ = (Index("ix_vr_classification", "classification"),)
+    __table_args__ = (
+        Index("ix_vr_classification", "classification"),
+        Index("ix_vr_requisition", "requisition_id"),
+        Index("ix_vr_contact", "contact_id"),
+        Index("ix_vr_scanned_by", "scanned_by_user_id"),
+        Index("ix_vr_req_email", "requisition_id", "vendor_email"),
+    )
 
 
 class VendorCard(Base):
@@ -879,7 +895,10 @@ class VendorReview(Base):
     vendor_card = relationship("VendorCard", back_populates="reviews")
     user = relationship("User")
 
-    __table_args__ = (Index("ix_review_vendor", "vendor_card_id"),)
+    __table_args__ = (
+        Index("ix_review_vendor", "vendor_card_id"),
+        Index("ix_review_user", "user_id"),
+    )
 
 
 class MaterialCard(Base):
