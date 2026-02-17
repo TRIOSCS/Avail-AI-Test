@@ -36,15 +36,11 @@ VENDOR_WINDOW_DAYS = 90
 COLD_START_THRESHOLD = 5
 
 # Vendor composite weights (sum = 1.0)
-W_RESPONSE_RATE = 0.15
-W_QUOTE_ACCURACY = 0.10
-W_ON_TIME = 0.10
-W_CANCELLATION = 0.10
-W_RMA = 0.05
-W_LEAD_TIME = 0.05
-W_QUOTE_CONVERSION = 0.15
-W_PO_CONVERSION = 0.15
-W_REVIEW_RATING = 0.15
+# Only metrics computable from AVAIL data (no ERP required)
+W_RESPONSE_RATE = 0.25
+W_QUOTE_CONVERSION = 0.25
+W_PO_CONVERSION = 0.25
+W_REVIEW_RATING = 0.25
 
 # Buyer point multipliers
 PTS_LOGGED = 1
@@ -87,24 +83,28 @@ def compute_vendor_scorecard(
         or 0
     )
 
-    rfqs_answered = (
-        db.query(sqlfunc.count(VendorResponse.id))
-        .filter(
-            or_(
-                sqlfunc.lower(sqlfunc.trim(VendorResponse.vendor_name)) == norm,
-                VendorResponse.vendor_name == disp,
-            ),
-            VendorResponse.status != "noise",
-            VendorResponse.received_at >= cutoff,
-        )
-        .scalar()
-        or 0
-    )
+    # Match responses by email domain (vendor_name stores person name, not company)
+    rfqs_answered = 0
+    domains = [vc.domain.lower()] if vc.domain else []
+    for alias in (vc.domain_aliases or []):
+        if alias:
+            domains.append(alias.lower())
+    if domains:
+        for domain in domains:
+            rfqs_answered += (
+                db.query(sqlfunc.count(VendorResponse.id))
+                .filter(
+                    VendorResponse.vendor_email.ilike(f"%@{domain}"),
+                    VendorResponse.status != "noise",
+                    VendorResponse.received_at >= cutoff,
+                )
+                .scalar()
+                or 0
+            )
 
     response_rate = (rfqs_answered / rfqs_sent) if rfqs_sent > 0 else None
 
-    # ── 2. Quote accuracy ──
-    # Compare offer prices to buy plan cost prices for same offer_id
+    # ── Offers in window (used for quote and PO conversion) ──
     offers_in_window = (
         db.query(Offer)
         .filter(
@@ -115,76 +115,7 @@ def compute_vendor_scorecard(
         .all()
     )
 
-    accuracy_diffs = []
-    for offer in offers_in_window:
-        # Find buy plans that reference this offer in line_items
-        buy_plans = (
-            db.query(BuyPlan)
-            .filter(
-                BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]),
-            )
-            .all()
-        )
-        for bp in buy_plans:
-            for item in bp.line_items or []:
-                if item.get("offer_id") == offer.id and item.get("cost_price"):
-                    bp_price = float(item["cost_price"])
-                    offer_price = float(offer.unit_price)
-                    if bp_price > 0:
-                        diff = abs(offer_price - bp_price) / bp_price
-                        accuracy_diffs.append(diff)
-
-    quote_accuracy = (
-        (1 - (sum(accuracy_diffs) / len(accuracy_diffs))) if accuracy_diffs else None
-    )
-    if quote_accuracy is not None:
-        quote_accuracy = max(0.0, min(1.0, quote_accuracy))
-
-    # ── 3. On-time delivery ──
-    # BuyPlans with po_confirmed — check if confirmation was within lead time
-    on_time_count = 0
-    total_delivery = 0
-    for bp in (
-        db.query(BuyPlan)
-        .filter(
-            BuyPlan.status.in_(["po_confirmed", "complete"]),
-            BuyPlan.approved_at >= cutoff,
-            BuyPlan.approved_at.isnot(None),
-        )
-        .all()
-    ):
-        for item in bp.line_items or []:
-            if item.get("vendor_name", "").lower() == (vc.display_name or "").lower():
-                total_delivery += 1
-                # Use lead_time field to estimate expected delivery
-                lead_str = item.get("lead_time", "")
-                try:
-                    lead_days = int(
-                        "".join(c for c in str(lead_str) if c.isdigit()) or "0"
-                    )
-                except (ValueError, TypeError):
-                    lead_days = 0
-                if lead_days > 0 and bp.approved_at:
-                    # If PO was confirmed, check the timeline
-                    # We don't have actual delivery date, so use po_confirmed timing
-                    if item.get("po_verified"):
-                        on_time_count += 1
-
-    on_time_delivery = (on_time_count / total_delivery) if total_delivery > 0 else None
-
-    # ── 4. Cancellation rate (from Acctivate) ──
-    cancellation_rate = vc.cancellation_rate
-
-    # ── 5. RMA rate (from Acctivate) ──
-    rma_rate = vc.rma_rate
-
-    # ── 6. Lead time accuracy ──
-    lead_time_accuracy = None
-    if total_delivery > 0 and on_time_delivery is not None:
-        # Approximate from on-time delivery data
-        lead_time_accuracy = on_time_delivery
-
-    # ── 7. Quote conversion rate ──
+    # ── 2. Quote conversion rate ──
     # What % of this vendor's offers made it into quotes?
     total_offers = len(offers_in_window)
     offers_in_quotes = 0
@@ -225,7 +156,7 @@ def compute_vendor_scorecard(
                     offer_id_set2.discard(oid)
     po_conversion = (offers_to_po / total_offers) if total_offers > 0 else None
 
-    # ── 9. Average buyer review rating ──
+    # ── 5. Average buyer review rating ──
     avg_rating_row = (
         db.query(sqlfunc.avg(VendorReview.rating))
         .filter(
@@ -240,20 +171,12 @@ def compute_vendor_scorecard(
     # ── Interaction count & cold-start ──
     interaction_count = rfqs_sent + total_offers
 
-    # Count POs in window
-    pos_in_window = total_delivery
-
     is_sufficient = interaction_count >= COLD_START_THRESHOLD
 
     # ── Composite score ──
     composite = (
         _compute_composite(
             response_rate,
-            quote_accuracy,
-            on_time_delivery,
-            cancellation_rate,
-            rma_rate,
-            lead_time_accuracy,
             quote_conversion,
             po_conversion,
             avg_review_rating,
@@ -265,11 +188,6 @@ def compute_vendor_scorecard(
     return {
         "vendor_card_id": vendor_card_id,
         "response_rate": response_rate,
-        "quote_accuracy": quote_accuracy,
-        "on_time_delivery": on_time_delivery,
-        "cancellation_rate": cancellation_rate,
-        "rma_rate": rma_rate,
-        "lead_time_accuracy": lead_time_accuracy,
         "quote_conversion": quote_conversion,
         "po_conversion": po_conversion,
         "avg_review_rating": avg_review_rating,
@@ -278,45 +196,22 @@ def compute_vendor_scorecard(
         "is_sufficient_data": is_sufficient,
         "rfqs_sent": rfqs_sent,
         "rfqs_answered": rfqs_answered,
-        "pos_in_window": pos_in_window,
     }
 
 
 def _compute_composite(
     response_rate,
-    quote_accuracy,
-    on_time,
-    cancellation_rate,
-    rma_rate,
-    lead_time,
     quote_conversion=None,
     po_conversion=None,
     avg_review_rating=None,
 ) -> float:
-    """Weighted average of available metrics. Cancellation & RMA are inverted (lower=better)."""
+    """Weighted average of available metrics."""
     metrics = []
     weights = []
 
     if response_rate is not None:
         metrics.append(min(1.0, response_rate))
         weights.append(W_RESPONSE_RATE)
-    if quote_accuracy is not None:
-        metrics.append(quote_accuracy)
-        weights.append(W_QUOTE_ACCURACY)
-    if on_time is not None:
-        metrics.append(on_time)
-        weights.append(W_ON_TIME)
-    if cancellation_rate is not None:
-        metrics.append(
-            max(0.0, 1.0 - cancellation_rate)
-        )  # Invert: lower cancel = higher score
-        weights.append(W_CANCELLATION)
-    if rma_rate is not None:
-        metrics.append(max(0.0, 1.0 - rma_rate))  # Invert: lower RMA = higher score
-        weights.append(W_RMA)
-    if lead_time is not None:
-        metrics.append(lead_time)
-        weights.append(W_LEAD_TIME)
     if quote_conversion is not None:
         metrics.append(min(1.0, quote_conversion))
         weights.append(W_QUOTE_CONVERSION)
@@ -364,11 +259,6 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
                 db.add(snap)
 
             snap.response_rate = result["response_rate"]
-            snap.quote_accuracy = result["quote_accuracy"]
-            snap.on_time_delivery = result["on_time_delivery"]
-            snap.cancellation_rate = result["cancellation_rate"]
-            snap.rma_rate = result["rma_rate"]
-            snap.lead_time_accuracy = result["lead_time_accuracy"]
             snap.quote_conversion = result["quote_conversion"]
             snap.po_conversion = result["po_conversion"]
             snap.avg_review_rating = result["avg_review_rating"]
@@ -377,7 +267,6 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
             snap.is_sufficient_data = result["is_sufficient_data"]
             snap.rfqs_sent = result["rfqs_sent"]
             snap.rfqs_answered = result["rfqs_answered"]
-            snap.pos_in_window = result["pos_in_window"]
 
             if result["is_sufficient_data"]:
                 updated += 1
@@ -451,11 +340,6 @@ def get_vendor_scorecard_list(
                 "vendor_name": vendor_name,
                 "snapshot_date": snap.snapshot_date.isoformat(),
                 "response_rate": snap.response_rate,
-                "quote_accuracy": snap.quote_accuracy,
-                "on_time_delivery": snap.on_time_delivery,
-                "cancellation_rate": snap.cancellation_rate,
-                "rma_rate": snap.rma_rate,
-                "lead_time_accuracy": snap.lead_time_accuracy,
                 "quote_conversion": snap.quote_conversion,
                 "po_conversion": snap.po_conversion,
                 "avg_review_rating": snap.avg_review_rating,
@@ -510,11 +394,6 @@ def get_vendor_scorecard_detail(db: Session, vendor_card_id: int) -> dict:
         "latest": {
             "snapshot_date": latest.snapshot_date.isoformat(),
             "response_rate": latest.response_rate,
-            "quote_accuracy": latest.quote_accuracy,
-            "on_time_delivery": latest.on_time_delivery,
-            "cancellation_rate": latest.cancellation_rate,
-            "rma_rate": latest.rma_rate,
-            "lead_time_accuracy": latest.lead_time_accuracy,
             "quote_conversion": latest.quote_conversion,
             "po_conversion": latest.po_conversion,
             "avg_review_rating": latest.avg_review_rating,

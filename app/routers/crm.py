@@ -1843,6 +1843,11 @@ async def submit_buy_plan(
     req = db.get(Requisition, quote.requisition_id)
     if req:
         req.status = "won"
+
+    # Mark selected offers as "won" so engagement scorer counts wins
+    for o in offers:
+        o.status = "won"
+
     db.commit()
 
     # Send notifications asynchronously (uses its own DB session to avoid

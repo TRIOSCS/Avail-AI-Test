@@ -181,27 +181,46 @@ async def compute_all_engagement_scores(db: Session) -> dict:
         norm = normalize_vendor_name(row.vendor_name or "")
         outreach_map[norm] = outreach_map.get(norm, 0) + row.total_outreach
 
-    # ── Gather response counts + velocity per vendor ──
+    # ── Build email-domain → vendor card normalized_name map ──
+    # VendorResponse.vendor_name stores the sender's personal name (e.g. "Michael
+    # Khoury"), not the company name. We match responses to vendor cards by the
+    # email domain (e.g. trioscs.com → "trio supply chain solutions").
+    domain_to_norm = {}
+    for card in db.query(VendorCard).filter(VendorCard.domain.isnot(None)).all():
+        domain_to_norm[card.domain.lower()] = card.normalized_name
+        for alias in (card.domain_aliases or []):
+            if alias:
+                domain_to_norm[alias.lower()] = card.normalized_name
+
+    # ── Gather response counts per vendor (matched by email domain) ──
     response_rows = (
         db.query(
-            VendorResponse.vendor_name,
+            VendorResponse.vendor_email,
             func.count(VendorResponse.id).label("total_responses"),
         )
         .filter(VendorResponse.status != "noise")
-        .group_by(VendorResponse.vendor_name)
+        .filter(VendorResponse.vendor_email.isnot(None))
+        .group_by(VendorResponse.vendor_email)
         .all()
     )
 
     response_map = {}
     for row in response_rows:
-        norm = normalize_vendor_name(row.vendor_name or "")
-        response_map[norm] = response_map.get(norm, 0) + row.total_responses
+        email = (row.vendor_email or "").lower()
+        if "@" not in email:
+            continue
+        domain = email.split("@", 1)[1]
+        norm = domain_to_norm.get(domain)
+        if not norm:
+            # Fallback: try matching by vendor_name directly
+            norm = normalize_vendor_name(row.vendor_email.split("@")[0])
+        if norm:
+            response_map[norm] = response_map.get(norm, 0) + row.total_responses
 
     # ── Compute average response velocity per vendor ──
     # Velocity = avg time between outbound Contact.created_at and VendorResponse.received_at
-    # This requires matching contacts to responses, which we do via vendor_name
+    # Matched via contact_id FK, attributed to vendor card via Contact.vendor_name
     velocity_map = {}
-    # Get contacts with responses matched by contact_id
     matched_pairs = (
         db.query(
             Contact.vendor_name,
@@ -222,7 +241,6 @@ async def compute_all_engagement_scores(db: Session) -> dict:
         sent = pair.sent_at
         received = pair.received_at
         if sent and received:
-            # Ensure timezone-aware
             if sent.tzinfo is None:
                 sent = sent.replace(tzinfo=timezone.utc)
             if received.tzinfo is None:
@@ -235,13 +253,13 @@ async def compute_all_engagement_scores(db: Session) -> dict:
         if hours_list:
             velocity_map[norm] = sum(hours_list) / len(hours_list)
 
-    # ── Gather win counts (accepted offers) per vendor ──
+    # ── Gather win counts (won offers) per vendor ──
     win_rows = (
         db.query(
             Offer.vendor_name,
             func.count(Offer.id).label("total_wins"),
         )
-        .filter(Offer.status == "accepted")
+        .filter(Offer.status == "won")
         .group_by(Offer.vendor_name)
         .all()
     )
@@ -320,18 +338,27 @@ def compute_single_vendor_score(card, db: Session) -> float | None:
         or 0
     )
 
-    responses = (
-        db.query(func.count(VendorResponse.id))
-        .filter(func.lower(VendorResponse.vendor_name) == norm)
-        .filter(VendorResponse.status != "noise")
-        .scalar()
-        or 0
-    )
+    # Match responses by email domain (vendor_name stores person name, not company)
+    domains = [card.domain.lower()] if card.domain else []
+    for alias in (card.domain_aliases or []):
+        if alias:
+            domains.append(alias.lower())
+
+    responses = 0
+    if domains:
+        for domain in domains:
+            responses += (
+                db.query(func.count(VendorResponse.id))
+                .filter(VendorResponse.vendor_email.ilike(f"%@{domain}"))
+                .filter(VendorResponse.status != "noise")
+                .scalar()
+                or 0
+            )
 
     wins = (
         db.query(func.count(Offer.id))
         .filter(func.lower(Offer.vendor_name) == norm)
-        .filter(Offer.status == "accepted")
+        .filter(Offer.status == "won")
         .scalar()
         or 0
     )
