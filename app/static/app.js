@@ -512,6 +512,12 @@ function renderReqList() {
     } else {
         data = data.filter(r => r.status === _reqStatusFilter);
     }
+    // Text filter
+    const q = (document.getElementById('reqListFilter')?.value || '').trim().toUpperCase();
+    if (q) data = data.filter(r =>
+        (r.name || '').toUpperCase().includes(q) ||
+        (r.customer_display || '').toUpperCase().includes(q)
+    );
     // Sort
     const sort = _reqListSort;
     if (sort === 'oldest') data = [...data].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
@@ -526,7 +532,7 @@ function renderReqList() {
     // Always show status bar
     if (statusBar) statusBar.style.display = 'flex';
     const countEl = document.getElementById('reqStatusCount');
-    if (countEl) countEl.textContent = `${data.length}`;
+    if (countEl) countEl.textContent = q ? `${data.length} of ${_reqListData.length}` : `${data.length}`;
 
     if (!data.length) {
         const labels = {draft:'Draft',active:'Sourcing',offers:'Offers',quoted:'Quoted',archive:'Archive'};

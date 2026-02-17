@@ -24,6 +24,37 @@ from ..models import ActivityLog, BuyPlan, Offer, User
 log = logging.getLogger("avail.buyplan")
 
 
+# ── Background Task Helper ─────────────────────────────────────────────
+
+
+def run_buyplan_bg(coro_factory, plan_id: int, **kwargs):
+    """Fire-and-forget a buyplan coroutine in a dedicated DB session.
+
+    Replaces the repeated inline async-def + create_task pattern throughout
+    crm.py.  ``coro_factory`` is an async callable ``(plan, db, **kw)``.
+    """
+    import asyncio
+
+    async def _run():
+        from ..database import SessionLocal
+
+        bg_db = SessionLocal()
+        try:
+            bg_plan = bg_db.get(BuyPlan, plan_id)
+            if bg_plan:
+                await coro_factory(bg_plan, bg_db, **kwargs)
+        except Exception:
+            log.exception(
+                "Background %s failed for plan %s",
+                coro_factory.__name__,
+                plan_id,
+            )
+        finally:
+            bg_db.close()
+
+    asyncio.create_task(_run())
+
+
 # ── Audit Trail ─────────────────────────────────────────────────────────
 
 
@@ -378,6 +409,110 @@ async def notify_buyplan_rejected(plan: BuyPlan, db: Session):
     )
 
 
+async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
+    """Notify logistics/accounting that a stock sale was approved (no PO required)."""
+    from ..scheduler import get_valid_token
+
+    approver = db.get(User, plan.approved_by_id) if plan.approved_by_id else None
+    approver_name = (approver.name or approver.email) if approver else "Manager (email token)"
+
+    submitter = db.get(User, plan.submitted_by_id)
+    submitter_name = submitter.name or submitter.email if submitter else "Unknown"
+
+    # Build line items table
+    rows = ""
+    total_cost = 0
+    for item in plan.line_items or []:
+        plan_qty = item.get("plan_qty") or item.get("qty") or 0
+        cost = plan_qty * (item.get("cost_price") or 0)
+        total_cost += cost
+        rows += f"""<tr>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("mpn", "")))}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("vendor_name", "")))}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{plan_qty:,}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">${item.get("cost_price", 0):.4f}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">${cost:,.2f}</td>
+        </tr>"""
+
+    html_body = f"""
+    <div style="font-family:Arial,sans-serif;max-width:700px">
+        <h2 style="color:#7c3aed">Stock Sale Approved — No PO Required</h2>
+        <p>Approved by <strong>{html.escape(str(approver_name))}</strong>.</p>
+        <p>This is an internal stock sale — no purchase orders are needed.</p>
+        <div style="background:#f3f4f6;padding:12px;border-radius:6px;margin:12px 0">
+            <p style="margin:0"><strong>Submitted by:</strong> {html.escape(str(submitter_name))}</p>
+            <p style="margin:4px 0 0"><strong>Acctivate SO#:</strong> {html.escape(str(plan.sales_order_number or "N/A"))}</p>
+        </div>
+        <table style="border-collapse:collapse;width:100%;margin:16px 0">
+            <thead><tr style="background:#f3f4f6">
+                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>
+                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>
+                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Plan Qty</th>
+                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>
+                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Line Total</th>
+            </tr></thead>
+            <tbody>{rows}</tbody>
+            <tfoot><tr style="background:#f3f4f6;font-weight:bold">
+                <td colspan="4" style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Total</td>
+                <td style="padding:8px 10px;border:1px solid #e5e7eb">${total_cost:,.2f}</td>
+            </tr></tfoot>
+        </table>
+        <p style="margin-top:20px">
+            <a href="{settings.app_url}/#buyplan/{plan.id}"
+               style="background:#7c3aed;color:white;padding:10px 24px;text-decoration:none;border-radius:5px">
+                View in AVAIL
+            </a>
+        </p>
+    </div>
+    """
+
+    # Send to stock_sale_notify_emails using an admin user's token
+    admin_users = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
+    sender = next((a for a in admin_users if a.access_token), None)
+    if sender:
+        token = await get_valid_token(sender, db)
+        if token:
+            from ..utils.graph_client import GraphClient
+
+            gc = GraphClient(token)
+            for email_addr in settings.stock_sale_notify_emails:
+                try:
+                    await gc.post_json(
+                        "/me/sendMail",
+                        {
+                            "message": {
+                                "subject": f"[AVAIL] Stock Sale Approved — #{plan.requisition_id}",
+                                "body": {"contentType": "HTML", "content": html_body},
+                                "toRecipients": [{"emailAddress": {"address": email_addr}}],
+                            },
+                            "saveToSentItems": "false",
+                        },
+                    )
+                    log.info(f"Stock sale email sent to {email_addr}")
+                except Exception as e:
+                    log.error(f"Failed to send stock sale email to {email_addr}: {e}")
+
+    # In-app notification to submitter
+    if submitter:
+        db.add(
+            ActivityLog(
+                user_id=submitter.id,
+                activity_type="buyplan_completed",
+                channel="system",
+                subject=f"Stock sale #{plan.id} approved and completed — no PO required",
+            )
+        )
+    db.commit()
+
+    # Teams channel post
+    await _post_teams_channel(
+        f"**Stock Sale #{plan.id} — Approved & Complete** by {approver_name}\n\n"
+        f"Submitted by: {submitter_name} | Total: ${total_cost:,.2f}\n"
+        f"No PO required (internal stock)\n\n"
+        f"[View in AVAIL]({settings.app_url}/#buyplan/{plan.id})"
+    )
+
+
 async def notify_buyplan_completed(plan: BuyPlan, db: Session, completer_name: str):
     """Notify the original submitter that their buy plan is complete."""
     from ..scheduler import get_valid_token
@@ -640,3 +775,37 @@ async def verify_po_sent(plan: BuyPlan, db: Session) -> dict:
         db.commit()
 
     return results
+
+
+# ── Auto-Complete Safety Net ────────────────────────────────────────────
+
+
+def auto_complete_stock_sales(db: Session) -> int:
+    """Complete stock sale plans stuck in 'approved' for 1+ hours (safety net).
+
+    Returns the number of plans auto-completed.
+    """
+    from datetime import datetime, timezone, timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+    stuck = (
+        db.query(BuyPlan)
+        .filter(
+            BuyPlan.is_stock_sale == True,  # noqa: E712
+            BuyPlan.status == "approved",
+            BuyPlan.approved_at < cutoff,
+        )
+        .all()
+    )
+
+    completed = 0
+    for plan in stuck:
+        plan.status = "complete"
+        plan.completed_at = datetime.now(timezone.utc)
+        # completed_by_id stays None (auto-completed by system)
+        log.info(f"Auto-completed stuck stock sale plan #{plan.id}")
+        completed += 1
+
+    if completed:
+        db.commit()
+    return completed

@@ -37,6 +37,7 @@ def run_startup_migrations() -> None:
         _create_proactive_tables(conn)
         _create_performance_tables(conn)
         _create_admin_settings_tables(conn)
+        _create_deep_enrichment_tables(conn)
     log.info("Startup migrations complete")
 
 
@@ -313,6 +314,8 @@ def _add_crm_columns(conn) -> None:
         "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP",
         "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS cancelled_by_id INTEGER REFERENCES users(id)",
         "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS cancellation_reason TEXT",
+        # v1.8.0 — Stock sale flag
+        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS is_stock_sale BOOLEAN DEFAULT FALSE",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
@@ -340,6 +343,9 @@ def _create_crm_indexes(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_buyplans_quote ON buy_plans(quote_id)",
         "CREATE INDEX IF NOT EXISTS ix_buyplans_status ON buy_plans(status)",
         "CREATE INDEX IF NOT EXISTS ix_buyplans_token ON buy_plans(approval_token)",
+        # v1.8.0 — Composite indexes for buy plan queries
+        "CREATE INDEX IF NOT EXISTS ix_buyplans_status_created ON buy_plans(status, created_at)",
+        "CREATE INDEX IF NOT EXISTS ix_buyplans_submitter_created ON buy_plans(submitted_by_id, created_at)",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
@@ -570,3 +576,88 @@ def _create_admin_settings_tables(conn) -> None:
             VALUES ('{key}', '{value}', '{desc}')
             ON CONFLICT (key) DO NOTHING""",
         )
+
+
+def _create_deep_enrichment_tables(conn) -> None:
+    """Deep enrichment system — jobs, review queue, signature cache + column additions."""
+    tables = [
+        """CREATE TABLE IF NOT EXISTS enrichment_jobs (
+            id SERIAL PRIMARY KEY,
+            job_type VARCHAR(50) NOT NULL,
+            status VARCHAR(20) DEFAULT 'pending',
+            total_items INTEGER DEFAULT 0,
+            processed_items INTEGER DEFAULT 0,
+            enriched_items INTEGER DEFAULT 0,
+            error_count INTEGER DEFAULT 0,
+            scope JSONB DEFAULT '{}',
+            started_by_id INTEGER REFERENCES users(id),
+            started_at TIMESTAMP,
+            completed_at TIMESTAMP,
+            error_log JSONB DEFAULT '[]',
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS enrichment_queue (
+            id SERIAL PRIMARY KEY,
+            vendor_card_id INTEGER REFERENCES vendor_cards(id) ON DELETE CASCADE,
+            company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE,
+            vendor_contact_id INTEGER REFERENCES vendor_contacts(id) ON DELETE CASCADE,
+            enrichment_type VARCHAR(50) NOT NULL,
+            field_name VARCHAR(100) NOT NULL,
+            current_value TEXT,
+            proposed_value TEXT NOT NULL,
+            confidence FLOAT NOT NULL DEFAULT 0.5,
+            source VARCHAR(50) NOT NULL,
+            status VARCHAR(20) DEFAULT 'pending',
+            batch_job_id INTEGER REFERENCES enrichment_jobs(id) ON DELETE SET NULL,
+            reviewed_by_id INTEGER REFERENCES users(id),
+            reviewed_at TIMESTAMP,
+            created_at TIMESTAMP DEFAULT NOW()
+        )""",
+        """CREATE TABLE IF NOT EXISTS email_signature_extracts (
+            id SERIAL PRIMARY KEY,
+            sender_email VARCHAR(255) NOT NULL UNIQUE,
+            sender_name VARCHAR(255),
+            full_name VARCHAR(255),
+            title VARCHAR(255),
+            company_name VARCHAR(255),
+            phone VARCHAR(100),
+            mobile VARCHAR(100),
+            website VARCHAR(500),
+            address TEXT,
+            linkedin_url VARCHAR(500),
+            extraction_method VARCHAR(20),
+            confidence FLOAT DEFAULT 0.5,
+            seen_count INTEGER DEFAULT 1,
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+        )""",
+    ]
+    for stmt in tables:
+        _exec(conn, stmt)
+
+    # Column additions on existing tables
+    col_stmts = [
+        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS deep_enrichment_at TIMESTAMP",
+        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS specialty_confidence FLOAT",
+        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS email_history_scanned_at TIMESTAMP",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS deep_enrichment_at TIMESTAMP",
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_deep_email_scan TIMESTAMP",
+    ]
+    for stmt in col_stmts:
+        _exec(conn, stmt)
+
+    # Indexes
+    indexes = [
+        "CREATE INDEX IF NOT EXISTS ix_ej_status ON enrichment_jobs(status)",
+        "CREATE INDEX IF NOT EXISTS ix_ej_type_status ON enrichment_jobs(job_type, status)",
+        "CREATE INDEX IF NOT EXISTS ix_eq_status ON enrichment_queue(status)",
+        "CREATE INDEX IF NOT EXISTS ix_eq_vendor ON enrichment_queue(vendor_card_id)",
+        "CREATE INDEX IF NOT EXISTS ix_eq_company ON enrichment_queue(company_id)",
+        "CREATE INDEX IF NOT EXISTS ix_eq_batch ON enrichment_queue(batch_job_id)",
+        "CREATE INDEX IF NOT EXISTS ix_eq_status_created ON enrichment_queue(status, created_at)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_ese_email ON email_signature_extracts(sender_email)",
+        "CREATE INDEX IF NOT EXISTS ix_ese_company ON email_signature_extracts(company_name)",
+    ]
+    for stmt in indexes:
+        _exec(conn, stmt)
+    conn.commit()

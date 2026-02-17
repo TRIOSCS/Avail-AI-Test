@@ -1003,6 +1003,7 @@
             </div>
         </div>
         <div id="reqStatusBar" class="filter-bar" style="margin-bottom:8px;display:none">
+            <input type="text" class="filter-search" id="reqListFilter" placeholder="Filter by name or customer…" oninput="renderReqList()">
             <div class="filter-pills">
                 <button class="filter-pill on" data-req-status="draft" onclick="setReqStatusFilter('draft',this)">Draft</button>
                 <button class="filter-pill" data-req-status="active" onclick="setReqStatusFilter('active',this)">Sourcing</button>

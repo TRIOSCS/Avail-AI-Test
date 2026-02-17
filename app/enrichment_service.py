@@ -576,7 +576,7 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
         elif result["source"] == "clay":
             result["source"] = "clay+explorium"
 
-    # Try AI (fills remaining gaps)
+    # Try Clearbit (fills gaps after Clay+Explorium)
     _enrichable = [
         "legal_name",
         "industry",
@@ -587,6 +587,22 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
         "website",
         "linkedin_url",
     ]
+    if any(not result.get(f) for f in _enrichable):
+        try:
+            from .connectors.clearbit_client import enrich_company as clearbit_enrich
+            cb = await clearbit_enrich(domain)
+            if cb:
+                for k, v in cb.items():
+                    if v and not result.get(k):
+                        result[k] = v
+                if not result["source"]:
+                    result["source"] = "clearbit"
+                elif "clearbit" not in result["source"]:
+                    result["source"] = result["source"] + "+clearbit"
+        except Exception as e:
+            log.debug("Clearbit enrichment skipped: %s", e)
+
+    # Try AI (fills remaining gaps)
     if any(not result.get(f) for f in _enrichable):
         ai = await _ai_find_company(domain, name)
         if ai:
@@ -618,6 +634,46 @@ async def find_suggested_contacts(
 
     exp_contacts = await _explorium_find_contacts(domain, title_filter)
     all_contacts.extend(exp_contacts)
+
+    # Hunter.io domain search
+    try:
+        from .connectors.hunter_client import find_domain_emails
+        hunter_contacts = await find_domain_emails(domain, limit=10)
+        for hc in hunter_contacts:
+            if hc.get("full_name"):
+                all_contacts.append({
+                    "source": "hunter",
+                    "full_name": hc["full_name"],
+                    "title": hc.get("position"),
+                    "email": hc.get("email"),
+                    "phone": hc.get("phone_number"),
+                    "linkedin_url": hc.get("linkedin_url"),
+                    "location": None,
+                    "company": name or domain,
+                })
+    except Exception as e:
+        log.debug("Hunter contacts skipped: %s", e)
+
+    # RocketReach search
+    try:
+        from .connectors.rocketreach_client import search_company_contacts
+        rr_contacts = await search_company_contacts(
+            company=name or domain, domain=domain, title_filter=title_filter, limit=5
+        )
+        for rc in rr_contacts:
+            if rc.get("full_name"):
+                all_contacts.append({
+                    "source": "rocketreach",
+                    "full_name": rc["full_name"],
+                    "title": rc.get("title"),
+                    "email": rc.get("email"),
+                    "phone": rc.get("phone"),
+                    "linkedin_url": rc.get("linkedin_url"),
+                    "location": None,
+                    "company": rc.get("company_name") or name or domain,
+                })
+    except Exception as e:
+        log.debug("RocketReach contacts skipped: %s", e)
 
     ai_contacts = await _ai_find_contacts(domain, name, title_filter)
     all_contacts.extend(ai_contacts)

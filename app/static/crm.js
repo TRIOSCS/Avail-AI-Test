@@ -1334,20 +1334,37 @@ function renderBuyPlanStatus(targetId) {
         </div>`;
     }
 
+    // Margin summary bar (when revenue data available)
+    let marginHtml = '';
+    if (bp.total_revenue > 0) {
+        const profitColor = bp.total_profit >= 0 ? 'var(--green)' : 'var(--red)';
+        marginHtml = `<div style="display:flex;gap:16px;background:var(--bg2);padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:12px;flex-wrap:wrap">
+            <div><strong>Cost:</strong> $${bp.total_cost.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+            <div><strong>Revenue:</strong> $${bp.total_revenue.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+            <div style="color:${profitColor}"><strong>Profit:</strong> $${bp.total_profit.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
+            <div><strong>Margin:</strong> ${bp.overall_margin_pct}%</div>
+        </div>`;
+    }
+
+    const hidePoCol = bp.is_stock_sale;
     let itemsHtml = (bp.line_items || []).map((item, i) => {
         const planQty = item.plan_qty || item.qty || 0;
-        const poEditable = isBuyer && (bp.status === 'approved' || bp.status === 'po_entered');
-        const poCell = poEditable
-            ? `<input type="text" class="po-input" data-idx="${i}" placeholder="PO#" value="${esc(item.po_number||'')}" style="width:100px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px">`
-            : (item.po_number ? `<span style="font-weight:600">${esc(item.po_number)}</span>` : '\u2014');
-        const verifyIcon = item.po_verified
-            ? '<span style="color:var(--green)" title="Verified">\u2713</span>'
-            : (item.po_number ? '<span style="color:var(--amber)" title="Unverified">\u23F3</span>' : '');
-        let poDetails = '';
-        if (item.po_verified) {
-            poDetails = `<div style="font-size:10px;color:var(--muted)">Sent to ${esc(item.po_recipient||'')} at ${item.po_sent_at||''}</div>`;
-        } else if (item.po_entered_at) {
-            poDetails = `<div style="font-size:10px;color:var(--muted)">Entered ${fmtDateTime(item.po_entered_at)}</div>`;
+        let poCell = '';
+        if (!hidePoCol) {
+            const poEditable = isBuyer && (bp.status === 'approved' || bp.status === 'po_entered');
+            poCell = poEditable
+                ? `<input type="text" class="po-input" data-idx="${i}" placeholder="PO#" value="${esc(item.po_number||'')}" style="width:100px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px">`
+                : (item.po_number ? `<span style="font-weight:600">${esc(item.po_number)}</span>` : '\u2014');
+            const verifyIcon = item.po_verified
+                ? '<span style="color:var(--green)" title="Verified">\u2713</span>'
+                : (item.po_number ? '<span style="color:var(--amber)" title="Unverified">\u23F3</span>' : '');
+            let poDetails = '';
+            if (item.po_verified) {
+                poDetails = `<div style="font-size:10px;color:var(--muted)">Sent to ${esc(item.po_recipient||'')} at ${item.po_sent_at||''}</div>`;
+            } else if (item.po_entered_at) {
+                poDetails = `<div style="font-size:10px;color:var(--muted)">Entered ${fmtDateTime(item.po_entered_at)}</div>`;
+            }
+            poCell = `<td>${poCell} ${verifyIcon}${poDetails}</td>`;
         }
         return `<tr>
             <td>${esc(item.mpn)}</td>
@@ -1355,7 +1372,7 @@ function renderBuyPlanStatus(targetId) {
             <td>${planQty.toLocaleString()}</td>
             <td>$${Number(item.cost_price||0).toFixed(4)}</td>
             <td>${esc(item.lead_time||'\u2014')}</td>
-            <td>${poCell} ${verifyIcon}${poDetails}</td>
+            ${poCell}
         </tr>`;
     }).join('');
 
@@ -1399,7 +1416,7 @@ function renderBuyPlanStatus(targetId) {
             actionsHtml += `<div style="margin-top:8px"><button class="btn btn-ghost" onclick="cancelBuyPlan()">Cancel Plan</button></div>`;
         }
     }
-    if (isBuyer && (bp.status === 'approved' || bp.status === 'po_entered')) {
+    if (!bp.is_stock_sale && isBuyer && (bp.status === 'approved' || bp.status === 'po_entered')) {
         actionsHtml += `
             <div style="margin-top:12px">
                 <button class="btn btn-primary" onclick="saveBuyPlanPOs()">Save PO Numbers</button>
@@ -1428,13 +1445,15 @@ function renderBuyPlanStatus(targetId) {
                 <div>
                     <strong>Buy Plan</strong>
                     <span class="status-badge" style="background:${statusColor};color:#fff;margin-left:8px">${statusLabel}</span>
+                    ${bp.is_stock_sale ? '<span class="status-badge" style="background:#7c3aed;color:#fff;margin-left:4px">Stock Sale</span>' : ''}
                 </div>
                 <span style="font-size:11px;color:var(--muted)">Submitted by ${esc(bp.submitted_by||'')} ${bp.submitted_at ? '\xB7 '+fmtDateTime(bp.submitted_at) : ''}</span>
             </div>
             ${contextHtml}
+            ${marginHtml}
             ${notesHtml}
             <table class="tbl" style="margin-bottom:0">
-                <thead><tr><th>MPN</th><th>Vendor</th><th>Plan Qty</th><th>Cost</th><th>Lead</th><th>PO</th></tr></thead>
+                <thead><tr><th>MPN</th><th>Vendor</th><th>Plan Qty</th><th>Cost</th><th>Lead</th>${hidePoCol ? '' : '<th>PO</th>'}</tr></thead>
                 <tbody>${itemsHtml}</tbody>
             </table>
             ${actionsHtml}
@@ -1607,6 +1626,7 @@ function renderBuyPlansList() {
                 <div>
                     <strong>${esc(bp.requisition_name || 'Requisition #' + bp.requisition_id)}</strong>
                     <span class="status-badge" style="background:${color};color:#fff;margin-left:8px;font-size:10px">${label}</span>
+                    ${bp.is_stock_sale ? '<span class="status-badge" style="background:#7c3aed;color:#fff;margin-left:4px;font-size:10px">Stock Sale</span>' : ''}
                 </div>
                 <span style="font-size:11px;color:var(--muted)">${bp.submitted_at ? fmtDateTime(bp.submitted_at) : ''}</span>
             </div>

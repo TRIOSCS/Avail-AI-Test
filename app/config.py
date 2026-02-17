@@ -67,6 +67,28 @@ class Settings:
     explorium_api_key: str = os.getenv("EXPLORIUM_API_KEY", "")
     apollo_api_key: str = os.getenv("APOLLO_API_KEY", "")
 
+    # Deep Enrichment APIs
+    hunter_api_key: str = os.getenv("HUNTER_API_KEY", "")
+    rocketreach_api_key: str = os.getenv("ROCKETREACH_API_KEY", "")
+    clearbit_api_key: str = os.getenv("CLEARBIT_API_KEY", "")
+
+    # Deep Enrichment feature flags
+    deep_enrichment_enabled: bool = (
+        os.getenv("DEEP_ENRICHMENT_ENABLED", "false").lower() == "true"
+    )
+    deep_email_mining_enabled: bool = (
+        os.getenv("DEEP_EMAIL_MINING_ENABLED", "false").lower() == "true"
+    )
+    deep_enrichment_auto_apply_threshold: float = float(
+        os.getenv("DEEP_ENRICHMENT_AUTO_APPLY_THRESHOLD", "0.8")
+    )
+    deep_enrichment_review_threshold: float = float(
+        os.getenv("DEEP_ENRICHMENT_REVIEW_THRESHOLD", "0.5")
+    )
+    deep_enrichment_stale_days: int = int(
+        os.getenv("DEEP_ENRICHMENT_STALE_DAYS", "30")
+    )
+
     # AI Features (Definitive Spec)
     ai_features_enabled: str = os.getenv(
         "AI_FEATURES_ENABLED", "mike_only"
@@ -131,6 +153,25 @@ class Settings:
     )
     proactive_archive_age_days: int = int(os.getenv("PROACTIVE_ARCHIVE_AGE_DAYS", "30"))
     proactive_throttle_days: int = int(os.getenv("PROACTIVE_THROTTLE_DAYS", "21"))
+
+    # Buy plan — stock sale detection & auto-complete
+    stock_sale_vendor_names: list = [
+        n.strip().lower()
+        for n in os.getenv(
+            "STOCK_SALE_VENDOR_NAMES", "trio,trio supply chain,stock,internal"
+        ).split(",")
+        if n.strip()
+    ]
+    stock_sale_notify_emails: list = [
+        e.strip().lower()
+        for e in os.getenv(
+            "STOCK_SALE_NOTIFY_EMAILS", "logistics@trioscs.com,accounting@trioscs.com"
+        ).split(",")
+        if e.strip()
+    ]
+    buyplan_auto_complete_hour: int = int(os.getenv("BUYPLAN_AUTO_COMPLETE_HOUR", "18"))
+    buyplan_auto_complete_tz: str = os.getenv("BUYPLAN_AUTO_COMPLETE_TZ", "US/Eastern")
+    po_verify_interval_min: int = int(os.getenv("PO_VERIFY_INTERVAL_MIN", "30"))
 
 
 settings = Settings()

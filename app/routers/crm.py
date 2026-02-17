@@ -1826,6 +1826,20 @@ def _buyplan_to_dict(bp: BuyPlan) -> dict:
                 f"{bp.quote.customer_site.site_name}"
             )
 
+    # Compute margin totals from line items
+    total_cost = 0.0
+    total_revenue = 0.0
+    for item in bp.line_items or []:
+        plan_qty = item.get("plan_qty") or item.get("qty") or 0
+        cost = plan_qty * (item.get("cost_price") or 0)
+        sell = plan_qty * (item.get("sell_price") or 0)
+        total_cost += cost
+        total_revenue += sell
+    total_profit = total_revenue - total_cost
+    overall_margin_pct = (
+        round((total_profit / total_revenue) * 100, 2) if total_revenue else 0
+    )
+
     return {
         "id": bp.id,
         "requisition_id": bp.requisition_id,
@@ -1836,6 +1850,11 @@ def _buyplan_to_dict(bp: BuyPlan) -> dict:
         "customer_name": customer_name,
         "status": bp.status,
         "line_items": bp.line_items or [],
+        "is_stock_sale": bp.is_stock_sale or False,
+        "total_cost": round(total_cost, 2),
+        "total_revenue": round(total_revenue, 2),
+        "total_profit": round(total_profit, 2),
+        "overall_margin_pct": overall_margin_pct,
         "sales_order_number": bp.sales_order_number,
         "salesperson_notes": bp.salesperson_notes,
         "manager_notes": bp.manager_notes,
@@ -1904,6 +1923,13 @@ async def submit_buy_plan(
 
     import secrets
 
+    # Detect stock sale: all vendors match stock_sale_vendor_names
+    stock_names = settings.stock_sale_vendor_names
+    is_stock = bool(line_items) and all(
+        (item.get("vendor_name") or "").strip().lower() in stock_names
+        for item in line_items
+    )
+
     plan = BuyPlan(
         requisition_id=quote.requisition_id,
         quote_id=quote_id,
@@ -1912,6 +1938,7 @@ async def submit_buy_plan(
         line_items=line_items,
         submitted_by_id=user.id,
         approval_token=secrets.token_urlsafe(32),
+        is_stock_sale=is_stock,
     )
     db.add(plan)
 
@@ -1935,25 +1962,10 @@ async def submit_buy_plan(
     )
     db.commit()
 
-    # Send notifications asynchronously (uses its own DB session to avoid
-    # request-scoped session closing before background task completes)
-    import asyncio
-    from ..services.buyplan_service import notify_buyplan_submitted
+    # Send notifications asynchronously (own DB session)
+    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_submitted
 
-    async def _bg_notify_submitted(plan_id: int):
-        from ..database import SessionLocal
-
-        bg_db = SessionLocal()
-        try:
-            bg_plan = bg_db.get(BuyPlan, plan_id)
-            if bg_plan:
-                await notify_buyplan_submitted(bg_plan, bg_db)
-        except Exception:
-            logger.exception("Background notify_buyplan_submitted failed")
-        finally:
-            bg_db.close()
-
-    asyncio.create_task(_bg_notify_submitted(plan.id))
+    run_buyplan_bg(notify_buyplan_submitted, plan.id)
 
     return {
         "ok": True,
@@ -2022,29 +2034,30 @@ async def approve_buyplan_by_token(
 
     from ..services.buyplan_service import log_buyplan_activity
 
-    log_buyplan_activity(
-        db, plan.submitted_by_id, plan, "buyplan_approved", "approved via email token"
-    )
+    # Stock sale fast-track: approve → complete (no PO required)
+    if plan.is_stock_sale:
+        plan.status = "complete"
+        plan.completed_at = datetime.now(timezone.utc)
+        # completed_by_id stays None (token-based)
+        log_buyplan_activity(
+            db, plan.submitted_by_id, plan, "buyplan_approved",
+            "stock sale approved + auto-completed via email token",
+        )
+    else:
+        log_buyplan_activity(
+            db, plan.submitted_by_id, plan, "buyplan_approved", "approved via email token"
+        )
     db.commit()
 
-    import asyncio
-    from ..services.buyplan_service import notify_buyplan_approved
+    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_approved
 
-    async def _bg(plan_id):
-        from ..database import SessionLocal
+    if plan.is_stock_sale:
+        from ..services.buyplan_service import notify_stock_sale_approved
 
-        bg_db = SessionLocal()
-        try:
-            bg_plan = bg_db.get(BuyPlan, plan_id)
-            if bg_plan:
-                await notify_buyplan_approved(bg_plan, bg_db)
-        except Exception:
-            logger.exception("Background notify_buyplan_approved (token) failed")
-        finally:
-            bg_db.close()
-
-    asyncio.create_task(_bg(plan.id))
-    return {"ok": True, "status": "approved"}
+        run_buyplan_bg(notify_stock_sale_approved, plan.id)
+    else:
+        run_buyplan_bg(notify_buyplan_approved, plan.id)
+    return {"ok": True, "status": plan.status}
 
 
 @router.put("/api/buy-plans/token/{token}/reject")
@@ -2072,23 +2085,9 @@ async def reject_buyplan_by_token(
     )
     db.commit()
 
-    import asyncio
-    from ..services.buyplan_service import notify_buyplan_rejected
+    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_rejected
 
-    async def _bg(plan_id):
-        from ..database import SessionLocal
-
-        bg_db = SessionLocal()
-        try:
-            bg_plan = bg_db.get(BuyPlan, plan_id)
-            if bg_plan:
-                await notify_buyplan_rejected(bg_plan, bg_db)
-        except Exception:
-            logger.exception("Background notify_buyplan_rejected (token) failed")
-        finally:
-            bg_db.close()
-
-    asyncio.create_task(_bg(plan.id))
+    run_buyplan_bg(notify_buyplan_rejected, plan.id)
     return {"ok": True, "status": "rejected"}
 
 
@@ -2140,30 +2139,31 @@ async def approve_buy_plan(
 
     from ..services.buyplan_service import log_buyplan_activity
 
-    log_buyplan_activity(
-        db, user.id, plan, "buyplan_approved", f"approved with SO# {so_number}"
-    )
+    # Stock sale fast-track: approve → complete (no PO required)
+    if plan.is_stock_sale:
+        plan.status = "complete"
+        plan.completed_at = datetime.now(timezone.utc)
+        plan.completed_by_id = user.id
+        log_buyplan_activity(
+            db, user.id, plan, "buyplan_approved",
+            f"stock sale approved + auto-completed with SO# {so_number}",
+        )
+    else:
+        log_buyplan_activity(
+            db, user.id, plan, "buyplan_approved", f"approved with SO# {so_number}"
+        )
     db.commit()
 
-    import asyncio
-    from ..services.buyplan_service import notify_buyplan_approved
+    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_approved
 
-    async def _bg_notify_approved(plan_id: int):
-        from ..database import SessionLocal
+    if plan.is_stock_sale:
+        from ..services.buyplan_service import notify_stock_sale_approved
 
-        bg_db = SessionLocal()
-        try:
-            bg_plan = bg_db.get(BuyPlan, plan_id)
-            if bg_plan:
-                await notify_buyplan_approved(bg_plan, bg_db)
-        except Exception:
-            logger.exception("Background notify_buyplan_approved failed")
-        finally:
-            bg_db.close()
+        run_buyplan_bg(notify_stock_sale_approved, plan.id)
+    else:
+        run_buyplan_bg(notify_buyplan_approved, plan.id)
 
-    asyncio.create_task(_bg_notify_approved(plan.id))
-
-    return {"ok": True, "status": "approved"}
+    return {"ok": True, "status": plan.status}
 
 
 @router.put("/api/buy-plans/{plan_id}/reject")
@@ -2195,23 +2195,9 @@ async def reject_buy_plan(
     )
     db.commit()
 
-    import asyncio
-    from ..services.buyplan_service import notify_buyplan_rejected
+    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_rejected
 
-    async def _bg_notify_rejected(plan_id: int):
-        from ..database import SessionLocal
-
-        bg_db = SessionLocal()
-        try:
-            bg_plan = bg_db.get(BuyPlan, plan_id)
-            if bg_plan:
-                await notify_buyplan_rejected(bg_plan, bg_db)
-        except Exception:
-            logger.exception("Background notify_buyplan_rejected failed")
-        finally:
-            bg_db.close()
-
-    asyncio.create_task(_bg_notify_rejected(plan.id))
+    run_buyplan_bg(notify_buyplan_rejected, plan.id)
 
     return {"ok": True, "status": "rejected"}
 
@@ -2251,24 +2237,10 @@ async def enter_po_number(
     )
     db.commit()
 
-    # Trigger PO verification in background (own session for safety)
-    import asyncio
-    from ..services.buyplan_service import verify_po_sent
+    # Trigger PO verification in background
+    from ..services.buyplan_service import run_buyplan_bg, verify_po_sent
 
-    async def _bg_verify_po(plan_id: int):
-        from ..database import SessionLocal
-
-        bg_db = SessionLocal()
-        try:
-            bg_plan = bg_db.get(BuyPlan, plan_id)
-            if bg_plan:
-                await verify_po_sent(bg_plan, bg_db)
-        except Exception:
-            logger.exception("Background verify_po_sent failed")
-        finally:
-            bg_db.close()
-
-    asyncio.create_task(_bg_verify_po(plan.id))
+    run_buyplan_bg(verify_po_sent, plan.id)
 
     return {"ok": True, "status": "po_entered"}
 
@@ -2307,9 +2279,12 @@ async def complete_buy_plan(
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise HTTPException(404)
-    if plan.status != "po_confirmed":
+    allowed = ["po_confirmed"]
+    if plan.is_stock_sale:
+        allowed.append("approved")
+    if plan.status not in allowed:
         raise HTTPException(
-            400, f"Can only complete from po_confirmed, current: {plan.status}"
+            400, f"Can only complete from {'/'.join(allowed)}, current: {plan.status}"
         )
 
     plan.status = "complete"
@@ -2321,24 +2296,11 @@ async def complete_buy_plan(
     log_buyplan_activity(db, user.id, plan, "buyplan_completed", "marked complete")
     db.commit()
 
-    import asyncio
-    from ..services.buyplan_service import notify_buyplan_completed
+    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_completed
 
-    async def _bg_notify_complete(plan_id: int, completer_name: str):
-        from ..database import SessionLocal
-
-        bg_db = SessionLocal()
-        try:
-            bg_plan = bg_db.get(BuyPlan, plan_id)
-            if bg_plan:
-                await notify_buyplan_completed(bg_plan, bg_db, completer_name)
-        except Exception:
-            logger.exception("Background notify_buyplan_completed failed")
-        finally:
-            bg_db.close()
-
-    asyncio.create_task(
-        _bg_notify_complete(plan.id, user.name or user.email)
+    run_buyplan_bg(
+        notify_buyplan_completed, plan.id,
+        completer_name=user.name or user.email,
     )
 
     return {"ok": True, "status": "complete"}
@@ -2414,23 +2376,9 @@ async def cancel_buy_plan(
     )
     db.commit()
 
-    import asyncio
-    from ..services.buyplan_service import notify_buyplan_cancelled
+    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_cancelled
 
-    async def _bg_notify_cancelled(plan_id: int):
-        from ..database import SessionLocal
-
-        bg_db = SessionLocal()
-        try:
-            bg_plan = bg_db.get(BuyPlan, plan_id)
-            if bg_plan:
-                await notify_buyplan_cancelled(bg_plan, bg_db)
-        except Exception:
-            logger.exception("Background notify_buyplan_cancelled failed")
-        finally:
-            bg_db.close()
-
-    asyncio.create_task(_bg_notify_cancelled(plan.id))
+    run_buyplan_bg(notify_buyplan_cancelled, plan.id)
 
     return {"ok": True, "status": "cancelled"}
 
@@ -2459,24 +2407,34 @@ async def resubmit_buy_plan(
 
     import secrets
 
+    new_line_items = [
+        {
+            **item,
+            "po_number": None,
+            "po_entered_at": None,
+            "po_sent_at": None,
+            "po_recipient": None,
+            "po_verified": False,
+        }
+        for item in (plan.line_items or [])
+    ]
+
+    # Detect stock sale: all vendors match stock_sale_vendor_names
+    stock_names = settings.stock_sale_vendor_names
+    is_stock = bool(new_line_items) and all(
+        (item.get("vendor_name") or "").strip().lower() in stock_names
+        for item in new_line_items
+    )
+
     new_plan = BuyPlan(
         requisition_id=plan.requisition_id,
         quote_id=plan.quote_id,
         status="pending_approval",
         salesperson_notes=salesperson_notes or plan.salesperson_notes,
-        line_items=[
-            {
-                **item,
-                "po_number": None,
-                "po_entered_at": None,
-                "po_sent_at": None,
-                "po_recipient": None,
-                "po_verified": False,
-            }
-            for item in (plan.line_items or [])
-        ],
+        line_items=new_line_items,
         submitted_by_id=user.id,
         approval_token=secrets.token_urlsafe(32),
+        is_stock_sale=is_stock,
     )
     db.add(new_plan)
 
@@ -2508,23 +2466,9 @@ async def resubmit_buy_plan(
     )
     db.commit()
 
-    import asyncio
-    from ..services.buyplan_service import notify_buyplan_submitted
+    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_submitted
 
-    async def _bg_notify(plan_id: int):
-        from ..database import SessionLocal
-
-        bg_db = SessionLocal()
-        try:
-            bg_plan = bg_db.get(BuyPlan, plan_id)
-            if bg_plan:
-                await notify_buyplan_submitted(bg_plan, bg_db)
-        except Exception:
-            logger.exception("Background notify_buyplan_submitted failed")
-        finally:
-            bg_db.close()
-
-    asyncio.create_task(_bg_notify(new_plan.id))
+    run_buyplan_bg(notify_buyplan_submitted, new_plan.id)
 
     return {"ok": True, "new_plan_id": new_plan.id, "status": "pending_approval"}
 
@@ -2611,23 +2555,9 @@ async def bulk_po_entry(
 
     # Trigger verification in background
     if has_any_po:
-        import asyncio
-        from ..services.buyplan_service import verify_po_sent
+        from ..services.buyplan_service import run_buyplan_bg, verify_po_sent
 
-        async def _bg_verify(plan_id):
-            from ..database import SessionLocal
-
-            bg_db = SessionLocal()
-            try:
-                bg_plan = bg_db.get(BuyPlan, plan_id)
-                if bg_plan:
-                    await verify_po_sent(bg_plan, bg_db)
-            except Exception:
-                logger.exception("Background verify_po_sent (bulk) failed")
-            finally:
-                bg_db.close()
-
-        asyncio.create_task(_bg_verify(plan.id))
+        run_buyplan_bg(verify_po_sent, plan.id)
 
     return {"ok": True, "status": plan.status, "changes": changes}
 

@@ -27,6 +27,10 @@ def _utc(dt):
 _last_ownership_sweep = datetime.min.replace(tzinfo=timezone.utc)
 _last_performance_compute = datetime.min.replace(tzinfo=timezone.utc)
 
+# Buy plan: PO verification interval & stock sale auto-complete
+_last_po_verify = datetime.min.replace(tzinfo=timezone.utc)
+_last_stock_autocomplete_date = None  # date object — prevents double-runs
+
 # ── Token Management ────────────────────────────────────────────────────
 
 
@@ -321,21 +325,49 @@ async def _scheduler_tick():
                 log.error(f"Routing expiration error: {e}")
                 db.rollback()
 
-        # ── Buy Plan PO verification scan (every tick) ──
+        # ── Buy Plan PO verification scan (every po_verify_interval_min) ──
         try:
-            from .models import BuyPlan
-            from .services.buyplan_service import verify_po_sent
+            global _last_po_verify
+            po_interval = timedelta(minutes=settings.po_verify_interval_min)
+            if now - _last_po_verify >= po_interval:
+                from .models import BuyPlan
+                from .services.buyplan_service import verify_po_sent
 
-            unverified_plans = (
-                db.query(BuyPlan).filter(BuyPlan.status == "po_entered").all()
-            )
-            for plan in unverified_plans:
-                try:
-                    await verify_po_sent(plan, db)
-                except Exception as e:
-                    log.error(f"PO verify error for plan {plan.id}: {e}")
+                unverified_plans = (
+                    db.query(BuyPlan).filter(BuyPlan.status == "po_entered").all()
+                )
+                for plan in unverified_plans:
+                    try:
+                        await verify_po_sent(plan, db)
+                    except Exception as e:
+                        log.error(f"PO verify error for plan {plan.id}: {e}")
+                _last_po_verify = now
         except Exception as e:
             log.error(f"PO verification scan error: {e}")
+            db.rollback()
+
+        # ── Stock sale auto-complete safety net (daily at configured hour) ──
+        try:
+            global _last_stock_autocomplete_date
+            from zoneinfo import ZoneInfo
+
+            local_tz = ZoneInfo(settings.buyplan_auto_complete_tz)
+            local_now = now.astimezone(local_tz)
+            target_hour = settings.buyplan_auto_complete_hour
+            today_local = local_now.date()
+
+            if (
+                local_now.hour >= target_hour
+                and _last_stock_autocomplete_date != today_local
+            ):
+                from .services.buyplan_service import auto_complete_stock_sales
+
+                completed = auto_complete_stock_sales(db)
+                _last_stock_autocomplete_date = today_local
+                if completed:
+                    log.info(f"Stock sale auto-complete: {completed} plan(s) completed")
+        except Exception as e:
+            log.error(f"Stock sale auto-complete error: {e}")
             db.rollback()
 
         # ── Proactive offer matching (every tick) ──
