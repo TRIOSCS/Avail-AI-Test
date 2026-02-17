@@ -158,20 +158,18 @@ async def _scheduler_tick():
         # ── Auto-archive stale requisitions (runs every tick, no auth needed) ──
         try:
             cutoff = now - timedelta(days=30)
-            stale = (
+            archived_count = (
                 db.query(Requisition)
                 .filter(
                     Requisition.status == "active",
                     Requisition.last_searched_at.isnot(None),
                     Requisition.last_searched_at < cutoff,
                 )
-                .all()
+                .update({"status": "archived"}, synchronize_session="fetch")
             )
-            for r in stale:
-                r.status = "archived"
-            if stale:
+            if archived_count:
                 db.commit()
-                log.info(f"Auto-archived {len(stale)} stale requisition(s)")
+                log.info(f"Auto-archived {archived_count} stale requisition(s)")
         except Exception as e:
             log.error(f"Auto-archive error: {e}")
             db.rollback()
@@ -489,12 +487,6 @@ async def _scheduler_tick():
                         .limit(50)
                         .all()
                     )
-                    for (vid,) in stale_vendors:
-                        try:
-                            await deep_enrich_vendor(vid, db)
-                        except Exception as e:
-                            log.warning(f"Enrichment sweep vendor {vid} error: {e}")
-                            db.rollback()
 
                     # Enrich recently created entities (last 24h with no enrichment)
                     recent_vendors = (
@@ -506,12 +498,6 @@ async def _scheduler_tick():
                         .limit(20)
                         .all()
                     )
-                    for (vid,) in recent_vendors:
-                        try:
-                            await deep_enrich_vendor(vid, db)
-                        except Exception as e:
-                            log.warning(f"Enrichment sweep new vendor {vid} error: {e}")
-                            db.rollback()
 
                     # Enrich up to 20 companies
                     stale_companies = (
@@ -523,12 +509,33 @@ async def _scheduler_tick():
                         .limit(20)
                         .all()
                     )
-                    for (cid,) in stale_companies:
+
+                    # Run all enrichments concurrently in batches of 10
+                    async def _safe_enrich_vendor(vid):
+                        try:
+                            await deep_enrich_vendor(vid, db)
+                        except Exception as e:
+                            log.warning(f"Enrichment sweep vendor {vid} error: {e}")
+                            db.rollback()
+
+                    async def _safe_enrich_company(cid):
                         try:
                             await deep_enrich_company(cid, db)
                         except Exception as e:
                             log.warning(f"Enrichment sweep company {cid} error: {e}")
                             db.rollback()
+
+                    all_vendor_ids = [vid for (vid,) in stale_vendors] + [vid for (vid,) in recent_vendors]
+                    # Process in batches of 10 to avoid overwhelming external APIs
+                    for i in range(0, len(all_vendor_ids), 10):
+                        batch = all_vendor_ids[i:i + 10]
+                        await asyncio.gather(*[_safe_enrich_vendor(vid) for vid in batch], return_exceptions=True)
+
+                    if stale_companies:
+                        await asyncio.gather(
+                            *[_safe_enrich_company(cid) for (cid,) in stale_companies],
+                            return_exceptions=True,
+                        )
 
                     _last_deep_enrichment_sweep = now
                     log.info(
@@ -710,15 +717,38 @@ async def _download_and_import_stock_list(
                 f"Excess list detected from company '{sender_match['name']}' ({vendor_email}): {filename}"
             )
 
-    # Import into material cards
+    # Import into material cards — batch pre-load for performance
     imported = 0
     norm_vendor = normalize_vendor_name(vendor_name)
+
+    # Pre-load existing MaterialCards in one query instead of per-row
+    valid_mpns = list({(row.get("mpn") or "").strip().upper() for row in rows
+                       if (row.get("mpn") or "").strip() and len((row.get("mpn") or "").strip()) >= 3})
+    card_map = {}
+    mvh_map = {}
+    if valid_mpns:
+        # Batch in chunks of 500 to keep IN clause manageable
+        for i in range(0, len(valid_mpns), 500):
+            chunk = valid_mpns[i:i + 500]
+            for c in db.query(MaterialCard).filter(MaterialCard.normalized_mpn.in_(chunk)).all():
+                card_map[c.normalized_mpn] = c
+        # Pre-load existing MVH entries for this vendor
+        existing_card_ids = [c.id for c in card_map.values()]
+        if existing_card_ids:
+            for i in range(0, len(existing_card_ids), 500):
+                chunk = existing_card_ids[i:i + 500]
+                for m in db.query(MaterialVendorHistory).filter(
+                    MaterialVendorHistory.material_card_id.in_(chunk),
+                    MaterialVendorHistory.vendor_name == norm_vendor,
+                ).all():
+                    mvh_map[m.material_card_id] = m
+
     for row in rows:
         mpn = (row.get("mpn") or "").strip().upper()
         if not mpn or len(mpn) < 3:
             continue
 
-        card = db.query(MaterialCard).filter_by(normalized_mpn=mpn).first()
+        card = card_map.get(mpn)
         if not card:
             card = MaterialCard(
                 normalized_mpn=mpn,
@@ -729,17 +759,14 @@ async def _download_and_import_stock_list(
             db.add(card)
             try:
                 db.flush()
+                card_map[mpn] = card
             except Exception as e:
                 log.debug(f"MaterialCard flush conflict for '{mpn}': {e}")
                 db.rollback()
                 continue
 
         # Add/update vendor history (richer fields from Upgrade 2)
-        mvh = (
-            db.query(MaterialVendorHistory)
-            .filter_by(material_card_id=card.id, vendor_name=norm_vendor)
-            .first()
-        )
+        mvh = mvh_map.get(card.id)
         if mvh:
             mvh.last_seen = datetime.now(timezone.utc)
             mvh.times_seen = (mvh.times_seen or 0) + 1
@@ -838,6 +865,17 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
 
     from .vendor_utils import merge_emails_into_card, merge_phones_into_card
 
+    # Pre-load existing VendorCards in one query instead of per-contact
+    norm_names = []
+    for contact in contacts:
+        vn = contact.get("vendor_name", "")
+        if vn:
+            norm_names.append(normalize_vendor_name(vn))
+    card_map = {}
+    if norm_names:
+        for c in db.query(VendorCard).filter(VendorCard.normalized_name.in_(norm_names)).all():
+            card_map[c.normalized_name] = c
+
     enriched = 0
     for contact in contacts:
         vendor_name = contact.get("vendor_name", "")
@@ -845,7 +883,7 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
             continue
 
         norm = normalize_vendor_name(vendor_name)
-        card = db.query(VendorCard).filter_by(normalized_name=norm).first()
+        card = card_map.get(norm)
         if not card:
             card = VendorCard(
                 normalized_name=norm,
@@ -857,6 +895,7 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
             db.add(card)
             try:
                 db.flush()
+                card_map[norm] = card
             except Exception as e:
                 log.debug(f"VendorCard flush conflict for '{norm}': {e}")
                 db.rollback()
@@ -899,28 +938,29 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
     if not vendors:
         return
 
+    # Pre-load VendorCards by domain in one query instead of per-domain
+    all_domains = list(vendors.keys())
+    domain_card_map = {}
+    if all_domains:
+        for vc in db.query(VendorCard).filter(VendorCard.domain.in_(all_domains)).all():
+            domain_card_map[vc.domain] = vc
+        # Also pre-load by normalized name prefix for fallback
+        unmatched_prefixes = {
+            d.split(".")[0].lower(): d for d in all_domains
+            if d not in domain_card_map and "." in d
+        }
+        if unmatched_prefixes:
+            for vc in db.query(VendorCard).filter(
+                VendorCard.normalized_name.in_(list(unmatched_prefixes.keys()))
+            ).all():
+                original_domain = unmatched_prefixes.get(vc.normalized_name)
+                if original_domain:
+                    domain_card_map[original_domain] = vc
+
     # Update VendorCard outreach counts
     updated = 0
     for domain, count in vendors.items():
-        # Find VendorCard by domain
-        card = (
-            db.query(VendorCard)
-            .filter(
-                VendorCard.domain == domain,
-            )
-            .first()
-        )
-
-        if not card:
-            # Try by normalized domain prefix
-            prefix = domain.split(".")[0].lower() if "." in domain else domain
-            card = (
-                db.query(VendorCard)
-                .filter(
-                    VendorCard.normalized_name == prefix,
-                )
-                .first()
-            )
+        card = domain_card_map.get(domain)
 
         if card:
             card.total_outreach = (card.total_outreach or 0) + count
@@ -988,13 +1028,24 @@ async def _sync_user_contacts(user, db):
 
     enriched = 0
 
+    # Pre-load existing VendorCards in one query instead of per-contact
+    sync_norm_names = []
+    for c in contacts:
+        company = c.get("companyName") or c.get("displayName") or ""
+        if company and len(company) >= 2:
+            sync_norm_names.append(normalize_vendor_name(company))
+    sync_card_map = {}
+    if sync_norm_names:
+        for vc in db.query(VendorCard).filter(VendorCard.normalized_name.in_(sync_norm_names)).all():
+            sync_card_map[vc.normalized_name] = vc
+
     for c in contacts:
         company = c.get("companyName") or c.get("displayName") or ""
         if not company or len(company) < 2:
             continue
 
         norm = normalize_vendor_name(company)
-        card = db.query(VendorCard).filter_by(normalized_name=norm).first()
+        card = sync_card_map.get(norm)
         if not card:
             card = VendorCard(
                 normalized_name=norm,
@@ -1006,6 +1057,7 @@ async def _sync_user_contacts(user, db):
             db.add(card)
             try:
                 db.flush()
+                sync_card_map[norm] = card
             except Exception as e:
                 log.debug(f"VendorCard flush conflict for '{norm}': {e}")
                 db.rollback()
