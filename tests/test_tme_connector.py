@@ -98,8 +98,8 @@ def test_sign_is_deterministic(connector):
     assert sig1 == sig2
 
 
-def test_no_credentials_returns_empty():
+@pytest.mark.asyncio
+async def test_no_credentials_returns_empty():
     conn = TMEConnector(token="", secret="")
-    import asyncio
-    results = asyncio.get_event_loop().run_until_complete(conn._do_search("LM358N"))
+    results = await conn._do_search("LM358N")
     assert results == []

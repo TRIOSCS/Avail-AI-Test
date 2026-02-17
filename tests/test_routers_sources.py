@@ -23,10 +23,10 @@ from app.routers.sources import (
 # ── _EmailMiningTestConnector ─────────────────────────────────────────
 
 
-def test_email_mining_test_connector_returns_status():
-    import asyncio
+@pytest.mark.asyncio
+async def test_email_mining_test_connector_returns_status():
     connector = _EmailMiningTestConnector()
-    results = asyncio.get_event_loop().run_until_complete(connector.search("LM358N"))
+    results = await connector.search("LM358N")
     assert len(results) == 1
     assert results[0]["status"] == "ok"
 

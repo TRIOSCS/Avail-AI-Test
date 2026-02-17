@@ -14,6 +14,7 @@ Called by: all test files via pytest autodiscovery
 Depends on: app.models (Base), app.database (get_db), app.dependencies
 """
 
+import asyncio
 import os
 os.environ["TESTING"] = "1"  # Must be set before importing app modules
 
@@ -29,6 +30,19 @@ from app.models import (
     Base, Company, CustomerSite, Requisition, Requirement, User, VendorCard,
     ActivityLog, Quote, Offer, BuyPlan,
 )
+
+# ── Event loop isolation ─────────────────────────────────────────────
+# Provide a fresh event loop per test to prevent cross-test pollution
+# (e.g. Playwright e2e tests leaving a running loop).
+
+
+@pytest.fixture()
+def event_loop():
+    """Create a fresh event loop for each test function."""
+    loop = asyncio.new_event_loop()
+    yield loop
+    loop.close()
+
 
 # ── In-memory SQLite engine ──────────────────────────────────────────
 # SQLite can't handle PostgreSQL ARRAY columns — remap them to JSON.
