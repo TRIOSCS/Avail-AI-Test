@@ -1393,11 +1393,26 @@ async def create_quote(
                 }
             )
     site = db.get(CustomerSite, req.customer_site_id)
+    total_sell = sum(
+        (item.get("qty") or 0) * (item.get("sell_price") or 0)
+        for item in line_items
+    )
+    total_cost = sum(
+        (item.get("qty") or 0) * (item.get("cost_price") or 0)
+        for item in line_items
+    )
     quote = Quote(
         requisition_id=req_id,
         customer_site_id=req.customer_site_id,
         quote_number=next_quote_number(db),
         line_items=line_items,
+        subtotal=total_sell,
+        total_cost=total_cost,
+        total_margin_pct=(
+            round((total_sell - total_cost) / total_sell * 100, 2)
+            if total_sell > 0
+            else 0
+        ),
         payment_terms=site.payment_terms if site else None,
         shipping_terms=site.shipping_terms if site else None,
         created_by_id=user.id,

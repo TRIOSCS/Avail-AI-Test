@@ -1513,8 +1513,7 @@
         <h2>Log Vendor Offer</h2>
         <div class="lo-form">
             <div class="field field-full"><label>Part Number</label><select id="loMpn" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--input);font-size:12px"></select></div>
-            <div class="field field-full"><label>Vendor Name</label><div class="site-typeahead"><input id="loVendor" placeholder="Type vendor name…" autocomplete="off"><div class="site-typeahead-list" id="loVendorList"></div></div></div>
-            <div class="field field-full ac-website-row" id="loWebsiteRow" style="display:none"><label>Website <span style="color:var(--muted);font-weight:400">(new vendor — enter for enrichment)</span></label><input id="loWebsite" placeholder="e.g. arrowelectronics.com"></div>
+            <div class="field field-full"><label>Vendor Name</label><select id="loVendor" style="padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--input);font-size:12px"><option value="">Select vendor…</option></select></div>
             <div class="field"><label>Qty Available</label><input id="loQty" type="number" placeholder="10000"></div>
             <div class="field"><label>Unit Price ($)</label><input id="loPrice" type="number" step="0.0001" placeholder="0.2500"></div>
             <div class="field"><label>Lead Time</label><input id="loLead" placeholder="4–6 wks"></div>

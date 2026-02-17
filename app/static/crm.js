@@ -580,7 +580,25 @@ function openLogOfferModal() {
     document.getElementById('loAttachments').innerHTML = '';
     const sel = document.getElementById('loMpn');
     sel.innerHTML = crmOffers.map(g => '<option value="' + g.requirement_id + '" data-mpn="' + escAttr(g.mpn) + '">' + esc(g.mpn) + ' (need ' + g.target_qty + ')</option>').join('');
-    setTimeout(() => document.getElementById('loVendor').focus(), 100);
+    // Populate vendor dropdown with RFQ'd vendors (from activity data)
+    const vendorSel = document.getElementById('loVendor');
+    const rfqVendors = _getRfqVendorNames();
+    vendorSel.innerHTML = '<option value="">Select vendor…</option>'
+        + rfqVendors.map(n => '<option value="' + escAttr(n) + '">' + esc(n) + '</option>').join('');
+    setTimeout(() => vendorSel.focus(), 100);
+}
+
+function _getRfqVendorNames() {
+    // Collect unique vendor names from activity data (vendors who've been RFQ'd)
+    const seen = new Set();
+    const names = [];
+    for (const v of (activityData.vendors || [])) {
+        const norm = (v.vendor_name || '').trim().toLowerCase();
+        if (!norm || seen.has(norm)) continue;
+        seen.add(norm);
+        names.push(v.vendor_name);
+    }
+    return names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
 }
 
 async function saveOffer(andNext) {
@@ -601,7 +619,6 @@ async function saveOffer(andNext) {
         packaging: document.getElementById('loPackaging').value.trim() || null,
         moq: parseInt(document.getElementById('loMoq').value) || null,
         notes: document.getElementById('loNotes').value.trim(),
-        vendor_website: document.getElementById('loWebsite').value.trim() || null,
     };
     if (!data.vendor_name || !data.mpn) return;
     try {
@@ -628,9 +645,9 @@ async function saveOffer(andNext) {
         showToast('Offer from ' + data.vendor_name + ' saved', 'success');
         notifyStatusChange(result);
         if (andNext) {
-            ['loVendor','loQty','loPrice','loLead','loDC','loFirmware','loHardware','loPackaging','loMoq','loNotes','loWebsite'].forEach(id => document.getElementById(id).value = '');
+            ['loQty','loPrice','loLead','loDC','loFirmware','loHardware','loPackaging','loMoq','loNotes'].forEach(id => document.getElementById(id).value = '');
+            document.getElementById('loVendor').value = '';
             document.getElementById('loCond').value = 'New';
-            document.getElementById('loWebsiteRow').style.display = 'none';
             document.getElementById('loAttachments').innerHTML = '';
             document.getElementById('loVendor').focus();
         } else {
@@ -1249,8 +1266,10 @@ async function loadBuyPlan() {
     renderBuyPlanStatus();
 }
 
-function renderBuyPlanStatus() {
-    const el = document.getElementById('buyPlanSection');
+var _bpRenderTarget = 'buyPlanSection';
+function renderBuyPlanStatus(targetId) {
+    if (targetId) _bpRenderTarget = targetId;
+    const el = document.getElementById(_bpRenderTarget);
     if (!el) return;
     if (!_currentBuyPlan) { el.innerHTML = ''; return; }
     const bp = _currentBuyPlan;
@@ -1578,14 +1597,14 @@ async function openBuyPlanDetail(planId) {
     try {
         _currentBuyPlan = await apiFetch('/api/buy-plans/' + planId);
     } catch (e) { showToast('Failed to load buy plan', 'error'); return; }
-    // Re-render inline — reuse renderBuyPlanStatus into a modal-like overlay
+    // Re-render inline — reuse renderBuyPlanStatus into a detail overlay
     const el = document.getElementById('buyPlansList');
     const backBtn = `<button class="btn btn-ghost" onclick="loadBuyPlans()" style="margin-bottom:12px">\u2190 Back to list</button>`;
     el.innerHTML = backBtn;
     const section = document.createElement('div');
-    section.id = 'buyPlanSection';
+    section.id = 'buyPlanDetailSection';
     el.appendChild(section);
-    renderBuyPlanStatus();
+    renderBuyPlanStatus('buyPlanDetailSection');
 }
 
 // ── Token-Based Approval ────────────────────────────────────────────────
@@ -2008,7 +2027,7 @@ async function enrichVendor(cardId, domain) {
 document.addEventListener('DOMContentLoaded', function() {
     loadUserOptions('asSiteOwner');
     loadSiteOptions();
-    initNameAutocomplete('loVendor', 'loVendorList', null, { types: 'vendor', websiteId: 'loWebsite' });
+    // loVendor is now a <select> populated per-requisition in openLogOfferModal()
     initNameAutocomplete('ncName', 'ncNameList', null, { types: 'all' });
     // Check for token-based approval links
     checkTokenApproval();
