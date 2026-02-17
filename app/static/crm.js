@@ -768,20 +768,32 @@ function renderQuote() {
         return;
     }
     const q = crmQuote;
-    const lines = (q.line_items || []).map((item, i) => `
-        <tr>
+    const isDraft = q.status === 'draft';
+    const lines = (q.line_items || []).map((item, i) => {
+        const sellInput = isDraft ? `<input type="number" step="0.0001" class="quote-sell-input" value="${item.sell_price||0}" onchange="updateQuoteLine(${i},'sell_price',this.value)">` : '$'+Number(item.sell_price||0).toFixed(4);
+        const leadInput = isDraft ? `<input type="text" class="quote-cell-input" value="${escAttr(item.lead_time||'')}" onchange="updateQuoteLineField(${i},'lead_time',this.value)" placeholder="—" style="width:60px">` : esc(item.lead_time || '—');
+        const condInput = isDraft ? `<input type="text" class="quote-cell-input" value="${escAttr(item.condition||'')}" onchange="updateQuoteLineField(${i},'condition',this.value)" placeholder="—" style="width:50px">` : esc(item.condition || '—');
+        const dcInput = isDraft ? `<input type="text" class="quote-cell-input" value="${escAttr(item.date_code||'')}" onchange="updateQuoteLineField(${i},'date_code',this.value)" placeholder="—" style="width:50px">` : esc(item.date_code || '—');
+        const fwInput = isDraft ? `<input type="text" class="quote-cell-input" value="${escAttr(item.firmware||'')}" onchange="updateQuoteLineField(${i},'firmware',this.value)" placeholder="—" style="width:50px">` : esc(item.firmware || '—');
+        const hwInput = isDraft ? `<input type="text" class="quote-cell-input" value="${escAttr(item.hardware_code||'')}" onchange="updateQuoteLineField(${i},'hardware_code',this.value)" placeholder="—" style="width:50px">` : esc(item.hardware_code || '—');
+        return `<tr>
             <td>${esc(item.mpn)}</td>
             <td>${esc(item.manufacturer || '—')}</td>
             <td>${(item.qty||0).toLocaleString()}</td>
             <td class="quote-cost">$${Number(item.cost_price||0).toFixed(4)}</td>
             <td>${item.target_price != null ? '$'+Number(item.target_price).toFixed(4) : '—'}</td>
-            <td><input type="number" step="0.0001" class="quote-sell-input" value="${item.sell_price||0}" onchange="updateQuoteLine(${i},this.value)"></td>
+            <td>${sellInput}</td>
             <td class="quote-margin" id="qm-${i}">${Number(item.margin_pct||0).toFixed(1)}%</td>
-            <td>${esc(item.lead_time || '—')}</td>
-        </tr>`).join('');
+            <td>${leadInput}</td>
+            <td>${condInput}</td>
+            <td>${dcInput}</td>
+            <td>${fwInput}</td>
+            <td>${hwInput}</td>
+        </tr>`;
+    }).join('');
 
     const statusActions = {
-        draft: '<button class="btn btn-ghost" onclick="saveQuoteDraft()">Save Draft</button> <button class="btn btn-ghost" onclick="copyQuoteTable()">📋 Copy Quote Table</button> <button class="btn btn-primary" onclick="markQuoteSent()">Mark Sent</button>',
+        draft: '<button class="btn btn-ghost" onclick="saveQuoteDraft()">Save Draft</button> <button class="btn btn-ghost" onclick="copyQuoteTable()">📋 Copy</button> <button class="btn btn-primary" onclick="sendQuoteEmail()">Send Quote</button>',
         sent: '<button class="btn btn-success" onclick="markQuoteResult(\'won\')">Mark Won</button> <button class="btn btn-danger" onclick="openLostModal()">Mark Lost</button> <button class="btn btn-ghost" onclick="reviseQuote()">Revise</button>',
         won: '<p style="color:var(--green);font-weight:600">✓ Won — $' + Number(q.won_revenue||0).toLocaleString() + '</p>',
         lost: '<p style="color:var(--red);font-weight:600">✗ Lost — ' + esc(q.result_reason||'') + '</p> <button class="btn btn-ghost" onclick="reopenQuote(false)">Reopen Quote</button> <button class="btn btn-ghost" onclick="reopenQuote(true)">Reopen &amp; Revise</button>',
@@ -791,7 +803,7 @@ function renderQuote() {
     el.innerHTML = `
     <div class="quote-header">
         <div style="display:flex;align-items:center;gap:12px">
-            <img src="/static/avail_logo.png" alt="TRIO" style="height:60px">
+            <img src="/static/trio_logo.png" alt="TRIO" style="height:60px">
             <div>
                 <div style="font-weight:700;font-size:13px;color:var(--text)">Trio Supply Chain Solutions</div>
                 <div style="font-size:11px;color:var(--muted)">info@trioscs.com</div>
@@ -805,8 +817,8 @@ function renderQuote() {
             </div>
         </div>
     </div>
-    <table class="tbl quote-table">
-        <thead><tr><th>MPN</th><th>Mfr</th><th>Qty</th><th>Cost</th><th>Target</th><th>Sell</th><th>Margin</th><th>Lead</th></tr></thead>
+    <table class="tbl quote-table" style="font-size:11px">
+        <thead><tr><th>MPN</th><th>Mfr</th><th>Qty</th><th>Cost</th><th>Target</th><th>Sell</th><th>Margin</th><th>Lead</th><th>Cond</th><th>DC</th><th>FW</th><th>HW</th></tr></thead>
         <tbody>${lines}</tbody>
     </table>
     <div class="quote-markup">
@@ -828,18 +840,27 @@ function renderQuote() {
         <label>Notes<br><textarea id="qtNotes" rows="2" style="width:100%">${esc(q.notes||'')}</textarea></label>
     </div>
     <div class="quote-actions">${statusActions[q.status] || ''}</div>
+    <div id="quoteHistorySection"></div>
     <div id="buyPlanSection"></div>`;
+    loadQuoteHistory();
 }
 
-function updateQuoteLine(idx, newSellPrice) {
+function updateQuoteLine(idx, field, value) {
     if (!crmQuote) return;
     const item = crmQuote.line_items[idx];
-    item.sell_price = parseFloat(newSellPrice) || 0;
-    const cost = item.cost_price || 0;
-    item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
-    const mEl = document.getElementById('qm-' + idx);
-    if (mEl) mEl.textContent = item.margin_pct.toFixed(1) + '%';
-    refreshQuoteTotals();
+    if (field === 'sell_price') {
+        item.sell_price = parseFloat(value) || 0;
+        const cost = item.cost_price || 0;
+        item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
+        const mEl = document.getElementById('qm-' + idx);
+        if (mEl) mEl.textContent = item.margin_pct.toFixed(1) + '%';
+        refreshQuoteTotals();
+    }
+}
+
+function updateQuoteLineField(idx, field, value) {
+    if (!crmQuote) return;
+    crmQuote.line_items[idx][field] = value;
 }
 
 function refreshQuoteTotals() {
@@ -915,15 +936,63 @@ function copyQuoteTable() {
     });
 }
 
-async function markQuoteSent() {
+async function sendQuoteEmail() {
     if (!crmQuote) return;
+    const toEmail = crmQuote.contact_email;
+    if (!toEmail) {
+        showToast('No contact email on customer site — add one first', 'error');
+        return;
+    }
+    if (!confirm('Send quote ' + crmQuote.quote_number + ' to ' + toEmail + '?')) return;
     try {
         await saveQuoteDraft();
         const sendData = await apiFetch('/api/quotes/' + crmQuote.id + '/send', { method: 'POST' });
-        showToast('Quote marked as sent', 'success');
+        showToast('Quote sent to ' + (sendData.sent_to || toEmail), 'success');
         notifyStatusChange(sendData);
         loadQuote();
-    } catch (e) { console.error('markQuoteSent:', e); showToast('Error sending quote', 'error'); }
+    } catch (e) { console.error('sendQuoteEmail:', e); showToast('Error sending quote: ' + (e.message||''), 'error'); }
+}
+
+// ── Quote History ──────────────────────────────────────────────────────
+async function loadQuoteHistory() {
+    if (!currentReqId) return;
+    const el = document.getElementById('quoteHistorySection');
+    if (!el) return;
+    try {
+        const quotes = await apiFetch('/api/requisitions/' + currentReqId + '/quotes');
+        if (!quotes || quotes.length <= 1) { el.innerHTML = ''; return; }
+        const rows = quotes.map(q => {
+            const isCurrent = crmQuote && q.id === crmQuote.id;
+            const date = q.sent_at ? new Date(q.sent_at).toLocaleDateString() : (q.created_at ? new Date(q.created_at).toLocaleDateString() : '—');
+            const total = q.subtotal != null ? '$' + Number(q.subtotal).toLocaleString(undefined,{minimumFractionDigits:2}) : '—';
+            const margin = q.total_margin_pct != null ? Number(q.total_margin_pct).toFixed(1) + '%' : '—';
+            const statusCls = q.status === 'won' ? 'color:var(--green)' : q.status === 'lost' ? 'color:var(--red)' : '';
+            return `<tr style="${isCurrent ? 'background:var(--teal-light,#d1ecf1)' : ''}">
+                <td style="padding:4px 8px;font-size:11px">${esc(q.quote_number)} Rev ${q.revision}</td>
+                <td style="padding:4px 8px;font-size:11px">${date}</td>
+                <td style="padding:4px 8px;font-size:11px">${total}</td>
+                <td style="padding:4px 8px;font-size:11px">${margin}</td>
+                <td style="padding:4px 8px;font-size:11px;${statusCls};font-weight:600">${q.status}</td>
+                <td style="padding:4px 8px;font-size:11px">${!isCurrent ? '<button class="btn btn-ghost btn-sm" onclick="loadSpecificQuote('+q.id+')" style="padding:1px 6px;font-size:10px">View</button>' : '<em style="color:var(--muted);font-size:10px">current</em>'}</td>
+            </tr>`;
+        }).join('');
+        el.innerHTML = `
+        <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+            <div style="font-weight:600;font-size:12px;margin-bottom:6px">Quote History (${quotes.length} revisions)</div>
+            <table class="tbl" style="font-size:11px">
+                <thead><tr><th>Quote #</th><th>Date</th><th>Total</th><th>Margin</th><th>Status</th><th></th></tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+        </div>`;
+    } catch (e) { console.error('loadQuoteHistory:', e); }
+}
+
+async function loadSpecificQuote(quoteId) {
+    try {
+        const quotes = await apiFetch('/api/requisitions/' + currentReqId + '/quotes');
+        const q = quotes.find(x => x.id === quoteId);
+        if (q) { crmQuote = q; renderQuote(); }
+    } catch (e) { console.error('loadSpecificQuote:', e); }
 }
 
 async function markQuoteResult(result) {

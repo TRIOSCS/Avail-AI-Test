@@ -1297,6 +1297,25 @@ async def get_quote(
     return quote_to_dict(quote)
 
 
+@router.get("/api/requisitions/{req_id}/quotes")
+async def list_quotes(
+    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+):
+    """List all quotes (including revisions) for a requisition."""
+    from ..dependencies import get_req_for_user
+
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404)
+    quotes = (
+        db.query(Quote)
+        .filter(Quote.requisition_id == req_id)
+        .order_by(Quote.revision.desc())
+        .all()
+    )
+    return [quote_to_dict(q) for q in quotes]
+
+
 @router.post("/api/requisitions/{req_id}/quote")
 async def create_quote(
     req_id: int,
@@ -1340,6 +1359,10 @@ async def create_quote(
                     "margin_pct": 0,
                     "lead_time": o.lead_time,
                     "condition": o.condition,
+                    "date_code": o.date_code,
+                    "firmware": o.firmware,
+                    "hardware_code": o.hardware_code,
+                    "packaging": o.packaging,
                     "offer_id": o.id,
                     "target_price": target,
                     "last_quoted_price": last_q_price,
@@ -1402,11 +1425,50 @@ async def update_quote(
 
 @router.post("/api/quotes/{quote_id}/send")
 async def send_quote(
-    quote_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+    quote_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
 ):
+    from ..dependencies import require_fresh_token
+
     quote = db.get(Quote, quote_id)
     if not quote:
         raise HTTPException(404)
+
+    # Build recipient from customer site contact
+    site = db.get(CustomerSite, quote.customer_site_id)
+    to_email = site.contact_email if site else None
+    if not to_email:
+        raise HTTPException(400, "No contact email on customer site — cannot send")
+
+    to_name = site.contact_name or ""
+    company_name = site.company.name if site and site.company else ""
+
+    # Build the HTML quote email
+    html = _build_quote_email_html(quote, to_name, company_name, user)
+
+    subject = f"Quote {quote.quote_number} — Trio Supply Chain Solutions"
+
+    # Send via Graph API
+    token = await require_fresh_token(request, db)
+    from app.utils.graph_client import GraphClient
+
+    gc = GraphClient(token)
+    payload = {
+        "message": {
+            "subject": subject,
+            "body": {"contentType": "HTML", "content": html},
+            "toRecipients": [
+                {"emailAddress": {"address": to_email, "name": to_name}}
+            ],
+        },
+        "saveToSentItems": "true",
+    }
+    result = await gc.post_json("/me/sendMail", payload)
+    if "error" in result:
+        raise HTTPException(502, f"Failed to send quote email: {result.get('detail', '')}")
+
     quote.status = "sent"
     quote.sent_at = datetime.now(timezone.utc)
     req = db.get(Requisition, quote.requisition_id)
@@ -1417,9 +1479,100 @@ async def send_quote(
     return {
         "ok": True,
         "status": "sent",
+        "sent_to": to_email,
         "req_status": req.status if req else None,
         "status_changed": req and req.status != old_status,
     }
+
+
+def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user: User) -> str:
+    """Build a professional HTML quote email with Trio branding."""
+    from datetime import timedelta
+
+    validity = quote.validity_days or 7
+    expires = (quote.sent_at or datetime.now(timezone.utc)) + timedelta(days=validity)
+    expires_str = expires.strftime("%B %d, %Y")
+
+    # Build line items rows
+    rows = ""
+    for item in (quote.line_items or []):
+        price = f"${item.get('sell_price', 0):.4f}" if item.get("sell_price") else "—"
+        qty = f"{item.get('qty', 0):,}" if item.get("qty") else "—"
+        details = []
+        if item.get("condition"):
+            details.append(item["condition"])
+        if item.get("date_code"):
+            details.append(f"DC: {item['date_code']}")
+        if item.get("firmware"):
+            details.append(f"FW: {item['firmware']}")
+        if item.get("hardware_code"):
+            details.append(f"HW: {item['hardware_code']}")
+        detail_str = f"<br><span style='font-size:11px;color:#888'>{' · '.join(details)}</span>" if details else ""
+        rows += f"""<tr>
+            <td style="padding:8px 12px;border-bottom:1px solid #eee">{item.get('mpn','')}{detail_str}</td>
+            <td style="padding:8px 12px;border-bottom:1px solid #eee">{item.get('manufacturer','') or '—'}</td>
+            <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:center">{qty}</td>
+            <td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right">{price}</td>
+            <td style="padding:8px 12px;border-bottom:1px solid #eee">{item.get('lead_time','') or '—'}</td>
+        </tr>"""
+
+    total = f"${float(quote.subtotal or 0):,.2f}"
+    terms_parts = []
+    if quote.payment_terms:
+        terms_parts.append(f"Payment: {quote.payment_terms}")
+    if quote.shipping_terms:
+        terms_parts.append(f"Shipping: {quote.shipping_terms}")
+    terms_str = " · ".join(terms_parts) if terms_parts else ""
+
+    greeting = f"Dear {to_name}," if to_name else "Dear Valued Customer,"
+    notes_block = f"<p style='margin-top:16px;color:#555'>{quote.notes}</p>" if quote.notes else ""
+    signature = user.email_signature or f"{user.name or 'Trio Supply Chain Solutions'}"
+    sig_html = signature.replace("\n", "<br>")
+
+    return f"""<html><body style="font-family:Calibri,Arial,sans-serif;color:#333;max-width:700px;margin:0 auto">
+<div style="text-align:center;padding:20px 0;border-bottom:2px solid #0c7c84">
+    <img src="https://www.trioscs.com/wp-content/uploads/2022/02/TRIO_CV_400.png" alt="Trio Supply Chain Solutions" style="height:60px">
+</div>
+<div style="padding:20px">
+    <div style="display:flex;justify-content:space-between;margin-bottom:16px">
+        <div>
+            <h2 style="margin:0;color:#0c7c84">Quotation</h2>
+            <p style="margin:4px 0;color:#666">{greeting}</p>
+            <p style="margin:4px 0;color:#666">Please find below our quotation for {company_name or 'your company'}.</p>
+        </div>
+        <div style="text-align:right;font-size:13px;color:#666">
+            <strong>{quote.quote_number}</strong> Rev {quote.revision}<br>
+            Valid until {expires_str}
+        </div>
+    </div>
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead>
+            <tr style="background:#f5f5f5">
+                <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #0c7c84">Part Number</th>
+                <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #0c7c84">Manufacturer</th>
+                <th style="padding:8px 12px;text-align:center;border-bottom:2px solid #0c7c84">Qty</th>
+                <th style="padding:8px 12px;text-align:right;border-bottom:2px solid #0c7c84">Unit Price</th>
+                <th style="padding:8px 12px;text-align:left;border-bottom:2px solid #0c7c84">Lead Time</th>
+            </tr>
+        </thead>
+        <tbody>{rows}</tbody>
+        <tfoot>
+            <tr style="background:#f5f5f5;font-weight:600">
+                <td colspan="3" style="padding:8px 12px;text-align:right">Total:</td>
+                <td style="padding:8px 12px;text-align:right">{total}</td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+    {f'<p style="margin-top:12px;font-size:12px;color:#666">{terms_str}</p>' if terms_str else ''}
+    {notes_block}
+    <hr style="margin:24px 0;border:none;border-top:1px solid #eee">
+    <p style="font-size:13px;color:#555">{sig_html}</p>
+</div>
+<div style="text-align:center;padding:12px;background:#f5f5f5;font-size:11px;color:#999">
+    Trio Supply Chain Solutions · <a href="https://trioscs.com" style="color:#0c7c84">trioscs.com</a>
+</div>
+</body></html>"""
 
 
 @router.post("/api/quotes/{quote_id}/result")
