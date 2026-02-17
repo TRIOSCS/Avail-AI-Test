@@ -597,6 +597,7 @@ function renderReqList() {
 }
 
 function setReqStatusFilter(status, btn) {
+    const wasArchive = _reqStatusFilter === 'archive';
     _reqStatusFilter = status;
     document.querySelectorAll('[data-req-status]').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
@@ -609,6 +610,9 @@ function setReqStatusFilter(status, btn) {
                 renderReqList();
             })
             .catch(() => showToast('Failed to load archived requisitions', 'error'));
+    } else if (wasArchive) {
+        // Re-fetch full list — _reqListData was replaced by archive-only data
+        loadRequisitions();
     } else {
         renderReqList();
     }
