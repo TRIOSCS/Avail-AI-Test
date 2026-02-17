@@ -112,6 +112,7 @@ function renderCustomers() {
                 <span style="margin-left:auto;display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">
                     <button class="btn-enrich" onclick="openEditCompany(${c.id})">Edit</button>
                     <button class="btn-enrich" onclick="enrichCompany(${c.id},'${escAttr(domain)}')">Enrich</button>
+                    <button class="btn-ai" onclick="deepEnrichCompany(${c.id})">Deep Enrich</button>
                     ${domain ? '<button class="btn-enrich" onclick="openSuggestedContacts(\'company\','+c.id+',\''+escAttr(domain)+'\',\''+escAttr(c.name)+'\')">Suggested Contacts</button>' : ''}
                 </span>
             </div>
@@ -4043,5 +4044,307 @@ async function testTeamsPost() {
         if (status) status.innerHTML = `<span style="color:var(--green)">${res.message || 'Test card sent!'}</span>`;
     } catch (e) {
         if (status) status.innerHTML = `<span style="color:var(--red)">Test failed: ${e.message || e}</span>`;
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Deep Enrichment UI
+// ═══════════════════════════════════════════════════════════════════════
+
+let _eqSelectedIds = new Set();
+let _bfPollInterval = null;
+
+function showEnrichment() {
+    showView('view-enrichment');
+    currentReqId = null;
+    loadEnrichmentQueue();
+    loadEnrichmentStats();
+}
+
+function switchEnrichTab(tab, btn) {
+    document.querySelectorAll('#enrichTabs .tab').forEach(t => t.classList.remove('on'));
+    btn.classList.add('on');
+    document.getElementById('enrichQueuePanel').style.display = tab === 'queue' ? '' : 'none';
+    document.getElementById('enrichBackfillPanel').style.display = tab === 'backfill' ? '' : 'none';
+    document.getElementById('enrichJobsPanel').style.display = tab === 'jobs' ? '' : 'none';
+
+    if (tab === 'queue') loadEnrichmentQueue();
+    if (tab === 'backfill') loadEnrichmentJobs();
+    if (tab === 'jobs') loadEnrichmentJobs();
+}
+
+async function loadEnrichmentQueue() {
+    const list = document.getElementById('enrichQueueList');
+    const statusFilter = document.getElementById('eqStatusFilter')?.value || 'pending';
+    const entityFilter = document.getElementById('eqEntityFilter')?.value || '';
+    _eqSelectedIds.clear();
+    updateBulkApproveBtn();
+
+    try {
+        let url = `/api/enrichment/queue?status=${statusFilter}&limit=100`;
+        if (entityFilter) url += `&entity_type=${entityFilter}`;
+        const data = await apiFetch(url);
+        const items = data.items || [];
+        const countEl = document.getElementById('eqCount');
+        if (countEl) countEl.textContent = `${data.total || items.length} items`;
+
+        if (!items.length) {
+            list.innerHTML = '<p class="empty">No enrichment items found.</p>';
+            return;
+        }
+
+        let html = '<table class="tbl"><thead><tr>';
+        if (statusFilter === 'pending') html += '<th><input type="checkbox" onchange="eqToggleAll(this)"></th>';
+        html += '<th>Entity</th><th>Field</th><th>Current</th><th>Proposed</th><th>Confidence</th><th>Source</th><th>Status</th>';
+        if (statusFilter === 'pending') html += '<th>Actions</th>';
+        html += '</tr></thead><tbody>';
+
+        for (const item of items) {
+            const confPct = Math.round(item.confidence * 100);
+            const confClass = confPct >= 80 ? 'color:var(--green)' : confPct >= 50 ? 'color:var(--yellow,#e6a817)' : 'color:var(--red)';
+            const currentDisp = item.current_value ? esc(String(item.current_value).substring(0, 40)) : '<span style="color:var(--muted)">—</span>';
+            const proposedDisp = esc(String(item.proposed_value).substring(0, 60));
+
+            html += '<tr>';
+            if (statusFilter === 'pending') {
+                html += `<td><input type="checkbox" data-eqid="${item.id}" onchange="eqToggleItem(${item.id}, this.checked)"></td>`;
+            }
+            html += `<td><strong>${esc(item.entity_name || '?')}</strong><br><small style="color:var(--muted)">${esc(item.entity_type || '')}</small></td>`;
+            html += `<td>${esc(item.field_name)}</td>`;
+            html += `<td>${currentDisp}</td>`;
+            html += `<td style="font-weight:500">${proposedDisp}</td>`;
+            html += `<td><span style="${confClass};font-weight:600">${confPct}%</span></td>`;
+            html += `<td><span class="badge badge-${item.source}">${esc(item.source)}</span></td>`;
+            html += `<td><span class="status-${item.status}">${esc(item.status)}</span></td>`;
+            if (statusFilter === 'pending') {
+                html += `<td>
+                    <button class="btn btn-sm" onclick="approveEnrichItem(${item.id})" title="Approve">✓</button>
+                    <button class="btn btn-sm btn-outline" onclick="rejectEnrichItem(${item.id})" title="Reject">✗</button>
+                </td>`;
+            }
+            html += '</tr>';
+        }
+        html += '</tbody></table>';
+        list.innerHTML = html;
+    } catch (e) {
+        list.innerHTML = `<p class="empty" style="color:var(--red)">Error: ${esc(e.message || String(e))}</p>`;
+    }
+}
+
+function eqToggleAll(checkbox) {
+    document.querySelectorAll('[data-eqid]').forEach(cb => {
+        cb.checked = checkbox.checked;
+        eqToggleItem(parseInt(cb.dataset.eqid), cb.checked);
+    });
+}
+
+function eqToggleItem(id, checked) {
+    if (checked) _eqSelectedIds.add(id);
+    else _eqSelectedIds.delete(id);
+    updateBulkApproveBtn();
+}
+
+function updateBulkApproveBtn() {
+    const btn = document.getElementById('eqBulkApproveBtn');
+    if (btn) {
+        btn.style.display = _eqSelectedIds.size > 0 ? '' : 'none';
+        btn.textContent = `Approve Selected (${_eqSelectedIds.size})`;
+    }
+}
+
+async function approveEnrichItem(id) {
+    try {
+        await apiFetch(`/api/enrichment/queue/${id}/approve`, {method: 'POST'});
+        showToast('Approved');
+        loadEnrichmentQueue();
+        loadEnrichmentStats();
+    } catch (e) {
+        showToast('Approve failed: ' + (e.message || e), 'error');
+    }
+}
+
+async function rejectEnrichItem(id) {
+    try {
+        await apiFetch(`/api/enrichment/queue/${id}/reject`, {method: 'POST'});
+        showToast('Rejected');
+        loadEnrichmentQueue();
+    } catch (e) {
+        showToast('Reject failed: ' + (e.message || e), 'error');
+    }
+}
+
+async function bulkApproveSelected() {
+    if (!_eqSelectedIds.size) return;
+    try {
+        const res = await apiFetch('/api/enrichment/queue/bulk-approve', {
+            method: 'POST',
+            body: {ids: Array.from(_eqSelectedIds)},
+        });
+        showToast(`Approved ${res.approved} items`);
+        _eqSelectedIds.clear();
+        loadEnrichmentQueue();
+        loadEnrichmentStats();
+    } catch (e) {
+        showToast('Bulk approve failed: ' + (e.message || e), 'error');
+    }
+}
+
+async function startBackfill() {
+    const statusEl = document.getElementById('bfStatus');
+    const types = [];
+    if (document.getElementById('bfVendors')?.checked) types.push('vendor');
+    if (document.getElementById('bfCompanies')?.checked) types.push('company');
+    if (!types.length) {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--red)">Select at least one entity type</span>';
+        return;
+    }
+    const maxItems = parseInt(document.getElementById('bfMaxItems')?.value) || 500;
+    const includeEmail = document.getElementById('bfDeepEmail')?.checked || false;
+
+    try {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">Starting...</span>';
+        const res = await apiFetch('/api/enrichment/backfill', {
+            method: 'POST',
+            body: {entity_types: types, max_items: maxItems, include_deep_email: includeEmail},
+        });
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">Job #${res.job_id} started</span>`;
+        pollBackfillProgress(res.job_id);
+    } catch (e) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--red)">${esc(e.message || String(e))}</span>`;
+    }
+}
+
+function pollBackfillProgress(jobId) {
+    const box = document.getElementById('bfProgressBox');
+    const bar = document.getElementById('bfProgressBar');
+    const label = document.getElementById('bfProgressLabel');
+    if (box) box.style.display = '';
+
+    if (_bfPollInterval) clearInterval(_bfPollInterval);
+    _bfPollInterval = setInterval(async () => {
+        try {
+            const job = await apiFetch(`/api/enrichment/jobs/${jobId}`);
+            if (bar) bar.style.width = job.progress_pct + '%';
+            if (label) label.textContent = `${job.processed_items}/${job.total_items} processed, ${job.enriched_items} enriched, ${job.error_count} errors (${job.progress_pct}%)`;
+
+            if (['completed','failed','cancelled'].includes(job.status)) {
+                clearInterval(_bfPollInterval);
+                _bfPollInterval = null;
+                if (label) label.textContent += ` — ${job.status}`;
+                loadEnrichmentStats();
+            }
+        } catch (e) {
+            clearInterval(_bfPollInterval);
+            _bfPollInterval = null;
+        }
+    }, 5000);
+}
+
+async function loadEnrichmentJobs() {
+    const list = document.getElementById('enrichJobsList');
+    try {
+        const data = await apiFetch('/api/enrichment/jobs?limit=20');
+        const jobs = data.jobs || [];
+        if (!jobs.length) {
+            list.innerHTML = '<p class="empty">No enrichment jobs yet.</p>';
+            return;
+        }
+
+        let html = '<table class="tbl"><thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Progress</th><th>Enriched</th><th>Errors</th><th>Started By</th><th>Started</th><th>Completed</th><th>Actions</th></tr></thead><tbody>';
+        for (const job of jobs) {
+            const statusClass = job.status === 'completed' ? 'color:var(--green)' :
+                                job.status === 'running' ? 'color:var(--teal)' :
+                                job.status === 'failed' ? 'color:var(--red)' : '';
+            html += `<tr>
+                <td>#${job.id}</td>
+                <td>${esc(job.job_type)}</td>
+                <td style="${statusClass};font-weight:600">${esc(job.status)}</td>
+                <td>${job.progress_pct}% (${job.processed_items}/${job.total_items})</td>
+                <td>${job.enriched_items}</td>
+                <td>${job.error_count}</td>
+                <td>${esc(job.started_by || '—')}</td>
+                <td>${job.started_at ? fmtDateTime(job.started_at) : '—'}</td>
+                <td>${job.completed_at ? fmtDateTime(job.completed_at) : '—'}</td>
+                <td>${job.status === 'running' ? `<button class="btn btn-sm btn-outline" onclick="cancelEnrichJob(${job.id})">Cancel</button>` : ''}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        list.innerHTML = html;
+    } catch (e) {
+        list.innerHTML = `<p class="empty" style="color:var(--red)">Error: ${esc(e.message || String(e))}</p>`;
+    }
+}
+
+async function cancelEnrichJob(jobId) {
+    try {
+        await apiFetch(`/api/enrichment/jobs/${jobId}/cancel`, {method: 'POST'});
+        showToast('Job cancelled');
+        loadEnrichmentJobs();
+    } catch (e) {
+        showToast('Cancel failed: ' + (e.message || e), 'error');
+    }
+}
+
+async function loadEnrichmentStats() {
+    try {
+        const s = await apiFetch('/api/enrichment/stats');
+        const ve = document.getElementById('esVendors');
+        const ce = document.getElementById('esCompanies');
+        const pe = document.getElementById('esPending');
+        const aa = document.getElementById('esAutoApplied');
+        const aj = document.getElementById('esActiveJobs');
+        if (ve) ve.textContent = `${s.vendors_enriched}/${s.vendors_total}`;
+        if (ce) ce.textContent = `${s.companies_enriched}/${s.companies_total}`;
+        if (pe) pe.textContent = s.queue_pending;
+        if (aa) aa.textContent = s.queue_auto_applied;
+        if (aj) aj.textContent = s.active_jobs;
+    } catch (e) {
+        console.error('enrichment stats error:', e);
+    }
+}
+
+async function refreshEnrichmentBadge() {
+    try {
+        const s = await apiFetch('/api/enrichment/stats');
+        const badge = document.getElementById('enrichmentBadge');
+        if (badge && s.queue_pending > 0) {
+            badge.textContent = s.queue_pending;
+            badge.style.display = '';
+        } else if (badge) {
+            badge.style.display = 'none';
+        }
+    } catch (e) { /* ignore */ }
+}
+
+async function deepEnrichVendor(vendorId) {
+    try {
+        showToast('Starting deep enrichment...');
+        const res = await apiFetch(`/api/enrichment/vendor/${vendorId}`, {method: 'POST'});
+        if (res.status === 'completed') {
+            showToast(`Enriched ${(res.enriched_fields || []).length} fields`);
+        } else if (res.status === 'skipped') {
+            showToast('Recently enriched — skipped', 'info');
+        } else {
+            showToast('Enrichment: ' + (res.status || 'done'));
+        }
+    } catch (e) {
+        showToast('Enrichment failed: ' + (e.message || e), 'error');
+    }
+}
+
+async function deepEnrichCompany(companyId) {
+    try {
+        showToast('Starting deep enrichment...');
+        const res = await apiFetch(`/api/enrichment/company/${companyId}`, {method: 'POST'});
+        if (res.status === 'completed') {
+            showToast(`Enriched ${(res.enriched_fields || []).length} fields`);
+        } else if (res.status === 'skipped') {
+            showToast('Recently enriched — skipped', 'info');
+        } else {
+            showToast('Enrichment: ' + (res.status || 'done'));
+        }
+    } catch (e) {
+        showToast('Enrichment failed: ' + (e.message || e), 'error');
     }
 }

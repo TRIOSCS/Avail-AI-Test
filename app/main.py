@@ -613,3 +613,6 @@ app.include_router(admin_router)
 from .routers.emails import router as emails_router
 
 app.include_router(emails_router)
+from .routers.enrichment import router as enrichment_router
+
+app.include_router(enrichment_router)

@@ -972,6 +972,7 @@
                 <button id="navBuyPlans" onclick="showBuyPlans();setNav(this)" style="display:none">Buy Plans</button>
                 <button id="navProactive" onclick="showProactiveOffers();setNav(this)" style="display:none">Proactive <span id="proactiveBadge" class="nav-badge" style="display:none"></span></button>
                 <button id="navPerformance" onclick="showPerformance();setNav(this)" style="display:none">Scorecards</button>
+                <button id="navEnrichment" onclick="showEnrichment();setNav(this)" style="display:none">Enrichment <span id="enrichmentBadge" class="nav-badge" style="display:none"></span></button>
             </div>
         </div>
         <div class="user">
@@ -1875,6 +1876,81 @@
         <div id="perfVendorPanel"><p class="empty">Loading...</p></div>
         <div id="perfBuyerPanel" style="display:none"><p class="empty">Loading...</p></div>
         <div id="perfSalesPanel" style="display:none"><p class="empty">Loading...</p></div>
+    </div>
+
+    <!-- VIEW: Deep Enrichment -->
+    <div id="view-enrichment" style="display:none">
+        <div class="vendor-header">
+            <h2>Enrichment</h2>
+        </div>
+        <div class="tabs" id="enrichTabs">
+            <button class="tab on" onclick="switchEnrichTab('queue',this)">Review Queue</button>
+            <button class="tab" onclick="switchEnrichTab('backfill',this)">Backfill</button>
+            <button class="tab" onclick="switchEnrichTab('jobs',this)">Job History</button>
+        </div>
+
+        <!-- Review Queue Tab -->
+        <div id="enrichQueuePanel">
+            <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
+                <select id="eqStatusFilter" onchange="loadEnrichmentQueue()" style="padding:4px 8px;border-radius:4px;border:1px solid var(--border)">
+                    <option value="pending">Pending</option>
+                    <option value="auto_applied">Auto-Applied</option>
+                    <option value="approved">Approved</option>
+                    <option value="rejected">Rejected</option>
+                    <option value="all">All</option>
+                </select>
+                <select id="eqEntityFilter" onchange="loadEnrichmentQueue()" style="padding:4px 8px;border-radius:4px;border:1px solid var(--border)">
+                    <option value="">All Entities</option>
+                    <option value="vendor">Vendors</option>
+                    <option value="company">Companies</option>
+                </select>
+                <button class="btn btn-sm" onclick="bulkApproveSelected()" id="eqBulkApproveBtn" style="display:none">Approve Selected</button>
+                <span id="eqCount" style="color:var(--muted);font-size:13px;margin-left:auto;"></span>
+            </div>
+            <div id="enrichQueueList"><p class="empty">Loading...</p></div>
+        </div>
+
+        <!-- Backfill Tab -->
+        <div id="enrichBackfillPanel" style="display:none">
+            <div class="card" style="max-width:600px;margin-bottom:16px;padding:16px;">
+                <h3 style="margin-top:0;">Start Deep Enrichment</h3>
+                <label style="display:block;margin-bottom:8px;">
+                    <input type="checkbox" id="bfVendors" checked> Vendors
+                </label>
+                <label style="display:block;margin-bottom:8px;">
+                    <input type="checkbox" id="bfCompanies" checked> Companies
+                </label>
+                <label style="display:block;margin-bottom:8px;">
+                    <input type="checkbox" id="bfDeepEmail"> Include Deep Email Mining
+                </label>
+                <label style="display:block;margin-bottom:8px;">
+                    Max items: <input type="number" id="bfMaxItems" value="500" min="1" max="2000" style="width:80px;padding:2px 6px;">
+                </label>
+                <button class="btn" onclick="startBackfill()">Start Enrichment</button>
+                <span id="bfStatus" style="margin-left:12px;"></span>
+            </div>
+            <div id="bfProgressBox" style="display:none;max-width:600px;">
+                <h4>Running Job</h4>
+                <div style="background:var(--bg);border-radius:4px;height:20px;overflow:hidden;margin-bottom:8px;">
+                    <div id="bfProgressBar" style="height:100%;background:var(--teal);transition:width 0.3s;width:0%"></div>
+                </div>
+                <span id="bfProgressLabel" style="font-size:13px;color:var(--muted);"></span>
+            </div>
+        </div>
+
+        <!-- Job History Tab -->
+        <div id="enrichJobsPanel" style="display:none">
+            <div id="enrichJobsList"><p class="empty">Loading...</p></div>
+        </div>
+
+        <!-- Stats Summary -->
+        <div id="enrichStatsPanel" style="margin-top:16px;padding:12px;background:var(--bg);border-radius:6px;display:flex;gap:24px;flex-wrap:wrap;">
+            <div><strong id="esVendors">-</strong><br><small style="color:var(--muted)">Vendors Enriched</small></div>
+            <div><strong id="esCompanies">-</strong><br><small style="color:var(--muted)">Companies Enriched</small></div>
+            <div><strong id="esPending">-</strong><br><small style="color:var(--muted)">Pending Review</small></div>
+            <div><strong id="esAutoApplied">-</strong><br><small style="color:var(--muted)">Auto-Applied</small></div>
+            <div><strong id="esActiveJobs">-</strong><br><small style="color:var(--muted)">Active Jobs</small></div>
+        </div>
     </div>
 
     <!-- VIEW: Settings (admin + dev_assistant) -->

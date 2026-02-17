@@ -270,6 +270,12 @@ function applyRoleGating() {
     // Performance nav visible to all
     const perfNav = document.getElementById('navPerformance');
     if (perfNav) perfNav.style.display = '';
+    // Enrichment nav visible to admin, manager, trader
+    const enrichNav = document.getElementById('navEnrichment');
+    if (enrichNav && (window.__isAdmin || ['manager','trader'].includes(window.userRole))) {
+        enrichNav.style.display = '';
+        refreshEnrichmentBadge();
+    }
     // Settings gear visible to admin and dev_assistant
     const settingsMenu = document.getElementById('settingsMenu');
     if (settingsMenu && (window.__isAdmin || window.__isDevAssistant)) settingsMenu.style.display = '';
@@ -1736,6 +1742,7 @@ async function openVendorPopup(cardId) {
     const vendorDomain = card.domain || (card.website ? card.website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
     html += `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
         <button class="btn-enrich" onclick="enrichVendor(${card.id},'${escAttr(vendorDomain)}')">Enrich</button>
+        <button class="btn-ai" onclick="deepEnrichVendor(${card.id})">Deep Enrich</button>
         <button class="btn-ai" onclick="findAIContacts('vendor',${card.id},'${escAttr(card.display_name)}','${escAttr(vendorDomain)}')">Find Contacts</button>
         <button class="btn-enrich" onclick="analyzeVendorMaterials(${card.id})">Analyze Materials</button>
     </div>`;

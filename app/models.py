@@ -45,6 +45,7 @@ class User(Base):
     m365_connected = Column(Boolean, default=False)
     m365_error_reason = Column(String(255))
     m365_last_healthy = Column(DateTime)
+    last_deep_email_scan = Column(DateTime)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisitions = relationship("Requisition", back_populates="creator")
@@ -89,6 +90,9 @@ class Company(Base):
     tax_id = Column(String(100))  # EIN / VAT ID
     currency = Column(String(10), default="USD")
     preferred_carrier = Column(String(100))  # FedEx, UPS, DHL, etc.
+
+    # Deep enrichment tracking
+    deep_enrichment_at = Column(DateTime)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
@@ -811,6 +815,11 @@ class VendorCard(Base):
     brand_tags = Column(JSON, default=list)  # ["IBM", "Dell", "HP"]
     commodity_tags = Column(JSON, default=list)  # ["CPU", "HDD", "DDR", "LCD"]
     material_tags_updated_at = Column(DateTime)
+
+    # Deep enrichment tracking
+    deep_enrichment_at = Column(DateTime)
+    specialty_confidence = Column(Float)
+    email_history_scanned_at = Column(DateTime)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(

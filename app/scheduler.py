@@ -26,6 +26,8 @@ def _utc(dt):
 # v1.3.0: Track last ownership sweep run (simple module-level timestamp)
 _last_ownership_sweep = datetime.min.replace(tzinfo=timezone.utc)
 _last_performance_compute = datetime.min.replace(tzinfo=timezone.utc)
+_last_deep_email_scan = datetime.min.replace(tzinfo=timezone.utc)
+_last_deep_enrichment_sweep = datetime.min.replace(tzinfo=timezone.utc)
 
 # Buy plan: PO verification interval & stock sale auto-complete
 _last_po_verify = datetime.min.replace(tzinfo=timezone.utc)
@@ -411,6 +413,131 @@ async def _scheduler_tick():
         except Exception as e:
             log.error(f"Performance tracking error: {e}")
             db.rollback()
+
+        # ── Deep email mining (every 4 hours, per user) ──
+        if settings.deep_email_mining_enabled:
+            try:
+                global _last_deep_email_scan
+                if now - _last_deep_email_scan > timedelta(hours=4):
+                    from .connectors.email_mining import EmailMiner
+                    from .services.signature_parser import extract_signature, cache_signature_extract
+                    from .services.deep_enrichment_service import link_contact_to_entities
+
+                    for user in users:
+                        if not user.access_token or not user.m365_connected:
+                            continue
+
+                        # Check per-user staleness
+                        if user.last_deep_email_scan:
+                            last_scan = _utc(user.last_deep_email_scan)
+                            if now - last_scan < timedelta(hours=4):
+                                continue
+
+                        try:
+                            token = await get_valid_token(user, db)
+                            if not token:
+                                continue
+                            miner = EmailMiner(token, db=db, user_id=user.id)
+                            scan_result = await asyncio.wait_for(
+                                miner.deep_scan_inbox(lookback_days=30, max_messages=500),
+                                timeout=120,
+                            )
+                            # Process per-domain results for contact linking
+                            for domain, domain_data in scan_result.get("per_domain", {}).items():
+                                for email_addr in domain_data.get("emails", [])[:10]:
+                                    try:
+                                        link_contact_to_entities(db, email_addr, {
+                                            "full_name": domain_data.get("sender_names", [""])[0] if domain_data.get("sender_names") else None,
+                                            "confidence": 0.6,
+                                        })
+                                    except Exception:
+                                        pass
+
+                            user.last_deep_email_scan = now
+                            db.commit()
+                            log.info(
+                                f"Deep email scan [{user.email}]: {scan_result.get('messages_scanned', 0)} msgs, "
+                                f"{scan_result.get('contacts_found', 0)} contacts"
+                            )
+                        except asyncio.TimeoutError:
+                            log.warning(f"Deep email scan TIMEOUT for {user.email}")
+                        except Exception as e:
+                            log.error(f"Deep email scan error for {user.email}: {e}")
+                            db.rollback()
+
+                    _last_deep_email_scan = now
+            except Exception as e:
+                log.error(f"Deep email mining error: {e}")
+                db.rollback()
+
+        # ── Deep enrichment sweep (every 12 hours) ──
+        if settings.deep_enrichment_enabled:
+            try:
+                global _last_deep_enrichment_sweep
+                if now - _last_deep_enrichment_sweep > timedelta(hours=12):
+                    from .models import VendorCard, Company
+                    from .services.deep_enrichment_service import deep_enrich_vendor, deep_enrich_company
+
+                    # Enrich up to 50 vendors per sweep
+                    stale_vendors = (
+                        db.query(VendorCard.id)
+                        .filter(
+                            (VendorCard.deep_enrichment_at.is_(None)) |
+                            (VendorCard.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
+                        )
+                        .order_by(VendorCard.sighting_count.desc().nullslast())
+                        .limit(50)
+                        .all()
+                    )
+                    for (vid,) in stale_vendors:
+                        try:
+                            await deep_enrich_vendor(vid, db)
+                        except Exception as e:
+                            log.warning(f"Enrichment sweep vendor {vid} error: {e}")
+                            db.rollback()
+
+                    # Enrich recently created entities (last 24h with no enrichment)
+                    recent_vendors = (
+                        db.query(VendorCard.id)
+                        .filter(
+                            VendorCard.created_at > now - timedelta(hours=24),
+                            VendorCard.deep_enrichment_at.is_(None),
+                        )
+                        .limit(20)
+                        .all()
+                    )
+                    for (vid,) in recent_vendors:
+                        try:
+                            await deep_enrich_vendor(vid, db)
+                        except Exception as e:
+                            log.warning(f"Enrichment sweep new vendor {vid} error: {e}")
+                            db.rollback()
+
+                    # Enrich up to 20 companies
+                    stale_companies = (
+                        db.query(Company.id)
+                        .filter(
+                            (Company.deep_enrichment_at.is_(None)) |
+                            (Company.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
+                        )
+                        .limit(20)
+                        .all()
+                    )
+                    for (cid,) in stale_companies:
+                        try:
+                            await deep_enrich_company(cid, db)
+                        except Exception as e:
+                            log.warning(f"Enrichment sweep company {cid} error: {e}")
+                            db.rollback()
+
+                    _last_deep_enrichment_sweep = now
+                    log.info(
+                        f"Deep enrichment sweep: {len(stale_vendors)} vendors, "
+                        f"{len(recent_vendors)} new vendors, {len(stale_companies)} companies"
+                    )
+            except Exception as e:
+                log.error(f"Deep enrichment sweep error: {e}")
+                db.rollback()
 
     except Exception as e:
         log.error(f"Scheduler batch error: {e}")

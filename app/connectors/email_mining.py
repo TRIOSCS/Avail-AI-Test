@@ -503,6 +503,164 @@ class EmailMiner:
             "used_delta": used_delta,
         }
 
+    # ── Deep Mining (scans ALL emails, not just offer-tagged) ──────────
+
+    async def deep_scan_inbox(
+        self, lookback_days: int = 365, max_messages: int = 2000
+    ) -> dict:
+        """Deep scan ALL emails for contacts, signatures, and vendor intelligence.
+
+        Unlike scan_inbox(), this does NOT filter by OFFER_PATTERNS — it processes
+        every email to extract signatures, brand mentions, and contact data.
+
+        Uses separate processing_type='deep_mining' for dedup (H2).
+
+        Returns: {
+            messages_scanned: int,
+            signatures_extracted: int,
+            brands_detected: int,
+            contacts_found: int,
+            per_domain: {domain: {emails: [...], phones: [...], brands: [...], commodities: [...]}}
+        }
+        """
+        from datetime import timedelta
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+        cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Fetch all messages (no keyword filter)
+        params = {
+            "$filter": f"receivedDateTime ge {cutoff_str}",
+            "$orderby": "receivedDateTime desc",
+            "$top": "50",
+            "$select": MSG_SELECT,
+        }
+
+        try:
+            messages = await self.gc.get_all_pages(
+                "/me/messages", params=params, max_items=max_messages
+            )
+        except Exception as e:
+            log.warning("Deep scan inbox error: %s", e)
+            return {
+                "messages_scanned": 0,
+                "signatures_extracted": 0,
+                "brands_detected": 0,
+                "contacts_found": 0,
+                "per_domain": {},
+            }
+
+        # Filter already-processed
+        msg_ids = [m.get("id") for m in messages if m.get("id")]
+        if self.db and msg_ids:
+            processed = self._already_processed(msg_ids, "deep_mining")
+        else:
+            processed = set()
+
+        # Skip common internal/system domains
+        skip_domains = {
+            "gmail.com", "yahoo.com", "outlook.com", "hotmail.com",
+            "microsoft.com", "google.com", "noreply", "no-reply",
+            "notifications", "mailer-daemon",
+        }
+
+        per_domain = {}
+        signatures_extracted = 0
+        brands_detected = 0
+        contacts_found = 0
+
+        for msg in messages:
+            msg_id = msg.get("id")
+            if not msg_id or msg_id in processed:
+                continue
+
+            sender = msg.get("sender", {}).get("emailAddress", {})
+            sender_email = (sender.get("address") or "").strip().lower()
+            sender_name = (sender.get("name") or "").strip()
+
+            if not sender_email or "@" not in sender_email:
+                continue
+
+            domain = sender_email.split("@")[-1].lower()
+            if any(skip in domain for skip in skip_domains):
+                continue
+
+            body = (msg.get("body", {}).get("content") or "")[:5000]
+            subject = msg.get("subject") or ""
+
+            # Extract vendor info (phones, websites)
+            vendor_info = self._extract_vendor_info(sender_name, sender_email, body, subject)
+
+            # Accumulate per domain
+            if domain not in per_domain:
+                per_domain[domain] = {
+                    "vendor_name": vendor_info["vendor_name"],
+                    "emails": set(),
+                    "phones": set(),
+                    "websites": set(),
+                    "brands": set(),
+                    "commodities": set(),
+                    "sender_names": set(),
+                    "subjects": [],
+                }
+
+            entry = per_domain[domain]
+            entry["emails"].add(sender_email)
+            entry["phones"].update(vendor_info.get("phones", []))
+            entry["websites"].update(vendor_info.get("websites", []))
+            if sender_name:
+                entry["sender_names"].add(sender_name)
+            if subject:
+                entry["subjects"].append(subject[:200])
+
+            # Detect brands and commodities from subject + body snippet
+            try:
+                from app.services.specialty_detector import (
+                    detect_brands_from_text,
+                    detect_commodities_from_text,
+                )
+                text_for_analysis = f"{subject} {body[:2000]}"
+                brands = detect_brands_from_text(text_for_analysis)
+                commodities = detect_commodities_from_text(text_for_analysis)
+                entry["brands"].update(brands)
+                entry["commodities"].update(commodities)
+                if brands:
+                    brands_detected += 1
+            except Exception:
+                pass
+
+            contacts_found += 1
+
+            # Mark as processed
+            if self.db:
+                self._mark_processed(msg_id, "deep_mining")
+
+        signatures_extracted = len(per_domain)
+
+        # Convert sets to lists for JSON serialization
+        for domain, entry in per_domain.items():
+            entry["emails"] = list(entry["emails"])
+            entry["phones"] = list(entry["phones"])
+            entry["websites"] = list(entry["websites"])
+            entry["brands"] = list(entry["brands"])
+            entry["commodities"] = list(entry["commodities"])
+            entry["sender_names"] = list(entry["sender_names"])
+
+        if self.db:
+            try:
+                self.db.commit()
+            except Exception as e:
+                log.warning("Deep scan commit error: %s", e)
+                self.db.rollback()
+
+        return {
+            "messages_scanned": len(messages) - len(processed),
+            "signatures_extracted": signatures_extracted,
+            "brands_detected": brands_detected,
+            "contacts_found": contacts_found,
+            "per_domain": per_domain,
+        }
+
     # ── Private helpers ──────────────────────────────────────────────────
 
     async def _search_messages(self, query: str, limit: int = 250) -> list[dict]:
