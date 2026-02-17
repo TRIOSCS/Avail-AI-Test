@@ -952,17 +952,68 @@ function copyQuoteTable() {
     });
 }
 
-async function sendQuoteEmail() {
+function sendQuoteEmail() {
     if (!crmQuote) return;
-    const toEmail = crmQuote.contact_email;
-    if (!toEmail) {
-        showToast('No contact email on customer site — add one first', 'error');
-        return;
+    // Populate the send-quote modal with contact options
+    const sel = document.getElementById('sqContactSelect');
+    sel.innerHTML = '';
+    const q = crmQuote;
+    // Primary site contact
+    if (q.contact_email) {
+        const opt = document.createElement('option');
+        opt.value = q.contact_email;
+        opt.dataset.name = q.contact_name || '';
+        opt.textContent = (q.contact_name ? q.contact_name + ' — ' : '') + q.contact_email;
+        sel.appendChild(opt);
     }
-    if (!confirm('Send quote ' + crmQuote.quote_number + ' to ' + toEmail + '?')) return;
+    // Additional site contacts
+    (q.site_contacts || []).forEach(function(c) {
+        if (c.email && c.email !== q.contact_email) {
+            const opt = document.createElement('option');
+            opt.value = c.email;
+            opt.dataset.name = c.full_name || '';
+            opt.textContent = (c.full_name ? c.full_name + ' — ' : '') + c.email;
+            sel.appendChild(opt);
+        }
+    });
+    // Manual entry option
+    var manOpt = document.createElement('option');
+    manOpt.value = '__manual__';
+    manOpt.textContent = 'Enter email manually...';
+    sel.appendChild(manOpt);
+
+    document.getElementById('sqQuoteNum').textContent = q.quote_number + ' Rev ' + q.revision;
+    document.getElementById('sqManualEmail').value = '';
+    onSqContactChange();
+    document.getElementById('sendQuoteModal').classList.add('open');
+}
+
+function onSqContactChange() {
+    var sel = document.getElementById('sqContactSelect');
+    var manual = sel.value === '__manual__';
+    document.getElementById('sqManualRow').style.display = manual ? '' : 'none';
+    if (manual) setTimeout(function() { document.getElementById('sqManualEmail').focus(); }, 50);
+}
+
+async function confirmSendQuote() {
+    if (!crmQuote) return;
+    var sel = document.getElementById('sqContactSelect');
+    var toEmail, toName;
+    if (sel.value === '__manual__') {
+        toEmail = document.getElementById('sqManualEmail').value.trim();
+        toName = '';
+        if (!toEmail) { showToast('Enter an email address', 'error'); return; }
+    } else {
+        toEmail = sel.value;
+        toName = sel.options[sel.selectedIndex].dataset.name || '';
+    }
+    closeModal('sendQuoteModal');
     try {
         await saveQuoteDraft();
-        const sendData = await apiFetch('/api/quotes/' + crmQuote.id + '/send', { method: 'POST' });
+        var sendData = await apiFetch('/api/quotes/' + crmQuote.id + '/send', {
+            method: 'POST',
+            body: { to_email: toEmail, to_name: toName }
+        });
         showToast('Quote sent to ' + (sendData.sent_to || toEmail), 'success');
         notifyStatusChange(sendData);
         loadQuote();

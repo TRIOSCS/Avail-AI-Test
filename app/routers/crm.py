@@ -128,6 +128,16 @@ def quote_to_dict(q: Quote) -> dict:
         ),
         "contact_name": q.customer_site.contact_name if q.customer_site else None,
         "contact_email": q.customer_site.contact_email if q.customer_site else None,
+        "site_contacts": [
+            {
+                "id": c.id,
+                "full_name": c.full_name,
+                "email": c.email,
+                "title": c.title,
+                "is_primary": c.is_primary,
+            }
+            for c in (q.customer_site.site_contacts if q.customer_site else [])
+        ],
         "quote_number": q.quote_number,
         "revision": q.revision,
         "line_items": q.line_items or [],
@@ -1436,13 +1446,20 @@ async def send_quote(
     if not quote:
         raise HTTPException(404)
 
-    # Build recipient from customer site contact
-    site = db.get(CustomerSite, quote.customer_site_id)
-    to_email = site.contact_email if site else None
-    if not to_email:
-        raise HTTPException(400, "No contact email on customer site — cannot send")
+    # Allow caller to override recipient email/name
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    override_email = (body.get("to_email") or "").strip()
+    override_name = (body.get("to_name") or "").strip()
 
-    to_name = site.contact_name or ""
+    site = db.get(CustomerSite, quote.customer_site_id)
+    to_email = override_email or (site.contact_email if site else None)
+    if not to_email:
+        raise HTTPException(400, "No recipient email — select a contact or enter one manually")
+
+    to_name = override_name or (site.contact_name if site else "") or ""
     company_name = site.company.name if site and site.company else ""
 
     # Build the HTML quote email
