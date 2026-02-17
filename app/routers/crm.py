@@ -169,6 +169,7 @@ def quote_to_dict(q: Quote) -> dict:
 async def list_companies(
     search: str = "",
     owner_id: int = 0,
+    unassigned: int = 0,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -176,6 +177,8 @@ async def list_companies(
     if search.strip():
         safe = search.strip().replace("%", r"\%").replace("_", r"\_")
         query = query.filter(Company.name.ilike(f"%{safe}%"))
+    if unassigned:
+        query = query.filter(Company.account_owner_id == None)  # noqa: E711
     companies = query.order_by(Company.name).limit(500).all()
 
     # Pre-fetch open requisition counts per site (avoids N+1 query per site)
@@ -203,7 +206,7 @@ async def list_companies(
         for s in c.sites:
             if not s.is_active:
                 continue
-            if owner_id and s.owner_id != owner_id:
+            if owner_id and not unassigned and s.owner_id != owner_id:
                 continue
             open_count = site_open_counts.get(s.id, 0)
             sites.append(
@@ -224,7 +227,7 @@ async def list_companies(
                     "notes": s.notes,
                 }
             )
-        if owner_id and not sites:
+        if owner_id and not unassigned and not sites:
             continue
         result.append(
             {
@@ -1841,6 +1844,8 @@ def _buyplan_to_dict(bp: BuyPlan) -> dict:
         "submitted_by_id": bp.submitted_by_id,
         "approved_by": bp.approved_by.name if bp.approved_by else None,
         "approved_by_id": bp.approved_by_id,
+        "rejected_by": bp.approved_by.name if (bp.approved_by and bp.status == "rejected") else None,
+        "rejected_by_id": bp.approved_by_id if bp.status == "rejected" else None,
         "submitted_at": bp.submitted_at.isoformat() if bp.submitted_at else None,
         "approved_at": bp.approved_at.isoformat() if bp.approved_at else None,
         "rejected_at": bp.rejected_at.isoformat() if bp.rejected_at else None,
@@ -2096,6 +2101,9 @@ async def get_buy_plan(
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise HTTPException(404)
+    if not _is_admin(user) and user.role not in ("manager", "buyer"):
+        if plan.submitted_by_id != user.id:
+            raise HTTPException(403, "You can only view your own buy plans")
     return _buyplan_to_dict(plan)
 
 
@@ -2438,6 +2446,9 @@ async def resubmit_buy_plan(
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise HTTPException(404)
+    if not _is_admin(user) and user.role != "manager":
+        if plan.submitted_by_id != user.id:
+            raise HTTPException(403, "Only the original submitter, admin, or manager can resubmit")
     if plan.status not in ("rejected", "cancelled"):
         raise HTTPException(
             400, f"Can only resubmit from rejected/cancelled, current: {plan.status}"

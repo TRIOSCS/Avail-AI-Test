@@ -8,7 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg:#f2f3f6; --white:#fff; --card2:#eceef2; --input:#f0f2f5; --surface:#f7f8fa;
+            --bg:#e8e8e8; --white:#fff; --card2:#eceef2; --input:#f0f2f5; --surface:#f7f8fa;
             --border:#c8cdd6; --border2:#b4bbc8; --focus:#3d6895;
             --text:#1a1f2e; --text2:#3d4a5c; --muted:#5f6d7e;
             --teal:#3d6895; --teal-light:#eaeff5;
@@ -597,6 +597,7 @@
         .cust-card.expanded .cust-expand{transform:rotate(90deg)}
         .cust-name{font-weight:700;font-size:14px;flex:1}
         .cust-count{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+        .cust-acct-mgr{font-size:10px;color:var(--text2);margin-left:4px}
         .cust-sites{display:none;border-top:1px solid var(--border);padding:8px 16px}
         .cust-card.expanded .cust-sites{display:block}
         .cust-site{display:flex;align-items:center;gap:12px;padding:8px 10px;border-radius:6px;cursor:pointer;transition:.15s;font-size:12px}
@@ -1009,6 +1010,16 @@
                 <button class="filter-pill" data-req-status="quoted" onclick="setReqStatusFilter('quoted',this)">Quoted</button>
                 <button class="filter-pill" data-req-status="archive" onclick="setReqStatusFilter('archive',this)">Archive</button>
             </div>
+            <select class="filter-sort" id="reqListSort" onchange="setReqListSort(this.value)">
+                <option value="newest">Newest first</option>
+                <option value="oldest">Oldest first</option>
+                <option value="name-az">Name A→Z</option>
+                <option value="name-za">Name Z→A</option>
+                <option value="parts">Most parts</option>
+                <option value="replies">Most replies</option>
+                <option value="customer">Customer A→Z</option>
+                <option value="last-searched">Last searched</option>
+            </select>
             <span class="filter-count" id="reqStatusCount"></span>
         </div>
         <div id="reqList"><p class="empty">Loading…</p></div>
@@ -1126,6 +1137,15 @@
                     <button class="filter-pill" data-src-filter="available" onclick="setSrcFilter('available',this)">Available</button>
                     <button class="filter-pill" data-src-filter="sold" onclick="setSrcFilter('sold',this)">Not Available</button>
                 </div>
+                <select class="filter-sort" id="srcSort" onchange="setSrcSort(this.value)">
+                    <option value="default">Default (score)</option>
+                    <option value="price-asc">Price Low→High</option>
+                    <option value="price-desc">Price High→Low</option>
+                    <option value="qty-desc">Qty High→Low</option>
+                    <option value="qty-asc">Qty Low→High</option>
+                    <option value="vendor-az">Vendor A→Z</option>
+                    <option value="engagement">Engagement High→Low</option>
+                </select>
                 <span class="filter-count" id="srcFilterCount"></span>
             </div>
             <div class="collapsed-match-hint hidden" id="collapsedMatchHint"></div>
@@ -1205,12 +1225,22 @@
         <div class="req-header">
             <h2>Customers</h2>
             <div class="flex-center gap-lg">
-                <label id="custMyOnlyLabel" class="flex-center" style="gap:5px;font-size:12px;color:var(--text2);cursor:pointer;display:none">
-                    <input type="checkbox" id="custMyOnly" onchange="loadCustomers()" style="accent-color:var(--teal)" aria-label="Show only my accounts"> My accounts
-                </label>
                 <input class="req-search" id="custFilter" placeholder="Search companies…" oninput="debouncedLoadCustomers()" aria-label="Search companies">
                 <button class="btn btn-primary" onclick="openNewCompanyModal()">+ New Company</button>
             </div>
+        </div>
+        <div class="cust-filters flex-center gap-sm flex-wrap" style="padding:0 16px 8px">
+            <button class="filter-pill" id="custUnassignedPill" onclick="toggleCustUnassigned(this)">Unassigned</button>
+            <label id="custMyOnlyLabel" class="flex-center" style="gap:5px;font-size:12px;color:var(--text2);cursor:pointer;display:none">
+                <input type="checkbox" id="custMyOnly" onchange="loadCustomers()" style="accent-color:var(--teal)" aria-label="Show only my accounts"> My accounts
+            </label>
+            <select class="filter-sort" id="custSort" onchange="sortCustomers(this.value)">
+                <option value="name-az">Name A→Z</option>
+                <option value="name-za">Name Z→A</option>
+                <option value="sites">Most Sites</option>
+                <option value="type">Account Type</option>
+            </select>
+            <span id="custFilterCount" class="text-muted" style="font-size:11px"></span>
         </div>
         <div id="custList"><p class="empty">Loading…</p></div>
     </div>
@@ -1230,6 +1260,14 @@
             <label style="margin-left:auto;font-size:11px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px">
                 <input type="checkbox" id="vendorHideBL" onchange="filterVendorList()" aria-label="Hide blacklisted vendors"> Hide blacklisted
             </label>
+            <select class="filter-sort" id="vendorSort" onchange="setVendorSort(this.value)">
+                <option value="name-az">Name A→Z</option>
+                <option value="name-za">Name Z→A</option>
+                <option value="eng-desc">Engagement High→Low</option>
+                <option value="eng-asc">Engagement Low→High</option>
+                <option value="sightings">Most sightings</option>
+                <option value="rating">Highest rated</option>
+            </select>
             <span id="vendorFilterCount" class="text-muted"></span>
         </div>
         <div id="vendorList"><p class="empty">Loading…</p></div>
@@ -1243,6 +1281,16 @@
                 <button class="btn btn-ghost btn-sm" onclick="toggleStockImport()">📦 Import Stock</button>
                 <input class="vendor-search" id="materialSearch" placeholder="Search by part number…" oninput="debouncedLoadMaterials()" aria-label="Search material cards">
             </div>
+        </div>
+        <div class="filter-bar" style="padding:0 16px 8px;display:flex;align-items:center">
+            <select class="filter-sort" id="materialSort" onchange="setMaterialSort(this.value)">
+                <option value="last-searched">Last searched</option>
+                <option value="mpn-az">MPN A→Z</option>
+                <option value="mpn-za">MPN Z→A</option>
+                <option value="most-searched">Most searched</option>
+                <option value="most-vendors">Most vendors</option>
+                <option value="oldest-search">Oldest search</option>
+            </select>
         </div>
         <div id="stockImportArea" data-role="buyer" style="display:none;margin-bottom:12px" class="card">
             <strong style="font-size:12px;color:var(--muted)">Import a vendor stock list — all rows stored as material cards with vendor history</strong>
@@ -1880,6 +1928,7 @@
                     <input id="newUserEmail" placeholder="Email address" type="email" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
                     <select id="newUserRole" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
                         <option value="buyer">Buyer</option>
+                        <option value="trader">Trader</option>
                         <option value="sales">Sales</option>
                         <option value="manager">Manager</option>
                         <option value="admin">Admin</option>

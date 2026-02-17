@@ -7,11 +7,25 @@ let crmCustomers = [];
 let crmOffers = [];
 let crmQuote = null;
 let selectedOffers = new Set();
+let _custUnassigned = false;
+let _custSort = 'name-az';
 
 function autoLogCrmCall(phone) {
     apiFetch('/api/activities/call', {
         method: 'POST', body: { phone: phone, direction: 'outbound' }
     }).catch(function(e) { console.error('autoLogCrmCall:', e); });
+}
+
+// ── Customer Filter / Sort Helpers ─────────────────────────────────────
+function toggleCustUnassigned(btn) {
+    _custUnassigned = !_custUnassigned;
+    btn.classList.toggle('on', _custUnassigned);
+    loadCustomers();
+}
+
+function sortCustomers(val) {
+    _custSort = val;
+    renderCustomers();
 }
 
 // ── Customers View ─────────────────────────────────────────────────────
@@ -44,6 +58,7 @@ async function loadCustomers() {
         let url = '/api/companies?search=' + encodeURIComponent(filter);
         // Sales always sees only their accounts; managers/admins/traders can toggle
         if ((isSalesOnly || myOnly) && window.userId) url += '&owner_id=' + window.userId;
+        if (_custUnassigned) url += '&unassigned=1';
         crmCustomers = await apiFetch(url);
         renderCustomers();
     } catch (e) { showToast('Failed to load customers', 'error'); console.error(e); }
@@ -51,11 +66,20 @@ async function loadCustomers() {
 
 function renderCustomers() {
     const el = document.getElementById('custList');
+    const countEl = document.getElementById('custFilterCount');
     if (!crmCustomers.length) {
         el.innerHTML = '<p class="empty">No customers yet — add a company to get started</p>';
+        if (countEl) countEl.textContent = '';
         return;
     }
-    el.innerHTML = crmCustomers.map(c => {
+    // Sort
+    const sorted = [...crmCustomers];
+    if (_custSort === 'name-az') sorted.sort((a,b) => a.name.localeCompare(b.name));
+    else if (_custSort === 'name-za') sorted.sort((a,b) => b.name.localeCompare(a.name));
+    else if (_custSort === 'sites') sorted.sort((a,b) => b.site_count - a.site_count);
+    else if (_custSort === 'type') sorted.sort((a,b) => (a.account_type||'').localeCompare(b.account_type||''));
+    if (countEl) countEl.textContent = sorted.length + ' companies';
+    el.innerHTML = sorted.map(c => {
         const sitesHtml = c.sites.map(s => `
             <div class="cust-site" onclick="event.stopPropagation();toggleSiteDetail(${s.id})">
                 <span class="cust-site-name">${esc(s.site_name)}</span>
@@ -74,14 +98,16 @@ function renderCustomers() {
             c.linkedin_url ? '<a href="' + escAttr(c.linkedin_url) + '" target="_blank" style="color:var(--teal);text-decoration:none;font-size:10px">LinkedIn ↗</a>' : '',
         ].filter(Boolean).join('');
         const enrichHtml = acctTags ? '<div class="enrich-bar">' + acctTags + '</div>' : '';
+        const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
         const domain = c.domain || (c.website ? c.website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
         return `
         <div class="card cust-card" id="custCard-${c.id}">
             <div class="cust-header" onclick="toggleCompanyCard(this.parentElement,${c.id})">
                 <span class="cust-expand">▶</span>
-                <span class="cust-name">${esc(c.name)}</span>
+                <span class="cust-name">${esc(displayName)}</span>
                 ${domain ? '<span style="font-size:10px;color:var(--muted)">' + esc(domain) + '</span>' : ''}
                 <span class="cust-count">${c.site_count} site${c.site_count !== 1 ? 's' : ''}</span>
+                ${c.account_owner_name ? '<span class="cust-acct-mgr">' + esc(c.account_owner_name) + '</span>' : '<span class="cust-acct-mgr" style="color:#c77">unassigned</span>'}
                 <span id="actHealth-${c.id}" style="margin-left:4px"></span>
                 <span style="margin-left:auto;display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">
                     <button class="btn-enrich" onclick="openEditCompany(${c.id})">Edit</button>
@@ -1273,8 +1299,8 @@ function renderBuyPlanStatus(targetId) {
     if (!el) return;
     if (!_currentBuyPlan) { el.innerHTML = ''; return; }
     const bp = _currentBuyPlan;
-    const isAdmin = window.__isAdmin || window.userRole === 'admin';
-    const isBuyer = ['buyer','trader','manager','admin'].includes(window.userRole) || window.__isAdmin;
+    const isAdmin = window.__isAdmin;
+    const isBuyer = ['buyer','trader','manager','admin'].includes(window.userRole);
 
     const statusColors = {
         pending_approval: 'var(--amber)',
@@ -1374,7 +1400,7 @@ function renderBuyPlanStatus(targetId) {
         }
     }
     if (isBuyer && (bp.status === 'approved' || bp.status === 'po_entered')) {
-        actionsHtml = `
+        actionsHtml += `
             <div style="margin-top:12px">
                 <button class="btn btn-primary" onclick="saveBuyPlanPOs()">Save PO Numbers</button>
                 <button class="btn btn-ghost" onclick="verifyBuyPlanPOs()">Verify PO Sent</button>
@@ -3715,6 +3741,7 @@ function renderAdminUsers() {
             <td>${u.email}</td>
             <td><select onchange="updateUserField(${u.id}, 'role', this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
                 <option value="buyer" ${u.role==='buyer'?'selected':''}>Buyer</option>
+                <option value="trader" ${u.role==='trader'?'selected':''}>Trader</option>
                 <option value="sales" ${u.role==='sales'?'selected':''}>Sales</option>
                 <option value="manager" ${u.role==='manager'?'selected':''}>Manager</option>
                 <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
