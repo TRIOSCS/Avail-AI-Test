@@ -133,7 +133,7 @@ async function toggleSiteDetail(siteId) {
                         </div>
                         ${c.title ? '<div class="si-contact-title">' + esc(c.title) + '</div>' : ''}
                         <div class="si-contact-meta">
-                            ${c.email ? '<a href="mailto:'+esc(c.email)+'" title="'+escAttr(c.email)+'">'+esc(c.email)+'</a>' : ''}
+                            ${c.email ? '<a href="mailto:'+esc(c.email)+'" title="'+escAttr(c.email)+'" onclick="autoLogEmail(\''+escAttr(c.email)+'\',\''+escAttr(c.full_name || '')+'\')">'+esc(c.email)+'</a>' : ''}
                             ${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" class="si-contact-phone" onclick="autoLogCrmCall(\''+escAttr(c.phone)+'\')">'+esc(c.phone)+'</a>' : ''}
                         </div>
                         ${c.notes ? '<div class="si-contact-notes">'+esc(c.notes)+'</div>' : ''}
@@ -905,7 +905,7 @@ function renderQuote() {
             <div><strong>${esc(q.quote_number)} Rev ${q.revision}</strong> <span class="status-badge status-${q.status}">${q.status}</span></div>
             <div style="color:var(--text2);font-size:12px;margin-top:2px">
                 ${esc(q.customer_name || '')}<br>
-                ${esc(q.contact_name || '')} · ${q.contact_email ? '<a href="mailto:'+esc(q.contact_email)+'">'+esc(q.contact_email)+'</a>' : ''}
+                ${esc(q.contact_name || '')} · ${q.contact_email ? '<a href="mailto:'+esc(q.contact_email)+'" onclick="autoLogEmail(\''+escAttr(q.contact_email)+'\',\''+escAttr(q.contact_name || '')+'\')">'+esc(q.contact_email)+'</a>' : ''}
             </div>
         </div>
     </div>
@@ -1683,7 +1683,7 @@ function renderSuggestedContacts() {
                 <div class="sc-name">${esc(c.full_name || '—')}</div>
                 <div class="sc-title">${esc(c.title || 'No title')}</div>
                 <div class="sc-meta">
-                    ${c.email ? '<span>✉ ' + esc(c.email) + '</span>' : ''}
+                    ${c.email ? '<a href="mailto:' + escAttr(c.email) + '" onclick="event.stopPropagation();autoLogEmail(\'' + escAttr(c.email) + '\',\'' + escAttr(c.full_name || '') + '\')">✉ ' + esc(c.email) + '</a>' : ''}
                     ${c.phone ? '<a href="tel:' + escAttr(c.phone) + '" onclick="event.stopPropagation();autoLogCrmCall(\'' + escAttr(c.phone) + '\')">☎ ' + esc(c.phone) + '</a>' : ''}
                     ${c.linkedin_url ? '<a href="' + escAttr(c.linkedin_url) + '" target="_blank" onclick="event.stopPropagation()">LinkedIn ↗</a>' : ''}
                     ${c.location ? '<span>📍 ' + esc(c.location) + '</span>' : ''}
@@ -1853,7 +1853,7 @@ function openAIContactsPanel(contacts, entityType, entityId) {
                             <div class="ai-contact-name">${esc(c.full_name)}</div>
                             <div class="ai-contact-title">${esc(c.title || 'No title')}</div>
                             <div class="ai-contact-meta">
-                                ${c.email ? `<span>✉ ${esc(c.email)}</span>` : ''}
+                                ${c.email ? `<a href="mailto:${escAttr(c.email)}" onclick="autoLogEmail('${escAttr(c.email)}','${escAttr(c.full_name || '')}')">✉ ${esc(c.email)}</a>` : ''}
                                 ${c.phone ? `<a href="tel:${escAttr(c.phone)}" onclick="autoLogCrmCall('${escAttr(c.phone)}')">☎ ${esc(c.phone)}</a>` : ''}
                                 ${c.linkedin_url ? `<a href="${escAttr(c.linkedin_url)}" target="_blank">LinkedIn ↗</a>` : ''}
                             </div>

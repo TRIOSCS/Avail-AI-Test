@@ -1886,7 +1886,7 @@ async function loadVendorContacts(cardId) {
                     </div>
                     ${c.title ? '<div style="font-size:11px;color:var(--text2)">' + esc(c.title) + '</div>' : ''}
                     <div class="si-contact-meta">
-                        ${c.email ? '<a href="mailto:' + escAttr(c.email) + '">' + esc(c.email) + '</a>' : ''}
+                        ${c.email ? '<a href="mailto:' + escAttr(c.email) + '" onclick="autoLogEmail(\'' + escAttr(c.email) + '\',\'' + escAttr(c.full_name || '') + '\')">' + esc(c.email) + '</a>' : ''}
                         ${c.email && c.phone ? ' &middot; ' : ''}
                         ${c.phone ? '<a href="tel:' + escAttr(c.phone) + '" onclick="autoLogVendorCall(' + cardId + ',\'' + escAttr(c.phone) + '\')">' + esc(c.phone) + '</a>' : ''}
                     </div>
@@ -2012,6 +2012,12 @@ function openVendorLogCallModal(cardId, vendorName, reqId) {
     window._vlcReqId = reqId || null;
     document.getElementById('vendorLogCallModal').classList.add('open');
     setTimeout(() => document.getElementById('vlcPhone').focus(), 100);
+}
+
+function autoLogEmail(email, contactName) {
+    apiFetch('/api/activities/email', {
+        method: 'POST', body: { email: email, contact_name: contactName || null }
+    }).catch(function(e) { console.error('autoLogEmail:', e); });
 }
 
 function autoLogVendorCall(cardId, phone) {

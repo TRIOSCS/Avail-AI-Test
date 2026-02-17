@@ -250,6 +250,37 @@ async def get_user_activities(
     return [_activity_to_dict(a) for a in activities]
 
 
+@router.post("/api/activities/email")
+async def log_email_click(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Auto-log when a mailto: link is clicked anywhere in the app."""
+    from app.services.activity_service import log_email_activity
+
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    email = (body.get("email") or "").strip()
+    if not email:
+        return {"status": "skipped", "message": "No email provided"}
+    record = log_email_activity(
+        user_id=user.id,
+        direction="sent",
+        email_addr=email,
+        subject=None,
+        external_id=None,
+        contact_name=body.get("contact_name"),
+        db=db,
+    )
+    db.commit()
+    if record:
+        return {"status": "logged", "activity_id": record.id}
+    return {"status": "no_match", "message": "Email did not match any known contact"}
+
+
 @router.post("/api/activities/call")
 async def log_phone_call(
     payload: PhoneCallLog,
