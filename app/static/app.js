@@ -258,9 +258,9 @@ function applyRoleGating() {
         roleBadge.className = `role-badge role-${window.userRole}`;
         roleBadge.style.display = 'none';
     }
-    // Show Buy Plans nav for admins
+    // Show Buy Plans nav for all roles except dev_assistant
     const bpNav = document.getElementById('navBuyPlans');
-    if (bpNav && window.__isAdmin) bpNav.style.display = '';
+    if (bpNav && window.userRole !== 'dev_assistant') bpNav.style.display = '';
     // Proactive nav visible for sales + admin
     const pNav = document.getElementById('navProactive');
     if (pNav && (['sales','trader'].includes(window.userRole) || window.__isAdmin)) {
@@ -481,6 +481,12 @@ function notifyStatusChange(data) {
 let _reqCustomerMap = {};  // id → customer_display
 let _reqListData = [];     // cached list for client-side filtering
 let _reqStatusFilter = 'draft';
+let _reqListSort = 'newest';
+
+function setReqListSort(val) {
+    _reqListSort = val;
+    renderReqList();
+}
 
 async function loadRequisitions(query = '') {
     try {
@@ -506,6 +512,17 @@ function renderReqList() {
     } else {
         data = data.filter(r => r.status === _reqStatusFilter);
     }
+    // Sort
+    const sort = _reqListSort;
+    if (sort === 'oldest') data = [...data].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    else if (sort === 'name-az') data = [...data].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    else if (sort === 'name-za') data = [...data].sort((a, b) => (b.name || '').localeCompare(a.name || ''));
+    else if (sort === 'parts') data = [...data].sort((a, b) => (b.requirement_count || 0) - (a.requirement_count || 0));
+    else if (sort === 'replies') data = [...data].sort((a, b) => (b.reply_count || 0) - (a.reply_count || 0));
+    else if (sort === 'customer') data = [...data].sort((a, b) => (a.customer_display || '').localeCompare(b.customer_display || ''));
+    else if (sort === 'last-searched') data = [...data].sort((a, b) => new Date(b.last_searched_at || 0) - new Date(a.last_searched_at || 0));
+    else data = [...data].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
     // Always show status bar
     if (statusBar) statusBar.style.display = 'flex';
     const countEl = document.getElementById('reqStatusCount');
@@ -777,7 +794,7 @@ function editReqName(h2) {
             await apiFetch(`/api/requisitions/${currentReqId}`, { method: 'PUT', body: { name: val } });
             currentReqName = val;
             h2.textContent = val;
-            loadRequisitions();
+            loadList();
         } catch(e) { h2.textContent = current; showToast('Failed to rename', 'error'); }
     };
     input.addEventListener('blur', save);
@@ -934,11 +951,17 @@ function updateRequirementCounts() {
 
 // ── Render Search Results ───────────────────────────────────────────────
 let srcFilterType = 'all';
+let _srcSort = 'default';
 
 function setSrcFilter(type, btn) {
     srcFilterType = type;
     document.querySelectorAll('[data-src-filter]').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
+    renderSources();
+}
+
+function setSrcSort(val) {
+    _srcSort = val;
     renderSources();
 }
 
@@ -1036,7 +1059,27 @@ function renderSources() {
             html += '<p class="empty" style="padding:12px 0">No vendors found for this part</p>';
         }
 
-        for (let i = 0; i < sightings.length; i++) {
+        // Sort sightings for display (preserve original indices for checkbox keys)
+        const sortedIndices = sightings.map((_, idx) => idx);
+        if (_srcSort !== 'default') {
+            sortedIndices.sort((a, b) => {
+                const sa = sightings[a], sb = sightings[b];
+                switch (_srcSort) {
+                    case 'price-asc': return (sa.unit_price ?? Infinity) - (sb.unit_price ?? Infinity);
+                    case 'price-desc': return (sb.unit_price ?? -1) - (sa.unit_price ?? -1);
+                    case 'qty-desc': return (sb.qty_available ?? 0) - (sa.qty_available ?? 0);
+                    case 'qty-asc': return (sa.qty_available ?? 0) - (sb.qty_available ?? 0);
+                    case 'vendor-az': return (sa.vendor_name || '').localeCompare(sb.vendor_name || '');
+                    case 'engagement': {
+                        const ea = sa.vendor_card?.engagement_score ?? -1;
+                        const eb = sb.vendor_card?.engagement_score ?? -1;
+                        return eb - ea;
+                    }
+                    default: return 0;
+                }
+            });
+        }
+        for (const i of sortedIndices) {
             const s = sightings[i];
 
             const vName = (s.vendor_name || '').trim();
@@ -2234,6 +2277,13 @@ async function analyzeVendorMaterials(cardId) {
 }
 
 // ── Vendors Tab ────────────────────────────────────────────────────────
+let _vendorSort = 'name-az';
+
+function setVendorSort(val) {
+    _vendorSort = val;
+    filterVendorList();
+}
+
 async function loadVendorList() {
     const q = (document.getElementById('vendorSearch') || {}).value || '';
     let resp;
@@ -2270,6 +2320,15 @@ function filterVendorList() {
     }
     if (hideBL) filtered = filtered.filter(c => !c.is_blacklisted);
 
+    // Sort
+    const vs = _vendorSort;
+    if (vs === 'name-za') filtered.sort((a, b) => (b.display_name || '').localeCompare(a.display_name || ''));
+    else if (vs === 'eng-desc') filtered.sort((a, b) => (b.engagement_score ?? -1) - (a.engagement_score ?? -1));
+    else if (vs === 'eng-asc') filtered.sort((a, b) => (a.engagement_score ?? -1) - (b.engagement_score ?? -1));
+    else if (vs === 'sightings') filtered.sort((a, b) => (b.sighting_count || 0) - (a.sighting_count || 0));
+    else if (vs === 'rating') filtered.sort((a, b) => (b.avg_rating ?? -1) - (a.avg_rating ?? -1));
+    else filtered.sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''));
+
     const countEl = document.getElementById('vendorFilterCount');
     if (countEl) countEl.textContent = filtered.length < _vendorListData.length ? `${filtered.length} of ${_vendorListData.length}` : '';
 
@@ -2298,12 +2357,34 @@ function filterVendorList() {
 }
 
 // ── Materials Tab ──────────────────────────────────────────────────────
+let _materialListData = [];
+let _materialSort = 'last-searched';
+
+function setMaterialSort(val) {
+    _materialSort = val;
+    renderMaterialList();
+}
+
 async function loadMaterialList() {
     const q = (document.getElementById('materialSearch') || {}).value || '';
     let resp;
     try { resp = await apiFetch(`/api/materials?q=${encodeURIComponent(q)}`); }
     catch (e) { console.error('Failed to load materials:', e); return; }
-    const data = resp.materials || resp;  // Backwards-compatible
+    _materialListData = resp.materials || resp;
+    renderMaterialList();
+}
+
+function renderMaterialList() {
+    let data = [..._materialListData];
+    const ms = _materialSort;
+    if (ms === 'mpn-az') data.sort((a, b) => (a.display_mpn || '').localeCompare(b.display_mpn || ''));
+    else if (ms === 'mpn-za') data.sort((a, b) => (b.display_mpn || '').localeCompare(a.display_mpn || ''));
+    else if (ms === 'most-searched') data.sort((a, b) => (b.search_count || 0) - (a.search_count || 0));
+    else if (ms === 'most-vendors') data.sort((a, b) => (b.vendor_count || 0) - (a.vendor_count || 0));
+    else if (ms === 'oldest-search') data.sort((a, b) => new Date(a.last_searched_at || 0) - new Date(b.last_searched_at || 0));
+    else data.sort((a, b) => new Date(b.last_searched_at || 0) - new Date(a.last_searched_at || 0));
+
+    const q = (document.getElementById('materialSearch') || {}).value || '';
     const el = document.getElementById('materialList');
     if (!data.length) {
         el.innerHTML = `<p class="empty">${q ? 'No materials match your search' : 'No material cards yet — they\'ll build automatically as you search'}</p>`;

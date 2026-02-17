@@ -26,7 +26,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.models import (
-    Base, Company, Requisition, Requirement, User, VendorCard, ActivityLog,
+    Base, Company, CustomerSite, Requisition, Requirement, User, VendorCard,
+    ActivityLog, Quote, Offer, BuyPlan,
 )
 
 # ── In-memory SQLite engine ──────────────────────────────────────────
@@ -239,3 +240,99 @@ def test_activity(db_session: Session, test_user: User, test_company: Company) -
     db_session.commit()
     db_session.refresh(activity)
     return activity
+
+
+@pytest.fixture()
+def manager_user(db_session: Session) -> User:
+    """A manager-role user for approval workflows."""
+    user = User(
+        email="manager@trioscs.com",
+        name="Test Manager",
+        role="manager",
+        azure_id="test-azure-id-manager",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture()
+def trader_user(db_session: Session) -> User:
+    """A trader-role user (restricted like sales)."""
+    user = User(
+        email="trader@trioscs.com",
+        name="Test Trader",
+        role="trader",
+        azure_id="test-azure-id-trader",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+    return user
+
+
+@pytest.fixture()
+def test_customer_site(db_session: Session, test_company: Company) -> CustomerSite:
+    """A sample customer site linked to test_company."""
+    site = CustomerSite(
+        company_id=test_company.id,
+        site_name="Acme HQ",
+        contact_name="Jane Doe",
+        contact_email="jane@acme-electronics.com",
+    )
+    db_session.add(site)
+    db_session.commit()
+    db_session.refresh(site)
+    return site
+
+
+@pytest.fixture()
+def test_quote(
+    db_session: Session,
+    test_requisition: Requisition,
+    test_customer_site: CustomerSite,
+    test_user: User,
+) -> Quote:
+    """A sent quote ready for buy plan submission."""
+    q = Quote(
+        requisition_id=test_requisition.id,
+        customer_site_id=test_customer_site.id,
+        quote_number="Q-2026-0001",
+        status="sent",
+        line_items=[],
+        subtotal=1000.00,
+        total_cost=500.00,
+        total_margin_pct=50.00,
+        created_by_id=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(q)
+    db_session.commit()
+    db_session.refresh(q)
+    return q
+
+
+@pytest.fixture()
+def test_offer(
+    db_session: Session,
+    test_requisition: Requisition,
+    test_user: User,
+) -> Offer:
+    """A vendor offer on the test requisition."""
+    o = Offer(
+        requisition_id=test_requisition.id,
+        vendor_name="Arrow Electronics",
+        mpn="LM317T",
+        qty_available=1000,
+        unit_price=0.50,
+        entered_by_id=test_user.id,
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(o)
+    db_session.commit()
+    db_session.refresh(o)
+    return o

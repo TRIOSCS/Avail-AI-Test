@@ -511,7 +511,6 @@ class EmailMiner:
             "$search": f'"{query}"',
             "$top": str(min(50, limit)),
             "$select": MSG_SELECT,
-            "$orderby": "receivedDateTime desc",
         }
         try:
             return await self.gc.get_all_pages(
