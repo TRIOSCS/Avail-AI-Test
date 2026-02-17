@@ -139,7 +139,8 @@ async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str)
 
 def card_to_dict(card: VendorCard, db: Session) -> dict:
     """Serialize a VendorCard with reviews, brand profile, and engagement metrics."""
-    reviews = db.query(VendorReview).filter_by(vendor_card_id=card.id).all()
+    from sqlalchemy.orm import joinedload
+    reviews = db.query(VendorReview).options(joinedload(VendorReview.user)).filter_by(vendor_card_id=card.id).all()
     avg = round(sum(r.rating for r in reviews) / len(reviews), 1) if reviews else None
 
     # Material profile: brands/manufacturers this vendor carries
@@ -547,31 +548,28 @@ async def scrape_website_contacts(url: str) -> dict:
     }
 
     async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-        for page_url in pages_to_try:
-            try:
-                resp = await client.get(page_url, headers=headers)
-                if resp.status_code != 200:
-                    continue
-                html = resp.text[:200_000]  # Cap at 200KB
+        # Fetch all pages concurrently instead of sequentially
+        import asyncio as _asyncio
+        tasks = [client.get(page_url, headers=headers) for page_url in pages_to_try]
+        results = await _asyncio.gather(*tasks, return_exceptions=True)
 
-                for mailto in re.findall(r'mailto:([^"\'?\s]+)', html, re.IGNORECASE):
-                    email = mailto.split("?")[0].strip().lower()
-                    if "@" in email:
-                        emails.add(email)
-
-                for match in _EMAIL_RE.findall(html):
-                    emails.add(match.lower())
-
-                for tel in re.findall(r'tel:([^"\'<\s]+)', html, re.IGNORECASE):
-                    phones.add(tel.strip())
-
-                # Short-circuit: found emails, skip remaining pages
-                if clean_emails(list(emails)):
-                    break
-
-            except Exception as e:
-                log.debug(f"Scrape failed for {page_url}: {e}")
+        for resp in results:
+            if isinstance(resp, Exception):
                 continue
+            if resp.status_code != 200:
+                continue
+            html = resp.text[:200_000]  # Cap at 200KB
+
+            for mailto in re.findall(r'mailto:([^"\'?\s]+)', html, re.IGNORECASE):
+                email = mailto.split("?")[0].strip().lower()
+                if "@" in email:
+                    emails.add(email)
+
+            for match in _EMAIL_RE.findall(html):
+                emails.add(match.lower())
+
+            for tel in re.findall(r'tel:([^"\'<\s]+)', html, re.IGNORECASE):
+                phones.add(tel.strip())
 
     return {"emails": clean_emails(list(emails)), "phones": clean_phones(list(phones))}
 
@@ -943,13 +941,12 @@ async def vendor_email_metrics(
     )
     total_quoted = len([c for c in contacts if c.status == "quoted"])
 
-    # Response time calculation
+    # Response time calculation — dict lookup instead of nested loop
+    contact_by_id = {c.id: c for c in contacts}
     response_hours: list[float] = []
     for vr in responses:
         if vr.contact_id and vr.received_at:
-            matching_contact = next(
-                (c for c in contacts if c.id == vr.contact_id), None
-            )
+            matching_contact = contact_by_id.get(vr.contact_id)
             if matching_contact and matching_contact.created_at:
                 delta = vr.received_at - matching_contact.created_at
                 response_hours.append(delta.total_seconds() / 3600)

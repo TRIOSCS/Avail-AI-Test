@@ -1362,8 +1362,14 @@ async def list_quotes(
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404)
+    from sqlalchemy.orm import joinedload
     quotes = (
         db.query(Quote)
+        .options(
+            joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(Quote.customer_site).joinedload(CustomerSite.site_contacts),
+            joinedload(Quote.created_by),
+        )
         .filter(Quote.requisition_id == req_id)
         .order_by(Quote.revision.desc())
         .all()

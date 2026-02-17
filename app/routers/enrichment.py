@@ -141,10 +141,14 @@ def api_bulk_approve(
     """Bulk approve multiple enrichment queue items."""
     from ..services.deep_enrichment_service import apply_queue_item
 
+    # Batch-fetch all items in one query instead of db.get() per item
+    items = db.query(EnrichmentQueue).filter(EnrichmentQueue.id.in_(body.ids)).all()
+    item_map = {item.id: item for item in items}
+
     approved = 0
     failed = 0
     for item_id in body.ids:
-        item = db.get(EnrichmentQueue, item_id)
+        item = item_map.get(item_id)
         if item and item.status in ("pending", "low_confidence"):
             ok = apply_queue_item(db, item, user_id=user.id)
             if ok:

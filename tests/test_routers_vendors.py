@@ -57,7 +57,7 @@ def test_card_to_dict_with_reviews():
     card = _make_vendor_card()
     review = _make_review(rating=4)
     db = MagicMock()
-    db.query.return_value.filter_by.return_value.all.return_value = [review]
+    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = [review]
     db.execute.return_value.fetchall.return_value = [("Texas Instruments", 5)]
     db.execute.return_value.scalar.return_value = 12
 
@@ -77,7 +77,7 @@ def test_card_to_dict_no_reviews():
     """card_to_dict handles zero reviews gracefully."""
     card = _make_vendor_card()
     db = MagicMock()
-    db.query.return_value.filter_by.return_value.all.return_value = []
+    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = []
     db.execute.return_value.fetchall.return_value = []
     db.execute.return_value.scalar.return_value = 0
 
@@ -95,7 +95,7 @@ def test_card_to_dict_none_timestamps():
         created_at=None, updated_at=None,
     )
     db = MagicMock()
-    db.query.return_value.filter_by.return_value.all.return_value = []
+    db.query.return_value.options.return_value.filter_by.return_value.all.return_value = []
     db.execute.return_value.fetchall.return_value = []
     db.execute.return_value.scalar.return_value = 0
 
