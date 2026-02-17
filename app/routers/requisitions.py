@@ -14,6 +14,8 @@ Called by: main.py (router mount)
 Depends on: models, search_service, file_utils, scoring, vendor_utils
 """
 
+import asyncio
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
@@ -487,6 +489,17 @@ async def search_all(
 
     # Enrich with vendor card ratings (no contact lookup — that happens at RFQ time)
     _enrich_with_vendor_cards(results, db)
+
+    # Auto-create routing assignments for new sightings
+    try:
+        from ..services.routing_service import auto_route_search_results, notify_routing_assignment
+        new_assignments = auto_route_search_results(results, db)
+        if new_assignments:
+            coros = [notify_routing_assignment(a, db) for a in new_assignments]
+            await asyncio.gather(*coros, return_exceptions=True)
+    except Exception:
+        logging.getLogger("avail.routing").exception("Auto-routing failed in search_all")
+
     return results
 
 
@@ -507,6 +520,17 @@ async def search_one(
         str(r.id): {"label": r.primary_mpn or f"Req #{r.id}", "sightings": sightings}
     }
     _enrich_with_vendor_cards(results, db)
+
+    # Auto-create routing assignments for new sightings
+    try:
+        from ..services.routing_service import auto_route_search_results, notify_routing_assignment
+        new_assignments = auto_route_search_results(results, db)
+        if new_assignments:
+            coros = [notify_routing_assignment(a, db) for a in new_assignments]
+            await asyncio.gather(*coros, return_exceptions=True)
+    except Exception:
+        logging.getLogger("avail.routing").exception("Auto-routing failed in search_one")
+
     return {"sightings": results[str(r.id)]["sightings"]}
 
 

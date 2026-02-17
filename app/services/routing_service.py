@@ -446,6 +446,69 @@ def expire_stale_offers(db: Session) -> int:
     return len(stale)
 
 
+def auto_route_search_results(
+    results: dict,
+    db: Session,
+) -> list[RoutingAssignment]:
+    """Create routing assignments for new (requirement, vendor_card) pairs in search results.
+
+    Iterates enriched search results, collects unique pairs, skips those that already
+    have an active assignment, and calls create_routing_assignment() for new ones.
+
+    Returns list of newly created assignments.
+    """
+    # Collect unique (requirement_id, vendor_card_id) pairs from fresh sightings
+    pairs: set[tuple[int, int]] = set()
+    for req_id_str, group in results.items():
+        try:
+            req_id = int(req_id_str)
+        except (ValueError, TypeError):
+            continue
+        for s in group.get("sightings", []):
+            if s.get("is_historical") or s.get("is_material_history"):
+                continue
+            card_id = (s.get("vendor_card") or {}).get("card_id")
+            if card_id:
+                pairs.add((req_id, card_id))
+
+    if not pairs:
+        return []
+
+    # Batch-query existing active assignments for these requirement IDs
+    req_ids = {p[0] for p in pairs}
+    existing = (
+        db.query(
+            RoutingAssignment.requirement_id,
+            RoutingAssignment.vendor_card_id,
+        )
+        .filter(
+            RoutingAssignment.requirement_id.in_(req_ids),
+            RoutingAssignment.status == "active",
+        )
+        .all()
+    )
+    existing_set = {(r, v) for r, v in existing}
+
+    new_pairs = pairs - existing_set
+    if not new_pairs:
+        return []
+
+    created = []
+    for req_id, card_id in new_pairs:
+        try:
+            assignment = create_routing_assignment(req_id, card_id, db)
+            if assignment:
+                created.append(assignment)
+        except Exception:
+            log.exception(f"Failed to create routing for req={req_id} vendor={card_id}")
+
+    if created:
+        db.commit()
+        log.info(f"Auto-routed {len(created)} new assignments from search results")
+
+    return created
+
+
 def reconfirm_offer(offer_id: int, db: Session) -> dict:
     """Reconfirm an offer to extend its TTL by another attribution window.
 
