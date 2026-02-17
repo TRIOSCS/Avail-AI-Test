@@ -414,7 +414,7 @@ function showDetail(id, name, tab) {
     // Restore last active tab or default to requirements
     const lastTab = tab || activeTabCache[id] || 'requirements';
     const tabMap = {requirements:0, sources:1, activity:2, offers:3, quote:4, emails:5};
-    const tabBtns = document.querySelectorAll('.tab');
+    const tabBtns = document.querySelectorAll('#reqTabs .tab');
     switchTab(lastTab, tabBtns[tabMap[lastTab] || 0]);
 }
 
@@ -432,7 +432,7 @@ function showMaterials() {
 
 function switchTab(name, btn) {
     document.querySelectorAll('.tc').forEach(t => t.classList.remove('on'));
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('on'));
+    document.querySelectorAll('#reqTabs .tab').forEach(t => t.classList.remove('on'));
     document.getElementById('tab-' + name).classList.add('on');
     btn.classList.add('on');
     if (currentReqId) activeTabCache[currentReqId] = name;
@@ -923,7 +923,7 @@ async function searchAll() {
         expandedGroups.clear();
         renderSources();
         updateRequirementCounts();
-        switchTab('sources', document.querySelectorAll('.tab')[1]);
+        switchTab('sources', document.querySelectorAll('#reqTabs .tab')[1]);
         // Update status in cached list (draft→active after submit)
         const reqInfo = _reqListData.find(r => r.id === currentReqId);
         if (reqInfo && reqInfo.status === 'draft') {

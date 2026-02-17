@@ -408,7 +408,7 @@ async function loadOffers() {
 
 function updateOfferTabBadge() {
     const totalOffers = crmOffers.reduce((sum, g) => sum + (g.offers?.length || 0), 0);
-    document.querySelectorAll('.tab').forEach(t => {
+    document.querySelectorAll('#reqTabs .tab').forEach(t => {
         if (t.textContent.match(/^Offers/)) {
             t.textContent = totalOffers ? 'Offers (' + totalOffers + ')' : 'Offers';
             t.classList.remove('tab-new', 'tab-urgent');
@@ -861,7 +861,7 @@ async function loadQuote() {
 }
 
 function updateQuoteTabBadge() {
-    document.querySelectorAll('.tab').forEach(t => {
+    document.querySelectorAll('#reqTabs .tab').forEach(t => {
         if (t.textContent.match(/^Quote/)) {
             t.textContent = crmQuote ? 'Quote (' + crmQuote.status + ')' : 'Quote';
         }
@@ -876,7 +876,7 @@ async function buildQuoteFromSelected() {
         });
         showToast('Quote built — review and adjust sell prices', 'success');
         notifyStatusChange(crmQuote);
-        const tabs = document.querySelectorAll('.tab');
+        const tabs = document.querySelectorAll('#reqTabs .tab');
         switchTab('quote', tabs[4]);
         renderQuote();
         updateQuoteTabBadge();
