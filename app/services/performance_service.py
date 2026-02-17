@@ -494,7 +494,7 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     grace_start_dt = month_start_dt - timedelta(days=GRACE_DAYS)
 
     # Get all buyers
-    buyers = db.query(User).filter(User.role == "buyer").all()
+    buyers = db.query(User).filter(User.role.in_(["buyer", "trader"])).all()
 
     # Collect all offer_ids that appear in quotes and buy plans (for status checks)
     # Quotes: line_items JSON contains offer_id

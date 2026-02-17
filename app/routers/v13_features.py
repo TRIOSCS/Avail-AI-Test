@@ -118,7 +118,7 @@ async def upsert_buyer_profile(
         raise HTTPException(403, "Only admins can edit other buyers' profiles")
 
     target = db.get(User, user_id)
-    if not target or target.role != "buyer":
+    if not target or target.role not in ("buyer", "trader"):
         raise HTTPException(400, "Target user must be a buyer")
 
     from app.services.buyer_service import upsert_profile
@@ -555,7 +555,7 @@ async def claim_account(
     company_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     """Manually claim an open pool account."""
-    if user.role != "sales":
+    if user.role not in ("sales", "trader"):
         raise HTTPException(403, "Only sales users can claim accounts")
 
     company = db.get(Company, company_id)

@@ -32,7 +32,7 @@ class User(Base):
     name = Column(String(255))
     role = Column(
         String(20), default="buyer"
-    )  # buyer | sales | manager | admin | dev_assistant
+    )  # buyer | sales | trader | manager | admin | dev_assistant
     is_active = Column(Boolean, default=True)
     azure_id = Column(String(255), unique=True)
     refresh_token = Column(EncryptedText)

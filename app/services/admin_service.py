@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 # ── User Management ──────────────────────────────────────────────────
 
-VALID_ROLES = ("buyer", "sales", "manager", "admin", "dev_assistant")
+VALID_ROLES = ("buyer", "sales", "trader", "manager", "admin", "dev_assistant")
 
 
 def list_users(db: Session) -> list[dict]:

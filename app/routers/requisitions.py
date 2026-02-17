@@ -142,7 +142,7 @@ async def list_requisitions(
         latest_offer_at_sq,
         sourced_count_sq,
     )
-    if user.role == "sales":
+    if user.role in ("sales", "trader"):
         query = query.filter(Requisition.created_by == user.id)
     # Buyers see all requisitions
 
@@ -597,7 +597,7 @@ async def mark_unavailable(
             Requirement.id == s.requirement_id,
         )
     )
-    if user.role == "sales":
+    if user.role in ("sales", "trader"):
         req_check = req_check.filter(Requisition.created_by == user.id)
     if not req_check.first():
         raise HTTPException(403, "Not your sighting")

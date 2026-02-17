@@ -1970,7 +1970,7 @@ async def list_buy_plans(
     if status:
         query = query.filter(BuyPlan.status == status)
     if not _is_admin(user):
-        if user.role == "sales":
+        if user.role in ("sales", "trader"):
             query = query.filter(BuyPlan.submitted_by_id == user.id)
         # Buyers see all (they need to check which plans have their offers)
     plans = query.limit(200).all()

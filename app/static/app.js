@@ -246,14 +246,14 @@ window.addEventListener('beforeunload', () => clearInterval(_m365Timer));
 // ── Role-Based UI Gating ────────────────────────────────────────────────
 function applyRoleGating() {
     // Elements with data-role="buyer" are visible for buyer, manager, and admin
-    const canBuy = ['buyer','manager','admin'].includes(window.userRole) || window.__isAdmin;
+    const canBuy = ['buyer','trader','manager','admin'].includes(window.userRole) || window.__isAdmin;
     document.querySelectorAll('[data-role="buyer"]').forEach(el => {
         el.style.display = canBuy ? '' : 'none';
     });
     // Role badge hidden — keep element for JS role gating but don't display
     const roleBadge = document.getElementById('roleBadge');
     if (roleBadge) {
-        const roleLabels = {buyer:'Buyer', sales:'Sales', manager:'Manager', admin:'Admin', dev_assistant:'Dev'};
+        const roleLabels = {buyer:'Buyer', sales:'Sales', trader:'Trader', manager:'Manager', admin:'Admin', dev_assistant:'Dev'};
         roleBadge.textContent = roleLabels[window.userRole] || window.userRole;
         roleBadge.className = `role-badge role-${window.userRole}`;
         roleBadge.style.display = 'none';
@@ -263,7 +263,7 @@ function applyRoleGating() {
     if (bpNav && window.__isAdmin) bpNav.style.display = '';
     // Proactive nav visible for sales + admin
     const pNav = document.getElementById('navProactive');
-    if (pNav && (window.userRole === 'sales' || window.__isAdmin)) {
+    if (pNav && (['sales','trader'].includes(window.userRole) || window.__isAdmin)) {
         pNav.style.display = '';
         refreshProactiveBadge();
     }
@@ -278,7 +278,7 @@ function applyRoleGating() {
         document.querySelectorAll('.settings-tab-users, .settings-tab-scoring').forEach(el => el.style.display = 'none');
     }
 }
-function isBuyer() { return ['buyer','manager','admin'].includes(window.userRole) || window.__isAdmin; }
+function isBuyer() { return ['buyer','trader','manager','admin'].includes(window.userRole) || window.__isAdmin; }
 
 async function refreshProactiveBadge() {
     try {

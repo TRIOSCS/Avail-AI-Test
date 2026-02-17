@@ -125,7 +125,7 @@ def check_and_claim_open_account(company_id: int, user_id: int, db: Session) -> 
 
     # Check the user's role — only sales can own accounts
     user = db.get(User, user_id)
-    if not user or user.role != "sales":
+    if not user or user.role not in ("sales", "trader"):
         return False
 
     # Lock the row to prevent concurrent claims
@@ -311,7 +311,7 @@ def get_manager_digest(db: Session) -> dict:
                 ActivityLog.created_at >= week_ago,
             ),
         )
-        .filter(User.role == "sales")
+        .filter(User.role.in_(["sales", "trader"]))
         .group_by(User.id, User.name)
         .all()
     )

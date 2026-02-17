@@ -480,8 +480,8 @@ async def get_follow_ups(
         Contact.status.in_(["sent", "opened"]),
         Contact.created_at < three_days_ago,
     )
-    # Sales sees only their own reqs' follow-ups
-    if user.role == "sales":
+    # Sales/trader sees only their own reqs' follow-ups
+    if user.role in ("sales", "trader"):
         stale_contacts = stale_contacts.join(Requisition).filter(
             Requisition.created_by == user.id
         )
@@ -543,7 +543,7 @@ async def follow_up_summary(
         .group_by(Requisition.id, Requisition.name)
     )
 
-    if user.role == "sales":
+    if user.role in ("sales", "trader"):
         query = query.filter(Requisition.created_by == user.id)
 
     rows = query.all()

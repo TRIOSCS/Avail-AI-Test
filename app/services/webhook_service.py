@@ -167,7 +167,7 @@ async def ensure_all_users_subscribed(db: Session):
         db.query(User)
         .filter(
             User.m365_connected.is_(True),
-            User.role.in_(["buyer", "sales"]),
+            User.role.in_(["buyer", "sales", "trader"]),
         )
         .all()
     )

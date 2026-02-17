@@ -20,13 +20,13 @@ async function showCustomers() {
     showView('view-customers');
     currentReqId = null;
     // Role-based account filtering
-    const isManagerOrAdmin = window.__isAdmin || window.userRole === 'manager';
+    const isManagerOrAdmin = window.__isAdmin || ['manager','trader'].includes(window.userRole);
     const isSalesOnly = window.userRole === 'sales';
     const toggleLabel = document.getElementById('custMyOnlyLabel');
     const toggleInput = document.getElementById('custMyOnly');
     if (toggleLabel && toggleInput) {
         if (isManagerOrAdmin) {
-            toggleLabel.style.display = '';  // Show toggle for managers/admins
+            toggleLabel.style.display = '';  // Show toggle for managers/admins/traders
         } else {
             toggleLabel.style.display = 'none';  // Hide for sales — forced to my accounts
             toggleInput.checked = true;
@@ -38,11 +38,11 @@ async function showCustomers() {
 async function loadCustomers() {
     try {
         const filter = document.getElementById('custFilter')?.value || '';
-        const isManagerOrAdmin = window.__isAdmin || window.userRole === 'manager';
+        const isManagerOrAdmin = window.__isAdmin || ['manager','trader'].includes(window.userRole);
         const isSalesOnly = window.userRole === 'sales';
         const myOnly = document.getElementById('custMyOnly')?.checked;
         let url = '/api/companies?search=' + encodeURIComponent(filter);
-        // Sales always sees only their accounts; managers/admins can toggle
+        // Sales always sees only their accounts; managers/admins/traders can toggle
         if ((isSalesOnly || myOnly) && window.userId) url += '&owner_id=' + window.userId;
         crmCustomers = await apiFetch(url);
         renderCustomers();
@@ -1274,7 +1274,7 @@ function renderBuyPlanStatus(targetId) {
     if (!_currentBuyPlan) { el.innerHTML = ''; return; }
     const bp = _currentBuyPlan;
     const isAdmin = window.__isAdmin || window.userRole === 'admin';
-    const isBuyer = ['buyer','manager','admin'].includes(window.userRole) || window.__isAdmin;
+    const isBuyer = ['buyer','trader','manager','admin'].includes(window.userRole) || window.__isAdmin;
 
     const statusColors = {
         pending_approval: 'var(--amber)',
