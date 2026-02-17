@@ -12,6 +12,7 @@ Each part in a multi-part reply gets its own classification:
   quoted, no_stock, follow_up, counter_offer
 """
 
+import json
 import logging
 
 from app.utils.claude_client import claude_structured
@@ -192,7 +193,18 @@ async def parse_vendor_response(
 
 def _normalize_parsed_parts(result: dict) -> None:
     """Apply deterministic normalization to AI-extracted values."""
-    for part in result.get("parts", []):
+    parts = result.get("parts", [])
+    # Claude batch API sometimes returns parts as a JSON string — parse it
+    if isinstance(parts, str):
+        try:
+            parts = json.loads(parts)
+            result["parts"] = parts
+        except (json.JSONDecodeError, TypeError):
+            result["parts"] = []
+            return
+    for part in parts:
+        if not isinstance(part, dict):
+            continue
         if "unit_price" in part and part["unit_price"] is not None:
             part["unit_price"] = normalize_price(part["unit_price"])
         if "qty_available" in part and part["qty_available"] is not None:
