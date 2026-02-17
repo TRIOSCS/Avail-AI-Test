@@ -48,9 +48,7 @@ const debouncedFilterSites = debounce((v) => filterSiteTypeahead(v), 150);
 // ── Utilities ───────────────────────────────────────────────────────────
 function esc(s) {
     if (!s) return '';
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 function escAttr(s) {
     if (!s) return '';

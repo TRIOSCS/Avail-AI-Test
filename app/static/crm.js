@@ -2,6 +2,12 @@
 
 // Depends on app.js (loaded first): apiFetch, debounce, esc, escAttr, showToast, fmtDate, fmtDateTime
 
+// ── Debounced CRM Handlers ─────────────────────────────────────────────
+const _debouncedFilterSiteContacts = debounce((input, siteId) => filterSiteContacts(input, siteId), 150);
+const _debouncedUpdateBpTotals = debounce(() => updateBpTotals(), 150);
+const _debouncedUpdateProactivePreview = debounce(() => updateProactivePreview(), 150);
+const _debouncedLoadVendorScorecards = debounce(() => loadVendorScorecards(), 300);
+
 // ── CRM State ──────────────────────────────────────────────────────────
 let crmCustomers = [];
 let crmOffers = [];
@@ -171,7 +177,7 @@ async function toggleSiteDetail(siteId) {
                     </div>
                 </div>`;
             const searchBar = contacts.length > 5
-                ? `<input class="si-contact-search" placeholder="Filter contacts…" oninput="filterSiteContacts(this,${s.id})">`
+                ? `<input class="si-contact-search" placeholder="Filter contacts…" oninput="_debouncedFilterSiteContacts(this,${s.id})">`
                 : '';
             const contactsHtml = contacts.length
                 ? `${searchBar}<div class="si-contact-grid" id="contactGrid-${s.id}">${sorted.map(renderContact).join('')}</div>`
@@ -1219,7 +1225,7 @@ function openBuyPlanModal() {
             <td>${esc(item.mpn)}</td>
             <td>${esc(item.manufacturer || '\u2014')}</td>
             <td>${qty.toLocaleString()}</td>
-            <td><input type="number" class="bp-plan-qty" data-idx="${i}" value="${qty}" min="1" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;text-align:right" oninput="updateBpTotals()"></td>
+            <td><input type="number" class="bp-plan-qty" data-idx="${i}" value="${qty}" min="1" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;text-align:right" oninput="_debouncedUpdateBpTotals()"></td>
             <td>$${Number(item.cost_price||0).toFixed(4)}</td>
             <td class="bp-line-total">$${(qty * Number(item.cost_price||0)).toFixed(2)}</td>
             <td>${esc(item.lead_time || '\u2014')}</td>
@@ -2720,7 +2726,7 @@ async function openProactiveSendModal(siteId) {
             <td>${esc(m.vendor_name)}</td>
             <td>${(m.qty_available||0).toLocaleString()}</td>
             <td>$${m.unit_price != null ? Number(m.unit_price).toFixed(4) : '—'}</td>
-            <td><input type="number" step="0.0001" class="ps-sell" data-id="${m.id}" value="${defaultSell}" style="width:90px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px" oninput="updateProactivePreview()"></td>
+            <td><input type="number" step="0.0001" class="ps-sell" data-id="${m.id}" value="${defaultSell}" style="width:90px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px" oninput="_debouncedUpdateProactivePreview()"></td>
             <td class="ps-margin" data-id="${m.id}"></td>
         </tr>`;
     }).join('');
@@ -2972,7 +2978,7 @@ function renderVendorScorecards(data) {
     // Make toggleSort available globally
     window._perfToggleSort = toggleSort;
 
-    const searchBar = `<div style="margin-bottom:10px"><input type="text" id="perfVendorSearch" placeholder="Search vendors..." value="${document.getElementById('perfVendorSearch')?.value||''}" class="filter-search" oninput="loadVendorScorecards()" style="max-width:300px"></div>`;
+    const searchBar = `<div style="margin-bottom:10px"><input type="text" id="perfVendorSearch" placeholder="Search vendors..." value="${document.getElementById('perfVendorSearch')?.value||''}" class="filter-search" oninput="_debouncedLoadVendorScorecards()" style="max-width:300px"></div>`;
 
     let html = searchBar + `<div style="overflow-x:auto"><table class="perf-table">
         <thead><tr>
