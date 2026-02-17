@@ -529,13 +529,33 @@ def is_private_url(url: str) -> bool:
 
 
 async def scrape_website_contacts(url: str) -> dict:
-    """Fetch vendor website homepage + /contact page, extract emails and phones."""
-    emails: set[str] = set()
-    phones: set[str] = set()
+    """Fetch vendor website homepage + /contact page, extract emails and phones.
 
+    Results are cached in IntelCache with a 7-day TTL keyed by domain to avoid
+    re-scraping the same vendor website on every page view.
+    """
+    from ..cache.intel_cache import get_cached, set_cached
+
+    # Normalize URL for cache key
+    raw_url = url
     if not url.startswith("http"):
         url = "https://" + url
     url = url.rstrip("/")
+
+    # Extract domain for cache key
+    try:
+        domain = url.split("//", 1)[1].split("/")[0].lower().replace("www.", "")
+    except IndexError:
+        domain = raw_url.lower()
+    cache_key = f"scrape:{domain}"
+
+    # Check cache first
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
+
+    emails: set[str] = set()
+    phones: set[str] = set()
 
     if is_private_url(url):
         log.warning(f"SSRF blocked: {url}")
@@ -571,7 +591,12 @@ async def scrape_website_contacts(url: str) -> dict:
             for tel in re.findall(r'tel:([^"\'<\s]+)', html, re.IGNORECASE):
                 phones.add(tel.strip())
 
-    return {"emails": clean_emails(list(emails)), "phones": clean_phones(list(phones))}
+    result = {"emails": clean_emails(list(emails)), "phones": clean_phones(list(phones))}
+
+    # Cache result for 7 days
+    set_cached(cache_key, result, ttl_days=7)
+
+    return result
 
 
 def merge_contact_into_card(

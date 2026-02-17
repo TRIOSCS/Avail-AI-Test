@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from loguru import logger
 from sqlalchemy import func as sqlfunc
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..config import settings
 from ..services.credential_service import get_credential_cached
@@ -116,6 +116,32 @@ def get_last_quoted_price(mpn: str, db: Session) -> dict | None:
     return None
 
 
+def _preload_last_quoted_prices(db: Session) -> dict[str, dict]:
+    """Load recent quotes ONCE and build MPN→price lookup dict."""
+    quotes = (
+        db.query(Quote)
+        .filter(Quote.status.in_(["sent", "won", "lost"]))
+        .order_by(Quote.sent_at.desc().nullslast(), Quote.created_at.desc())
+        .limit(100)
+        .all()
+    )
+    result: dict[str, dict] = {}
+    for q in quotes:
+        for item in q.line_items or []:
+            mpn_key = (item.get("mpn") or "").upper().strip()
+            if mpn_key and mpn_key not in result:
+                result[mpn_key] = {
+                    "sell_price": item.get("sell_price"),
+                    "margin_pct": item.get("margin_pct"),
+                    "quote_number": q.quote_number,
+                    "date": (q.sent_at or q.created_at).isoformat()
+                    if (q.sent_at or q.created_at)
+                    else None,
+                    "result": q.result,
+                }
+    return result
+
+
 def quote_to_dict(q: Quote) -> dict:
     """Serialize a Quote to API response dict."""
     return {
@@ -173,7 +199,14 @@ async def list_companies(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    query = db.query(Company).filter(Company.is_active == True)  # noqa: E712
+    query = (
+        db.query(Company)
+        .filter(Company.is_active == True)  # noqa: E712
+        .options(
+            selectinload(Company.sites).joinedload(CustomerSite.owner),
+            joinedload(Company.account_owner),
+        )
+    )
     if search.strip():
         safe = search.strip().replace("%", r"\%").replace("_", r"\_")
         query = query.filter(Company.name.ilike(f"%{safe}%"))
@@ -938,6 +971,10 @@ async def list_offers(
     offers = (
         db.query(Offer)
         .filter(Offer.requisition_id == req_id)
+        .options(
+            joinedload(Offer.entered_by),
+            selectinload(Offer.attachments),
+        )
         .order_by(
             Offer.requirement_id,
             Offer.unit_price,
@@ -994,10 +1031,12 @@ async def list_offers(
                 "attachments": atts,
             }
         )
+    # Preload quoted prices ONCE instead of per-requirement DB call
+    quoted_prices = _preload_last_quoted_prices(db)
     result = []
     for r in req.requirements:
         target = float(r.target_price) if r.target_price else None
-        last_q = get_last_quoted_price(r.primary_mpn, db)
+        last_q = quoted_prices.get((r.primary_mpn or "").upper().strip())
         result.append(
             {
                 "requirement_id": r.id,

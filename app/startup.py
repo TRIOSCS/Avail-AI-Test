@@ -127,6 +127,9 @@ def _create_indexes(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_activity_unmatched ON activity_log(created_at DESC) WHERE company_id IS NULL AND vendor_card_id IS NULL AND dismissed_at IS NULL",
         # v2.0 — Excess list sightings index
         "CREATE INDEX IF NOT EXISTS ix_sightings_source_company ON sightings(source_company_id) WHERE source_company_id IS NOT NULL",
+        # Phase 6 — vendor_name indexes for contact/response lookups
+        "CREATE INDEX IF NOT EXISTS ix_contact_vendor_name ON contacts(vendor_name)",
+        "CREATE INDEX IF NOT EXISTS ix_vr_vendor_name ON vendor_responses(vendor_name)",
     ]
     for stmt in stmts:
         _exec(conn, stmt)

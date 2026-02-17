@@ -259,7 +259,6 @@ def _compute_composite(
 def compute_all_vendor_scorecards(db: Session) -> dict:
     """Batch compute and snapshot all vendor scorecards."""
     today = date.today()
-    vendor_ids = [r[0] for r in db.query(VendorCard.id).all()]
     updated = 0
     skipped = 0
 
@@ -288,58 +287,72 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
             if oid:
                 po_offer_ids.add(oid)
 
-    for vid in vendor_ids:
-        # Use a savepoint so a single vendor failure doesn't roll back
-        # previously computed scorecards in this transaction.
-        savepoint = db.begin_nested()
-        try:
-            result = compute_vendor_scorecard(
-                db,
-                vid,
-                quoted_offer_ids=quoted_offer_ids,
-                po_offer_ids=po_offer_ids,
-            )
-            if not result:
+    # Process vendor IDs in chunks of 500 to avoid loading all at once
+    CHUNK_SIZE = 500
+    total_vendors = db.query(VendorCard.id).count()
+
+    for chunk_offset in range(0, total_vendors, CHUNK_SIZE):
+        vendor_ids_chunk = [
+            r[0]
+            for r in db.query(VendorCard.id)
+            .order_by(VendorCard.id)
+            .offset(chunk_offset)
+            .limit(CHUNK_SIZE)
+            .all()
+        ]
+
+        for vid in vendor_ids_chunk:
+            # Use a savepoint so a single vendor failure doesn't roll back
+            # previously computed scorecards in this transaction.
+            savepoint = db.begin_nested()
+            try:
+                result = compute_vendor_scorecard(
+                    db,
+                    vid,
+                    quoted_offer_ids=quoted_offer_ids,
+                    po_offer_ids=po_offer_ids,
+                )
+                if not result:
+                    savepoint.rollback()
+                    continue
+
+                # Upsert snapshot
+                existing = (
+                    db.query(VendorMetricsSnapshot)
+                    .filter(
+                        VendorMetricsSnapshot.vendor_card_id == vid,
+                        VendorMetricsSnapshot.snapshot_date == today,
+                    )
+                    .first()
+                )
+
+                if existing:
+                    snap = existing
+                else:
+                    snap = VendorMetricsSnapshot(vendor_card_id=vid, snapshot_date=today)
+                    db.add(snap)
+
+                snap.response_rate = result["response_rate"]
+                snap.quote_conversion = result["quote_conversion"]
+                snap.po_conversion = result["po_conversion"]
+                snap.avg_review_rating = result["avg_review_rating"]
+                snap.composite_score = result["composite_score"]
+                snap.interaction_count = result["interaction_count"]
+                snap.is_sufficient_data = result["is_sufficient_data"]
+                snap.rfqs_sent = result["rfqs_sent"]
+                snap.rfqs_answered = result["rfqs_answered"]
+
+                if result["is_sufficient_data"]:
+                    updated += 1
+                else:
+                    skipped += 1
+
+                savepoint.commit()
+
+            except Exception as e:
+                log.error(f"Vendor scorecard error for {vid}: {e}")
                 savepoint.rollback()
                 continue
-
-            # Upsert snapshot
-            existing = (
-                db.query(VendorMetricsSnapshot)
-                .filter(
-                    VendorMetricsSnapshot.vendor_card_id == vid,
-                    VendorMetricsSnapshot.snapshot_date == today,
-                )
-                .first()
-            )
-
-            if existing:
-                snap = existing
-            else:
-                snap = VendorMetricsSnapshot(vendor_card_id=vid, snapshot_date=today)
-                db.add(snap)
-
-            snap.response_rate = result["response_rate"]
-            snap.quote_conversion = result["quote_conversion"]
-            snap.po_conversion = result["po_conversion"]
-            snap.avg_review_rating = result["avg_review_rating"]
-            snap.composite_score = result["composite_score"]
-            snap.interaction_count = result["interaction_count"]
-            snap.is_sufficient_data = result["is_sufficient_data"]
-            snap.rfqs_sent = result["rfqs_sent"]
-            snap.rfqs_answered = result["rfqs_answered"]
-
-            if result["is_sufficient_data"]:
-                updated += 1
-            else:
-                skipped += 1
-
-            savepoint.commit()
-
-        except Exception as e:
-            log.error(f"Vendor scorecard error for {vid}: {e}")
-            savepoint.rollback()
-            continue
 
     db.commit()
     return {"updated": updated, "skipped_cold_start": skipped}

@@ -735,6 +735,7 @@ class Contact(Base):
         Index("ix_contact_req", "requisition_id"),
         Index("ix_contact_status", "status"),
         Index("ix_contact_user_status", "user_id", "status", "created_at"),
+        Index("ix_contact_vendor_name", "vendor_name"),
     )
 
 
@@ -768,6 +769,7 @@ class VendorResponse(Base):
         Index("ix_vr_contact", "contact_id"),
         Index("ix_vr_scanned_by", "scanned_by_user_id"),
         Index("ix_vr_req_email", "requisition_id", "vendor_email"),
+        Index("ix_vr_vendor_name", "vendor_name"),
     )
 
 

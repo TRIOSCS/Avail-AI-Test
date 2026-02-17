@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func as sqlfunc
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
 from ..dependencies import (
@@ -67,6 +67,7 @@ async def list_contacts(
 ):
     contacts = (
         db.query(Contact)
+        .options(joinedload(Contact.user))
         .filter_by(requisition_id=req_id)
         .order_by(Contact.created_at.desc())
         .all()

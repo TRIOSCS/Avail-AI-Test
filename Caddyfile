@@ -7,6 +7,17 @@ app.availai.net {
         reverse_proxy app:8000
     }
 
+    # Safe read-only GET endpoints — 30s browser cache reduces redundant
+    # API calls when switching tabs rapidly
+    @safe_api {
+        method GET
+        path /api/companies /api/users/list /api/vendors
+    }
+    handle @safe_api {
+        header Cache-Control "private, max-age=30"
+        reverse_proxy app:8000
+    }
+
     @api path /api/* /auth/*
     handle @api {
         header Cache-Control "no-cache, no-store, must-revalidate"

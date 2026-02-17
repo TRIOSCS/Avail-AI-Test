@@ -541,10 +541,19 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
 
     Tries Clay first, Explorium fills gaps, AI fills remaining gaps.
+    Results cached in IntelCache with 14-day TTL keyed by domain.
     Input is normalized before providers, output is normalized after.
     """
+    from .cache.intel_cache import get_cached, set_cached
+
     # Layer 1: input cleanup
     name, domain = await normalize_company_input(name, domain)
+
+    # Check cache first (14-day TTL)
+    cache_key = f"enrich:{domain}"
+    cached = get_cached(cache_key)
+    if cached is not None:
+        return cached
 
     result = {
         "legal_name": None,
@@ -615,7 +624,13 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
                 result["source"] = result["source"] + "+ai"
 
     # Layer 2: output normalization
-    return normalize_company_output(result)
+    normalized = normalize_company_output(result)
+
+    # Cache enrichment result for 14 days
+    if any(v for k, v in normalized.items() if k != "domain"):
+        set_cached(cache_key, normalized, ttl_days=14)
+
+    return normalized
 
 
 async def find_suggested_contacts(

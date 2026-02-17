@@ -269,46 +269,62 @@ async def compute_all_engagement_scores(db: Session) -> dict:
         norm = normalize_vendor_name(row.vendor_name or "")
         win_map[norm] = win_map.get(norm, 0) + row.total_wins
 
-    # ── Update ALL VendorCards (cold-start baseline of 50 for those without data) ──
+    # ── Update ALL VendorCards in batches (avoid loading 10k+ ORM objects at once) ──
     all_norms = set(outreach_map.keys()) | set(response_map.keys())
-    cards = db.query(VendorCard).all()
+    total_count = db.query(func.count(VendorCard.id)).scalar() or 0
 
     updated = 0
     skipped = 0
+    BATCH_SIZE = 1000
 
-    for card in cards:
-        norm = card.normalized_name
-        outreach = outreach_map.get(norm, card.total_outreach or 0)
-        responses = response_map.get(norm, card.total_responses or 0)
-        wins = win_map.get(norm, card.total_wins or 0)
-        velocity = velocity_map.get(norm)
-
-        result = compute_engagement_score(
-            total_outreach=outreach,
-            total_responses=responses,
-            total_wins=wins,
-            avg_velocity_hours=velocity,
-            last_contact_at=card.last_contact_at,
-            now=now,
+    for offset in range(0, total_count, BATCH_SIZE):
+        cards = (
+            db.query(VendorCard)
+            .order_by(VendorCard.id)
+            .offset(offset)
+            .limit(BATCH_SIZE)
+            .all()
         )
 
-        # Update card
-        card.total_outreach = outreach
-        card.total_responses = responses
-        card.total_wins = wins
-        card.ghost_rate = result["ghost_rate"]
-        card.response_velocity_hours = velocity
-        card.engagement_score = result["engagement_score"]
-        card.engagement_computed_at = now
+        for card in cards:
+            norm = card.normalized_name
+            outreach = outreach_map.get(norm, card.total_outreach or 0)
+            responses = response_map.get(norm, card.total_responses or 0)
+            wins = win_map.get(norm, card.total_wins or 0)
+            velocity = velocity_map.get(norm)
 
-        # Compute relationship_months
-        if card.created_at:
-            created = card.created_at
-            if created.tzinfo is None:
-                created = created.replace(tzinfo=timezone.utc)
-            card.relationship_months = max(int((now - created).days / 30), 0)
+            result = compute_engagement_score(
+                total_outreach=outreach,
+                total_responses=responses,
+                total_wins=wins,
+                avg_velocity_hours=velocity,
+                last_contact_at=card.last_contact_at,
+                now=now,
+            )
 
-        updated += 1
+            # Update card
+            card.total_outreach = outreach
+            card.total_responses = responses
+            card.total_wins = wins
+            card.ghost_rate = result["ghost_rate"]
+            card.response_velocity_hours = velocity
+            card.engagement_score = result["engagement_score"]
+            card.engagement_computed_at = now
+
+            # Compute relationship_months
+            if card.created_at:
+                created = card.created_at
+                if created.tzinfo is None:
+                    created = created.replace(tzinfo=timezone.utc)
+                card.relationship_months = max(int((now - created).days / 30), 0)
+
+            updated += 1
+
+        # Flush each batch to free memory
+        try:
+            db.flush()
+        except Exception as e:
+            log.error(f"Engagement scoring flush failed at offset {offset}: {e}")
 
     try:
         db.commit()
