@@ -407,7 +407,7 @@ function showDetail(id, name, tab) {
     if (typeof loadQuote === 'function') loadQuote();
     // Restore last active tab or default to requirements
     const lastTab = tab || activeTabCache[id] || 'requirements';
-    const tabMap = {requirements:0, sources:1, activity:2, offers:3, quote:4};
+    const tabMap = {requirements:0, sources:1, activity:2, offers:3, quote:4, emails:5};
     const tabBtns = document.querySelectorAll('.tab');
     switchTab(lastTab, tabBtns[tabMap[lastTab] || 0]);
 }
@@ -433,6 +433,7 @@ function switchTab(name, btn) {
     // Auto-load CRM tabs on first switch
     if (name === 'offers' && typeof loadOffers === 'function') loadOffers();
     if (name === 'quote' && typeof loadQuote === 'function') loadQuote();
+    if (name === 'emails' && typeof loadEmailThreads === 'function') loadEmailThreads();
 }
 
 // ── Modals ──────────────────────────────────────────────────────────────
@@ -1122,7 +1123,8 @@ function renderSources() {
                 : '<span class="sc-key-val" style="color:var(--muted)">—</span>';
 
             // Row 2 badges: collect all, show max 3 + overflow
-            const allBadges = [matchBadge, unavailBadge, s.is_authorized ? '<span class="badge b-auth">Auth</span>' : '', `<span class="badge b-src">${srcLabel}</span>`, condBadge, emailIndicator, histBadge, matHistBadge].filter(b => b);
+            const excessBadge = (s.source_type || '').toLowerCase() === 'excess_list' ? '<span class="badge" style="background:#fef3c7;color:#92400e" title="Excess list from customer">EXCESS</span>' : '';
+            const allBadges = [matchBadge, unavailBadge, excessBadge, s.is_authorized ? '<span class="badge b-auth">Auth</span>' : '', `<span class="badge b-src">${srcLabel}</span>`, condBadge, emailIndicator, histBadge, matHistBadge].filter(b => b);
             const visibleBadges = allBadges.slice(0, 3).join('');
             const overflowBadge = allBadges.length > 3 ? `<span class="sc-more-badge">+${allBadges.length - 3}</span>` : '';
 
@@ -1805,6 +1807,16 @@ async function openVendorPopup(cardId) {
             </div>
             <input id="vpComment" class="vp-input" placeholder="Short comment (optional)…" maxlength="500">
             <button class="btn btn-primary btn-sm" onclick="vpSubmitReview(${card.id})">Submit</button>
+        </div>
+    </div>`;
+
+    // Vendor Emails section
+    html += `<div class="vp-section">
+        <div class="vp-label" style="cursor:pointer" onclick="toggleVendorEmails(${card.id})">
+            Emails <span style="font-size:10px;color:var(--muted)">▼</span>
+        </div>
+        <div id="vpEmails" style="display:none">
+            <p class="vp-muted" style="font-size:11px">Loading...</p>
         </div>
     </div>`;
 
@@ -2939,5 +2951,248 @@ async function doStockImport() {
     } catch(e) {
         statusEl.className = 'ustatus err';
         statusEl.textContent = 'Import failed: ' + e.message;
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  EMAIL THREADS — Requirement + Vendor email viewing
+// ═══════════════════════════════════════════════════════════════════════
+
+let _emailThreadsLoaded = null; // reqId of last loaded threads
+let _emailThreadsData = [];
+
+async function loadEmailThreads() {
+    if (!currentReqId) return;
+    // Get the first requirement ID for this requisition
+    const el = document.getElementById('emailsContent');
+    if (!el) return;
+
+    // Avoid reloading if already loaded for this req
+    if (_emailThreadsLoaded === currentReqId && _emailThreadsData.length > 0) return;
+
+    el.innerHTML = '<div class="spinner-row"><div class="spinner"></div> Loading email threads...</div>';
+
+    try {
+        // Get requirements for this requisition to find requirement IDs
+        const reqs = await apiFetch(`/api/requisitions/${currentReqId}/requirements`);
+        if (!reqs || !reqs.length) {
+            el.innerHTML = '<p class="empty">No requirements — add parts first to see related emails</p>';
+            return;
+        }
+
+        // Fetch threads for each requirement and merge
+        const allThreads = new Map(); // conversation_id → thread
+        for (const req of reqs) {
+            try {
+                const data = await apiFetch(`/api/requirements/${req.id}/emails`);
+                if (data.error) {
+                    el.innerHTML = `<p class="empty" style="color:var(--red)">${esc(data.error)}</p>`;
+                    return;
+                }
+                for (const t of (data.threads || [])) {
+                    if (!allThreads.has(t.conversation_id)) {
+                        allThreads.set(t.conversation_id, t);
+                    }
+                }
+            } catch (e) {
+                if (e.status === 401) {
+                    el.innerHTML = '<p class="empty" style="color:var(--red)">Could not load emails — M365 connection may need refresh</p>';
+                    return;
+                }
+            }
+        }
+
+        _emailThreadsData = Array.from(allThreads.values());
+        _emailThreadsData.sort((a, b) => (b.last_message_date || '').localeCompare(a.last_message_date || ''));
+        _emailThreadsLoaded = currentReqId;
+
+        if (_emailThreadsData.length === 0) {
+            el.innerHTML = '<p class="empty">No email threads found for this requirement</p>';
+            return;
+        }
+
+        renderEmailThreads(el);
+    } catch (e) {
+        el.innerHTML = '<p class="empty" style="color:var(--red)">Could not load emails — M365 connection may need refresh</p>';
+    }
+}
+
+function renderEmailThreads(el) {
+    el.innerHTML = _emailThreadsData.map(t => {
+        const needsBadge = t.needs_response ? '<span class="email-needs-response">Needs Response</span>' : '';
+        const matchBadge = t.matched_via ? `<span class="email-match-badge">${esc(t.matched_via)}</span>` : '';
+        const participants = (t.participants || []).join(', ');
+        return `<div class="card email-thread-card" onclick="toggleThreadMessages('${escAttr(t.conversation_id)}', this)">
+            <div class="email-thread-header">
+                <div class="email-thread-subject">${esc(t.subject)} ${needsBadge} ${matchBadge}</div>
+                <div class="email-thread-meta">
+                    <span class="email-thread-count">${t.message_count} msg${t.message_count !== 1 ? 's' : ''}</span>
+                    <span class="email-thread-date">${fmtDateTime(t.last_message_date)}</span>
+                </div>
+            </div>
+            <div class="email-thread-participants">${esc(participants)}</div>
+            ${t.snippet ? `<div class="email-thread-snippet">${esc(t.snippet)}</div>` : ''}
+            <div class="email-thread-messages" id="thread-${CSS.escape(t.conversation_id)}" style="display:none"></div>
+        </div>`;
+    }).join('');
+}
+
+async function toggleThreadMessages(conversationId, cardEl) {
+    const msgContainer = document.getElementById('thread-' + CSS.escape(conversationId));
+    if (!msgContainer) return;
+
+    if (msgContainer.style.display !== 'none') {
+        msgContainer.style.display = 'none';
+        return;
+    }
+
+    msgContainer.style.display = 'block';
+    msgContainer.innerHTML = '<div class="spinner-row"><div class="spinner"></div></div>';
+
+    try {
+        const data = await apiFetch(`/api/emails/thread/${encodeURIComponent(conversationId)}`);
+        if (data.error) {
+            msgContainer.innerHTML = `<p class="empty" style="font-size:11px;color:var(--red)">${esc(data.error)}</p>`;
+            return;
+        }
+
+        const messages = data.messages || [];
+        if (!messages.length) {
+            msgContainer.innerHTML = '<p class="empty" style="font-size:11px">No messages found</p>';
+            return;
+        }
+
+        let html = messages.map(m => {
+            const isSent = m.direction === 'sent';
+            const cls = isSent ? 'email-msg-sent' : 'email-msg-received';
+            const align = isSent ? 'right' : 'left';
+            return `<div class="email-msg ${cls}">
+                <div class="email-msg-header">
+                    <strong>${esc(m.from_name || m.from_email)}</strong>
+                    <span class="email-msg-date">${fmtDateTime(m.received_date)}</span>
+                </div>
+                <div class="email-msg-body">${esc(m.body_preview)}</div>
+            </div>`;
+        }).join('');
+
+        // Reply button
+        const lastMsg = messages[messages.length - 1];
+        const replyTo = lastMsg.direction === 'sent' ? (lastMsg.to[0] || '') : lastMsg.from_email;
+        const replySubject = lastMsg.subject.startsWith('Re:') ? lastMsg.subject : 'Re: ' + lastMsg.subject;
+        html += `<div class="email-reply-area" id="reply-${CSS.escape(conversationId)}" style="display:none">
+            <textarea class="email-reply-input" id="replyBody-${CSS.escape(conversationId)}" placeholder="Type your reply..." rows="3"></textarea>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:6px">
+                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('reply-${CSS.escape(conversationId)}').style.display='none'">Cancel</button>
+                <button class="btn btn-primary btn-sm" onclick="sendEmailReply('${escAttr(conversationId)}','${escAttr(replyTo)}','${escAttr(replySubject)}')">Send Reply</button>
+            </div>
+        </div>`;
+        html += `<button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="document.getElementById('reply-${CSS.escape(conversationId)}').style.display='block'">Reply</button>`;
+
+        msgContainer.innerHTML = html;
+    } catch (e) {
+        msgContainer.innerHTML = '<p class="empty" style="font-size:11px;color:var(--red)">Failed to load messages</p>';
+    }
+}
+
+async function sendEmailReply(conversationId, to, subject) {
+    const bodyEl = document.getElementById('replyBody-' + CSS.escape(conversationId));
+    if (!bodyEl) return;
+    const body = bodyEl.value.trim();
+    if (!body) { showToast('Please type a reply', 'error'); return; }
+
+    try {
+        await apiFetch('/api/emails/reply', {
+            method: 'POST',
+            body: { conversation_id: conversationId, to: to, subject: subject, body: body }
+        });
+        showToast('Reply sent', 'ok');
+        // Refresh thread
+        _emailThreadsLoaded = null;
+        loadEmailThreads();
+    } catch (e) {
+        showToast('Failed to send reply: ' + e.message, 'error');
+    }
+}
+
+// ── Vendor Popup Emails ──────────────────────────────────────────────
+
+let _vendorEmailsLoaded = null;
+
+async function toggleVendorEmails(vendorCardId) {
+    const el = document.getElementById('vpEmails');
+    if (!el) return;
+
+    if (el.style.display !== 'none') {
+        el.style.display = 'none';
+        return;
+    }
+    el.style.display = 'block';
+
+    if (_vendorEmailsLoaded === vendorCardId) return;
+
+    el.innerHTML = '<div class="spinner-row"><div class="spinner"></div></div>';
+
+    try {
+        const data = await apiFetch(`/api/vendors/${vendorCardId}/emails`);
+        _vendorEmailsLoaded = vendorCardId;
+
+        if (data.error) {
+            el.innerHTML = `<p class="vp-muted" style="font-size:11px;color:var(--red)">${esc(data.error)}</p>`;
+            return;
+        }
+
+        const threads = data.threads || [];
+        if (!threads.length) {
+            el.innerHTML = '<p class="vp-muted" style="font-size:11px">No email threads found</p>';
+            return;
+        }
+
+        el.innerHTML = threads.slice(0, 20).map(t => {
+            const needsBadge = t.needs_response ? '<span class="email-needs-response" style="font-size:9px">Needs Response</span>' : '';
+            return `<div class="vp-item" style="padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="toggleVpThreadMessages('${escAttr(t.conversation_id)}', this)">
+                <div style="display:flex;justify-content:space-between;align-items:center">
+                    <span style="font-size:12px;font-weight:500">${esc(t.subject)}</span>
+                    ${needsBadge}
+                </div>
+                <div style="font-size:10px;color:var(--muted)">${t.message_count} msgs · ${fmtDate(t.last_message_date)}</div>
+                <div class="vp-thread-msgs" style="display:none;margin-top:6px"></div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        el.innerHTML = '<p class="vp-muted" style="font-size:11px;color:var(--red)">Could not load emails</p>';
+    }
+}
+
+async function toggleVpThreadMessages(conversationId, itemEl) {
+    const msgContainer = itemEl.querySelector('.vp-thread-msgs');
+    if (!msgContainer) return;
+
+    if (msgContainer.style.display !== 'none') {
+        msgContainer.style.display = 'none';
+        return;
+    }
+    msgContainer.style.display = 'block';
+    msgContainer.innerHTML = '<div class="spinner-row" style="padding:4px"><div class="spinner"></div></div>';
+
+    try {
+        const data = await apiFetch(`/api/emails/thread/${encodeURIComponent(conversationId)}`);
+        const messages = data.messages || [];
+        if (!messages.length) {
+            msgContainer.innerHTML = '<p style="font-size:10px;color:var(--muted)">No messages</p>';
+            return;
+        }
+        msgContainer.innerHTML = messages.map(m => {
+            const isSent = m.direction === 'sent';
+            return `<div style="padding:4px 8px;margin:3px 0;border-radius:6px;font-size:11px;background:${isSent ? 'var(--teal-bg, rgba(0,200,150,0.08))' : 'var(--surface2, #2a2a2a)'}">
+                <div style="display:flex;justify-content:space-between">
+                    <strong>${esc(m.from_name || m.from_email)}</strong>
+                    <span style="color:var(--muted);font-size:10px">${fmtDateTime(m.received_date)}</span>
+                </div>
+                <div style="color:var(--text2);margin-top:2px">${esc(m.body_preview)}</div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        msgContainer.innerHTML = '<p style="font-size:10px;color:var(--red)">Failed to load</p>';
     }
 }

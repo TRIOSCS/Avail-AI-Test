@@ -3268,6 +3268,7 @@ function switchSettingsTab(name, btn) {
     else if (name === 'config') loadSettingsConfig();
     else if (name === 'sources') loadSettingsSources();
     else if (name === 'manage-users') loadAdminUsers();
+    else if (name === 'unmatched') loadUnmatchedQueue();
 }
 
 // Keep backward compat for dropdown links
@@ -3710,5 +3711,75 @@ async function importVendors() {
         fileInput.value = '';
     } catch (e) {
         statusEl.textContent = 'Error: ' + (e.message || e);
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  UNMATCHED ACTIVITY QUEUE (Phase 2A)
+// ═══════════════════════════════════════════════════════════════════════
+
+async function loadUnmatchedQueue() {
+    const el = document.getElementById('unmatchedQueueContent');
+    el.innerHTML = '<p class="empty">Loading unmatched activities...</p>';
+    try {
+        const data = await apiFetch('/api/activities/unmatched?limit=50');
+        const items = data.items || [];
+        if (!items.length) {
+            el.innerHTML = '<p class="empty">No unmatched activities — all clear!</p>';
+            return;
+        }
+        let html = `<p style="margin:0 0 12px;color:var(--muted);font-size:13px">${data.total} unmatched activit${data.total === 1 ? 'y' : 'ies'} awaiting review</p>`;
+        html += '<div style="display:flex;flex-direction:column;gap:8px">';
+        for (const a of items) {
+            const contact = a.contact_email || a.contact_phone || 'Unknown';
+            const typeIcon = a.channel === 'email' ? '✉' : '📞';
+            const dateStr = a.created_at ? new Date(a.created_at).toLocaleDateString() : '';
+            const subject = a.subject ? ` — ${esc(a.subject.substring(0, 60))}` : '';
+            html += `<div class="card" style="padding:12px;display:flex;align-items:center;gap:12px" id="unmatched-${a.id}">
+                <span style="font-size:18px">${typeIcon}</span>
+                <div style="flex:1;min-width:0">
+                    <div style="font-weight:600;font-size:13px">${esc(contact)}${subject}</div>
+                    <div style="font-size:11px;color:var(--muted)">${esc(a.activity_type)} · ${esc(a.user_name || '')} · ${dateStr}</div>
+                    ${a.contact_name ? `<div style="font-size:11px;color:var(--muted)">Contact: ${esc(a.contact_name)}</div>` : ''}
+                </div>
+                <div style="display:flex;gap:6px;flex-shrink:0">
+                    <button class="btn" style="font-size:11px;padding:4px 10px" onclick="promptAttributeActivity(${a.id})">Attribute</button>
+                    <button class="btn" style="font-size:11px;padding:4px 10px;opacity:0.7" onclick="dismissActivity(${a.id})">Dismiss</button>
+                </div>
+            </div>`;
+        }
+        html += '</div>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = `<p class="empty" style="color:var(--red)">Error: ${e.message || e}</p>`;
+    }
+}
+
+async function promptAttributeActivity(activityId) {
+    const entityType = prompt('Attribute to "company" or "vendor"?');
+    if (!entityType || (entityType !== 'company' && entityType !== 'vendor')) return;
+    const entityId = prompt(`Enter ${entityType} ID:`);
+    if (!entityId || isNaN(parseInt(entityId))) return;
+    try {
+        await apiFetch(`/api/activities/${activityId}/attribute`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({entity_type: entityType, entity_id: parseInt(entityId)})
+        });
+        const row = document.getElementById('unmatched-' + activityId);
+        if (row) row.remove();
+    } catch (e) {
+        alert('Error: ' + (e.message || e));
+    }
+}
+
+async function dismissActivity(activityId) {
+    try {
+        await apiFetch(`/api/activities/${activityId}/dismiss`, {method: 'POST'});
+        const row = document.getElementById('unmatched-' + activityId);
+        if (row) row.remove();
+    } catch (e) {
+        alert('Error: ' + (e.message || e));
     }
 }

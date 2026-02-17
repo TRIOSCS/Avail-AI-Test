@@ -66,7 +66,7 @@ def test_activity_to_dict_includes_all_keys():
         "company_id", "vendor_card_id", "vendor_contact_id",
         "contact_email", "contact_phone",
         "contact_name", "subject", "notes", "duration_seconds",
-        "requisition_id", "created_at",
+        "requisition_id", "dismissed_at", "created_at",
     }
     assert set(_activity_to_dict(_make_activity()).keys()) == expected
 
@@ -120,21 +120,21 @@ def test_get_user_activities(client, test_activity):
 
 
 def test_log_phone_call_no_match(client):
-    """Phone number that doesn't match any known contact."""
+    """Phone number that doesn't match any known contact — still logged (unmatched queue)."""
     resp = client.post("/api/activities/call", json={
         "direction": "outbound",
         "phone": "+1-999-000-0000",
         "duration_seconds": 120,
     })
     assert resp.status_code == 200
-    assert resp.json()["status"] == "no_match"
+    assert resp.json()["status"] == "logged"
 
 
 def test_log_phone_call_missing_required(client):
-    """Empty phone string (schema default) returns no_match."""
+    """Empty phone string (schema default) — still logged as unmatched."""
     resp = client.post("/api/activities/call", json={})
     assert resp.status_code == 200
-    assert resp.json()["status"] == "no_match"
+    assert resp.json()["status"] == "logged"
 
 
 def test_company_activity_status_no_activity(client, test_company):

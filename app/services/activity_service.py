@@ -147,9 +147,6 @@ def log_email_activity(
             return None
 
     match = match_email_to_entity(email_addr, db)
-    if not match:
-        log.debug(f"No match for email {email_addr}, skipping activity log")
-        return None
 
     activity_type = "email_sent" if direction == "sent" else "email_received"
 
@@ -157,9 +154,9 @@ def log_email_activity(
         user_id=user_id,
         activity_type=activity_type,
         channel="email",
-        company_id=match["id"] if match["type"] == "company" else None,
-        vendor_card_id=match["id"] if match["type"] == "vendor" else None,
-        vendor_contact_id=match.get("vendor_contact_id") if match["type"] == "vendor" else None,
+        company_id=match["id"] if match and match["type"] == "company" else None,
+        vendor_card_id=match["id"] if match and match["type"] == "vendor" else None,
+        vendor_contact_id=match.get("vendor_contact_id") if match and match["type"] == "vendor" else None,
         contact_email=email_addr,
         contact_name=contact_name,
         subject=subject,
@@ -168,13 +165,18 @@ def log_email_activity(
     db.add(record)
     db.flush()
 
-    # Update last_activity_at on the matched entity
-    _update_last_activity(match, db, user_id)
-    _update_vendor_contact_stats(match, db)
+    if match:
+        # Update last_activity_at on the matched entity
+        _update_last_activity(match, db, user_id)
+        _update_vendor_contact_stats(match, db)
+        log.info(
+            f"Activity logged: {activity_type} → {match['type']} '{match['name']}' by user {user_id}"
+        )
+    else:
+        log.info(
+            f"Activity logged (unmatched): {activity_type} for {email_addr} by user {user_id}"
+        )
 
-    log.info(
-        f"Activity logged: {activity_type} → {match['type']} '{match['name']}' by user {user_id}"
-    )
     return record
 
 
@@ -196,9 +198,6 @@ def log_call_activity(
             return None
 
     match = match_phone_to_entity(phone, db)
-    if not match:
-        log.debug(f"No match for phone {phone}, skipping activity log")
-        return None
 
     activity_type = f"call_{direction}"
 
@@ -206,9 +205,9 @@ def log_call_activity(
         user_id=user_id,
         activity_type=activity_type,
         channel="phone",
-        company_id=match["id"] if match["type"] == "company" else None,
-        vendor_card_id=match["id"] if match["type"] == "vendor" else None,
-        vendor_contact_id=match.get("vendor_contact_id") if match["type"] == "vendor" else None,
+        company_id=match["id"] if match and match["type"] == "company" else None,
+        vendor_card_id=match["id"] if match and match["type"] == "vendor" else None,
+        vendor_contact_id=match.get("vendor_contact_id") if match and match["type"] == "vendor" else None,
         contact_phone=phone,
         contact_name=contact_name,
         duration_seconds=duration_seconds,
@@ -217,12 +216,17 @@ def log_call_activity(
     db.add(record)
     db.flush()
 
-    _update_last_activity(match, db, user_id)
-    _update_vendor_contact_stats(match, db)
+    if match:
+        _update_last_activity(match, db, user_id)
+        _update_vendor_contact_stats(match, db)
+        log.info(
+            f"Activity logged: {activity_type} → {match['type']} '{match['name']}' by user {user_id}"
+        )
+    else:
+        log.info(
+            f"Activity logged (unmatched): {activity_type} for {phone} by user {user_id}"
+        )
 
-    log.info(
-        f"Activity logged: {activity_type} → {match['type']} '{match['name']}' by user {user_id}"
-    )
     return record
 
 
@@ -504,3 +508,89 @@ _GENERIC_DOMAINS = frozenset(
         "fastmail.com",
     }
 )
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  UNMATCHED ACTIVITY QUEUE (Phase 2A)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def get_unmatched_activities(
+    db: Session, limit: int = 100, offset: int = 0
+) -> list[ActivityLog]:
+    """Get activities with no company or vendor match and not dismissed."""
+    return (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.company_id.is_(None),
+            ActivityLog.vendor_card_id.is_(None),
+            ActivityLog.dismissed_at.is_(None),
+        )
+        .order_by(ActivityLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+
+def count_unmatched_activities(db: Session) -> int:
+    """Count unmatched, non-dismissed activities."""
+    return (
+        db.query(func.count(ActivityLog.id))
+        .filter(
+            ActivityLog.company_id.is_(None),
+            ActivityLog.vendor_card_id.is_(None),
+            ActivityLog.dismissed_at.is_(None),
+        )
+        .scalar()
+        or 0
+    )
+
+
+def attribute_activity(
+    activity_id: int,
+    entity_type: str,
+    entity_id: int,
+    db: Session,
+    user_id: int | None = None,
+) -> ActivityLog | None:
+    """Attribute an unmatched activity to a company or vendor.
+
+    Returns the updated ActivityLog or None if not found.
+    """
+    activity = db.get(ActivityLog, activity_id)
+    if not activity:
+        return None
+
+    if entity_type == "company":
+        activity.company_id = entity_id
+        activity.vendor_card_id = None
+    elif entity_type == "vendor":
+        activity.vendor_card_id = entity_id
+        activity.company_id = None
+    else:
+        return None
+
+    db.flush()
+
+    # Also update last_activity_at on the target entity
+    match = {"type": entity_type, "id": entity_id}
+    _update_last_activity(match, db, user_id)
+
+    log.info(
+        f"Activity {activity_id} attributed to {entity_type} {entity_id}"
+    )
+    return activity
+
+
+def dismiss_activity(activity_id: int, db: Session) -> ActivityLog | None:
+    """Dismiss an unmatched activity (mark as reviewed, not useful)."""
+    activity = db.get(ActivityLog, activity_id)
+    if not activity:
+        return None
+
+    activity.dismissed_at = datetime.now(timezone.utc)
+    db.flush()
+
+    log.info(f"Activity {activity_id} dismissed")
+    return activity

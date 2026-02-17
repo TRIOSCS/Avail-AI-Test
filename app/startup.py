@@ -97,6 +97,10 @@ def _add_columns(conn) -> None:
         "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS notes TEXT",
         # v1.7.x — Scope activities to requisition
         "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS requisition_id INTEGER REFERENCES requisitions(id)",
+        # v2.0 — Unmatched activity queue (Phase 2A)
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMP",
+        # v2.0 — Excess list differentiation (Phase 2B)
+        "ALTER TABLE sightings ADD COLUMN IF NOT EXISTS source_company_id INTEGER REFERENCES companies(id)",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
@@ -118,6 +122,10 @@ def _create_indexes(conn) -> None:
         "CREATE INDEX IF NOT EXISTS ix_vc_domain ON vendor_cards(domain)",
         "CREATE INDEX IF NOT EXISTS ix_activity_vendor_contact ON activity_log(vendor_contact_id, created_at) WHERE vendor_contact_id IS NOT NULL",
         "CREATE INDEX IF NOT EXISTS ix_activity_requisition ON activity_log(requisition_id, vendor_card_id, created_at) WHERE requisition_id IS NOT NULL",
+        # v2.0 — Unmatched activity queue index
+        "CREATE INDEX IF NOT EXISTS ix_activity_unmatched ON activity_log(created_at DESC) WHERE company_id IS NULL AND vendor_card_id IS NULL AND dismissed_at IS NULL",
+        # v2.0 — Excess list sightings index
+        "CREATE INDEX IF NOT EXISTS ix_sightings_source_company ON sightings(source_company_id) WHERE source_company_id IS NOT NULL",
     ]
     for stmt in stmts:
         _exec(conn, stmt)

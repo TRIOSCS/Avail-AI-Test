@@ -82,6 +82,23 @@ class VendorNoteLog(BaseModel):
     requisition_id: int | None = None
 
 
+# ── Unmatched Activity Queue ───────────────────────────────────────
+
+
+class ActivityAttributeRequest(BaseModel):
+    """Attribute an unmatched activity to a company or vendor."""
+
+    entity_type: Literal["company", "vendor"]
+    entity_id: int
+
+    @field_validator("entity_id")
+    @classmethod
+    def must_be_positive(cls, v: int, info) -> int:
+        if v <= 0:
+            raise ValueError("entity_id must be positive")
+        return v
+
+
 # ── Customer Ownership ──────────────────────────────────────────────
 
 

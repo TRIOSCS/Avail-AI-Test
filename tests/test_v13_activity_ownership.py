@@ -78,14 +78,14 @@ def test_get_user_activities(client, db_session, test_user, test_company):
 
 
 def test_log_phone_call_no_match(client):
-    """Phone number that doesn't match any known contact → no_match."""
+    """Phone number that doesn't match any known contact — still logged (unmatched queue)."""
     resp = client.post("/api/activities/call", json={
         "direction": "outbound",
         "phone": "+1-555-9999",
         "duration_seconds": 120,
     })
     assert resp.status_code == 200
-    assert resp.json()["status"] == "no_match"
+    assert resp.json()["status"] == "logged"
 
 
 def test_company_activity_status_no_activity(client, test_company):

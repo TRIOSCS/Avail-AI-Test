@@ -23,9 +23,10 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import is_admin as _is_admin, require_user
+from ..dependencies import is_admin as _is_admin, require_admin, require_user
 from ..models import ActivityLog, Company, User, VendorCard
 from ..schemas.v13_features import (
+    ActivityAttributeRequest,
     BuyerProfileUpsert,
     CompanyCallLog,
     CompanyNoteLog,
@@ -158,6 +159,7 @@ def _activity_to_dict(a) -> dict:
         "notes": getattr(a, "notes", None),
         "duration_seconds": a.duration_seconds,
         "requisition_id": getattr(a, "requisition_id", None),
+        "dismissed_at": a.dismissed_at.isoformat() if getattr(a, "dismissed_at", None) else None,
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
 
@@ -363,6 +365,85 @@ async def log_vendor_note_endpoint(
     )
     db.commit()
     return {"status": "logged", "activity_id": record.id}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  UNMATCHED ACTIVITY QUEUE (Phase 2A)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+@router.get("/api/activities/unmatched")
+async def list_unmatched_activities(
+    limit: int = 100,
+    offset: int = 0,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """List activities with no company or vendor match (admin only)."""
+    from app.services.activity_service import (
+        count_unmatched_activities,
+        get_unmatched_activities,
+    )
+
+    activities = get_unmatched_activities(db, limit=limit, offset=offset)
+    total = count_unmatched_activities(db)
+    return {
+        "items": [_activity_to_dict(a) for a in activities],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.post("/api/activities/{activity_id}/attribute")
+async def attribute_activity_endpoint(
+    activity_id: int,
+    payload: ActivityAttributeRequest,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Attribute an unmatched activity to a company or vendor (admin only)."""
+    # Verify the target entity exists
+    if payload.entity_type == "company":
+        target = db.get(Company, payload.entity_id)
+        if not target:
+            raise HTTPException(404, "Company not found")
+    elif payload.entity_type == "vendor":
+        target = db.get(VendorCard, payload.entity_id)
+        if not target:
+            raise HTTPException(404, "Vendor not found")
+
+    from app.services.activity_service import attribute_activity
+
+    result = attribute_activity(
+        activity_id=activity_id,
+        entity_type=payload.entity_type,
+        entity_id=payload.entity_id,
+        db=db,
+        user_id=user.id,
+    )
+    if not result:
+        raise HTTPException(404, "Activity not found")
+
+    db.commit()
+    return {"status": "attributed", "activity": _activity_to_dict(result)}
+
+
+@router.post("/api/activities/{activity_id}/dismiss")
+async def dismiss_activity_endpoint(
+    activity_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Dismiss an unmatched activity (admin only)."""
+    from app.services.activity_service import dismiss_activity
+
+    result = dismiss_activity(activity_id, db)
+    if not result:
+        raise HTTPException(404, "Activity not found")
+
+    db.commit()
+    return {"status": "dismissed", "activity_id": activity_id}
 
 
 @router.get("/api/vendors/{vendor_id}/activity-status")

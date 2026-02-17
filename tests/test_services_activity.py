@@ -208,11 +208,14 @@ class TestLogEmailActivity:
         assert record is not None
         assert record.activity_type == "email_received"
 
-    def test_no_match_returns_none(self, db_session, test_user):
+    def test_no_match_logs_unmatched(self, db_session, test_user):
+        """Unmatched emails are still logged (for admin review queue)."""
         record = log_email_activity(
             test_user.id, "sent", "nobody@unknown.com", "Hi", None, "X", db_session,
         )
-        assert record is None
+        assert record is not None
+        assert record.company_id is None
+        assert record.vendor_card_id is None
 
 
 # ── Call activity logging ───────────────────────────────────────────

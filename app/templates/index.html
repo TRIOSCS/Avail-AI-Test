@@ -913,6 +913,33 @@
         .settings-dropdown-content a{display:block;padding:10px 16px;font-size:13px;color:var(--text);cursor:pointer;text-decoration:none}
         .settings-dropdown-content a:hover{background:var(--surface)}
         .settings-panel{margin-top:12px}
+
+        /* Email Threads */
+        .email-thread-card{cursor:pointer;transition:border-color 0.15s}
+        .email-thread-card:hover{border-color:var(--teal)}
+        .email-thread-header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+        .email-thread-subject{font-size:13px;font-weight:600;color:var(--text);flex:1}
+        .email-thread-meta{display:flex;gap:8px;align-items:center;flex-shrink:0}
+        .email-thread-count{font-size:11px;color:var(--muted);background:var(--surface);padding:1px 6px;border-radius:4px}
+        .email-thread-date{font-size:11px;color:var(--muted)}
+        .email-thread-participants{font-size:11px;color:var(--text2);margin-top:2px}
+        .email-thread-snippet{font-size:11px;color:var(--muted);margin-top:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .email-needs-response{background:var(--amber-light);color:var(--amber);font-size:10px;padding:1px 6px;border-radius:4px;font-weight:600;margin-left:6px}
+        .email-match-badge{background:var(--blue-light);color:var(--blue);font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px}
+        .email-thread-messages{margin-top:10px;border-top:1px solid var(--border);padding-top:8px}
+        .email-msg{padding:8px 12px;margin:4px 0;border-radius:8px;font-size:12px}
+        .email-msg-sent{background:var(--blue-light);margin-left:20%}
+        .email-msg-received{background:var(--surface);margin-right:20%}
+        .email-msg-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
+        .email-msg-header strong{font-size:12px;color:var(--text)}
+        .email-msg-date{font-size:10px;color:var(--muted)}
+        .email-msg-body{color:var(--text2);line-height:1.4;white-space:pre-wrap}
+        .email-reply-area{margin-top:10px;padding:10px;background:var(--surface);border-radius:8px;border:1px solid var(--border)}
+        .email-reply-input{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--text);font-size:12px;font-family:inherit;resize:vertical}
+        .email-reply-input:focus{outline:none;border-color:var(--teal)}
+        .spinner-row{display:flex;align-items:center;justify-content:center;gap:8px;padding:16px;color:var(--muted);font-size:12px}
+        .spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--teal);border-radius:50%;animation:spin 0.6s linear infinite}
+        @keyframes spin{to{transform:rotate(360deg)}}
     </style>
 </head>
 <body>
@@ -1011,6 +1038,7 @@
             <button class="tab" onclick="switchTab('activity',this)">Activity</button>
             <button class="tab" onclick="switchTab('offers',this)">Offers</button>
             <button class="tab" onclick="switchTab('quote',this)">Quote</button>
+            <button class="tab" onclick="switchTab('emails',this)">Emails</button>
         </div>
 
         <!-- Requirements Tab -->
@@ -1160,6 +1188,13 @@
         <!-- Quote Tab -->
         <div id="tab-quote" class="tc">
             <div id="quoteContent"><p class="empty">No quote yet — select offers on the Offers tab and click "Build Quote"</p></div>
+        </div>
+
+        <!-- Emails Tab -->
+        <div id="tab-emails" class="tc">
+            <div id="emailsContent">
+                <p class="empty">Loading email threads...</p>
+            </div>
         </div>
     </div>
 
@@ -1803,6 +1838,7 @@
             <button class="tab" onclick="switchSettingsTab('config',this)">Configuration</button>
             <button class="tab" onclick="switchSettingsTab('sources',this)">Data Sources</button>
             <button class="tab settings-tab-users" onclick="switchSettingsTab('create-user',this)">Create User</button>
+            <button class="tab settings-tab-users" onclick="switchSettingsTab('unmatched',this)">Unmatched Queue</button>
         </div>
 
         <div id="settings-users" class="settings-panel">
@@ -1823,6 +1859,10 @@
 
         <div id="settings-sources" class="settings-panel" style="display:none">
             <div id="settingsSourcesList"><p class="empty">Loading...</p></div>
+        </div>
+
+        <div id="settings-unmatched" class="settings-panel" style="display:none">
+            <div id="unmatchedQueueContent"><p class="empty">Loading...</p></div>
         </div>
 
         <div id="settings-create-user" class="settings-panel" style="display:none">

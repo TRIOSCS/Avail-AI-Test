@@ -84,7 +84,7 @@ def test_get_user_activities_other_user_empty(client, sales_user):
 # ── POST /api/activities/call ─────────────────────────────────────────
 
 def test_log_phone_call_no_match(client):
-    """Phone number that doesn't match any contact returns no_match."""
+    """Phone number that doesn't match any contact — still logged (unmatched queue)."""
     resp = client.post("/api/activities/call", json={
         "direction": "outbound",
         "phone": "+1-555-999-0000",
@@ -92,7 +92,7 @@ def test_log_phone_call_no_match(client):
     })
     assert resp.status_code == 200
     data = resp.json()
-    assert data["status"] == "no_match"
+    assert data["status"] == "logged"
 
 
 def test_log_phone_call_invalid_direction(client):

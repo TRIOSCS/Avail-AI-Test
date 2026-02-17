@@ -284,9 +284,13 @@ class Sighting(Base):
     lead_time_days = Column(Integer)
     lead_time = Column(String(100))
 
+    # v2.0: Excess list differentiation — links sighting to originating customer company
+    source_company_id = Column(Integer, ForeignKey("companies.id"))
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requirement = relationship("Requirement", back_populates="sightings")
+    source_company = relationship("Company", foreign_keys=[source_company_id])
 
     __table_args__ = (
         Index("ix_sightings_vendor_name", "vendor_name"),
@@ -1145,6 +1149,7 @@ class ActivityLog(Base):
     duration_seconds = Column(Integer)
     external_id = Column(String(255))  # Graph message ID or 8x8 call ID
     notes = Column(Text)  # manual call/note text
+    dismissed_at = Column(DateTime)  # v2.0: admin dismissed unmatched activity
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

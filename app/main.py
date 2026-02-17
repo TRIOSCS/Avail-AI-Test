@@ -580,3 +580,6 @@ app.include_router(performance_router)
 from .routers.admin import router as admin_router
 
 app.include_router(admin_router)
+from .routers.emails import router as emails_router
+
+app.include_router(emails_router)

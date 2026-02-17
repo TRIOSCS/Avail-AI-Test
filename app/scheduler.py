@@ -536,6 +536,21 @@ async def _download_and_import_stock_list(
         log.info(f"No valid rows in {filename}")
         return
 
+    # Phase 2B: Classify sender — stock list (vendor) vs excess list (customer)
+    sender_match = None
+    is_excess_list = False
+    source_company_id = None
+    if vendor_email:
+        from app.services.activity_service import match_email_to_entity
+
+        sender_match = match_email_to_entity(vendor_email, db)
+        if sender_match and sender_match["type"] == "company":
+            is_excess_list = True
+            source_company_id = sender_match["id"]
+            log.info(
+                f"Excess list detected from company '{sender_match['name']}' ({vendor_email}): {filename}"
+            )
+
     # Import into material cards
     imported = 0
     norm_vendor = normalize_vendor_name(vendor_name)
@@ -581,7 +596,7 @@ async def _download_and_import_stock_list(
             mvh = MaterialVendorHistory(
                 material_card_id=card.id,
                 vendor_name=norm_vendor,
-                source_type="email_auto_import",
+                source_type="excess_list" if is_excess_list else "email_auto_import",
                 last_qty=row.get("qty"),
                 last_price=row.get("unit_price") or row.get("price"),
                 last_manufacturer=row.get("manufacturer", ""),
@@ -592,7 +607,8 @@ async def _download_and_import_stock_list(
 
     try:
         db.commit()
-        log.info(f"Auto-imported {imported} parts from {filename} ({vendor_name})")
+        list_type = "excess list" if is_excess_list else "stock list"
+        log.info(f"Auto-imported {imported} parts from {list_type} {filename} ({vendor_name})")
     except Exception as e:
         log.error(f"Stock list commit failed: {e}")
         db.rollback()
