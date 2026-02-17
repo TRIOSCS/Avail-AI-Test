@@ -3317,6 +3317,7 @@ function switchSettingsTab(name, btn) {
     else if (name === 'manage-users') loadAdminUsers();
     else if (name === 'unmatched') loadUnmatchedQueue();
     else if (name === 'teams') loadTeamsConfig();
+    else if (name === 'enrichment') { loadEnrichmentQueue(); loadEnrichmentStats(); }
 }
 
 // Keep backward compat for dropdown links
@@ -4056,10 +4057,7 @@ let _eqSelectedIds = new Set();
 let _bfPollInterval = null;
 
 function showEnrichment() {
-    showView('view-enrichment');
-    currentReqId = null;
-    loadEnrichmentQueue();
-    loadEnrichmentStats();
+    openSettingsTab('enrichment');
 }
 
 function switchEnrichTab(tab, btn) {
@@ -4068,10 +4066,13 @@ function switchEnrichTab(tab, btn) {
     document.getElementById('enrichQueuePanel').style.display = tab === 'queue' ? '' : 'none';
     document.getElementById('enrichBackfillPanel').style.display = tab === 'backfill' ? '' : 'none';
     document.getElementById('enrichJobsPanel').style.display = tab === 'jobs' ? '' : 'none';
+    const m365Panel = document.getElementById('enrichM365Panel');
+    if (m365Panel) m365Panel.style.display = tab === 'm365' ? '' : 'none';
 
     if (tab === 'queue') loadEnrichmentQueue();
     if (tab === 'backfill') loadEnrichmentJobs();
     if (tab === 'jobs') loadEnrichmentJobs();
+    if (tab === 'm365') loadM365Status();
 }
 
 async function loadEnrichmentQueue() {
@@ -4299,6 +4300,8 @@ async function loadEnrichmentStats() {
         if (pe) pe.textContent = s.queue_pending;
         if (aa) aa.textContent = s.queue_auto_applied;
         if (aj) aj.textContent = s.active_jobs;
+        const em = document.getElementById('esVendorEmails');
+        if (em) em.textContent = s.vendor_emails || 0;
     } catch (e) {
         console.error('enrichment stats error:', e);
     }
@@ -4346,5 +4349,89 @@ async function deepEnrichCompany(companyId) {
         }
     } catch (e) {
         showToast('Enrichment failed: ' + (e.message || e), 'error');
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  Email Backfill & Website Scraping
+// ═══════════════════════════════════════════════════════════════════════
+
+async function startEmailBackfill() {
+    const statusEl = document.getElementById('emailBfStatus');
+    try {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">Running...</span>';
+        const res = await apiFetch('/api/enrichment/backfill-emails', {method: 'POST'});
+        const parts = [];
+        if (res.activity_log_created) parts.push(`${res.activity_log_created} from activity log`);
+        if (res.vendor_card_created) parts.push(`${res.vendor_card_created} from vendor cards`);
+        if (res.brokerbin_created) parts.push(`${res.brokerbin_created} from BrokerBin`);
+        const msg = parts.length ? parts.join(', ') : 'No new emails found';
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">${esc(msg)}</span>`;
+        loadEnrichmentStats();
+    } catch (e) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--red)">${esc(e.message || String(e))}</span>`;
+    }
+}
+
+async function startWebsiteScrape() {
+    const statusEl = document.getElementById('scrapeStatus');
+    const maxVendors = parseInt(document.getElementById('scrapeMaxVendors')?.value) || 500;
+    try {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">Scraping... this may take a few minutes.</span>';
+        const res = await apiFetch('/api/enrichment/scrape-websites', {
+            method: 'POST',
+            body: {max_vendors: maxVendors},
+        });
+        const msg = `Scraped ${res.vendors_scraped || 0} vendors, found ${res.emails_found || 0} emails`;
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">${esc(msg)}</span>`;
+        loadEnrichmentStats();
+    } catch (e) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:var(--red)">${esc(e.message || String(e))}</span>`;
+    }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  M365 Inbox Mining Status
+// ═══════════════════════════════════════════════════════════════════════
+
+async function loadM365Status() {
+    const list = document.getElementById('m365UserList');
+    if (!list) return;
+    try {
+        const data = await apiFetch('/api/enrichment/m365-status');
+        const users = data.users || [];
+        if (!users.length) {
+            list.innerHTML = '<p class="empty">No users found.</p>';
+            return;
+        }
+        let html = '<table class="tbl"><thead><tr><th>User</th><th>M365 Status</th><th>Last Inbox Scan</th><th>Last Deep Scan</th><th>Actions</th></tr></thead><tbody>';
+        for (const u of users) {
+            const connected = u.m365_connected;
+            const statusHtml = connected
+                ? '<span style="color:var(--green);font-weight:600">Connected</span>'
+                : `<span style="color:var(--red)">Not Connected</span>${u.error_reason ? `<br><small style="color:var(--muted)">${esc(u.error_reason)}</small>` : ''}`;
+            const lastScan = u.last_inbox_scan ? fmtDateTime(u.last_inbox_scan) : '—';
+            const lastDeep = u.last_deep_scan ? fmtDateTime(u.last_deep_scan) : '—';
+            const actions = connected
+                ? `<button class="btn btn-sm" onclick="triggerDeepScan(${u.id})">Deep Scan</button>`
+                : '<small style="color:var(--muted)">Must log in via Azure AD</small>';
+            html += `<tr><td><strong>${esc(u.name)}</strong><br><small style="color:var(--muted)">${esc(u.email)}</small></td><td>${statusHtml}</td><td>${lastScan}</td><td>${lastDeep}</td><td>${actions}</td></tr>`;
+        }
+        html += '</tbody></table>';
+        list.innerHTML = html;
+    } catch (e) {
+        list.innerHTML = `<p class="empty" style="color:var(--red)">Error: ${esc(e.message || String(e))}</p>`;
+    }
+}
+
+async function triggerDeepScan(userId) {
+    try {
+        showToast('Starting deep inbox scan...');
+        const res = await apiFetch(`/api/enrichment/deep-email-scan/${userId}`, {method: 'POST'});
+        showToast(`Deep scan complete: ${res.contacts_created || 0} new contacts found`);
+        loadM365Status();
+        loadEnrichmentStats();
+    } catch (e) {
+        showToast('Deep scan failed: ' + (e.message || e), 'error');
     }
 }

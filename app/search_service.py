@@ -296,7 +296,77 @@ def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Si
         db.add(s)
         sightings.append(s)
     db.commit()
+
+    # Propagate vendor emails from search results to VendorContact records
+    _propagate_vendor_emails(sightings, db)
+
     return sightings
+
+
+def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
+    """Create VendorContact records from sighting emails (e.g. BrokerBin)."""
+    from .models import VendorCard, VendorContact
+    from .vendor_utils import normalize_vendor_name, merge_emails_into_card
+
+    # Collect unique vendor_name -> email pairs
+    email_map: dict[str, set[str]] = {}
+    phone_map: dict[str, set[str]] = {}
+    for s in sightings:
+        if not s.vendor_email or "@" not in s.vendor_email:
+            continue
+        vn = (s.vendor_name or "").strip()
+        if not vn:
+            continue
+        email_map.setdefault(vn, set()).add(s.vendor_email.strip().lower())
+        if s.vendor_phone:
+            phone_map.setdefault(vn, set()).add(s.vendor_phone.strip())
+
+    if not email_map:
+        return
+
+    for vendor_name, emails in email_map.items():
+        norm = normalize_vendor_name(vendor_name)
+        if not norm:
+            continue
+
+        card = db.query(VendorCard).filter_by(normalized_name=norm).first()
+        if not card:
+            continue
+
+        # Merge emails into VendorCard.emails JSON array
+        merge_emails_into_card(card, list(emails))
+
+        # Create VendorContact records if not exists
+        for email in emails:
+            existing = (
+                db.query(VendorContact)
+                .filter_by(vendor_card_id=card.id, email=email)
+                .first()
+            )
+            if existing:
+                existing.last_seen_at = datetime.now(timezone.utc)
+                continue
+
+            contact = VendorContact(
+                vendor_card_id=card.id,
+                email=email,
+                source="brokerbin",
+                confidence=60,
+                contact_type="company",
+            )
+            db.add(contact)
+
+        # Also add phones if available
+        phones = phone_map.get(vendor_name, set())
+        if phones:
+            from .vendor_utils import merge_phones_into_card
+            merge_phones_into_card(card, list(phones))
+
+    try:
+        db.commit()
+    except Exception as e:
+        log.warning("Failed to propagate vendor emails: %s", e)
+        db.rollback()
 
 
 def _get_material_history(

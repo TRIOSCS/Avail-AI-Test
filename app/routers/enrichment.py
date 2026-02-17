@@ -4,15 +4,20 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import require_admin, require_user
 from ..models import (
+    ActivityLog,
     EnrichmentJob,
     EnrichmentQueue,
+    Sighting,
     User,
     VendorCard,
+    VendorContact,
     Company,
 )
 from ..schemas.enrichment import (
@@ -356,4 +361,277 @@ def api_enrichment_stats(
         "companies_enriched": companies_enriched,
         "companies_total": companies_total,
         "active_jobs": active_jobs,
+        "vendor_emails": db.query(func.count(VendorContact.id)).filter(
+            VendorContact.email.isnot(None)
+        ).scalar() or 0,
     }
+
+
+# ── Email Backfill ────────────────────────────────────────────────────
+
+
+@router.post("/api/enrichment/backfill-emails")
+def api_backfill_emails(
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """One-time backfill: recover vendor emails from activity_log, VendorCard.emails, and BrokerBin sightings."""
+    from ..vendor_utils import normalize_vendor_name
+
+    now = datetime.now(timezone.utc)
+    activity_log_created = 0
+    vendor_card_created = 0
+    brokerbin_created = 0
+
+    # 1. Activity log orphans — emails in activity_log not in vendor_contacts
+    activity_rows = (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.contact_email.isnot(None),
+            ActivityLog.contact_email != "",
+            ActivityLog.vendor_card_id.isnot(None),
+        )
+        .all()
+    )
+    for row in activity_rows:
+        email = row.contact_email.strip().lower()
+        if not email or "@" not in email:
+            continue
+        existing = (
+            db.query(VendorContact)
+            .filter_by(vendor_card_id=row.vendor_card_id, email=email)
+            .first()
+        )
+        if existing:
+            continue
+        vc = VendorContact(
+            vendor_card_id=row.vendor_card_id,
+            email=email,
+            full_name=row.contact_name,
+            source="activity_log",
+            confidence=55,
+            contact_type="individual" if row.contact_name else "company",
+        )
+        db.add(vc)
+        activity_log_created += 1
+
+    # 2. VendorCard.emails consolidation
+    cards_with_emails = (
+        db.query(VendorCard)
+        .filter(VendorCard.emails.isnot(None))
+        .all()
+    )
+    for card in cards_with_emails:
+        emails = card.emails or []
+        if not isinstance(emails, list):
+            continue
+        for email in emails:
+            email = (email or "").strip().lower()
+            if not email or "@" not in email:
+                continue
+            existing = (
+                db.query(VendorContact)
+                .filter_by(vendor_card_id=card.id, email=email)
+                .first()
+            )
+            if existing:
+                continue
+            vc = VendorContact(
+                vendor_card_id=card.id,
+                email=email,
+                source="vendor_card_import",
+                confidence=50,
+                contact_type="company",
+            )
+            db.add(vc)
+            vendor_card_created += 1
+
+    # 3. BrokerBin sighting re-scan
+    bb_sightings = (
+        db.query(Sighting)
+        .filter(
+            Sighting.source_type == "brokerbin",
+            Sighting.vendor_email.isnot(None),
+            Sighting.vendor_email != "",
+        )
+        .all()
+    )
+    for s in bb_sightings:
+        email = s.vendor_email.strip().lower()
+        if not email or "@" not in email:
+            continue
+        vn = (s.vendor_name or "").strip()
+        if not vn:
+            continue
+        norm = normalize_vendor_name(vn)
+        if not norm:
+            continue
+        card = db.query(VendorCard).filter_by(normalized_name=norm).first()
+        if not card:
+            continue
+        existing = (
+            db.query(VendorContact)
+            .filter_by(vendor_card_id=card.id, email=email)
+            .first()
+        )
+        if existing:
+            continue
+        vc = VendorContact(
+            vendor_card_id=card.id,
+            email=email,
+            source="brokerbin",
+            confidence=60,
+            contact_type="company",
+        )
+        db.add(vc)
+        brokerbin_created += 1
+
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        log.error("Email backfill commit failed: %s", e)
+        raise HTTPException(500, f"Backfill failed: {e}")
+
+    total = activity_log_created + vendor_card_created + brokerbin_created
+    log.info(
+        "Email backfill complete: %d total (%d activity_log, %d vendor_card, %d brokerbin)",
+        total, activity_log_created, vendor_card_created, brokerbin_created,
+    )
+    return {
+        "activity_log_created": activity_log_created,
+        "vendor_card_created": vendor_card_created,
+        "brokerbin_created": brokerbin_created,
+        "total_created": total,
+    }
+
+
+# ── M365 Status & Deep Scan ──────────────────────────────────────────
+
+
+@router.get("/api/enrichment/m365-status")
+def api_m365_status(
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Get M365 connection status for all users."""
+    users = db.query(User).filter(User.is_active == True).order_by(User.name).all()  # noqa: E712
+    return {
+        "users": [
+            {
+                "id": u.id,
+                "name": u.name or u.email,
+                "email": u.email,
+                "m365_connected": bool(u.m365_connected),
+                "error_reason": u.m365_error_reason,
+                "last_inbox_scan": u.last_inbox_scan.isoformat() if u.last_inbox_scan else None,
+                "last_deep_scan": u.last_deep_email_scan.isoformat() if u.last_deep_email_scan else None,
+            }
+            for u in users
+        ]
+    }
+
+
+@router.post("/api/enrichment/deep-email-scan/{user_id}")
+async def api_deep_email_scan(
+    user_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Trigger a deep inbox scan for a specific user to extract vendor contacts."""
+    from ..connectors.email_mining import EmailMiner
+    from ..scheduler import get_valid_token
+    from ..vendor_utils import normalize_vendor_name, merge_emails_into_card
+
+    target_user = db.get(User, user_id)
+    if not target_user:
+        raise HTTPException(404, "User not found")
+    if not target_user.m365_connected:
+        raise HTTPException(400, "User does not have M365 connected")
+
+    fresh_token = await get_valid_token(target_user, db) or target_user.access_token
+    if not fresh_token:
+        raise HTTPException(400, "No valid access token for user")
+
+    miner = EmailMiner(fresh_token, db=db, user_id=target_user.id)
+    results = await miner.deep_scan_inbox(lookback_days=365, max_messages=2000)
+
+    contacts_created = 0
+    per_domain = results.get("per_domain", {})
+    for domain, data in per_domain.items():
+        emails = data.get("emails", [])
+        if not emails:
+            continue
+
+        # Try to find a vendor card matching this domain
+        card = db.query(VendorCard).filter(
+            (VendorCard.domain == domain) |
+            (VendorCard.website.ilike(f"%{domain}%"))
+        ).first()
+
+        if not card:
+            # Try matching by normalized name from domain
+            domain_name = domain.split(".")[0] if domain else ""
+            if domain_name:
+                norm = normalize_vendor_name(domain_name)
+                card = db.query(VendorCard).filter_by(normalized_name=norm).first()
+
+        if not card:
+            continue
+
+        merge_emails_into_card(card, emails)
+
+        for email in emails:
+            email_lower = email.strip().lower()
+            if not email_lower or "@" not in email_lower:
+                continue
+            existing = (
+                db.query(VendorContact)
+                .filter_by(vendor_card_id=card.id, email=email_lower)
+                .first()
+            )
+            if existing:
+                continue
+            vc = VendorContact(
+                vendor_card_id=card.id,
+                email=email_lower,
+                source="email_mining_deep",
+                confidence=70,
+                contact_type="company",
+            )
+            db.add(vc)
+            contacts_created += 1
+
+    target_user.last_deep_email_scan = datetime.now(timezone.utc)
+    try:
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        log.error("Deep scan commit failed for user %s: %s", target_user.email, e)
+        raise HTTPException(500, f"Deep scan failed: {e}")
+
+    log.info("Deep email scan for %s: %d contacts created", target_user.email, contacts_created)
+    return {
+        "messages_scanned": results.get("messages_scanned", 0),
+        "contacts_created": contacts_created,
+    }
+
+
+# ── Website Scraping ─────────────────────────────────────────────────
+
+
+class ScrapeRequest(BaseModel):
+    max_vendors: int = 500
+
+
+@router.post("/api/enrichment/scrape-websites")
+async def api_scrape_websites(
+    body: ScrapeRequest = ScrapeRequest(),
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Scrape vendor websites for contact emails."""
+    from ..services.website_scraper import scrape_vendor_websites
+
+    result = await scrape_vendor_websites(db, max_vendors=body.max_vendors)
+    return result
