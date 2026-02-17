@@ -419,8 +419,12 @@ async def rfq_prepare(
         raise HTTPException(404)
     vendors = payload.vendors
 
-    # All MPNs on this requisition
+    # All MPNs on this requisition + substitutes map
     all_parts = [r.primary_mpn for r in req.requirements if r.primary_mpn]
+    subs_map = {}
+    for r in req.requirements:
+        if r.primary_mpn and r.substitutes:
+            subs_map[r.primary_mpn] = [s for s in r.substitutes if s]
 
     # Build exhaustion map: {normalized_vendor: [parts_already_asked]}
     contacts = db.query(Contact).filter_by(requisition_id=req_id).all()
@@ -458,7 +462,7 @@ async def rfq_prepare(
             base.update({"emails": [], "phones": [], "needs_lookup": True})
         results.append(base)
 
-    return {"vendors": results, "all_parts": all_parts}
+    return {"vendors": results, "all_parts": all_parts, "subs_map": subs_map}
 
 
 # ── Follow-Up Detection ───────────────────────────────────────────────

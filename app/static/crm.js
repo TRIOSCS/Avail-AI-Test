@@ -2317,19 +2317,6 @@ function renderIntelCard(intel, el) {
 }
 
 
-// ── Feature 4: Smart RFQ Draft ────────────────────────────────────────
-
-async function generateSmartRFQ(vendorName, parts) {
-    try {
-        const data = await apiFetch('/api/ai/draft-rfq', {
-            method: 'POST', body: { vendor_name: vendorName, parts }
-        });
-        return data.available ? data.body : null;
-    } catch (e) {
-        return null;
-    }
-}
-
 // ── Site Contacts CRUD ─────────────────────────────────────────────────
 
 function openAddSiteContact(siteId) {
@@ -2406,31 +2393,6 @@ function filterSiteContacts(input, siteId) {
         const text = card.dataset.contactSearch || '';
         card.style.display = !q || text.includes(q) ? '' : 'none';
     });
-}
-
-// Generate smart draft for the currently selected first vendor in RFQ modal
-async function generateSmartRFQForModal() {
-    const btn = event?.target;
-    if (btn) { btn.disabled = true; btn.textContent = 'Generating…'; }
-    try {
-        // Gather all parts from the current requisition
-        const parts = (window._currentRequirements || []).map(r => r.mpn);
-        // Use first selected vendor
-        const firstVendor = rfqVendorData.find(v => v.selected);
-        if (!firstVendor || !parts.length) {
-            showToast('No vendor or parts selected', 'info');
-            return;
-        }
-        const body = await generateSmartRFQ(firstVendor.name, parts);
-        if (body) {
-            document.getElementById('rfqBody').value = body;
-            showToast('Smart draft applied', 'success');
-        } else {
-            showToast('AI draft unavailable — using template', 'info');
-        }
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = '🤖 Smart Draft'; }
-    }
 }
 
 // ── Company Activity Tracking ─────────────────────────────────────────

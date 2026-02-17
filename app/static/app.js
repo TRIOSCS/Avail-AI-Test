@@ -1283,6 +1283,7 @@ function getSelectedByVendor() {
 
 // ── RFQ Flow ────────────────────────────────────────────────────────────
 let rfqAllParts = []; // All MPNs on this requisition
+let rfqSubsMap = {}; // { primary_mpn: [sub1, sub2, ...] }
 
 async function openBatchRfqModal() {
     const groups = getSelectedByVendor();
@@ -1302,6 +1303,7 @@ async function openBatchRfqModal() {
             method: 'POST', body: { vendors: groups.map(g => ({ vendor_name: g.vendor_name })) }
         });
         rfqAllParts = data.all_parts || [];
+        rfqSubsMap = data.subs_map || {};
 
         rfqVendorData = data.vendors.map((v, i) => {
             const listingParts = (groups[i] && groups[i].parts) || [];
@@ -1502,7 +1504,13 @@ function buildVendorBody(v) {
     let body = 'Hi,\n\n';
 
     body += 'We are sourcing the following parts — please send your best offer if available:\n\n';
-    body += allSendParts.map(p => `  ${p}`).join('\n');
+    body += allSendParts.map(p => {
+        const subs = (rfqSubsMap[p] || []).filter(s => s.toUpperCase() !== p.toUpperCase());
+        if (subs.length) {
+            return `  ${p}  (also acceptable: ${subs.join(', ')})`;
+        }
+        return `  ${p}`;
+    }).join('\n');
     body += '\n';
 
     if (condLine) body += '\n' + condLine;
@@ -1537,31 +1545,6 @@ function renderRfqMessage() {
     }
 }
 
-async function generateSmartRFQForModal() {
-    const sample = rfqVendorData.find(v => _vendorHasPartsToSend(v));
-    if (!sample) { showToast('No vendor with parts selected', 'error'); return; }
-    const parts = [...sample.new_listing, ...sample.new_other];
-    if (sample.include_repeats) parts.push(...sample.repeat_listing, ...sample.repeat_other);
-    if (!parts.length) { showToast('No parts to draft for', 'error'); return; }
-    const btn = document.querySelector('[onclick*="generateSmartRFQ"]');
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ Drafting…'; }
-    try {
-        const data = await apiFetch('/api/ai/draft-rfq', {
-            method: 'POST', body: { vendor_name: sample.vendor_name, parts }
-        });
-        if (data.available && data.body) {
-            document.getElementById('rfqBody').value = data.body;
-            showToast('Smart draft generated', 'success');
-        } else {
-            showToast(data.reason || 'Draft generation failed', 'error');
-        }
-    } catch (e) {
-        console.error('generateSmartRFQForModal:', e);
-        showToast('Smart draft failed — using template', 'error');
-    } finally {
-        if (btn) { btn.disabled = false; btn.textContent = '🤖 Smart Draft'; }
-    }
-}
 
 function rfqSelectEmail(idx, value) {
     if (value === '__custom__') {
