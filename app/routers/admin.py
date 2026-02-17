@@ -151,13 +151,13 @@ def api_health(
     return get_system_health(db)
 
 
-# ── Credential Management (admin only) ────────────────────────────────
+# ── Credential Management (admin + dev_assistant) ─────────────────────
 
 
 @router.get("/api/admin/sources/{source_id}/credentials")
 def api_get_credentials(
     source_id: int,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
     """Return masked credential values for a source."""
@@ -192,7 +192,7 @@ def api_get_credentials(
 def api_set_credentials(
     source_id: int,
     body: dict,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
     """Set credential values for a source. Body: {VAR_NAME: "plaintext_value", ...}"""
@@ -222,7 +222,7 @@ def api_set_credentials(
 def api_delete_credential(
     source_id: int,
     var_name: str,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
     """Remove a single credential from a source."""

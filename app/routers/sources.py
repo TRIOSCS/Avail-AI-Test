@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import require_admin, require_fresh_token, require_user
+from ..dependencies import require_admin, require_fresh_token, require_settings_access, require_user
 from ..schemas.sources import MiningOptions, SourceStatusToggle
 from ..models import (
     ApiSource,
@@ -287,10 +287,10 @@ async def test_api_source(
 async def toggle_api_source(
     source_id: int,
     payload: SourceStatusToggle,
-    user: User = Depends(require_admin),
+    user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
-    """Enable or disable a source (admin only)."""
+    """Enable or disable a source (admin + dev_assistant)."""
     src = db.get(ApiSource, source_id)
     if not src:
         raise HTTPException(404)

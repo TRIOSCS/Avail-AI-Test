@@ -3099,7 +3099,11 @@ function openSettingsTab(panel) {
     document.getElementById('settingsDropdownContent').style.display = 'none';
     showView('view-settings');
     document.querySelectorAll('.topbar-nav button').forEach(b => b.classList.remove('active'));
-    switchSettingsTab(panel);
+    // Dev assistant defaults to sources tab (Users tab is hidden for them)
+    if (!panel && window.__isDevAssistant && !window.__isAdmin) {
+        panel = 'sources';
+    }
+    switchSettingsTab(panel || 'users');
 }
 
 function switchSettingsTab(name, btn) {
@@ -3132,67 +3136,103 @@ async function loadSettingsSources() {
         const sources = (res.sources || []).filter(s => s.source_type !== 'internal');
         if (!sources.length) { el.innerHTML = '<p class="empty">No data sources configured</p>'; return; }
 
-        // Sort: live first, then pending, error, disabled
-        const order = {live: 0, pending: 1, error: 2, disabled: 3};
-        sources.sort((a, b) => (order[a.status] || 9) - (order[b.status] || 9));
+        // Category display order and labels
+        const categoryOrder = ['api', 'platform', 'enrichment', 'email', 'scraper', 'manual'];
+        const categoryLabels = {
+            api: 'Part Search APIs',
+            platform: 'Platform Services',
+            enrichment: 'Enrichment APIs',
+            email: 'Email Intelligence',
+            scraper: 'Scrapers (Pending)',
+            manual: 'Manual Import',
+        };
 
-        let html = '';
+        // Group sources by category
+        const grouped = {};
         for (const s of sources) {
-            const dot = s.status === 'live' ? '🟢' : s.status === 'pending' ? '🟡' : s.status === 'error' ? '🔴' : '⚫';
-            const envVars = s.env_vars || [];
-            const envStatus = s.env_status || {};
+            const cat = s.category || 'api';
+            if (!grouped[cat]) grouped[cat] = [];
+            grouped[cat].push(s);
+        }
 
-            let credsHtml = '';
-            for (const v of envVars) {
-                const isSet = envStatus[v];
-                const badge = isSet
-                    ? '<span style="color:var(--teal);font-size:11px;font-weight:600">Set</span>'
-                    : '<span style="color:var(--muted);font-size:11px">Not set</span>';
-                credsHtml += `
-                    <div class="cred-row" id="cred-row-${s.id}-${v}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
-                        <code style="font-size:11px;min-width:180px;color:var(--text2)">${v}</code>
-                        <span id="cred-status-${s.id}-${v}">${badge}</span>
-                        <div style="flex:1"></div>
-                        <button class="btn-sm" onclick="editCredential(${s.id},'${v}')" style="font-size:11px;padding:2px 10px">Edit</button>
-                    </div>
-                    <div id="cred-edit-${s.id}-${v}" style="display:none;padding:6px 0 10px">
-                        <div style="display:flex;gap:8px;align-items:center">
-                            <input type="password" id="cred-input-${s.id}-${v}" placeholder="Enter value..."
-                                   style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg);color:var(--text)">
-                            <button class="btn-sm" onclick="saveCredential(${s.id},'${v}')"
-                                    style="font-size:11px;padding:4px 12px;background:var(--teal);color:#fff;border:none;border-radius:4px">Save</button>
-                            <button class="btn-sm" onclick="cancelCredEdit(${s.id},'${v}')"
-                                    style="font-size:11px;padding:4px 10px">Cancel</button>
+        // Sort within each group: live first, then pending, error, disabled
+        const order = {live: 0, pending: 1, error: 2, disabled: 3};
+        for (const cat of Object.keys(grouped)) {
+            grouped[cat].sort((a, b) => (order[a.status] || 9) - (order[b.status] || 9));
+        }
+
+        const canToggle = window.__isAdmin || window.__isDevAssistant;
+        let html = '';
+        for (const cat of categoryOrder) {
+            const group = grouped[cat];
+            if (!group || !group.length) continue;
+            const label = categoryLabels[cat] || cat;
+            html += `<h3 style="font-size:13px;font-weight:600;color:var(--text2);margin:20px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)">${label}</h3>`;
+
+            for (const s of group) {
+                const dot = s.status === 'live' ? '🟢' : s.status === 'pending' ? '🟡' : s.status === 'error' ? '🔴' : '⚫';
+                const envVars = s.env_vars || [];
+                const envStatus = s.env_status || {};
+
+                let credsHtml = '';
+                for (const v of envVars) {
+                    const isSet = envStatus[v];
+                    const badge = isSet
+                        ? '<span style="color:var(--teal);font-size:11px;font-weight:600">Set</span>'
+                        : '<span style="color:var(--muted);font-size:11px">Not set</span>';
+                    credsHtml += `
+                        <div class="cred-row" id="cred-row-${s.id}-${v}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+                            <code style="font-size:11px;min-width:180px;color:var(--text2)">${v}</code>
+                            <span id="cred-status-${s.id}-${v}">${badge}</span>
+                            <div style="flex:1"></div>
+                            <button class="btn-sm" onclick="editCredential(${s.id},'${v}')" style="font-size:11px;padding:2px 10px">Edit</button>
                         </div>
-                    </div>`;
+                        <div id="cred-edit-${s.id}-${v}" style="display:none;padding:6px 0 10px">
+                            <div style="display:flex;gap:8px;align-items:center">
+                                <input type="password" id="cred-input-${s.id}-${v}" placeholder="Enter value..."
+                                       style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg);color:var(--text)">
+                                <button class="btn-sm" onclick="saveCredential(${s.id},'${v}')"
+                                        style="font-size:11px;padding:4px 12px;background:var(--teal);color:#fff;border:none;border-radius:4px">Save</button>
+                                <button class="btn-sm" onclick="cancelCredEdit(${s.id},'${v}')"
+                                        style="font-size:11px;padding:4px 10px">Cancel</button>
+                            </div>
+                        </div>`;
+                }
+
+                const statsHtml = s.total_searches
+                    ? `<div style="font-size:10px;color:var(--muted);margin-top:8px">${s.total_searches} searches / ${s.total_results} results / ${s.avg_response_ms}ms avg</div>`
+                    : '';
+                const errorHtml = s.last_error
+                    ? `<div style="font-size:10px;color:var(--red);margin-top:4px">Last error: ${s.last_error}</div>`
+                    : '';
+
+                // Toggle button for admin and dev_assistant
+                const toggleHtml = canToggle && envVars.length
+                    ? `<button class="btn-sm" onclick="toggleSourceStatus(${s.id},'${s.status}')"
+                              style="font-size:10px;padding:2px 10px;${s.status === 'disabled' ? 'opacity:0.7' : ''}">${s.status === 'disabled' ? 'Enable' : 'Disable'}</button>`
+                    : '';
+
+                html += `<div class="card" style="padding:16px;margin-bottom:12px">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                        <div>
+                            <strong style="font-size:14px">${s.display_name}</strong>
+                            <span style="font-size:11px;color:var(--muted);margin-left:8px">${s.source_type}</span>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:10px">
+                            <span style="font-size:11px">${dot} ${s.status}</span>
+                            ${toggleHtml}
+                            <button class="btn-sm" id="test-btn-${s.id}" onclick="testSourceCred(${s.id})"
+                                    style="font-size:11px;padding:3px 12px">Test</button>
+                        </div>
+                    </div>
+                    <div style="font-size:11px;color:var(--text2);margin-bottom:10px">${s.description || ''}</div>
+                    ${s.setup_notes ? '<div style="font-size:10px;color:var(--muted);margin-bottom:8px;padding:6px 10px;background:var(--bg);border-radius:4px">' + s.setup_notes + '</div>' : ''}
+                    ${s.signup_url ? '<a href="' + s.signup_url + '" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:none">Get API credentials ↗</a>' : ''}
+                    <div style="margin-top:10px">${credsHtml}</div>
+                    <div id="test-result-${s.id}"></div>
+                    ${statsHtml}${errorHtml}
+                </div>`;
             }
-
-            const statsHtml = s.total_searches
-                ? `<div style="font-size:10px;color:var(--muted);margin-top:8px">${s.total_searches} searches / ${s.total_results} results / ${s.avg_response_ms}ms avg</div>`
-                : '';
-            const errorHtml = s.last_error
-                ? `<div style="font-size:10px;color:var(--red);margin-top:4px">Last error: ${s.last_error}</div>`
-                : '';
-
-            html += `<div class="card" style="padding:16px;margin-bottom:12px">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                    <div>
-                        <strong style="font-size:14px">${s.display_name}</strong>
-                        <span style="font-size:11px;color:var(--muted);margin-left:8px">${s.source_type}</span>
-                    </div>
-                    <div style="display:flex;align-items:center;gap:10px">
-                        <span style="font-size:11px">${dot} ${s.status}</span>
-                        <button class="btn-sm" id="test-btn-${s.id}" onclick="testSourceCred(${s.id})"
-                                style="font-size:11px;padding:3px 12px">Test</button>
-                    </div>
-                </div>
-                <div style="font-size:11px;color:var(--text2);margin-bottom:10px">${s.description || ''}</div>
-                ${s.setup_notes ? '<div style="font-size:10px;color:var(--muted);margin-bottom:8px;padding:6px 10px;background:var(--bg);border-radius:4px">' + s.setup_notes + '</div>' : ''}
-                ${s.signup_url ? '<a href="' + s.signup_url + '" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:none">Get API credentials ↗</a>' : ''}
-                <div style="margin-top:10px">${credsHtml}</div>
-                <div id="test-result-${s.id}"></div>
-                ${statsHtml}${errorHtml}
-            </div>`;
         }
         el.innerHTML = html;
     } catch (e) {
@@ -3252,6 +3292,21 @@ async function testSourceCred(sourceId) {
     }
     btn.disabled = false;
     btn.textContent = 'Test';
+}
+
+async function toggleSourceStatus(sourceId, currentStatus) {
+    const newStatus = currentStatus === 'disabled' ? 'pending' : 'disabled';
+    try {
+        await apiFetch(`/api/sources/${sourceId}/toggle`, {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({status: newStatus}),
+        });
+        showToast(`Source ${newStatus === 'disabled' ? 'disabled' : 'enabled'}`, 'success');
+        loadSettingsSources();
+    } catch (e) {
+        showToast('Failed to toggle source: ' + (e.message || e), 'error');
+    }
 }
 
 // ── System Health ──
