@@ -20,6 +20,7 @@ from contextlib import contextmanager
 import pymssql  # type: ignore
 
 from .config import settings
+from .services.credential_service import get_credential_cached
 
 log = logging.getLogger("avail.acctivate")
 
@@ -30,11 +31,11 @@ log = logging.getLogger("avail.acctivate")
 def _connect():
     """Open a read-only connection to Acctivate's SQL Server."""
     conn = pymssql.connect(
-        server=settings.acctivate_host,
-        port=settings.acctivate_port,
-        user=settings.acctivate_user,
-        password=settings.acctivate_password,
-        database=settings.acctivate_database,
+        server=get_credential_cached("acctivate_erp", "ACCTIVATE_HOST") or "localhost",
+        port=int(get_credential_cached("acctivate_erp", "ACCTIVATE_PORT") or 1433),
+        user=get_credential_cached("acctivate_erp", "ACCTIVATE_USER") or "",
+        password=get_credential_cached("acctivate_erp", "ACCTIVATE_PASSWORD") or "",
+        database=get_credential_cached("acctivate_erp", "ACCTIVATE_DATABASE") or "",
         login_timeout=10,
         timeout=30,
         as_dict=True,

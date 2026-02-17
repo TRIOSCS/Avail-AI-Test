@@ -40,6 +40,7 @@ from ..schemas.vendors import (
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..services.credential_service import get_credential_cached
 from ..database import get_db
 from ..dependencies import require_admin, require_user, require_buyer
 from ..models import (
@@ -127,7 +128,7 @@ async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str)
         log.exception("Background enrichment failed for vendor card %d", card_id)
 
     # Also run AI material analysis if vendor has sighting data
-    if settings.anthropic_api_key:
+    if get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         try:
             await _analyze_vendor_materials(card_id)
         except Exception:
@@ -659,7 +660,7 @@ async def lookup_vendor_contact(
             log.warning(f"Tier 2 scrape failed for {vendor_name}: {e}")
 
     # TIER 3: AI lookup (expensive, last resort)
-    if not settings.anthropic_api_key:
+    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         return {
             "vendor_name": vendor_name,
             "emails": card.emails or [],
@@ -1035,9 +1036,9 @@ async def add_email_to_card(
     enrich_triggered = False
     if domain_extracted and not card.last_enriched_at:
         if (
-            settings.clay_api_key
-            or settings.explorium_api_key
-            or settings.anthropic_api_key
+            get_credential_cached("clay_enrichment", "CLAY_API_KEY")
+            or get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+            or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
         ):
             asyncio.create_task(
                 _background_enrich_vendor(card.id, domain_extracted, card.display_name)
@@ -1388,9 +1389,9 @@ async def import_stock_list_standalone(
     enrich_triggered = False
     if new_vendor and vendor_card.domain and not vendor_card.last_enriched_at:
         if (
-            settings.clay_api_key
-            or settings.explorium_api_key
-            or settings.anthropic_api_key
+            get_credential_cached("clay_enrichment", "CLAY_API_KEY")
+            or get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+            or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
         ):
             asyncio.create_task(
                 _background_enrich_vendor(
@@ -1751,7 +1752,7 @@ async def analyze_vendor_materials(
     if not card:
         raise HTTPException(404, "Vendor not found")
 
-    if not settings.anthropic_api_key:
+    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         raise HTTPException(503, "AI not configured — set ANTHROPIC_API_KEY in .env")
 
     await _analyze_vendor_materials(card_id, db_session=db)

@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from .config import settings
+from .services.credential_service import get_credential_cached
 from .utils.claude_client import claude_json, claude_text
 from .services.ai_service import enrich_contacts_websearch
 
@@ -176,7 +177,7 @@ async def normalize_company_input(name: str, domain: str = "") -> tuple[str, str
     clean_domain = _clean_domain(domain) if domain else ""
 
     # AI typo fix only when name looks suspicious and we have an API key
-    if clean_name and _name_looks_suspicious(clean_name) and settings.anthropic_api_key:
+    if clean_name and _name_looks_suspicious(clean_name) and get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         try:
             fixed = await claude_text(
                 f'Fix any typos in this company name. Return ONLY the corrected name, nothing else: "{clean_name}"',
@@ -266,7 +267,7 @@ CLAY_BASE = "https://api.clay.com/v3/sources"
 
 async def _clay_find_company(domain: str) -> Optional[dict]:
     """Look up a company on Clay by domain. Returns normalized company data."""
-    if not settings.clay_api_key:
+    if not get_credential_cached("clay_enrichment", "CLAY_API_KEY"):
         log.debug("Clay API key not configured — skipping")
         return None
     try:
@@ -274,7 +275,7 @@ async def _clay_find_company(domain: str) -> Optional[dict]:
             resp = await client.post(
                 f"{CLAY_BASE}/enrich-company",
                 headers={
-                    "Authorization": f"Bearer {settings.clay_api_key}",
+                    "Authorization": f"Bearer {get_credential_cached("clay_enrichment", "CLAY_API_KEY")}",
                     "Content-Type": "application/json",
                 },
                 json={"domain": domain},
@@ -310,7 +311,7 @@ async def _clay_find_company(domain: str) -> Optional[dict]:
 
 async def _clay_find_contacts(domain: str, title_filter: str = "") -> list[dict]:
     """Find contacts at a company via Clay. Returns list of contact dicts."""
-    if not settings.clay_api_key:
+    if not get_credential_cached("clay_enrichment", "CLAY_API_KEY"):
         return []
     try:
         async with httpx.AsyncClient(timeout=20) as client:
@@ -320,7 +321,7 @@ async def _clay_find_contacts(domain: str, title_filter: str = "") -> list[dict]
             resp = await client.post(
                 f"{CLAY_BASE}/find-people",
                 headers={
-                    "Authorization": f"Bearer {settings.clay_api_key}",
+                    "Authorization": f"Bearer {get_credential_cached("clay_enrichment", "CLAY_API_KEY")}",
                     "Content-Type": "application/json",
                 },
                 json=payload,
@@ -355,7 +356,7 @@ EXPLORIUM_BASE = "https://api.explorium.ai/v1"
 
 async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]:
     """Look up a company on Explorium by domain. Returns normalized company data."""
-    if not settings.explorium_api_key:
+    if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY"):
         log.debug("Explorium API key not configured — skipping")
         return None
     try:
@@ -363,7 +364,7 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
             resp = await client.post(
                 f"{EXPLORIUM_BASE}/match/business",
                 headers={
-                    "Authorization": f"Bearer {settings.explorium_api_key}",
+                    "Authorization": f"Bearer {get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")}",
                     "Content-Type": "application/json",
                 },
                 json={"domain": domain, "name": name},
@@ -399,7 +400,7 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
 
 async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[dict]:
     """Find contacts at a company via Explorium."""
-    if not settings.explorium_api_key:
+    if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY"):
         return []
     try:
         async with httpx.AsyncClient(timeout=20) as client:
@@ -409,7 +410,7 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
             resp = await client.post(
                 f"{EXPLORIUM_BASE}/fetch/prospects",
                 headers={
-                    "Authorization": f"Bearer {settings.explorium_api_key}",
+                    "Authorization": f"Bearer {get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")}",
                     "Content-Type": "application/json",
                 },
                 json=payload,
@@ -450,7 +451,7 @@ COMPANY_SEARCH_SYSTEM = (
 
 async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
     """Look up a company using Claude + web search. Returns normalized company data."""
-    if not settings.anthropic_api_key:
+    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         log.debug("Anthropic API key not configured — skipping AI enrichment")
         return None
     try:
@@ -504,7 +505,7 @@ async def _ai_find_contacts(
     Delegates to ai_service.enrich_contacts_websearch() and normalizes
     the output to match the enrichment service contact shape.
     """
-    if not settings.anthropic_api_key:
+    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         return []
     try:
         title_keywords = [title_filter] if title_filter else None

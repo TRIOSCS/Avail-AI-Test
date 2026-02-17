@@ -25,6 +25,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..services.credential_service import get_credential_cached
 from ..database import get_db
 from ..dependencies import is_admin as _is_admin, require_admin, require_buyer, require_user
 from ..models import (
@@ -294,9 +295,9 @@ async def create_company(
     enrich_triggered = False
     domain = company.domain or ""
     if domain and (
-        settings.clay_api_key
-        or settings.explorium_api_key
-        or settings.anthropic_api_key
+        get_credential_cached("clay_enrichment", "CLAY_API_KEY")
+        or get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+        or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
     ):
         import asyncio
         from ..enrichment_service import enrich_entity, apply_enrichment_to_company
@@ -560,9 +561,9 @@ async def enrich_company(
 ):
     """Enrich a customer company with external data."""
     if (
-        not settings.clay_api_key
-        and not settings.explorium_api_key
-        and not settings.anthropic_api_key
+        not get_credential_cached("clay_enrichment", "CLAY_API_KEY")
+        and not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+        and not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
     ):
         raise HTTPException(
             503,
@@ -602,9 +603,9 @@ async def enrich_vendor_card(
 ):
     """Enrich a vendor card with external data."""
     if (
-        not settings.clay_api_key
-        and not settings.explorium_api_key
-        and not settings.anthropic_api_key
+        not get_credential_cached("clay_enrichment", "CLAY_API_KEY")
+        and not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+        and not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
     ):
         raise HTTPException(
             503,
@@ -645,9 +646,9 @@ async def get_suggested_contacts(
 ):
     """Find suggested contacts at a company from enrichment providers."""
     if (
-        not settings.clay_api_key
-        and not settings.explorium_api_key
-        and not settings.anthropic_api_key
+        not get_credential_cached("clay_enrichment", "CLAY_API_KEY")
+        and not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+        and not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
     ):
         raise HTTPException(
             503,
@@ -1045,9 +1046,9 @@ async def create_offer(
         db.add(card)
         db.flush()
         if domain and (
-            settings.clay_api_key
-            or settings.explorium_api_key
-            or settings.anthropic_api_key
+            get_credential_cached("clay_enrichment", "CLAY_API_KEY")
+            or get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+            or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
         ):
             import asyncio
             from ..routers.vendors import _background_enrich_vendor

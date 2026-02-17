@@ -3133,7 +3133,7 @@ async function loadSettingsSources() {
     el.innerHTML = '<p class="empty">Loading data sources...</p>';
     try {
         const res = await apiFetch('/api/sources');
-        const sources = (res.sources || []).filter(s => s.source_type !== 'internal');
+        const sources = res.sources || [];
         if (!sources.length) { el.innerHTML = '<p class="empty">No data sources configured</p>'; return; }
 
         // Category display order and labels

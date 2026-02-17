@@ -95,19 +95,17 @@ class TestNormalizeCompanyInput:
         assert name == "Acme Corp"
 
     @pytest.mark.asyncio
-    @patch("app.enrichment_service.settings")
-    async def test_no_ai_call_for_clean_name(self, mock_settings):
-        mock_settings.anthropic_api_key = "test-key"
+    @patch("app.enrichment_service.get_credential_cached", return_value="test-key")
+    async def test_no_ai_call_for_clean_name(self, mock_cred):
         with patch("app.enrichment_service.claude_text") as mock_claude:
             name, _ = await normalize_company_input("International Business Machines", "")
             mock_claude.assert_not_called()
             assert name == "International Business Machines"
 
     @pytest.mark.asyncio
-    @patch("app.enrichment_service.settings")
+    @patch("app.enrichment_service.get_credential_cached", return_value="test-key")
     @patch("app.enrichment_service.claude_text", new_callable=AsyncMock)
-    async def test_ai_fixes_typo(self, mock_claude, mock_settings):
-        mock_settings.anthropic_api_key = "test-key"
+    async def test_ai_fixes_typo(self, mock_claude, mock_cred):
         mock_claude.return_value = "International Business Machines"
         # "Ntrntnl" and "Bsnss" have no vowels, triggering the heuristic
         name, _ = await normalize_company_input("Ntrntnl Bsnss Machines", "")
@@ -115,9 +113,8 @@ class TestNormalizeCompanyInput:
         assert name == "International Business Machines"
 
     @pytest.mark.asyncio
-    @patch("app.enrichment_service.settings")
-    async def test_no_ai_without_api_key(self, mock_settings):
-        mock_settings.anthropic_api_key = ""
+    @patch("app.enrichment_service.get_credential_cached", return_value="")
+    async def test_no_ai_without_api_key(self, mock_cred):
         with patch("app.enrichment_service.claude_text") as mock_claude:
             name, _ = await normalize_company_input("Interntnl Bssness Mchns", "")
             mock_claude.assert_not_called()

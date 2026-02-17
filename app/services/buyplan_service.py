@@ -18,6 +18,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..services.credential_service import get_credential_cached
 from ..models import ActivityLog, BuyPlan, Offer, User
 
 log = logging.getLogger("avail.buyplan")
@@ -475,13 +476,13 @@ async def notify_buyplan_cancelled(plan: BuyPlan, db: Session):
 
 async def _post_teams_channel(message: str):
     """Post a message to the configured Teams channel via webhook."""
-    if not settings.teams_webhook_url:
+    if not get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL"):
         log.debug("Teams webhook not configured — skipping channel post")
         return
     try:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
-                settings.teams_webhook_url,
+                get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL"),
                 json={
                     "type": "message",
                     "attachments": [

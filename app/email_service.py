@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 from sqlalchemy.orm import Session
 
 from .config import settings
+from .services.credential_service import get_credential_cached
 from .models import Contact, VendorResponse, ProcessedMessage, PendingBatch
 
 log = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ async def send_batch_rfq(
     results = []
 
     # AI-rephrase each body so emails don't look like cookie-cutter spam
-    if settings.anthropic_api_key:
+    if get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         try:
             from app.services.ai_service import rephrase_rfq
 
@@ -424,7 +425,7 @@ async def poll_inbox(
             )
 
             # ── Reply classification + AI parsing (batch or inline) ──
-            if settings.anthropic_api_key:
+            if get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
                 pending_parse.append(vr)
 
             # ── Contact status progression ──

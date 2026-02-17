@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 
 from app.config import settings
+from app.services.credential_service import get_credential_cached
 
 log = logging.getLogger("avail.claude")
 
@@ -39,7 +40,7 @@ MODELS = {
 def _headers(*, cache: bool = False) -> dict:
     """Build API headers. Enable prompt caching when static prompts are reused."""
     h = {
-        "x-api-key": settings.anthropic_api_key,
+        "x-api-key": get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"),
         "anthropic-version": API_VERSION,
         "content-type": "application/json",
     }
@@ -75,7 +76,7 @@ async def claude_structured(
     Returns:
         Parsed dict conforming to schema, or None on failure
     """
-    if not settings.anthropic_api_key:
+    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         return None
 
     # Extended thinking requires Sonnet
@@ -173,7 +174,7 @@ async def claude_text(
     Returns:
         Text response or None on failure
     """
-    if not settings.anthropic_api_key:
+    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         return None
 
     model = MODELS.get(model_tier, MODELS["fast"])
@@ -334,7 +335,7 @@ async def claude_batch_submit(
         Batch ID string for polling, or None on failure.
         50% cost reduction vs individual calls; up to 24h processing.
     """
-    if not settings.anthropic_api_key or not requests:
+    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY") or not requests:
         return None
 
     batch_requests = [
@@ -382,7 +383,7 @@ async def claude_batch_results(
         Dict of {custom_id: parsed_dict} when batch is complete.
         Entries with errors will have value None.
     """
-    if not settings.anthropic_api_key or not batch_id:
+    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY") or not batch_id:
         return None
 
     try:

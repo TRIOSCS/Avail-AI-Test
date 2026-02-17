@@ -15,6 +15,7 @@ Depends on: config.py (secret_key), models.py (ApiSource)
 
 import base64
 import os
+import time
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -100,3 +101,28 @@ def credential_is_set(db: Session, source_name: str, env_var_name: str) -> bool:
     if src and src.credentials and src.credentials.get(env_var_name):
         return True
     return bool(os.getenv(env_var_name))
+
+
+# ── Cached credential access (no DB session required) ────────────────
+
+_cred_cache: dict[tuple[str, str], tuple[str | None, float]] = {}
+_CACHE_TTL = 60  # seconds
+
+
+def get_credential_cached(source_name: str, env_var_name: str) -> str | None:
+    """Get credential with in-memory cache (60s TTL). Opens its own DB session."""
+    key = (source_name, env_var_name)
+    now = time.time()
+    cached = _cred_cache.get(key)
+    if cached and (now - cached[1]) < _CACHE_TTL:
+        return cached[0]
+
+    from ..database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        val = get_credential(db, source_name, env_var_name)
+        _cred_cache[key] = (val, now)
+        return val
+    finally:
+        db.close()
