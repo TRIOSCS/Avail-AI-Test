@@ -33,6 +33,7 @@ W_VELOCITY = 0.15
 W_WIN_RATE = 0.15
 
 # ── Thresholds ──
+COLD_START_SCORE = 50  # All vendors start at 50 and move up/down with data
 MIN_OUTREACH_FOR_SCORE = 2  # Need at least 2 outreach events to compute
 VELOCITY_IDEAL_HOURS = 4  # ≤4h = perfect score
 VELOCITY_MAX_HOURS = 168  # ≥168h (7 days) = zero score
@@ -65,7 +66,7 @@ def compute_engagement_score(
 
     if total_outreach < MIN_OUTREACH_FOR_SCORE:
         return {
-            "engagement_score": None,
+            "engagement_score": COLD_START_SCORE,
             "response_rate": 0,
             "ghost_rate": 1.0 if total_outreach > 0 and total_responses == 0 else 0,
             "recency_score": 0,
@@ -250,13 +251,9 @@ async def compute_all_engagement_scores(db: Session) -> dict:
         norm = normalize_vendor_name(row.vendor_name or "")
         win_map[norm] = win_map.get(norm, 0) + row.total_wins
 
-    # ── Update all VendorCards with outreach ──
-    # Get all cards that appear in any of our maps
+    # ── Update ALL VendorCards (cold-start baseline of 50 for those without data) ──
     all_norms = set(outreach_map.keys()) | set(response_map.keys())
-    if not all_norms:
-        return {"updated": 0, "skipped": 0}
-
-    cards = db.query(VendorCard).filter(VendorCard.normalized_name.in_(all_norms)).all()
+    cards = db.query(VendorCard).all()
 
     updated = 0
     skipped = 0
@@ -276,10 +273,6 @@ async def compute_all_engagement_scores(db: Session) -> dict:
             last_contact_at=card.last_contact_at,
             now=now,
         )
-
-        if result["engagement_score"] is None:
-            skipped += 1
-            continue
 
         # Update card
         card.total_outreach = outreach
