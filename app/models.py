@@ -446,7 +446,9 @@ class BuyPlan(Base):
     #   entered_by_id, po_number, po_sent_at, po_recipient, po_verified}]
 
     manager_notes = Column(Text)
+    salesperson_notes = Column(Text)
     rejection_reason = Column(Text)
+    sales_order_number = Column(String(100))
 
     submitted_by_id = Column(Integer, ForeignKey("users.id"))
     approved_by_id = Column(Integer, ForeignKey("users.id"))

@@ -28,35 +28,51 @@ log = logging.getLogger("avail.buyplan")
 async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
     """Notify admins that a buy plan needs approval."""
     from ..scheduler import get_valid_token
+    from ..models import Quote
 
     submitter = db.get(User, plan.submitted_by_id)
     submitter_name = submitter.name or submitter.email if submitter else "Unknown"
+
+    # Deal context
+    customer_name = ""
+    quote_number = ""
+    quote = db.get(Quote, plan.quote_id) if plan.quote_id else None
+    if quote and quote.customer_site and quote.customer_site.company:
+        customer_name = f"{quote.customer_site.company.name} — {quote.customer_site.site_name}"
+        quote_number = quote.quote_number or ""
 
     # Build line items table
     rows = ""
     total_cost = 0
     for item in plan.line_items or []:
-        cost = (item.get("qty") or 0) * (item.get("cost_price") or 0)
+        plan_qty = item.get("plan_qty") or item.get("qty") or 0
+        cost = plan_qty * (item.get("cost_price") or 0)
         total_cost += cost
         rows += f"""<tr>
             <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("mpn", "")}</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("vendor_name", "")}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("qty", 0):,}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{plan_qty:,}</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb">${item.get("cost_price", 0):.4f}</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb">${cost:,.2f}</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("lead_time", "")}</td>
         </tr>"""
 
+    sp_notes_html = ""
+    if plan.salesperson_notes:
+        sp_notes_html = f'<p style="background:#f0f9ff;padding:10px;border-left:3px solid #2563eb;margin:12px 0"><strong>Salesperson Notes:</strong> {plan.salesperson_notes}</p>'
+
     html_body = f"""
     <div style="font-family:Arial,sans-serif;max-width:700px">
         <h2 style="color:#2563eb">Buy Plan Approval Required</h2>
         <p><strong>{submitter_name}</strong> has submitted a buy plan for approval.</p>
-        <p>Requisition: <strong>#{plan.requisition_id}</strong> | Quote: <strong>#{plan.quote_id}</strong></p>
+        <p>Customer: <strong>{customer_name}</strong></p>
+        <p>Requisition: <strong>#{plan.requisition_id}</strong> | Quote: <strong>{quote_number}</strong></p>
+        {sp_notes_html}
         <table style="border-collapse:collapse;width:100%;margin:16px 0">
             <thead><tr style="background:#f3f4f6">
                 <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>
                 <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty</th>
+                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Plan Qty</th>
                 <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>
                 <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Line Total</th>
                 <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead Time</th>
@@ -133,9 +149,20 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
 async def notify_buyplan_approved(plan: BuyPlan, db: Session):
     """Notify buyers that their offers need to be purchased."""
     from ..scheduler import get_valid_token
+    from ..models import Quote
 
     approver = db.get(User, plan.approved_by_id)
     approver_name = approver.name or approver.email if approver else "Manager"
+
+    # Deal context
+    customer_name = ""
+    quote_number = ""
+    quote = db.get(Quote, plan.quote_id) if plan.quote_id else None
+    if quote and quote.customer_site and quote.customer_site.company:
+        customer_name = f"{quote.customer_site.company.name} — {quote.customer_site.site_name}"
+        quote_number = quote.quote_number or ""
+
+    so_number = plan.sales_order_number or "N/A"
 
     # Identify unique buyers from the line items
     buyer_ids = set()
@@ -144,7 +171,6 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
         if entered_by:
             buyer_ids.add(entered_by)
     if not buyer_ids:
-        # Fallback: get entered_by_id from the offers themselves
         offer_ids = [
             item.get("offer_id")
             for item in (plan.line_items or [])
@@ -157,34 +183,44 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
     buyers = db.query(User).filter(User.id.in_(buyer_ids)).all() if buyer_ids else []
 
     for buyer in buyers:
-        # Filter items for this buyer
         buyer_items = [
             i for i in (plan.line_items or []) if i.get("entered_by_id") == buyer.id
         ]
         if not buyer_items:
-            # All items if not specifically assigned
             buyer_items = plan.line_items or []
 
         rows = ""
         for item in buyer_items:
+            plan_qty = item.get("plan_qty") or item.get("qty") or 0
             rows += f"""<tr>
                 <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("mpn", "")}</td>
                 <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("vendor_name", "")}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("qty", 0):,}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb">{plan_qty:,}</td>
                 <td style="padding:6px 10px;border:1px solid #e5e7eb">${item.get("cost_price", 0):.4f}</td>
                 <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("lead_time", "")}</td>
             </tr>"""
 
+        notes_html = ""
+        if plan.salesperson_notes:
+            notes_html += f'<p style="background:#f0f9ff;padding:10px;border-left:3px solid #2563eb;margin:8px 0"><strong>Salesperson Notes:</strong> {plan.salesperson_notes}</p>'
+        if plan.manager_notes:
+            notes_html += f'<p style="background:#f0fdf4;padding:10px;border-left:3px solid #16a34a;margin:8px 0"><strong>Manager Notes:</strong> {plan.manager_notes}</p>'
+
         html_body = f"""
         <div style="font-family:Arial,sans-serif;max-width:700px">
-            <h2 style="color:#16a34a">Buy Plan Approved — Action Required</h2>
-            <p>A buy plan has been approved by <strong>{approver_name}</strong>. Please create POs in Acctivate for the following items:</p>
-            {f'<p style="color:#6b7280"><em>Manager notes: {plan.manager_notes}</em></p>' if plan.manager_notes else ""}
+            <h2 style="color:#16a34a">Buy Plan Approved — PO Required</h2>
+            <p>Approved by <strong>{approver_name}</strong>. Please create POs in Acctivate and enter the PO numbers in AVAIL.</p>
+            <div style="background:#f3f4f6;padding:12px;border-radius:6px;margin:12px 0">
+                <p style="margin:0"><strong>Customer:</strong> {customer_name}</p>
+                <p style="margin:4px 0 0"><strong>Acctivate SO#:</strong> {so_number}</p>
+                <p style="margin:4px 0 0"><strong>Quote:</strong> {quote_number}</p>
+            </div>
+            {notes_html}
             <table style="border-collapse:collapse;width:100%;margin:16px 0">
                 <thead><tr style="background:#f3f4f6">
                     <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">MPN</th>
                     <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Vendor</th>
-                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty</th>
+                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Plan Qty</th>
                     <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Cost</th>
                     <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead Time</th>
                 </tr></thead>

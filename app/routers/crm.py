@@ -1766,13 +1766,31 @@ async def reopen_quote(
 
 
 def _buyplan_to_dict(bp: BuyPlan) -> dict:
+    # Gather deal context from quote/requisition
+    customer_name = ""
+    quote_number = ""
+    quote_subtotal = None
+    if bp.quote:
+        quote_number = bp.quote.quote_number or ""
+        quote_subtotal = float(bp.quote.subtotal) if bp.quote.subtotal else None
+        if bp.quote.customer_site and bp.quote.customer_site.company:
+            customer_name = (
+                f"{bp.quote.customer_site.company.name} — "
+                f"{bp.quote.customer_site.site_name}"
+            )
+
     return {
         "id": bp.id,
         "requisition_id": bp.requisition_id,
         "requisition_name": bp.requisition.name if bp.requisition else None,
         "quote_id": bp.quote_id,
+        "quote_number": quote_number,
+        "quote_subtotal": quote_subtotal,
+        "customer_name": customer_name,
         "status": bp.status,
         "line_items": bp.line_items or [],
+        "sales_order_number": bp.sales_order_number,
+        "salesperson_notes": bp.salesperson_notes,
         "manager_notes": bp.manager_notes,
         "rejection_reason": bp.rejection_reason,
         "submitted_by": bp.submitted_by.name if bp.submitted_by else None,
@@ -1800,23 +1818,30 @@ async def submit_buy_plan(
     offer_ids = body.get("offer_ids", [])
     if not offer_ids:
         raise HTTPException(400, "At least one offer must be selected")
+    salesperson_notes = (body.get("salesperson_notes") or "").strip()
+    plan_qtys = body.get("plan_qtys", {})  # {offer_id: qty}
 
     # Build buy plan line items from selected offers
     offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
     line_items = []
     for o in offers:
+        qty_available = o.qty_available or 0
+        # Use salesperson's planned qty if provided, otherwise default to available
+        plan_qty = plan_qtys.get(str(o.id), plan_qtys.get(o.id, qty_available))
         line_items.append(
             {
                 "offer_id": o.id,
                 "mpn": o.mpn,
                 "vendor_name": o.vendor_name,
                 "manufacturer": o.manufacturer,
-                "qty": o.qty_available or 0,
+                "qty": qty_available,
+                "plan_qty": int(plan_qty) if plan_qty else qty_available,
                 "cost_price": float(o.unit_price) if o.unit_price else 0,
                 "lead_time": o.lead_time,
                 "condition": o.condition,
                 "entered_by_id": o.entered_by_id,
                 "po_number": None,
+                "po_entered_at": None,
                 "po_sent_at": None,
                 "po_recipient": None,
                 "po_verified": False,
@@ -1829,6 +1854,7 @@ async def submit_buy_plan(
         requisition_id=quote.requisition_id,
         quote_id=quote_id,
         status="pending_approval",
+        salesperson_notes=salesperson_notes or None,
         line_items=line_items,
         submitted_by_id=user.id,
         approval_token=secrets.token_urlsafe(32),
@@ -1926,6 +1952,11 @@ async def approve_buy_plan(
         raise HTTPException(400, f"Cannot approve plan in status: {plan.status}")
 
     body = await request.json()
+    so_number = (body.get("sales_order_number") or "").strip()
+    if not so_number:
+        raise HTTPException(400, "Acctivate Sales Order # is required")
+    plan.sales_order_number = so_number
+
     if "line_items" in body:
         plan.line_items = body["line_items"]
     if "manager_notes" in body:
@@ -2024,6 +2055,7 @@ async def enter_po_number(
         raise HTTPException(400, "Invalid line_index")
 
     plan.line_items[line_index]["po_number"] = po_number
+    plan.line_items[line_index]["po_entered_at"] = datetime.now(timezone.utc).isoformat()
     plan.status = "po_entered"
 
     from sqlalchemy.orm.attributes import flag_modified

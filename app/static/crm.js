@@ -1167,19 +1167,39 @@ function openBuyPlanModal() {
     if (!crmQuote) return;
     const modal = document.getElementById('buyPlanModal');
     modal.classList.add('open');
-    const items = (crmQuote.line_items || []).map((item, i) => `
+    const items = (crmQuote.line_items || []).map((item, i) => {
+        const qty = item.qty || 0;
+        return `
         <tr>
             <td><input type="checkbox" class="bp-check" data-idx="${i}" checked></td>
             <td>${esc(item.mpn)}</td>
-            <td>${esc(item.manufacturer || '—')}</td>
-            <td>${(item.qty||0).toLocaleString()}</td>
+            <td>${esc(item.manufacturer || '\u2014')}</td>
+            <td>${qty.toLocaleString()}</td>
+            <td><input type="number" class="bp-plan-qty" data-idx="${i}" value="${qty}" min="1" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;text-align:right" oninput="updateBpTotals()"></td>
             <td>$${Number(item.cost_price||0).toFixed(4)}</td>
-            <td>$${(Number(item.qty||0) * Number(item.cost_price||0)).toFixed(2)}</td>
-            <td>${esc(item.lead_time || '—')}</td>
-        </tr>
-    `).join('');
+            <td class="bp-line-total">$${(qty * Number(item.cost_price||0)).toFixed(2)}</td>
+            <td>${esc(item.lead_time || '\u2014')}</td>
+        </tr>`;
+    }).join('');
     document.getElementById('bpItems').innerHTML = items;
-    document.getElementById('bpTotal').textContent = '$' + Number(crmQuote.total_cost||0).toLocaleString();
+    document.getElementById('bpSalespersonNotes').value = '';
+    updateBpTotals();
+}
+
+function updateBpTotals() {
+    let total = 0;
+    document.querySelectorAll('.bp-plan-qty').forEach(input => {
+        const idx = parseInt(input.dataset.idx);
+        const item = (crmQuote.line_items || [])[idx];
+        if (!item) return;
+        const qty = parseInt(input.value) || 0;
+        const lineTotal = qty * Number(item.cost_price || 0);
+        total += lineTotal;
+        const row = input.closest('tr');
+        const totalCell = row.querySelector('.bp-line-total');
+        if (totalCell) totalCell.textContent = '$' + lineTotal.toFixed(2);
+    });
+    document.getElementById('bpTotal').textContent = '$' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 
 async function submitBuyPlan() {
@@ -1188,15 +1208,28 @@ async function submitBuyPlan() {
     const selectedIndices = Array.from(checks).map(c => parseInt(c.dataset.idx));
     if (!selectedIndices.length) { showToast('Select at least one item', 'error'); return; }
 
-    // Get offer IDs from line items
-    const offerIds = selectedIndices
-        .map(i => (crmQuote.line_items || [])[i]?.offer_id)
-        .filter(Boolean);
+    // Get offer IDs and plan quantities from line items
+    const offerIds = [];
+    const planQtys = {};
+    selectedIndices.forEach(i => {
+        const item = (crmQuote.line_items || [])[i];
+        if (item && item.offer_id) {
+            offerIds.push(item.offer_id);
+            const qtyInput = document.querySelector('.bp-plan-qty[data-idx="' + i + '"]');
+            if (qtyInput) planQtys[item.offer_id] = parseInt(qtyInput.value) || item.qty || 0;
+        }
+    });
     if (!offerIds.length) { showToast('No offer IDs found', 'error'); return; }
+
+    const salespersonNotes = document.getElementById('bpSalespersonNotes')?.value?.trim() || '';
 
     try {
         const res = await apiFetch('/api/quotes/' + crmQuote.id + '/buy-plan', {
-            method: 'POST', body: { offer_ids: offerIds }
+            method: 'POST', body: {
+                offer_ids: offerIds,
+                plan_qtys: planQtys,
+                salesperson_notes: salespersonNotes
+            }
         });
         showToast('Buy plan submitted for approval!', 'success');
         closeModal('buyPlanModal');
@@ -1234,9 +1267,9 @@ function renderBuyPlanStatus() {
     };
     const statusLabels = {
         pending_approval: 'Pending Approval',
-        approved: 'Approved — Awaiting PO',
+        approved: 'Approved \u2014 Awaiting PO',
         rejected: 'Rejected',
-        po_entered: 'PO Entered — Verifying',
+        po_entered: 'PO Entered \u2014 Verifying',
         po_confirmed: 'PO Confirmed',
         complete: 'Complete',
     };
@@ -1244,36 +1277,68 @@ function renderBuyPlanStatus() {
     const statusColor = statusColors[bp.status] || 'var(--muted)';
     const statusLabel = statusLabels[bp.status] || bp.status;
 
+    // Deal context header
+    let contextHtml = '';
+    if (bp.customer_name || bp.quote_number || bp.sales_order_number) {
+        contextHtml = `<div style="background:var(--bg2);padding:10px;border-radius:6px;margin-bottom:12px;font-size:12px">
+            ${bp.customer_name ? '<div><strong>Customer:</strong> '+esc(bp.customer_name)+'</div>' : ''}
+            ${bp.quote_number ? '<div><strong>Quote:</strong> '+esc(bp.quote_number)+'</div>' : ''}
+            ${bp.sales_order_number ? '<div><strong>Acctivate SO#:</strong> '+esc(bp.sales_order_number)+'</div>' : ''}
+        </div>`;
+    }
+
     let itemsHtml = (bp.line_items || []).map((item, i) => {
+        const planQty = item.plan_qty || item.qty || 0;
         const poCell = (isBuyer && bp.status === 'approved') || (isBuyer && bp.status === 'po_entered' && !item.po_number)
             ? `<input type="text" class="po-input" data-idx="${i}" placeholder="PO#" value="${esc(item.po_number||'')}" style="width:100px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px">`
-            : (item.po_number ? `<span style="font-weight:600">${esc(item.po_number)}</span>` : '—');
+            : (item.po_number ? `<span style="font-weight:600">${esc(item.po_number)}</span>` : '\u2014');
         const verifyIcon = item.po_verified
-            ? '<span style="color:var(--green)" title="Verified">✓</span>'
-            : (item.po_number ? '<span style="color:var(--amber)" title="Unverified">⏳</span>' : '');
-        const poDetails = item.po_verified
-            ? `<div style="font-size:10px;color:var(--muted)">Sent to ${esc(item.po_recipient||'')} at ${item.po_sent_at||''}</div>`
-            : '';
+            ? '<span style="color:var(--green)" title="Verified">\u2713</span>'
+            : (item.po_number ? '<span style="color:var(--amber)" title="Unverified">\u23F3</span>' : '');
+        let poDetails = '';
+        if (item.po_verified) {
+            poDetails = `<div style="font-size:10px;color:var(--muted)">Sent to ${esc(item.po_recipient||'')} at ${item.po_sent_at||''}</div>`;
+        } else if (item.po_entered_at) {
+            poDetails = `<div style="font-size:10px;color:var(--muted)">Entered ${fmtDateTime(item.po_entered_at)}</div>`;
+        }
         return `<tr>
             <td>${esc(item.mpn)}</td>
             <td>${esc(item.vendor_name)}</td>
-            <td>${(item.qty||0).toLocaleString()}</td>
+            <td>${planQty.toLocaleString()}</td>
             <td>$${Number(item.cost_price||0).toFixed(4)}</td>
-            <td>${esc(item.lead_time||'—')}</td>
+            <td>${esc(item.lead_time||'\u2014')}</td>
             <td>${poCell} ${verifyIcon}${poDetails}</td>
         </tr>`;
     }).join('');
+
+    // Notes sections
+    let notesHtml = '';
+    if (bp.salesperson_notes) {
+        notesHtml += `<div style="background:#f0f9ff;padding:8px 10px;border-left:3px solid #2563eb;border-radius:4px;margin-bottom:8px;font-size:12px"><strong>Salesperson:</strong> ${esc(bp.salesperson_notes)}</div>`;
+    }
+    if (bp.manager_notes) {
+        notesHtml += `<div style="background:#f0fdf4;padding:8px 10px;border-left:3px solid #16a34a;border-radius:4px;margin-bottom:8px;font-size:12px"><strong>Manager:</strong> ${esc(bp.manager_notes)}</div>`;
+    }
+    if (bp.rejection_reason) {
+        notesHtml += `<div style="background:#fef2f2;padding:8px 10px;border-left:3px solid var(--red);border-radius:4px;margin-bottom:8px;font-size:12px"><strong>Rejected:</strong> ${esc(bp.rejection_reason)}</div>`;
+    }
 
     let actionsHtml = '';
     const canApprove = isAdmin || window.userRole === 'manager';
     if (canApprove && bp.status === 'pending_approval') {
         actionsHtml = `
-            <div style="display:flex;gap:8px;margin-top:12px">
-                <textarea id="bpManagerNotes" placeholder="Manager notes (optional)…" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;min-height:40px"></textarea>
-            </div>
-            <div style="display:flex;gap:8px;margin-top:8px">
-                <button class="btn btn-success" onclick="approveBuyPlan()">Approve</button>
-                <button class="btn btn-danger" onclick="openRejectBuyPlanModal()">Reject</button>
+            <div style="margin-top:12px">
+                <div class="field" style="margin-bottom:8px">
+                    <label style="font-weight:600;font-size:12px">Acctivate Sales Order # <span style="color:var(--red)">*</span></label>
+                    <input type="text" id="bpSalesOrderNumber" placeholder="Enter Acctivate SO#" style="width:200px;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)">
+                </div>
+                <div style="margin-bottom:8px">
+                    <textarea id="bpManagerNotes" placeholder="Manager notes (optional)\u2026" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;min-height:40px"></textarea>
+                </div>
+                <div style="display:flex;gap:8px">
+                    <button class="btn btn-success" onclick="approveBuyPlan()">Approve</button>
+                    <button class="btn btn-danger" onclick="openRejectBuyPlanModal()">Reject</button>
+                </div>
             </div>`;
     }
     if (isBuyer && (bp.status === 'approved' || bp.status === 'po_entered')) {
@@ -1291,12 +1356,12 @@ function renderBuyPlanStatus() {
                     <strong>Buy Plan</strong>
                     <span class="status-badge" style="background:${statusColor};color:#fff;margin-left:8px">${statusLabel}</span>
                 </div>
-                <span style="font-size:11px;color:var(--muted)">Submitted by ${esc(bp.submitted_by||'')} ${bp.submitted_at ? '· '+fmtDateTime(bp.submitted_at) : ''}</span>
+                <span style="font-size:11px;color:var(--muted)">Submitted by ${esc(bp.submitted_by||'')} ${bp.submitted_at ? '\xB7 '+fmtDateTime(bp.submitted_at) : ''}</span>
             </div>
-            ${bp.manager_notes ? '<p style="font-size:12px;color:var(--text2);margin-bottom:8px"><em>Manager: '+esc(bp.manager_notes)+'</em></p>' : ''}
-            ${bp.rejection_reason ? '<p style="font-size:12px;color:var(--red);margin-bottom:8px"><strong>Rejected:</strong> '+esc(bp.rejection_reason)+'</p>' : ''}
+            ${contextHtml}
+            ${notesHtml}
             <table class="tbl" style="margin-bottom:0">
-                <thead><tr><th>MPN</th><th>Vendor</th><th>Qty</th><th>Cost</th><th>Lead</th><th>PO</th></tr></thead>
+                <thead><tr><th>MPN</th><th>Vendor</th><th>Plan Qty</th><th>Cost</th><th>Lead</th><th>PO</th></tr></thead>
                 <tbody>${itemsHtml}</tbody>
             </table>
             ${actionsHtml}
@@ -1305,14 +1370,16 @@ function renderBuyPlanStatus() {
 
 async function approveBuyPlan() {
     if (!_currentBuyPlan) return;
+    const soNumber = document.getElementById('bpSalesOrderNumber')?.value?.trim() || '';
+    if (!soNumber) { showToast('Acctivate Sales Order # is required', 'error'); return; }
     const notes = document.getElementById('bpManagerNotes')?.value?.trim() || '';
     try {
         await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/approve', {
-            method: 'PUT', body: { manager_notes: notes }
+            method: 'PUT', body: { sales_order_number: soNumber, manager_notes: notes }
         });
         showToast('Buy plan approved — buyers notified', 'success');
         loadBuyPlan();
-    } catch (e) { showToast('Failed to approve', 'error'); }
+    } catch (e) { showToast('Failed to approve: ' + (e.message || e), 'error'); }
 }
 
 function openRejectBuyPlanModal() {
@@ -1419,7 +1486,9 @@ function renderBuyPlansList() {
         const color = statusColors[bp.status] || 'var(--muted)';
         const label = statusLabels[bp.status] || bp.status;
         const itemCount = (bp.line_items || []).length;
-        const total = (bp.line_items || []).reduce((s, li) => s + (Number(li.qty)||0) * (Number(li.cost_price)||0), 0);
+        const total = (bp.line_items || []).reduce((s, li) => s + (Number(li.plan_qty || li.qty)||0) * (Number(li.cost_price)||0), 0);
+        const soLabel = bp.sales_order_number ? ' \xB7 SO# ' + esc(bp.sales_order_number) : '';
+        const custLabel = bp.customer_name ? ' \xB7 ' + esc(bp.customer_name) : '';
         return `
         <div class="card card-clickable" style="border-left:4px solid ${color}" onclick="openBuyPlanDetail(${bp.id})">
             <div style="display:flex;justify-content:space-between;align-items:center">
@@ -1430,9 +1499,9 @@ function renderBuyPlansList() {
                 <span style="font-size:11px;color:var(--muted)">${bp.submitted_at ? fmtDateTime(bp.submitted_at) : ''}</span>
             </div>
             <div style="font-size:12px;color:var(--text2);margin-top:6px">
-                ${itemCount} item${itemCount !== 1 ? 's' : ''} · $${total.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}
-                · Submitted by ${esc(bp.submitted_by || '—')}
-                ${bp.approved_by ? ' · Approved by ' + esc(bp.approved_by) : ''}
+                ${itemCount} item${itemCount !== 1 ? 's' : ''} \xB7 $${total.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}${custLabel}${soLabel}
+                \xB7 Submitted by ${esc(bp.submitted_by || '\u2014')}
+                ${bp.approved_by ? ' \xB7 Approved by ' + esc(bp.approved_by) : ''}
             </div>
         </div>`;
     }).join('');

@@ -1620,12 +1620,16 @@
 <div id="buyPlanModal" class="modal-bg" onclick="if(event.target===this)closeModal('buyPlanModal')">
     <div class="modal modal-lg">
         <h2>Mark Won &amp; Submit Buy Plan</h2>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Select which items to purchase. This will be sent to management for approval.</p>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Select items and set the quantity to purchase from each vendor. This will be sent to management for approval.</p>
         <table class="tbl" style="margin-bottom:12px">
-            <thead><tr><th style="width:30px"></th><th>MPN</th><th>Mfr</th><th>Qty</th><th>Unit Cost</th><th>Line Total</th><th>Lead</th></tr></thead>
+            <thead><tr><th style="width:30px"></th><th>MPN</th><th>Mfr</th><th>Avail Qty</th><th>Plan Qty</th><th>Unit Cost</th><th>Line Total</th><th>Lead</th></tr></thead>
             <tbody id="bpItems"></tbody>
         </table>
         <div style="text-align:right;font-weight:600;margin-bottom:12px">Total Cost: <span id="bpTotal"></span></div>
+        <div class="field" style="margin-bottom:12px">
+            <label>Notes for Manager &amp; Buyers</label>
+            <textarea id="bpSalespersonNotes" rows="3" placeholder="Add any context, special instructions, or notes for the purchasing team..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)"></textarea>
+        </div>
         <div class="mactions">
             <button class="btn btn-ghost" onclick="closeModal('buyPlanModal')">Cancel</button>
             <button class="btn btn-success" onclick="submitBuyPlan()">Mark Won &amp; Submit Buy Plan</button>

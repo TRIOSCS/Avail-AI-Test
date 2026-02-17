@@ -295,6 +295,9 @@ def _add_crm_columns(conn) -> None:
         "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS timezone VARCHAR(50)",
         "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS receiving_hours VARCHAR(100)",
         "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS carrier_account VARCHAR(100)",
+        # v1.4.1: Buy plan remediation
+        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS sales_order_number VARCHAR(100)",
+        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS salesperson_notes TEXT",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
