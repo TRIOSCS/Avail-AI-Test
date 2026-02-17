@@ -71,8 +71,8 @@ async def send_batch_rfq(
                 "subject": tagged_subject,
                 "body": {"contentType": "HTML", "content": html_body},
                 "toRecipients": [{"emailAddress": {"address": email}}],
-                "isReadReceiptRequested": True,
-                "isDeliveryReceiptRequested": True,
+                "isReadReceiptRequested": False,
+                "isDeliveryReceiptRequested": False,
             },
             "saveToSentItems": "true",
         }
