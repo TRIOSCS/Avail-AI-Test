@@ -19,18 +19,34 @@ function autoLogCrmCall(phone) {
 async function showCustomers() {
     showView('view-customers');
     currentReqId = null;
+    // Role-based account filtering
+    const isManagerOrAdmin = window.__isAdmin || window.userRole === 'manager';
+    const isSalesOnly = window.userRole === 'sales';
+    const toggleLabel = document.getElementById('custMyOnlyLabel');
+    const toggleInput = document.getElementById('custMyOnly');
+    if (toggleLabel && toggleInput) {
+        if (isManagerOrAdmin) {
+            toggleLabel.style.display = '';  // Show toggle for managers/admins
+        } else {
+            toggleLabel.style.display = 'none';  // Hide for sales — forced to my accounts
+            toggleInput.checked = true;
+        }
+    }
     await loadCustomers();
 }
 
 async function loadCustomers() {
     try {
         const filter = document.getElementById('custFilter')?.value || '';
+        const isManagerOrAdmin = window.__isAdmin || window.userRole === 'manager';
+        const isSalesOnly = window.userRole === 'sales';
         const myOnly = document.getElementById('custMyOnly')?.checked;
         let url = '/api/companies?search=' + encodeURIComponent(filter);
-        if (myOnly && window.userId) url += '&owner_id=' + window.userId;
+        // Sales always sees only their accounts; managers/admins can toggle
+        if ((isSalesOnly || myOnly) && window.userId) url += '&owner_id=' + window.userId;
         crmCustomers = await apiFetch(url);
         renderCustomers();
-    } catch (e) { showToast('Failed to load customers', 'error'); }
+    } catch (e) { showToast('Failed to load customers', 'error'); console.error(e); }
 }
 
 function renderCustomers() {

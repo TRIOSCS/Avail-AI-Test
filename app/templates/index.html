@@ -1162,7 +1162,7 @@
         <div class="req-header">
             <h2>Customers</h2>
             <div class="flex-center gap-lg">
-                <label class="flex-center" style="gap:5px;font-size:12px;color:var(--text2);cursor:pointer">
+                <label id="custMyOnlyLabel" class="flex-center" style="gap:5px;font-size:12px;color:var(--text2);cursor:pointer;display:none">
                     <input type="checkbox" id="custMyOnly" onchange="loadCustomers()" style="accent-color:var(--teal)" aria-label="Show only my accounts"> My accounts
                 </label>
                 <input class="req-search" id="custFilter" placeholder="Search companies…" oninput="debouncedLoadCustomers()" aria-label="Search companies">
