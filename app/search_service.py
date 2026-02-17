@@ -26,6 +26,8 @@ from .connectors.digikey import DigiKeyConnector
 from .connectors.mouser import MouserConnector
 from .connectors.oemsecrets import OEMSecretsConnector
 from .connectors.sourcengine import SourcengineConnector
+from .connectors.element14 import Element14Connector
+from .connectors.tme import TMEConnector
 
 # Map connector class names to ApiSource.name for stats tracking
 _CONNECTOR_SOURCE_MAP = {
@@ -36,6 +38,8 @@ _CONNECTOR_SOURCE_MAP = {
     "MouserConnector": "mouser",
     "OEMSecretsConnector": "oemsecrets",
     "SourcengineConnector": "sourcengine",
+    "Element14Connector": "element14",
+    "TMEConnector": "tme",
 }
 
 log = logging.getLogger(__name__)
@@ -149,6 +153,15 @@ async def _fetch_fresh(pns: list[str], db: Session) -> list[dict]:
     src_key = _cred("sourcengine", "SOURCENGINE_API_KEY")
     if "sourcengine" not in disabled_sources and src_key:
         connectors.append(SourcengineConnector(src_key))
+
+    e14_key = _cred("element14", "ELEMENT14_API_KEY")
+    if "element14" not in disabled_sources and e14_key:
+        connectors.append(Element14Connector(e14_key))
+
+    tme_token = _cred("tme", "TME_API_TOKEN")
+    tme_secret = _cred("tme", "TME_API_SECRET")
+    if "tme" not in disabled_sources and tme_token and tme_secret:
+        connectors.append(TMEConnector(tme_token, tme_secret))
 
     if not connectors:
         return []
