@@ -102,10 +102,11 @@ class Settings:
         if e.strip()
     ]
 
-    # Microsoft Teams (Buy Plan notifications)
+    # Microsoft Teams (channel notifications)
     teams_webhook_url: str = os.getenv("TEAMS_WEBHOOK_URL", "")
     teams_team_id: str = os.getenv("TEAMS_TEAM_ID", "")
     teams_channel_id: str = os.getenv("TEAMS_CHANNEL_ID", "")
+    teams_hot_threshold: float = float(os.getenv("TEAMS_HOT_THRESHOLD", "10000"))
 
     # Activity tracking & customer ownership (v1.3.0)
     activity_tracking_enabled: bool = (

@@ -1083,6 +1083,34 @@ async def create_offer(
     if req.status in ("active", "sourcing"):
         req.status = "offers"
     db.commit()
+
+    # Teams: competitive quote alert if >20% below current best price
+    try:
+        if offer.unit_price and offer.unit_price > 0 and offer.requirement_id:
+            from sqlalchemy import func
+            best_price = (
+                db.query(func.min(Offer.unit_price))
+                .filter(
+                    Offer.requirement_id == offer.requirement_id,
+                    Offer.id != offer.id,
+                    Offer.unit_price > 0,
+                )
+                .scalar()
+            )
+            if best_price and float(offer.unit_price) < float(best_price) * 0.8:
+                from ..services.teams import send_competitive_quote_alert
+                import asyncio
+                asyncio.create_task(send_competitive_quote_alert(
+                    offer_id=offer.id,
+                    mpn=offer.mpn,
+                    vendor_name=offer.vendor_name,
+                    offer_price=float(offer.unit_price),
+                    best_price=float(best_price),
+                    requisition_id=req_id,
+                ))
+    except Exception:
+        pass  # Never block offer creation
+
     return {
         "id": offer.id,
         "vendor_name": offer.vendor_name,

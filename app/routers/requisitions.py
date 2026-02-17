@@ -330,6 +330,28 @@ async def add_requirements(
         db.add(r)
         created.append(r)
     db.commit()
+
+    # Teams: hot requirement alert for high-value items
+    try:
+        from ..config import settings as cfg
+        from ..services.teams import send_hot_requirement_alert
+        for r in created:
+            price = float(r.target_price or 0)
+            qty = r.target_qty or 0
+            if qty * price >= cfg.teams_hot_threshold:
+                customer = req.customer_site.company.name if req.customer_site and req.customer_site.company else (req.customer_name or "")
+                import asyncio
+                asyncio.create_task(send_hot_requirement_alert(
+                    requirement_id=r.id,
+                    mpn=r.primary_mpn,
+                    target_qty=qty,
+                    target_price=price,
+                    customer_name=customer,
+                    requisition_id=req_id,
+                ))
+    except Exception:
+        pass  # Never block requirement creation
+
     return [{"id": r.id, "primary_mpn": r.primary_mpn} for r in created]
 
 

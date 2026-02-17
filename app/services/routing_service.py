@@ -238,6 +238,39 @@ def rank_buyers_for_assignment(
     return results
 
 
+async def rank_buyers_with_availability(
+    requirement_id: int,
+    vendor_card_id: int,
+    db: Session,
+) -> list[dict]:
+    """Rank buyers with calendar availability filtering.
+
+    Wraps rank_buyers_for_assignment and removes buyers who are OOO today.
+    Falls back to the full list if calendar checks fail entirely.
+    """
+    from datetime import date
+
+    ranked = rank_buyers_for_assignment(requirement_id, vendor_card_id, db)
+    if not ranked:
+        return ranked
+
+    try:
+        from app.services.calendar import is_buyer_available
+        check_date = date.today()
+        available = []
+        for entry in ranked:
+            if await is_buyer_available(entry["user_id"], check_date, db):
+                available.append(entry)
+            else:
+                entry["score_details"]["calendar_ooo"] = True
+                log.info(f"Buyer {entry['user_id']} ({entry['user_name']}) skipped — OOO on {check_date}")
+        # If ALL buyers are OOO, fall back to the full list (don't leave nobody)
+        return available if available else ranked
+    except Exception as e:
+        log.debug(f"Calendar availability check skipped: {e}")
+        return ranked
+
+
 def create_routing_assignment(
     requirement_id: int,
     vendor_card_id: int,

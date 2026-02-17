@@ -1,9 +1,10 @@
-"""Admin API — User management, system config, health, data import."""
+"""Admin API — User management, system config, health, data import, Teams."""
 
 import csv
 import io
 import logging
 import os
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from pydantic import BaseModel, Field
@@ -13,6 +14,7 @@ from ..database import get_db
 from ..dependencies import require_admin, require_settings_access
 from ..models import (
     ApiSource,
+    SystemConfig,
     User,
     Company,
     CustomerSite,
@@ -432,3 +434,172 @@ async def import_vendors(
         "contacts_created": contacts_created,
         "rows_processed": len(rows),
     }
+
+
+# ── Teams Integration (admin only) ──────────────────────────────────
+
+
+class TeamsConfigRequest(BaseModel):
+    team_id: str = Field(..., min_length=1)
+    channel_id: str = Field(..., min_length=1)
+    channel_name: Optional[str] = None
+    enabled: bool = True
+    hot_threshold: Optional[float] = None
+
+
+@router.get("/api/admin/teams/config")
+def api_get_teams_config(
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Get current Teams integration configuration."""
+    from ..config import settings
+
+    config = {
+        "team_id": settings.teams_team_id,
+        "channel_id": settings.teams_channel_id,
+        "channel_name": "",
+        "hot_threshold": settings.teams_hot_threshold,
+        "enabled": False,
+    }
+
+    has_enabled_row = False
+
+    # Runtime overrides from SystemConfig
+    for row in db.query(SystemConfig).filter(
+        SystemConfig.key.in_([
+            "teams_team_id", "teams_channel_id", "teams_enabled",
+            "teams_channel_name", "teams_hot_threshold",
+        ])
+    ).all():
+        if row.key == "teams_team_id" and row.value:
+            config["team_id"] = row.value
+        elif row.key == "teams_channel_id" and row.value:
+            config["channel_id"] = row.value
+        elif row.key == "teams_channel_name":
+            config["channel_name"] = row.value
+        elif row.key == "teams_enabled":
+            has_enabled_row = True
+            config["enabled"] = row.value.lower() == "true"
+        elif row.key == "teams_hot_threshold":
+            try:
+                config["hot_threshold"] = float(row.value)
+            except ValueError:
+                pass
+
+    # If no explicit enabled row, infer from env vars having team+channel set
+    if not has_enabled_row and config["team_id"] and config["channel_id"]:
+        config["enabled"] = True
+
+    return config
+
+
+@router.post("/api/admin/teams/config")
+def api_set_teams_config(
+    body: TeamsConfigRequest,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Save Teams integration configuration."""
+    _upsert_config(db, "teams_team_id", body.team_id, user.email)
+    _upsert_config(db, "teams_channel_id", body.channel_id, user.email)
+    _upsert_config(db, "teams_enabled", str(body.enabled).lower(), user.email)
+    if body.channel_name:
+        _upsert_config(db, "teams_channel_name", body.channel_name, user.email)
+    if body.hot_threshold is not None:
+        _upsert_config(db, "teams_hot_threshold", str(body.hot_threshold), user.email)
+    db.commit()
+    log.info(f"Teams config updated by {user.email}: team={body.team_id}, channel={body.channel_id}, enabled={body.enabled}")
+    return {"status": "saved"}
+
+
+@router.get("/api/admin/teams/channels")
+async def api_list_teams_channels(
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """List Teams channels the user has access to via Graph API."""
+    from ..scheduler import get_valid_token
+    from ..utils.graph_client import GraphClient
+
+    token = await get_valid_token(user, db)
+    if not token:
+        raise HTTPException(400, "No valid Microsoft 365 token. Please reconnect M365.")
+
+    gc = GraphClient(token)
+
+    # Get teams the user is a member of
+    teams_result = await gc.get_json("/me/joinedTeams", params={"$select": "id,displayName"})
+    if "error" in teams_result:
+        raise HTTPException(502, f"Graph API error: {teams_result.get('error', {}).get('message', 'Unknown')}")
+
+    teams_list = teams_result.get("value", [])
+    result = []
+
+    for team in teams_list:
+        channels_result = await gc.get_json(
+            f"/teams/{team['id']}/channels",
+            params={"$select": "id,displayName,membershipType"},
+        )
+        channels = channels_result.get("value", [])
+        for ch in channels:
+            result.append({
+                "team_id": team["id"],
+                "team_name": team.get("displayName", ""),
+                "channel_id": ch["id"],
+                "channel_name": ch.get("displayName", ""),
+                "membership_type": ch.get("membershipType", ""),
+            })
+
+    return {"channels": result}
+
+
+@router.post("/api/admin/teams/test")
+async def api_test_teams_post(
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Send a test Adaptive Card to the configured Teams channel."""
+    from ..services.teams import _get_teams_config, _make_card, post_to_channel
+    from ..scheduler import get_valid_token
+
+    channel_id, team_id, enabled = _get_teams_config()
+    if not channel_id or not team_id:
+        raise HTTPException(400, "Teams channel not configured. Save a channel first.")
+
+    token = await get_valid_token(user, db)
+    if not token:
+        raise HTTPException(400, "No valid Microsoft 365 token.")
+
+    card = _make_card(
+        title="AVAIL TEST",
+        subtitle="Teams integration is working correctly.",
+        facts=[
+            {"title": "Sent By", "value": user.name or user.email},
+            {"title": "Status", "value": "Connection verified"},
+        ],
+        action_url="",
+        action_title="Open AVAIL",
+        accent_color="accent",
+    )
+
+    ok = await post_to_channel(team_id, channel_id, card, token)
+    if not ok:
+        raise HTTPException(502, "Failed to post to Teams channel. Check permissions.")
+    return {"status": "sent", "message": "Test card posted to Teams channel."}
+
+
+def _upsert_config(db: Session, key: str, value: str, admin_email: str):
+    """Insert or update a SystemConfig row."""
+    from datetime import datetime, timezone
+    row = db.query(SystemConfig).filter(SystemConfig.key == key).first()
+    if row:
+        row.value = value
+        row.updated_by = admin_email
+        row.updated_at = datetime.now(timezone.utc)
+    else:
+        row = SystemConfig(
+            key=key, value=value, updated_by=admin_email,
+            description=f"Teams integration: {key}",
+        )
+        db.add(row)

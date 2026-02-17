@@ -3269,6 +3269,7 @@ function switchSettingsTab(name, btn) {
     else if (name === 'sources') loadSettingsSources();
     else if (name === 'manage-users') loadAdminUsers();
     else if (name === 'unmatched') loadUnmatchedQueue();
+    else if (name === 'teams') loadTeamsConfig();
 }
 
 // Keep backward compat for dropdown links
@@ -3781,5 +3782,137 @@ async function dismissActivity(activityId) {
         if (row) row.remove();
     } catch (e) {
         alert('Error: ' + (e.message || e));
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  TEAMS INTEGRATION CONFIG
+// ═══════════════════════════════════════════════════════════════════════
+
+async function loadTeamsConfig() {
+    const el = document.getElementById('teamsConfigContent');
+    el.innerHTML = '<p class="empty">Loading Teams configuration...</p>';
+    try {
+        const config = await apiFetch('/api/admin/teams/config');
+        let html = `
+            <div class="card" style="max-width:600px;padding:20px">
+                <h3 style="margin:0 0 16px;font-size:15px">Teams Channel Notifications</h3>
+                <p style="font-size:12px;color:var(--muted);margin-bottom:16px">
+                    Post critical AVAIL events (hot requirements, competitive quotes, ownership warnings, stock matches) to a Teams channel.
+                </p>
+                <div style="display:flex;flex-direction:column;gap:12px">
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <label style="font-size:12px;font-weight:600;width:100px">Enabled</label>
+                        <input type="checkbox" id="teamsEnabled" ${config.enabled ? 'checked' : ''} style="width:16px;height:16px">
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Teams Channel</label>
+                        <select id="teamsChannelSelect" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px">
+                            <option value="">— Select a channel —</option>
+                        </select>
+                        <button class="btn btn-ghost btn-sm" onclick="refreshTeamsChannels()" style="margin-top:6px;font-size:11px">Refresh Channels</button>
+                    </div>
+                    <div>
+                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Hot Requirement Threshold ($)</label>
+                        <input id="teamsHotThreshold" type="number" value="${config.hot_threshold || 10000}" min="0" step="500"
+                            style="width:160px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px">
+                        <span style="font-size:11px;color:var(--muted);margin-left:6px">Notify when requirement value exceeds this</span>
+                    </div>
+                    <div style="display:flex;gap:8px;margin-top:8px">
+                        <button class="btn btn-primary" onclick="saveTeamsConfig()">Save Configuration</button>
+                        <button class="btn btn-ghost" onclick="testTeamsPost()">Send Test Card</button>
+                    </div>
+                    <div id="teamsStatus" style="font-size:12px;margin-top:4px"></div>
+                </div>
+            </div>`;
+        el.innerHTML = html;
+
+        // If we have a saved config, load channels to populate the dropdown
+        if (config.team_id && config.channel_id) {
+            _populateChannelDropdown(config.team_id, config.channel_id, config.channel_name);
+        }
+        refreshTeamsChannels();
+    } catch (e) {
+        el.innerHTML = `<p class="empty" style="color:var(--red)">Error loading Teams config: ${e.message || e}</p>`;
+    }
+}
+
+function _populateChannelDropdown(teamId, channelId, channelName) {
+    const sel = document.getElementById('teamsChannelSelect');
+    if (!sel) return;
+    // Add current selection as an option so it's visible immediately
+    const opt = document.createElement('option');
+    opt.value = `${teamId}|${channelId}`;
+    opt.textContent = channelName || `${teamId} / ${channelId}`;
+    opt.selected = true;
+    sel.appendChild(opt);
+}
+
+async function refreshTeamsChannels() {
+    const sel = document.getElementById('teamsChannelSelect');
+    if (!sel) return;
+    const currentVal = sel.value;
+
+    try {
+        const data = await apiFetch('/api/admin/teams/channels');
+        const channels = data.channels || [];
+        sel.innerHTML = '<option value="">— Select a channel —</option>';
+        for (const ch of channels) {
+            const val = `${ch.team_id}|${ch.channel_id}`;
+            const opt = document.createElement('option');
+            opt.value = val;
+            opt.textContent = `${ch.team_name} → ${ch.channel_name}`;
+            if (val === currentVal) opt.selected = true;
+            sel.appendChild(opt);
+        }
+        if (!channels.length) {
+            sel.innerHTML = '<option value="">No channels found (connect M365 first)</option>';
+        }
+    } catch (e) {
+        const status = document.getElementById('teamsStatus');
+        if (status) status.innerHTML = `<span style="color:var(--red)">Could not load channels: ${e.message || e}</span>`;
+    }
+}
+
+async function saveTeamsConfig() {
+    const status = document.getElementById('teamsStatus');
+    const sel = document.getElementById('teamsChannelSelect');
+    const val = sel ? sel.value : '';
+    if (!val) {
+        if (status) status.innerHTML = '<span style="color:var(--red)">Please select a channel.</span>';
+        return;
+    }
+    const [teamId, channelId] = val.split('|');
+    const channelName = sel.options[sel.selectedIndex]?.textContent || '';
+    const enabled = document.getElementById('teamsEnabled')?.checked ?? true;
+    const hotThreshold = parseFloat(document.getElementById('teamsHotThreshold')?.value) || 10000;
+
+    try {
+        await apiFetch('/api/admin/teams/config', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                team_id: teamId,
+                channel_id: channelId,
+                channel_name: channelName,
+                enabled: enabled,
+                hot_threshold: hotThreshold,
+            }),
+        });
+        if (status) status.innerHTML = '<span style="color:var(--green)">Configuration saved.</span>';
+    } catch (e) {
+        if (status) status.innerHTML = `<span style="color:var(--red)">Save failed: ${e.message || e}</span>`;
+    }
+}
+
+async function testTeamsPost() {
+    const status = document.getElementById('teamsStatus');
+    if (status) status.innerHTML = '<span style="color:var(--muted)">Sending test card...</span>';
+    try {
+        const res = await apiFetch('/api/admin/teams/test', {method: 'POST'});
+        if (status) status.innerHTML = `<span style="color:var(--green)">${res.message || 'Test card sent!'}</span>`;
+    } catch (e) {
+        if (status) status.innerHTML = `<span style="color:var(--red)">Test failed: ${e.message || e}</span>`;
     }
 }

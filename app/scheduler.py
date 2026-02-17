@@ -101,7 +101,7 @@ async def _refresh_access_token(
                     "client_secret": client_secret,
                     "refresh_token": refresh_token,
                     "grant_type": "refresh_token",
-                    "scope": "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read",
+                    "scope": "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read Calendars.Read ChannelMessage.Send Team.ReadBasic.All",
                 },
             )
 
@@ -612,6 +612,37 @@ async def _download_and_import_stock_list(
     except Exception as e:
         log.error(f"Stock list commit failed: {e}")
         db.rollback()
+        return
+
+    # Teams: check if imported MPNs match any open requirements
+    try:
+        from sqlalchemy import func as sa_func
+        from app.models import Requirement, Requisition
+        from app.services.teams import send_stock_match_alert
+
+        imported_mpns = [r.get("mpn", "").strip().upper() for r in rows if r.get("mpn")]
+        if imported_mpns:
+            matches = (
+                db.query(Requirement.id, Requirement.primary_mpn, Requirement.requisition_id)
+                .join(Requisition, Requirement.requisition_id == Requisition.id)
+                .filter(
+                    Requisition.status.in_(["active", "sourcing", "offers"]),
+                    sa_func.upper(Requirement.primary_mpn).in_(imported_mpns),
+                )
+                .all()
+            )
+            if matches:
+                match_list = [
+                    {"mpn": m.primary_mpn, "requirement_id": m.id, "requisition_id": m.requisition_id}
+                    for m in matches
+                ]
+                await send_stock_match_alert(
+                    matches=match_list,
+                    filename=filename,
+                    vendor_name=vendor_name,
+                )
+    except Exception as e:
+        log.debug(f"Teams stock match check skipped: {e}")
 
 
 def _parse_stock_file(file_bytes: bytes, filename: str) -> list[dict]:

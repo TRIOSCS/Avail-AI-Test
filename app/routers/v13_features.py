@@ -700,10 +700,10 @@ async def score_routing(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Preview routing scores for a requirement+vendor pair."""
-    from app.services.routing_service import rank_buyers_for_assignment
+    """Preview routing scores for a requirement+vendor pair (with calendar availability)."""
+    from app.services.routing_service import rank_buyers_with_availability
 
-    return rank_buyers_for_assignment(
+    return await rank_buyers_with_availability(
         payload.requirement_id, payload.vendor_card_id, db
     )
 
