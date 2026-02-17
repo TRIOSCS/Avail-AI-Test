@@ -1414,6 +1414,44 @@
     </div>
 </div>
 
+<!-- Edit Company Modal -->
+<div id="editCompanyModal" class="modal-bg" onclick="if(event.target===this)closeModal('editCompanyModal')">
+    <div class="modal" style="max-width:560px">
+        <input type="hidden" id="ecId">
+        <h2>Edit Company</h2>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div class="field" style="grid-column:1/-1"><label>Company Name</label><input id="ecName"></div>
+            <div class="field"><label>Account Type</label>
+                <select id="ecAccountType" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px">
+                    <option value="">—</option>
+                    <option>Customer</option><option>Prospect</option><option>Partner</option><option>Competitor</option>
+                </select>
+            </div>
+            <div class="field"><label>Account Owner</label><select id="ecOwner" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px"></select></div>
+            <div class="field"><label>Phone</label><input id="ecPhone" placeholder="+1 (555) 000-0000"></div>
+            <div class="field"><label>Website</label><input id="ecWebsite" placeholder="company.com"></div>
+            <div class="field"><label>Domain</label><input id="ecDomain" placeholder="company.com"></div>
+            <div class="field"><label>LinkedIn</label><input id="ecLinkedin" placeholder="linkedin.com/company/..."></div>
+            <div class="field"><label>Industry</label><input id="ecIndustry"></div>
+            <div class="field"><label>Legal Name</label><input id="ecLegalName"></div>
+            <div class="field"><label>Employee Size</label><input id="ecEmployeeSize" placeholder="51-200"></div>
+            <div class="field"><label>HQ City</label><input id="ecHqCity"></div>
+            <div class="field"><label>HQ State</label><input id="ecHqState"></div>
+            <div class="field"><label>HQ Country</label><input id="ecHqCountry"></div>
+            <div class="field"><label>Credit Terms</label><input id="ecCreditTerms" placeholder="Net 30"></div>
+            <div class="field"><label>Tax ID</label><input id="ecTaxId" placeholder="EIN / VAT"></div>
+            <div class="field"><label>Currency</label><input id="ecCurrency" placeholder="USD" style="width:80px"></div>
+            <div class="field"><label>Preferred Carrier</label><input id="ecCarrier" placeholder="FedEx, UPS..."></div>
+            <div class="field" style="grid-column:1/-1"><label>Notes</label><textarea id="ecNotes" rows="2" style="width:100%"></textarea></div>
+            <div class="field"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="ecStrategic"> Strategic Account</label></div>
+        </div>
+        <div class="mactions">
+            <button class="btn btn-ghost" onclick="closeModal('editCompanyModal')">Cancel</button>
+            <button class="btn btn-primary" onclick="saveEditCompany()">Save</button>
+        </div>
+    </div>
+</div>
+
 <!-- Add Site Modal -->
 <div id="addSiteModal" class="modal-bg" onclick="if(event.target===this)closeModal('addSiteModal')">
     <div class="modal">
@@ -1432,6 +1470,15 @@
             <div class="field"><label for="asSiteCountry">Country</label><input id="asSiteCountry" placeholder="US" value="US"></div>
             <div class="field"><label for="asSitePayTerms">Payment Terms</label><input id="asSitePayTerms" placeholder="Net 30"></div>
             <div class="field"><label for="asSiteShipTerms">Shipping Terms</label><input id="asSiteShipTerms" placeholder="FOB Origin"></div>
+            <div class="field"><label for="asSiteType">Site Type</label>
+                <select id="asSiteType" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px">
+                    <option value="">—</option>
+                    <option>HQ</option><option>Branch</option><option>Warehouse</option><option>Manufacturing</option>
+                </select>
+            </div>
+            <div class="field"><label for="asSiteTimezone">Timezone</label><input id="asSiteTimezone" placeholder="America/New_York"></div>
+            <div class="field"><label for="asSiteRecvHours">Receiving Hours</label><input id="asSiteRecvHours" placeholder="Mon-Fri 8am-5pm"></div>
+            <div class="field"><label for="asSiteCarrierAcct">Carrier Account</label><input id="asSiteCarrierAcct" placeholder="UPS/FedEx acct #"></div>
             <div class="field"><label for="asSiteNotes">Notes</label><textarea id="asSiteNotes" rows="2" placeholder="Internal notes..." style="width:100%;resize:vertical"></textarea></div>
         </div>
         <div class="mactions">

@@ -64,14 +64,16 @@ function renderCustomers() {
             </div>
             <div id="siteDetail-${s.id}" class="site-detail-panel" style="display:none"></div>
         `).join('');
-        const enrichHtml = c.last_enriched_at
-            ? `<div class="enrich-bar">
-                    ${c.industry ? '<span class="enrich-tag">' + esc(c.industry) + '</span>' : ''}
-                    ${c.employee_size ? '<span class="enrich-tag">👥 ' + esc(c.employee_size) + '</span>' : ''}
-                    ${c.hq_city ? '<span class="enrich-tag">📍 ' + esc(c.hq_city) + (c.hq_state ? ', ' + esc(c.hq_state) : '') + '</span>' : ''}
-                    ${c.linkedin_url ? '<a href="' + escAttr(c.linkedin_url) + '" target="_blank" style="color:var(--teal);text-decoration:none;font-size:10px">LinkedIn ↗</a>' : ''}
-                </div>`
-            : '';
+        const acctTags = [
+            c.account_type ? '<span class="enrich-tag">' + esc(c.account_type) + '</span>' : '',
+            c.industry ? '<span class="enrich-tag">' + esc(c.industry) + '</span>' : '',
+            c.employee_size ? '<span class="enrich-tag">👥 ' + esc(c.employee_size) + '</span>' : '',
+            c.hq_city ? '<span class="enrich-tag">📍 ' + esc(c.hq_city) + (c.hq_state ? ', ' + esc(c.hq_state) : '') + '</span>' : '',
+            c.phone ? '<span class="enrich-tag">📞 ' + esc(c.phone) + '</span>' : '',
+            c.credit_terms ? '<span class="enrich-tag">' + esc(c.credit_terms) + '</span>' : '',
+            c.linkedin_url ? '<a href="' + escAttr(c.linkedin_url) + '" target="_blank" style="color:var(--teal);text-decoration:none;font-size:10px">LinkedIn ↗</a>' : '',
+        ].filter(Boolean).join('');
+        const enrichHtml = acctTags ? '<div class="enrich-bar">' + acctTags + '</div>' : '';
         const domain = c.domain || (c.website ? c.website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
         return `
         <div class="card cust-card" id="custCard-${c.id}">
@@ -82,6 +84,7 @@ function renderCustomers() {
                 <span class="cust-count">${c.site_count} site${c.site_count !== 1 ? 's' : ''}</span>
                 <span id="actHealth-${c.id}" style="margin-left:4px"></span>
                 <span style="margin-left:auto;display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">
+                    <button class="btn-enrich" onclick="openEditCompany(${c.id})">Edit</button>
                     <button class="btn-enrich" onclick="enrichCompany(${c.id},'${escAttr(domain)}')">Enrich</button>
                     ${domain ? '<button class="btn-enrich" onclick="openSuggestedContacts(\'company\','+c.id+',\''+escAttr(domain)+'\',\''+escAttr(c.name)+'\')">Suggested Contacts</button>' : ''}
                 </span>
@@ -213,13 +216,78 @@ async function createCompany() {
     } catch (e) { showToast('Failed to create company', 'error'); }
 }
 
+async function openEditCompany(companyId) {
+    var c = crmCustomers.find(x => x.id === companyId);
+    if (!c) return;
+    document.getElementById('ecId').value = companyId;
+    document.getElementById('ecName').value = c.name || '';
+    document.getElementById('ecAccountType').value = c.account_type || '';
+    document.getElementById('ecPhone').value = c.phone || '';
+    document.getElementById('ecWebsite').value = c.website || '';
+    document.getElementById('ecDomain').value = c.domain || '';
+    document.getElementById('ecLinkedin').value = c.linkedin_url || '';
+    document.getElementById('ecIndustry').value = c.industry || '';
+    document.getElementById('ecLegalName').value = c.legal_name || '';
+    document.getElementById('ecEmployeeSize').value = c.employee_size || '';
+    document.getElementById('ecHqCity').value = c.hq_city || '';
+    document.getElementById('ecHqState').value = c.hq_state || '';
+    document.getElementById('ecHqCountry').value = c.hq_country || '';
+    document.getElementById('ecCreditTerms').value = c.credit_terms || '';
+    document.getElementById('ecTaxId').value = c.tax_id || '';
+    document.getElementById('ecCurrency').value = c.currency || 'USD';
+    document.getElementById('ecCarrier').value = c.preferred_carrier || '';
+    document.getElementById('ecNotes').value = c.notes || '';
+    document.getElementById('ecStrategic').checked = !!c.is_strategic;
+    await loadUserOptions('ecOwner');
+    if (c.account_owner_id) document.getElementById('ecOwner').value = c.account_owner_id;
+    document.getElementById('editCompanyModal').classList.add('open');
+    setTimeout(function() { document.getElementById('ecName').focus(); }, 100);
+}
+
+async function saveEditCompany() {
+    var id = document.getElementById('ecId').value;
+    var name = document.getElementById('ecName').value.trim();
+    if (!name) { showToast('Company name is required', 'error'); return; }
+    var ownerVal = document.getElementById('ecOwner').value;
+    try {
+        await apiFetch('/api/companies/' + id, {
+            method: 'PUT',
+            body: {
+                name: name,
+                account_type: document.getElementById('ecAccountType').value || null,
+                phone: document.getElementById('ecPhone').value.trim() || null,
+                website: document.getElementById('ecWebsite').value.trim() || null,
+                domain: document.getElementById('ecDomain').value.trim() || null,
+                linkedin_url: document.getElementById('ecLinkedin').value.trim() || null,
+                industry: document.getElementById('ecIndustry').value.trim() || null,
+                legal_name: document.getElementById('ecLegalName').value.trim() || null,
+                employee_size: document.getElementById('ecEmployeeSize').value.trim() || null,
+                hq_city: document.getElementById('ecHqCity').value.trim() || null,
+                hq_state: document.getElementById('ecHqState').value.trim() || null,
+                hq_country: document.getElementById('ecHqCountry').value.trim() || null,
+                credit_terms: document.getElementById('ecCreditTerms').value.trim() || null,
+                tax_id: document.getElementById('ecTaxId').value.trim() || null,
+                currency: document.getElementById('ecCurrency').value.trim() || null,
+                preferred_carrier: document.getElementById('ecCarrier').value.trim() || null,
+                notes: document.getElementById('ecNotes').value,
+                is_strategic: document.getElementById('ecStrategic').checked,
+                account_owner_id: ownerVal ? parseInt(ownerVal) : null,
+            }
+        });
+        closeModal('editCompanyModal');
+        showToast('Company updated', 'success');
+        loadCustomers();
+    } catch (e) { showToast('Failed to update company: ' + (e.message || ''), 'error'); }
+}
+
 function openAddSiteModal(companyId, companyName) {
     document.getElementById('asSiteCompanyId').value = companyId;
     delete document.getElementById('asSiteCompanyId').dataset.editSiteId;
     document.getElementById('asSiteCompanyName').textContent = companyName;
     document.querySelector('#addSiteModal h2').innerHTML = 'Add Site to <span id="asSiteCompanyName">' + esc(companyName) + '</span>';
-    ['asSiteName','asSiteAddr1','asSiteAddr2','asSiteCity','asSiteState','asSiteZip','asSitePayTerms','asSiteShipTerms'].forEach(id => document.getElementById(id).value = '');
+    ['asSiteName','asSiteAddr1','asSiteAddr2','asSiteCity','asSiteState','asSiteZip','asSitePayTerms','asSiteShipTerms','asSiteTimezone','asSiteRecvHours','asSiteCarrierAcct'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('asSiteCountry').value = 'US';
+    document.getElementById('asSiteType').value = '';
     document.getElementById('asSiteNotes').value = '';
     document.getElementById('addSiteModal').classList.add('open');
     setTimeout(() => document.getElementById('asSiteName').focus(), 100);
@@ -238,6 +306,10 @@ async function addSite() {
         country: document.getElementById('asSiteCountry').value.trim() || 'US',
         payment_terms: document.getElementById('asSitePayTerms').value.trim(),
         shipping_terms: document.getElementById('asSiteShipTerms').value.trim(),
+        site_type: document.getElementById('asSiteType').value || null,
+        timezone: document.getElementById('asSiteTimezone').value.trim() || null,
+        receiving_hours: document.getElementById('asSiteRecvHours').value.trim() || null,
+        carrier_account: document.getElementById('asSiteCarrierAcct').value.trim() || null,
         notes: document.getElementById('asSiteNotes').value.trim() || null,
     };
     if (!data.site_name) return;
@@ -276,6 +348,10 @@ async function openEditSiteModal(siteId) {
         document.getElementById('asSiteCountry').value = s.country || 'US';
         document.getElementById('asSitePayTerms').value = s.payment_terms || '';
         document.getElementById('asSiteShipTerms').value = s.shipping_terms || '';
+        document.getElementById('asSiteType').value = s.site_type || '';
+        document.getElementById('asSiteTimezone').value = s.timezone || '';
+        document.getElementById('asSiteRecvHours').value = s.receiving_hours || '';
+        document.getElementById('asSiteCarrierAcct').value = s.carrier_account || '';
         document.getElementById('asSiteNotes').value = s.notes || '';
         document.getElementById('addSiteModal').classList.add('open');
         document.querySelector('#addSiteModal h2').innerHTML = 'Edit Site — <span>' + esc(s.site_name || '') + '</span>';

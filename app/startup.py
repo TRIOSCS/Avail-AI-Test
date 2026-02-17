@@ -283,6 +283,18 @@ def _add_crm_columns(conn) -> None:
         "ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS customer_site_id INTEGER REFERENCES customer_sites(id)",
         "ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS cloned_from_id INTEGER REFERENCES requisitions(id)",
         "ALTER TABLE requirements ADD COLUMN IF NOT EXISTS target_price NUMERIC(12,4)",
+        # v1.4.0: Company account management fields
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS account_type VARCHAR(50)",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS phone VARCHAR(100)",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS credit_terms VARCHAR(100)",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS tax_id VARCHAR(100)",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS preferred_carrier VARCHAR(100)",
+        # v1.4.0: Site operations fields
+        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS site_type VARCHAR(50)",
+        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS timezone VARCHAR(50)",
+        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS receiving_hours VARCHAR(100)",
+        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS carrier_account VARCHAR(100)",
     ]
     for stmt in stmts:
         _exec(conn, stmt)

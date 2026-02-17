@@ -243,6 +243,15 @@ async def list_companies(
                 if c.last_enriched_at
                 else None,
                 "enrichment_source": c.enrichment_source,
+                "account_type": c.account_type,
+                "phone": c.phone,
+                "credit_terms": c.credit_terms,
+                "tax_id": c.tax_id,
+                "currency": c.currency,
+                "preferred_carrier": c.preferred_carrier,
+                "is_strategic": c.is_strategic,
+                "account_owner_id": c.account_owner_id,
+                "account_owner_name": (c.account_owner.name if c.account_owner else None) if c.account_owner_id else None,
                 "site_count": len(sites),
                 "sites": sites,
             }
@@ -417,6 +426,10 @@ async def get_site(
         "country": site.country,
         "payment_terms": site.payment_terms,
         "shipping_terms": site.shipping_terms,
+        "site_type": site.site_type,
+        "timezone": site.timezone,
+        "receiving_hours": site.receiving_hours,
+        "carrier_account": site.carrier_account,
         "notes": site.notes,
         "contacts": [
             {

@@ -30,6 +30,12 @@ class CompanyCreate(BaseModel):
     notes: str | None = None
     domain: str | None = None
     linkedin_url: str | None = None
+    account_type: str | None = None
+    phone: str | None = None
+    credit_terms: str | None = None
+    tax_id: str | None = None
+    currency: str | None = None
+    preferred_carrier: str | None = None
 
     @field_validator("name")
     @classmethod
@@ -53,6 +59,14 @@ class CompanyUpdate(BaseModel):
     hq_city: str | None = None
     hq_state: str | None = None
     hq_country: str | None = None
+    account_type: str | None = None
+    phone: str | None = None
+    credit_terms: str | None = None
+    tax_id: str | None = None
+    currency: str | None = None
+    preferred_carrier: str | None = None
+    is_strategic: bool | None = None
+    account_owner_id: int | None = None
 
 
 class CompanyOut(BaseModel):
@@ -79,6 +93,10 @@ class SiteCreate(BaseModel):
     country: str = "US"
     payment_terms: str | None = None
     shipping_terms: str | None = None
+    site_type: str | None = None
+    timezone: str | None = None
+    receiving_hours: str | None = None
+    carrier_account: str | None = None
     notes: str | None = None
 
     @field_validator("site_name")
@@ -106,6 +124,10 @@ class SiteUpdate(BaseModel):
     country: str | None = None
     payment_terms: str | None = None
     shipping_terms: str | None = None
+    site_type: str | None = None
+    timezone: str | None = None
+    receiving_hours: str | None = None
+    carrier_account: str | None = None
     notes: str | None = None
     is_active: bool | None = None
 

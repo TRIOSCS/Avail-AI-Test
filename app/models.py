@@ -80,6 +80,14 @@ class Company(Base):
     last_activity_at = Column(DateTime)
     account_owner_id = Column(Integer, ForeignKey("users.id"))
 
+    # v1.4.0: Account management fields
+    account_type = Column(String(50))  # Customer, Prospect, Partner, Competitor
+    phone = Column(String(100))
+    credit_terms = Column(String(100))  # Net 30, Net 60, COD, etc.
+    tax_id = Column(String(100))  # EIN / VAT ID
+    currency = Column(String(10), default="USD")
+    preferred_carrier = Column(String(100))  # FedEx, UPS, DHL, etc.
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,
@@ -90,6 +98,7 @@ class Company(Base):
     sites = relationship(
         "CustomerSite", back_populates="company", cascade="all, delete-orphan"
     )
+    account_owner = relationship("User", foreign_keys=[account_owner_id])
 
     __table_args__ = (Index("ix_companies_name", "name"),)
 
@@ -123,6 +132,12 @@ class CustomerSite(Base):
     # Default terms
     payment_terms = Column(String(100))
     shipping_terms = Column(String(100))
+
+    # v1.4.0: Site operations fields
+    site_type = Column(String(50))  # HQ, Branch, Warehouse, Manufacturing
+    timezone = Column(String(50))  # e.g. "America/New_York"
+    receiving_hours = Column(String(100))  # e.g. "Mon-Fri 8am-5pm"
+    carrier_account = Column(String(100))  # Customer shipping account number
 
     notes = Column(Text)
     is_active = Column(Boolean, default=True)
