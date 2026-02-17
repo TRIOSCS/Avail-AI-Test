@@ -3032,7 +3032,7 @@ function renderBuyerLeaderboard(data, months) {
 
     html += `<div style="overflow-x:auto"><table class="perf-table"><thead><tr>
         <th>#</th><th>Buyer</th>
-        <th>Offers (x1)</th><th>Quoted (x3)</th><th>Buy Plan (x5)</th><th>PO Confirmed (x8)</th><th>Stock Lists (x2)</th>
+        <th>Offers (x1)</th><th>Quoted (x3)</th><th>Buy Plan (x5)</th><th>PO Confirmed (x8)</th><th>Inventory Lists (x2)</th>
         <th>Total</th>
         <th style="border-left:2px solid var(--border)">YTD Offers</th><th>YTD PO Conf.</th><th>YTD Points</th>
     </tr></thead><tbody>`;
@@ -3178,7 +3178,7 @@ function renderSalespersonScorecard(data) {
         {key:'proactive_sent', label:'Proactive Sent'},
         {key:'proactive_converted', label:'Proactive Conv.'},
         {key:'proactive_revenue', label:'Proactive Rev.', fmt:'$'},
-        {key:'boms_uploaded', label:'Lists Uploaded'},
+        {key:'boms_uploaded', label:'Excess Lists'},
     ];
 
     const ytdCols = [
