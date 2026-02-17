@@ -546,11 +546,13 @@ function renderReqList() {
         return `
         <div class="card card-clickable ${isArchived ? 'req-archived' : ''}" onclick="showDetail(${r.id}, '${escAttr(r.name)}')">
             <div class="req-card">
-                <div style="flex:1">
+                <div style="flex:1;min-width:0">
                     <div class="req-name">${esc(r.name)} ${statusBadge} ${newOffersDot}</div>
-                    ${custDisplay}
-                    ${progressBar}
-                    ${replyBadge}
+                    <div class="req-detail-row">
+                        ${custDisplay}
+                        ${progressBar}
+                        ${replyBadge}
+                    </div>
                 </div>
                 <div class="req-meta">
                     ${createdBy}

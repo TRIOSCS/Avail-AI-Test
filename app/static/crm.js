@@ -3275,6 +3275,129 @@ function switchSettingsTab(name, btn) {
 // Keep backward compat for dropdown links
 function showSettings(panel) { openSettingsTab(panel); }
 
+let _sourcesData = [];
+let _sourcesFilter = 'all';   // 'all' or 'active'
+let _sourcesQuery = '';
+let _sourcesSearchTimer = null;
+
+function _renderSourceCards() {
+    const container = document.getElementById('sourcesCardsContainer');
+    if (!container) return;
+
+    let filtered = _sourcesData;
+    if (_sourcesFilter === 'active') {
+        filtered = filtered.filter(s => s.status === 'live');
+    }
+    if (_sourcesQuery) {
+        const q = _sourcesQuery.toLowerCase();
+        filtered = filtered.filter(s =>
+            (s.display_name || '').toLowerCase().includes(q) ||
+            (s.description || '').toLowerCase().includes(q) ||
+            (s.source_type || '').toLowerCase().includes(q)
+        );
+    }
+
+    if (!filtered.length) {
+        container.innerHTML = '<p class="empty">No matching sources</p>';
+        return;
+    }
+
+    const categoryOrder = ['api', 'platform', 'enrichment', 'email', 'scraper', 'manual'];
+    const categoryLabels = {
+        api: 'Part Search APIs',
+        platform: 'Platform Services',
+        enrichment: 'Enrichment APIs',
+        email: 'Email Intelligence',
+        scraper: 'Scrapers (Pending)',
+        manual: 'Manual Import',
+    };
+
+    const grouped = {};
+    for (const s of filtered) {
+        const cat = s.category || 'api';
+        if (!grouped[cat]) grouped[cat] = [];
+        grouped[cat].push(s);
+    }
+    const order = {live: 0, pending: 1, error: 2, disabled: 3};
+    for (const cat of Object.keys(grouped)) {
+        grouped[cat].sort((a, b) => (order[a.status] || 9) - (order[b.status] || 9));
+    }
+
+    const canToggle = window.__isAdmin || window.__isDevAssistant;
+    let html = '';
+    for (const cat of categoryOrder) {
+        const group = grouped[cat];
+        if (!group || !group.length) continue;
+        const label = categoryLabels[cat] || cat;
+        html += `<h3 style="font-size:13px;font-weight:600;color:var(--text2);margin:20px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)">${label}</h3>`;
+
+        for (const s of group) {
+            const dot = s.status === 'live' ? '🟢' : s.status === 'pending' ? '🟡' : s.status === 'error' ? '🔴' : '⚫';
+            const envVars = s.env_vars || [];
+            const envStatus = s.env_status || {};
+
+            let credsHtml = '';
+            for (const v of envVars) {
+                const isSet = envStatus[v];
+                const badge = isSet
+                    ? '<span style="color:var(--teal);font-size:11px;font-weight:600">Set</span>'
+                    : '<span style="color:var(--muted);font-size:11px">Not set</span>';
+                credsHtml += `
+                    <div class="cred-row" id="cred-row-${s.id}-${v}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
+                        <code style="font-size:11px;min-width:180px;color:var(--text2)">${v}</code>
+                        <span id="cred-status-${s.id}-${v}">${badge}</span>
+                        <div style="flex:1"></div>
+                        <button class="btn-sm" onclick="editCredential(${s.id},'${v}')" style="font-size:11px;padding:2px 10px">Edit</button>
+                    </div>
+                    <div id="cred-edit-${s.id}-${v}" style="display:none;padding:6px 0 10px">
+                        <div style="display:flex;gap:8px;align-items:center">
+                            <input type="password" id="cred-input-${s.id}-${v}" placeholder="Enter value..."
+                                   style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg);color:var(--text)">
+                            <button class="btn-sm" onclick="saveCredential(${s.id},'${v}')"
+                                    style="font-size:11px;padding:4px 12px;background:var(--teal);color:#fff;border:none;border-radius:4px">Save</button>
+                            <button class="btn-sm" onclick="cancelCredEdit(${s.id},'${v}')"
+                                    style="font-size:11px;padding:4px 10px">Cancel</button>
+                        </div>
+                    </div>`;
+            }
+
+            const statsHtml = s.total_searches
+                ? `<div style="font-size:10px;color:var(--muted);margin-top:8px">${s.total_searches} searches / ${s.total_results} results / ${s.avg_response_ms}ms avg</div>`
+                : '';
+            const errorHtml = s.last_error
+                ? `<div style="font-size:10px;color:var(--red);margin-top:4px">Last error: ${s.last_error}</div>`
+                : '';
+
+            const toggleHtml = canToggle && envVars.length
+                ? `<button class="btn-sm" onclick="toggleSourceStatus(${s.id},'${s.status}')"
+                          style="font-size:10px;padding:2px 10px;${s.status === 'disabled' ? 'opacity:0.7' : ''}">${s.status === 'disabled' ? 'Enable' : 'Disable'}</button>`
+                : '';
+
+            html += `<div class="card" style="padding:16px;margin-bottom:12px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                    <div>
+                        <strong style="font-size:14px">${s.display_name}</strong>
+                        <span style="font-size:11px;color:var(--muted);margin-left:8px">${s.source_type}</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:10px">
+                        <span style="font-size:11px">${dot} ${s.status}</span>
+                        ${toggleHtml}
+                        <button class="btn-sm" id="test-btn-${s.id}" onclick="testSourceCred(${s.id})"
+                                style="font-size:11px;padding:3px 12px">Test</button>
+                    </div>
+                </div>
+                <div style="font-size:11px;color:var(--text2);margin-bottom:10px">${s.description || ''}</div>
+                ${s.setup_notes ? '<div style="font-size:10px;color:var(--muted);margin-bottom:8px;padding:6px 10px;background:var(--bg);border-radius:4px">' + s.setup_notes + '</div>' : ''}
+                ${s.signup_url ? '<a href="' + s.signup_url + '" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:none">Get API credentials ↗</a>' : ''}
+                <div style="margin-top:10px">${credsHtml}</div>
+                <div id="test-result-${s.id}"></div>
+                ${statsHtml}${errorHtml}
+            </div>`;
+        }
+    }
+    container.innerHTML = html;
+}
+
 async function loadSettingsSources() {
     const el = document.getElementById('settingsSourcesList');
     el.innerHTML = '<p class="empty">Loading data sources...</p>';
@@ -3283,108 +3406,67 @@ async function loadSettingsSources() {
         const sources = res.sources || [];
         if (!sources.length) { el.innerHTML = '<p class="empty">No data sources configured</p>'; return; }
 
-        // Category display order and labels
-        const categoryOrder = ['api', 'platform', 'enrichment', 'email', 'scraper', 'manual'];
-        const categoryLabels = {
-            api: 'Part Search APIs',
-            platform: 'Platform Services',
-            enrichment: 'Enrichment APIs',
-            email: 'Email Intelligence',
-            scraper: 'Scrapers (Pending)',
-            manual: 'Manual Import',
-        };
+        _sourcesData = sources;
+        _sourcesFilter = 'all';
+        _sourcesQuery = '';
 
-        // Group sources by category
-        const grouped = {};
-        for (const s of sources) {
-            const cat = s.category || 'api';
-            if (!grouped[cat]) grouped[cat] = [];
-            grouped[cat].push(s);
-        }
+        // Compute summary counts (always from full data)
+        const counts = {live: 0, pending: 0, error: 0, disabled: 0};
+        for (const s of sources) counts[s.status] = (counts[s.status] || 0) + 1;
+        const total = sources.length;
 
-        // Sort within each group: live first, then pending, error, disabled
-        const order = {live: 0, pending: 1, error: 2, disabled: 3};
-        for (const cat of Object.keys(grouped)) {
-            grouped[cat].sort((a, b) => (order[a.status] || 9) - (order[b.status] || 9));
-        }
+        // Build summary + controls + card container
+        const pillStyle = (active) => `display:inline-block;padding:4px 14px;font-size:12px;font-weight:600;border-radius:20px;cursor:pointer;transition:.15s;border:1px solid var(--border);`
+            + (active ? 'background:var(--teal);color:#fff;border-color:var(--teal);' : 'background:var(--bg);color:var(--text2);');
 
-        const canToggle = window.__isAdmin || window.__isDevAssistant;
-        let html = '';
-        for (const cat of categoryOrder) {
-            const group = grouped[cat];
-            if (!group || !group.length) continue;
-            const label = categoryLabels[cat] || cat;
-            html += `<h3 style="font-size:13px;font-weight:600;color:var(--text2);margin:20px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)">${label}</h3>`;
+        el.innerHTML = `
+            <div style="margin-bottom:16px;padding:12px 16px;background:var(--bg);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2)">
+                <span>🟢 ${counts.live} Live</span>
+                <span style="color:var(--muted)">·</span>
+                <span>🟡 ${counts.pending} Pending</span>
+                <span style="color:var(--muted)">·</span>
+                <span>🔴 ${counts.error} Error</span>
+                <span style="color:var(--muted)">·</span>
+                <span>⚫ ${counts.disabled} Disabled</span>
+                <span style="color:var(--muted)">·</span>
+                <span style="font-weight:600">${total} total</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+                <div style="display:flex;gap:4px" id="sourcesToggle">
+                    <span id="srcPillAll" style="${pillStyle(true)}" onclick="setSourcesFilter('all')">All</span>
+                    <span id="srcPillActive" style="${pillStyle(false)}" onclick="setSourcesFilter('active')">Active</span>
+                </div>
+                <input class="req-search" id="sourcesSearchInput" type="text" placeholder="Search sources…"
+                       style="flex:1;min-width:180px" oninput="onSourcesSearch(this.value)" aria-label="Search sources">
+            </div>
+            <div id="sourcesCardsContainer"></div>`;
 
-            for (const s of group) {
-                const dot = s.status === 'live' ? '🟢' : s.status === 'pending' ? '🟡' : s.status === 'error' ? '🔴' : '⚫';
-                const envVars = s.env_vars || [];
-                const envStatus = s.env_status || {};
-
-                let credsHtml = '';
-                for (const v of envVars) {
-                    const isSet = envStatus[v];
-                    const badge = isSet
-                        ? '<span style="color:var(--teal);font-size:11px;font-weight:600">Set</span>'
-                        : '<span style="color:var(--muted);font-size:11px">Not set</span>';
-                    credsHtml += `
-                        <div class="cred-row" id="cred-row-${s.id}-${v}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
-                            <code style="font-size:11px;min-width:180px;color:var(--text2)">${v}</code>
-                            <span id="cred-status-${s.id}-${v}">${badge}</span>
-                            <div style="flex:1"></div>
-                            <button class="btn-sm" onclick="editCredential(${s.id},'${v}')" style="font-size:11px;padding:2px 10px">Edit</button>
-                        </div>
-                        <div id="cred-edit-${s.id}-${v}" style="display:none;padding:6px 0 10px">
-                            <div style="display:flex;gap:8px;align-items:center">
-                                <input type="password" id="cred-input-${s.id}-${v}" placeholder="Enter value..."
-                                       style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg);color:var(--text)">
-                                <button class="btn-sm" onclick="saveCredential(${s.id},'${v}')"
-                                        style="font-size:11px;padding:4px 12px;background:var(--teal);color:#fff;border:none;border-radius:4px">Save</button>
-                                <button class="btn-sm" onclick="cancelCredEdit(${s.id},'${v}')"
-                                        style="font-size:11px;padding:4px 10px">Cancel</button>
-                            </div>
-                        </div>`;
-                }
-
-                const statsHtml = s.total_searches
-                    ? `<div style="font-size:10px;color:var(--muted);margin-top:8px">${s.total_searches} searches / ${s.total_results} results / ${s.avg_response_ms}ms avg</div>`
-                    : '';
-                const errorHtml = s.last_error
-                    ? `<div style="font-size:10px;color:var(--red);margin-top:4px">Last error: ${s.last_error}</div>`
-                    : '';
-
-                // Toggle button for admin and dev_assistant
-                const toggleHtml = canToggle && envVars.length
-                    ? `<button class="btn-sm" onclick="toggleSourceStatus(${s.id},'${s.status}')"
-                              style="font-size:10px;padding:2px 10px;${s.status === 'disabled' ? 'opacity:0.7' : ''}">${s.status === 'disabled' ? 'Enable' : 'Disable'}</button>`
-                    : '';
-
-                html += `<div class="card" style="padding:16px;margin-bottom:12px">
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                        <div>
-                            <strong style="font-size:14px">${s.display_name}</strong>
-                            <span style="font-size:11px;color:var(--muted);margin-left:8px">${s.source_type}</span>
-                        </div>
-                        <div style="display:flex;align-items:center;gap:10px">
-                            <span style="font-size:11px">${dot} ${s.status}</span>
-                            ${toggleHtml}
-                            <button class="btn-sm" id="test-btn-${s.id}" onclick="testSourceCred(${s.id})"
-                                    style="font-size:11px;padding:3px 12px">Test</button>
-                        </div>
-                    </div>
-                    <div style="font-size:11px;color:var(--text2);margin-bottom:10px">${s.description || ''}</div>
-                    ${s.setup_notes ? '<div style="font-size:10px;color:var(--muted);margin-bottom:8px;padding:6px 10px;background:var(--bg);border-radius:4px">' + s.setup_notes + '</div>' : ''}
-                    ${s.signup_url ? '<a href="' + s.signup_url + '" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:none">Get API credentials ↗</a>' : ''}
-                    <div style="margin-top:10px">${credsHtml}</div>
-                    <div id="test-result-${s.id}"></div>
-                    ${statsHtml}${errorHtml}
-                </div>`;
-            }
-        }
-        el.innerHTML = html;
+        _renderSourceCards();
     } catch (e) {
         el.innerHTML = '<p class="empty">Failed to load sources</p>';
     }
+}
+
+function setSourcesFilter(mode) {
+    _sourcesFilter = mode;
+    const allPill = document.getElementById('srcPillAll');
+    const activePill = document.getElementById('srcPillActive');
+    if (allPill && activePill) {
+        const on = 'background:var(--teal);color:#fff;border-color:var(--teal);';
+        const off = 'background:var(--bg);color:var(--text2);border-color:var(--border);';
+        const base = 'display:inline-block;padding:4px 14px;font-size:12px;font-weight:600;border-radius:20px;cursor:pointer;transition:.15s;border:1px solid var(--border);';
+        allPill.style.cssText = base + (mode === 'all' ? on : off);
+        activePill.style.cssText = base + (mode === 'active' ? on : off);
+    }
+    _renderSourceCards();
+}
+
+function onSourcesSearch(val) {
+    clearTimeout(_sourcesSearchTimer);
+    _sourcesSearchTimer = setTimeout(() => {
+        _sourcesQuery = val.trim();
+        _renderSourceCards();
+    }, 200);
 }
 
 function editCredential(sourceId, varName) {
