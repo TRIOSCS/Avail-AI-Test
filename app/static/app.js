@@ -2441,8 +2441,11 @@ function setActFilter(type, btn) {
 }
 
 function setActStat(type, el) {
+    // Sent and Replied tiles open detail modals
+    if (type === 'all') { openSentEmailsModal(); return; }
+    if (type === 'replied') { openRepliedEmailsModal(); return; }
     // Toggle — click same stat again to clear
-    if (actStatFilter === type || type === 'all') {
+    if (actStatFilter === type) {
         actStatFilter = null;
         document.querySelectorAll('.act-stat').forEach(s => s.classList.remove('on'));
     } else {
@@ -2600,21 +2603,6 @@ function renderActivityCards() {
 
         const threadBtn = `<button class="btn btn-ghost btn-sm" onclick="viewThread('${escAttr(v.vendor_name)}')">View Thread</button>`;
 
-        // AI Parse button — only show when response hasn't been parsed yet
-        let parseBtn = '';
-        let attBtn = '';
-        if (v.responses && v.responses.length) {
-            const lastR = v.responses[v.responses.length - 1];
-            if (lastR.id) {
-                const pd = lastR.parsed_data || {};
-                const hasParsed = pd.parts && pd.parts.length;
-                if (!hasParsed) {
-                    parseBtn = `<button class="btn-ai btn-sm" onclick="parseResponseAI(${lastR.id})">🤖 Parse</button>`;
-                }
-                attBtn = `<button class="btn-ai btn-sm" onclick="parseResponseAttachments(${lastR.id})" title="Parse attachments from this response">📎 Attachments</button>`;
-            }
-        }
-
         // Place Call / Note buttons (only when vendor_card_id is known)
         let logBtns = '';
         if (v.vendor_card_id) {
@@ -2646,7 +2634,7 @@ function renderActivityCards() {
             </div>
             ${metaHtml}
             ${quoteHtml}
-            <div class="act-card-actions">${followUpBtn}${parseBtn}${attBtn}${logBtns}${threadBtn}</div>
+            <div class="act-card-actions">${followUpBtn}${logBtns}${threadBtn}</div>
         </div>`;
     }).join('');
 }
@@ -2819,6 +2807,97 @@ async function viewThread(vendorName) {
 }
 
 
+
+function _ensureEmailListModal() {
+    if (document.getElementById('emailListModal')) return;
+    const m = document.createElement('div');
+    m.id = 'emailListModal';
+    m.className = 'modal-bg';
+    m.innerHTML = `<div class="modal modal-lg"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h2 id="emailListTitle"></h2><button class="btn btn-ghost btn-sm" onclick="closeModal('emailListModal')">✕ Close</button></div><div id="emailListContent" style="max-height:60vh;overflow-y:auto"></div></div>`;
+    m.addEventListener('click', e => { if (e.target === m) closeModal('emailListModal'); });
+    document.body.appendChild(m);
+}
+
+function openSentEmailsModal() {
+    _ensureEmailListModal();
+    const vendors = activityData.vendors || [];
+    let html = '';
+    const allSent = [];
+    for (const v of vendors) {
+        for (const c of (v.contacts || [])) {
+            if (c.contact_type === 'email') allSent.push({ ...c, vendor_name: v.vendor_name });
+        }
+    }
+    allSent.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    if (!allSent.length) {
+        html = '<p class="empty">No sent emails</p>';
+    } else {
+        for (const c of allSent) {
+            const bodyHtml = c.body
+                ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(26,127,155,.1);line-height:1.5;max-height:200px;overflow-y:auto">${c.body}</div>`
+                : '';
+            html += `<div style="margin-bottom:12px;padding:10px 14px;background:var(--teal-light);border-radius:8px;border:1px solid rgba(26,127,155,.15)">
+                <div style="font-size:11px;color:var(--teal);font-weight:600;margin-bottom:4px">
+                    To: ${esc(c.vendor_contact || '')} (${esc(c.vendor_name || '')}) · ${fmtDateTime(c.created_at)} · by ${esc(c.user_name || '')}
+                </div>
+                ${c.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:2px">${esc(c.subject)}</div>` : ''}
+                <div style="font-size:11px;color:var(--text2)">${(c.parts_included || []).join(', ')}</div>
+                ${bodyHtml}
+            </div>`;
+        }
+    }
+    document.getElementById('emailListTitle').textContent = `Sent Emails (${allSent.length})`;
+    document.getElementById('emailListContent').innerHTML = html;
+    document.getElementById('emailListModal').classList.add('open');
+}
+
+function openRepliedEmailsModal() {
+    _ensureEmailListModal();
+    const vendors = activityData.vendors || [];
+    let html = '<p style="font-size:11px;color:var(--muted);margin-bottom:10px">Note: Not all vendors support read receipts — some replies may not appear here.</p>';
+    const allReplies = [];
+    for (const v of vendors) {
+        for (const r of (v.responses || [])) {
+            allReplies.push({ ...r, vendor_name: v.vendor_name });
+        }
+    }
+    allReplies.sort((a, b) => (b.received_at || '').localeCompare(a.received_at || ''));
+    if (!allReplies.length) {
+        html += '<p class="empty">No replies received yet</p>';
+    } else {
+        for (const r of allReplies) {
+            const pd = r.parsed_data || {};
+            let parsedHtml = '';
+            if (pd.parts && pd.parts.length) {
+                const clsColors = {quote_provided:'var(--green)',no_stock:'var(--red)',counter_offer:'var(--amber)',clarification_needed:'#6366f1',ooo_bounce:'var(--muted)',follow_up:'var(--blue)'};
+                const clsLabels = {quote_provided:'Quote Provided',no_stock:'No Stock',counter_offer:'Counter Offer',clarification_needed:'Clarification Needed',ooo_bounce:'OOO / Bounce',follow_up:'Follow Up'};
+                const cls = pd.overall_classification || '';
+                const clsColor = clsColors[cls] || '#6b7280';
+                parsedHtml += `<div style="margin-bottom:4px"><span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;color:#fff;background:${clsColor}">${esc(clsLabels[cls]||cls)}</span></div>`;
+                parsedHtml += '<table style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:4px"><tr style="color:var(--text2);border-bottom:1px solid rgba(0,0,0,.08)"><th style="text-align:left;padding:3px 6px;font-weight:600">MPN</th><th style="text-align:right;padding:3px 6px;font-weight:600">Qty</th><th style="text-align:right;padding:3px 6px;font-weight:600">Price</th><th style="text-align:left;padding:3px 6px;font-weight:600">Lead Time</th></tr>';
+                for (const p of pd.parts) {
+                    const price = p.unit_price != null ? `${p.currency||'$'}${p.unit_price.toFixed(2)}` : '\u2014';
+                    parsedHtml += `<tr style="border-bottom:1px solid rgba(0,0,0,.04)"><td style="padding:3px 6px;font-weight:600">${esc(p.mpn||'')}</td><td style="padding:3px 6px;text-align:right">${p.qty_available != null ? p.qty_available.toLocaleString() : '\u2014'}</td><td style="padding:3px 6px;text-align:right">${price}</td><td style="padding:3px 6px">${esc(p.lead_time||'\u2014')}</td></tr>`;
+                }
+                parsedHtml += '</table>';
+            }
+            const emailBodyHtml = r.body
+                ? `<div style="font-size:12px;color:var(--text);margin-top:6px;padding:8px 10px;background:rgba(255,255,255,.6);border-radius:6px;border:1px solid rgba(16,185,129,.1);line-height:1.5;max-height:200px;overflow-y:auto">${r.body}</div>`
+                : '';
+            html += `<div style="margin-bottom:12px;padding:10px 14px;background:var(--green-light);border-radius:8px;border:1px solid rgba(16,185,129,.15)">
+                <div style="font-size:11px;color:var(--green);font-weight:600;margin-bottom:4px">
+                    From: ${esc(r.vendor_email || '')} (${esc(r.vendor_name || '')}) · ${fmtDateTime(r.received_at)}
+                </div>
+                ${r.subject ? `<div style="font-size:12px;font-weight:600;margin-bottom:4px">${esc(r.subject)}</div>` : ''}
+                ${parsedHtml}
+                ${emailBodyHtml}
+            </div>`;
+        }
+    }
+    document.getElementById('emailListTitle').textContent = `Replies Received (${allReplies.length})`;
+    document.getElementById('emailListContent').innerHTML = html;
+    document.getElementById('emailListModal').classList.add('open');
+}
 
 // ── Stock List Import ────────────────────────────────────────────────────
 function toggleStockImport() {
