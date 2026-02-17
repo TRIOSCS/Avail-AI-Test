@@ -44,11 +44,18 @@ class RfqVendorGroup(BaseModel):
     subject: str = ""
     body: str = ""
 
+    @field_validator("vendor_email")
+    @classmethod
+    def email_must_contain_at(cls, v: str) -> str:
+        if "@" not in v:
+            raise ValueError("Invalid email address")
+        return v
+
 
 class BatchRfqSend(BaseModel):
     """Batch RFQ send payload."""
 
-    groups: list[RfqVendorGroup] = Field(default_factory=list)
+    groups: list[RfqVendorGroup] = Field(default_factory=list, min_length=1)
 
 
 class RfqPrepareVendor(BaseModel):

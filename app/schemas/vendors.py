@@ -102,6 +102,8 @@ class VendorContactCreate(BaseModel):
         v = v.strip().lower()
         if not v:
             raise ValueError("Email is required")
+        if "@" not in v:
+            raise ValueError("Invalid email address")
         return v
 
 

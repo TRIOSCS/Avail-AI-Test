@@ -41,7 +41,7 @@ _CONNECTOR_SOURCE_MAP = {
 log = logging.getLogger(__name__)
 
 
-def normalize_mpn(mpn: str) -> str:
+def normalize_mpn_lower(mpn: str) -> str:
     if not mpn:
         return ""
     return mpn.strip().lower()
@@ -294,7 +294,7 @@ def _get_material_history(
         return []
 
     # Batch fetch all material cards for these PNs (1 query instead of N)
-    norm_pns = [normalize_mpn(pn) for pn in pns if normalize_mpn(pn)]
+    norm_pns = [normalize_mpn_lower(pn) for pn in pns if normalize_mpn_lower(pn)]
     if not norm_pns:
         return []
     cards = (
@@ -393,7 +393,7 @@ def _upsert_material_card(
     pn: str, sightings: list[Sighting], db: Session, now: datetime
 ):
     """Upsert material card. Raises on error — caller handles rollback."""
-    norm = normalize_mpn(pn)
+    norm = normalize_mpn_lower(pn)
     if not norm:
         return
     pn_sightings = [s for s in sightings if (s.mpn_matched or "").lower() == pn.lower()]

@@ -56,9 +56,20 @@ GRACE_DAYS = 7
 
 
 def compute_vendor_scorecard(
-    db: Session, vendor_card_id: int, window_days: int = VENDOR_WINDOW_DAYS
+    db: Session,
+    vendor_card_id: int,
+    window_days: int = VENDOR_WINDOW_DAYS,
+    *,
+    quoted_offer_ids: set[int] | None = None,
+    po_offer_ids: set[int] | None = None,
 ) -> dict:
-    """Compute all 6 metrics for a single vendor over the rolling window."""
+    """Compute all 6 metrics for a single vendor over the rolling window.
+
+    When called from compute_all_vendor_scorecards(), pre-loaded lookup sets
+    are passed in so we avoid re-querying all quotes/buy-plans per vendor.
+    When called individually (single vendor endpoint), the sets are loaded
+    on demand from the database.
+    """
     vc = db.get(VendorCard, vendor_card_id)
     if not vc:
         return {}
@@ -120,40 +131,50 @@ def compute_vendor_scorecard(
     total_offers = len(offers_in_window)
     offers_in_quotes = 0
     if total_offers > 0:
-        offer_id_set = {o.id for o in offers_in_window}
-        all_quotes = (
-            db.query(Quote)
-            .filter(
-                Quote.status.in_(["sent", "won", "lost"]),
+        # Build lookup on demand if not pre-loaded (single-vendor call)
+        if quoted_offer_ids is None:
+            quoted_offer_ids = set()
+            all_quotes = (
+                db.query(Quote)
+                .filter(
+                    Quote.status.in_(["sent", "won", "lost"]),
+                )
+                .all()
             )
-            .all()
-        )
-        for q in all_quotes:
-            for item in q.line_items or []:
-                oid = item.get("offer_id")
-                if oid in offer_id_set:
-                    offers_in_quotes += 1
-                    offer_id_set.discard(oid)
+            for q in all_quotes:
+                for item in q.line_items or []:
+                    oid = item.get("offer_id")
+                    if oid:
+                        quoted_offer_ids.add(oid)
+
+        for o in offers_in_window:
+            if o.id in quoted_offer_ids:
+                offers_in_quotes += 1
     quote_conversion = (offers_in_quotes / total_offers) if total_offers > 0 else None
 
     # ── 8. PO conversion rate ──
     # What % of this vendor's offers made it to PO confirmed/complete?
     offers_to_po = 0
     if total_offers > 0:
-        offer_id_set2 = {o.id for o in offers_in_window}
-        po_plans = (
-            db.query(BuyPlan)
-            .filter(
-                BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]),
+        # Build lookup on demand if not pre-loaded (single-vendor call)
+        if po_offer_ids is None:
+            po_offer_ids = set()
+            po_plans = (
+                db.query(BuyPlan)
+                .filter(
+                    BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]),
+                )
+                .all()
             )
-            .all()
-        )
-        for bp in po_plans:
-            for item in bp.line_items or []:
-                oid = item.get("offer_id")
-                if oid in offer_id_set2:
-                    offers_to_po += 1
-                    offer_id_set2.discard(oid)
+            for bp in po_plans:
+                for item in bp.line_items or []:
+                    oid = item.get("offer_id")
+                    if oid:
+                        po_offer_ids.add(oid)
+
+        for o in offers_in_window:
+            if o.id in po_offer_ids:
+                offers_to_po += 1
     po_conversion = (offers_to_po / total_offers) if total_offers > 0 else None
 
     # ── 5. Average buyer review rating ──
@@ -236,10 +257,44 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
     updated = 0
     skipped = 0
 
+    # ── Preload quote and buy-plan offer-id lookups ONCE ──
+    quoted_offer_ids: set[int] = set()
+    all_quotes = (
+        db.query(Quote)
+        .filter(Quote.status.in_(["sent", "won", "lost"]))
+        .all()
+    )
+    for q in all_quotes:
+        for item in q.line_items or []:
+            oid = item.get("offer_id")
+            if oid:
+                quoted_offer_ids.add(oid)
+
+    po_offer_ids: set[int] = set()
+    po_plans = (
+        db.query(BuyPlan)
+        .filter(BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]))
+        .all()
+    )
+    for bp in po_plans:
+        for item in bp.line_items or []:
+            oid = item.get("offer_id")
+            if oid:
+                po_offer_ids.add(oid)
+
     for vid in vendor_ids:
+        # Use a savepoint so a single vendor failure doesn't roll back
+        # previously computed scorecards in this transaction.
+        savepoint = db.begin_nested()
         try:
-            result = compute_vendor_scorecard(db, vid)
+            result = compute_vendor_scorecard(
+                db,
+                vid,
+                quoted_offer_ids=quoted_offer_ids,
+                po_offer_ids=po_offer_ids,
+            )
             if not result:
+                savepoint.rollback()
                 continue
 
             # Upsert snapshot
@@ -273,9 +328,11 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
             else:
                 skipped += 1
 
+            savepoint.commit()
+
         except Exception as e:
             log.error(f"Vendor scorecard error for {vid}: {e}")
-            db.rollback()
+            savepoint.rollback()
             continue
 
     db.commit()

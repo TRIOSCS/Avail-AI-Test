@@ -109,7 +109,7 @@ async def send_batch_rfq(
 
             # Try to get the sent message ID for reply matching
             try:
-                sent_msg = await _find_sent_message(gc, group["subject"])
+                sent_msg = await _find_sent_message(gc, tagged_subject)
                 if sent_msg:
                     contact.graph_message_id = sent_msg.get("id")
                     contact.graph_conversation_id = sent_msg.get("conversationId")

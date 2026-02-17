@@ -31,7 +31,10 @@ def test_create_requisition_defaults_name(client):
 def test_list_requisitions_empty(client):
     resp = client.get("/api/requisitions")
     assert resp.status_code == 200
-    assert isinstance(resp.json(), list)
+    data = resp.json()
+    assert "requisitions" in data
+    assert isinstance(data["requisitions"], list)
+    assert "total" in data
 
 
 def test_list_requisitions_after_create(client):
@@ -40,7 +43,7 @@ def test_list_requisitions_after_create(client):
     })
     resp = client.get("/api/requisitions")
     assert resp.status_code == 200
-    names = [r["name"] for r in resp.json()]
+    names = [r["name"] for r in resp.json()["requisitions"]]
     assert "REQ-LIST-001" in names
 
 
@@ -53,7 +56,7 @@ def test_list_requisitions_search_filter(client):
     })
     resp = client.get("/api/requisitions?q=ALPHA")
     assert resp.status_code == 200
-    names = [r["name"] for r in resp.json()]
+    names = [r["name"] for r in resp.json()["requisitions"]]
     assert "REQ-ALPHA" in names
 
 

@@ -45,7 +45,8 @@ def _exec(conn, stmt: str) -> None:
     try:
         conn.execute(sqltext(stmt))
         conn.commit()
-    except Exception:
+    except Exception as e:
+        log.warning(f"DDL statement failed (may be expected for IF NOT EXISTS): {e}")
         conn.rollback()
 
 

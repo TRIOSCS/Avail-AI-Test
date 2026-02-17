@@ -18,6 +18,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, relationship
 
+from .utils.encrypted_type import EncryptedText
+
 
 class Base(DeclarativeBase):
     pass
@@ -33,8 +35,8 @@ class User(Base):
     )  # buyer | sales | manager | admin | dev_assistant
     is_active = Column(Boolean, default=True)
     azure_id = Column(String(255), unique=True)
-    refresh_token = Column(Text)
-    access_token = Column(Text)
+    refresh_token = Column(EncryptedText)
+    access_token = Column(EncryptedText)
     token_expires_at = Column(DateTime)
     email_signature = Column(Text)
     last_email_scan = Column(DateTime)
@@ -194,13 +196,17 @@ class SiteContact(Base):
 
 class Requisition(Base):
     __tablename__ = "requisitions"
+    __table_args__ = (
+        Index("ix_requisitions_status", "status"),
+        Index("ix_requisitions_created_by", "created_by"),
+    )
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
     customer_name = Column(String(255))  # Legacy — kept for migration
-    customer_site_id = Column(Integer, ForeignKey("customer_sites.id"))
+    customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"))
     status = Column(String(50), default="active")
     cloned_from_id = Column(Integer, ForeignKey("requisitions.id"))
-    created_by = Column(Integer, ForeignKey("users.id"))
+    created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_searched_at = Column(DateTime)
     offers_viewed_at = Column(DateTime)
@@ -224,7 +230,7 @@ class Requisition(Base):
 class Requirement(Base):
     __tablename__ = "requirements"
     id = Column(Integer, primary_key=True)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id"), nullable=False)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
     primary_mpn = Column(String(255))
     oem_pn = Column(String(255))
     brand = Column(String(255))
@@ -254,14 +260,14 @@ class Requirement(Base):
 class Sighting(Base):
     __tablename__ = "sightings"
     id = Column(Integer, primary_key=True)
-    requirement_id = Column(Integer, ForeignKey("requirements.id"), nullable=False)
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
     vendor_name = Column(String(255), nullable=False)
     vendor_email = Column(String(255))
     vendor_phone = Column(String(100))
     mpn_matched = Column(String(255))
     manufacturer = Column(String(255))
     qty_available = Column(Integer)
-    unit_price = Column(Float)
+    unit_price = Column(Numeric(12, 4))
     currency = Column(String(10), default="USD")
     moq = Column(Integer)
     source_type = Column(String(50))
@@ -299,7 +305,7 @@ class Offer(Base):
     requisition_id = Column(
         Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
     )
-    requirement_id = Column(Integer, ForeignKey("requirements.id"))
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"))
 
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"))
     vendor_name = Column(String(255), nullable=False)
@@ -684,7 +690,7 @@ class StockListHash(Base):
 class Contact(Base):
     __tablename__ = "contacts"
     id = Column(Integer, primary_key=True)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id"), nullable=False)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     contact_type = Column(String(20), nullable=False)
     vendor_name = Column(String(255), nullable=False)
@@ -791,7 +797,7 @@ class VendorCard(Base):
     avg_response_hours = Column(Float)
     overall_win_rate = Column(Float)
     total_pos = Column(Integer, default=0)
-    total_revenue = Column(Float, default=0)
+    total_revenue = Column(Numeric(14, 2), default=0)
     last_activity_at = Column(DateTime)
 
     # AI-generated material intelligence

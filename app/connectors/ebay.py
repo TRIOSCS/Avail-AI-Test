@@ -4,6 +4,7 @@ import logging
 import base64
 import httpx
 from .sources import BaseConnector
+from ..utils import safe_int, safe_float
 
 log = logging.getLogger(__name__)
 
@@ -107,7 +108,7 @@ class EbayConnector(BaseConnector):
 
             title = item.get("title", "")
             price_info = item.get("price", {})
-            price = _safe_float(price_info.get("value"))
+            price = safe_float(price_info.get("value"))
             currency = price_info.get("currency", "USD")
 
             condition = item.get("condition", "")
@@ -121,7 +122,7 @@ class EbayConnector(BaseConnector):
                 for avail in item["estimatedAvailabilities"]:
                     est = avail.get("estimatedAvailableQuantity")
                     if est:
-                        qty = _safe_int(est)
+                        qty = safe_int(est)
                         break
 
             key = f"{seller_name}_{item_id}"
@@ -151,21 +152,3 @@ class EbayConnector(BaseConnector):
 
         log.info(f"eBay: {pn} -> {len(results)} results")
         return results
-
-
-def _safe_int(v):
-    if v is None:
-        return None
-    try:
-        return int(v)
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_float(v):
-    if v is None:
-        return None
-    try:
-        return float(v)
-    except (ValueError, TypeError):
-        return None

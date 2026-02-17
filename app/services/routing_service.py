@@ -23,6 +23,7 @@ Usage:
     expire_stale_offers(db)
 """
 
+import html
 import logging
 from datetime import datetime, timezone, timedelta
 
@@ -538,7 +539,9 @@ async def notify_routing_assignment(
         )
         return 0
 
-    # Get admin token for sending
+    # Get admin token for sending (with refresh if near expiry)
+    from app.scheduler import get_valid_token
+
     admin_user = (
         db.query(User)
         .filter(
@@ -546,11 +549,16 @@ async def notify_routing_assignment(
         )
         .first()
     )
-    if not admin_user or not admin_user.access_token:
+    if not admin_user:
         log.warning("No admin token available for routing notifications")
         return 0
 
-    client = GraphClient(admin_user.access_token)
+    token = await get_valid_token(admin_user, db)
+    if not token:
+        log.warning("Admin token refresh failed for routing notifications")
+        return 0
+
+    client = GraphClient(token)
 
     buyer_ids = [
         (assignment.buyer_1_id, assignment.buyer_1_score, 1),
@@ -583,11 +591,11 @@ async def notify_routing_assignment(
 <h2 style="color: #0078d4;">New Routing Assignment</h2>
 <p>You've been ranked <strong>#{rank}</strong> for this sourcing opportunity:</p>
 <table style="border-collapse: collapse; margin: 16px 0;">
-  <tr><td style="padding: 6px 16px 6px 0; font-weight: bold;">MPN:</td><td>{mpn}</td></tr>
-  <tr><td style="padding: 6px 16px 6px 0; font-weight: bold;">Brand:</td><td>{brand}</td></tr>
-  <tr><td style="padding: 6px 16px 6px 0; font-weight: bold;">Vendor:</td><td>{vendor_name}</td></tr>
+  <tr><td style="padding: 6px 16px 6px 0; font-weight: bold;">MPN:</td><td>{html.escape(str(mpn))}</td></tr>
+  <tr><td style="padding: 6px 16px 6px 0; font-weight: bold;">Brand:</td><td>{html.escape(str(brand))}</td></tr>
+  <tr><td style="padding: 6px 16px 6px 0; font-weight: bold;">Vendor:</td><td>{html.escape(str(vendor_name))}</td></tr>
   <tr><td style="padding: 6px 16px 6px 0; font-weight: bold;">Your Score:</td><td>{score:.1f} / 100</td></tr>
-  <tr><td style="padding: 6px 16px 6px 0; font-weight: bold;">Expires:</td><td>{expires_str}</td></tr>
+  <tr><td style="padding: 6px 16px 6px 0; font-weight: bold;">Expires:</td><td>{html.escape(str(expires_str))}</td></tr>
 </table>
 <p><strong>⏱ You have {hours} hours to claim this assignment</strong> by entering an offer.</p>
 <p style="margin-top: 8px; font-size: 13px; color: #666;">
@@ -598,7 +606,7 @@ async def notify_routing_assignment(
 
         try:
             await client.post_json(
-                "https://graph.microsoft.com/v1.0/me/sendMail",
+                "/me/sendMail",
                 {
                     "message": {
                         "subject": subject,

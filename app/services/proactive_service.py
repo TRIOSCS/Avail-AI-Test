@@ -8,6 +8,7 @@ Called by: scheduler.py (background scan), routers/proactive.py (endpoints)
 Depends on: models, config, utils/graph_client
 """
 
+import html
 import logging
 import secrets
 from datetime import datetime, timezone, timedelta
@@ -286,24 +287,24 @@ async def send_proactive_offer(
     rows_html = ""
     for item in line_items:
         rows_html += f"""<tr>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item["mpn"]}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("manufacturer", "")}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item["mpn"]))}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("manufacturer", "")))}</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right">{item["qty"]:,}</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right">${item["sell_price"]:.4f}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("condition", "")}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("lead_time", "")}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("condition", "")))}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("lead_time", "")))}</td>
         </tr>"""
 
     contact_names = ", ".join(c.full_name for c in contacts if c.full_name)
     greeting = (
-        f"Hi {contacts[0].full_name},"
+        f"Hi {html.escape(str(contacts[0].full_name))},"
         if len(contacts) == 1 and contacts[0].full_name
-        else f"Hi {contact_names},"
+        else f"Hi {html.escape(str(contact_names))},"
         if contact_names
         else "Hello,"
     )
 
-    notes_html = f'<p style="margin-top:12px">{notes}</p>' if notes else ""
+    notes_html = f'<p style="margin-top:12px">{html.escape(str(notes))}</p>' if notes else ""
     salesperson_name = user.name or user.email.split("@")[0]
 
     html_body = f"""
@@ -323,7 +324,7 @@ async def send_proactive_offer(
         </table>
         {notes_html}
         <p>Please reply to this email if you'd like to place an order or need more details on any of these items.</p>
-        <p>Best regards,<br>{salesperson_name}<br>Trio Supply Chain Solutions</p>
+        <p>Best regards,<br>{html.escape(str(salesperson_name))}<br>Trio Supply Chain Solutions</p>
     </div>
     """
 

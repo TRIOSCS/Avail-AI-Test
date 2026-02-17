@@ -5,6 +5,7 @@ import asyncio
 import httpx
 from abc import ABC, abstractmethod
 from urllib.parse import quote_plus
+from ..utils import safe_int, safe_float
 
 log = logging.getLogger(__name__)
 
@@ -289,9 +290,9 @@ class BrokerBinConnector(BaseConnector):
             if not results:
                 log.info(f"BrokerBin fields for {part_number}: {list(item.keys())}")
 
-            qty = _safe_int(item.get("qty"))
-            price = _safe_float(item.get("price"))
-            age = _safe_int(item.get("age_in_days"))
+            qty = safe_int(item.get("qty"))
+            price = safe_float(item.get("price"))
+            age = safe_int(item.get("age_in_days"))
 
             # Confidence: higher for fresh listings with qty and price
             conf = 3
@@ -329,21 +330,3 @@ class BrokerBinConnector(BaseConnector):
         total = (body.get("meta") or {}).get("total", len(results))
         log.info(f"BrokerBin: {part_number} -> {len(results)} results (total: {total})")
         return results
-
-
-def _safe_int(v):
-    if v is None:
-        return None
-    try:
-        return int(v)
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_float(v):
-    if v is None:
-        return None
-    try:
-        return float(v)
-    except (ValueError, TypeError):
-        return None

@@ -15,6 +15,7 @@ Usage:
     check_and_claim_open_account(company_id, user_id, db)
 """
 
+import html
 import logging
 from datetime import datetime, timezone, timedelta
 
@@ -122,13 +123,19 @@ def check_and_claim_open_account(company_id: int, user_id: int, db: Session) -> 
     if not company:
         return False
 
-    # Only claim if unowned
-    if company.account_owner_id is not None:
-        return False
-
     # Check the user's role — only sales can own accounts
     user = db.get(User, user_id)
     if not user or user.role != "sales":
+        return False
+
+    # Lock the row to prevent concurrent claims
+    company = (
+        db.query(Company)
+        .filter(Company.id == company_id, Company.account_owner_id.is_(None))
+        .with_for_update()
+        .first()
+    )
+    if not company:
         return False
 
     company.account_owner_id = user_id
@@ -417,7 +424,7 @@ async def _send_warning_alert(
         html_body = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px;">
             <h2 style="color: #d97706;">⚠️ Account Ownership Warning</h2>
-            <p>No activity has been logged on <strong>{company.name}</strong> in <strong>{days_inactive} days</strong>.</p>
+            <p>No activity has been logged on <strong>{html.escape(str(company.name))}</strong> in <strong>{days_inactive} days</strong>.</p>
             <p>You'll lose ownership in <strong>{days_remaining} day{"s" if days_remaining != 1 else ""}</strong> unless you make contact.</p>
             <p style="margin-top: 20px;">
                 <a href="{settings.app_url}/companies/{company.id}" 
@@ -474,7 +481,7 @@ async def send_manager_digest_email(db: Session):
         for acct in digest["at_risk_accounts"]:
             color = "#dc2626" if acct["days_remaining"] <= 2 else "#d97706"
             lines.append(
-                f"<tr><td>{acct['company_name']}</td><td>{acct['owner_name'] or 'N/A'}</td>"
+                f"<tr><td>{html.escape(str(acct['company_name']))}</td><td>{html.escape(str(acct['owner_name'] or 'N/A'))}</td>"
                 f"<td>{acct['days_inactive']}</td>"
                 f"<td style='color: {color}; font-weight: bold;'>{acct['days_remaining']}</td></tr>"
             )
@@ -486,7 +493,7 @@ async def send_manager_digest_email(db: Session):
         )
         for acct in digest["recently_cleared"]:
             lines.append(
-                f"<p>• {acct['company_name']} — cleared {acct['cleared_at']}</p>"
+                f"<p>• {html.escape(str(acct['company_name']))} — cleared {html.escape(str(acct['cleared_at']))}</p>"
             )
 
     if digest["team_activity"]:
@@ -499,7 +506,7 @@ async def send_manager_digest_email(db: Session):
             digest["team_activity"], key=lambda x: x["activity_count"], reverse=True
         ):
             lines.append(
-                f"<tr><td>{ta['user_name']}</td><td>{ta['activity_count']}</td></tr>"
+                f"<tr><td>{html.escape(str(ta['user_name']))}</td><td>{ta['activity_count']}</td></tr>"
             )
         lines.append("</table>")
 

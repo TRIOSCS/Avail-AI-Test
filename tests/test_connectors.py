@@ -112,24 +112,24 @@ class TestDigiKeyConnector:
 
 class TestDigiKeySafeHelpers:
     def test_safe_int_valid(self):
-        from app.connectors.digikey import _safe_int
-        assert _safe_int(42) == 42
-        assert _safe_int("100") == 100
+        from app.utils import safe_int
+        assert safe_int(42) == 42
+        assert safe_int("100") == 100
 
     def test_safe_int_invalid(self):
-        from app.connectors.digikey import _safe_int
-        assert _safe_int(None) is None
-        assert _safe_int("abc") is None
+        from app.utils import safe_int
+        assert safe_int(None) is None
+        assert safe_int("abc") is None
 
     def test_safe_float_valid(self):
-        from app.connectors.digikey import _safe_float
-        assert _safe_float(1.25) == 1.25
-        assert _safe_float("3.14") == 3.14
+        from app.utils import safe_float
+        assert safe_float(1.25) == 1.25
+        assert safe_float("3.14") == 3.14
 
     def test_safe_float_invalid(self):
-        from app.connectors.digikey import _safe_float
-        assert _safe_float(None) is None
-        assert _safe_float("N/A") is None
+        from app.utils import safe_float
+        assert safe_float(None) is None
+        assert safe_float("N/A") is None
 
 
 # ── eBay ────────────────────────────────────────────────────────────

@@ -32,19 +32,19 @@ NOW = datetime(2026, 2, 15, 12, 0, 0, tzinfo=timezone.utc)
 
 
 class TestColdStart:
-    def test_zero_outreach_returns_none(self):
+    def test_zero_outreach_returns_cold_start(self):
         result = compute_engagement_score(0, 0, 0, None, None, now=NOW)
-        assert result["engagement_score"] is None
+        assert result["engagement_score"] == 50  # COLD_START_SCORE
         assert result["ghost_rate"] == 0
 
     def test_one_outreach_below_threshold(self):
         result = compute_engagement_score(1, 0, 0, None, None, now=NOW)
-        assert result["engagement_score"] is None
+        assert result["engagement_score"] == 50  # COLD_START_SCORE
         assert result["ghost_rate"] == 1.0  # 1 outreach, 0 responses
 
     def test_one_outreach_with_response(self):
         result = compute_engagement_score(1, 1, 0, None, None, now=NOW)
-        assert result["engagement_score"] is None  # still below MIN_OUTREACH
+        assert result["engagement_score"] == 50  # still below MIN_OUTREACH
 
     def test_exactly_min_outreach(self):
         result = compute_engagement_score(2, 1, 0, 2.0, NOW - timedelta(days=1), now=NOW)

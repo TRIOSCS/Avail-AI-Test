@@ -3,6 +3,7 @@
 import logging
 import httpx
 from .sources import BaseConnector
+from ..utils import safe_int, safe_float
 
 log = logging.getLogger(__name__)
 
@@ -73,7 +74,7 @@ class MouserConnector(BaseConnector):
                 best = min(price_breaks, key=lambda p: p.get("Quantity", 999999))
                 price_str = best.get("Price", "")
                 if price_str:
-                    price = _safe_float(price_str.replace("$", "").replace(",", ""))
+                    price = safe_float(price_str.replace("$", "").replace(",", ""))
 
             results.append(
                 {
@@ -95,12 +96,3 @@ class MouserConnector(BaseConnector):
 
         log.info(f"Mouser: {pn} -> {len(results)} results")
         return results
-
-
-def _safe_float(v):
-    if v is None:
-        return None
-    try:
-        return float(v)
-    except (ValueError, TypeError):
-        return None

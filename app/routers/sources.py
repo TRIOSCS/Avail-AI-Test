@@ -20,12 +20,11 @@ import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import require_fresh_token, require_user
+from ..dependencies import require_admin, require_fresh_token, require_user
 from ..schemas.sources import MiningOptions, SourceStatusToggle
 from ..models import (
     ApiSource,
@@ -288,10 +287,10 @@ async def test_api_source(
 async def toggle_api_source(
     source_id: int,
     payload: SourceStatusToggle,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Enable or disable a source."""
+    """Enable or disable a source (admin only)."""
     src = db.get(ApiSource, source_id)
     if not src:
         raise HTTPException(404)
@@ -397,7 +396,7 @@ async def email_mining_scan_outbound(
 ):
     """Scan Sent Items for AVAIL RFQ emails, update VendorCard outreach metrics."""
     if not user.m365_connected or not user.access_token:
-        return JSONResponse(status_code=400, content={"error": "M365 not connected"})
+        raise HTTPException(400, "M365 not connected")
 
     from ..connectors.email_mining import EmailMiner
     from ..scheduler import get_valid_token
@@ -472,7 +471,7 @@ async def vendor_engagement_detail(
 
     card = db.query(VendorCard).filter_by(id=vendor_id).first()
     if not card:
-        return JSONResponse(status_code=404, content={"error": "Vendor not found"})
+        raise HTTPException(404, "Vendor not found")
 
     result = compute_engagement_score(
         total_outreach=card.total_outreach or 0,
@@ -518,17 +517,14 @@ async def parse_response_attachments(
     """Download and parse attachments from a vendor response email.
     Creates Sightings for matched MPNs via AI-powered column mapping."""
     if not user.m365_connected or not user.access_token:
-        return JSONResponse(status_code=400, content={"error": "M365 not connected"})
+        raise HTTPException(400, "M365 not connected")
 
     vr = db.query(VendorResponse).filter_by(id=response_id).first()
     if not vr:
-        return JSONResponse(status_code=404, content={"error": "Response not found"})
+        raise HTTPException(404, "Response not found")
 
     if not vr.message_id:
-        return JSONResponse(
-            status_code=400,
-            content={"error": "No message ID — cannot fetch attachments"},
-        )
+        raise HTTPException(400, "No message ID — cannot fetch attachments")
 
     from ..utils.graph_client import GraphClient
     from ..scheduler import get_valid_token
@@ -539,9 +535,7 @@ async def parse_response_attachments(
     try:
         att_data = await gc.get_json(f"/me/messages/{vr.message_id}/attachments")
     except Exception as e:
-        return JSONResponse(
-            status_code=502, content={"error": f"Graph API error: {str(e)[:200]}"}
-        )
+        raise HTTPException(502, f"Graph API error: {str(e)[:200]}")
 
     attachments = att_data.get("value", []) if att_data else []
     parseable_exts = {".xlsx", ".xls", ".csv", ".tsv"}
@@ -593,9 +587,7 @@ async def parse_response_attachments(
         db.commit()
     except Exception as e:
         db.rollback()
-        return JSONResponse(
-            status_code=500, content={"error": f"Save failed: {str(e)[:200]}"}
-        )
+        raise HTTPException(500, f"Save failed: {str(e)[:200]}")
 
     return {
         "attachments_found": len(attachments),

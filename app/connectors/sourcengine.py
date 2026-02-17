@@ -3,6 +3,7 @@
 import logging
 import httpx
 from .sources import BaseConnector
+from ..utils import safe_int, safe_float
 
 log = logging.getLogger(__name__)
 
@@ -83,35 +84,17 @@ class SourcengineConnector(BaseConnector):
                     "vendor_name": sup_name,
                     "manufacturer": mfr,
                     "mpn_matched": mpn,
-                    "qty_available": _safe_int(qty),
-                    "unit_price": _safe_float(price),
+                    "qty_available": safe_int(qty),
+                    "unit_price": safe_float(price),
                     "currency": currency,
                     "source_type": "sourcengine",
                     "is_authorized": offer.get("authorized", False),
                     "confidence": 4 if qty else 3,
                     "click_url": url,
                     "vendor_sku": sku,
-                    "moq": _safe_int(moq),
+                    "moq": safe_int(moq),
                 }
             )
 
         log.info(f"Sourcengine: {pn} -> {len(results)} results")
         return results
-
-
-def _safe_int(v):
-    if v is None:
-        return None
-    try:
-        return int(v)
-    except (ValueError, TypeError):
-        return None
-
-
-def _safe_float(v):
-    if v is None:
-        return None
-    try:
-        return float(v)
-    except (ValueError, TypeError):
-        return None

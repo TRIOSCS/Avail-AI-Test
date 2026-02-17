@@ -16,7 +16,7 @@ Depends on: models, search_service, file_utils, scoring, vendor_utils
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
 
 from ..schemas.requisitions import (
     RequisitionCreate,
@@ -55,6 +55,8 @@ router = APIRouter(tags=["requisitions"])
 async def list_requisitions(
     q: str = "",
     status: str = "",
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -150,7 +152,8 @@ async def list_requisitions(
     else:
         query = query.filter(Requisition.status.notin_(["archived", "won", "lost"]))
 
-    rows = query.order_by(Requisition.created_at.desc()).limit(500).all()
+    total = query.count()
+    rows = query.order_by(Requisition.created_at.desc()).offset(offset).limit(limit).all()
     # Pre-load creator names for buyers (they see all reqs)
     creator_names = {}
     if user.role == "buyer":
@@ -162,35 +165,40 @@ async def list_requisitions(
                 .all()
             )
             creator_names = {u.id: u.name or u.email.split("@")[0] for u in creators}
-    return [
-        {
-            "id": r.id,
-            "name": r.name,
-            "status": r.status,
-            "customer_site_id": r.customer_site_id,
-            "customer_display": (
-                f"{r.customer_site.company.name} — {r.customer_site.site_name}"
-                if r.customer_site and r.customer_site.company
-                else r.customer_name or ""
-            ),
-            "requirement_count": req_cnt,
-            "contact_count": con_cnt,
-            "reply_count": reply_cnt or 0,
-            "latest_reply_at": latest_reply.isoformat() if latest_reply else None,
-            "has_new_offers": bool(has_new),
-            "latest_offer_at": latest_offer.isoformat() if latest_offer else None,
-            "created_by_name": creator_names.get(r.created_by, "")
-            if user.role == "buyer"
-            else None,
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "last_searched_at": r.last_searched_at.isoformat()
-            if r.last_searched_at
-            else None,
-            "sourced_count": sourced_cnt or 0,
-            "cloned_from_id": r.cloned_from_id,
-        }
-        for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt in rows
-    ]
+    return {
+        "requisitions": [
+            {
+                "id": r.id,
+                "name": r.name,
+                "status": r.status,
+                "customer_site_id": r.customer_site_id,
+                "customer_display": (
+                    f"{r.customer_site.company.name} — {r.customer_site.site_name}"
+                    if r.customer_site and r.customer_site.company
+                    else r.customer_name or ""
+                ),
+                "requirement_count": req_cnt,
+                "contact_count": con_cnt,
+                "reply_count": reply_cnt or 0,
+                "latest_reply_at": latest_reply.isoformat() if latest_reply else None,
+                "has_new_offers": bool(has_new),
+                "latest_offer_at": latest_offer.isoformat() if latest_offer else None,
+                "created_by_name": creator_names.get(r.created_by, "")
+                if user.role == "buyer"
+                else None,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "last_searched_at": r.last_searched_at.isoformat()
+                if r.last_searched_at
+                else None,
+                "sourced_count": sourced_cnt or 0,
+                "cloned_from_id": r.cloned_from_id,
+            }
+            for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt in rows
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 @router.post("/api/requisitions", response_model=RequisitionOut)
@@ -467,6 +475,10 @@ async def search_one(
     r = db.get(Requirement, item_id)
     if not r:
         raise HTTPException(404)
+    # Verify the user has access to the parent requisition
+    req = get_req_for_user(db, user, r.requisition_id)
+    if not req:
+        raise HTTPException(403, "Access denied")
     sightings = await search_requirement(r, db)
     # Wrap in same structure as search_all so enrichment works
     results = {

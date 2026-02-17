@@ -11,6 +11,7 @@ Called by: routers/crm.py (buy plan endpoints)
 Depends on: utils/graph_client, models, config
 """
 
+import html
 import logging
 
 import httpx
@@ -72,24 +73,24 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
         cost = plan_qty * (item.get("cost_price") or 0)
         total_cost += cost
         rows += f"""<tr>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("mpn", "")}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("vendor_name", "")}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("mpn", "")))}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("vendor_name", "")))}</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb">{plan_qty:,}</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb">${item.get("cost_price", 0):.4f}</td>
             <td style="padding:6px 10px;border:1px solid #e5e7eb">${cost:,.2f}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("lead_time", "")}</td>
+            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("lead_time", "")))}</td>
         </tr>"""
 
     sp_notes_html = ""
     if plan.salesperson_notes:
-        sp_notes_html = f'<p style="background:#f0f9ff;padding:10px;border-left:3px solid #2563eb;margin:12px 0"><strong>Salesperson Notes:</strong> {plan.salesperson_notes}</p>'
+        sp_notes_html = f'<p style="background:#f0f9ff;padding:10px;border-left:3px solid #2563eb;margin:12px 0"><strong>Salesperson Notes:</strong> {html.escape(str(plan.salesperson_notes))}</p>'
 
     html_body = f"""
     <div style="font-family:Arial,sans-serif;max-width:700px">
         <h2 style="color:#2563eb">Buy Plan Approval Required</h2>
-        <p><strong>{submitter_name}</strong> has submitted a buy plan for approval.</p>
-        <p>Customer: <strong>{customer_name}</strong></p>
-        <p>Requisition: <strong>#{plan.requisition_id}</strong> | Quote: <strong>{quote_number}</strong></p>
+        <p><strong>{html.escape(str(submitter_name))}</strong> has submitted a buy plan for approval.</p>
+        <p>Customer: <strong>{html.escape(str(customer_name))}</strong></p>
+        <p>Requisition: <strong>#{plan.requisition_id}</strong> | Quote: <strong>{html.escape(str(quote_number))}</strong></p>
         {sp_notes_html}
         <table style="border-collapse:collapse;width:100%;margin:16px 0">
             <thead><tr style="background:#f3f4f6">
@@ -169,7 +170,7 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
     )
     for admin in admin_users:
         await _send_teams_dm(
-            admin, f"Buy Plan #{plan.id} needs your approval — ${total_cost:,.2f}"
+            admin, f"Buy Plan #{plan.id} needs your approval — ${total_cost:,.2f}", db
         )
 
 
@@ -220,27 +221,27 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
         for item in buyer_items:
             plan_qty = item.get("plan_qty") or item.get("qty") or 0
             rows += f"""<tr>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("mpn", "")}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("vendor_name", "")}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("mpn", "")))}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("vendor_name", "")))}</td>
                 <td style="padding:6px 10px;border:1px solid #e5e7eb">{plan_qty:,}</td>
                 <td style="padding:6px 10px;border:1px solid #e5e7eb">${item.get("cost_price", 0):.4f}</td>
-                <td style="padding:6px 10px;border:1px solid #e5e7eb">{item.get("lead_time", "")}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("lead_time", "")))}</td>
             </tr>"""
 
         notes_html = ""
         if plan.salesperson_notes:
-            notes_html += f'<p style="background:#f0f9ff;padding:10px;border-left:3px solid #2563eb;margin:8px 0"><strong>Salesperson Notes:</strong> {plan.salesperson_notes}</p>'
+            notes_html += f'<p style="background:#f0f9ff;padding:10px;border-left:3px solid #2563eb;margin:8px 0"><strong>Salesperson Notes:</strong> {html.escape(str(plan.salesperson_notes))}</p>'
         if plan.manager_notes:
-            notes_html += f'<p style="background:#f0fdf4;padding:10px;border-left:3px solid #16a34a;margin:8px 0"><strong>Manager Notes:</strong> {plan.manager_notes}</p>'
+            notes_html += f'<p style="background:#f0fdf4;padding:10px;border-left:3px solid #16a34a;margin:8px 0"><strong>Manager Notes:</strong> {html.escape(str(plan.manager_notes))}</p>'
 
         html_body = f"""
         <div style="font-family:Arial,sans-serif;max-width:700px">
             <h2 style="color:#16a34a">Buy Plan Approved — PO Required</h2>
-            <p>Approved by <strong>{approver_name}</strong>. Please create POs in Acctivate and enter the PO numbers in AVAIL.</p>
+            <p>Approved by <strong>{html.escape(str(approver_name))}</strong>. Please create POs in Acctivate and enter the PO numbers in AVAIL.</p>
             <div style="background:#f3f4f6;padding:12px;border-radius:6px;margin:12px 0">
-                <p style="margin:0"><strong>Customer:</strong> {customer_name}</p>
-                <p style="margin:4px 0 0"><strong>Acctivate SO#:</strong> {so_number}</p>
-                <p style="margin:4px 0 0"><strong>Quote:</strong> {quote_number}</p>
+                <p style="margin:0"><strong>Customer:</strong> {html.escape(str(customer_name))}</p>
+                <p style="margin:4px 0 0"><strong>Acctivate SO#:</strong> {html.escape(str(so_number))}</p>
+                <p style="margin:4px 0 0"><strong>Quote:</strong> {html.escape(str(quote_number))}</p>
             </div>
             {notes_html}
             <table style="border-collapse:collapse;width:100%;margin:16px 0">
@@ -299,6 +300,7 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
             buyer,
             f"Buy Plan #{plan.id} has been approved. "
             f"Please create POs for {len(buyer_items)} item(s) in Acctivate.",
+            db,
         )
 
     db.commit()
@@ -325,8 +327,8 @@ async def notify_buyplan_rejected(plan: BuyPlan, db: Session):
     html_body = f"""
     <div style="font-family:Arial,sans-serif;max-width:600px">
         <h2 style="color:#dc2626">Buy Plan Rejected</h2>
-        <p>Your buy plan for requisition <strong>#{plan.requisition_id}</strong> was rejected by <strong>{rejector_name}</strong>.</p>
-        {f"<p><strong>Reason:</strong> {plan.rejection_reason}</p>" if plan.rejection_reason else ""}
+        <p>Your buy plan for requisition <strong>#{plan.requisition_id}</strong> was rejected by <strong>{html.escape(str(rejector_name))}</strong>.</p>
+        {f"<p><strong>Reason:</strong> {html.escape(str(plan.rejection_reason))}</p>" if plan.rejection_reason else ""}
         <p style="margin-top:20px">
             <a href="{settings.app_url}/#buyplan/{plan.id}"
                style="background:#2563eb;color:white;padding:10px 24px;text-decoration:none;border-radius:5px">
@@ -371,6 +373,7 @@ async def notify_buyplan_rejected(plan: BuyPlan, db: Session):
     await _send_teams_dm(
         submitter,
         f"Buy Plan #{plan.id} was rejected: {plan.rejection_reason or 'no reason given'}",
+        db,
     )
 
 
@@ -386,8 +389,8 @@ async def notify_buyplan_completed(plan: BuyPlan, db: Session, completer_name: s
     <div style="font-family:Arial,sans-serif;max-width:600px">
         <h2 style="color:#16a34a">Buy Plan Complete</h2>
         <p>Your buy plan for requisition <strong>#{plan.requisition_id}</strong>
-           has been marked complete by <strong>{completer_name}</strong>.</p>
-        <p>Sales Order: <strong>{plan.sales_order_number or 'N/A'}</strong></p>
+           has been marked complete by <strong>{html.escape(str(completer_name))}</strong>.</p>
+        <p>Sales Order: <strong>{html.escape(str(plan.sales_order_number or 'N/A'))}</strong></p>
         <p style="margin-top:20px">
             <a href="{settings.app_url}/#buyplan/{plan.id}"
                style="background:#16a34a;color:white;padding:10px 24px;text-decoration:none;border-radius:5px">
@@ -504,15 +507,24 @@ async def _post_teams_channel(message: str):
         log.error(f"Teams channel post failed: {e}")
 
 
-async def _send_teams_dm(user: User, message: str):
+async def _send_teams_dm(user: User, message: str, db: Session = None):
     """Send a direct Teams message to a user via Graph API."""
-    if not user.access_token:
+    if not user.access_token and not db:
         log.debug(f"No token for {user.email}, skipping Teams DM")
         return
     try:
         from ..utils.graph_client import GraphClient
 
-        gc = GraphClient(user.access_token)
+        if db:
+            from ..scheduler import get_valid_token
+
+            token = await get_valid_token(user, db)
+        else:
+            token = user.access_token
+        if not token:
+            log.debug(f"No valid token for {user.email}, skipping Teams DM")
+            return
+        gc = GraphClient(token)
         # Create or get 1:1 chat with the user (self-chat acts as notification)
         chat = await gc.post_json(
             "/chats",

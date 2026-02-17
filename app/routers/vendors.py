@@ -23,7 +23,7 @@ import re
 import socket
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func as sqlfunc, text as sqltext
 from sqlalchemy.exc import IntegrityError
 
@@ -41,7 +41,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import require_user, require_buyer
+from ..dependencies import require_admin, require_user, require_buyer
 from ..models import (
     User,
     VendorCard,
@@ -57,7 +57,7 @@ from ..models import (
     Company,
 )
 from ..vendor_utils import normalize_vendor_name
-from ..search_service import normalize_mpn
+from ..search_service import normalize_mpn_lower as normalize_mpn
 
 log = logging.getLogger(__name__)
 
@@ -240,11 +240,13 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
 
 @router.get("/api/vendors")
 async def list_vendors(
-    request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
+    q: str = Query("", description="Vendor name search filter"),
+    limit: int = Query(200, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
 ):
-    q = request.query_params.get("q", "").strip().lower()
-    limit = min(int(request.query_params.get("limit", "200")), 1000)
-    offset = max(int(request.query_params.get("offset", "0")), 0)
+    q = q.strip().lower()
     query = db.query(VendorCard).order_by(VendorCard.display_name)
     if q:
         safe_q = q.replace("%", r"\%").replace("_", r"\_")
@@ -380,7 +382,7 @@ async def toggle_blacklist(
 
 @router.delete("/api/vendors/{card_id}")
 async def delete_vendor(
-    card_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+    card_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)
 ):
     card = db.get(VendorCard, card_id)
     if not card:
@@ -1254,7 +1256,7 @@ async def update_material(
 
 @router.delete("/api/materials/{card_id}")
 async def delete_material(
-    card_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+    card_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)
 ):
     card = db.get(MaterialCard, card_id)
     if not card:
@@ -1522,7 +1524,9 @@ async def get_vendor_confirmed_offers(
 @router.get("/api/vendors/{card_id}/parts-summary")
 async def get_vendor_parts_summary(
     card_id: int,
-    request: Request,
+    q: str = Query("", description="MPN search filter"),
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1532,15 +1536,15 @@ async def get_vendor_parts_summary(
         raise HTTPException(404, "Vendor not found")
 
     norm = card.normalized_name
-    q = request.query_params.get("q", "").strip().lower()
-    limit = min(int(request.query_params.get("limit", "100")), 500)
-    offset = max(int(request.query_params.get("offset", "0")), 0)
+    q = q.strip().lower()
 
     # Combine sightings and material_vendor_history into a unified parts summary
-    q_filter = ""
+    params: dict = {"norm": norm, "off": offset, "lim": limit}
+    mpn_filter = ""
     if q:
-        safe_q = q.replace("'", "''").replace("%", r"\%").replace("_", r"\_")
-        q_filter = f"AND LOWER(mpn) LIKE '%{safe_q}%'"
+        mpn_filter = "AND LOWER(mpn) LIKE :mpn_pattern ESCAPE '\\'"
+        safe_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        params["mpn_pattern"] = f"%{safe_q}%"
 
     rows = db.execute(
         sqltext(f"""
@@ -1571,14 +1575,17 @@ async def get_vendor_parts_summary(
             JOIN material_cards mc ON mc.id = mvh.material_card_id
             WHERE mvh.vendor_name = :norm
         ) combined
-        WHERE mpn != '' {q_filter}
+        WHERE mpn != '' {mpn_filter}
         ORDER BY last_seen DESC NULLS LAST
         OFFSET :off LIMIT :lim
     """),
-        {"norm": norm, "off": offset, "lim": limit},
+        params,
     ).fetchall()
 
     # Get total count
+    count_params: dict = {"norm": norm}
+    if q:
+        count_params["mpn_pattern"] = params["mpn_pattern"]
     total = (
         db.execute(
             sqltext(f"""
@@ -1590,9 +1597,9 @@ async def get_vendor_parts_summary(
             JOIN material_cards mc ON mc.id = mvh.material_card_id
             WHERE mvh.vendor_name = :norm
         ) all_mpns
-        WHERE mpn != '' {q_filter}
+        WHERE mpn != '' {mpn_filter}
     """),
-            {"norm": norm},
+            count_params,
         ).scalar()
         or 0
     )

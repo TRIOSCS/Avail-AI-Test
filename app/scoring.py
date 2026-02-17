@@ -1,7 +1,7 @@
 """Scoring engine — ranks vendor sightings by weighted factors.
 
 Phase 1 scores based on available data:
-  Recency(30) + Quantity(20) + Source(20) + Completeness(10) + Authorized(10) + Price(10)
+  Recency(30) + Quantity(20) + Source credibility(20) + Completeness(10) + Vendor reliability(10) + Price(10)
 """
 
 import math
@@ -10,6 +10,11 @@ from datetime import datetime, timezone
 SOURCE_SCORES = {
     "nexar": 85,
     "octopart": 85,
+    "digikey": 90,
+    "mouser": 90,
+    "ebay": 60,
+    "oemsecrets": 80,
+    "sourcengine": 80,
     "brokerbin": 75,
     "upload": 70,
     "email": 95,
@@ -69,9 +74,9 @@ def score_sighting(sighting, target_qty: int, weights: dict) -> float:
     total = (
         scores["recency"] * weights.get("recency", 30) / 100
         + scores["quantity"] * weights.get("quantity", 20) / 100
-        + scores["source_credibility"] * weights.get("source_credibility", 10) / 100
+        + scores["source_credibility"] * weights.get("source_credibility", 20) / 100
         + scores["data_completeness"] * weights.get("data_completeness", 10) / 100
-        + scores["vendor_reliability"] * weights.get("vendor_reliability", 20) / 100
+        + scores["vendor_reliability"] * weights.get("vendor_reliability", 10) / 100
         + scores["price"] * weights.get("price", 10) / 100
     )
 

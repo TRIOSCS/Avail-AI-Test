@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import is_admin as _is_admin, require_buyer, require_user
+from ..dependencies import is_admin as _is_admin, require_admin, require_buyer, require_user
 from ..models import (
     BuyPlan,
     Company,
@@ -846,7 +846,7 @@ async def list_users_simple(
 @router.post("/api/customers/import")
 async def import_customers(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     data = await request.json()
@@ -1095,7 +1095,7 @@ async def create_offer(
 async def update_offer(
     offer_id: int,
     payload: OfferUpdate,
-    user: User = Depends(require_user),
+    user: User = Depends(require_buyer),
     db: Session = Depends(get_db),
 ):
     offer = db.get(Offer, offer_id)
@@ -1109,7 +1109,7 @@ async def update_offer(
 
 @router.delete("/api/offers/{offer_id}")
 async def delete_offer(
-    offer_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+    offer_id: int, user: User = Depends(require_buyer), db: Session = Depends(get_db)
 ):
     offer = db.get(Offer, offer_id)
     if not offer:

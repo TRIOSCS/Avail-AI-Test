@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 # ── Companies ────────────────────────────────────────────────────────
@@ -174,8 +174,8 @@ class OfferCreate(BaseModel):
     vendor_name: str
     requirement_id: int | None = None
     manufacturer: str | None = None
-    qty_available: int | None = None
-    unit_price: float | None = None
+    qty_available: int | None = Field(default=None, ge=0)
+    unit_price: float | None = Field(default=None, ge=0)
     lead_time: str | None = None
     date_code: str | None = None
     condition: str = "New"
@@ -224,13 +224,23 @@ class OfferOut(BaseModel):
 # ── Quotes ───────────────────────────────────────────────────────────
 
 
+class QuoteLineItem(BaseModel):
+    offer_id: int | None = None
+    mpn: str = ""
+    vendor_name: str = ""
+    qty: int = 0
+    unit_cost: float = 0
+    unit_sell: float = 0
+    margin: float = 0
+
+
 class QuoteCreate(BaseModel):
     offer_ids: list[int] = []
-    line_items: list[dict] = []
+    line_items: list[QuoteLineItem] = []
 
 
 class QuoteUpdate(BaseModel):
-    line_items: list[dict] | None = None
+    line_items: list[QuoteLineItem] | None = None
     payment_terms: str | None = None
     shipping_terms: str | None = None
     notes: str | None = None

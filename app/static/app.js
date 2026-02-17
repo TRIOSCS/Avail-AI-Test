@@ -484,7 +484,8 @@ let _reqStatusFilter = 'draft';
 async function loadRequisitions(query = '') {
     try {
         const url = query ? `/api/requisitions?q=${encodeURIComponent(query)}` : '/api/requisitions';
-        _reqListData = await apiFetch(url);
+        const resp = await apiFetch(url);
+        _reqListData = resp.requisitions || resp;
         _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
         renderReqList();
     } catch (e) { console.error('loadRequisitions:', e); }
@@ -569,7 +570,8 @@ function setReqStatusFilter(status, btn) {
     btn.classList.add('on');
     if (status === 'archive') {
         apiFetch('/api/requisitions?status=archive')
-            .then(data => {
+            .then(resp => {
+                const data = resp.requisitions || resp;
                 _reqListData = data;
                 data.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
                 renderReqList();
@@ -622,7 +624,8 @@ async function toggleArchive(id) {
     try {
         await apiFetch(`/api/requisitions/${id}/archive`, { method: 'PUT' });
         if (_reqStatusFilter === 'archive') {
-            const data = await apiFetch('/api/requisitions?status=archive');
+            const resp = await apiFetch('/api/requisitions?status=archive');
+            const data = resp.requisitions || resp;
             _reqListData = data;
             data.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
             renderReqList();
