@@ -262,7 +262,6 @@ async def handle_notification(payload: dict, db: Session):
 
         # Determine direction: sent by user or received
         from_addr = _extract_email(msg.get("from"))
-        [_extract_email(r) for r in msg.get("toRecipients", [])]
 
         user_email = user.email.lower()
 

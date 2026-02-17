@@ -88,9 +88,5 @@ class RequirementOut(BaseModel):
     sighting_count: int = 0
 
 
-class OkOut(BaseModel):
-    ok: bool = True
-
-
 class SightingUnavailableIn(BaseModel):
     unavailable: bool = True

@@ -777,7 +777,7 @@ function editReqName(h2) {
             await apiFetch(`/api/requisitions/${currentReqId}`, { method: 'PUT', body: { name: val } });
             currentReqName = val;
             h2.textContent = val;
-            loadList();
+            loadRequisitions();
         } catch(e) { h2.textContent = current; showToast('Failed to rename', 'error'); }
     };
     input.addEventListener('blur', save);
