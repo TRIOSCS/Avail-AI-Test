@@ -1075,11 +1075,12 @@
         .topcontrols{display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap}
 
         /* Sidebar rail — blue tab centered on page with chevron */
-        .sb-rail{position:fixed;top:50%;left:0;transform:translateY(-50%);height:160px;width:17px;background:var(--blue);z-index:201;cursor:pointer;transition:width .15s,background .15s,box-shadow .15s,opacity .2s;display:flex;align-items:center;justify-content:center;border-radius:0 6px 6px 0}
+        .sb-rail{position:fixed;top:50%;left:0;transform:translateY(-50%);height:160px;width:17px;background:var(--blue);z-index:201;cursor:pointer;transition:left .3s,width .15s,background .15s,box-shadow .15s;display:flex;align-items:center;justify-content:center;border-radius:0 6px 6px 0}
         .sb-rail:hover{width:22px;background:var(--blue-dk);box-shadow:2px 0 10px rgba(74,111,165,.3)}
-        .sb-rail svg{width:12px;height:12px;fill:none;stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;opacity:.85;transition:opacity .15s}
+        .sb-rail svg{width:12px;height:12px;fill:none;stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;opacity:.85;transition:opacity .15s,transform .3s}
         .sb-rail:hover svg{opacity:1}
-        body.sb-open .sb-rail{opacity:0;pointer-events:none}
+        body.sb-open .sb-rail{left:var(--sbw);border-radius:0 6px 6px 0}
+        body.sb-open .sb-rail svg{transform:rotate(180deg)}
 
         /* v7 Sidebar overlay nav */
         .sidebar-nav{display:flex;flex-direction:column;gap:2px;padding:10px 8px;flex:1}
@@ -1218,8 +1219,8 @@
     </div>
 </div>
 
-<!-- Sidebar rail — blue strip with chevron, hover to open -->
-<div class="sb-rail" onmouseenter="openSidebar()" title="Open menu" aria-label="Open sidebar">
+<!-- Sidebar rail — blue strip with chevron, click to toggle -->
+<div class="sb-rail" onclick="toggleSidebar()" title="Toggle menu" aria-label="Toggle sidebar">
     <svg viewBox="0 0 10 14"><polyline points="2,2 8,7 2,12"/></svg>
 </div>
 
@@ -1231,10 +1232,10 @@
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleMobileSidebar()"></div>
 
 <!-- Click-away overlay to close sidebar -->
-<div class="sb-overlay" onmouseenter="closeSidebar()"></div>
+<div class="sb-overlay" onclick="toggleSidebar()"></div>
 
 <!-- SIDEBAR — v7 slide-out -->
-<aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation" onmouseleave="closeSidebar()">
+<aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
     <nav class="sidebar-nav">
         <button class="active" id="navReqs" onclick="sidebarNav('reqs',this)"><span class="ni">&#x1f4cb;</span> RFQs</button>
         <button id="navCustomers" onclick="sidebarNav('customers',this)"><span class="ni">&#x1f3e2;</span> Customers</button>

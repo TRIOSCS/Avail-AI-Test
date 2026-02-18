@@ -905,13 +905,6 @@ function debouncedMainSearch() {
 }
 
 // ── v7 Sidebar Navigation ───────────────────────────────────────────────
-function openSidebar() {
-    document.body.classList.add('sb-open');
-}
-function closeSidebar() {
-    document.body.classList.remove('sb-open');
-}
-// Legacy alias
 function toggleSidebar() {
     document.body.classList.toggle('sb-open');
 }
@@ -922,7 +915,7 @@ function sidebarNav(page, el) {
     // Close sidebar on mobile
     const sb = document.getElementById('sidebar');
     if (sb && sb.classList.contains('mobile-open')) toggleMobileSidebar();
-    closeSidebar();
+    document.body.classList.remove('sb-open');
     const routes = {
         reqs: () => { showList(); setMainPill('rfq'); },
         customers: () => showCustomers(),
@@ -938,7 +931,7 @@ function sidebarNav(page, el) {
 function navHighlight(btn) {
     document.querySelectorAll('.sidebar-nav button').forEach(i => i.classList.remove('active'));
     if (btn) btn.classList.add('active');
-    closeSidebar();
+    document.body.classList.remove('sb-open');
 }
 
 function setMainPill(view) {
