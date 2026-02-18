@@ -221,8 +221,9 @@
 
         /* Table — v7 bordered card rows, sortable headers */
         .tbl{width:100%;font-size:12px;border-collapse:separate;border-spacing:0 4px}
-        .tbl th{text-align:left;padding:8px 10px;color:var(--text);font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--text2);cursor:pointer;user-select:none;transition:.15s;white-space:nowrap}
-        .tbl th:hover{color:var(--teal)}
+        .tbl th{text-align:left;padding:8px 10px;background:var(--surface);color:var(--text2);font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--border);cursor:pointer;user-select:none;transition:.15s;white-space:nowrap}
+        .tbl th:first-child{border-radius:6px 0 0 0}.tbl th:last-child{border-radius:0 6px 0 0}
+        .tbl th:hover{color:var(--teal);background:var(--blue-lt)}
         .tbl th .sort-arrow{font-size:9px;margin-left:3px;color:var(--muted)}
         .tbl th.sorted .sort-arrow{color:var(--teal)}
         .tbl td{padding:9px 10px;background:var(--white);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
@@ -604,7 +605,7 @@
 
             /* v7 toparea — stack on mobile */
             .toparea{flex-wrap:wrap;gap:8px;padding:8px 12px}
-            .toparea img{height:72px}
+            .toparea img{height:80px}
             .topcontrols{flex-direction:column;align-items:stretch;gap:6px}
             .fpills{width:100%;overflow-x:auto;scrollbar-width:none}
             .fpills::-webkit-scrollbar{display:none}
@@ -1071,7 +1072,7 @@
 
         /* Top area — logo left, controls right, all on grey */
         .toparea{display:flex;align-items:center;gap:12px;padding:4px 16px;position:relative;z-index:100}
-        .toparea img{height:72px;flex-shrink:0}
+        .toparea img{height:96px;flex-shrink:0}
         .topcontrols{display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap}
 
         /* Sidebar rail — blue tab centered on page with chevron */
@@ -1148,6 +1149,8 @@
         .dtbl td{padding:4px 8px;border-bottom:1px solid var(--card2)}
         .dtbl input{border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:11px;font-family:'JetBrains Mono',monospace;width:100%;background:var(--white)}
         .dtbl input:focus{outline:none;border-color:var(--teal)}
+        .dd-edit{cursor:pointer}
+        .dd-edit:hover{background:var(--bg);border-radius:3px}
 
         /* Deadline flags */
         .dl{font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:3px}
@@ -1199,7 +1202,6 @@
 <div class="toparea">
     <img src="/static/avail_logo.png" alt="AVAIL">
     <div class="topcontrols" id="topcontrols">
-        <button class="btn btn-primary" onclick="openNewReqModal()">+ New RFQ</button>
         <div class="fpills" id="mainPills">
             <button class="fp on" data-view="rfq" onclick="setMainView('rfq',this)">RFQ</button>
             <button class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)">Sourcing</button>
@@ -1216,6 +1218,7 @@
                 </div>
             </div>
         </div>
+        <button class="btn btn-primary" style="margin-left:auto" onclick="openNewReqModal()">+ New RFQ</button>
     </div>
 </div>
 

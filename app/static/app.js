@@ -15,6 +15,7 @@ let activeTabCache = {};  // reqId → tab name
 let _vendorListData = [];   // cached vendor list for client-side filtering
 let _vendorTierFilter = 'all';  // all|proven|developing|caution|new
 let expandedGroups = new Set();  // reqIds that are expanded (default: all collapsed)
+let _ddReqCache = {};  // drill-down requirements cache: rfqId → [requirements]
 
 // ── Shared Helpers ──────────────────────────────────────────────────────
 async function apiFetch(url, opts = {}) {
@@ -566,14 +567,100 @@ function sortReqList(col) {
     renderReqList();
 }
 
-function toggleDrillDown(reqId) {
+async function toggleDrillDown(reqId) {
     const drow = document.getElementById('d-' + reqId);
     const arrow = document.getElementById('a-' + reqId);
-    if (drow) drow.classList.toggle('open');
+    if (!drow) return;
+    const opening = !drow.classList.contains('open');
+    drow.classList.toggle('open');
     if (arrow) arrow.classList.toggle('open');
+    if (!opening) return;
+    // Fetch requirements on first open, then cache
+    const dd = drow.querySelector('.dd-content');
+    if (!dd) return;
+    if (!_ddReqCache[reqId]) {
+        dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading…</span>';
+        try {
+            _ddReqCache[reqId] = await apiFetch(`/api/requisitions/${reqId}/requirements`);
+        } catch(e) {
+            dd.innerHTML = '<span style="font-size:11px;color:var(--red)">Failed to load</span>';
+            return;
+        }
+    }
+    _renderDrillDownTable(reqId);
+}
+
+function _renderDrillDownTable(rfqId) {
+    const drow = document.getElementById('d-' + rfqId);
+    if (!drow) return;
+    const dd = drow.querySelector('.dd-content');
+    if (!dd) return;
+    const reqs = _ddReqCache[rfqId] || [];
+    if (!reqs.length) { dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">No parts</span>'; return; }
+    let html = `<table class="dtbl"><thead><tr>
+        <th>MPN</th><th>Qty</th><th>Target $</th><th>Vendors</th><th>Condition</th><th>Date Codes</th>
+    </tr></thead><tbody>`;
+    for (const r of reqs) {
+        html += `<tr>
+            <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'primary_mpn')">${esc(r.primary_mpn || '—')}</td>
+            <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'target_qty')">${r.target_qty || 0}</td>
+            <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'target_price')" style="color:${r.target_price ? 'var(--teal)' : 'var(--muted)'}">${r.target_price != null ? '$' + parseFloat(r.target_price).toFixed(2) : '—'}</td>
+            <td class="mono">${r.sighting_count || 0}</td>
+            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'condition')">${esc(r.condition || '—')}</td>
+            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'date_codes')">${esc(r.date_codes || '—')}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    dd.innerHTML = html;
+}
+
+function editDrillCell(td, rfqId, reqId, field) {
+    if (td.querySelector('input')) return;
+    const reqs = _ddReqCache[rfqId] || [];
+    const r = reqs.find(x => x.id === reqId);
+    if (!r) return;
+
+    let currentVal;
+    if (field === 'target_qty') currentVal = String(r.target_qty || 1);
+    else if (field === 'target_price') currentVal = r.target_price != null ? String(r.target_price) : '';
+    else currentVal = r[field] || '';
+
+    const input = document.createElement('input');
+    input.className = 'req-edit-input';
+    input.value = currentVal;
+    if (field === 'target_qty') { input.type = 'number'; input.min = '1'; input.style.width = '50px'; }
+    if (field === 'target_price') { input.type = 'number'; input.step = '0.01'; input.min = '0'; input.style.width = '60px'; input.placeholder = '0.00'; }
+
+    td.textContent = '';
+    td.appendChild(input);
+    input.focus();
+    input.select();
+
+    const save = async () => {
+        const val = input.value.trim();
+        if (val === currentVal) { _renderDrillDownTable(rfqId); return; }
+        const body = {};
+        if (field === 'target_price') body[field] = val ? parseFloat(val) : null;
+        else if (field === 'target_qty') body[field] = parseInt(val) || 1;
+        else body[field] = val;
+        try {
+            const updated = await apiFetch(`/api/requirements/${reqId}`, { method: 'PUT', body });
+            // Update cache in-place
+            const idx = reqs.findIndex(x => x.id === reqId);
+            if (idx >= 0) Object.assign(reqs[idx], updated);
+        } catch(e) { console.error('editDrillCell:', e); }
+        _renderDrillDownTable(rfqId);
+    };
+
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); _renderDrillDownTable(rfqId); }
+    });
 }
 
 function renderReqList() {
+    _ddReqCache = {};
     const el = document.getElementById('reqList');
     let data = _reqListData;
     // When server search is active, skip status/text filters (server already filtered)
@@ -708,7 +795,7 @@ function _renderReqRow(r) {
                 <button class="btn btn-g btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','sources')">\u25b6 Source</button>
             </div>
         </div>
-        <span style="font-size:11px;color:var(--muted)">${total} parts \u2014 expand for details</span>
+        <div class="dd-content"><span style="font-size:11px;color:var(--muted)">${total} parts \u2014 expand for details</span></div>
     </td></tr>`;
 }
 
@@ -1030,6 +1117,7 @@ let selectedRequirements = new Set(); // Track selected requirements for partial
 
 async function loadRequirements() {
     if (!currentReqId) return;
+    delete _ddReqCache[currentReqId];
     try { reqData = await apiFetch(`/api/requisitions/${currentReqId}/requirements`); }
     catch(e) { console.error('loadRequirements:', e); return; }
     window._currentRequirements = reqData;  // expose for AI Smart RFQ
