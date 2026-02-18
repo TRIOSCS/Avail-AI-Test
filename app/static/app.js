@@ -400,6 +400,12 @@ function showDetail(id, name, tab) {
             custEl.style.color = custName ? '' : 'var(--teal)';
         }
     }
+    // Show deadline in detail header
+    const dlEl = document.getElementById('detailDeadline');
+    if (dlEl) {
+        const reqDl = _reqListData.find(r => r.id === id);
+        _renderDetailDeadline(dlEl, reqDl?.deadline);
+    }
     // Hide site picker when switching requisitions
     const picker = document.getElementById('detailSitePicker');
     if (picker) picker.style.display = 'none';
@@ -1044,7 +1050,7 @@ function _renderReqRow(r) {
     }
 
     // Need By — v7 deadline alert system
-    let dl = '';
+    let dl = '', dlClass = '';
     if (r.deadline === 'ASAP') {
         dl = '<span class="dl dl-asap">ASAP</span>';
     } else if (r.deadline) {
@@ -1052,12 +1058,12 @@ function _renderReqRow(r) {
         const now = new Date(); now.setHours(0,0,0,0);
         const diff = Math.round((d - now) / 86400000);
         const fmt = fmtDate(r.deadline);
-        if (diff < 0) dl = `<span class="dl dl-u">\ud83d\udd34 OVERDUE ${fmt}</span>`;
-        else if (diff === 0) dl = `<span class="dl dl-u">\ud83d\udd34 TODAY</span>`;
-        else if (diff <= 3) dl = `<span class="dl dl-w">\u26a0\ufe0f ${fmt}</span>`;
+        if (diff < 0) { dl = `<span class="dl dl-u">\ud83d\udd34 OVERDUE ${fmt}</span>`; dlClass = ' dl-row-overdue'; }
+        else if (diff === 0) { dl = `<span class="dl dl-u dl-flash">\ud83d\udd34 DUE TODAY</span>`; dlClass = ' dl-row-today'; }
+        else if (diff <= 3) { dl = `<span class="dl dl-w">\u26a0\ufe0f ${fmt}</span>`; dlClass = ' dl-row-warn'; }
         else dl = `<span class="dl dl-ok">\u2713 ${fmt}</span>`;
     } else {
-        dl = '<span class="dl" style="color:var(--muted)">\u2014</span>';
+        dl = '<span class="dl dl-set" title="Click to set deadline">+ Set date</span>';
     }
 
     // Customer display — dedup "Company — Company"
@@ -1126,7 +1132,7 @@ function _renderReqRow(r) {
             <td class="mono">${respPct}</td>
             <td style="font-size:11px">${searched}</td>
             <td class="mono" style="font-size:11px">${age}</td>
-            <td>${dl}</td>`;
+            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>`;
         actions = `<td style="white-space:nowrap">${srcBtn}</td>`;
         colspan = 11;
     } else if (v === 'archive') {
@@ -1145,12 +1151,12 @@ function _renderReqRow(r) {
             <td class="mono">${total}</td>
             <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px">${age}</td>
-            <td>${dl}</td>`;
+            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>`;
         actions = `<td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();submitToSourcing(${r.id})" title="Submit to sourcing">&#x25b6; Source</button></td>`;
         colspan = 7;
     }
 
-    return `<tr onclick="toggleDrillDown(${r.id})">
+    return `<tr class="${dlClass}" onclick="toggleDrillDown(${r.id})">
         <td><button class="ea" id="a-${r.id}">\u25b6</button></td>
         ${nameCell}
         ${dataCells}
@@ -1165,6 +1171,69 @@ function _renderReqRow(r) {
         </div>
         <div class="dd-content"><span style="font-size:11px;color:var(--muted)">${total} parts \u2014 expand for details</span></div>
     </td></tr>`;
+}
+
+// ── Inline Deadline Editor ───────────────────────────────────────────────
+function editDeadline(reqId, td) {
+    if (td.querySelector('input')) return; // Already editing
+    const r = _reqListData.find(x => x.id === reqId);
+    const cur = r?.deadline || '';
+    const isAsap = cur === 'ASAP';
+    td.innerHTML = `<div style="display:flex;align-items:center;gap:4px" onclick="event.stopPropagation()">
+        <input type="date" value="${isAsap ? '' : cur}" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;width:120px"
+            onchange="saveDeadline(${reqId},this.value,false)" onkeydown="if(event.key==='Escape'){renderReqList()}">
+        <button class="btn btn-sm" style="font-size:10px;padding:1px 5px" onclick="saveDeadline(${reqId},'ASAP',true)"${isAsap ? ' disabled' : ''}>ASAP</button>
+        ${cur ? '<button class="btn btn-sm" style="font-size:10px;padding:1px 5px;color:var(--red)" onclick="saveDeadline('+reqId+',null,false)" title="Clear deadline">&times;</button>' : ''}
+    </div>`;
+    const inp = td.querySelector('input[type=date]');
+    if (inp) inp.focus();
+}
+
+async function saveDeadline(reqId, value, isAsap) {
+    const deadline = isAsap ? 'ASAP' : (value || null);
+    try {
+        await apiFetch(`/api/requisitions/${reqId}`, { method: 'PUT', body: { deadline } });
+        const r = _reqListData.find(x => x.id === reqId);
+        if (r) r.deadline = deadline;
+        renderReqList();
+        // Update detail header if viewing this req
+        const dlEl = document.getElementById('detailDeadline');
+        if (dlEl && currentReqId === reqId) _renderDetailDeadline(dlEl, deadline);
+        showToast(deadline ? `Deadline set to ${deadline}` : 'Deadline cleared', 'success');
+    } catch (e) { showToast('Failed to update deadline', 'error'); }
+}
+
+function _renderDetailDeadline(el, deadline) {
+    if (deadline === 'ASAP') {
+        el.innerHTML = '<span class="dl dl-asap">ASAP</span>';
+    } else if (deadline) {
+        const d = new Date(deadline);
+        const now = new Date(); now.setHours(0,0,0,0);
+        const diff = Math.round((d - now) / 86400000);
+        const fmt = fmtDate(deadline);
+        if (diff < 0) el.innerHTML = `<span class="dl dl-u">\ud83d\udd34 OVERDUE ${fmt}</span>`;
+        else if (diff === 0) el.innerHTML = `<span class="dl dl-u dl-flash">\ud83d\udd34 DUE TODAY</span>`;
+        else if (diff <= 3) el.innerHTML = `<span class="dl dl-w">\u26a0\ufe0f Due ${fmt}</span>`;
+        else el.innerHTML = `<span class="dl dl-ok">Due ${fmt}</span>`;
+    } else {
+        el.innerHTML = '<span class="dl dl-set">+ Set deadline</span>';
+    }
+}
+
+function editDetailDeadline() {
+    const el = document.getElementById('detailDeadline');
+    if (!el || el.querySelector('input')) return;
+    const r = _reqListData.find(x => x.id === currentReqId);
+    const cur = r?.deadline || '';
+    const isAsap = cur === 'ASAP';
+    el.innerHTML = `<div style="display:inline-flex;align-items:center;gap:6px">
+        <input type="date" value="${isAsap ? '' : cur}" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px"
+            onchange="saveDeadline(${currentReqId},this.value,false)">
+        <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="saveDeadline(${currentReqId},'ASAP',true)"${isAsap ? ' disabled' : ''}>ASAP</button>
+        ${cur ? `<button class="btn btn-sm" style="font-size:11px;padding:2px 8px;color:var(--red)" onclick="saveDeadline(${currentReqId},null,false)">Clear</button>` : ''}
+        <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="_renderDetailDeadline(document.getElementById('detailDeadline'),${cur ? `'${cur}'` : 'null'})">Cancel</button>
+    </div>`;
+    el.querySelector('input[type=date]')?.focus();
 }
 
 // ── v7 Filter Dropdown ──────────────────────────────────────────────────
@@ -1495,14 +1564,19 @@ async function createRequisition() {
     if (!name) { showToast('Please enter a requisition name', 'error'); return; }
     const siteId = document.getElementById('nrSiteId')?.value || null;
     if (!siteId) { showToast('Please select a customer account', 'error'); return; }
+    const isAsap = document.getElementById('nrAsap')?.checked;
+    const dlVal = document.getElementById('nrDeadline')?.value || '';
+    const deadline = isAsap ? 'ASAP' : (dlVal || null);
     try {
         const data = await apiFetch('/api/requisitions', {
-            method: 'POST', body: { name, customer_site_id: parseInt(siteId) }
+            method: 'POST', body: { name, customer_site_id: parseInt(siteId), deadline }
         });
         closeModal('newReqModal');
         document.getElementById('nrName').value = '';
         document.getElementById('nrSiteSearch').value = '';
         document.getElementById('nrSiteId').value = '';
+        document.getElementById('nrDeadline').value = '';
+        document.getElementById('nrAsap').checked = false;
         document.getElementById('nrSiteSelected').style.display = 'none';
         document.getElementById('nrContactField').style.display = 'none';
         showDetail(data.id, data.name);

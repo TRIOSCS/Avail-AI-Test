@@ -1176,7 +1176,17 @@
 
         /* Deadline flags */
         .dl{font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:3px}
-        .dl-ok{color:var(--green)}.dl-w{color:var(--amber)}.dl-u{color:var(--red);animation:pulse 1.5s infinite}.dl-asap{color:var(--red);font-weight:800}
+        .dl-ok{color:var(--green)}.dl-w{color:var(--amber)}.dl-u{color:var(--red)}.dl-asap{color:var(--red);font-weight:800}
+        .dl-flash{animation:dl-blink .8s ease-in-out infinite;font-weight:800}
+        @keyframes dl-blink{0%,100%{color:var(--red);opacity:1}50%{color:#fff;opacity:.7}}
+        .dl-set{color:var(--blue);font-weight:500;cursor:pointer;font-size:11px}
+        .dl-cell{cursor:pointer}.dl-cell:hover{background:var(--blue-light)!important;border-radius:4px}
+        .detail-deadline{display:inline-block;margin-top:2px;font-size:12px}
+        /* Row-level deadline alerts */
+        tr.dl-row-today>td{background:rgba(217,68,82,.1)!important;animation:row-flash 1.2s ease-in-out infinite}
+        tr.dl-row-overdue>td{background:rgba(217,68,82,.07)!important}
+        tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
+        @keyframes row-flash{0%,100%{background:rgba(217,68,82,.1)}50%{background:rgba(217,68,82,.25)}}
 
         /* Vendor drill-down */
         .vhdr{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
@@ -1352,6 +1362,7 @@
                 <a class="back-link" onclick="showList()">← Back</a>
                 <div style="display:flex;align-items:center;gap:8px"><h2 id="detailTitle" onclick="editReqName(this)" title="Click to rename" style="cursor:pointer"></h2><span id="detailStatus" class="status-chip"></span></div>
                 <span id="detailCustomer" class="req-customer" onclick="openDetailSitePicker()" title="Click to link/change customer" style="cursor:pointer"></span>
+                <span id="detailDeadline" class="detail-deadline" onclick="editDetailDeadline()" title="Click to set/change deadline" style="cursor:pointer"></span>
                 <div id="detailSitePicker" style="display:none;margin-top:4px">
                     <div class="site-typeahead" style="max-width:320px">
                         <input id="detailSiteSearch" placeholder="Search customer site…" autocomplete="off" oninput="filterDetailSiteTypeahead(this.value)">
@@ -1656,6 +1667,13 @@
             <div id="nrSiteSelected" style="display:none;margin-top:6px;padding:8px 12px;background:var(--teal-light);border:1px solid rgba(61,104,149,.15);border-radius:6px;font-size:12px;display:none">
                 <span id="nrSiteSelectedLabel" style="font-weight:600"></span>
                 <span onclick="clearNrSite()" style="margin-left:8px;color:var(--red);cursor:pointer;font-size:11px">Clear</span>
+            </div>
+        </div>
+        <div class="field" style="margin-top:10px">
+            <label>Need By</label>
+            <div style="display:flex;align-items:center;gap:10px">
+                <input type="date" id="nrDeadline" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--white);color:var(--text)">
+                <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="nrAsap" onchange="if(this.checked)document.getElementById('nrDeadline').value=''"> ASAP</label>
             </div>
         </div>
         <div class="field" id="nrContactField" style="margin-top:10px;display:none">
