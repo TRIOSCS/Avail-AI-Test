@@ -1044,7 +1044,7 @@
             </div>
             <div style="display:flex;gap:8px;align-items:center">
                 <button class="btn btn-ghost btn-sm" id="cloneBtn" onclick="cloneRequisition(currentReqId)" title="Clone this requisition" style="display:none">Clone</button>
-                <button class="btn btn-primary" id="searchAllBtn" onclick="submitOrSearch()">Submit</button>
+                <button class="btn btn-primary" id="searchAllBtn" onclick="submitOrSearch()">Search Selected</button>
             </div>
         </div>
 
@@ -1098,10 +1098,11 @@
                     <span class="filter-count" id="reqFilterCount"></span>
                 </div>
                 <table class="tbl">
-                    <thead><tr><th>Part Number</th><th style="width:50px">Qty</th><th>Substitutes</th><th style="width:64px">Target $</th><th style="width:60px">FW</th><th style="width:60px">DC</th><th style="width:60px">HW</th><th style="width:55px">Pkg</th><th style="width:55px">Cond</th><th style="width:45px">Src</th><th style="width:30px"></th></tr></thead>
+                    <thead><tr><th style="width:28px"><input type="checkbox" checked onchange="toggleAllReqSelection(this.checked)" title="Select/deselect all"></th><th>Part Number</th><th style="width:50px">Qty</th><th>Substitutes</th><th style="width:64px">Target $</th><th style="width:60px">FW</th><th style="width:60px">DC</th><th style="width:60px">HW</th><th style="width:55px">Pkg</th><th style="width:55px">Cond</th><th style="width:45px">Src</th><th style="width:30px"></th></tr></thead>
                     <tbody id="reqTable"></tbody>
                     <tfoot>
                         <tr class="add-row">
+                            <td></td>
                             <td><input id="fMpn" placeholder="Enter part number…" onkeydown="if(event.key==='Enter')addReq()"></td>
                             <td><input id="fQty" type="number" value="1" min="1" style="width:50px" onkeydown="if(event.key==='Enter')addReq()"></td>
                             <td><input id="fSubs" placeholder="Alternates…" onkeydown="if(event.key==='Enter')addReq()"></td>
@@ -1113,7 +1114,7 @@
                     </tfoot>
                 </table>
                 <div id="searchAllBar" class="search-all-bar" onclick="submitOrSearch()" style="display:none">
-                    <span class="search-all-bar-text" id="searchAllBarText">Search all sources</span>
+                    <span class="search-all-bar-text" id="searchAllBarText">Search selected parts</span>
                 </div>
             </div>
         </div>

@@ -91,11 +91,11 @@ def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
 
 def user_reqs_query(db: Session, user: User):
     """Base requisition query respecting role-based access.
-    Sales sees own reqs only; dev_assistant sees none; others see all."""
+    Sales sees own reqs only; dev_assistant sees none; all other roles see all."""
     q = db.query(Requisition)
     if user.role == "dev_assistant":
         q = q.filter(sa.false())
-    elif user.role in ("sales", "trader"):
+    elif user.role == "sales":
         q = q.filter(Requisition.created_by == user.id)
     return q
 
@@ -104,7 +104,7 @@ def get_req_for_user(db: Session, user: User, req_id: int) -> Requisition:
     """Get a single requisition with role-based access check."""
     if user.role == "dev_assistant":
         return None
-    if user.role in ("sales", "trader"):
+    if user.role == "sales":
         return db.query(Requisition).filter_by(id=req_id, created_by=user.id).first()
     return db.query(Requisition).filter_by(id=req_id).first()
 

@@ -15,7 +15,6 @@ Depends on: models, search_service, file_utils, scoring, vendor_utils
 """
 
 import asyncio
-import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
@@ -142,9 +141,9 @@ async def list_requisitions(
         latest_offer_at_sq,
         sourced_count_sq,
     )
-    if user.role in ("sales", "trader"):
+    # Sales sees own reqs only; all other roles see everything
+    if user.role == "sales":
         query = query.filter(Requisition.created_by == user.id)
-    # Buyers see all requisitions
 
     if q.strip():
         safe_q = q.strip().replace("%", r"\%").replace("_", r"\_")
@@ -156,17 +155,16 @@ async def list_requisitions(
 
     total = query.count()
     rows = query.order_by(Requisition.created_at.desc()).offset(offset).limit(limit).all()
-    # Pre-load creator names for buyers (they see all reqs)
+    # Pre-load creator names (all roles see all reqs now)
     creator_names = {}
-    if user.role == "buyer":
-        creator_ids = {r.created_by for r, _, _, _, _, _, _, _ in rows if r.created_by}
-        if creator_ids:
-            creators = (
-                db.query(User.id, User.name, User.email)
-                .filter(User.id.in_(creator_ids))
-                .all()
-            )
-            creator_names = {u.id: u.name or u.email.split("@")[0] for u in creators}
+    creator_ids = {r.created_by for r, _, _, _, _, _, _, _ in rows if r.created_by}
+    if creator_ids:
+        creators = (
+            db.query(User.id, User.name, User.email)
+            .filter(User.id.in_(creator_ids))
+            .all()
+        )
+        creator_names = {u.id: u.name or u.email.split("@")[0] for u in creators}
     return {
         "requisitions": [
             {
@@ -185,9 +183,7 @@ async def list_requisitions(
                 "latest_reply_at": latest_reply.isoformat() if latest_reply else None,
                 "has_new_offers": bool(has_new),
                 "latest_offer_at": latest_offer.isoformat() if latest_offer else None,
-                "created_by_name": creator_names.get(r.created_by, "")
-                if user.role == "buyer"
-                else None,
+                "created_by_name": creator_names.get(r.created_by, ""),
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "last_searched_at": r.last_searched_at.isoformat()
                 if r.last_searched_at
@@ -469,13 +465,27 @@ async def update_requirement(
 # ── Search ───────────────────────────────────────────────────────────────
 @router.post("/api/requisitions/{req_id}/search")
 async def search_all(
-    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+    req_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
 ):
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404)
+
+    # Optional: only search specific requirements
+    requirement_ids = None
+    try:
+        body = await request.json()
+        requirement_ids = body.get("requirement_ids")
+    except Exception:
+        pass  # No body or invalid JSON — search all
+
     results = {}
     for r in req.requirements:
+        if requirement_ids and r.id not in requirement_ids:
+            continue
         sightings = await search_requirement(r, db)
         label = r.primary_mpn or f"Req #{r.id}"
         results[str(r.id)] = {"label": label, "sightings": sightings}
@@ -489,16 +499,6 @@ async def search_all(
 
     # Enrich with vendor card ratings (no contact lookup — that happens at RFQ time)
     _enrich_with_vendor_cards(results, db)
-
-    # Auto-create routing assignments for new sightings
-    try:
-        from ..services.routing_service import auto_route_search_results, notify_routing_assignment
-        new_assignments = auto_route_search_results(results, db)
-        if new_assignments:
-            coros = [notify_routing_assignment(a, db) for a in new_assignments]
-            await asyncio.gather(*coros, return_exceptions=True)
-    except Exception:
-        logging.getLogger("avail.routing").exception("Auto-routing failed in search_all")
 
     return results
 
@@ -520,16 +520,6 @@ async def search_one(
         str(r.id): {"label": r.primary_mpn or f"Req #{r.id}", "sightings": sightings}
     }
     _enrich_with_vendor_cards(results, db)
-
-    # Auto-create routing assignments for new sightings
-    try:
-        from ..services.routing_service import auto_route_search_results, notify_routing_assignment
-        new_assignments = auto_route_search_results(results, db)
-        if new_assignments:
-            coros = [notify_routing_assignment(a, db) for a in new_assignments]
-            await asyncio.gather(*coros, return_exceptions=True)
-    except Exception:
-        logging.getLogger("avail.routing").exception("Auto-routing failed in search_one")
 
     return {"sightings": results[str(r.id)]["sightings"]}
 
@@ -589,7 +579,7 @@ async def mark_unavailable(
     s = db.get(Sighting, sighting_id)
     if not s:
         raise HTTPException(404)
-    # Verify ownership: sighting → requirement → requisition → user (sales restricted)
+    # Verify sighting belongs to a valid requisition
     req_check = (
         db.query(Requisition)
         .join(Requirement)
@@ -597,8 +587,6 @@ async def mark_unavailable(
             Requirement.id == s.requirement_id,
         )
     )
-    if user.role in ("sales", "trader"):
-        req_check = req_check.filter(Requisition.created_by == user.id)
     if not req_check.first():
         raise HTTPException(403, "Not your sighting")
     s.is_unavailable = data.unavailable

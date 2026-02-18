@@ -373,8 +373,7 @@ function showDetail(id, name, tab) {
     }
     const searchBtn = document.getElementById('searchAllBtn');
     if (searchBtn) {
-        const isDraft = reqInfo && reqInfo.status === 'draft';
-        searchBtn.textContent = isDraft ? 'Submit' : '⟳ Search All';
+        searchBtn.textContent = 'Search Selected';
     }
     // Set status chip (no pulse on initial load)
     const chip = document.getElementById('detailStatus');
@@ -548,7 +547,7 @@ function renderReqList() {
         const archiveBtn = isArchived
             ? `<button class="btn-reactivate" onclick="event.stopPropagation();toggleArchive(${r.id})" title="Reactivate">↩ Activate</button>`
             : `<button class="btn-archive" onclick="event.stopPropagation();toggleArchive(${r.id})" title="Archive">📦 Archive</button>`;
-        const createdBy = (window.userRole === 'buyer' && r.created_by_name) ? `<span title="Created by ${esc(r.created_by_name)}">👤 ${esc(r.created_by_name)}</span>` : '';
+        const createdBy = r.created_by_name ? `<span title="Created by ${esc(r.created_by_name)}">👤 ${esc(r.created_by_name)}</span>` : '';
         const custDisplay = r.customer_display ? `<span class="req-customer">${esc(r.customer_display)}</span>` : '';
         const statusBadge = r.status !== 'active' ? `<span class="status-badge status-${r.status}">${r.status}</span>` : '';
         // Reply count badge
@@ -672,16 +671,19 @@ async function toggleArchive(id) {
 
 // ── Requirements ────────────────────────────────────────────────────────
 let reqData = []; // Cache for editing
+let selectedRequirements = new Set(); // Track selected requirements for partial search
 
 async function loadRequirements() {
     if (!currentReqId) return;
     try { reqData = await apiFetch(`/api/requisitions/${currentReqId}/requirements`); }
     catch(e) { console.error('loadRequirements:', e); return; }
     window._currentRequirements = reqData;  // expose for AI Smart RFQ
+    // Auto-select all requirements
+    selectedRequirements = new Set(reqData.map(r => r.id));
     const el = document.getElementById('reqTable');
     const filterBar = document.getElementById('reqFilterBar');
     if (!reqData.length) {
-        el.innerHTML = '<tr><td colspan="11" class="empty">No parts yet — add one below</td></tr>';
+        el.innerHTML = '<tr><td colspan="12" class="empty">No parts yet — add one below</td></tr>';
         if (filterBar) filterBar.style.display = 'none';
         return;
     }
@@ -719,7 +721,9 @@ function renderRequirementsTable() {
     if (countEl) countEl.textContent = (q || pill !== 'all') ? `${filtered.length} of ${reqData.length}` : `${reqData.length} parts`;
     el.innerHTML = filtered.map(r => {
         const subsText = (r.substitutes || []).length ? r.substitutes.join(', ') : '—';
+        const checked = selectedRequirements.has(r.id) ? 'checked' : '';
         return `<tr data-req-id="${r.id}">
+            <td style="width:28px;text-align:center"><input type="checkbox" ${checked} onchange="toggleReqSelection(${r.id}, this.checked)" title="Include in search"></td>
             <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'primary_mpn')" title="Click to edit">${esc(r.primary_mpn || '—')}</td>
             <td class="mono req-edit-cell" onclick="editReqCell(this,${r.id},'target_qty')" title="Click to edit" style="width:50px">${r.target_qty}</td>
             <td class="req-edit-cell" onclick="editReqCell(this,${r.id},'substitutes')" title="Click to edit" style="font-size:11px;color:var(--text2)">${esc(subsText)}</td>
@@ -734,6 +738,19 @@ function renderRequirementsTable() {
         </tr>`;
     }).join('');
     if (Object.keys(searchResults).length) updateRequirementCounts();
+}
+
+function toggleReqSelection(reqId, checked) {
+    if (checked) selectedRequirements.add(reqId);
+    else selectedRequirements.delete(reqId);
+    updateSearchAllBar();
+}
+
+function toggleAllReqSelection(checked) {
+    if (checked) reqData.forEach(r => selectedRequirements.add(r.id));
+    else selectedRequirements.clear();
+    renderRequirementsTable();
+    updateSearchAllBar();
 }
 
 let reqFilterType = 'all';
@@ -896,17 +913,11 @@ function updateSearchAllBar() {
     if (!bar) return;
     if (!reqData.length) { bar.style.display = 'none'; return; }
     bar.style.display = 'flex';
-    const reqInfo = _reqListData.find(r => r.id === currentReqId);
-    const isDraft = reqInfo && reqInfo.status === 'draft';
-    const unsearched = reqData.filter(r => !r.sighting_count).length;
+    const n = selectedRequirements.size;
     const textEl = document.getElementById('searchAllBarText');
-    if (isDraft) {
-        textEl.textContent = `Submit & search ${reqData.length} part${reqData.length !== 1 ? 's' : ''}`;
-    } else if (unsearched > 0) {
-        textEl.textContent = `🔍 Search all — ${unsearched} part${unsearched !== 1 ? 's' : ''} unsourced`;
-    } else {
-        textEl.textContent = '🔍 Re-search all parts';
-    }
+    textEl.textContent = n > 0
+        ? `Search ${n} selected part${n !== 1 ? 's' : ''}`
+        : 'Select parts to search';
 }
 
 function submitOrSearch() {
@@ -915,11 +926,12 @@ function submitOrSearch() {
 
 async function searchAll() {
     if (!currentReqId) return;
+    if (!selectedRequirements.size) { alert('No parts selected'); return; }
     const btn = document.getElementById('searchAllBtn');
-    const wasDraft = (_reqListData.find(r => r.id === currentReqId) || {}).status === 'draft';
-    btn.disabled = true; btn.textContent = wasDraft ? 'Submitting…' : 'Searching…';
+    btn.disabled = true; btn.textContent = 'Searching…';
     try {
-        searchResults = await apiFetch(`/api/requisitions/${currentReqId}/search`, { method: 'POST' });
+        const body = { requirement_ids: [...selectedRequirements] };
+        searchResults = await apiFetch(`/api/requisitions/${currentReqId}/search`, { method: 'POST', body });
         searchResultsCache[currentReqId] = searchResults;
         selectedSightings.clear();
         expandedGroups.clear();
@@ -935,7 +947,7 @@ async function searchAll() {
     } catch (e) {
         alert('Search error: ' + e.message);
     }
-    btn.disabled = false; btn.textContent = '⟳ Search All';
+    btn.disabled = false; btn.textContent = 'Search Selected';
 }
 
 function updateRequirementCounts() {
