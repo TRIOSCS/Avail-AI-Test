@@ -1220,6 +1220,7 @@
             <button class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)">Sourcing</button>
             <button class="fp" data-view="archive" onclick="setMainView('archive',this)">Archive</button>
         </div>
+        <button class="btn btn-primary" onclick="openNewReqModal()">+ New RFQ</button>
         <input type="text" class="sbox" id="mainSearch" placeholder="&#x1f50d;  Search customer, part, RFQ&hellip;" oninput="debouncedMainSearch()">
         <div class="fpills fpills-sm" id="statusToggle">
             <button class="fp fp-sm on" data-sf="all" onclick="setStatusFilter('all',this)">All</button>
@@ -1238,7 +1239,6 @@
         </div>
         <button class="tb-btn" id="btnMyAccounts" onclick="toggleMyAccounts(this)">My Accounts</button>
         <button class="tb-btn" onclick="collapseAllRows()">Collapse All</button>
-        <button class="btn btn-primary" style="margin-left:auto" onclick="openNewReqModal()">+ New RFQ</button>
     </div>
 </div>
 
