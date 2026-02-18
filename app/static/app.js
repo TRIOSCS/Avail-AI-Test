@@ -845,13 +845,12 @@ function renderReqList() {
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('sourced')"${thClass('sourced')}>Sourced ${sa('sourced')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
-            <th onclick="sortReqList('status')"${thClass('status')}>Status ${sa('status')}</th>
             <th onclick="sortReqList('sent')"${thClass('sent')}>RFQs Sent ${sa('sent')}</th>
             <th onclick="sortReqList('resp')"${thClass('resp')}>Resp % ${sa('resp')}</th>
             <th onclick="sortReqList('searched')"${thClass('searched')}>Searched ${sa('searched')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By ${sa('deadline')}</th>
-            <th style="width:60px"></th>
+            <th onclick="sortReqList('status')"${thClass('status')} title="Sourcing / Offers / Quoted">Status ${sa('status')}</th>
         </tr></thead>`;
     } else if (v === 'archive') {
         thead = `<thead><tr>
@@ -960,11 +959,15 @@ function _renderReqRow(r) {
         }
 
         // Action buttons for sourcing
+        // State-aware action button
         let srcBtn;
-        if (offers > 0 && r.has_new_offers) {
-            srcBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','quote')" title="New offers — prepare quote">Offers (${offers})</button>`;
+        const isQuoted = r.status === 'quoted' || r.status === 'quoting';
+        if (isQuoted) {
+            srcBtn = `<button class="btn btn-q btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','quote')" title="Quote prepared">Quoted</button>`;
+        } else if (offers > 0 && r.has_new_offers) {
+            srcBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','quote')" title="New offers — click to review">Offers (${offers})</button>`;
         } else if (offers > 0) {
-            srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','quote')" title="Prepare quote">Quote (${offers})</button>`;
+            srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','quote')" title="Prepare quote">Offers (${offers})</button>`;
         } else {
             srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','sources')" title="Sourcing in progress">Sourcing</button>`;
         }
@@ -973,14 +976,13 @@ function _renderReqRow(r) {
             <td class="mono">${total}</td>
             <td><div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div><span class="prog-txt">${sourced}/${total}</span></div></td>
             ${offersCell}
-            <td><span class="badge ${bc}">${_statusLabels[r.status] || r.status}</span></td>
             <td class="mono">${sent}</td>
             <td class="mono">${respPct}</td>
             <td style="font-size:11px">${searched}</td>
             <td class="mono" style="font-size:11px">${age}</td>
             <td>${dl}</td>`;
-        actions = `<td style="white-space:nowrap"><button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})">&#x1f4e5; Archive</button> ${srcBtn}</td>`;
-        colspan = 12;
+        actions = `<td style="white-space:nowrap">${srcBtn}</td>`;
+        colspan = 11;
     } else if (v === 'archive') {
         // Archive: Parts, Offers, Outcome, Sales, Age
         dataCells = `
@@ -1187,6 +1189,9 @@ function setMainView(view, btn) {
     // Hide status toggle — tabs are now locked to their status
     const stEl = document.getElementById('statusToggle');
     if (stEl) stEl.style.display = 'none';
+    // Follow-ups panel: only visible on sourcing tab
+    const fuPanel = document.getElementById('followUpsPanel');
+    if (fuPanel) fuPanel.style.display = 'none';
     if (view === 'rfq') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
@@ -1195,6 +1200,7 @@ function setMainView(view, btn) {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
+        loadFollowUpsPanel();
     } else if (view === 'archive') {
         _reqStatusFilter = 'archive';
         _serverSearchActive = false;
@@ -1334,7 +1340,47 @@ async function sendFollowUp(contactId, vendorName) {
         const data = await apiFetch(`/api/follow-ups/${contactId}/send`, { method: 'POST', body: {} });
         showToast(data.message || `Follow-up sent to ${vendorName}`, 'success');
         if (typeof loadActivity === 'function') loadActivity();
+        loadFollowUpsPanel();
     } catch (e) { showToast('Failed to send follow-up', 'error'); }
+}
+
+// ── Follow-Ups Dashboard Panel ───────────────────────────────────────────
+async function loadFollowUpsPanel() {
+    const panel = document.getElementById('followUpsPanel');
+    if (!panel) return;
+    if (_currentMainView !== 'sourcing') { panel.style.display = 'none'; return; }
+    try {
+        const data = await apiFetch('/api/follow-ups');
+        const followUps = data.follow_ups || [];
+        if (!followUps.length) { panel.style.display = 'none'; return; }
+        // Group by requisition
+        const groups = {};
+        for (const fu of followUps) {
+            const key = fu.requisition_id || 0;
+            if (!groups[key]) groups[key] = { name: fu.requisition_name || 'Unknown RFQ', items: [] };
+            groups[key].items.push(fu);
+        }
+        let html = `<div class="card" style="margin:0 16px 12px;padding:12px;border-left:3px solid var(--amber)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <span style="font-weight:700;font-size:13px;color:var(--amber)">Awaiting Vendor Replies (${followUps.length})</span>
+            </div>`;
+        for (const [rfqId, g] of Object.entries(groups)) {
+            html += `<div style="margin-bottom:6px"><span style="font-weight:600;font-size:12px">${esc(g.name)}</span></div>`;
+            for (const fu of g.items) {
+                const dayColor = fu.days_waiting > 5 ? 'var(--red)' : fu.days_waiting > 2 ? 'var(--amber)' : 'var(--green)';
+                html += `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:11px">
+                    <span style="color:var(--text2)">${esc(fu.vendor_name)}</span>
+                    <span style="color:var(--muted)">${esc(fu.vendor_email || '')}</span>
+                    <span style="color:${dayColor};font-weight:600">${fu.days_waiting}d</span>
+                    ${fu.parts ? `<span style="color:var(--muted)">${esc(fu.parts)}</span>` : ''}
+                    ${fu.contact_id ? `<button class="btn btn-ghost btn-sm" onclick="sendFollowUp(${fu.contact_id},'${escAttr(fu.vendor_name)}')" style="padding:1px 6px;font-size:10px">Follow Up</button>` : ''}
+                </div>`;
+            }
+        }
+        html += '</div>';
+        panel.innerHTML = html;
+        panel.style.display = '';
+    } catch { panel.style.display = 'none'; }
 }
 
 async function createRequisition() {
@@ -2463,22 +2509,24 @@ async function openVendorPopup(cardId) {
     catch (e) { console.error('Failed to load vendor:', e); return; }
 
     let html = `<div class="vp-header">
-        <h2>${esc(card.display_name)}</h2>
+        <h2 onclick="editVendorField(${card.id},'display_name',this)" style="cursor:pointer" title="Click to edit">${esc(card.display_name)}</h2>
         <div class="vp-rating">${stars(card.avg_rating, card.review_count)}</div>
     </div>`;
 
-    // Blacklist toggle
+    // Blacklist toggle + admin delete
     const blOn = card.is_blacklisted;
-    html += `<div class="vp-section" style="padding-bottom:8px;margin-bottom:10px">
+    html += `<div class="vp-section" style="padding-bottom:8px;margin-bottom:10px;display:flex;gap:8px;align-items:center">
         <button class="btn-blacklist ${blOn ? 'vp-bl-on' : 'vp-bl-off'}" onclick="vpToggleBlacklist(${card.id}, ${!blOn})">
             ${blOn ? '🚫 Blacklisted' : 'Blacklist'}
         </button>
         ${blOn ? '<span style="font-size:10px;color:var(--red);margin-left:8px">This vendor is hidden from all search results</span>' : ''}
+        ${window.__isAdmin ? `<button class="btn btn-danger btn-sm" onclick="deleteVendor(${card.id},'${escAttr(card.display_name)}')" style="margin-left:auto;font-size:10px">Delete Vendor</button>` : ''}
     </div>`;
 
     // Info
     html += '<div class="vp-section">';
-    if (card.website) html += `<div class="vp-field"><span class="vp-label">Website</span> <a href="${escAttr(card.website)}" target="_blank">${esc(card.website)}</a></div>`;
+    if (card.website) html += `<div class="vp-field"><span class="vp-label">Website</span> <span onclick="editVendorField(${card.id},'website',this)" style="cursor:pointer;color:var(--teal);text-decoration:underline" title="Click to edit">${esc(card.website)}</span></div>`;
+    else html += `<div class="vp-field"><span class="vp-label">Website</span> <span onclick="editVendorField(${card.id},'website',this)" style="cursor:pointer;color:var(--muted);font-size:11px" title="Click to add">+ Add website</span></div>`;
     if (card.linkedin_url) html += `<div class="vp-field"><span class="vp-label">LinkedIn</span> <a href="${escAttr(card.linkedin_url)}" target="_blank" style="color:var(--teal)">Company Page ↗</a></div>`;
     html += `<div class="vp-field"><span class="vp-label">Seen in</span> ${card.sighting_count} search results</div>`;
     // Enrichment tags
@@ -2533,6 +2581,9 @@ async function openVendorPopup(cardId) {
     }
     html += '</div>';
 
+    // Email Metrics (loaded async)
+    html += `<div id="vpEmailMetrics"></div>`;
+
     // Intel Card container (loaded async)
     html += `<div id="vpIntelCard"></div>`;
 
@@ -2540,7 +2591,10 @@ async function openVendorPopup(cardId) {
     html += `<div class="vp-section">
         <div class="vp-label" style="display:flex;justify-content:space-between;align-items:center">
             Contacts
-            <button class="btn btn-ghost btn-sm" onclick="openAddVendorContact(${card.id})">+ Add</button>
+            <span style="display:flex;gap:4px">
+                ${vendorDomain ? `<button class="btn btn-ghost btn-sm" onclick="openSuggestedContacts('vendor',${card.id},'${escAttr(vendorDomain)}','${escAttr(card.display_name)}')">Find Contacts</button>` : ''}
+                <button class="btn btn-ghost btn-sm" onclick="openAddVendorContact(${card.id})">+ Add</button>
+            </span>
         </div>
         <div id="vpContactsList"><p class="vp-muted" style="font-size:11px">Loading contacts...</p></div>
     </div>`;
@@ -2606,6 +2660,25 @@ async function openVendorPopup(cardId) {
         </div>
     </div>`;
 
+    // Offer History (collapsible, searchable, paginated)
+    html += `<div class="vp-section">
+        <div class="vp-label" style="display:flex;justify-content:space-between;align-items:center">
+            Offer History
+            <button class="btn btn-ghost btn-sm" onclick="toggleOfferHistory(${card.id})">View History</button>
+        </div>
+        <div id="vpOfferHistory" style="display:none">
+            <div style="margin-bottom:8px">
+                <input id="vpOfferHistorySearch" placeholder="Search by MPN..."
+                    style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px"
+                    oninput="debounceOfferHistorySearch(${card.id})">
+            </div>
+            <div id="vpOfferHistoryList"><p class="vp-muted" style="font-size:11px">Loading...</p></div>
+            <div id="vpOfferHistoryMore" style="display:none;text-align:center;margin-top:8px">
+                <button class="btn btn-ghost btn-sm" onclick="loadMoreOfferHistory(${card.id})">Load More</button>
+            </div>
+        </div>
+    </div>`;
+
     // Reviews
     html += '<div class="vp-section"><div class="vp-label">Reviews</div>';
     if (card.reviews.length) {
@@ -2646,14 +2719,111 @@ async function openVendorPopup(cardId) {
     document.getElementById('vendorPopupContent').innerHTML = html;
     document.getElementById('vendorPopup').classList.add('open');
 
-    // Load contacts, activities, and intel asynchronously
+    // Load contacts, activities, metrics, and intel asynchronously
     loadVendorContacts(card.id);
     loadVendorActivities(card.id);
     loadVendorActivityStatus(card.id);
+    loadVendorEmailMetrics(card.id);
     const intelEl = document.getElementById('vpIntelCard');
     if (intelEl && card.display_name) {
         loadCompanyIntel(card.display_name, vendorDomain, intelEl);
     }
+}
+
+async function loadVendorEmailMetrics(cardId) {
+    const el = document.getElementById('vpEmailMetrics');
+    if (!el) return;
+    try {
+        const m = await apiFetch(`/api/vendors/${cardId}/email-metrics`);
+        const avgResp = m.avg_response_hours != null ? (m.avg_response_hours < 24 ? Math.round(m.avg_response_hours) + 'h' : Math.round(m.avg_response_hours / 24) + 'd') : '—';
+        el.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0;padding:8px 12px;background:var(--surface);border-radius:6px;border:1px solid var(--border);font-size:11px">
+            <div style="text-align:center"><div style="font-weight:800;font-size:14px;color:var(--blue)">${m.total_rfqs_sent || 0}</div><div style="color:var(--muted)">RFQs Sent</div></div>
+            <div style="text-align:center"><div style="font-weight:800;font-size:14px;color:var(--green)">${m.total_replies || 0}</div><div style="color:var(--muted)">Replies</div></div>
+            <div style="text-align:center"><div style="font-weight:800;font-size:14px;color:var(--amber)">${m.total_quotes || 0}</div><div style="color:var(--muted)">Quotes</div></div>
+            <div style="text-align:center"><div style="font-weight:800;font-size:14px">${m.response_rate != null ? Math.round(m.response_rate) + '%' : '—'}</div><div style="color:var(--muted)">Response Rate</div></div>
+            <div style="text-align:center"><div style="font-weight:800;font-size:14px">${avgResp}</div><div style="color:var(--muted)">Avg Response</div></div>
+            <div style="text-align:center"><div style="font-weight:800;font-size:14px;color:var(--purple)">${m.active_rfqs || 0}</div><div style="color:var(--muted)">Active RFQs</div></div>
+        </div>`;
+    } catch { el.innerHTML = ''; }
+}
+
+// ── Vendor Offer History ─────────────────────────────────────────────────
+let _offerHistoryOffset = 0;
+let _offerHistoryQuery = '';
+const debounceOfferHistorySearch = debounce((cardId) => { _offerHistoryOffset = 0; _offerHistoryQuery = document.getElementById('vpOfferHistorySearch')?.value?.trim() || ''; loadOfferHistory(cardId); }, 300);
+
+function toggleOfferHistory(cardId) {
+    const el = document.getElementById('vpOfferHistory');
+    if (!el) return;
+    const show = el.style.display === 'none';
+    el.style.display = show ? '' : 'none';
+    if (show) { _offerHistoryOffset = 0; _offerHistoryQuery = ''; loadOfferHistory(cardId); }
+}
+
+async function loadOfferHistory(cardId) {
+    const el = document.getElementById('vpOfferHistoryList');
+    if (!el) return;
+    if (_offerHistoryOffset === 0) el.innerHTML = '<p class="vp-muted" style="font-size:11px">Loading...</p>';
+    try {
+        let url = `/api/vendors/${cardId}/offer-history?offset=${_offerHistoryOffset}&limit=20`;
+        if (_offerHistoryQuery) url += '&q=' + encodeURIComponent(_offerHistoryQuery);
+        const data = await apiFetch(url);
+        const items = data.items || [];
+        let html = items.map(o => `<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0;border-bottom:1px solid var(--card2);font-size:11px">
+            <span><b class="cust-link" onclick="openMaterialPopup(${o.material_card_id})">${esc(o.mpn)}</b> ${o.manufacturer ? '<span style="color:var(--muted)">'+esc(o.manufacturer)+'</span>' : ''}</span>
+            <span style="display:flex;gap:8px;color:var(--text2)">
+                ${o.price != null ? '<span>$'+Number(o.price).toFixed(2)+'</span>' : ''}
+                ${o.qty ? '<span>×'+o.qty.toLocaleString()+'</span>' : ''}
+                <span style="color:var(--muted)">${o.times_seen || 1}× seen</span>
+                ${o.last_seen ? '<span style="color:var(--muted)">'+fmtDate(o.last_seen)+'</span>' : ''}
+            </span>
+        </div>`).join('');
+        if (_offerHistoryOffset === 0) el.innerHTML = html || '<p class="vp-muted" style="font-size:11px">No offer history</p>';
+        else el.innerHTML += html;
+        const more = document.getElementById('vpOfferHistoryMore');
+        if (more) more.style.display = items.length >= 20 ? '' : 'none';
+        _offerHistoryOffset += items.length;
+    } catch { if (_offerHistoryOffset === 0) el.innerHTML = '<p class="vp-muted" style="font-size:11px">Failed to load</p>'; }
+}
+
+function loadMoreOfferHistory(cardId) { loadOfferHistory(cardId); }
+
+// ── Vendor Inline Edit / Delete ──────────────────────────────────────────
+function editVendorField(cardId, field, el) {
+    if (el.querySelector('input')) return;
+    const currentVal = el.textContent.trim();
+    const input = document.createElement('input');
+    input.className = 'req-edit-input';
+    input.value = currentVal === '+ Add website' ? '' : currentVal;
+    input.style.cssText = 'font-size:inherit;padding:2px 6px;border:1px solid var(--border);border-radius:4px;width:100%;background:var(--white)';
+    el.textContent = '';
+    el.appendChild(input);
+    input.focus();
+    input.select();
+    const save = async () => {
+        const val = input.value.trim();
+        if (val === currentVal || (!val && currentVal === '+ Add website')) { openVendorPopup(cardId); return; }
+        try {
+            await apiFetch(`/api/vendors/${cardId}`, { method: 'PUT', body: { [field]: val } });
+            showToast('Vendor updated', 'success');
+            openVendorPopup(cardId);
+        } catch (e) { showToast('Failed to update vendor', 'error'); openVendorPopup(cardId); }
+    };
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); openVendorPopup(cardId); }
+    });
+}
+
+async function deleteVendor(cardId, name) {
+    if (!confirm(`Delete vendor "${name}"? This cannot be undone.`)) return;
+    try {
+        await apiFetch(`/api/vendors/${cardId}`, { method: 'DELETE' });
+        showToast('Vendor deleted', 'success');
+        document.getElementById('vendorPopup').classList.remove('open');
+        if (typeof loadVendorList === 'function') loadVendorList();
+    } catch (e) { showToast('Failed to delete vendor: ' + e.message, 'error'); }
 }
 
 let vpRating = 0;
@@ -3283,16 +3453,15 @@ async function openMaterialPopup(cardId) {
     catch { pricingHistory = { history: [] }; }
 
     let html = `<div class="mp-header">
-        <h2>${esc(card.display_mpn)}</h2>
+        <h2 onclick="editMaterialField(${card.id},'display_mpn',this)" style="cursor:pointer" title="Click to edit MPN">${esc(card.display_mpn)}</h2>
         <div class="mp-header-meta">
-            ${card.manufacturer ? `<span style="font-weight:600">${esc(card.manufacturer)}</span> · ` : ''}
+            ${card.manufacturer ? `<span onclick="editMaterialField(${card.id},'manufacturer',this)" style="font-weight:600;cursor:pointer" title="Click to edit">${esc(card.manufacturer)}</span> · ` : `<span onclick="editMaterialField(${card.id},'manufacturer',this)" style="cursor:pointer;color:var(--muted)" title="Click to add">+ Add manufacturer</span> · `}
             ${card.search_count} searches · Last searched ${card.last_searched_at ? fmtDate(card.last_searched_at) : 'never'}
+            ${window.__isAdmin ? `<button class="btn btn-danger btn-sm" onclick="deleteMaterial(${card.id},'${escAttr(card.display_mpn)}')" style="margin-left:12px;font-size:10px">Delete</button>` : ''}
         </div>
     </div>`;
 
-    if (card.description) {
-        html += `<div class="mp-section"><div class="mp-label">Description</div><div style="font-size:12px">${esc(card.description)}</div></div>`;
-    }
+    html += `<div class="mp-section"><div class="mp-label">Description</div><div onclick="editMaterialField(${card.id},'description',this)" style="font-size:12px;cursor:pointer" title="Click to edit">${card.description ? esc(card.description) : '<span style="color:var(--muted)">+ Add description</span>'}</div></div>`;
 
     // ── Offers section ──
     const offers = card.offers || [];
@@ -3379,6 +3548,46 @@ async function openVendorPopupByName(vendorName) {
         const exact = data.find(c => c.display_name.toLowerCase() === vendorName.toLowerCase());
         openVendorPopup(exact ? exact.id : data[0].id);
     }
+}
+
+// ── Material Inline Edit / Delete ────────────────────────────────────────
+function editMaterialField(cardId, field, el) {
+    if (el.querySelector('input,textarea')) return;
+    const currentVal = el.textContent.trim();
+    const isDesc = field === 'description';
+    const inp = document.createElement(isDesc ? 'textarea' : 'input');
+    inp.className = 'req-edit-input';
+    inp.value = (currentVal === '+ Add manufacturer' || currentVal === '+ Add description') ? '' : currentVal;
+    inp.style.cssText = 'font-size:inherit;padding:2px 6px;border:1px solid var(--border);border-radius:4px;width:100%;background:var(--white)';
+    if (isDesc) { inp.rows = 2; inp.style.resize = 'vertical'; }
+    el.textContent = '';
+    el.appendChild(inp);
+    inp.focus();
+    inp.select();
+    const save = async () => {
+        const val = inp.value.trim();
+        if (val === currentVal) { openMaterialPopup(cardId); return; }
+        try {
+            await apiFetch(`/api/materials/${cardId}`, { method: 'PUT', body: { [field]: val } });
+            showToast('Material updated', 'success');
+            openMaterialPopup(cardId);
+        } catch (e) { showToast('Failed to update material', 'error'); openMaterialPopup(cardId); }
+    };
+    inp.addEventListener('blur', save);
+    inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && !isDesc) { e.preventDefault(); inp.blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); openMaterialPopup(cardId); }
+    });
+}
+
+async function deleteMaterial(cardId, mpn) {
+    if (!confirm(`Delete material "${mpn}"? This cannot be undone.`)) return;
+    try {
+        await apiFetch(`/api/materials/${cardId}`, { method: 'DELETE' });
+        showToast('Material deleted', 'success');
+        document.getElementById('materialPopup').classList.remove('open');
+        if (typeof loadMaterialList === 'function') loadMaterialList();
+    } catch (e) { showToast('Failed to delete material: ' + e.message, 'error'); }
 }
 
 async function openMaterialPopupByMpn(mpn) {
@@ -4143,4 +4352,49 @@ async function toggleVpThreadMessages(conversationId, itemEl) {
     } catch (e) {
         msgContainer.innerHTML = '<p style="font-size:10px;color:var(--red)">Failed to load</p>';
     }
+}
+
+// ── Sales Notifications ──────────────────────────────────────────────────
+function toggleNotifications() {
+    const panel = document.getElementById('notifPanel');
+    if (!panel) return;
+    const opening = !panel.classList.contains('open');
+    panel.classList.toggle('open');
+    if (opening) loadNotifications();
+}
+
+async function loadNotifications() {
+    const el = document.getElementById('notifList');
+    if (!el) return;
+    try {
+        const data = await apiFetch('/api/sales/notifications');
+        const items = Array.isArray(data) ? data : (data.notifications || []);
+        if (!items.length) { el.innerHTML = '<p class="empty" style="font-size:12px">No notifications</p>'; return; }
+        el.innerHTML = items.map(n => `<div style="padding:6px 0;border-bottom:1px solid var(--card2);font-size:12px;cursor:pointer" onclick="${n.company_id ? 'goToCompany('+n.company_id+')' : ''}">
+            <div style="font-weight:600">${esc(n.subject || n.type || 'Notification')}</div>
+            <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10px">
+                <span>${esc(n.company_name || '')}</span>
+                <span>${n.created_at ? fmtDateTime(n.created_at) : ''}</span>
+            </div>
+        </div>`).join('');
+    } catch { el.innerHTML = '<p class="empty" style="font-size:12px">Failed to load</p>'; }
+}
+
+async function loadNotificationBadge() {
+    const badge = document.getElementById('notifBadge');
+    if (!badge) return;
+    try {
+        const data = await apiFetch('/api/sales/notifications');
+        const items = Array.isArray(data) ? data : (data.notifications || []);
+        const count = items.length;
+        badge.textContent = count;
+        badge.style.display = count > 0 ? 'flex' : 'none';
+    } catch { badge.style.display = 'none'; }
+}
+
+// Load notification badge on page init
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(loadNotificationBadge, 2000));
+} else {
+    setTimeout(loadNotificationBadge, 2000);
 }

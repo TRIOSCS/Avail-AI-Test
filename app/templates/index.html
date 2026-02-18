@@ -1152,6 +1152,7 @@
         .btn-p{background:var(--teal);color:#fff}.btn-p:hover{background:#3a5c8a}
         .btn-g{background:var(--green);color:#fff}.btn-g:hover{background:#0d8f6d}
         .btn-y{background:var(--amber);color:#fff}.btn-y:hover{background:#d4930a}
+        .btn-q{background:#8b5cf6;color:#fff;border:none}.btn-q:hover{background:#7c3aed}
         .btn-flash{animation:flash-green 1.2s ease-in-out infinite}
         @keyframes flash-green{0%,100%{opacity:1}50%{opacity:.35}}
 
@@ -1269,7 +1270,29 @@
                 <option value="none">No Deadline</option>
             </select>
         </div>
+        <div class="filter-wrap">
+            <button class="filter-btn" onclick="toggleFilter('mainFilterPanel')">
+                Filters <span class="filter-badge" id="filterBadge">0</span>
+            </button>
+            <div id="mainFilterPanel" class="filter-panel">
+                <div id="filterGroups"></div>
+                <div class="filter-actions">
+                    <button class="fa-clear" onclick="clearAllFilters()">Clear</button>
+                    <button class="fa-apply" onclick="applyFilters()">Apply</button>
+                </div>
+            </div>
+        </div>
         <button class="tb-btn" id="btnMyAccounts" onclick="toggleMyAccounts(this)">My Accounts</button>
+        <div class="filter-wrap" style="margin-left:auto">
+            <button class="filter-btn" onclick="toggleNotifications()" style="position:relative;padding:6px 10px" title="Notifications">
+                &#x1f514;
+                <span id="notifBadge" class="filter-badge" style="position:absolute;top:-4px;right:-4px;background:var(--red)">0</span>
+            </button>
+            <div id="notifPanel" class="filter-panel" style="right:0;left:auto;width:360px;max-height:400px;overflow-y:auto">
+                <div style="font-weight:700;font-size:13px;margin-bottom:8px">Notifications</div>
+                <div id="notifList"><p class="empty" style="font-size:12px">No notifications</p></div>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -1316,6 +1339,7 @@
 
     <!-- VIEW: Requisition List (v7 — header/tabs/filters are in toparea) -->
     <div id="view-list">
+        <div id="followUpsPanel" style="display:none"></div>
         <div id="reqList"><p class="empty">Loading…</p></div>
     </div>
 
@@ -2139,10 +2163,12 @@
             <button class="fp on" onclick="switchPerfTab('vendors',this)">Vendor Scorecard</button>
             <button class="fp" onclick="switchPerfTab('buyers',this)">Buyer Leaderboard</button>
             <button class="fp" onclick="switchPerfTab('sales',this)">Salesperson Scorecard</button>
+            <button class="fp" id="perfDigestTab" onclick="switchPerfTab('digest',this)" style="display:none">Team Digest</button>
         </div>
         <div id="perfVendorPanel"><p class="empty">Loading...</p></div>
         <div id="perfBuyerPanel" style="display:none"><p class="empty">Loading...</p></div>
         <div id="perfSalesPanel" style="display:none"><p class="empty">Loading...</p></div>
+        <div id="perfDigestPanel" style="display:none"><p class="empty">Loading...</p></div>
     </div>
 
 
@@ -2161,6 +2187,7 @@
             <button class="tab" onclick="switchSettingsTab('enrichment',this)">Enrichment</button>
             <button class="tab settings-tab-users" onclick="switchSettingsTab('unmatched',this)">Unmatched Queue</button>
             <button class="tab settings-tab-users" onclick="switchSettingsTab('teams',this)">Teams Integration</button>
+            <button class="tab settings-tab-users" onclick="switchSettingsTab('import',this)">Import</button>
         </div>
 
         <div id="settings-users" class="settings-panel">
@@ -2189,6 +2216,23 @@
 
         <div id="settings-teams" class="settings-panel" style="display:none">
             <div id="teamsConfigContent"><p class="empty">Loading...</p></div>
+        </div>
+
+        <div id="settings-import" class="settings-panel" style="display:none">
+            <div class="card" style="max-width:600px;padding:20px;margin-bottom:16px">
+                <h3>Import Customers</h3>
+                <p style="font-size:11px;color:var(--muted)">CSV: company_name, site_name, contact_name, contact_email, contact_phone</p>
+                <input type="file" id="customerImportFile" accept=".csv" style="margin:8px 0">
+                <button class="btn btn-primary btn-sm" onclick="importCustomers()">Import</button>
+                <div id="customerImportStatus" style="margin-top:8px;font-size:12px"></div>
+            </div>
+            <div class="card" style="max-width:600px;padding:20px">
+                <h3>Import Vendors</h3>
+                <p style="font-size:11px;color:var(--muted)">CSV: vendor_name, domain, website, contact_name, contact_email</p>
+                <input type="file" id="vendorImportFile" accept=".csv" style="margin:8px 0">
+                <button class="btn btn-primary btn-sm" onclick="importVendors()">Import</button>
+                <div id="vendorImportStatus" style="margin-top:8px;font-size:12px"></div>
+            </div>
         </div>
 
         <div id="settings-enrichment" class="settings-panel" style="display:none">

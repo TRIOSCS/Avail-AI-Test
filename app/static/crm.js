@@ -600,7 +600,7 @@ function renderOffers() {
             if (images.length) {
                 photoHtml = `<span onclick="openOfferGallery(${o.id});event.stopPropagation()" style="display:inline-flex;align-items:center;gap:3px;margin-top:3px;padding:2px 8px;border-radius:10px;background:var(--teal-light,#d1ecf1);color:var(--teal,#0c7c84);font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--teal,#0c7c84)">📷 ${images.length} Photo${images.length>1?'s':''} — View</span>`;
             }
-            const fileHtml = nonImages.map(a => `<a href="${esc(a.onedrive_url||'#')}" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:underline">${esc(a.file_name)}</a>`).join(' ');
+            const fileHtml = nonImages.map(a => `<a href="${esc(a.onedrive_url||'#')}" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:underline">${esc(a.file_name)}</a><button onclick="event.stopPropagation();deleteOfferAttachment(${a.id})" style="border:none;background:none;color:var(--red);cursor:pointer;font-size:10px;padding:0 2px" title="Remove attachment">&times;</button>`).join(' ');
 
             const enteredStr = o.entered_by ? '<span style="font-size:10px;color:var(--muted)">by '+esc(o.entered_by)+'</span>' : '';
             return `
@@ -3064,6 +3064,9 @@ let _perfVendorOrder = 'desc';
 function showPerformance() {
     showView('view-performance');
     currentReqId = null;
+    // Show digest tab for admins
+    const digestTab = document.getElementById('perfDigestTab');
+    if (digestTab) digestTab.style.display = window.__isAdmin ? '' : 'none';
     switchPerfTab('vendors');
 }
 
@@ -3074,9 +3077,60 @@ function switchPerfTab(tab, btn) {
     document.getElementById('perfVendorPanel').style.display = tab === 'vendors' ? '' : 'none';
     document.getElementById('perfBuyerPanel').style.display = tab === 'buyers' ? '' : 'none';
     document.getElementById('perfSalesPanel').style.display = tab === 'sales' ? '' : 'none';
+    const digestPanel = document.getElementById('perfDigestPanel');
+    if (digestPanel) digestPanel.style.display = tab === 'digest' ? '' : 'none';
     if (tab === 'vendors') loadVendorScorecards();
     else if (tab === 'buyers') loadBuyerLeaderboard();
     else if (tab === 'sales') loadSalespersonScorecard();
+    else if (tab === 'digest') loadManagerDigest();
+}
+
+async function loadManagerDigest() {
+    const el = document.getElementById('perfDigestPanel');
+    if (!el) return;
+    el.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        const data = await apiFetch('/api/sales/manager-digest');
+        let html = '<div style="padding:0 16px">';
+        // Summary cards
+        const s = data.summary || data;
+        html += '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px">';
+        const cards = [
+            { label: 'Active RFQs', val: s.active_rfqs ?? s.total_active ?? '—', color: 'var(--blue)' },
+            { label: 'Offers Today', val: s.offers_today ?? s.new_offers ?? '—', color: 'var(--green)' },
+            { label: 'Quotes Sent', val: s.quotes_sent ?? s.total_quotes ?? '—', color: 'var(--purple)' },
+            { label: 'Pending Follow-ups', val: s.pending_followups ?? s.follow_ups ?? '—', color: 'var(--amber)' },
+            { label: 'Response Rate', val: s.response_rate != null ? Math.round(s.response_rate) + '%' : '—', color: 'var(--teal)' }
+        ];
+        for (const c of cards) {
+            html += `<div class="card" style="padding:16px;min-width:120px;text-align:center">
+                <div style="font-size:24px;font-weight:800;color:${c.color}">${c.val}</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:4px">${c.label}</div>
+            </div>`;
+        }
+        html += '</div>';
+        // Team activity table
+        const team = data.team || data.team_activity || [];
+        if (team.length) {
+            html += '<h3 style="font-size:14px;margin-bottom:8px">Team Activity</h3>';
+            html += '<table class="tbl"><thead><tr><th>Name</th><th>RFQs</th><th>Offers</th><th>Quotes</th><th>Response Rate</th><th>Last Active</th></tr></thead><tbody>';
+            for (const m of team) {
+                html += `<tr>
+                    <td><b>${esc(m.name || m.user_name || '')}</b></td>
+                    <td class="mono">${m.rfqs ?? m.active_rfqs ?? '—'}</td>
+                    <td class="mono">${m.offers ?? m.total_offers ?? '—'}</td>
+                    <td class="mono">${m.quotes ?? m.total_quotes ?? '—'}</td>
+                    <td class="mono">${m.response_rate != null ? Math.round(m.response_rate) + '%' : '—'}</td>
+                    <td style="font-size:11px">${m.last_active ? fmtDateTime(m.last_active) : '—'}</td>
+                </tr>`;
+            }
+            html += '</tbody></table>';
+        }
+        html += '</div>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<p class="empty">Failed to load digest</p>';
+    }
 }
 
 async function loadVendorScorecards(sortBy, order) {
