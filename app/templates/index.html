@@ -1073,7 +1073,7 @@
         /* Top area — logo left, controls right, all on grey */
         .toparea{display:flex;align-items:center;gap:12px;padding:2px 16px;position:relative;z-index:100}
         .toparea img{height:96px;flex-shrink:0}
-        .topcontrols{display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap}
+        .topcontrols{display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap;justify-content:space-between}
 
         /* Sidebar rail — blue tab centered on page with chevron */
         .sb-rail{position:fixed;top:50%;left:0;transform:translateY(-50%);height:160px;width:17px;background:var(--blue);z-index:201;cursor:pointer;transition:left .3s,width .15s,background .15s,box-shadow .15s;display:flex;align-items:center;justify-content:center;border-radius:0 6px 6px 0}
@@ -1125,7 +1125,7 @@
         .tb-select:hover,.tb-select:focus{border-color:var(--teal);outline:none}
 
         /* Search box — prominent */
-        .sbox{background:var(--white);border:2px solid var(--teal);border-radius:8px;padding:6px 14px;font-size:13px;color:var(--text);width:280px;font-family:inherit;font-weight:500;box-shadow:0 0 0 3px rgba(74,111,165,.08)}
+        .sbox{background:var(--white);border:2px solid var(--teal);border-radius:8px;padding:6px 14px;font-size:13px;color:var(--text);flex:1;min-width:180px;font-family:inherit;font-weight:500;box-shadow:0 0 0 3px rgba(74,111,165,.08)}
         .sbox:focus{outline:none;box-shadow:0 0 0 4px rgba(74,111,165,.18)}
         .sbox::placeholder{color:var(--muted)}
 

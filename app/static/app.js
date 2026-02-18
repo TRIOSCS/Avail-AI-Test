@@ -849,6 +849,7 @@ function renderReqList() {
             <th onclick="sortReqList('sent')"${thClass('sent')}>RFQs Sent ${sa('sent')}</th>
             <th onclick="sortReqList('resp')"${thClass('resp')}>Resp % ${sa('resp')}</th>
             <th onclick="sortReqList('searched')"${thClass('searched')}>Searched ${sa('searched')}</th>
+            <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By ${sa('deadline')}</th>
             <th style="width:60px"></th>
         </tr></thead>`;
@@ -976,9 +977,10 @@ function _renderReqRow(r) {
             <td class="mono">${sent}</td>
             <td class="mono">${respPct}</td>
             <td style="font-size:11px">${searched}</td>
+            <td class="mono" style="font-size:11px">${age}</td>
             <td>${dl}</td>`;
         actions = `<td style="white-space:nowrap"><button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})">&#x1f4e5; Archive</button> ${srcBtn}</td>`;
-        colspan = 11;
+        colspan = 12;
     } else if (v === 'archive') {
         // Archive: Parts, Offers, Outcome, Sales, Age
         dataCells = `
