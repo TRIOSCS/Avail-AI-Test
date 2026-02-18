@@ -1071,15 +1071,15 @@
 
         /* Top area — logo left, controls right, all on grey */
         .toparea{display:flex;align-items:center;gap:12px;padding:4px 16px;position:relative;z-index:100}
-        .toparea img{height:44px;flex-shrink:0}
+        .toparea img{height:72px;flex-shrink:0}
         .topcontrols{display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap}
 
         /* Sidebar rail — blue tab centered on page with chevron */
-        .sb-rail{position:fixed;top:50%;left:0;transform:translateY(-50%);height:120px;width:20px;background:var(--blue);z-index:201;cursor:pointer;transition:width .15s,background .15s,box-shadow .15s;display:flex;align-items:center;justify-content:center;border-radius:0 6px 6px 0}
-        .sb-rail:hover{width:26px;background:var(--blue-dk);box-shadow:2px 0 10px rgba(74,111,165,.3)}
-        .sb-rail svg{width:14px;height:14px;fill:none;stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;opacity:.85;transition:opacity .15s}
+        .sb-rail{position:fixed;top:50%;left:0;transform:translateY(-50%);height:160px;width:17px;background:var(--blue);z-index:201;cursor:pointer;transition:width .15s,background .15s,box-shadow .15s,opacity .2s;display:flex;align-items:center;justify-content:center;border-radius:0 6px 6px 0}
+        .sb-rail:hover{width:22px;background:var(--blue-dk);box-shadow:2px 0 10px rgba(74,111,165,.3)}
+        .sb-rail svg{width:12px;height:12px;fill:none;stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;opacity:.85;transition:opacity .15s}
         .sb-rail:hover svg{opacity:1}
-        body.sb-open .sb-rail{display:none}
+        body.sb-open .sb-rail{opacity:0;pointer-events:none}
 
         /* v7 Sidebar overlay nav */
         .sidebar-nav{display:flex;flex-direction:column;gap:2px;padding:10px 8px;flex:1}
@@ -1218,8 +1218,8 @@
     </div>
 </div>
 
-<!-- Sidebar rail — blue strip with chevron that opens sidebar on click -->
-<div class="sb-rail" onclick="toggleSidebar()" title="Open menu" aria-label="Open sidebar">
+<!-- Sidebar rail — blue strip with chevron, hover to open -->
+<div class="sb-rail" onmouseenter="openSidebar()" title="Open menu" aria-label="Open sidebar">
     <svg viewBox="0 0 10 14"><polyline points="2,2 8,7 2,12"/></svg>
 </div>
 
@@ -1231,10 +1231,10 @@
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleMobileSidebar()"></div>
 
 <!-- Click-away overlay to close sidebar -->
-<div class="sb-overlay" onclick="toggleSidebar()"></div>
+<div class="sb-overlay" onmouseenter="closeSidebar()"></div>
 
 <!-- SIDEBAR — v7 slide-out -->
-<aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
+<aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation" onmouseleave="closeSidebar()">
     <nav class="sidebar-nav">
         <button class="active" id="navReqs" onclick="sidebarNav('reqs',this)"><span class="ni">&#x1f4cb;</span> RFQs</button>
         <button id="navCustomers" onclick="sidebarNav('customers',this)"><span class="ni">&#x1f3e2;</span> Customers</button>
