@@ -598,10 +598,13 @@ function _renderDrillDownTable(rfqId) {
     if (!dd) return;
     const reqs = _ddReqCache[rfqId] || [];
     if (!reqs.length) { dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">No parts</span>'; return; }
+    const DD_LIMIT = 100;
+    const showAll = dd.dataset.showAll === '1';
+    const visible = showAll ? reqs : reqs.slice(0, DD_LIMIT);
     let html = `<table class="dtbl"><thead><tr>
         <th>MPN</th><th>Qty</th><th>Target $</th><th>Vendors</th><th>Condition</th><th>Date Codes</th>
     </tr></thead><tbody>`;
-    for (const r of reqs) {
+    for (const r of visible) {
         html += `<tr>
             <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'primary_mpn')">${esc(r.primary_mpn || '—')}</td>
             <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'target_qty')">${r.target_qty || 0}</td>
@@ -612,6 +615,9 @@ function _renderDrillDownTable(rfqId) {
         </tr>`;
     }
     html += '</tbody></table>';
+    if (!showAll && reqs.length > DD_LIMIT) {
+        html += `<a onclick="event.stopPropagation();this.parentElement.dataset.showAll='1';_renderDrillDownTable(${rfqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin-top:4px">Show all ${reqs.length} parts\u2026</a>`;
+    }
     dd.innerHTML = html;
 }
 
@@ -645,10 +651,10 @@ function editDrillCell(td, rfqId, reqId, field) {
         else if (field === 'target_qty') body[field] = parseInt(val) || 1;
         else body[field] = val;
         try {
-            const updated = await apiFetch(`/api/requirements/${reqId}`, { method: 'PUT', body });
-            // Update cache in-place
+            await apiFetch(`/api/requirements/${reqId}`, { method: 'PUT', body });
+            // Update cache in-place from the body we sent
             const idx = reqs.findIndex(x => x.id === reqId);
-            if (idx >= 0) Object.assign(reqs[idx], updated);
+            if (idx >= 0) Object.assign(reqs[idx], body);
         } catch(e) { console.error('editDrillCell:', e); }
         _renderDrillDownTable(rfqId);
     };
@@ -748,7 +754,8 @@ function renderReqList() {
         <th onclick="sortReqList('offers')"${thClass('offers')}>Offers <span class="sort-arrow">${_sortArrow('offers')}</span></th>
         <th onclick="sortReqList('status')"${thClass('status')}>Status <span class="sort-arrow">${_sortArrow('status')}</span></th>
         <th onclick="sortReqList('sales')"${thClass('sales')}>Sales <span class="sort-arrow">${_sortArrow('sales')}</span></th>
-        <th onclick="sortReqList('deadline')"${thClass('deadline')}>Needed By <span class="sort-arrow">${_sortArrow('deadline')}</span></th>
+        <th onclick="sortReqList('age')"${thClass('age')}>Age <span class="sort-arrow">${_sortArrow('age')}</span></th>
+        <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By <span class="sort-arrow">${_sortArrow('deadline')}</span></th>
     </tr></thead>`;
 
     const rows = data.map(r => _renderReqRow(r)).join('');
