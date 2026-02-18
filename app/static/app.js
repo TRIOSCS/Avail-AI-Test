@@ -576,6 +576,7 @@ async function toggleDrillDown(reqId) {
     const opening = !drow.classList.contains('open');
     drow.classList.toggle('open');
     if (arrow) arrow.classList.toggle('open');
+    _updateDrillToggleLabel();
     if (!opening) return;
     // Fetch requirements on first open, then cache
     const dd = drow.querySelector('.dd-content');
@@ -822,7 +823,7 @@ function renderReqList() {
     // v7 table with sortable headers + expandable drill-down rows
     const thClass = (col) => _reqSortCol === col ? ' class="sorted"' : '';
     const thead = `<thead><tr>
-        <th style="width:28px;cursor:pointer" onclick="collapseAllRows()" title="Collapse all">\u25bc</th>
+        <th style="width:80px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6 Expand</th>
         <th onclick="sortReqList('name')"${thClass('name')}>RFQ <span class="sort-arrow">${_sortArrow('name')}</span></th>
         <th onclick="sortReqList('reqs')"${thClass('reqs')}>Reqs <span class="sort-arrow">${_sortArrow('reqs')}</span></th>
         <th onclick="sortReqList('sourced')"${thClass('sourced')}>Sourced <span class="sort-arrow">${_sortArrow('sourced')}</span></th>
@@ -886,6 +887,18 @@ function _renderReqRow(r) {
         else if (h < 96) dot = ' <span class="new-offers-dot red" title="New offers"></span>';
     }
 
+    // Source/status action button
+    let srcBtn;
+    if (r.status === 'draft') {
+        srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();submitToSourcing(${r.id})" title="Submit to sourcing">\u25b6 Source</button>`;
+    } else if (offers > 0 && r.has_new_offers) {
+        srcBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','offers')" title="New offers — click to review">Offers (${offers})</button>`;
+    } else if (offers > 0) {
+        srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','offers')" title="View offers">Offers (${offers})</button>`;
+    } else {
+        srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','sources')" title="Sourcing in progress">Sourcing</button>`;
+    }
+
     return `<tr onclick="toggleDrillDown(${r.id})">
         <td><button class="ea" id="a-${r.id}">\u25b6</button></td>
         <td><b>${esc(cust)}</b>${dot}<br><span style="font-size:11px;color:var(--muted)">${esc(r.name || '')}</span></td>
@@ -896,7 +909,7 @@ function _renderReqRow(r) {
         <td>${esc(r.created_by_name || '')}</td>
         <td class="mono" style="font-size:11px">${age}</td>
         <td>${dl}</td>
-        <td><button class="btn btn-g btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','sources')" title="Source all parts">\u25b6 Source</button></td>
+        <td>${srcBtn}</td>
     </tr>
     <tr class="drow" id="d-${r.id}"><td colspan="10">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -1115,9 +1128,27 @@ function toggleMyAccounts(btn) {
     renderReqList();
 }
 
-function collapseAllRows() {
-    document.querySelectorAll('.drow.open').forEach(row => row.classList.remove('open'));
-    document.querySelectorAll('.ea.open').forEach(a => a.classList.remove('open'));
+function toggleAllDrillRows() {
+    const anyOpen = document.querySelectorAll('.drow.open').length > 0;
+    if (anyOpen) {
+        // Collapse all
+        document.querySelectorAll('.drow.open').forEach(row => row.classList.remove('open'));
+        document.querySelectorAll('.ea.open').forEach(a => a.classList.remove('open'));
+    } else {
+        // Expand all — trigger toggleDrillDown for each row to fetch data
+        document.querySelectorAll('.drow').forEach(row => {
+            const id = parseInt(row.id.replace('d-', ''));
+            if (id) toggleDrillDown(id);
+        });
+    }
+    _updateDrillToggleLabel();
+}
+
+function _updateDrillToggleLabel() {
+    const el = document.getElementById('ddToggleAll');
+    if (!el) return;
+    const anyOpen = document.querySelectorAll('.drow.open').length > 0;
+    el.textContent = anyOpen ? '\u25bc Collapse' : '\u25b6 Expand';
 }
 
 function applyDeadlineFilter() {
@@ -1512,6 +1543,19 @@ function updateSearchAllBar() {
     textEl.textContent = n > 0
         ? `Search ${n} selected part${n !== 1 ? 's' : ''}`
         : 'Select parts to search';
+}
+
+async function submitToSourcing(reqId) {
+    // Submit a draft RFQ to sourcing — opens detail and searches all parts
+    const reqInfo = _reqListData.find(r => r.id === reqId);
+    showDetail(reqId, reqInfo ? reqInfo.name : '', 'sources');
+    // Wait for detail to load, then select all and search
+    await new Promise(resolve => setTimeout(resolve, 600));
+    // Select all requirements
+    const checkboxes = document.querySelectorAll('.req-checkbox');
+    checkboxes.forEach(cb => { cb.checked = true; selectedRequirements.add(parseInt(cb.value)); });
+    updateSearchBtnCount();
+    searchAll();
 }
 
 function submitOrSearch() {
