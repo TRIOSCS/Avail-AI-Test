@@ -70,6 +70,29 @@ async function loadCustomers() {
     } catch (e) { showToast('Failed to load customers', 'error'); console.error(e); }
 }
 
+async function goToCompany(companyId) {
+    if (!companyId) return;
+    showView('view-customers');
+    currentReqId = null;
+    // Load all customers (unfiltered) so the target company is visible
+    try {
+        crmCustomers = await apiFetch('/api/companies');
+        renderCustomers();
+    } catch (e) { showToast('Failed to load customers', 'error'); return; }
+    // Find and expand the target company card
+    setTimeout(() => {
+        const card = document.querySelector(`.cust-card[data-company-id="${companyId}"]`);
+        if (card) {
+            card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if (!card.classList.contains('expanded')) {
+                toggleCompanyCard(card, companyId);
+            }
+        }
+    }, 100);
+    // Highlight sidebar
+    navHighlight(document.getElementById('navCustomers'));
+}
+
 function renderCustomers() {
     const el = document.getElementById('custList');
     const countEl = document.getElementById('custFilterCount');
@@ -107,7 +130,7 @@ function renderCustomers() {
         const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
         const domain = c.domain || (c.website ? c.website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
         return `
-        <div class="card cust-card" id="custCard-${c.id}">
+        <div class="card cust-card" id="custCard-${c.id}" data-company-id="${c.id}">
             <div class="cust-header" onclick="toggleCompanyCard(this.parentElement,${c.id})">
                 <span class="cust-expand">▶</span>
                 <span class="cust-name">${esc(displayName)}</span>

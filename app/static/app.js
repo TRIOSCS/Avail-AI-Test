@@ -386,8 +386,15 @@ function showDetail(id, name, tab) {
     const custEl = document.getElementById('detailCustomer');
     if (custEl) {
         const custName = _reqCustomerMap[id];
-        custEl.textContent = custName || '+ Link Customer';
-        custEl.style.color = custName ? '' : 'var(--teal)';
+        const reqInfo2 = _reqListData.find(r => r.id === id);
+        const compId = reqInfo2 ? reqInfo2.company_id : null;
+        if (custName && compId) {
+            custEl.innerHTML = `<span class="cust-link" onclick="goToCompany(${compId})">${esc(custName)}</span>`;
+            custEl.style.color = '';
+        } else {
+            custEl.textContent = custName || '+ Link Customer';
+            custEl.style.color = custName ? '' : 'var(--teal)';
+        }
     }
     // Hide site picker when switching requisitions
     const picker = document.getElementById('detailSitePicker');
@@ -903,7 +910,7 @@ function _renderReqRow(r) {
 
     return `<tr onclick="toggleDrillDown(${r.id})">
         <td><button class="ea" id="a-${r.id}">\u25b6</button></td>
-        <td><b>${esc(cust)}</b>${dot}<br><span style="font-size:11px;color:var(--muted)">${esc(r.name || '')}</span></td>
+        <td>${r.company_id ? `<b class="cust-link" onclick="event.stopPropagation();goToCompany(${r.company_id})">${esc(cust)}</b>` : `<b>${esc(cust)}</b>`}${dot}<br><span style="font-size:11px;color:var(--muted)">${esc(r.name || '')}</span></td>
         <td class="mono">${total}</td>
         <td><div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div><span class="prog-txt">${sourced}/${total}</span></div></td>
         <td class="mono">${offers}</td>
@@ -1852,7 +1859,7 @@ function renderSources() {
                 ${isBuyer() ? `<input type="checkbox" ${checked} onchange="toggleSighting('${key}')">` : ''}
                 <div class="sc-body">
                     <div class="sc-top">
-                        <span class="sc-vendor" title="${escAttr(s.vendor_name)}">${esc(s.vendor_name)}</span>
+                        ${vc.card_id ? `<span class="sc-vendor cust-link" title="${escAttr(s.vendor_name)}" onclick="event.stopPropagation();openVendorPopup(${vc.card_id})">${esc(s.vendor_name)}</span>` : `<span class="sc-vendor" title="${escAttr(s.vendor_name)}">${esc(s.vendor_name)}</span>`}
                         ${ratingHtml}
                         <div class="sc-key-vals">
                             <span class="sc-detail-label">QTY</span>${qtyHtml}

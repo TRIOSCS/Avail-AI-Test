@@ -1155,6 +1155,9 @@
         .btn-flash{animation:flash-green 1.2s ease-in-out infinite}
         @keyframes flash-green{0%,100%{opacity:1}50%{opacity:.35}}
 
+        /* Clickable company/vendor name links */
+        .cust-link{cursor:pointer;color:var(--blue);transition:color .15s}.cust-link:hover{color:var(--teal);text-decoration:underline}
+
         /* Expand arrow + detail rows */
         .ea{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:4px;cursor:pointer;transition:transform .15s;font-size:10px;color:var(--muted);border:1px solid var(--border);background:var(--white)}
         .ea:hover{background:var(--surface);color:var(--text)}.ea.open{transform:rotate(90deg)}

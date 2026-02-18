@@ -189,6 +189,11 @@ async def list_requisitions(
                 "name": r.name,
                 "status": r.status,
                 "customer_site_id": r.customer_site_id,
+                "company_id": (
+                    r.customer_site.company_id
+                    if r.customer_site
+                    else None
+                ),
                 "customer_display": (
                     f"{r.customer_site.company.name} — {r.customer_site.site_name}"
                     if r.customer_site and r.customer_site.company
