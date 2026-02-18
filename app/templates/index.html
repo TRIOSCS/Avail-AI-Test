@@ -76,7 +76,7 @@
         .shell{display:flex;height:100vh;overflow:hidden}
 
         /* Sidebar */
-        .sidebar{position:fixed;top:104px;left:0;bottom:0;width:var(--sbw);background:var(--white);border-right:1px solid var(--border);box-shadow:2px 0 12px rgba(0,0,0,.06);z-index:150;transform:translateX(-100%);transition:transform .3s ease;display:flex;flex-direction:column;overflow:hidden}
+        .sidebar{position:fixed;top:100px;left:0;bottom:0;width:var(--sbw);background:var(--white);border-right:1px solid var(--border);box-shadow:2px 0 12px rgba(0,0,0,.06);z-index:150;transform:translateX(-100%);transition:transform .3s ease;display:flex;flex-direction:column;overflow:hidden}
         .sidebar.collapsed{width:var(--sidebar-collapsed)}
         .logo-zone{height:58px;flex-shrink:0;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
         .logo-avail{position:absolute;display:flex;justify-content:center;align-items:center;width:100%;padding:0 14px;transition:opacity .18s,transform .18s}
@@ -109,7 +109,7 @@
 
         .sidebar-bottom{margin-top:auto;display:flex;flex-direction:column}
         .sidebar-toggle-zone{padding:8px 10px;display:flex;justify-content:center;border-top:1px solid rgba(255,255,255,.12)}
-        .sidebar-footer{border-top:1px solid var(--border);padding:10px 14px;display:flex;align-items:center;gap:8px}
+        .sidebar-footer{border-top:1px solid var(--border);padding:10px 14px;display:flex;align-items:center;gap:8px;flex-shrink:0}
         .sidebar-user{display:flex;align-items:center;gap:8px;padding:4px;font-size:12px;color:rgba(255,255,255,.75);cursor:default}
         .sidebar-user-avatar{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.15);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
         .sidebar-user-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;transition:opacity .22s}
@@ -1268,6 +1268,7 @@
         <button id="navBuyPlans" onclick="sidebarNav('buyplans',this)"><span class="ni">&#x1f4e6;</span> Buy Plans</button>
         <button id="navScorecards" onclick="sidebarNav('performance',this)"><span class="ni">&#x1f4ca;</span> Scorecards</button>
         <button id="navProactive" onclick="sidebarNav('proactive',this)" style="display:none"><span class="ni">&#x2b50;</span> Proactive</button>
+        <button id="navSettings" onclick="sidebarNav('settings',this)" style="display:none"><span class="ni">&#x2699;</span> Settings</button>
         <button class="nav-logout" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())"><span class="ni">&#x1f6aa;</span> Logout</button>
     </nav>
     <div class="sidebar-footer">
@@ -1275,16 +1276,6 @@
         <span class="un">{{ user_name }}</span>
         <span id="roleBadge" style="display:none"></span>
         {% if is_admin %}<span class="rb">Admin</span>{% endif %}
-        <button class="gb" id="settingsMenu" onclick="toggleSettingsDropdown()" title="Settings" style="display:none">&#x2699;</button>
-        <div class="settings-dropdown-content" id="settingsDropdownContent" style="display:none;margin-top:4px;background:var(--white);border:1px solid var(--border);border-radius:6px">
-            <a onclick="openSettingsTab('users')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">Users</a>
-            <a onclick="openSettingsTab('health')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">System Health</a>
-            <a onclick="openSettingsTab('scoring')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">Scoring Weights</a>
-            <a onclick="openSettingsTab('config')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">Configuration</a>
-            <a onclick="openSettingsTab('sources')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">Data Sources</a>
-            <a onclick="openSettingsTab('enrichment')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">Enrichment</a>
-            <a onclick="openSettingsTab('create-user')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">Create User</a>
-        </div>
         <span id="m365Status" style="display:none;font-size:10px;padding:4px 8px"><span id="m365Dot"></span><span id="m365Label"></span></span>
     </div>
 </aside>

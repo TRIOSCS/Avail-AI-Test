@@ -288,9 +288,11 @@ function applyRoleGating() {
         if (myReqsBtn) myReqsBtn.style.display = 'none';
         if (myReqsDiv) myReqsDiv.style.display = 'none';
     }
-    // Settings gear visible to admin and dev_assistant
+    // Settings nav visible to admin and dev_assistant
     const settingsMenu = document.getElementById('settingsMenu');
     if (settingsMenu && (window.__isAdmin || window.__isDevAssistant)) settingsMenu.style.display = '';
+    const navSettings = document.getElementById('navSettings');
+    if (navSettings && (window.__isAdmin || window.__isDevAssistant)) navSettings.style.display = '';
     // Dev assistants: hide Users/Scoring/Create User/Data Import tabs
     if (window.__isDevAssistant && !window.__isAdmin) {
         document.querySelectorAll('.settings-tab-users, .settings-tab-scoring').forEach(el => el.style.display = 'none');
@@ -1182,7 +1184,8 @@ function sidebarNav(page, el) {
         materials: () => showMaterials(),
         buyplans: () => showBuyPlans(),
         proactive: () => showProactiveOffers(),
-        performance: () => showPerformance()
+        performance: () => showPerformance(),
+        settings: () => showSettings()
     };
     if (routes[page]) routes[page]();
 }
