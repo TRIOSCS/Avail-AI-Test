@@ -513,6 +513,12 @@ const debouncedReqListSearch = debounce(() => {
     else renderReqList();  // Short input: client-side only
 }, 300);
 
+function submitReqListSearch() {
+    const q = (document.getElementById('reqListFilter')?.value || '').trim();
+    if (q) loadRequisitions(q);
+    else loadRequisitions();
+}
+
 async function loadRequisitions(query = '') {
     try {
         const url = query ? `/api/requisitions?q=${encodeURIComponent(query)}` : '/api/requisitions';

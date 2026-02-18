@@ -147,12 +147,15 @@ async def list_requisitions(
 
     if q.strip():
         safe_q = q.strip().replace("%", r"\%").replace("_", r"\_")
-        from sqlalchemy import or_, exists
-        # Search by req name, customer name, or part number (MPN)
+        from sqlalchemy import or_, exists, cast, String
+        # Search by req name, customer name, primary MPN, or substitutes
         mpn_match = exists(
             select(Requirement.id).where(
                 Requirement.requisition_id == Requisition.id,
-                Requirement.primary_mpn.ilike(f"%{safe_q}%"),
+                or_(
+                    Requirement.primary_mpn.ilike(f"%{safe_q}%"),
+                    cast(Requirement.substitutes, String).ilike(f"%{safe_q}%"),
+                ),
             )
         )
         query = query.filter(
