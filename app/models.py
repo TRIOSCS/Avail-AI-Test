@@ -217,6 +217,7 @@ class Requisition(Base):
     cloned_from_id = Column(Integer, ForeignKey("requisitions.id"))
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    deadline = Column(String(50))  # ISO date or "ASAP"
     last_searched_at = Column(DateTime)
     offers_viewed_at = Column(DateTime)
 

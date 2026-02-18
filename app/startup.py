@@ -295,6 +295,7 @@ def _add_crm_columns(conn) -> None:
     stmts = [
         "ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS customer_site_id INTEGER REFERENCES customer_sites(id)",
         "ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS cloned_from_id INTEGER REFERENCES requisitions(id)",
+        "ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS deadline VARCHAR(50)",
         "ALTER TABLE requirements ADD COLUMN IF NOT EXISTS target_price NUMERIC(12,4)",
         # v1.4.0: Company account management fields
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS account_type VARCHAR(50)",

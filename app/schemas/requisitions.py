@@ -27,6 +27,7 @@ class RequisitionCreate(BaseModel):
     name: str = "Untitled"
     customer_name: str | None = None
     customer_site_id: int | None = None
+    deadline: str | None = None
 
 
 class RequisitionOut(BaseModel):
@@ -37,6 +38,7 @@ class RequisitionOut(BaseModel):
 class RequisitionUpdate(BaseModel):
     name: str | None = None
     customer_site_id: int | None = None
+    deadline: str | None = None
 
 
 class RequisitionArchiveOut(BaseModel):

@@ -208,6 +208,7 @@ async def list_requisitions(
                 else None,
                 "sourced_count": sourced_cnt or 0,
                 "cloned_from_id": r.cloned_from_id,
+                "deadline": r.deadline,
             }
             for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt in rows
         ],
@@ -227,6 +228,7 @@ async def create_requisition(
         name=body.name,
         customer_site_id=body.customer_site_id,
         customer_name=body.customer_name,
+        deadline=body.deadline,
         created_by=user.id,
         status="draft",
     )
@@ -264,6 +266,8 @@ async def update_requisition(
         req.name = body.name.strip() or req.name
     if body.customer_site_id is not None:
         req.customer_site_id = body.customer_site_id
+    if body.deadline is not None:
+        req.deadline = body.deadline or None
     db.commit()
     return {"ok": True, "name": req.name}
 

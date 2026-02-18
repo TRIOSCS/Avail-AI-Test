@@ -693,10 +693,11 @@ function renderReqList() {
         data = data.filter(r => {
             if (_deadlineFilter === 'none') return !r.deadline;
             if (!r.deadline) return false;
+            if (r.deadline === 'ASAP') return _deadlineFilter === 'overdue' || _deadlineFilter === 'today';
             const d = new Date(r.deadline); d.setHours(0,0,0,0);
-            const diff = (d - now) / 86400000;
+            const diff = Math.round((d - now) / 86400000);
             if (_deadlineFilter === 'overdue') return diff < 0;
-            if (_deadlineFilter === 'today') return diff >= 0 && diff < 1;
+            if (_deadlineFilter === 'today') return diff === 0;
             if (_deadlineFilter === '3days') return diff >= 0 && diff <= 3;
             if (_deadlineFilter === 'week') return diff >= 0 && diff <= 7;
             return true;
@@ -716,7 +717,8 @@ function renderReqList() {
                 case 'offers': va = a.reply_count || 0; vb = b.reply_count || 0; break;
                 case 'status': va = a.status || ''; vb = b.status || ''; break;
                 case 'sales': va = a.created_by_name || ''; vb = b.created_by_name || ''; break;
-                case 'deadline': va = a.deadline || '9999-12-31'; vb = b.deadline || '9999-12-31'; break;
+                case 'age': va = a.created_at || ''; vb = b.created_at || ''; break;
+                case 'deadline': va = a.deadline === 'ASAP' ? '0000-00-00' : (a.deadline || '9999-12-31'); vb = b.deadline === 'ASAP' ? '0000-00-00' : (b.deadline || '9999-12-31'); break;
                 default: va = 0; vb = 0;
             }
             if (typeof va === 'string') return _reqSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
@@ -772,18 +774,28 @@ function _renderReqRow(r) {
     const badgeMap = {draft:'b-draft',active:'b-src',sourcing:'b-src',offers:'b-off',quoted:'b-qtd',quoting:'b-qtd',archived:'b-draft',won:'b-off',lost:'b-draft'};
     const bc = badgeMap[r.status] || 'b-draft';
 
-    // Deadline flag
+    // Age — days since created
+    let age = '';
+    if (r.created_at) {
+        const days = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000);
+        age = days === 0 ? 'Today' : days === 1 ? '1d' : days + 'd';
+    }
+
+    // Need By — v7 deadline alert system
     let dl = '';
-    if (r.deadline) {
+    if (r.deadline === 'ASAP') {
+        dl = '<span class="dl dl-asap">ASAP</span>';
+    } else if (r.deadline) {
         const d = new Date(r.deadline);
         const now = new Date(); now.setHours(0,0,0,0);
-        const diff = (d - now) / 86400000;
+        const diff = Math.round((d - now) / 86400000);
         const fmt = fmtDate(r.deadline);
-        if (diff < 0) dl = `<span class="dl dl-u">\ud83d\udd34 ${fmt}</span>`;
-        else if (diff <= 3) dl = `<span class="dl dl-w">\u26a0 ${fmt}</span>`;
+        if (diff < 0) dl = `<span class="dl dl-u">\ud83d\udd34 OVERDUE ${fmt}</span>`;
+        else if (diff === 0) dl = `<span class="dl dl-u">\ud83d\udd34 TODAY</span>`;
+        else if (diff <= 3) dl = `<span class="dl dl-w">\u26a0\ufe0f ${fmt}</span>`;
         else dl = `<span class="dl dl-ok">\u2713 ${fmt}</span>`;
     } else {
-        dl = `<span class="dl" style="color:var(--muted)">${fmtDate(r.created_at)}</span>`;
+        dl = '<span class="dl" style="color:var(--muted)">\u2014</span>';
     }
 
     // Customer display — dedup "Company — Company"
@@ -808,9 +820,10 @@ function _renderReqRow(r) {
         <td class="mono">${offers}</td>
         <td><span class="badge ${bc}">${_statusLabels[r.status] || r.status}</span></td>
         <td>${esc(r.created_by_name || '')}</td>
+        <td class="mono" style="font-size:11px">${age}</td>
         <td>${dl}</td>
     </tr>
-    <tr class="drow" id="d-${r.id}"><td colspan="8">
+    <tr class="drow" id="d-${r.id}"><td colspan="9">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
             <div style="display:flex;gap:6px;align-items:center">
