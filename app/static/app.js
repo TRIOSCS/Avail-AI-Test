@@ -493,6 +493,7 @@ let _reqListData = [];     // cached list for client-side filtering
 let _reqStatusFilter = 'draft';
 let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
+let _serverSearchActive = false; // True when server-side search returned filtered results
 
 function setReqListSort(val) {
     _reqListSort = val;
@@ -515,6 +516,7 @@ const debouncedReqListSearch = debounce(() => {
 async function loadRequisitions(query = '') {
     try {
         const url = query ? `/api/requisitions?q=${encodeURIComponent(query)}` : '/api/requisitions';
+        _serverSearchActive = !!query;
         const resp = await apiFetch(url);
         _reqListData = resp.requisitions || resp;
         _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
@@ -526,26 +528,24 @@ function renderReqList() {
     const el = document.getElementById('reqList');
     const statusBar = document.getElementById('reqStatusBar');
     let data = _reqListData;
-    // Apply status filter
-    if (_reqStatusFilter === 'archive') {
-        // Backend already returned only archived/won/lost
-    } else if (_reqStatusFilter === 'quoted') {
-        data = data.filter(r => r.status === 'quoting' || r.status === 'quoted');
-    } else if (_reqStatusFilter === 'active') {
-        data = data.filter(r => r.status === 'active');
-    } else {
-        data = data.filter(r => r.status === _reqStatusFilter);
+    // When server search is active, skip status/text filters (server already filtered)
+    if (!_serverSearchActive) {
+        // Apply status filter
+        if (_reqStatusFilter === 'archive') {
+            // Backend already returned only archived/won/lost
+        } else if (_reqStatusFilter === 'quoted') {
+            data = data.filter(r => r.status === 'quoting' || r.status === 'quoted');
+        } else if (_reqStatusFilter === 'active') {
+            data = data.filter(r => r.status === 'active');
+        } else {
+            data = data.filter(r => r.status === _reqStatusFilter);
+        }
     }
     // "My Reqs" filter
     if (_myReqsOnly && window.userId) {
         data = data.filter(r => r.created_by === window.userId);
     }
-    // Text filter
     const q = (document.getElementById('reqListFilter')?.value || '').trim().toUpperCase();
-    if (q) data = data.filter(r =>
-        (r.name || '').toUpperCase().includes(q) ||
-        (r.customer_display || '').toUpperCase().includes(q)
-    );
     // Sort
     const sort = _reqListSort;
     if (sort === 'oldest') data = [...data].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
@@ -620,9 +620,14 @@ function renderReqList() {
 
 function setReqStatusFilter(status, btn) {
     const wasArchive = _reqStatusFilter === 'archive';
+    const wasSearch = _serverSearchActive;
     _reqStatusFilter = status;
     document.querySelectorAll('[data-req-status]').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
+    // Clear search when switching tabs
+    const searchInput = document.getElementById('reqListFilter');
+    if (searchInput) searchInput.value = '';
+    _serverSearchActive = false;
     if (status === 'archive') {
         apiFetch('/api/requisitions?status=archive')
             .then(resp => {
@@ -632,8 +637,8 @@ function setReqStatusFilter(status, btn) {
                 renderReqList();
             })
             .catch(() => showToast('Failed to load archived requisitions', 'error'));
-    } else if (wasArchive) {
-        // Re-fetch full list — _reqListData was replaced by archive-only data
+    } else if (wasArchive || wasSearch) {
+        // Re-fetch full list — data was replaced by filtered results
         loadRequisitions();
     } else {
         renderReqList();
