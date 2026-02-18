@@ -761,7 +761,7 @@ function renderReqList() {
     // v7 table with sortable headers + expandable drill-down rows
     const thClass = (col) => _reqSortCol === col ? ' class="sorted"' : '';
     const thead = `<thead><tr>
-        <th style="width:28px"></th>
+        <th style="width:28px;cursor:pointer" onclick="collapseAllRows()" title="Collapse all">\u25bc</th>
         <th onclick="sortReqList('name')"${thClass('name')}>RFQ <span class="sort-arrow">${_sortArrow('name')}</span></th>
         <th onclick="sortReqList('reqs')"${thClass('reqs')}>Reqs <span class="sort-arrow">${_sortArrow('reqs')}</span></th>
         <th onclick="sortReqList('sourced')"${thClass('sourced')}>Sourced <span class="sort-arrow">${_sortArrow('sourced')}</span></th>
@@ -770,6 +770,7 @@ function renderReqList() {
         <th onclick="sortReqList('sales')"${thClass('sales')}>Sales <span class="sort-arrow">${_sortArrow('sales')}</span></th>
         <th onclick="sortReqList('age')"${thClass('age')}>Age <span class="sort-arrow">${_sortArrow('age')}</span></th>
         <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By <span class="sort-arrow">${_sortArrow('deadline')}</span></th>
+        <th style="width:60px"></th>
     </tr></thead>`;
 
     const rows = data.map(r => _renderReqRow(r)).join('');
