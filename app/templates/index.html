@@ -610,7 +610,7 @@
             .fpills::-webkit-scrollbar{display:none}
             .sbox{width:100%;font-size:16px}
             .filter-panel{width:calc(100vw - 24px);left:-12px}
-            .sb-rail{top:88px}
+            .sb-rail{height:90px;width:18px}
             body.sb-open .main{margin-left:0 !important}
             /* v7 table: horizontal scroll on mobile */
             .tbl{display:block;overflow-x:auto;white-space:nowrap}
@@ -1074,10 +1074,10 @@
         .toparea img{height:100px;flex-shrink:0}
         .topcontrols{display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap}
 
-        /* Sidebar rail — blue strip with chevron that opens sidebar on click */
-        .sb-rail{position:fixed;top:120px;left:0;bottom:0;width:14px;background:var(--blue);z-index:201;cursor:pointer;transition:width .15s,background .15s,box-shadow .15s;display:flex;align-items:center;justify-content:center;border-radius:0 4px 4px 0}
-        .sb-rail:hover{width:20px;background:var(--blue-dk);box-shadow:2px 0 10px rgba(74,111,165,.3)}
-        .sb-rail svg{width:10px;height:10px;fill:none;stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;opacity:.8;transition:opacity .15s}
+        /* Sidebar rail — blue tab centered on page with chevron */
+        .sb-rail{position:fixed;top:50%;left:0;transform:translateY(-50%);height:120px;width:20px;background:var(--blue);z-index:201;cursor:pointer;transition:width .15s,background .15s,box-shadow .15s;display:flex;align-items:center;justify-content:center;border-radius:0 6px 6px 0}
+        .sb-rail:hover{width:26px;background:var(--blue-dk);box-shadow:2px 0 10px rgba(74,111,165,.3)}
+        .sb-rail svg{width:14px;height:14px;fill:none;stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;opacity:.85;transition:opacity .15s}
         .sb-rail:hover svg{opacity:1}
         body.sb-open .sb-rail{display:none}
 
