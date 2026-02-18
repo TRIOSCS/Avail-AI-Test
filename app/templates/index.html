@@ -1087,6 +1087,8 @@
         .sidebar-nav button:hover{background:var(--surface);color:var(--text)}
         .sidebar-nav button.active{background:var(--teal-light);color:var(--teal)}
         .sidebar-nav .ni{font-size:18px;width:22px;text-align:center}
+        .sidebar-nav .nav-logout{margin-top:auto;border-top:1px solid var(--border);border-radius:0 0 8px 8px;padding-top:12px;color:var(--muted)}
+        .sidebar-nav .nav-logout:hover{color:var(--red);background:var(--red-light)}
 
         /* v7 Sidebar footer sub-elements */
         .sidebar-footer .ui{width:26px;height:26px;border-radius:50%;background:var(--teal);color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0}
@@ -1240,6 +1242,7 @@
         <button id="navMaterials" onclick="sidebarNav('materials',this)"><span class="ni">&#x1f527;</span> Materials</button>
         <button id="navScorecards" onclick="sidebarNav('performance',this)"><span class="ni">&#x1f4ca;</span> Scorecards</button>
         <button id="navProactive" onclick="sidebarNav('proactive',this)" style="display:none"><span class="ni">&#x2b50;</span> Proactive</button>
+        <button class="nav-logout" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())"><span class="ni">&#x1f6aa;</span> Logout</button>
     </nav>
     <div class="sidebar-footer">
         <span class="ui">{{ user_name[:2]|upper if user_name else 'U' }}</span>
@@ -1257,7 +1260,6 @@
             <a onclick="openSettingsTab('create-user')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">Create User</a>
         </div>
         <span id="m365Status" style="display:none;font-size:10px;padding:4px 8px"><span id="m365Dot"></span><span id="m365Label"></span></span>
-        <button class="btn-out" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())"><span>Logout</span></button>
     </div>
 </aside>
 
