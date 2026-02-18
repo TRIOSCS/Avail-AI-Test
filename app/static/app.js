@@ -1157,33 +1157,17 @@ function buildFilterGroups() {
     let html = '';
 
     // Quick filters
-    html += _filterGroupHtml('Quick', [
+    html += _filterGroupHtml('Quick Filters', [
         {value:'my_accounts', label:'My Accounts only'},
         {value:'no_offers', label:'No offers yet'},
         {value:'overdue_asap', label:'Overdue / ASAP'}
     ]);
-
-    // Status (only when not on archive view)
-    if (_reqStatusFilter !== 'archive') {
-        html += _filterGroupHtml('Status', [
-            {value:'status_draft', label:'Draft'},
-            {value:'status_sourcing', label:'Sourcing'}
-        ]);
-    }
 
     // Sales person — dynamic from data
     const salesPeople = [...new Set(_reqListData.map(r => r.created_by_name).filter(Boolean))].sort();
     if (salesPeople.length) {
         html += _filterGroupHtml('Sales Person', salesPeople.map(n => ({value:'sales_'+n, label:n})));
     }
-
-    // Deadline
-    html += _filterGroupHtml('Deadline', [
-        {value:'dl_overdue', label:'Overdue'},
-        {value:'dl_asap', label:'ASAP'},
-        {value:'dl_week', label:'This week'},
-        {value:'dl_month', label:'This month'}
-    ]);
 
     // Customer — top 10
     const customers = [...new Set(_reqListData.map(r => r.customer_display).filter(Boolean))].sort().slice(0, 10);
@@ -1257,36 +1241,11 @@ function applyDropdownFilters(data) {
             return new Date(r.deadline) <= now;
         });
     }
-    // Status filters
-    if (_activeFilters['status_draft']) {
-        filtered = filtered.filter(r => r.status === 'draft');
-    }
-    if (_activeFilters['status_sourcing']) {
-        filtered = filtered.filter(r => r.status === 'active');
-    }
     // Sales person
     const salesFilters = Object.keys(_activeFilters).filter(k => k.startsWith('sales_'));
     if (salesFilters.length) {
         const names = new Set(salesFilters.map(k => k.replace('sales_', '')));
         filtered = filtered.filter(r => names.has(r.created_by_name));
-    }
-    // Deadline
-    if (_activeFilters['dl_overdue']) {
-        const now = new Date(); now.setHours(0,0,0,0);
-        filtered = filtered.filter(r => r.deadline && new Date(r.deadline) < now);
-    }
-    if (_activeFilters['dl_asap']) {
-        filtered = filtered.filter(r => r.deadline && new Date(r.deadline) <= new Date());
-    }
-    if (_activeFilters['dl_week']) {
-        const now = new Date(); now.setHours(0,0,0,0);
-        const week = new Date(now); week.setDate(week.getDate() + 7);
-        filtered = filtered.filter(r => r.deadline && new Date(r.deadline) <= week);
-    }
-    if (_activeFilters['dl_month']) {
-        const now = new Date(); now.setHours(0,0,0,0);
-        const month = new Date(now); month.setDate(month.getDate() + 30);
-        filtered = filtered.filter(r => r.deadline && new Date(r.deadline) <= month);
     }
     // Customer
     const custFilters = Object.keys(_activeFilters).filter(k => k.startsWith('cust_'));
