@@ -1111,6 +1111,19 @@
         .fp.on{background:var(--teal);color:#fff}
         .fp:not(.on):hover{color:var(--text);background:var(--bg)}
 
+        /* Smaller variant pills for status toggle */
+        .fpills-sm{padding:2px;border-radius:6px}
+        .fp-sm{padding:3px 10px;font-size:11px;border-radius:4px}
+
+        /* Toolbar buttons */
+        .tb-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--white);color:var(--text2);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s;white-space:nowrap}
+        .tb-btn:hover{border-color:var(--teal);color:var(--teal)}
+        .tb-btn.active{background:var(--teal-light);border-color:var(--teal);color:var(--teal)}
+
+        /* Toolbar select dropdown */
+        .tb-select{padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:var(--white);color:var(--text2);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s}
+        .tb-select:hover,.tb-select:focus{border-color:var(--teal);outline:none}
+
         /* Search box — prominent */
         .sbox{background:var(--white);border:2px solid var(--teal);border-radius:8px;padding:6px 14px;font-size:13px;color:var(--text);width:280px;font-family:inherit;font-weight:500;box-shadow:0 0 0 3px rgba(74,111,165,.08)}
         .sbox:focus{outline:none;box-shadow:0 0 0 4px rgba(74,111,165,.18)}
@@ -1208,16 +1221,23 @@
             <button class="fp" data-view="archive" onclick="setMainView('archive',this)">Archive</button>
         </div>
         <input type="text" class="sbox" id="mainSearch" placeholder="&#x1f50d;  Search customer, part, RFQ&hellip;" oninput="debouncedMainSearch()">
-        <div class="filter-wrap">
-            <button class="filter-btn" onclick="toggleFilter('mainFilterPanel')">&#x23f7; Filters <span class="filter-badge" id="filterBadge">0</span></button>
-            <div class="filter-panel" id="mainFilterPanel">
-                <div id="filterGroups"></div>
-                <div class="filter-actions">
-                    <button class="fa-clear" onclick="clearAllFilters()">Clear all</button>
-                    <button class="fa-apply" onclick="applyFilters()">Apply</button>
-                </div>
-            </div>
+        <div class="fpills fpills-sm" id="statusToggle">
+            <button class="fp fp-sm on" data-sf="all" onclick="setStatusFilter('all',this)">All</button>
+            <button class="fp fp-sm" data-sf="draft" onclick="setStatusFilter('draft',this)">Draft</button>
+            <button class="fp fp-sm" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
         </div>
+        <div class="filter-wrap">
+            <select class="tb-select" id="deadlineFilter" onchange="applyDeadlineFilter()">
+                <option value="">Deadline</option>
+                <option value="overdue">Overdue</option>
+                <option value="today">Today</option>
+                <option value="3days">Next 3 Days</option>
+                <option value="week">This Week</option>
+                <option value="none">No Deadline</option>
+            </select>
+        </div>
+        <button class="tb-btn" id="btnMyAccounts" onclick="toggleMyAccounts(this)">My Accounts</button>
+        <button class="tb-btn" onclick="collapseAllRows()">Collapse All</button>
         <button class="btn btn-primary" style="margin-left:auto" onclick="openNewReqModal()">+ New RFQ</button>
     </div>
 </div>

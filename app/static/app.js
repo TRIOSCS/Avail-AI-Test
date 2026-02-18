@@ -511,6 +511,7 @@ let _reqStatusFilter = 'all';
 let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _serverSearchActive = false; // True when server-side search returned filtered results
+let _deadlineFilter = '';  // Deadline dropdown filter
 
 function setReqListSort(val) {
     _reqListSort = val;
@@ -680,6 +681,21 @@ function renderReqList() {
     if (_myReqsOnly && window.userId) {
         data = data.filter(r => r.created_by === window.userId);
     }
+    // Deadline filter
+    if (_deadlineFilter) {
+        const now = new Date(); now.setHours(0,0,0,0);
+        data = data.filter(r => {
+            if (_deadlineFilter === 'none') return !r.deadline;
+            if (!r.deadline) return false;
+            const d = new Date(r.deadline); d.setHours(0,0,0,0);
+            const diff = (d - now) / 86400000;
+            if (_deadlineFilter === 'overdue') return diff < 0;
+            if (_deadlineFilter === 'today') return diff >= 0 && diff < 1;
+            if (_deadlineFilter === '3days') return diff >= 0 && diff <= 3;
+            if (_deadlineFilter === 'week') return diff >= 0 && diff <= 7;
+            return true;
+        });
+    }
     // Apply dropdown filters (v7 filter panel)
     data = applyDropdownFilters(data);
 
@@ -783,7 +799,7 @@ function _renderReqRow(r) {
         <td class="mono">${total}</td>
         <td><div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div><span class="prog-txt">${sourced}/${total}</span></div></td>
         <td class="mono">${offers}</td>
-        <td><span class="badge ${bc}">${r.status}</span></td>
+        <td><span class="badge ${bc}">${_statusLabels[r.status] || r.status}</span></td>
         <td>${esc(r.created_by_name || '')}</td>
         <td>${dl}</td>
     </tr>
@@ -961,7 +977,15 @@ function setMainView(view, btn) {
     document.querySelectorAll('#mainPills .fp').forEach(b => b.classList.remove('on'));
     if (btn) btn.classList.add('on');
     _activeFilters = {};
+    _deadlineFilter = '';
+    const dlSel = document.getElementById('deadlineFilter');
+    if (dlSel) dlSel.value = '';
+    // Reset status toggle to "All"
+    document.querySelectorAll('#statusToggle .fp').forEach(b => b.classList.toggle('on', b.dataset.sf === 'all'));
     countActiveFilters();
+    // Show/hide status toggle (not relevant on archive tab)
+    const stEl = document.getElementById('statusToggle');
+    if (stEl) stEl.style.display = (view === 'archive') ? 'none' : '';
     if (view === 'rfq') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
@@ -982,6 +1006,41 @@ function setMainView(view, btn) {
             .catch(() => showToast('Failed to load archived requisitions', 'error'));
     }
     buildFilterGroups();
+}
+
+// ── Toolbar Controls ────────────────────────────────────────────────────
+
+function setStatusFilter(sf, btn) {
+    document.querySelectorAll('#statusToggle .fp').forEach(b => b.classList.remove('on'));
+    if (btn) btn.classList.add('on');
+    // Override the main status filter within the current tab
+    if (sf === 'all') {
+        // Respect the tab-level filter
+        const activeTab = document.querySelector('#mainPills .fp.on');
+        const view = activeTab ? activeTab.dataset.view : 'rfq';
+        if (view === 'sourcing') _reqStatusFilter = 'active';
+        else if (view === 'archive') _reqStatusFilter = 'archive';
+        else _reqStatusFilter = 'all';
+    } else {
+        _reqStatusFilter = sf;
+    }
+    renderReqList();
+}
+
+function toggleMyAccounts(btn) {
+    _myReqsOnly = !_myReqsOnly;
+    btn.classList.toggle('active', _myReqsOnly);
+    renderReqList();
+}
+
+function collapseAllRows() {
+    document.querySelectorAll('.drow.open').forEach(row => row.classList.remove('open'));
+    document.querySelectorAll('.ea.open').forEach(a => a.classList.remove('open'));
+}
+
+function applyDeadlineFilter() {
+    _deadlineFilter = document.getElementById('deadlineFilter')?.value || '';
+    renderReqList();
 }
 
 // ── v7 Main Search ──────────────────────────────────────────────────────
