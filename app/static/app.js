@@ -845,6 +845,7 @@ function renderReqList() {
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('sourced')"${thClass('sourced')}>Sourced ${sa('sourced')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
+            <th onclick="sortReqList('status')"${thClass('status')}>Status ${sa('status')}</th>
             <th onclick="sortReqList('sent')"${thClass('sent')}>RFQs Sent ${sa('sent')}</th>
             <th onclick="sortReqList('resp')"${thClass('resp')}>Resp % ${sa('resp')}</th>
             <th onclick="sortReqList('searched')"${thClass('searched')}>Searched ${sa('searched')}</th>
@@ -945,16 +946,24 @@ function _renderReqRow(r) {
     let dataCells, actions, colspan;
 
     if (v === 'sourcing') {
-        // Sourcing: Parts, Sourced, Offers, RFQs Sent, Resp %, Searched, Need By
+        // Sourcing: Parts, Sourced, Offers, Status, RFQs Sent, Resp %, Searched, Need By
         const sent = r.rfq_sent_count || 0;
         const respPct = sent > 0 ? Math.round((offers / sent) * 100) + '%' : '\u2014';
+
+        // Offers cell — clickable to go to quote preparation
+        let offersCell;
+        if (offers > 0) {
+            offersCell = `<td class="mono"><b class="cust-link" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','quote')" title="Go to quote preparation">${offers}</b></td>`;
+        } else {
+            offersCell = `<td class="mono">${offers}</td>`;
+        }
 
         // Action buttons for sourcing
         let srcBtn;
         if (offers > 0 && r.has_new_offers) {
-            srcBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','offers')" title="New offers — click to review">Offers (${offers})</button>`;
+            srcBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','quote')" title="New offers — prepare quote">Offers (${offers})</button>`;
         } else if (offers > 0) {
-            srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','offers')" title="View offers">Offers (${offers})</button>`;
+            srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','quote')" title="Prepare quote">Quote (${offers})</button>`;
         } else {
             srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','sources')" title="Sourcing in progress">Sourcing</button>`;
         }
@@ -962,13 +971,14 @@ function _renderReqRow(r) {
         dataCells = `
             <td class="mono">${total}</td>
             <td><div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div><span class="prog-txt">${sourced}/${total}</span></div></td>
-            <td class="mono">${offers}</td>
+            ${offersCell}
+            <td><span class="badge ${bc}">${_statusLabels[r.status] || r.status}</span></td>
             <td class="mono">${sent}</td>
             <td class="mono">${respPct}</td>
             <td style="font-size:11px">${searched}</td>
             <td>${dl}</td>`;
         actions = `<td style="white-space:nowrap"><button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})">&#x1f4e5; Archive</button> ${srcBtn}</td>`;
-        colspan = 10;
+        colspan = 11;
     } else if (v === 'archive') {
         // Archive: Parts, Offers, Outcome, Sales, Age
         dataCells = `
@@ -3050,10 +3060,22 @@ async function unifiedEnrichVendor(cardId) {
 }
 
 // ── Vendors Tab ────────────────────────────────────────────────────────
-let _vendorSort = 'name-az';
+let _vendorSortCol = null;
+let _vendorSortDir = 'asc';
 
-function setVendorSort(val) {
-    _vendorSort = val;
+function _vendorSortArrow(col) {
+    if (_vendorSortCol !== col) return '\u21c5';
+    return _vendorSortDir === 'asc' ? '\u25b2' : '\u25bc';
+}
+
+function sortVendorList(col) {
+    if (_vendorSortCol === col) {
+        if (_vendorSortDir === 'asc') _vendorSortDir = 'desc';
+        else { _vendorSortCol = null; _vendorSortDir = 'asc'; }
+    } else {
+        _vendorSortCol = col;
+        _vendorSortDir = 'asc';
+    }
     filterVendorList();
 }
 
@@ -3075,9 +3097,7 @@ function vendorTier(score) {
 
 function setVendorTier(tier, btn) {
     _vendorTierFilter = tier;
-    // Update tab active state
-    const container = btn.parentElement;
-    if (container) container.querySelectorAll('.tab,.pill-filter').forEach(b => b.classList.remove('on'));
+    document.querySelectorAll('#vendorTierPills .fp').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
     filterVendorList();
 }
@@ -3085,7 +3105,7 @@ function setVendorTier(tier, btn) {
 function filterVendorList() {
     const hideBL = (document.getElementById('vendorHideBL') || {}).checked;
     const q = (document.getElementById('vendorSearch') || {}).value || '';
-    let filtered = _vendorListData;
+    let filtered = [..._vendorListData];
     if (q) {
         const lq = q.toLowerCase();
         filtered = filtered.filter(c => (c.display_name || '').toLowerCase().includes(lq));
@@ -3095,90 +3115,90 @@ function filterVendorList() {
     }
     if (hideBL) filtered = filtered.filter(c => !c.is_blacklisted);
 
-    // Sort
-    const vs = _vendorSort;
-    if (vs === 'name-za') filtered.sort((a, b) => (b.display_name || '').localeCompare(a.display_name || ''));
-    else if (vs === 'eng-desc') filtered.sort((a, b) => (b.engagement_score ?? -1) - (a.engagement_score ?? -1));
-    else if (vs === 'eng-asc') filtered.sort((a, b) => (a.engagement_score ?? -1) - (b.engagement_score ?? -1));
-    else if (vs === 'sightings') filtered.sort((a, b) => (b.sighting_count || 0) - (a.sighting_count || 0));
-    else if (vs === 'rating') filtered.sort((a, b) => (b.avg_rating ?? -1) - (a.avg_rating ?? -1));
-    else filtered.sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''));
+    // Sort by column or default (name A-Z)
+    if (_vendorSortCol) {
+        filtered.sort((a, b) => {
+            let va, vb;
+            switch (_vendorSortCol) {
+                case 'name': va = (a.display_name || ''); vb = (b.display_name || ''); break;
+                case 'tier': va = (a.engagement_score ?? -1); vb = (b.engagement_score ?? -1); break;
+                case 'score': va = (a.engagement_score ?? -1); vb = (b.engagement_score ?? -1); break;
+                case 'rating': va = (a.avg_rating ?? -1); vb = (b.avg_rating ?? -1); break;
+                case 'sightings': va = (a.sighting_count || 0); vb = (b.sighting_count || 0); break;
+                case 'email': va = ((a.emails || [])[0] || ''); vb = ((b.emails || [])[0] || ''); break;
+                case 'last': va = (a.last_sighting_at || ''); vb = (b.last_sighting_at || ''); break;
+                default: va = 0; vb = 0;
+            }
+            if (typeof va === 'string') return _vendorSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+            return _vendorSortDir === 'asc' ? va - vb : vb - va;
+        });
+    } else {
+        filtered.sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''));
+    }
 
     const countEl = document.getElementById('vendorFilterCount');
     if (countEl) countEl.textContent = filtered.length < _vendorListData.length ? `${filtered.length} of ${_vendorListData.length}` : '';
 
     const el = document.getElementById('vendorList');
     if (!filtered.length) {
-        el.innerHTML = `<p class="empty">${_vendorListData.length ? 'No vendors match filters' : 'No vendors yet — they\'ll appear here after your first search'}</p>`;
+        el.innerHTML = `<p class="empty">${_vendorListData.length ? 'No vendors match filters' : 'No vendors yet \u2014 they\'ll appear here after your first search'}</p>`;
         return;
     }
 
-    // Group alphabetically
-    const groups = {};
-    filtered.forEach(c => {
-        const letter = (c.display_name || '?')[0].toUpperCase();
-        const key = /[A-Z]/.test(letter) ? letter : '#';
-        if (!groups[key]) groups[key] = [];
-        groups[key].push(c);
-    });
-    const sortedLetters = Object.keys(groups).sort((a, b) => a === '#' ? 1 : b === '#' ? -1 : a.localeCompare(b));
+    const thC = (col) => _vendorSortCol === col ? ' class="sorted"' : '';
+    const sa = (col) => `<span class="sort-arrow">${_vendorSortArrow(col)}</span>`;
+    const tierBadge = {proven:'b-proven',developing:'b-developing',caution:'b-caution',new:'b-new'};
+    const tierLabel = {proven:'Proven',developing:'Developing',caution:'Caution',new:'New'};
 
-    el.innerHTML = sortedLetters.map(letter => {
-        const vendors = groups[letter];
-        const gid = 'vg-' + letter;
-        const isExpanded = !_collapsedVendorGroups || !_collapsedVendorGroups.has(letter);
-        return `
-        <div class="coll-group ${isExpanded ? '' : 'collapsed'}" id="${gid}">
-            <div class="coll-group-header" onclick="toggleVendorGroup('${letter}')">
-                <span class="coll-chevron">${isExpanded ? '▾' : '▸'}</span>
-                <span class="coll-group-name">${letter}</span>
-                <span class="coll-group-count">(${vendors.length})</span>
-            </div>
-            <div class="coll-group-body" ${isExpanded ? '' : 'style="display:none"'}>
-                ${vendors.map(c => _renderVendorCard(c)).join('')}
-            </div>
-        </div>`;
-    }).join('');
-}
+    let html = `<div style="padding:0 16px"><table class="tbl"><thead><tr>
+        <th onclick="sortVendorList('name')"${thC('name')}>Vendor ${sa('name')}</th>
+        <th onclick="sortVendorList('tier')"${thC('tier')}>Tier ${sa('tier')}</th>
+        <th onclick="sortVendorList('score')"${thC('score')}>Score ${sa('score')}</th>
+        <th onclick="sortVendorList('rating')"${thC('rating')}>Rating ${sa('rating')}</th>
+        <th onclick="sortVendorList('sightings')"${thC('sightings')}>Sightings ${sa('sightings')}</th>
+        <th onclick="sortVendorList('email')"${thC('email')}>Email ${sa('email')}</th>
+        <th onclick="sortVendorList('last')"${thC('last')}>Last Active ${sa('last')}</th>
+    </tr></thead><tbody>`;
 
-let _collapsedVendorGroups = new Set();
-function toggleVendorGroup(letter) {
-    if (_collapsedVendorGroups.has(letter)) _collapsedVendorGroups.delete(letter);
-    else _collapsedVendorGroups.add(letter);
-    filterVendorList();
-}
+    for (const c of filtered) {
+        const tier = vendorTier(c.engagement_score);
+        const bc = c.is_blacklisted ? 'b-bl' : (tierBadge[tier] || 'b-new');
+        const tl = c.is_blacklisted ? 'Blacklisted' : (tierLabel[tier] || 'New');
+        const primaryEmail = (c.emails || [])[0] || '';
+        const scoreText = c.engagement_score != null ? Math.round(c.engagement_score) : '\u2014';
+        html += `<tr onclick="openVendorPopup(${c.id})">
+            <td><b class="cust-link">${esc(c.display_name)}</b></td>
+            <td><span class="badge ${bc}">${tl}</span></td>
+            <td class="mono">${scoreText}</td>
+            <td>${stars(c.avg_rating, c.review_count)}</td>
+            <td class="mono">${c.sighting_count || 0}</td>
+            <td style="font-size:11px;color:var(--text2)">${primaryEmail ? esc(primaryEmail) : '\u2014'}</td>
+            <td style="font-size:11px;color:var(--muted)">${c.last_sighting_at ? fmtDate(c.last_sighting_at) : '\u2014'}</td>
+        </tr>`;
+    }
 
-function _renderVendorCard(c) {
-    const tier = vendorTier(c.engagement_score);
-    const tierLabel = {proven:'Proven',developing:'Developing',caution:'Caution',new:'New'}[tier];
-    const tierCls = {proven:'eng-proven',developing:'eng-developing',caution:'eng-caution',new:'eng-new'}[tier];
-    const scoreText = c.engagement_score != null ? `${Math.round(c.engagement_score)} · ${tierLabel}` : tierLabel;
-    const primaryEmail = (c.emails || [])[0] || '';
-    const lastActive = c.last_sighting_at ? fmtDate(c.last_sighting_at) : '';
-    return `<div class="card card-clickable ${c.is_blacklisted ? 'vendor-card-bl' : ''}" onclick="openVendorPopup(${c.id})" style="padding:10px 14px;margin-bottom:3px">
-        <div class="vendor-card-row">
-            <div style="flex:1;min-width:0">
-                <div class="vendor-card-name">${esc(c.display_name)} ${c.is_blacklisted ? '<span style="color:var(--red);font-size:10px">Blacklisted</span>' : ''}</div>
-                <div style="display:flex;gap:10px;align-items:center;margin-top:2px;flex-wrap:wrap">
-                    <span class="eng-badge ${tierCls}">${scoreText}</span>
-                    <span>${stars(c.avg_rating, c.review_count)}</span>
-                    <span style="font-size:10px;color:var(--muted)">${c.sighting_count} sightings</span>
-                </div>
-            </div>
-            <div style="text-align:right;flex-shrink:0">
-                ${primaryEmail ? `<div style="font-size:11px;color:var(--text2)">${esc(primaryEmail)}</div>` : ''}
-                ${lastActive ? `<div style="font-size:10px;color:var(--muted)">Last: ${lastActive}</div>` : ''}
-            </div>
-        </div>
-    </div>`;
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
 }
 
 // ── Materials Tab ──────────────────────────────────────────────────────
 let _materialListData = [];
-let _materialSort = 'last-searched';
+let _matSortCol = null;
+let _matSortDir = 'asc';
 
-function setMaterialSort(val) {
-    _materialSort = val;
+function _matSortArrow(col) {
+    if (_matSortCol !== col) return '\u21c5';
+    return _matSortDir === 'asc' ? '\u25b2' : '\u25bc';
+}
+
+function sortMatList(col) {
+    if (_matSortCol === col) {
+        if (_matSortDir === 'asc') _matSortDir = 'desc';
+        else { _matSortCol = null; _matSortDir = 'asc'; }
+    } else {
+        _matSortCol = col;
+        _matSortDir = 'asc';
+    }
     renderMaterialList();
 }
 
@@ -3193,74 +3213,61 @@ async function loadMaterialList() {
 
 function renderMaterialList() {
     let data = [..._materialListData];
-    const ms = _materialSort;
-    if (ms === 'mpn-az') data.sort((a, b) => (a.display_mpn || '').localeCompare(b.display_mpn || ''));
-    else if (ms === 'mpn-za') data.sort((a, b) => (b.display_mpn || '').localeCompare(a.display_mpn || ''));
-    else if (ms === 'most-searched') data.sort((a, b) => (b.search_count || 0) - (a.search_count || 0));
-    else if (ms === 'most-vendors') data.sort((a, b) => (b.vendor_count || 0) - (a.vendor_count || 0));
-    else if (ms === 'oldest-search') data.sort((a, b) => new Date(a.last_searched_at || 0) - new Date(b.last_searched_at || 0));
-    else data.sort((a, b) => new Date(b.last_searched_at || 0) - new Date(a.last_searched_at || 0));
-
     const q = (document.getElementById('materialSearch') || {}).value || '';
     const el = document.getElementById('materialList');
     if (!data.length) {
-        el.innerHTML = `<p class="empty">${q ? 'No materials match your search' : 'No material cards yet — they\'ll build automatically as you search'}</p>`;
+        el.innerHTML = `<p class="empty">${q ? 'No materials match your search' : 'No material cards yet \u2014 they\'ll build automatically as you search'}</p>`;
         return;
     }
 
-    // Group by manufacturer
-    const groups = {};
-    data.forEach(c => {
-        const mfr = c.manufacturer || 'Unknown';
-        if (!groups[mfr]) groups[mfr] = [];
-        groups[mfr].push(c);
-    });
-    const sortedMfrs = Object.keys(groups).sort((a, b) => a === 'Unknown' ? 1 : b === 'Unknown' ? -1 : a.localeCompare(b));
+    if (_matSortCol) {
+        data.sort((a, b) => {
+            let va, vb;
+            switch (_matSortCol) {
+                case 'mpn': va = (a.display_mpn || ''); vb = (b.display_mpn || ''); break;
+                case 'mfr': va = (a.manufacturer || ''); vb = (b.manufacturer || ''); break;
+                case 'vendors': va = a.vendor_count || 0; vb = b.vendor_count || 0; break;
+                case 'price': va = a.best_price ?? 999999; vb = b.best_price ?? 999999; break;
+                case 'offers': va = a.offer_count || 0; vb = b.offer_count || 0; break;
+                case 'searches': va = a.search_count || 0; vb = b.search_count || 0; break;
+                case 'last': va = a.last_searched_at || ''; vb = b.last_searched_at || ''; break;
+                default: va = 0; vb = 0;
+            }
+            if (typeof va === 'string') return _matSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+            return _matSortDir === 'asc' ? va - vb : vb - va;
+        });
+    } else {
+        data.sort((a, b) => new Date(b.last_searched_at || 0) - new Date(a.last_searched_at || 0));
+    }
 
-    el.innerHTML = sortedMfrs.map(mfr => {
-        const materials = groups[mfr];
-        const gid = 'mg-' + mfr.replace(/[^a-zA-Z0-9]/g, '_');
-        const isExpanded = !_collapsedMatGroups || !_collapsedMatGroups.has(mfr);
-        return `
-        <div class="coll-group ${isExpanded ? '' : 'collapsed'}" id="${gid}">
-            <div class="coll-group-header" onclick="toggleMatGroup('${escAttr(mfr)}')">
-                <span class="coll-chevron">${isExpanded ? '▾' : '▸'}</span>
-                <span class="coll-group-name">${esc(mfr)}</span>
-                <span class="coll-group-count">(${materials.length})</span>
-            </div>
-            <div class="coll-group-body" ${isExpanded ? '' : 'style="display:none"'}>
-                ${materials.map(c => _renderMaterialCard(c)).join('')}
-            </div>
-        </div>`;
-    }).join('');
-}
+    const thC = (col) => _matSortCol === col ? ' class="sorted"' : '';
+    const sa = (col) => `<span class="sort-arrow">${_matSortArrow(col)}</span>`;
 
-let _collapsedMatGroups = new Set();
-function toggleMatGroup(mfr) {
-    if (_collapsedMatGroups.has(mfr)) _collapsedMatGroups.delete(mfr);
-    else _collapsedMatGroups.add(mfr);
-    renderMaterialList();
-}
+    let html = `<div style="padding:0 16px"><table class="tbl"><thead><tr>
+        <th onclick="sortMatList('mpn')"${thC('mpn')}>MPN ${sa('mpn')}</th>
+        <th onclick="sortMatList('mfr')"${thC('mfr')}>Manufacturer ${sa('mfr')}</th>
+        <th onclick="sortMatList('vendors')"${thC('vendors')}>Vendors ${sa('vendors')}</th>
+        <th onclick="sortMatList('price')"${thC('price')}>Best Price ${sa('price')}</th>
+        <th onclick="sortMatList('offers')"${thC('offers')}>Offers ${sa('offers')}</th>
+        <th onclick="sortMatList('searches')"${thC('searches')}>Searches ${sa('searches')}</th>
+        <th onclick="sortMatList('last')"${thC('last')}>Last Searched ${sa('last')}</th>
+    </tr></thead><tbody>`;
 
-function _renderMaterialCard(c) {
-    const bestPrice = c.best_price != null ? `Best: $${Number(c.best_price).toFixed(2)}` : '';
-    const offerCount = c.offer_count > 0 ? `${c.offer_count} offer${c.offer_count !== 1 ? 's' : ''}` : '';
-    return `<div class="card card-clickable" onclick="openMaterialPopup(${c.id})" style="padding:10px 14px;margin-bottom:3px">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-            <div>
-                <div class="mat-card-mpn">${esc(c.display_mpn)}</div>
-                <div style="display:flex;gap:10px;align-items:center;margin-top:2px;font-size:11px;color:var(--muted)">
-                    <span>${c.vendor_count} vendor${c.vendor_count !== 1 ? 's' : ''}</span>
-                    ${bestPrice ? `<span class="mono" style="color:var(--green);font-weight:600">${bestPrice}</span>` : ''}
-                    ${offerCount ? `<span>${offerCount}</span>` : ''}
-                </div>
-            </div>
-            <div style="text-align:right;font-size:10px;color:var(--muted)">
-                <div>${c.search_count}x searched</div>
-                <div>${c.last_searched_at ? fmtDate(c.last_searched_at) : '—'}</div>
-            </div>
-        </div>
-    </div>`;
+    for (const c of data) {
+        const bestPrice = c.best_price != null ? `$${Number(c.best_price).toFixed(2)}` : '\u2014';
+        html += `<tr onclick="openMaterialPopup(${c.id})">
+            <td><b class="cust-link">${esc(c.display_mpn)}</b></td>
+            <td>${esc(c.manufacturer || '\u2014')}</td>
+            <td class="mono">${c.vendor_count || 0}</td>
+            <td class="mono" style="color:${c.best_price != null ? 'var(--green)' : 'var(--muted)'};font-weight:600">${bestPrice}</td>
+            <td class="mono">${c.offer_count || 0}</td>
+            <td class="mono">${c.search_count || 0}</td>
+            <td style="font-size:11px;color:var(--muted)">${c.last_searched_at ? fmtDate(c.last_searched_at) : '\u2014'}</td>
+        </tr>`;
+    }
+
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
 }
 
 async function openMaterialPopup(cardId) {

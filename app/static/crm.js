@@ -14,7 +14,24 @@ let crmOffers = [];
 let crmQuote = null;
 let selectedOffers = new Set();
 let _custUnassigned = false;
-let _custSort = 'name-az';
+let _custSortCol = null;
+let _custSortDir = 'asc';
+
+function _custSortArrow(col) {
+    if (_custSortCol !== col) return '\u21c5';
+    return _custSortDir === 'asc' ? '\u25b2' : '\u25bc';
+}
+
+function sortCustList(col) {
+    if (_custSortCol === col) {
+        if (_custSortDir === 'asc') _custSortDir = 'desc';
+        else { _custSortCol = null; _custSortDir = 'asc'; }
+    } else {
+        _custSortCol = col;
+        _custSortDir = 'asc';
+    }
+    renderCustomers();
+}
 
 function autoLogCrmCall(phone) {
     apiFetch('/api/activities/call', {
@@ -29,10 +46,7 @@ function toggleCustUnassigned(btn) {
     loadCustomers();
 }
 
-function sortCustomers(val) {
-    _custSort = val;
-    renderCustomers();
-}
+// sortCustomers removed — now handled by sortCustList() with column headers
 
 // ── Customers View ─────────────────────────────────────────────────────
 
@@ -74,22 +88,21 @@ async function goToCompany(companyId) {
     if (!companyId) return;
     showView('view-customers');
     currentReqId = null;
-    // Load all customers (unfiltered) so the target company is visible
     try {
         crmCustomers = await apiFetch('/api/companies');
         renderCustomers();
     } catch (e) { showToast('Failed to load customers', 'error'); return; }
-    // Find and expand the target company card
+    // Find and expand the target company drill-down row
     setTimeout(() => {
-        const card = document.querySelector(`.cust-card[data-company-id="${companyId}"]`);
-        if (card) {
-            card.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            if (!card.classList.contains('expanded')) {
-                toggleCompanyCard(card, companyId);
+        const drow = document.getElementById('cd-' + companyId);
+        if (drow) {
+            const dataRow = drow.previousElementSibling;
+            if (dataRow) dataRow.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if (!drow.classList.contains('open')) {
+                toggleCustDrill(companyId);
             }
         }
     }, 100);
-    // Highlight sidebar
     navHighlight(document.getElementById('navCustomers'));
 }
 
@@ -97,67 +110,133 @@ function renderCustomers() {
     const el = document.getElementById('custList');
     const countEl = document.getElementById('custFilterCount');
     if (!crmCustomers.length) {
-        el.innerHTML = '<p class="empty">No customers yet — add a company to get started</p>';
+        el.innerHTML = '<p class="empty">No customers yet \u2014 add a company to get started</p>';
         if (countEl) countEl.textContent = '';
         return;
     }
     // Sort
     const sorted = [...crmCustomers];
-    if (_custSort === 'name-az') sorted.sort((a,b) => a.name.localeCompare(b.name));
-    else if (_custSort === 'name-za') sorted.sort((a,b) => b.name.localeCompare(a.name));
-    else if (_custSort === 'sites') sorted.sort((a,b) => b.site_count - a.site_count);
-    else if (_custSort === 'type') sorted.sort((a,b) => (a.account_type||'').localeCompare(b.account_type||''));
+    if (_custSortCol) {
+        sorted.sort((a, b) => {
+            let va, vb;
+            switch (_custSortCol) {
+                case 'name': va = (a.name || ''); vb = (b.name || ''); break;
+                case 'type': va = (a.account_type || ''); vb = (b.account_type || ''); break;
+                case 'industry': va = (a.industry || ''); vb = (b.industry || ''); break;
+                case 'sites': va = a.site_count || 0; vb = b.site_count || 0; break;
+                case 'owner': va = (a.account_owner_name || ''); vb = (b.account_owner_name || ''); break;
+                default: va = 0; vb = 0;
+            }
+            if (typeof va === 'string') return _custSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+            return _custSortDir === 'asc' ? va - vb : vb - va;
+        });
+    } else {
+        sorted.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    }
+
     if (countEl) countEl.textContent = sorted.length + ' companies';
-    el.innerHTML = sorted.map(c => {
-        const sitesHtml = c.sites.map(s => `
-            <div class="cust-site" onclick="event.stopPropagation();toggleSiteDetail(${s.id})">
-                <span class="cust-site-name">${esc(s.site_name)}</span>
-                <span class="cust-site-owner">${esc(s.owner_name || '—')}</span>
-                <span class="cust-site-reqs">${s.open_reqs ? s.open_reqs + ' open reqs' : '—'}</span>
-            </div>
-            <div id="siteDetail-${s.id}" class="site-detail-panel" style="display:none"></div>
-        `).join('');
-        const acctTags = [
-            c.account_type ? '<span class="enrich-tag">' + esc(c.account_type) + '</span>' : '',
-            c.industry ? '<span class="enrich-tag">' + esc(c.industry) + '</span>' : '',
-            c.employee_size ? '<span class="enrich-tag">👥 ' + esc(c.employee_size) + '</span>' : '',
-            c.hq_city ? '<span class="enrich-tag">📍 ' + esc(c.hq_city) + (c.hq_state ? ', ' + esc(c.hq_state) : '') + '</span>' : '',
-            c.phone ? '<span class="enrich-tag">📞 ' + esc(c.phone) + '</span>' : '',
-            c.credit_terms ? '<span class="enrich-tag">' + esc(c.credit_terms) + '</span>' : '',
-            c.linkedin_url ? '<a href="' + escAttr(c.linkedin_url) + '" target="_blank" style="color:var(--teal);text-decoration:none;font-size:10px">LinkedIn ↗</a>' : '',
-        ].filter(Boolean).join('');
-        const enrichHtml = acctTags ? '<div class="enrich-bar">' + acctTags + '</div>' : '';
+
+    const thC = (col) => _custSortCol === col ? ' class="sorted"' : '';
+    const sa = (col) => `<span class="sort-arrow">${_custSortArrow(col)}</span>`;
+
+    let html = `<div style="padding:0 16px"><table class="tbl"><thead><tr>
+        <th style="width:30px"></th>
+        <th onclick="sortCustList('name')"${thC('name')}>Company ${sa('name')}</th>
+        <th onclick="sortCustList('type')"${thC('type')}>Type ${sa('type')}</th>
+        <th onclick="sortCustList('industry')"${thC('industry')}>Industry ${sa('industry')}</th>
+        <th onclick="sortCustList('sites')"${thC('sites')}>Sites ${sa('sites')}</th>
+        <th onclick="sortCustList('owner')"${thC('owner')}>Owner ${sa('owner')}</th>
+        <th>Health</th>
+        <th style="width:90px">Actions</th>
+    </tr></thead><tbody>`;
+
+    for (const c of sorted) {
         const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
         const domain = c.domain || (c.website ? c.website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
-        return `
-        <div class="card cust-card" id="custCard-${c.id}" data-company-id="${c.id}">
-            <div class="cust-header" onclick="toggleCompanyCard(this.parentElement,${c.id})">
-                <span class="cust-expand">▶</span>
-                <span class="cust-name">${esc(displayName)}</span>
-                ${domain ? '<span style="font-size:10px;color:var(--muted)">' + esc(domain) + '</span>' : ''}
-                <span class="cust-count">${c.site_count} site${c.site_count !== 1 ? 's' : ''}</span>
-                ${c.account_owner_name ? '<span class="cust-acct-mgr">' + esc(c.account_owner_name) + '</span>' : '<span class="cust-acct-mgr" style="color:#c77">unassigned</span>'}
-                <span id="actHealth-${c.id}" style="margin-left:4px"></span>
-                <span style="margin-left:auto;display:flex;gap:4px;flex-wrap:wrap" onclick="event.stopPropagation()">
-                    <button class="btn-enrich" onclick="openEditCompany(${c.id})">Edit</button>
-                    <button class="btn-enrich" onclick="unifiedEnrichCompany(${c.id})">Enrich</button>
-                </span>
-            </div>
-            ${enrichHtml}
-            <div class="cust-sites">${sitesHtml}
-                <div class="cust-add-site">
-                    <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openAddSiteModal(${c.id},'${escAttr(c.name)}')">+ Add Site</button>
-                </div>
-            </div>
-            <div id="actSection-${c.id}" class="cust-activity-section" style="display:none">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-                    <span class="si-contacts-title">Recent Activity</span>
-                    <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openLogNoteModal(${c.id},'${escAttr(c.name)}')">+ Note</button>
-                </div>
-                <div id="actList-${c.id}"><p class="empty" style="padding:4px;font-size:11px">Loading...</p></div>
-            </div>
-        </div>`;
-    }).join('');
+        const ownerHtml = c.account_owner_name
+            ? esc(c.account_owner_name)
+            : '<span style="color:var(--red);font-weight:600">unassigned</span>';
+
+        html += `<tr onclick="toggleCustDrill(${c.id})" data-company-id="${c.id}">
+            <td><button class="ea" id="ca-${c.id}">\u25b6</button></td>
+            <td><b class="cust-link">${esc(displayName)}</b>${domain ? '<br><span style="font-size:10px;color:var(--muted)">' + esc(domain) + '</span>' : ''}</td>
+            <td>${c.account_type ? '<span class="badge b-src">' + esc(c.account_type) + '</span>' : '\u2014'}</td>
+            <td style="font-size:11px">${esc(c.industry || '\u2014')}</td>
+            <td class="mono">${c.site_count || 0}</td>
+            <td>${ownerHtml}</td>
+            <td><span id="actHealth-${c.id}"></span></td>
+            <td style="white-space:nowrap" onclick="event.stopPropagation()">
+                <button class="btn-enrich" onclick="openEditCompany(${c.id})">Edit</button>
+                <button class="btn-enrich" onclick="unifiedEnrichCompany(${c.id})">Enrich</button>
+            </td>
+        </tr>
+        <tr class="drow" id="cd-${c.id}"><td colspan="8">
+            <div id="cdInner-${c.id}"><p class="empty" style="padding:4px;font-size:11px">Loading...</p></div>
+        </td></tr>`;
+    }
+
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
+}
+
+function toggleCustDrill(companyId) {
+    const drow = document.getElementById('cd-' + companyId);
+    const arrow = document.getElementById('ca-' + companyId);
+    if (!drow) return;
+    const opening = !drow.classList.contains('open');
+    drow.classList.toggle('open');
+    if (arrow) arrow.classList.toggle('open');
+    if (opening) {
+        _loadCustDrillContent(companyId);
+        loadCompanyActivityStatus(companyId);
+    }
+}
+
+async function _loadCustDrillContent(companyId) {
+    const inner = document.getElementById('cdInner-' + companyId);
+    if (!inner || inner.dataset.loaded) return;
+    const c = crmCustomers.find(x => x.id === companyId);
+    if (!c) return;
+
+    // Enrichment tags
+    const acctTags = [
+        c.employee_size ? '<span class="enrich-tag">\ud83d\udc65 ' + esc(c.employee_size) + '</span>' : '',
+        c.hq_city ? '<span class="enrich-tag">\ud83d\udccd ' + esc(c.hq_city) + (c.hq_state ? ', ' + esc(c.hq_state) : '') + '</span>' : '',
+        c.phone ? '<span class="enrich-tag">\ud83d\udcde ' + esc(c.phone) + '</span>' : '',
+        c.credit_terms ? '<span class="enrich-tag">' + esc(c.credit_terms) + '</span>' : '',
+        c.linkedin_url ? '<a href="' + escAttr(c.linkedin_url) + '" target="_blank" style="color:var(--teal);text-decoration:none;font-size:10px">LinkedIn \u2197</a>' : '',
+    ].filter(Boolean).join('');
+    const enrichHtml = acctTags ? '<div class="enrich-bar" style="margin-bottom:8px">' + acctTags + '</div>' : '';
+
+    // Sites sub-table
+    const sites = c.sites || [];
+    let sitesHtml = '';
+    if (sites.length) {
+        sitesHtml = `<table class="dtbl"><thead><tr><th>Site</th><th>Owner</th><th>Open Reqs</th></tr></thead><tbody>`;
+        for (const s of sites) {
+            sitesHtml += `<tr style="cursor:pointer" onclick="toggleSiteDetail(${s.id})">
+                <td style="font-weight:600">${esc(s.site_name)}</td>
+                <td>${esc(s.owner_name || '\u2014')}</td>
+                <td class="mono">${s.open_reqs || 0}</td>
+            </tr>
+            <tr><td colspan="3"><div id="siteDetail-${s.id}" class="site-detail-panel" style="display:none"></div></td></tr>`;
+        }
+        sitesHtml += '</tbody></table>';
+    }
+    sitesHtml += `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="event.stopPropagation();openAddSiteModal(${c.id},'${escAttr(c.name)}')">+ Add Site</button>`;
+
+    // Activity section
+    const actHtml = `<div class="cust-activity-section" style="margin-top:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span class="si-contacts-title">Recent Activity</span>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openLogNoteModal(${c.id},'${escAttr(c.name)}')">+ Note</button>
+        </div>
+        <div id="actList-${c.id}"><p class="empty" style="padding:4px;font-size:11px">Loading...</p></div>
+    </div>`;
+
+    inner.innerHTML = enrichHtml + sitesHtml + actHtml;
+    inner.dataset.loaded = '1';
+    loadCompanyActivities(companyId);
 }
 
 async function toggleSiteDetail(siteId) {
@@ -2540,11 +2619,8 @@ function filterSiteContacts(input, siteId) {
 // ── Company Activity Tracking ─────────────────────────────────────────
 
 function toggleCompanyCard(cardEl, companyId) {
-    cardEl.classList.toggle('expanded');
-    if (cardEl.classList.contains('expanded')) {
-        loadCompanyActivityStatus(companyId);
-        loadCompanyActivities(companyId);
-    }
+    // Legacy compat — redirect to drill-down toggle
+    toggleCustDrill(companyId);
 }
 
 async function loadCompanyActivityStatus(companyId) {
