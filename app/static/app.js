@@ -16,6 +16,8 @@ let _vendorListData = [];   // cached vendor list for client-side filtering
 let _vendorTierFilter = 'all';  // all|proven|developing|caution|new
 let expandedGroups = new Set();  // reqIds that are expanded (default: all collapsed)
 let _ddReqCache = {};  // drill-down requirements cache: rfqId → [requirements]
+let _ddSightingsCache = {};      // reqId -> sightings API response
+let _ddSelectedSightings = {};   // reqId -> Set of sighting IDs
 const CONDITION_OPTIONS = ['New', 'ETN', 'Factory Refurbished', 'Pulls'];
 
 // ── Shared Helpers ──────────────────────────────────────────────────────
@@ -588,19 +590,35 @@ async function toggleDrillDown(reqId) {
     if (arrow) arrow.classList.toggle('open');
     _updateDrillToggleLabel();
     if (!opening) return;
-    // Fetch requirements on first open, then cache
     const dd = drow.querySelector('.dd-content');
     if (!dd) return;
-    if (!_ddReqCache[reqId]) {
-        dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading…</span>';
-        try {
-            _ddReqCache[reqId] = await apiFetch(`/api/requisitions/${reqId}/requirements`);
-        } catch(e) {
-            dd.innerHTML = '<span style="font-size:11px;color:var(--red)">Failed to load</span>';
-            return;
+
+    if (_currentMainView === 'sourcing') {
+        // Sourcing: fetch sightings, not requirements
+        if (!_ddSightingsCache[reqId]) {
+            dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading…</span>';
+            try {
+                _ddSightingsCache[reqId] = await apiFetch(`/api/requisitions/${reqId}/sightings`);
+            } catch(e) {
+                dd.innerHTML = '<span style="font-size:11px;color:var(--red)">Failed to load</span>';
+                return;
+            }
         }
+        if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
+        _renderSourcingDrillDown(reqId);
+    } else {
+        // RFQ / Archive: fetch requirements (existing behavior)
+        if (!_ddReqCache[reqId]) {
+            dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading…</span>';
+            try {
+                _ddReqCache[reqId] = await apiFetch(`/api/requisitions/${reqId}/requirements`);
+            } catch(e) {
+                dd.innerHTML = '<span style="font-size:11px;color:var(--red)">Failed to load</span>';
+                return;
+            }
+        }
+        _renderDrillDownTable(reqId);
     }
-    _renderDrillDownTable(reqId);
 }
 
 function _renderDrillDownTable(rfqId) {
@@ -750,8 +768,109 @@ async function deleteDrillRow(rfqId, reqId) {
     } catch(e) { showToast('Failed to remove part', 'error'); }
 }
 
+// ── Sourcing Drill-Down (sightings view) ────────────────────────────────
+function _renderSourcingDrillDown(reqId) {
+    const drow = document.getElementById('d-' + reqId);
+    if (!drow) return;
+    const dd = drow.querySelector('.dd-content');
+    if (!dd) return;
+    const data = _ddSightingsCache[reqId] || {};
+    const groups = Object.entries(data); // [ [reqId, {label, sightings}], ... ]
+    if (!groups.length) { dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">No sightings yet</span>'; return; }
+    const sel = _ddSelectedSightings[reqId] || new Set();
+    const DD_LIMIT = 100;
+    const showAll = dd.dataset.showAll === '1';
+    let html = '';
+    for (const [rId, group] of groups) {
+        const sightings = group.sightings || [];
+        const label = group.label || 'Unknown MPN';
+        html += `<div style="margin-bottom:10px">
+            <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">${esc(label)} <span style="font-weight:400;color:var(--muted)">(${sightings.length} source${sightings.length !== 1 ? 's' : ''})</span></div>`;
+        if (!sightings.length) {
+            html += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">No sources found</div></div>';
+            continue;
+        }
+        const visible = showAll ? sightings : sightings.slice(0, DD_LIMIT);
+        html += `<table class="dtbl"><thead><tr>
+            <th style="width:24px"></th><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Score</th><th>Condition</th>
+        </tr></thead><tbody>`;
+        for (const s of visible) {
+            const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
+            const checked = sel.has(s.id) ? 'checked' : '';
+            const dimStyle = !hasEmail ? 'opacity:.5' : '';
+            const disabledAttr = !hasEmail ? 'disabled title="No vendor email"' : '';
+            const price = s.unit_price != null ? '$' + parseFloat(s.unit_price).toFixed(2) : '\u2014';
+            const qty = s.qty_available != null ? Number(s.qty_available).toLocaleString() : '\u2014';
+            const scoreVal = s.score != null ? parseFloat(s.score).toFixed(1) : '\u2014';
+            html += `<tr style="${dimStyle}">
+                <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
+                <td>${esc(s.vendor_name || '\u2014')}</td>
+                <td class="mono">${esc(s.mpn_matched || '\u2014')}</td>
+                <td class="mono">${qty}</td>
+                <td class="mono" style="color:${s.unit_price ? 'var(--teal)' : 'var(--muted)'}">${price}</td>
+                <td style="font-size:10px">${esc(s.source_type || '\u2014')}</td>
+                <td class="mono">${scoreVal}</td>
+                <td style="font-size:10px">${esc(s.condition || '\u2014')}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        if (!showAll && sightings.length > DD_LIMIT) {
+            html += `<a onclick="event.stopPropagation();this.closest('.dd-content').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin-top:4px">Show all ${sightings.length} sources\u2026</a>`;
+        }
+        html += '</div>';
+    }
+    dd.innerHTML = html;
+}
+
+function ddToggleSighting(reqId, sightingId) {
+    const sel = _ddSelectedSightings[reqId];
+    if (!sel) return;
+    if (sel.has(sightingId)) sel.delete(sightingId);
+    else sel.add(sightingId);
+    // Update checkbox without full re-render
+    const drow = document.getElementById('d-' + reqId);
+    if (drow) {
+        const cb = drow.querySelector(`input[type="checkbox"][onclick*="ddToggleSighting(${reqId},${sightingId})"]`);
+        if (cb) cb.checked = sel.has(sightingId);
+    }
+    _updateDdBulkButton(reqId);
+}
+
+function _updateDdBulkButton(reqId) {
+    const btn = document.getElementById('bulkRfqBtn-' + reqId);
+    if (!btn) return;
+    const sel = _ddSelectedSightings[reqId];
+    const count = sel ? sel.size : 0;
+    btn.style.display = count > 0 ? '' : 'none';
+    btn.textContent = `Send Bulk RFQ (${count})`;
+}
+
+function ddSendBulkRfq(reqId) {
+    const sel = _ddSelectedSightings[reqId];
+    if (!sel || !sel.size) return;
+    const data = _ddSightingsCache[reqId] || {};
+    // Collect selected sightings and group by vendor
+    const groups = {};
+    for (const [rId, group] of Object.entries(data)) {
+        for (const s of (group.sightings || [])) {
+            if (!sel.has(s.id)) continue;
+            const vKey = (s.vendor_name || '').trim().toLowerCase();
+            if (!vKey || vKey === 'no seller listed') continue;
+            if (!groups[vKey]) groups[vKey] = { vendor_name: s.vendor_name, parts: [] };
+            const part = s.mpn_matched || group.label;
+            if (!groups[vKey].parts.includes(part)) groups[vKey].parts.push(part);
+        }
+    }
+    const vendorGroups = Object.values(groups);
+    if (!vendorGroups.length) { showToast('No valid vendors selected', 'error'); return; }
+    currentReqId = reqId;
+    openBatchRfqModal(vendorGroups);
+}
+
 function renderReqList() {
     _ddReqCache = {};
+    _ddSightingsCache = {};
+    _ddSelectedSightings = {};
     const el = document.getElementById('reqList');
     let data = _reqListData;
     // When server search is active, skip status/text filters (server already filtered)
@@ -1013,7 +1132,9 @@ function _renderReqRow(r) {
     <tr class="drow" id="d-${r.id}"><td colspan="${colspan}">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
-            <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
+            ${v === 'sourcing'
+                ? `<button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Send Bulk RFQ (0)</button>`
+                : `<button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>`}
         </div>
         <div class="dd-content"><span style="font-size:11px;color:var(--muted)">${total} parts \u2014 expand for details</span></div>
     </td></tr>`;
@@ -2158,8 +2279,8 @@ function getSelectedByVendor() {
 let rfqAllParts = []; // All MPNs on this requisition
 let rfqSubsMap = {}; // { primary_mpn: [sub1, sub2, ...] }
 
-async function openBatchRfqModal() {
-    const groups = getSelectedByVendor();
+async function openBatchRfqModal(prebuiltGroups) {
+    const groups = prebuiltGroups || getSelectedByVendor();
     if (!groups.length) return;
 
     const modal = document.getElementById('rfqModal');
@@ -2483,6 +2604,9 @@ async function sendBatchRfq() {
         alert(`${sent} of ${payload.length} emails sent successfully`);
         closeModal('rfqModal');
         selectedSightings.clear();
+        // Clear sourcing drill-down state so next expand re-fetches fresh data
+        if (_ddSelectedSightings[currentReqId]) delete _ddSelectedSightings[currentReqId];
+        if (_ddSightingsCache[currentReqId]) delete _ddSightingsCache[currentReqId];
         renderSources();
         loadActivity();
     } catch (e) {
