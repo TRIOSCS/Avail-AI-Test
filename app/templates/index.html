@@ -1000,11 +1000,10 @@
         <div class="req-header">
             <h2>Requisitions</h2>
             <div class="flex-center gap-lg">
-                <input class="req-search" id="reqSearchInput" type="text" placeholder="Search requisitions…" oninput="searchRequisitions(this.value)" aria-label="Search requisitions">
                 <button class="btn btn-primary" onclick="openNewReqModal()">+ New Requisition</button>
             </div>
         </div>
-        <div id="reqStatusBar" class="filter-bar" style="margin-bottom:8px;display:none">
+        <div id="reqStatusBar" class="filter-bar" style="margin-bottom:8px">
             <input type="text" class="filter-search" id="reqListFilter" placeholder="Search by name, customer, or part number…" oninput="debouncedReqListSearch()">
             <div class="filter-pills">
                 <button class="filter-pill on" data-req-status="draft" onclick="setReqStatusFilter('draft',this)">Draft</button>
