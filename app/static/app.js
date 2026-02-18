@@ -804,9 +804,11 @@ function _renderSourcingDrillDown(reqId) {
             const price = s.unit_price != null ? '$' + parseFloat(s.unit_price).toFixed(2) : '\u2014';
             const qty = s.qty_available != null ? Number(s.qty_available).toLocaleString() : '\u2014';
             const scoreVal = s.score != null ? parseFloat(s.score).toFixed(1) : '\u2014';
+            const safeVName = (s.vendor_name||'').replace(/'/g, "\\'");
+            const needsEmail = !hasEmail ? ` <a onclick="event.stopPropagation();ddPromptVendorEmail(${reqId},${s.id},'${safeVName}')" style="color:var(--red);font-size:10px;cursor:pointer;font-weight:600">needs email</a>` : '';
             html += `<tr style="${dimStyle}">
                 <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
-                <td>${esc(s.vendor_name || '\u2014')}</td>
+                <td>${esc(s.vendor_name || '\u2014')}${needsEmail}</td>
                 <td class="mono">${esc(s.mpn_matched || '\u2014')}</td>
                 <td class="mono">${qty}</td>
                 <td class="mono" style="color:${s.unit_price ? 'var(--teal)' : 'var(--muted)'}">${price}</td>
@@ -845,6 +847,29 @@ function _updateDdBulkButton(reqId) {
     const count = sel ? sel.size : 0;
     btn.style.display = count > 0 ? '' : 'none';
     btn.textContent = `Send Bulk RFQ (${count})`;
+}
+
+async function ddPromptVendorEmail(reqId, sightingId, vendorName) {
+    const email = prompt(`Enter email for ${vendorName}:`);
+    if (!email || !email.trim()) return;
+    const trimmed = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) { showToast('Invalid email address', 'error'); return; }
+    try {
+        await apiFetch('/api/vendor-card/add-email', {
+            method: 'POST', body: JSON.stringify({ vendor_name: vendorName, email: trimmed })
+        });
+        showToast(`Email added for ${vendorName}`, 'success');
+        // Update cached sighting so re-render picks it up
+        const data = _ddSightingsCache[reqId] || {};
+        for (const [rId, group] of Object.entries(data)) {
+            for (const s of (group.sightings || [])) {
+                if (s.id === sightingId) { s.vendor_email = trimmed; break; }
+            }
+        }
+        _renderSourcingDrillDown(reqId);
+    } catch(e) {
+        showToast('Failed to save email', 'error');
+    }
 }
 
 function ddSendBulkRfq(reqId) {
