@@ -1005,13 +1005,15 @@
             </div>
         </div>
         <div id="reqStatusBar" class="filter-bar" style="margin-bottom:8px;display:none">
-            <input type="text" class="filter-search" id="reqListFilter" placeholder="Filter by name or customer…" oninput="renderReqList()">
+            <input type="text" class="filter-search" id="reqListFilter" placeholder="Search by name, customer, or part number…" oninput="debouncedReqListSearch()">
             <div class="filter-pills">
                 <button class="filter-pill on" data-req-status="draft" onclick="setReqStatusFilter('draft',this)">Draft</button>
                 <button class="filter-pill" data-req-status="active" onclick="setReqStatusFilter('active',this)">Sourcing</button>
                 <button class="filter-pill" data-req-status="offers" onclick="setReqStatusFilter('offers',this)">Offers</button>
                 <button class="filter-pill" data-req-status="quoted" onclick="setReqStatusFilter('quoted',this)">Quoted</button>
                 <button class="filter-pill" data-req-status="archive" onclick="setReqStatusFilter('archive',this)">Archive</button>
+                <span style="border-left:1px solid var(--border);height:18px;margin:0 4px" id="myReqsDivider"></span>
+                <button class="filter-pill" id="myReqsBtn" onclick="toggleMyReqs(this)">My Reqs</button>
             </div>
             <select class="filter-sort" id="reqListSort" onchange="setReqListSort(this.value)">
                 <option value="newest">Newest first</option>

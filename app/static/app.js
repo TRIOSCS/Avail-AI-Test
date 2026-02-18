@@ -274,6 +274,13 @@ function applyRoleGating() {
         enrichNav.style.display = '';
         refreshEnrichmentBadge();
     }
+    // "My Reqs" toggle: hide for sales (they already only see their own)
+    const myReqsBtn = document.getElementById('myReqsBtn');
+    const myReqsDiv = document.getElementById('myReqsDivider');
+    if (window.userRole === 'sales') {
+        if (myReqsBtn) myReqsBtn.style.display = 'none';
+        if (myReqsDiv) myReqsDiv.style.display = 'none';
+    }
     // Settings gear visible to admin and dev_assistant
     const settingsMenu = document.getElementById('settingsMenu');
     if (settingsMenu && (window.__isAdmin || window.__isDevAssistant)) settingsMenu.style.display = '';
@@ -485,11 +492,25 @@ let _reqCustomerMap = {};  // id → customer_display
 let _reqListData = [];     // cached list for client-side filtering
 let _reqStatusFilter = 'draft';
 let _reqListSort = 'newest';
+let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 
 function setReqListSort(val) {
     _reqListSort = val;
     renderReqList();
 }
+
+function toggleMyReqs(btn) {
+    _myReqsOnly = !_myReqsOnly;
+    btn.classList.toggle('on', _myReqsOnly);
+    renderReqList();
+}
+
+const debouncedReqListSearch = debounce(() => {
+    const q = (document.getElementById('reqListFilter')?.value || '').trim();
+    if (q.length >= 2) loadRequisitions(q);
+    else if (q.length === 0) loadRequisitions();
+    else renderReqList();  // Short input: client-side only
+}, 300);
 
 async function loadRequisitions(query = '') {
     try {
@@ -514,6 +535,10 @@ function renderReqList() {
         data = data.filter(r => r.status === 'active');
     } else {
         data = data.filter(r => r.status === _reqStatusFilter);
+    }
+    // "My Reqs" filter
+    if (_myReqsOnly && window.userId) {
+        data = data.filter(r => r.created_by === window.userId);
     }
     // Text filter
     const q = (document.getElementById('reqListFilter')?.value || '').trim().toUpperCase();

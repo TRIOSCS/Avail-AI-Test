@@ -147,7 +147,21 @@ async def list_requisitions(
 
     if q.strip():
         safe_q = q.strip().replace("%", r"\%").replace("_", r"\_")
-        query = query.filter(Requisition.name.ilike(f"%{safe_q}%"))
+        from sqlalchemy import or_, exists
+        # Search by req name, customer name, or part number (MPN)
+        mpn_match = exists(
+            select(Requirement.id).where(
+                Requirement.requisition_id == Requisition.id,
+                Requirement.primary_mpn.ilike(f"%{safe_q}%"),
+            )
+        )
+        query = query.filter(
+            or_(
+                Requisition.name.ilike(f"%{safe_q}%"),
+                Requisition.customer_name.ilike(f"%{safe_q}%"),
+                mpn_match,
+            )
+        )
     elif status == "archive":
         query = query.filter(Requisition.status.in_(["archived", "won", "lost"]))
     else:
@@ -183,6 +197,7 @@ async def list_requisitions(
                 "latest_reply_at": latest_reply.isoformat() if latest_reply else None,
                 "has_new_offers": bool(has_new),
                 "latest_offer_at": latest_offer.isoformat() if latest_offer else None,
+                "created_by": r.created_by,
                 "created_by_name": creator_names.get(r.created_by, ""),
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "last_searched_at": r.last_searched_at.isoformat()
