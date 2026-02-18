@@ -83,6 +83,7 @@ class RequirementUpdate(BaseModel):
     hardware_codes: str | None = None
     packaging: str | None = None
     condition: str | None = None
+    notes: str | None = None
 
     @field_validator("primary_mpn")
     @classmethod

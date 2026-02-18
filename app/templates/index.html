@@ -1160,8 +1160,8 @@
         .dtbl{width:100%;font-size:11px;border-collapse:collapse;margin-top:4px}
         .dtbl th{text-align:left;padding:4px 8px;color:var(--text);font-weight:700;font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border);background:transparent}
         .dtbl td{padding:4px 8px;border-bottom:1px solid var(--card2)}
-        .dtbl input{border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:11px;font-family:'JetBrains Mono',monospace;width:100%;background:var(--white)}
-        .dtbl input:focus{outline:none;border-color:var(--teal)}
+        .dtbl input,.dtbl textarea,.dtbl select{border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:11px;font-family:'JetBrains Mono',monospace;width:100%;background:var(--white)}
+        .dtbl input:focus,.dtbl textarea:focus,.dtbl select:focus{outline:none;border-color:var(--teal)}
         .dd-edit{cursor:pointer}
         .dd-edit:hover{background:var(--bg);border-radius:3px}
 
@@ -1223,9 +1223,8 @@
         <button class="btn btn-primary" onclick="openNewReqModal()">+ New RFQ</button>
         <input type="text" class="sbox" id="mainSearch" placeholder="&#x1f50d;  Search customer, part, RFQ&hellip;" oninput="debouncedMainSearch()">
         <div class="fpills fpills-sm" id="statusToggle">
-            <button class="fp fp-sm on" data-sf="all" onclick="setStatusFilter('all',this)">All</button>
             <button class="fp fp-sm" data-sf="draft" onclick="setStatusFilter('draft',this)">Draft</button>
-            <button class="fp fp-sm" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
+            <button class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
         </div>
         <div class="filter-wrap">
             <select class="tb-select" id="deadlineFilter" onchange="applyDeadlineFilter()">

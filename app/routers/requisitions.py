@@ -317,6 +317,7 @@ async def list_requirements(
                 "hardware_codes": r.hardware_codes or "",
                 "packaging": r.packaging or "",
                 "condition": r.condition or "",
+                "notes": r.notes or "",
             }
         )
     return results
@@ -480,6 +481,8 @@ async def update_requirement(
         r.packaging = data.packaging.strip()
     if data.condition is not None:
         r.condition = data.condition.strip()
+    if data.notes is not None:
+        r.notes = data.notes.strip()
     db.commit()
     return {"ok": True}
 

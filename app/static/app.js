@@ -508,7 +508,7 @@ function notifyStatusChange(data) {
 // ── Requisitions ────────────────────────────────────────────────────────
 let _reqCustomerMap = {};  // id → customer_display
 let _reqListData = [];     // cached list for client-side filtering
-let _reqStatusFilter = 'all';
+let _reqStatusFilter = 'active';
 let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _serverSearchActive = false; // True when server-side search returned filtered results
@@ -598,23 +598,29 @@ function _renderDrillDownTable(rfqId) {
     const dd = drow.querySelector('.dd-content');
     if (!dd) return;
     const reqs = _ddReqCache[rfqId] || [];
-    if (!reqs.length) { dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">No parts</span>'; return; }
+    if (!reqs.length) { dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">No parts yet</span>'; return; }
     const DD_LIMIT = 100;
     const showAll = dd.dataset.showAll === '1';
     const visible = showAll ? reqs : reqs.slice(0, DD_LIMIT);
     let html = `<table class="dtbl"><thead><tr>
-        <th>MPN</th><th>Qty</th><th>Target $</th><th>Vendors</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th>
+        <th>MPN</th><th>Qty</th><th>Target $</th><th>Subs</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th><th>Pkg</th><th>Notes</th><th>Vendors</th><th style="width:24px"></th>
     </tr></thead><tbody>`;
     for (const r of visible) {
+        const subsText = (r.substitutes || []).length ? r.substitutes.join(', ') : '—';
+        const notesTrunc = (r.notes || '').length > 30 ? r.notes.substring(0, 30) + '\u2026' : (r.notes || '—');
         html += `<tr>
             <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'primary_mpn')">${esc(r.primary_mpn || '—')}</td>
             <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'target_qty')">${r.target_qty || 0}</td>
             <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'target_price')" style="color:${r.target_price ? 'var(--teal)' : 'var(--muted)'}">${r.target_price != null ? '$' + parseFloat(r.target_price).toFixed(2) : '—'}</td>
-            <td class="mono">${r.sighting_count || 0}</td>
+            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'substitutes')" style="font-size:10px">${esc(subsText)}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'condition')">${esc(r.condition || '—')}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'date_codes')">${esc(r.date_codes || '—')}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'firmware')" style="font-size:10px">${esc(r.firmware || '—')}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'hardware_codes')" style="font-size:10px">${esc(r.hardware_codes || '—')}</td>
+            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'packaging')" style="font-size:10px">${esc(r.packaging || '—')}</td>
+            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'notes')" title="${escAttr(r.notes || '')}" style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(notesTrunc)}</td>
+            <td class="mono">${r.sighting_count || 0}</td>
+            <td><button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteDrillRow(${rfqId},${r.id})" title="Remove" style="font-size:10px;padding:1px 5px">\u2715</button></td>
         </tr>`;
     }
     html += '</tbody></table>';
@@ -625,13 +631,14 @@ function _renderDrillDownTable(rfqId) {
 }
 
 function editDrillCell(td, rfqId, reqId, field) {
-    if (td.querySelector('input, select')) return;
+    if (td.querySelector('input, select, textarea')) return;
     const reqs = _ddReqCache[rfqId] || [];
     const r = reqs.find(x => x.id === reqId);
     if (!r) return;
 
     let currentVal;
-    if (field === 'target_qty') currentVal = String(r.target_qty || 1);
+    if (field === 'substitutes') currentVal = (r.substitutes || []).join(', ');
+    else if (field === 'target_qty') currentVal = String(r.target_qty || 1);
     else if (field === 'target_price') currentVal = r.target_price != null ? String(r.target_price) : '';
     else currentVal = r[field] || '';
 
@@ -640,6 +647,12 @@ function editDrillCell(td, rfqId, reqId, field) {
         el = document.createElement('select');
         el.className = 'req-edit-input';
         el.innerHTML = '<option value="">—</option>' + CONDITION_OPTIONS.map(o => `<option value="${o}"${currentVal === o ? ' selected' : ''}>${o}</option>`).join('');
+    } else if (field === 'notes') {
+        el = document.createElement('textarea');
+        el.className = 'req-edit-input';
+        el.value = currentVal;
+        el.rows = 2;
+        el.style.cssText = 'width:180px;font-size:11px;resize:vertical';
     } else {
         el = document.createElement('input');
         el.className = 'req-edit-input';
@@ -659,6 +672,7 @@ function editDrillCell(td, rfqId, reqId, field) {
         const body = {};
         if (field === 'target_price') body[field] = val ? parseFloat(val) : null;
         else if (field === 'target_qty') body[field] = parseInt(val) || 1;
+        else if (field === 'substitutes') body[field] = val ? val.split(',').map(s => s.trim()).filter(Boolean) : [];
         else body[field] = val;
         try {
             await apiFetch(`/api/requirements/${reqId}`, { method: 'PUT', body });
@@ -673,9 +687,56 @@ function editDrillCell(td, rfqId, reqId, field) {
         el.addEventListener('change', () => el.blur());
     }
     el.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+        if (e.key === 'Enter' && field !== 'notes') { e.preventDefault(); el.blur(); }
         if (e.key === 'Escape') { e.preventDefault(); _renderDrillDownTable(rfqId); }
     });
+}
+
+async function addDrillRow(rfqId) {
+    const mpn = prompt('Part number (MPN):');
+    if (!mpn || !mpn.trim()) return;
+    try {
+        await apiFetch(`/api/requisitions/${rfqId}/requirements`, {
+            method: 'POST', body: { primary_mpn: mpn.trim(), target_qty: 1 }
+        });
+        delete _ddReqCache[rfqId];
+        // Update the count in the list data
+        const rfq = _reqListData.find(r => r.id === rfqId);
+        if (rfq) rfq.requirement_count = (rfq.requirement_count || 0) + 1;
+        // Re-fetch and render
+        _ddReqCache[rfqId] = await apiFetch(`/api/requisitions/${rfqId}/requirements`);
+        _renderDrillDownTable(rfqId);
+        // Update header count
+        const drow = document.getElementById('d-' + rfqId);
+        if (drow) {
+            const hdr = drow.querySelector('span[style*="font-weight:700"]');
+            const total = _ddReqCache[rfqId].length;
+            if (hdr) hdr.textContent = `${total} part${total !== 1 ? 's' : ''}`;
+        }
+    } catch(e) { showToast('Failed to add part', 'error'); }
+}
+
+async function deleteDrillRow(rfqId, reqId) {
+    if (!confirm('Remove this part?')) return;
+    try {
+        await apiFetch(`/api/requirements/${reqId}`, { method: 'DELETE' });
+        const reqs = _ddReqCache[rfqId];
+        if (reqs) {
+            const idx = reqs.findIndex(x => x.id === reqId);
+            if (idx >= 0) reqs.splice(idx, 1);
+        }
+        // Update the count in the list data
+        const rfq = _reqListData.find(r => r.id === rfqId);
+        if (rfq && rfq.requirement_count > 0) rfq.requirement_count--;
+        _renderDrillDownTable(rfqId);
+        // Update header count
+        const drow = document.getElementById('d-' + rfqId);
+        if (drow) {
+            const hdr = drow.querySelector('span[style*="font-weight:700"]');
+            const total = (reqs || []).length;
+            if (hdr) hdr.textContent = `${total} part${total !== 1 ? 's' : ''}`;
+        }
+    } catch(e) { showToast('Failed to remove part', 'error'); }
 }
 
 function renderReqList() {
@@ -835,14 +896,12 @@ function _renderReqRow(r) {
         <td>${esc(r.created_by_name || '')}</td>
         <td class="mono" style="font-size:11px">${age}</td>
         <td>${dl}</td>
+        <td><button class="btn btn-g btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','sources')" title="Source all parts">\u25b6 Source</button></td>
     </tr>
-    <tr class="drow" id="d-${r.id}"><td colspan="9">
+    <tr class="drow" id="d-${r.id}"><td colspan="10">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
-            <div style="display:flex;gap:6px;align-items:center">
-                <a class="back-link" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}')">Full Detail \u2192</a>
-                <button class="btn btn-g btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','sources')">\u25b6 Source</button>
-            </div>
+            <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
         </div>
         <div class="dd-content"><span style="font-size:11px;color:var(--muted)">${total} parts \u2014 expand for details</span></div>
     </td></tr>`;
@@ -1013,14 +1072,14 @@ function setMainView(view, btn) {
     _deadlineFilter = '';
     const dlSel = document.getElementById('deadlineFilter');
     if (dlSel) dlSel.value = '';
-    // Reset status toggle to "All"
-    document.querySelectorAll('#statusToggle .fp').forEach(b => b.classList.toggle('on', b.dataset.sf === 'all'));
+    // Reset status toggle to "Sourcing"
+    document.querySelectorAll('#statusToggle .fp').forEach(b => b.classList.toggle('on', b.dataset.sf === 'active'));
     countActiveFilters();
     // Show/hide status toggle (not relevant on archive tab)
     const stEl = document.getElementById('statusToggle');
     if (stEl) stEl.style.display = (view === 'archive') ? 'none' : '';
     if (view === 'rfq') {
-        _reqStatusFilter = 'all';
+        _reqStatusFilter = 'active';
         _serverSearchActive = false;
         loadRequisitions();
     } else if (view === 'sourcing') {
@@ -1046,17 +1105,7 @@ function setMainView(view, btn) {
 function setStatusFilter(sf, btn) {
     document.querySelectorAll('#statusToggle .fp').forEach(b => b.classList.remove('on'));
     if (btn) btn.classList.add('on');
-    // Override the main status filter within the current tab
-    if (sf === 'all') {
-        // Respect the tab-level filter
-        const activeTab = document.querySelector('#mainPills .fp.on');
-        const view = activeTab ? activeTab.dataset.view : 'rfq';
-        if (view === 'sourcing') _reqStatusFilter = 'active';
-        else if (view === 'archive') _reqStatusFilter = 'archive';
-        else _reqStatusFilter = 'all';
-    } else {
-        _reqStatusFilter = sf;
-    }
+    _reqStatusFilter = sf;
     renderReqList();
 }
 
