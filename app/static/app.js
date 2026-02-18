@@ -1283,6 +1283,14 @@ async function toggleArchive(id) {
     } catch (e) { showToast('Failed to toggle archive', 'error'); }
 }
 
+async function archiveFromList(reqId) {
+    try {
+        await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
+        showToast('Archived');
+        loadRequisitions();
+    } catch (e) { showToast('Failed to archive', 'error'); }
+}
+
 // ── Requirements ────────────────────────────────────────────────────────
 let reqData = []; // Cache for editing
 let selectedRequirements = new Set(); // Track selected requirements for partial search
