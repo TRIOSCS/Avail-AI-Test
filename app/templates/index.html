@@ -127,7 +127,7 @@
         .sight-group-title .mono{font-size:11px;color:var(--muted)}
         .sg-title-left{display:flex;align-items:center;gap:6px;min-width:0}
         .sg-chevron{font-size:10px;color:var(--muted);width:12px;text-align:center;flex-shrink:0;transition:transform .15s}
-        .sg-mpn{cursor:pointer;color:var(--teal)}
+        .sg-mpn{cursor:pointer;color:#1b6b4f;font-size:14px}
         .sg-mpn:hover{text-decoration:underline}
         .sg-collapsed .sight-group-title{border-bottom:1px solid var(--border);margin-bottom:0}
         .sg-body{transition:all .1s ease}
@@ -140,7 +140,7 @@
         .sc input[type=checkbox]{width:14px;height:14px;accent-color:var(--teal);cursor:pointer}
         .sc-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:0}
         .sc-top{display:flex;align-items:center;gap:6px;min-width:0}
-        .sc-vendor{font-weight:700;font-size:12px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:180px}
+        .sc-vendor{font-weight:700;font-size:14px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;color:#1a3a5c}
         .sc-key-vals{display:flex;gap:8px;align-items:center;margin-left:auto;flex-shrink:0}
         .sc-key-val{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:600;white-space:nowrap}
         .sc-badges{display:flex;gap:3px;align-items:center;flex-wrap:wrap;margin-top:1px}
@@ -195,7 +195,7 @@
         .act-card{background:var(--white);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:6px;transition:.15s}
         .act-card:hover{border-color:var(--border2);box-shadow:0 2px 8px rgba(0,0,0,.04)}
         .act-card-header{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-        .act-card-vendor{font-size:14px;font-weight:700}
+        .act-card-vendor{font-size:15px;font-weight:700;color:#1a3a5c}
         .act-badge-replied{font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:var(--green-light);color:var(--green);text-transform:uppercase}
         .act-badge-awaiting{font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:#fef3c7;color:#92400e;text-transform:uppercase}
         .act-badge-opened{font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:#dbeafe;color:#1e40af;text-transform:uppercase}
@@ -211,7 +211,7 @@
         .act-card-part{font-size:11px;font-family:'JetBrains Mono',monospace;background:var(--surface);padding:2px 8px;border-radius:4px;color:var(--text2)}
         .act-card-quote{margin-top:8px;padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:12px}
         .act-card-quote-line{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-        .act-card-quote-mpn{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:11px}
+        .act-card-quote-mpn{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:12px;color:#1b6b4f}
         .act-card-quote-val{font-size:11px;color:var(--text2)}
         .act-card-actions{display:flex;gap:6px;margin-top:8px;justify-content:flex-end;flex-wrap:wrap}
         .act-badge-classification{font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:#f0e6ff;color:#7b4fb0;text-transform:uppercase;letter-spacing:.3px}
@@ -339,7 +339,7 @@
 
         /* Material Card styles (list + popup) */
         .mat-card-row{display:flex;justify-content:space-between;align-items:center}
-        .mat-card-mpn{font-weight:700;font-size:13px;font-family:'JetBrains Mono',monospace}
+        .mat-card-mpn{font-weight:700;font-size:14px;font-family:'JetBrains Mono',monospace;color:#1b6b4f}
         .mat-card-meta{display:flex;gap:12px;align-items:center;font-size:11px;color:var(--muted)}
         .mp-header{margin-bottom:16px}
         .mp-header h2{font-size:18px;margin-bottom:2px;font-family:'JetBrains Mono',monospace}
@@ -358,7 +358,7 @@
         .mp-tbl th{text-align:left;padding:5px 8px;color:var(--muted);font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
         .mp-tbl td{padding:5px 8px;border-bottom:1px solid var(--card2);vertical-align:middle}
         .mp-tbl tr:hover td{background:var(--bg)}
-        .mp-tbl-vendor{font-weight:600;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .mp-tbl-vendor{font-weight:700;font-size:12px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1a3a5c}
         .mp-tbl-date{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text2);white-space:nowrap}
 
         @media(max-width:768px){
@@ -407,7 +407,7 @@
             .sc{flex-direction:column;align-items:flex-start;gap:4px;padding:6px 10px !important}
             .sc input[type=checkbox]{width:18px;height:18px}
             .sc-top{flex-wrap:wrap}
-            .sc-vendor{max-width:140px}
+            .sc-vendor{max-width:140px;font-size:13px}
             .sc-key-vals{margin-left:0}
             .sc-details{flex-wrap:wrap;gap:6px}
             .sc-actions-right{flex-direction:row;width:100%;justify-content:flex-end;margin-left:0;margin-top:2px}
@@ -421,7 +421,7 @@
             .act-stat{padding:8px 10px;min-width:70px;flex:1 1 calc(50% - 4px);min-height:60px}
             .act-stat-num{font-size:18px}
             .act-card-header{flex-wrap:wrap;gap:4px}
-            .act-card-vendor{font-size:13px}
+            .act-card-vendor{font-size:14px}
             .act-card-date{margin-left:0;font-size:10px;width:100%}
             .act-card-meta{flex-direction:column;gap:4px}
             .act-card-parts{gap:3px}
@@ -596,7 +596,7 @@
         .cust-header:hover{background:var(--bg)}
         .cust-expand{font-size:10px;color:var(--muted);transition:transform .2s;width:14px}
         .cust-card.expanded .cust-expand{transform:rotate(90deg)}
-        .cust-name{font-weight:700;font-size:14px;flex:1}
+        .cust-name{font-weight:700;font-size:16px;flex:1;color:#1a3a5c}
         .cust-count{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace}
         .cust-acct-mgr{font-size:10px;color:var(--text2);margin-left:4px}
         .cust-sites{display:none;border-top:1px solid var(--border);padding:8px 16px}
@@ -684,8 +684,8 @@
         .proactive-match{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--bg);font-size:12px}
         .proactive-match:last-child{border-bottom:none}
         .proactive-match label{display:flex;align-items:center;gap:6px;cursor:pointer;flex:1}
-        .proactive-match .pm-mpn{font-family:'JetBrains Mono',monospace;font-weight:600;min-width:120px}
-        .proactive-match .pm-vendor{color:var(--text2);min-width:100px}
+        .proactive-match .pm-mpn{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:13px;min-width:120px;color:#1b6b4f}
+        .proactive-match .pm-vendor{color:#1a3a5c;font-weight:600;min-width:100px}
         .proactive-match .pm-detail{color:var(--muted)}
         .proactive-actions{display:flex;gap:6px;margin-top:10px}
         .proactive-offer-card{background:var(--white);border:1px solid var(--border);border-radius:8px;padding:14px 16px;margin-bottom:8px}
