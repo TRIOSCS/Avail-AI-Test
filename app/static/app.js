@@ -517,10 +517,11 @@ function notifyStatusChange(data) {
 // ── Requisitions ────────────────────────────────────────────────────────
 let _reqCustomerMap = {};  // id → customer_display
 let _reqListData = [];     // cached list for client-side filtering
-let _reqStatusFilter = 'active';
+let _reqStatusFilter = 'draft';
 let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _serverSearchActive = false; // True when server-side search returned filtered results
+let _currentMainView = 'rfq';  // 'rfq' | 'sourcing' | 'archive'
 let _deadlineFilter = '';  // Deadline dropdown filter
 
 function setReqListSort(val) {
@@ -802,6 +803,9 @@ function renderReqList() {
                 case 'sales': va = a.created_by_name || ''; vb = b.created_by_name || ''; break;
                 case 'age': va = a.created_at || ''; vb = b.created_at || ''; break;
                 case 'deadline': va = a.deadline === 'ASAP' ? '0000-00-00' : (a.deadline || '9999-12-31'); vb = b.deadline === 'ASAP' ? '0000-00-00' : (b.deadline || '9999-12-31'); break;
+                case 'sent': va = a.rfq_sent_count || 0; vb = b.rfq_sent_count || 0; break;
+                case 'resp': { const sa = a.rfq_sent_count || 0; const sb = b.rfq_sent_count || 0; va = sa > 0 ? (a.reply_count || 0) / sa : 0; vb = sb > 0 ? (b.reply_count || 0) / sb : 0; break; }
+                case 'searched': va = a.last_searched_at || ''; vb = b.last_searched_at || ''; break;
                 default: va = 0; vb = 0;
             }
             if (typeof va === 'string') return _reqSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
@@ -829,20 +833,46 @@ function renderReqList() {
         return;
     }
 
-    // v7 table with sortable headers + expandable drill-down rows
+    // Tab-aware table headers
     const thClass = (col) => _reqSortCol === col ? ' class="sorted"' : '';
-    const thead = `<thead><tr>
-        <th style="width:80px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6 Expand</th>
-        <th onclick="sortReqList('name')"${thClass('name')}>RFQ <span class="sort-arrow">${_sortArrow('name')}</span></th>
-        <th onclick="sortReqList('reqs')"${thClass('reqs')}>Reqs <span class="sort-arrow">${_sortArrow('reqs')}</span></th>
-        <th onclick="sortReqList('sourced')"${thClass('sourced')}>Sourced <span class="sort-arrow">${_sortArrow('sourced')}</span></th>
-        <th onclick="sortReqList('offers')"${thClass('offers')}>Offers <span class="sort-arrow">${_sortArrow('offers')}</span></th>
-        <th onclick="sortReqList('status')"${thClass('status')}>Status <span class="sort-arrow">${_sortArrow('status')}</span></th>
-        <th onclick="sortReqList('sales')"${thClass('sales')}>Sales <span class="sort-arrow">${_sortArrow('sales')}</span></th>
-        <th onclick="sortReqList('age')"${thClass('age')}>Age <span class="sort-arrow">${_sortArrow('age')}</span></th>
-        <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By <span class="sort-arrow">${_sortArrow('deadline')}</span></th>
-        <th style="width:60px"></th>
-    </tr></thead>`;
+    const sa = (col) => `<span class="sort-arrow">${_sortArrow(col)}</span>`;
+    const v = _currentMainView;
+    let thead;
+    if (v === 'sourcing') {
+        thead = `<thead><tr>
+            <th style="width:80px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6 Expand</th>
+            <th onclick="sortReqList('name')"${thClass('name')}>RFQ ${sa('name')}</th>
+            <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
+            <th onclick="sortReqList('sourced')"${thClass('sourced')}>Sourced ${sa('sourced')}</th>
+            <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
+            <th onclick="sortReqList('sent')"${thClass('sent')}>RFQs Sent ${sa('sent')}</th>
+            <th onclick="sortReqList('resp')"${thClass('resp')}>Resp % ${sa('resp')}</th>
+            <th onclick="sortReqList('searched')"${thClass('searched')}>Searched ${sa('searched')}</th>
+            <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By ${sa('deadline')}</th>
+            <th style="width:60px"></th>
+        </tr></thead>`;
+    } else if (v === 'archive') {
+        thead = `<thead><tr>
+            <th style="width:80px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6 Expand</th>
+            <th onclick="sortReqList('name')"${thClass('name')}>RFQ ${sa('name')}</th>
+            <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
+            <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
+            <th onclick="sortReqList('status')"${thClass('status')}>Outcome ${sa('status')}</th>
+            <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
+            <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
+            <th style="width:60px"></th>
+        </tr></thead>`;
+    } else {
+        thead = `<thead><tr>
+            <th style="width:80px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6 Expand</th>
+            <th onclick="sortReqList('name')"${thClass('name')}>RFQ ${sa('name')}</th>
+            <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
+            <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
+            <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
+            <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By ${sa('deadline')}</th>
+            <th style="width:60px"></th>
+        </tr></thead>`;
+    }
 
     const rows = data.map(r => _renderReqRow(r)).join('');
     el.innerHTML = `<table class="tbl">${thead}<tbody>${rows}</tbody></table>`;
@@ -853,6 +883,7 @@ function _renderReqRow(r) {
     const sourced = r.sourced_count || 0;
     const offers = r.reply_count || 0;
     const pct = total > 0 ? Math.round((sourced / total) * 100) : 0;
+    const v = _currentMainView;
 
     // Status badge mapping
     const badgeMap = {draft:'b-draft',active:'b-src',sourcing:'b-src',offers:'b-off',quoted:'b-qtd',quoting:'b-qtd',archived:'b-draft',won:'b-off',lost:'b-draft'};
@@ -896,31 +927,76 @@ function _renderReqRow(r) {
         else if (h < 96) dot = ' <span class="new-offers-dot red" title="New offers"></span>';
     }
 
-    // Source/status action button
-    let srcBtn;
-    if (r.status === 'draft') {
-        srcBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();submitToSourcing(${r.id})" title="Submit to sourcing">\u25b6 Source</button>`;
-    } else if (offers > 0 && r.has_new_offers) {
-        srcBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','offers')" title="New offers — click to review">Offers (${offers})</button>`;
-    } else if (offers > 0) {
-        srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','offers')" title="View offers">Offers (${offers})</button>`;
+    // Name cell — shared across all tabs
+    const nameCell = `<td>${r.company_id ? `<b class="cust-link" onclick="event.stopPropagation();goToCompany(${r.company_id})">${esc(cust)}</b>` : `<b>${esc(cust)}</b>`}${dot}<br><span style="font-size:11px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
+
+    // Last Searched — relative timestamp
+    let searched = '';
+    if (r.last_searched_at) {
+        const h = (Date.now() - new Date(r.last_searched_at).getTime()) / 3600000;
+        if (h < 1) searched = '<' + Math.max(1, Math.round(h * 60)) + 'm ago';
+        else if (h < 24) searched = Math.round(h) + 'h ago';
+        else searched = Math.round(h / 24) + 'd ago';
     } else {
-        srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','sources')" title="Sourcing in progress">Sourcing</button>`;
+        searched = '<span style="color:var(--muted)">\u2014</span>';
+    }
+
+    // Per-tab data cells and actions
+    let dataCells, actions, colspan;
+
+    if (v === 'sourcing') {
+        // Sourcing: Parts, Sourced, Offers, RFQs Sent, Resp %, Searched, Need By
+        const sent = r.rfq_sent_count || 0;
+        const respPct = sent > 0 ? Math.round((offers / sent) * 100) + '%' : '\u2014';
+
+        // Action buttons for sourcing
+        let srcBtn;
+        if (offers > 0 && r.has_new_offers) {
+            srcBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','offers')" title="New offers — click to review">Offers (${offers})</button>`;
+        } else if (offers > 0) {
+            srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','offers')" title="View offers">Offers (${offers})</button>`;
+        } else {
+            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','sources')" title="Sourcing in progress">Sourcing</button>`;
+        }
+
+        dataCells = `
+            <td class="mono">${total}</td>
+            <td><div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div><span class="prog-txt">${sourced}/${total}</span></div></td>
+            <td class="mono">${offers}</td>
+            <td class="mono">${sent}</td>
+            <td class="mono">${respPct}</td>
+            <td style="font-size:11px">${searched}</td>
+            <td>${dl}</td>`;
+        actions = `<td style="white-space:nowrap"><button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})">&#x1f4e5; Archive</button> ${srcBtn}</td>`;
+        colspan = 10;
+    } else if (v === 'archive') {
+        // Archive: Parts, Offers, Outcome, Sales, Age
+        dataCells = `
+            <td class="mono">${total}</td>
+            <td class="mono">${offers}</td>
+            <td><span class="badge ${bc}">${_statusLabels[r.status] || r.status}</span></td>
+            <td>${esc(r.created_by_name || '')}</td>
+            <td class="mono" style="font-size:11px">${age}</td>`;
+        actions = `<td style="white-space:nowrap"><button class="btn btn-sm" onclick="event.stopPropagation();cloneFromList(${r.id})" title="Clone as new draft">&#x1f4cb; Clone</button></td>`;
+        colspan = 8;
+    } else {
+        // RFQ (drafts): Parts, Sales, Age, Need By
+        dataCells = `
+            <td class="mono">${total}</td>
+            <td>${esc(r.created_by_name || '')}</td>
+            <td class="mono" style="font-size:11px">${age}</td>
+            <td>${dl}</td>`;
+        actions = `<td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();submitToSourcing(${r.id})" title="Submit to sourcing">&#x25b6; Source</button></td>`;
+        colspan = 7;
     }
 
     return `<tr onclick="toggleDrillDown(${r.id})">
         <td><button class="ea" id="a-${r.id}">\u25b6</button></td>
-        <td>${r.company_id ? `<b class="cust-link" onclick="event.stopPropagation();goToCompany(${r.company_id})">${esc(cust)}</b>` : `<b>${esc(cust)}</b>`}${dot}<br><span style="font-size:11px;color:var(--muted)">${esc(r.name || '')}</span></td>
-        <td class="mono">${total}</td>
-        <td><div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div><span class="prog-txt">${sourced}/${total}</span></div></td>
-        <td class="mono">${offers}</td>
-        <td><span class="badge ${bc}">${_statusLabels[r.status] || r.status}</span></td>
-        <td>${esc(r.created_by_name || '')}</td>
-        <td class="mono" style="font-size:11px">${age}</td>
-        <td>${dl}</td>
-        <td style="white-space:nowrap"><button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})">&#x1f4e5; Archive</button> ${srcBtn}</td>
+        ${nameCell}
+        ${dataCells}
+        ${actions}
     </tr>
-    <tr class="drow" id="d-${r.id}"><td colspan="10">
+    <tr class="drow" id="d-${r.id}"><td colspan="${colspan}">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
             <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
@@ -1088,20 +1164,19 @@ function applyDropdownFilters(data) {
 
 // ── v7 Main View Switcher ───────────────────────────────────────────────
 function setMainView(view, btn) {
+    _currentMainView = view;
     document.querySelectorAll('#mainPills .fp').forEach(b => b.classList.remove('on'));
     if (btn) btn.classList.add('on');
     _activeFilters = {};
     _deadlineFilter = '';
     const dlSel = document.getElementById('deadlineFilter');
     if (dlSel) dlSel.value = '';
-    // Reset status toggle to "Sourcing"
-    document.querySelectorAll('#statusToggle .fp').forEach(b => b.classList.toggle('on', b.dataset.sf === 'active'));
     countActiveFilters();
-    // Show/hide status toggle (not relevant on archive tab)
+    // Hide status toggle — tabs are now locked to their status
     const stEl = document.getElementById('statusToggle');
-    if (stEl) stEl.style.display = (view === 'archive') ? 'none' : '';
+    if (stEl) stEl.style.display = 'none';
     if (view === 'rfq') {
-        _reqStatusFilter = 'active';
+        _reqStatusFilter = 'draft';
         _serverSearchActive = false;
         loadRequisitions();
     } else if (view === 'sourcing') {
@@ -1299,6 +1374,17 @@ async function archiveFromList(reqId) {
         showToast('Archived');
         loadRequisitions();
     } catch (e) { showToast('Failed to archive', 'error'); }
+}
+
+async function cloneFromList(reqId) {
+    try {
+        const resp = await apiFetch(`/api/requisitions/${reqId}/clone`, { method: 'POST' });
+        showToast(`Cloned as "${resp.name}"`);
+        // Switch to RFQ tab to show the new draft
+        const rfqBtn = document.querySelector('#mainPills .fp');
+        if (rfqBtn) setMainView('rfq', rfqBtn);
+        else loadRequisitions();
+    } catch (e) { showToast('Failed to clone', 'error'); }
 }
 
 // ── Requirements ────────────────────────────────────────────────────────

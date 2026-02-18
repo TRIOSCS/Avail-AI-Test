@@ -1198,6 +1198,33 @@
         .b-off{background:var(--green-light);color:var(--green)}
         .b-qtd{background:var(--amber-light);color:var(--amber)}
 
+        /* Buy Plan status badges */
+        .b-pend{background:var(--amber-light);color:var(--amber)}
+        .b-appr{background:var(--green-light);color:var(--green)}
+        .b-po{background:var(--blue-lt);color:var(--blue)}
+        .b-conf{background:var(--green-light);color:#065f46}
+        .b-comp{background:var(--green-light);color:#065f46}
+        .b-canc{background:var(--bg2);color:var(--muted)}
+        .b-rej{background:var(--red-light);color:var(--red)}
+        .b-stock{background:var(--purple-lt);color:var(--purple)}
+
+        /* Vendor tier badges */
+        .b-proven{background:#e6f9ed;color:#1a7a3a}
+        .b-developing{background:#fff8e1;color:#b8860b}
+        .b-caution{background:#fde8e8;color:#c0392b}
+        .b-new{background:var(--bg2);color:var(--muted)}
+        .b-bl{background:var(--red-light);color:var(--red)}
+
+        /* Shared view toolbar */
+        .view-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;padding:0 16px}
+        .view-toolbar h2{font-size:16px;font-weight:700;margin:0;white-space:nowrap}
+
+        /* .tbl compat rules for perf highlight rows */
+        .tbl tr.cold-start{opacity:.6}
+        .tbl tr.sc-gold>td{background:rgba(255,215,0,.12)!important}
+        .tbl tr.sc-silver>td{background:rgba(192,192,192,.15)!important}
+        .tbl tr.lb-highlight>td{background:rgba(61,104,149,.08)!important}
+
         /* View toggle */
         .view{display:none}.view.on{display:block}
     </style>
@@ -1490,24 +1517,16 @@
 
     <!-- VIEW: Customers -->
     <div id="view-customers" style="display:none">
-        <div class="req-header">
+        <div class="view-toolbar">
             <h2>Customers</h2>
-            <div class="flex-center gap-lg">
-                <input class="req-search" id="custFilter" placeholder="Search companies…" oninput="debouncedLoadCustomers()" aria-label="Search companies">
-                <button class="btn btn-primary" onclick="openNewCompanyModal()">+ New Company</button>
+            <input class="sbox" id="custFilter" placeholder="Search companies…" oninput="debouncedLoadCustomers()" aria-label="Search companies" style="width:260px">
+            <div class="fpills fpills-sm">
+                <button class="fp fp-sm" id="custUnassignedPill" onclick="toggleCustUnassigned(this)">Unassigned</button>
             </div>
-        </div>
-        <div class="cust-filters flex-center gap-sm flex-wrap" style="padding:0 16px 8px">
-            <button class="filter-pill" id="custUnassignedPill" onclick="toggleCustUnassigned(this)">Unassigned</button>
-            <label id="custMyOnlyLabel" class="flex-center" style="gap:5px;font-size:12px;color:var(--text2);cursor:pointer;display:none">
+            <label id="custMyOnlyLabel" class="tb-btn" style="display:none;gap:4px;cursor:pointer;align-items:center">
                 <input type="checkbox" id="custMyOnly" onchange="loadCustomers()" style="accent-color:var(--teal)" aria-label="Show only my accounts"> My accounts
             </label>
-            <select class="filter-sort" id="custSort" onchange="sortCustomers(this.value)">
-                <option value="name-az">Name A→Z</option>
-                <option value="name-za">Name Z→A</option>
-                <option value="sites">Most Sites</option>
-                <option value="type">Account Type</option>
-            </select>
+            <button class="btn btn-primary btn-sm" onclick="openNewCompanyModal()">+ New Company</button>
             <span id="custFilterCount" class="text-muted" style="font-size:11px"></span>
         </div>
         <div id="custList"><p class="empty">Loading…</p></div>
@@ -1515,31 +1534,19 @@
 
     <!-- VIEW: Vendors -->
     <div id="view-vendors" style="display:none">
-        <div class="vendor-header">
+        <div class="view-toolbar">
             <h2>Vendor Directory</h2>
-        </div>
-        <!-- Tier tabs -->
-        <div class="tabs" id="vendorTierTabs" style="margin-bottom:12px">
-            <button class="tab on" onclick="setVendorTier('all',this)">All</button>
-            <button class="tab" onclick="setVendorTier('proven',this)">Proven</button>
-            <button class="tab" onclick="setVendorTier('developing',this)">Developing</button>
-            <button class="tab" onclick="setVendorTier('caution',this)">Caution</button>
-            <button class="tab" onclick="setVendorTier('new',this)">New</button>
-        </div>
-        <!-- Filter bar -->
-        <div class="filter-bar" style="margin-bottom:8px">
-            <input class="filter-search" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" aria-label="Search vendors">
-            <label style="font-size:11px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px">
-                <input type="checkbox" id="vendorHideBL" onchange="filterVendorList()" aria-label="Hide blacklisted vendors"> Hide blacklisted
+            <div class="fpills" id="vendorTierPills">
+                <button class="fp on" onclick="setVendorTier('all',this)">All</button>
+                <button class="fp" onclick="setVendorTier('proven',this)">Proven</button>
+                <button class="fp" onclick="setVendorTier('developing',this)">Developing</button>
+                <button class="fp" onclick="setVendorTier('caution',this)">Caution</button>
+                <button class="fp" onclick="setVendorTier('new',this)">New</button>
+            </div>
+            <input class="sbox" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" aria-label="Search vendors" style="width:220px">
+            <label class="tb-btn" style="display:flex;align-items:center;gap:4px;cursor:pointer">
+                <input type="checkbox" id="vendorHideBL" onchange="filterVendorList()" aria-label="Hide blacklisted" style="accent-color:var(--teal)"> Hide blacklisted
             </label>
-            <select class="filter-sort" id="vendorSort" onchange="setVendorSort(this.value)">
-                <option value="name-az">Name A→Z</option>
-                <option value="name-za">Name Z→A</option>
-                <option value="eng-desc">Engagement High→Low</option>
-                <option value="eng-asc">Engagement Low→High</option>
-                <option value="sightings">Most sightings</option>
-                <option value="rating">Highest rated</option>
-            </select>
             <span id="vendorFilterCount" class="text-muted"></span>
         </div>
         <div id="vendorList"><p class="empty">Loading…</p></div>
@@ -1547,21 +1554,10 @@
 
     <!-- VIEW: Materials -->
     <div id="view-materials" style="display:none">
-        <div class="vendor-header">
+        <div class="view-toolbar">
             <h2>Materials</h2>
-        </div>
-        <!-- Search-first layout -->
-        <div class="filter-bar" style="margin-bottom:8px">
-            <input class="filter-search" id="materialSearch" placeholder="Search by part number or manufacturer…" oninput="debouncedLoadMaterials()" aria-label="Search material cards" style="flex:2;max-width:480px">
-            <select class="filter-sort" id="materialSort" onchange="setMaterialSort(this.value)">
-                <option value="last-searched">Last searched</option>
-                <option value="mpn-az">MPN A→Z</option>
-                <option value="mpn-za">MPN Z→A</option>
-                <option value="most-searched">Most searched</option>
-                <option value="most-vendors">Most vendors</option>
-                <option value="oldest-search">Oldest search</option>
-            </select>
-            <button class="btn btn-ghost btn-sm" onclick="toggleStockImport()">Import Stock</button>
+            <input class="sbox" id="materialSearch" placeholder="Search by MPN or manufacturer…" oninput="debouncedLoadMaterials()" aria-label="Search material cards" style="width:320px">
+            <button class="tb-btn" onclick="toggleStockImport()">Import Stock</button>
         </div>
         <div id="stockImportArea" data-role="buyer" style="display:none;margin-bottom:12px" class="card">
             <strong style="font-size:12px;color:var(--muted)">Import a vendor stock list — all rows stored as material cards with vendor history</strong>
@@ -1586,17 +1582,18 @@
 
     <!-- VIEW: Buy Plans (admin only) -->
     <div id="view-buyplans" style="display:none">
-        <div class="vendor-header">
+        <div class="view-toolbar">
             <h2>Buy Plans</h2>
-            <div style="display:flex;gap:6px">
-                <button class="filter-pill on" data-bp-status="" onclick="setBpFilter('',this)">All</button>
-                <button class="filter-pill" data-bp-status="pending_approval" onclick="setBpFilter('pending_approval',this)">Pending</button>
-                <button class="filter-pill" data-bp-status="approved" onclick="setBpFilter('approved',this)">Approved</button>
-                <button class="filter-pill" data-bp-status="po_entered" onclick="setBpFilter('po_entered',this)">PO Entered</button>
-                <button class="filter-pill" data-bp-status="po_confirmed" onclick="setBpFilter('po_confirmed',this)">Confirmed</button>
-                <button class="filter-pill" data-bp-status="complete" onclick="setBpFilter('complete',this)">Complete</button>
-                <button class="filter-pill" data-bp-status="cancelled" onclick="setBpFilter('cancelled',this)">Cancelled</button>
+            <div class="fpills" id="bpStatusPills">
+                <button class="fp on" data-bp-status="" onclick="setBpFilter('',this)">All</button>
+                <button class="fp" data-bp-status="pending_approval" onclick="setBpFilter('pending_approval',this)">Pending</button>
+                <button class="fp" data-bp-status="approved" onclick="setBpFilter('approved',this)">Approved</button>
+                <button class="fp" data-bp-status="po_entered" onclick="setBpFilter('po_entered',this)">PO Entered</button>
+                <button class="fp" data-bp-status="po_confirmed" onclick="setBpFilter('po_confirmed',this)">Confirmed</button>
+                <button class="fp" data-bp-status="complete" onclick="setBpFilter('complete',this)">Complete</button>
+                <button class="fp" data-bp-status="cancelled" onclick="setBpFilter('cancelled',this)">Cancelled</button>
             </div>
+            <input class="sbox" id="bpSearch" placeholder="Search buy plans…" oninput="renderBuyPlansList()" style="width:220px">
         </div>
         <div id="buyPlansList"><p class="empty">Loading…</p></div>
     </div>
@@ -2135,13 +2132,13 @@
 
     <!-- VIEW: Performance Tracking -->
     <div id="view-performance" style="display:none">
-        <div class="vendor-header">
+        <div class="view-toolbar">
             <h2>Scorecards</h2>
         </div>
-        <div class="tabs" id="perfTabs">
-            <button class="tab on" onclick="switchPerfTab('vendors',this)">Vendor Scorecard</button>
-            <button class="tab" onclick="switchPerfTab('buyers',this)">Buyer Leaderboard</button>
-            <button class="tab" onclick="switchPerfTab('sales',this)">Salesperson Scorecard</button>
+        <div class="fpills" id="perfTabs" style="margin:0 16px 12px">
+            <button class="fp on" onclick="switchPerfTab('vendors',this)">Vendor Scorecard</button>
+            <button class="fp" onclick="switchPerfTab('buyers',this)">Buyer Leaderboard</button>
+            <button class="fp" onclick="switchPerfTab('sales',this)">Salesperson Scorecard</button>
         </div>
         <div id="perfVendorPanel"><p class="empty">Loading...</p></div>
         <div id="perfBuyerPanel" style="display:none"><p class="empty">Loading...</p></div>

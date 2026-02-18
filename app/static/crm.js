@@ -1611,59 +1611,105 @@ async function loadBuyPlans() {
 
 function setBpFilter(status, btn) {
     _bpFilter = status;
-    document.querySelectorAll('[data-bp-status]').forEach(b => b.classList.remove('on'));
+    document.querySelectorAll('#bpStatusPills .fp').forEach(b => b.classList.remove('on'));
     if (btn) btn.classList.add('on');
     loadBuyPlans();
 }
 
+let _bpSortCol = null;
+let _bpSortDir = 'asc';
+
+function _bpSortArrow(col) {
+    if (_bpSortCol !== col) return '\u21c5';
+    return _bpSortDir === 'asc' ? '\u25b2' : '\u25bc';
+}
+
+function sortBpList(col) {
+    if (_bpSortCol === col) {
+        if (_bpSortDir === 'asc') _bpSortDir = 'desc';
+        else { _bpSortCol = null; _bpSortDir = 'asc'; }
+    } else {
+        _bpSortCol = col;
+        _bpSortDir = 'asc';
+    }
+    renderBuyPlansList();
+}
+
 function renderBuyPlansList() {
     const el = document.getElementById('buyPlansList');
-    if (!_buyPlans.length) {
+    let data = [..._buyPlans];
+
+    // Search filter
+    const q = (document.getElementById('bpSearch') || {}).value || '';
+    if (q) {
+        const lq = q.toLowerCase();
+        data = data.filter(bp => (bp.requisition_name || '').toLowerCase().includes(lq)
+            || (bp.customer_name || '').toLowerCase().includes(lq)
+            || (bp.sales_order_number || '').toLowerCase().includes(lq)
+            || (bp.submitted_by || '').toLowerCase().includes(lq));
+    }
+
+    if (!data.length) {
         el.innerHTML = '<p class="empty">No buy plans found</p>';
         return;
     }
-    const statusColors = {
-        pending_approval: 'var(--amber)',
-        approved: 'var(--green)',
-        rejected: 'var(--red)',
-        po_entered: 'var(--blue)',
-        po_confirmed: 'var(--green)',
-        complete: 'var(--green)',
-        cancelled: 'var(--muted)',
-    };
-    const statusLabels = {
-        pending_approval: 'Pending',
-        approved: 'Approved',
-        rejected: 'Rejected',
-        po_entered: 'PO Entered',
-        po_confirmed: 'Confirmed',
-        complete: 'Complete',
-        cancelled: 'Cancelled',
-    };
-    el.innerHTML = _buyPlans.map(bp => {
-        const color = statusColors[bp.status] || 'var(--muted)';
+
+    const statusLabels = {pending_approval:'Pending',approved:'Approved',rejected:'Rejected',po_entered:'PO Entered',po_confirmed:'Confirmed',complete:'Complete',cancelled:'Cancelled'};
+    const statusBadge = {pending_approval:'b-pend',approved:'b-appr',rejected:'b-rej',po_entered:'b-po',po_confirmed:'b-conf',complete:'b-comp',cancelled:'b-canc'};
+
+    // Sort
+    if (_bpSortCol) {
+        data.sort((a, b) => {
+            let va, vb;
+            switch (_bpSortCol) {
+                case 'req': va = (a.requisition_name || ''); vb = (b.requisition_name || ''); break;
+                case 'status': va = (a.status || ''); vb = (b.status || ''); break;
+                case 'customer': va = (a.customer_name || ''); vb = (b.customer_name || ''); break;
+                case 'items': va = (a.line_items || []).length; vb = (b.line_items || []).length; break;
+                case 'total': va = (a.line_items || []).reduce((s, li) => s + (Number(li.plan_qty || li.qty)||0) * (Number(li.cost_price)||0), 0); vb = (b.line_items || []).reduce((s, li) => s + (Number(li.plan_qty || li.qty)||0) * (Number(li.cost_price)||0), 0); break;
+                case 'so': va = (a.sales_order_number || ''); vb = (b.sales_order_number || ''); break;
+                case 'by': va = (a.submitted_by || ''); vb = (b.submitted_by || ''); break;
+                case 'date': va = (a.submitted_at || ''); vb = (b.submitted_at || ''); break;
+                default: va = 0; vb = 0;
+            }
+            if (typeof va === 'string') return _bpSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+            return _bpSortDir === 'asc' ? va - vb : vb - va;
+        });
+    }
+
+    const thC = (col) => _bpSortCol === col ? ' class="sorted"' : '';
+    const sa = (col) => `<span class="sort-arrow">${_bpSortArrow(col)}</span>`;
+
+    let html = `<div style="padding:0 16px"><table class="tbl"><thead><tr>
+        <th onclick="sortBpList('req')"${thC('req')}>Requisition ${sa('req')}</th>
+        <th onclick="sortBpList('status')"${thC('status')}>Status ${sa('status')}</th>
+        <th onclick="sortBpList('customer')"${thC('customer')}>Customer ${sa('customer')}</th>
+        <th onclick="sortBpList('items')"${thC('items')}>Items ${sa('items')}</th>
+        <th onclick="sortBpList('total')"${thC('total')}>Total Cost ${sa('total')}</th>
+        <th onclick="sortBpList('so')"${thC('so')}>SO# ${sa('so')}</th>
+        <th onclick="sortBpList('by')"${thC('by')}>Submitted By ${sa('by')}</th>
+        <th onclick="sortBpList('date')"${thC('date')}>Date ${sa('date')}</th>
+    </tr></thead><tbody>`;
+
+    for (const bp of data) {
         const label = statusLabels[bp.status] || bp.status;
+        const bc = statusBadge[bp.status] || 'b-draft';
         const itemCount = (bp.line_items || []).length;
         const total = (bp.line_items || []).reduce((s, li) => s + (Number(li.plan_qty || li.qty)||0) * (Number(li.cost_price)||0), 0);
-        const soLabel = bp.sales_order_number ? ' \xB7 SO# ' + esc(bp.sales_order_number) : '';
-        const custLabel = bp.customer_name ? ' \xB7 ' + esc(bp.customer_name) : '';
-        return `
-        <div class="card card-clickable" style="border-left:4px solid ${color}" onclick="openBuyPlanDetail(${bp.id})">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-                <div>
-                    <strong>${esc(bp.requisition_name || 'Requisition #' + bp.requisition_id)}</strong>
-                    <span class="status-badge" style="background:${color};color:#fff;margin-left:8px;font-size:10px">${label}</span>
-                    ${bp.is_stock_sale ? '<span class="status-badge" style="background:#7c3aed;color:#fff;margin-left:4px;font-size:10px">Stock Sale</span>' : ''}
-                </div>
-                <span style="font-size:11px;color:var(--muted)">${bp.submitted_at ? fmtDateTime(bp.submitted_at) : ''}</span>
-            </div>
-            <div style="font-size:12px;color:var(--text2);margin-top:6px">
-                ${itemCount} item${itemCount !== 1 ? 's' : ''} \xB7 $${total.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}${custLabel}${soLabel}
-                \xB7 Submitted by ${esc(bp.submitted_by || '\u2014')}
-                ${bp.approved_by ? ' \xB7 Approved by ' + esc(bp.approved_by) : ''}
-            </div>
-        </div>`;
-    }).join('');
+        html += `<tr onclick="openBuyPlanDetail(${bp.id})">
+            <td><b class="cust-link">${esc(bp.requisition_name || 'Req #' + bp.requisition_id)}</b></td>
+            <td><span class="badge ${bc}">${label}</span>${bp.is_stock_sale ? ' <span class="badge b-stock">Stock</span>' : ''}</td>
+            <td>${esc(bp.customer_name || '\u2014')}</td>
+            <td class="mono">${itemCount}</td>
+            <td class="mono">$${total.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+            <td class="mono">${esc(bp.sales_order_number || '\u2014')}</td>
+            <td>${esc(bp.submitted_by || '\u2014')}</td>
+            <td style="font-size:11px;color:var(--muted)">${bp.submitted_at ? fmtDateTime(bp.submitted_at) : '\u2014'}</td>
+        </tr>`;
+    }
+
+    html += '</tbody></table></div>';
+    el.innerHTML = html;
 }
 
 async function openBuyPlanDetail(planId) {
@@ -2946,9 +2992,9 @@ function showPerformance() {
 }
 
 function switchPerfTab(tab, btn) {
-    document.querySelectorAll('#perfTabs .tab').forEach(t => t.classList.remove('on'));
+    document.querySelectorAll('#perfTabs .fp').forEach(t => t.classList.remove('on'));
     if (btn) btn.classList.add('on');
-    else document.querySelector(`#perfTabs .tab[onclick*="${tab}"]`)?.classList.add('on');
+    else document.querySelector(`#perfTabs .fp[onclick*="${tab}"]`)?.classList.add('on');
     document.getElementById('perfVendorPanel').style.display = tab === 'vendors' ? '' : 'none';
     document.getElementById('perfBuyerPanel').style.display = tab === 'buyers' ? '' : 'none';
     document.getElementById('perfSalesPanel').style.display = tab === 'sales' ? '' : 'none';
@@ -2979,10 +3025,11 @@ function renderVendorScorecards(data) {
         return;
     }
 
-    function sortIcon(col) {
-        if (col !== _perfVendorSort) return '';
-        return _perfVendorOrder === 'desc' ? ' ▼' : ' ▲';
+    function sa(col) {
+        if (col !== _perfVendorSort) return '<span class="sort-arrow">\u21c5</span>';
+        return `<span class="sort-arrow">${_perfVendorOrder === 'asc' ? '\u25b2' : '\u25bc'}</span>`;
     }
+    function thC(col) { return col === _perfVendorSort ? ' class="sorted"' : ''; }
     function toggleSort(col) {
         if (_perfVendorSort === col) _perfVendorOrder = _perfVendorOrder === 'desc' ? 'asc' : 'desc';
         else { _perfVendorSort = col; _perfVendorOrder = 'desc'; }
@@ -2991,27 +3038,25 @@ function renderVendorScorecards(data) {
 
     function metricCell(val, invert) {
         if (val === null || val === undefined) return '<td class="metric-cell na">N/A</td>';
-        const displayed = invert ? val : val;
         const score = invert ? 1 - val : val;
         let cls = 'metric-red';
         if (score >= 0.7) cls = 'metric-green';
         else if (score >= 0.4) cls = 'metric-yellow';
-        return `<td class="metric-cell ${cls}">${(displayed * 100).toFixed(0)}%</td>`;
+        return `<td class="metric-cell ${cls}">${(val * 100).toFixed(0)}%</td>`;
     }
 
-    // Make toggleSort available globally
     window._perfToggleSort = toggleSort;
 
-    const searchBar = `<div style="margin-bottom:10px"><input type="text" id="perfVendorSearch" placeholder="Search vendors..." value="${document.getElementById('perfVendorSearch')?.value||''}" class="filter-search" oninput="_debouncedLoadVendorScorecards()" style="max-width:300px"></div>`;
+    const searchBar = `<div style="margin:0 16px 10px"><input type="text" id="perfVendorSearch" placeholder="Search vendors..." value="${document.getElementById('perfVendorSearch')?.value||''}" class="sbox" oninput="_debouncedLoadVendorScorecards()" style="width:300px"></div>`;
 
-    let html = searchBar + `<div style="overflow-x:auto"><table class="perf-table">
+    let html = searchBar + `<div style="overflow-x:auto;padding:0 16px"><table class="tbl">
         <thead><tr>
-            <th style="cursor:pointer" onclick="window._perfToggleSort('composite_score')">Vendor${sortIcon('composite_score')}</th>
-            <th style="cursor:pointer" onclick="window._perfToggleSort('response_rate')">Response Rate${sortIcon('response_rate')}</th>
-            <th style="cursor:pointer" onclick="window._perfToggleSort('quote_conversion')">Quote Rate${sortIcon('quote_conversion')}</th>
-            <th style="cursor:pointer" onclick="window._perfToggleSort('po_conversion')">PO Rate${sortIcon('po_conversion')}</th>
-            <th style="cursor:pointer" onclick="window._perfToggleSort('avg_review_rating')">Reviews${sortIcon('avg_review_rating')}</th>
-            <th style="cursor:pointer" onclick="window._perfToggleSort('composite_score')">Score${sortIcon('composite_score')}</th>
+            <th onclick="window._perfToggleSort('composite_score')"${thC('composite_score')}>Vendor ${sa('composite_score')}</th>
+            <th onclick="window._perfToggleSort('response_rate')"${thC('response_rate')}>Response Rate ${sa('response_rate')}</th>
+            <th onclick="window._perfToggleSort('quote_conversion')"${thC('quote_conversion')}>Quote Rate ${sa('quote_conversion')}</th>
+            <th onclick="window._perfToggleSort('po_conversion')"${thC('po_conversion')}>PO Rate ${sa('po_conversion')}</th>
+            <th onclick="window._perfToggleSort('avg_review_rating')"${thC('avg_review_rating')}>Reviews ${sa('avg_review_rating')}</th>
+            <th onclick="window._perfToggleSort('composite_score')"${thC('composite_score')}>Score ${sa('composite_score')}</th>
         </tr></thead><tbody>`;
 
     for (const v of items) {
@@ -3034,7 +3079,7 @@ function renderVendorScorecards(data) {
 
     html += '</tbody></table></div>';
     if (window.__isAdmin) {
-        html += `<div style="margin-top:10px"><button class="btn btn-ghost btn-sm" onclick="refreshVendorScorecards()">Refresh Scorecards</button></div>`;
+        html += `<div style="margin:10px 16px 0"><button class="btn btn-ghost btn-sm" onclick="refreshVendorScorecards()">Refresh Scorecards</button></div>`;
     }
     el.innerHTML = html;
 }
@@ -3074,25 +3119,24 @@ function renderBuyerLeaderboard(data, months) {
     const el = document.getElementById('perfBuyerPanel');
     const entries = data.entries || [];
 
-    let monthSelector = `<select onchange="loadBuyerLeaderboard(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px">`;
+    let monthSelector = `<select class="tb-select" onchange="loadBuyerLeaderboard(this.value)">`;
     for (const m of months) {
         const label = new Date(m + '-15').toLocaleDateString('en-US', {month:'long', year:'numeric'});
         monthSelector += `<option value="${m}" ${m === _leaderboardMonth ? 'selected' : ''}>${label}</option>`;
     }
     monthSelector += '</select>';
 
-    // Summary cards
     const totalPts = entries.reduce((s, e) => s + e.total_points, 0);
-    const topScorer = entries.length ? entries[0].user_name : '—';
+    const topScorer = entries.length ? entries[0].user_name : '\u2014';
     const totalOffers = entries.reduce((s, e) => s + e.offers_logged, 0);
     const ytdTotalPts = entries.reduce((s, e) => s + (e.ytd_total_points || 0), 0);
 
-    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+    let html = `<div style="display:flex;align-items:center;gap:10px;margin:0 16px 12px;flex-wrap:wrap">
         <div>${monthSelector}</div>
-        ${window.__isAdmin ? '<button class="btn btn-ghost btn-sm" onclick="refreshBuyerLeaderboard()">Refresh</button>' : ''}
+        ${window.__isAdmin ? '<button class="tb-btn" onclick="refreshBuyerLeaderboard()">Refresh</button>' : ''}
     </div>`;
 
-    html += `<div class="perf-summary">
+    html += `<div class="perf-summary" style="padding:0 16px">
         <div class="perf-card"><div class="perf-card-num">${totalOffers}</div><div class="perf-card-label">Offers Logged</div></div>
         <div class="perf-card"><div class="perf-card-num">${totalPts}</div><div class="perf-card-label">Monthly Points</div></div>
         <div class="perf-card"><div class="perf-card-num">${topScorer}</div><div class="perf-card-label">Top Scorer</div></div>
@@ -3107,7 +3151,7 @@ function renderBuyerLeaderboard(data, months) {
 
     const currentEmail = (window.__userEmail || '').toLowerCase();
 
-    html += `<div style="overflow-x:auto"><table class="perf-table"><thead><tr>
+    html += `<div style="overflow-x:auto;padding:0 16px"><table class="tbl"><thead><tr>
         <th>#</th><th>Buyer</th>
         <th>Offers (x1)</th><th>Quoted (x3)</th><th>Buy Plan (x5)</th><th>PO Confirmed (x8)</th><th>Inventory Lists (x2)</th>
         <th>Total</th>
@@ -3120,7 +3164,7 @@ function renderBuyerLeaderboard(data, months) {
         if (e.rank === 1) rowCls = 'sc-gold';
         else if (e.rank === 2) rowCls = 'sc-silver';
         else if (isMe) rowCls = 'lb-highlight';
-        const medal = e.rank === 1 ? ' 🥇' : e.rank === 2 ? ' 🥈' : e.rank === 3 ? ' 🥉' : '';
+        const medal = e.rank === 1 ? ' \ud83e\udd47' : e.rank === 2 ? ' \ud83e\udd48' : e.rank === 3 ? ' \ud83e\udd49' : '';
         html += `<tr class="${rowCls}">
             <td><strong>${e.rank}${medal}</strong></td>
             <td>${e.user_name || 'Unknown'}</td>
@@ -3201,9 +3245,8 @@ function renderSalespersonScorecard(data) {
     const el = document.getElementById('perfSalesPanel');
     const entries = data.entries || [];
 
-    // Month selector — last 12 months
     const now = new Date();
-    let monthSelector = `<select onchange="loadSalespersonScorecard(this.value)" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px">`;
+    let monthSelector = `<select class="tb-select" onchange="loadSalespersonScorecard(this.value)">`;
     for (let i = 0; i < 12; i++) {
         const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
         const val = d.toISOString().slice(0,7);
@@ -3212,17 +3255,16 @@ function renderSalespersonScorecard(data) {
     }
     monthSelector += '</select>';
 
-    // Summary cards
     const totalRev = entries.reduce((s, e) => s + (e.monthly.won_revenue || 0), 0);
     const totalOrders = entries.reduce((s, e) => s + (e.monthly.orders_won || 0), 0);
     const totalQuotes = entries.reduce((s, e) => s + (e.monthly.quotes_sent || 0), 0);
     const ytdRev = entries.reduce((s, e) => s + (e.ytd.won_revenue || 0), 0);
 
-    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+    let html = `<div style="display:flex;align-items:center;gap:10px;margin:0 16px 12px;flex-wrap:wrap">
         <div>${monthSelector}</div>
     </div>`;
 
-    html += `<div class="perf-summary">
+    html += `<div class="perf-summary" style="padding:0 16px">
         <div class="perf-card"><div class="perf-card-num">$${totalRev.toLocaleString()}</div><div class="perf-card-label">Monthly Revenue</div></div>
         <div class="perf-card"><div class="perf-card-num">${totalOrders}</div><div class="perf-card-label">Orders Won</div></div>
         <div class="perf-card"><div class="perf-card-num">${totalQuotes}</div><div class="perf-card-label">Quotes Sent</div></div>
@@ -3235,10 +3277,8 @@ function renderSalespersonScorecard(data) {
         return;
     }
 
-    // Sort entries
     const sorted = _sortSalesEntries(entries, _salesSortCol, _salesSortDir);
 
-    // Determine 1st/2nd by won_revenue for highlights
     const byRev = entries.slice().sort((a, b) => (b.monthly.won_revenue || 0) - (a.monthly.won_revenue || 0));
     const gold_id = byRev[0] && byRev[0].monthly.won_revenue > 0 ? byRev[0].user_id : null;
     const silver_id = byRev[1] && byRev[1].monthly.won_revenue > 0 ? byRev[1].user_id : null;
@@ -3264,19 +3304,19 @@ function renderSalespersonScorecard(data) {
         {key:'proactive_revenue', label:'YTD Proactive Rev.', fmt:'$'},
     ];
 
-    function thClass(key) {
-        let cls = 'sortable';
-        if (_salesSortCol === key) cls += _salesSortDir === 'desc' ? ' sorted-desc' : ' sorted-asc';
-        return cls;
+    function sa(key) {
+        if (_salesSortCol !== key) return '<span class="sort-arrow">\u21c5</span>';
+        return `<span class="sort-arrow">${_salesSortDir === 'asc' ? '\u25b2' : '\u25bc'}</span>`;
     }
+    function thC(key) { return _salesSortCol === key ? ' class="sorted"' : ''; }
 
-    html += `<div style="overflow-x:auto"><table class="perf-table"><thead><tr>
+    html += `<div style="overflow-x:auto;padding:0 16px"><table class="tbl"><thead><tr>
         <th>#</th><th>Salesperson</th>`;
     for (const c of cols) {
-        html += `<th class="${thClass(c.key)}" onclick="sortSalesScorecard('${c.key}')">${c.label}</th>`;
+        html += `<th${thC(c.key)} onclick="sortSalesScorecard('${c.key}')">${c.label} ${sa(c.key)}</th>`;
     }
     for (const c of ytdCols) {
-        html += `<th style="border-left:2px solid var(--border)" class="${thClass('ytd_'+c.key)}" onclick="sortSalesScorecard('ytd_${c.key}')">${c.label}</th>`;
+        html += `<th style="border-left:2px solid var(--border)"${thC('ytd_'+c.key)} onclick="sortSalesScorecard('ytd_${c.key}')">${c.label} ${sa('ytd_'+c.key)}</th>`;
     }
     html += '</tr></thead><tbody>';
 
@@ -3285,8 +3325,8 @@ function renderSalespersonScorecard(data) {
         const rank = i + 1;
         let rowCls = '';
         let medal = '';
-        if (e.user_id === gold_id) { rowCls = 'class="sc-gold"'; medal = ' 🥇'; }
-        else if (e.user_id === silver_id) { rowCls = 'class="sc-silver"'; medal = ' 🥈'; }
+        if (e.user_id === gold_id) { rowCls = 'class="sc-gold"'; medal = ' \ud83e\udd47'; }
+        else if (e.user_id === silver_id) { rowCls = 'class="sc-silver"'; medal = ' \ud83e\udd48'; }
 
         html += `<tr ${rowCls}><td><strong>${rank}${medal}</strong></td><td>${e.user_name || 'Unknown'}</td>`;
         for (const c of cols) {

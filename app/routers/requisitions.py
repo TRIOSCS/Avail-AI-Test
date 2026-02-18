@@ -78,6 +78,16 @@ async def list_requisitions(
         .scalar_subquery()
         .label("contact_count")
     )
+    rfq_sent_count_sq = (
+        select(sqlfunc.count(Contact.id))
+        .where(
+            Contact.requisition_id == Requisition.id,
+            Contact.status == "sent",
+        )
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("rfq_sent_count")
+    )
     reply_count_sq = (
         select(sqlfunc.count(VendorResponse.id))
         .where(VendorResponse.requisition_id == Requisition.id)
@@ -140,6 +150,7 @@ async def list_requisitions(
         has_new_offers_sq,
         latest_offer_at_sq,
         sourced_count_sq,
+        rfq_sent_count_sq,
     )
     # Sales sees own reqs only; all other roles see everything
     if user.role == "sales":
@@ -174,7 +185,7 @@ async def list_requisitions(
     rows = query.order_by(Requisition.created_at.desc()).offset(offset).limit(limit).all()
     # Pre-load creator names (all roles see all reqs now)
     creator_names = {}
-    creator_ids = {r.created_by for r, _, _, _, _, _, _, _ in rows if r.created_by}
+    creator_ids = {r.created_by for r, _, _, _, _, _, _, _, _ in rows if r.created_by}
     if creator_ids:
         creators = (
             db.query(User.id, User.name, User.email)
@@ -212,10 +223,11 @@ async def list_requisitions(
                 if r.last_searched_at
                 else None,
                 "sourced_count": sourced_cnt or 0,
+                "rfq_sent_count": rfq_sent or 0,
                 "cloned_from_id": r.cloned_from_id,
                 "deadline": r.deadline,
             }
-            for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt in rows
+            for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt, rfq_sent in rows
         ],
         "total": total,
         "limit": limit,
@@ -255,6 +267,43 @@ async def toggle_archive(
         req.status = "archived"
     db.commit()
     return {"ok": True, "status": req.status}
+
+
+@router.post("/api/requisitions/{req_id}/clone")
+async def clone_requisition(
+    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+):
+    """Clone an archived (or any) requisition into a new draft with all its requirements."""
+    src = get_req_for_user(db, user, req_id)
+    if not src:
+        raise HTTPException(404)
+    clone = Requisition(
+        name=f"{src.name} (copy)",
+        customer_site_id=src.customer_site_id,
+        customer_name=src.customer_name,
+        deadline=src.deadline,
+        created_by=user.id,
+        status="draft",
+        cloned_from_id=src.id,
+    )
+    db.add(clone)
+    db.flush()  # get clone.id
+    for r in src.requirements:
+        db.add(Requirement(
+            requisition_id=clone.id,
+            primary_mpn=r.primary_mpn,
+            target_qty=r.target_qty,
+            target_price=r.target_price,
+            substitutes=r.substitutes[:20] if r.substitutes else [],
+            firmware=r.firmware,
+            date_codes=r.date_codes,
+            hardware_codes=r.hardware_codes,
+            packaging=r.packaging,
+            condition=r.condition,
+            notes=r.notes,
+        ))
+    db.commit()
+    return {"ok": True, "id": clone.id, "name": clone.name}
 
 
 @router.put("/api/requisitions/{req_id}")
