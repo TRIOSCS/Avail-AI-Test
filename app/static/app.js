@@ -906,8 +906,6 @@ function debouncedMainSearch() {
 // ── v7 Sidebar Navigation ───────────────────────────────────────────────
 function toggleSidebar() {
     document.body.classList.toggle('sb-open');
-    const toggle = document.querySelector('.sb-toggle');
-    if (toggle) toggle.setAttribute('aria-expanded', document.body.classList.contains('sb-open'));
 }
 
 function sidebarNav(page, el) {

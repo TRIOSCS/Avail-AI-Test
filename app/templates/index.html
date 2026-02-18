@@ -610,8 +610,7 @@
             .fpills::-webkit-scrollbar{display:none}
             .sbox{width:100%;font-size:16px}
             .filter-panel{width:calc(100vw - 24px);left:-12px}
-            .sb-toggle{top:68px;left:8px}
-            body.sb-open .sb-toggle{left:208px}
+            .sb-rail{top:68px}
             body.sb-open .main{margin-left:0 !important}
             /* v7 table: horizontal scroll on mobile */
             .tbl{display:block;overflow-x:auto;white-space:nowrap}
@@ -1075,12 +1074,10 @@
         .toparea img{height:80px;flex-shrink:0;mix-blend-mode:multiply}
         .topcontrols{display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap}
 
-        /* Sidebar toggle — below logo */
-        .sb-toggle{position:fixed;top:100px;left:16px;z-index:201;width:36px;height:36px;border-radius:8px;background:var(--white);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--muted);box-shadow:0 2px 6px rgba(0,0,0,.08);transition:.2s}
-        .sb-toggle:hover{background:var(--teal-light);color:var(--teal);border-color:var(--teal)}
-        body.sb-open .sb-toggle{left:216px}
-        body.sb-open .sb-toggle .ticon::after{content:'\2715'}
-        body:not(.sb-open) .sb-toggle .ticon::after{content:'\2630'}
+        /* Sidebar rail — thin blue strip that opens sidebar on click */
+        .sb-rail{position:fixed;top:100px;left:0;bottom:0;width:6px;background:var(--blue);z-index:201;cursor:pointer;transition:width .15s,background .15s,box-shadow .15s}
+        .sb-rail:hover{width:10px;background:var(--blue-dk);box-shadow:2px 0 8px rgba(74,111,165,.25)}
+        body.sb-open .sb-rail{display:none}
 
         /* v7 Sidebar overlay nav */
         .sidebar-nav{display:flex;flex-direction:column;gap:2px;padding:10px 8px;flex:1}
@@ -1098,6 +1095,9 @@
         /* Body sidebar-open state */
         body.sb-open .sidebar{transform:translateX(0)}
         body.sb-open .main{margin-left:var(--sbw)}
+        /* Click-away overlay to close sidebar */
+        .sb-overlay{display:none;position:fixed;inset:0;z-index:149}
+        body.sb-open .sb-overlay{display:block}
 
         /* Pills */
         .fpills{display:flex;gap:2px;background:var(--white);border-radius:8px;padding:3px;border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.04)}
@@ -1214,10 +1214,8 @@
     </div>
 </div>
 
-<!-- SIDEBAR TOGGLE — below logo area -->
-<div class="sb-toggle" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar" aria-expanded="false">
-    <span class="ticon"></span>
-</div>
+<!-- Sidebar rail — thin blue line that opens sidebar on click -->
+<div class="sb-rail" onclick="toggleSidebar()" title="Open menu" aria-label="Open sidebar"></div>
 
 <!-- Mobile top bar -->
 <div class="mobile-topbar">
@@ -1225,6 +1223,9 @@
     <img src="/static/avail_logo.png" alt="AVAIL" class="mobile-logo">
 </div>
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleMobileSidebar()"></div>
+
+<!-- Click-away overlay to close sidebar -->
+<div class="sb-overlay" onclick="toggleSidebar()"></div>
 
 <!-- SIDEBAR — v7 slide-out -->
 <aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
