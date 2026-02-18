@@ -16,6 +16,7 @@ let _vendorListData = [];   // cached vendor list for client-side filtering
 let _vendorTierFilter = 'all';  // all|proven|developing|caution|new
 let expandedGroups = new Set();  // reqIds that are expanded (default: all collapsed)
 let _ddReqCache = {};  // drill-down requirements cache: rfqId → [requirements]
+const CONDITION_OPTIONS = ['New', 'ETN', 'Factory Refurbished', 'Pulls'];
 
 // ── Shared Helpers ──────────────────────────────────────────────────────
 async function apiFetch(url, opts = {}) {
@@ -602,7 +603,7 @@ function _renderDrillDownTable(rfqId) {
     const showAll = dd.dataset.showAll === '1';
     const visible = showAll ? reqs : reqs.slice(0, DD_LIMIT);
     let html = `<table class="dtbl"><thead><tr>
-        <th>MPN</th><th>Qty</th><th>Target $</th><th>Vendors</th><th>Condition</th><th>Date Codes</th>
+        <th>MPN</th><th>Qty</th><th>Target $</th><th>Vendors</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th>
     </tr></thead><tbody>`;
     for (const r of visible) {
         html += `<tr>
@@ -612,6 +613,8 @@ function _renderDrillDownTable(rfqId) {
             <td class="mono">${r.sighting_count || 0}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'condition')">${esc(r.condition || '—')}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'date_codes')">${esc(r.date_codes || '—')}</td>
+            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'firmware')" style="font-size:10px">${esc(r.firmware || '—')}</td>
+            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'hardware_codes')" style="font-size:10px">${esc(r.hardware_codes || '—')}</td>
         </tr>`;
     }
     html += '</tbody></table>';
@@ -622,7 +625,7 @@ function _renderDrillDownTable(rfqId) {
 }
 
 function editDrillCell(td, rfqId, reqId, field) {
-    if (td.querySelector('input')) return;
+    if (td.querySelector('input, select')) return;
     const reqs = _ddReqCache[rfqId] || [];
     const r = reqs.find(x => x.id === reqId);
     if (!r) return;
@@ -632,19 +635,26 @@ function editDrillCell(td, rfqId, reqId, field) {
     else if (field === 'target_price') currentVal = r.target_price != null ? String(r.target_price) : '';
     else currentVal = r[field] || '';
 
-    const input = document.createElement('input');
-    input.className = 'req-edit-input';
-    input.value = currentVal;
-    if (field === 'target_qty') { input.type = 'number'; input.min = '1'; input.style.width = '50px'; }
-    if (field === 'target_price') { input.type = 'number'; input.step = '0.01'; input.min = '0'; input.style.width = '60px'; input.placeholder = '0.00'; }
+    let el;
+    if (field === 'condition') {
+        el = document.createElement('select');
+        el.className = 'req-edit-input';
+        el.innerHTML = '<option value="">—</option>' + CONDITION_OPTIONS.map(o => `<option value="${o}"${currentVal === o ? ' selected' : ''}>${o}</option>`).join('');
+    } else {
+        el = document.createElement('input');
+        el.className = 'req-edit-input';
+        el.value = currentVal;
+        if (field === 'target_qty') { el.type = 'number'; el.min = '1'; el.style.width = '50px'; }
+        if (field === 'target_price') { el.type = 'number'; el.step = '0.01'; el.min = '0'; el.style.width = '60px'; el.placeholder = '0.00'; }
+    }
 
     td.textContent = '';
-    td.appendChild(input);
-    input.focus();
-    input.select();
+    td.appendChild(el);
+    el.focus();
+    if (el.select) el.select();
 
     const save = async () => {
-        const val = input.value.trim();
+        const val = el.value.trim();
         if (val === currentVal) { _renderDrillDownTable(rfqId); return; }
         const body = {};
         if (field === 'target_price') body[field] = val ? parseFloat(val) : null;
@@ -652,16 +662,18 @@ function editDrillCell(td, rfqId, reqId, field) {
         else body[field] = val;
         try {
             await apiFetch(`/api/requirements/${reqId}`, { method: 'PUT', body });
-            // Update cache in-place from the body we sent
             const idx = reqs.findIndex(x => x.id === reqId);
             if (idx >= 0) Object.assign(reqs[idx], body);
         } catch(e) { console.error('editDrillCell:', e); }
         _renderDrillDownTable(rfqId);
     };
 
-    input.addEventListener('blur', save);
-    input.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    el.addEventListener('blur', save);
+    if (field === 'condition') {
+        el.addEventListener('change', () => el.blur());
+    }
+    el.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
         if (e.key === 'Escape') { e.preventDefault(); _renderDrillDownTable(rfqId); }
     });
 }
@@ -1284,7 +1296,7 @@ function setReqFilter(type, btn) {
 }
 
 function editReqCell(td, reqId, field) {
-    if (td.querySelector('input')) return; // Already editing
+    if (td.querySelector('input, select')) return; // Already editing
     const r = reqData.find(x => x.id === reqId);
     if (!r) return;
 
@@ -1294,19 +1306,26 @@ function editReqCell(td, reqId, field) {
     else if (field === 'target_price') currentVal = r.target_price != null ? String(r.target_price) : '';
     else currentVal = r[field] || '';
 
-    const input = document.createElement('input');
-    input.className = 'req-edit-input';
-    input.value = currentVal;
-    if (field === 'target_qty') { input.type = 'number'; input.min = '1'; input.style.width = '50px'; }
-    if (field === 'target_price') { input.type = 'number'; input.step = '0.01'; input.min = '0'; input.style.width = '60px'; input.placeholder = '0.00'; }
+    let el;
+    if (field === 'condition') {
+        el = document.createElement('select');
+        el.className = 'req-edit-input';
+        el.innerHTML = '<option value="">—</option>' + CONDITION_OPTIONS.map(o => `<option value="${o}"${currentVal === o ? ' selected' : ''}>${o}</option>`).join('');
+    } else {
+        el = document.createElement('input');
+        el.className = 'req-edit-input';
+        el.value = currentVal;
+        if (field === 'target_qty') { el.type = 'number'; el.min = '1'; el.style.width = '50px'; }
+        if (field === 'target_price') { el.type = 'number'; el.step = '0.01'; el.min = '0'; el.style.width = '60px'; el.placeholder = '0.00'; }
+    }
 
     td.textContent = '';
-    td.appendChild(input);
-    input.focus();
-    input.select();
+    td.appendChild(el);
+    el.focus();
+    if (el.select) el.select();
 
     const save = async () => {
-        const val = input.value.trim();
+        const val = el.value.trim();
         if (val === currentVal) { loadRequirements(); return; }
         const body = {};
         if (field === 'target_price') {
@@ -1322,9 +1341,12 @@ function editReqCell(td, reqId, field) {
         loadRequirements();
     };
 
-    input.addEventListener('blur', save);
-    input.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    el.addEventListener('blur', save);
+    if (field === 'condition') {
+        el.addEventListener('change', () => el.blur());
+    }
+    el.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
         if (e.key === 'Escape') { loadRequirements(); }
     });
 }
