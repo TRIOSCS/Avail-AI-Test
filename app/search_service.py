@@ -20,6 +20,8 @@ from .models import (
     ApiSource,
 )
 from .scoring import score_sighting
+from .utils.normalization import normalize_mpn
+from .utils.normalization_helpers import fix_encoding
 from .connectors.sources import NexarConnector, BrokerBinConnector
 from .connectors.ebay import EbayConnector
 from .connectors.digikey import DigiKeyConnector
@@ -275,12 +277,18 @@ def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Si
 
     sightings = []
     for r in fresh:
+        # Normalize mpn_matched (uppercase, strip) and vendor_name (trim, fix encoding)
+        raw_mpn = r.get("mpn_matched")
+        clean_mpn = normalize_mpn(raw_mpn) or raw_mpn
+        raw_vendor = r.get("vendor_name", "Unknown")
+        clean_vendor = fix_encoding((raw_vendor or "").strip()) or raw_vendor
+
         s = Sighting(
             requirement_id=req.id,
-            vendor_name=r.get("vendor_name", "Unknown"),
+            vendor_name=clean_vendor,
             vendor_email=r.get("vendor_email"),
             vendor_phone=r.get("vendor_phone"),
-            mpn_matched=r.get("mpn_matched"),
+            mpn_matched=clean_mpn,
             manufacturer=r.get("manufacturer"),
             qty_available=r.get("qty_available"),
             unit_price=r.get("unit_price"),

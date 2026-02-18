@@ -5,21 +5,47 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AVAIL — Opportunity Management</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg:#e8e8e8; --white:#fff; --card2:#e8eaef; --input:#eef0f4; --surface:#f5f6f9;
-            --border:#bfc5d0; --border2:#a8b0be; --focus:#3d6895;
-            --text:#1a1f2e; --text2:#3d4a5c; --muted:#5f6d7e;
-            --teal:#3d6895; --teal-light:#eaeff5;
+            /* Primary brand blue */
+            --blue:#4a6fa5; --blue-lt:#eef2f8; --blue-dk:#2d4f82;
+
+            /* Aliases for JS backward compat */
+            --teal:#4a6fa5; --teal-light:#eef2f8;
+            --accent:#4a6fa5; --accent-hover:#2d4f82; --accent-light:#eef2f8;
+            --focus:#4a6fa5;
+
+            /* Sidebar / Navy (used for sidebar bg) */
+            --navy-900:#4a6fa5; --navy-800:#3d6292; --navy-700:#365880;
+            --navy-600:#2d4f82; --navy-nav-text:rgba(255,255,255,.75); --navy-nav-active:#ffffff;
+
+            /* Semantic colors */
             --green:#0fa67f; --green-light:#e8f8f3;
             --amber:#d9880b; --amber-light:#fef5e6;
             --red:#d94452; --red-light:#fce8ea;
-            --blue:#3d6895; --blue-light:#eaeff5;
-            --bg2:#e4e7ed; --bg3:#dde1e8;
-            --shadow-sm:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.04);
-            --shadow-md:0 4px 12px rgba(0,0,0,.1),0 1px 3px rgba(0,0,0,.06);
-            --shadow-lg:0 8px 24px rgba(0,0,0,.12),0 2px 6px rgba(0,0,0,.06);
+            --purple:#5b21b6; --purple-lt:#ede9fe;
+
+            /* Surfaces */
+            --bg:#f2f3f6; --white:#fff; --surface:#f7f8fa; --input:#f0f2f5;
+            --card2:#eceef2; --bg2:#ebeef3; --bg3:#d1d5db;
+
+            /* Text */
+            --text:#1a1f2e; --text2:#3d4a5c; --muted:#5f6d7e;
+
+            /* Borders */
+            --border:#c8cdd6; --border2:#d1d5db;
+
+            /* Also keep --blue-light alias */
+            --blue-light:#eef2f8;
+
+            /* Shadows */
+            --shadow-sm:0 1px 3px rgba(0,0,0,.06),0 1px 2px rgba(0,0,0,.03);
+            --shadow-md:0 4px 12px rgba(0,0,0,.08),0 1px 3px rgba(0,0,0,.04);
+            --shadow-lg:0 8px 24px rgba(0,0,0,.1),0 2px 6px rgba(0,0,0,.05);
+
+            /* Sidebar */
+            --sidebar-width:160px; --sidebar-collapsed:52px; --sbw:200px;
         }
         *{margin:0;padding:0;box-sizing:border-box}
 
@@ -32,35 +58,89 @@
         .flex-center{display:flex;align-items:center}.flex-gap-sm{display:flex;align-items:center;gap:6px}
         .flex-gap{display:flex;align-items:center;gap:10px}.hidden{display:none}
         .clickable{cursor:pointer}.card-empty{text-align:center;padding:16px;color:var(--muted);font-size:13px}
-        body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
-        h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color:var(--teal)}
+        html,body{height:100%;overflow:hidden}
+        body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column}
+        h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color:var(--blue)}
 
         /* Login */
-        .login{display:flex;align-items:center;justify-content:center;min-height:100vh;background:linear-gradient(160deg,#eef2f7 0%,#e4eaf3 40%,#e8f1f5 100%)}
+        .login{display:flex;align-items:center;justify-content:center;height:100vh;background:linear-gradient(160deg,#f0f4f8 0%,#dbeafe 40%,#e8f1f8 100%)}
         .login-card{background:var(--white);border:1px solid var(--border);border-radius:20px;padding:56px 48px 44px;text-align:center;max-width:460px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,.07),0 1px 3px rgba(0,0,0,.04)}
         .login-logo{width:189px;margin-bottom:12px}
         .login-divider{width:48px;height:2px;background:var(--border2);margin:0 auto 20px;border-radius:1px}
         .login-card .sub{color:var(--text2);font-size:13px;font-weight:500;margin-bottom:32px;letter-spacing:-.01em}
-        .btn-ms{display:inline-flex;align-items:center;gap:10px;background:var(--teal);color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:14px;transition:all .2s;box-shadow:0 2px 8px rgba(61,104,149,.25)}
-        .btn-ms:hover{background:#2f5478;box-shadow:0 4px 16px rgba(61,104,149,.35);transform:translateY(-1px)}
+        .btn-ms{display:inline-flex;align-items:center;gap:10px;background:var(--blue);color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:14px;transition:all .2s;box-shadow:0 2px 8px rgba(74,111,165,.25)}
+        .btn-ms:hover{background:var(--blue-dk);box-shadow:0 4px 16px rgba(74,111,165,.35);transform:translateY(-1px)}
         .ver{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);margin-top:28px;letter-spacing:.02em}
 
-        /* Shell */
-        .shell{max-width:1100px;margin:0 auto;padding:16px 20px}
-        .topbar{display:flex;justify-content:space-between;align-items:center;padding:6px 16px;background:var(--white);border-bottom:1px solid var(--border);margin-bottom:12px;box-shadow:0 2px 8px rgba(0,0,0,.07)}
-        .topbar-left{display:flex;align-items:center;gap:10px}
-        .topbar-logo{height:77px}
-        .topbar-nav{display:flex;gap:2px;margin-left:12px}
-        .topbar-nav button{padding:5px 12px;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
-        .topbar-nav button:hover{background:var(--bg);border-color:var(--border)}
-        .topbar-nav button.active{background:var(--teal-light);color:var(--teal);border-color:rgba(61,104,149,.15)}
+        /* Shell — sidebar + main content layout */
+        .shell{display:flex;height:100vh;overflow:hidden}
+
+        /* Sidebar */
+        .sidebar{position:fixed;top:84px;left:0;bottom:0;width:var(--sbw);background:var(--white);border-right:1px solid var(--border);box-shadow:2px 0 12px rgba(0,0,0,.06);z-index:150;transform:translateX(-100%);transition:transform .3s ease;display:flex;flex-direction:column;overflow:hidden}
+        .sidebar.collapsed{width:var(--sidebar-collapsed)}
+        .logo-zone{height:58px;flex-shrink:0;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
+        .logo-avail{position:absolute;display:flex;justify-content:center;align-items:center;width:100%;padding:0 14px;transition:opacity .18s,transform .18s}
+        .logo-avail img{width:120px;max-height:40px;object-fit:contain;filter:brightness(0) invert(1);display:block}
+        .logo-trio{position:absolute;opacity:0;transform:scale(.82);transition:opacity .18s,transform .18s}
+        .logo-trio img{width:38px;height:32px;object-fit:cover;object-position:left center;filter:brightness(0) invert(1);display:block}
+        .sidebar.collapsed .logo-avail{opacity:0;transform:scale(.85)}
+        .sidebar.collapsed .logo-trio{opacity:1;transform:scale(1)}
+        .sidebar-brand{font-size:14px;font-weight:800;color:var(--navy-nav-active);white-space:nowrap;overflow:hidden;margin-left:44px;transition:opacity .22s}
+        .sidebar.collapsed .sidebar-brand{opacity:0;width:0}
+        .sidebar-toggle{background:none;border:none;color:var(--navy-nav-text);cursor:pointer;padding:6px;border-radius:6px;font-size:14px;transition:all .22s cubic-bezier(.4,0,.2,1);display:flex;align-items:center;justify-content:center;width:32px;height:32px}
+        .sidebar-toggle:hover{color:var(--navy-nav-active);background:rgba(255,255,255,.12)}
+        .sidebar-toggle svg{transition:transform .22s cubic-bezier(.4,0,.2,1)}
+        .sidebar.collapsed .sidebar-toggle svg{transform:rotate(180deg)}
+
+
+        .sidebar-section{padding:4px 0}
+        .sidebar-section-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1.2px;color:rgba(255,255,255,.35);padding:12px 14px 4px;white-space:nowrap;overflow:hidden}
+        .sidebar.collapsed .sidebar-section-label{visibility:hidden;height:8px;padding:0}
+        .sidebar-item{display:flex;align-items:center;gap:10px;padding:8px 14px;cursor:pointer;transition:all .15s;border-radius:6px;margin:1px 8px;font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;color:rgba(255,255,255,.75);text-decoration:none}
+        .sidebar-item:hover{background:rgba(255,255,255,.1);color:#fff}
+        .sidebar-item.active{background:rgba(255,255,255,.18);color:#fff;font-weight:600}
+        .sidebar-item svg,.sidebar-item .si-icon{width:18px;height:18px;flex-shrink:0;opacity:.7}
+        .sidebar-item.active svg,.sidebar-item.active .si-icon{opacity:1}
+        .sidebar-item .si-label{overflow:hidden;text-overflow:ellipsis;transition:opacity .22s}
+        .sidebar.collapsed .sidebar-item .si-label{opacity:0;width:0;overflow:hidden}
+        .sidebar-item .si-badge{margin-left:auto;font-size:10px;font-weight:700;background:rgba(255,255,255,.2);color:#fff;padding:1px 6px;border-radius:8px;min-width:18px;text-align:center;flex-shrink:0}
+        .sidebar.collapsed .sidebar-item .si-badge{display:none}
+        .sidebar.collapsed .sidebar-item{padding:8px 0;justify-content:center;margin:1px 4px;border-radius:8px}
+
+        .sidebar-bottom{margin-top:auto;display:flex;flex-direction:column}
+        .sidebar-toggle-zone{padding:8px 10px;display:flex;justify-content:center;border-top:1px solid rgba(255,255,255,.12)}
+        .sidebar-footer{border-top:1px solid var(--border);padding:10px 14px;display:flex;align-items:center;gap:8px}
+        .sidebar-user{display:flex;align-items:center;gap:8px;padding:4px;font-size:12px;color:rgba(255,255,255,.75);cursor:default}
+        .sidebar-user-avatar{width:28px;height:28px;border-radius:50%;background:rgba(255,255,255,.15);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0}
+        .sidebar-user-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;transition:opacity .22s}
+        .sidebar.collapsed .sidebar-user-name{opacity:0;width:0}
+        .sidebar-footer .btn-out{background:var(--surface);border:1px solid var(--border);color:var(--text2);padding:5px 10px;border-radius:6px;cursor:pointer;font-size:11px;transition:.15s;white-space:nowrap;overflow:hidden}
+        .sidebar-footer .btn-out:hover{background:var(--bg2);color:var(--text);border-color:var(--teal)}
+        .sidebar.collapsed .sidebar-footer .btn-out span{display:none}
+        .sidebar.collapsed .sidebar-footer .btn-out::after{content:'→'}
+        .sidebar-settings-btn{background:none;border:none;color:rgba(255,255,255,.75);cursor:pointer;font-size:14px;padding:4px 6px;border-radius:4px;transition:.15s}
+        .sidebar-settings-btn:hover{color:#fff;background:rgba(255,255,255,.1)}
+
+        /* Topbar */
+        .topbar{display:flex;align-items:center;gap:12px;padding:10px 16px;position:relative;z-index:100;flex-shrink:0}
+        .page-title{font-size:14px;font-weight:700;color:#1f2937}
+        .req-total-count{font-size:11px;color:#9ca3af}
+        .topbar-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+        .user-name{font-size:12px;color:#6b7280}
+        .user-avatar{width:28px;height:28px;border-radius:50%;background:#4a6fa5;color:white;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+
+        /* Main content area */
+        .main{flex:1;background:var(--bg);overflow:hidden;display:flex;flex-direction:column;transition:margin-left .3s}
+        .main-scroll{flex:1;overflow-y:auto;padding:20px 24px}
+
+        /* Keep legacy topbar classes for settings dropdown (reused in sidebar) */
         .user{display:flex;align-items:center;gap:8px;color:var(--text2);font-size:12px}
         .btn-out{background:var(--bg);border:1px solid var(--border);color:var(--text2);padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;transition:.15s}
-        .btn-out:hover{border-color:var(--teal);color:var(--teal)}
+        .btn-out:hover{border-color:var(--accent);color:var(--accent)}
 
         /* Buttons */
         .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s ease;border:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
-        .btn-primary{background:var(--teal);color:#fff;box-shadow:0 1px 3px rgba(61,104,149,.25)}.btn-primary:hover{background:#2f5478;box-shadow:0 3px 8px rgba(61,104,149,.3);transform:translateY(-1px)}
+        .btn-primary{background:var(--blue);color:#fff;box-shadow:0 1px 3px rgba(74,111,165,.25)}.btn-primary:hover{background:var(--blue-dk);box-shadow:0 3px 8px rgba(74,111,165,.3);transform:translateY(-1px)}
         .btn-success{background:var(--green);color:#fff;box-shadow:0 1px 3px rgba(15,166,127,.25)}.btn-success:hover{background:#0d9070;box-shadow:0 3px 8px rgba(15,166,127,.3);transform:translateY(-1px)}
         .btn-ghost{background:none;border:1px solid var(--border);color:var(--text2)}.btn-ghost:hover{border-color:var(--teal);color:var(--teal);background:var(--teal-light)}
         .btn-sm{padding:5px 11px;font-size:11px}
@@ -73,10 +153,20 @@
         .card-clickable{cursor:pointer}
         .empty{color:var(--muted);font-size:13px;padding:40px 0;text-align:center}
 
+        /* Collapsible Groups — shared component */
+        .coll-group{margin-bottom:6px}
+        .coll-group-header{display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;user-select:none;border-radius:6px;transition:background .15s;font-size:13px}
+        .coll-group-header:hover{background:var(--surface)}
+        .coll-chevron{font-size:11px;color:var(--muted);width:14px;text-align:center;flex-shrink:0;transition:transform .15s}
+        .coll-group-name{font-weight:700;color:var(--accent);font-size:14px}
+        .coll-group-count{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+        .coll-group-body{padding-left:8px}
+        .coll-group.collapsed .coll-group-body{display:none}
+
         /* Tabs */
         .tabs{display:flex;gap:2px;margin-bottom:16px;background:var(--white);border-radius:10px;padding:3px;border:1px solid var(--border);width:fit-content;box-shadow:var(--shadow-sm)}
         .tab{padding:7px 18px;border-radius:8px;border:none;background:transparent;color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;transition:all .2s ease}
-        .tab.on{background:var(--teal);color:#fff}
+        .tab.on{background:var(--blue);color:#fff}
         .tab:not(.on):hover{color:var(--text);background:var(--bg)}
         .tc{display:none}.tc.on{display:block}
 
@@ -84,13 +174,31 @@
         .req-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
         .req-header h2{font-size:16px;font-weight:700}
         #reqList .card{padding:8px 14px;margin-bottom:4px}
+        #reqList .req-row{margin-bottom:0}
+        /* 8-column requisition grid */
+        .col-headers{display:grid;grid-template-columns:180px 1fr 70px 80px 60px 90px 110px 70px;gap:0 8px;padding:4px 14px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:2}
+        .req-row{display:grid;grid-template-columns:180px 1fr 70px 80px 60px 90px 110px 70px;gap:0 8px;align-items:center;padding:7px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .12s;border-left:3px solid transparent;font-size:12px}
+        .req-row:hover{background:var(--surface)}
+        .c-id{font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+        .c-mpns{display:flex;flex-wrap:wrap;gap:3px;min-width:0}
+        .mpn-chip{display:inline-block;padding:1px 6px;border-radius:4px;background:var(--blue-light);color:var(--blue-dk);font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:500;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}
+        .c-qty{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);text-align:right}
+        .c-val{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text);text-align:right}
+        .c-src{display:flex;flex-wrap:wrap;gap:3px}
+        .src-badge{display:inline-block;padding:1px 5px;border-radius:3px;font-size:9px;font-weight:600;background:var(--bg2);color:var(--text2)}
+        .c-status .status-badge{font-size:10px}
+        .c-user{font-size:11px;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .c-date{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace;white-space:nowrap}
+        /* Status border-left accents */
+        .s-draft{border-left-color:var(--muted)}
+        .s-sourcing,.s-active{border-left-color:var(--blue)}
+        .s-offers{border-left-color:var(--amber)}
+        .s-quoted,.s-quoting{border-left-color:var(--green)}
+        .s-archive,.s-archived,.s-won,.s-lost{border-left-color:var(--purple)}
+        /* Legacy — keep for any JS that references these */
         .req-card{display:flex;justify-content:space-between;align-items:center}
-        .req-name{font-weight:700;font-size:15px;color:#5a8a8a}
+        .req-name{font-weight:700;font-size:15px;color:var(--accent)}
         .req-detail-row{display:flex;align-items:center;gap:10px;margin-top:2px;flex-wrap:wrap}
-        .req-progress{display:flex;align-items:center;gap:6px}
-        .req-progress-bar{width:60px;height:4px;border-radius:2px;background:var(--bg2);overflow:hidden}
-        .req-progress-fill{height:100%;border-radius:2px;background:var(--teal);transition:width .3s}
-        .req-progress-text{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace}
         .req-activity{font-size:10px;color:var(--muted);display:inline-flex;align-items:center;gap:2px}
         .req-meta{display:flex;gap:16px;font-size:11px;color:var(--text2);font-family:'JetBrains Mono',monospace;align-items:center;font-weight:500}
         .btn-archive{padding:4px 10px;border-radius:5px;font-size:10px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--white);color:var(--text2);transition:.15s}
@@ -111,17 +219,23 @@
         .detail-header h2{font-size:16px;font-weight:700}
         .back-link{color:var(--teal);font-size:12px;font-weight:600;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;gap:4px}
 
-        /* Table */
-        .tbl{width:100%;font-size:12px;border-collapse:collapse}
-        .tbl th{text-align:left;padding:8px 10px;color:var(--muted);font-weight:700;border-bottom:2px solid var(--border);font-size:10px;text-transform:uppercase;letter-spacing:.5px}
-        .tbl td{padding:8px 10px;border-bottom:1px solid var(--card2)}
-        .tbl tr:hover td{background:var(--bg)}
+        /* Table — v7 bordered card rows, sortable headers */
+        .tbl{width:100%;font-size:12px;border-collapse:separate;border-spacing:0 4px}
+        .tbl th{text-align:left;padding:8px 10px;color:var(--text);font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:.6px;border-bottom:2px solid var(--text2);cursor:pointer;user-select:none;transition:.15s;white-space:nowrap}
+        .tbl th:hover{color:var(--teal)}
+        .tbl th .sort-arrow{font-size:9px;margin-left:3px;color:var(--muted)}
+        .tbl th.sorted .sort-arrow{color:var(--teal)}
+        .tbl td{padding:9px 10px;background:var(--white);border-top:1px solid var(--border);border-bottom:1px solid var(--border)}
+        .tbl td:first-child{border-left:1px solid var(--border);border-radius:6px 0 0 6px}
+        .tbl td:last-child{border-right:1px solid var(--border);border-radius:0 6px 6px 0}
+        .tbl tbody tr:hover>td{background:var(--surface)}
+        .tbl tbody tr{cursor:pointer}
         .mono{font-family:'JetBrains Mono',monospace}
 
         /* Inline add row */
         .add-row input{background:var(--input);border:1px solid var(--border);border-radius:5px;padding:6px 8px;font-size:12px;color:var(--text);width:100%;font-family:'JetBrains Mono',monospace}
         .add-row input:focus{outline:none;border-color:var(--teal);background:var(--white)}
-        .add-row input::placeholder{font-family:'Plus Jakarta Sans',sans-serif;color:var(--muted);font-style:italic}
+        .add-row input::placeholder{font-family:'DM Sans',sans-serif;color:var(--muted);font-style:italic}
 
         /* Sightings */
         .sight-group{margin-bottom:10px}
@@ -130,7 +244,7 @@
         .sight-group-title .mono{font-size:11px;color:var(--muted)}
         .sg-title-left{display:flex;align-items:center;gap:6px;min-width:0}
         .sg-chevron{font-size:10px;color:var(--muted);width:12px;text-align:center;flex-shrink:0;transition:transform .15s}
-        .sg-mpn{cursor:pointer;color:#0e7a4e;font-size:14px;font-weight:700}
+        .sg-mpn{cursor:pointer;color:var(--green);font-size:14px;font-weight:700}
         .sg-mpn:hover{text-decoration:underline}
         .sg-collapsed .sight-group-title{border-bottom:1px solid var(--border);margin-bottom:0}
         .sg-body{transition:all .1s ease}
@@ -143,7 +257,7 @@
         .sc input[type=checkbox]{width:14px;height:14px;accent-color:var(--teal);cursor:pointer}
         .sc-body{flex:1;min-width:0;display:flex;flex-direction:column;gap:0}
         .sc-top{display:flex;align-items:center;gap:6px;min-width:0}
-        .sc-vendor{font-weight:700;font-size:15px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;color:#5a8a8a}
+        .sc-vendor{font-weight:700;font-size:15px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;color:var(--accent)}
         .sc-key-vals{display:flex;gap:8px;align-items:center;margin-left:auto;flex-shrink:0}
         .sc-key-val{font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;white-space:nowrap;color:var(--text)}
         .sc-badges{display:flex;gap:3px;align-items:center;flex-wrap:wrap;margin-top:1px}
@@ -198,7 +312,7 @@
         .act-card{background:var(--white);border:1px solid var(--border);border-left:3px solid var(--border2);border-radius:10px;padding:14px 16px;margin-bottom:6px;transition:all .2s ease;box-shadow:var(--shadow-sm)}
         .act-card:hover{border-color:var(--border2);border-left-color:var(--teal);box-shadow:var(--shadow-md)}
         .act-card-header{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-        .act-card-vendor{font-size:16px;font-weight:700;color:#5a8a8a}
+        .act-card-vendor{font-size:16px;font-weight:700;color:var(--accent)}
         .act-badge-replied{font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:var(--green-light);color:var(--green);text-transform:uppercase}
         .act-badge-awaiting{font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:#fef3c7;color:#92400e;text-transform:uppercase}
         .act-badge-opened{font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:#dbeafe;color:#1e40af;text-transform:uppercase}
@@ -214,7 +328,7 @@
         .act-card-part{font-size:11px;font-family:'JetBrains Mono',monospace;background:var(--surface);padding:2px 8px;border-radius:4px;color:var(--text2)}
         .act-card-quote{margin-top:8px;padding:8px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;font-size:12px}
         .act-card-quote-line{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-        .act-card-quote-mpn{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:13px;color:#0e7a4e}
+        .act-card-quote-mpn{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:13px;color:var(--green)}
         .act-card-quote-val{font-size:11px;color:var(--text2)}
         .act-card-actions{display:flex;gap:6px;margin-top:8px;justify-content:flex-end;flex-wrap:wrap}
         .act-badge-classification{font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:#f0e6ff;color:#7b4fb0;text-transform:uppercase;letter-spacing:.3px}
@@ -228,7 +342,7 @@
         .filter-pills{display:flex;gap:4px;align-items:center}
         .filter-pill{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--white);color:var(--text2);font-size:11px;font-weight:600;cursor:pointer;transition:.15s;white-space:nowrap}
         .filter-pill:hover{border-color:var(--border2);background:var(--surface)}
-        .filter-pill.on{background:var(--teal);color:#fff;border-color:var(--teal)}
+        .filter-pill.on{background:var(--blue);color:#fff;border-color:var(--blue)}
         .filter-count{font-size:11px;color:var(--muted);margin-left:auto;white-space:nowrap}
         .filter-sort{padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--white);color:var(--text2);font-size:11px;font-weight:600;cursor:pointer;outline:none;appearance:auto}
 
@@ -331,7 +445,7 @@
         .vendor-search{background:var(--input);border:1px solid var(--border);border-radius:6px;padding:7px 12px;font-size:12px;color:var(--text);width:240px}
         .vendor-search:focus{outline:none;border-color:var(--teal);background:var(--white)}
         .vendor-card-row{display:flex;justify-content:space-between;align-items:center}
-        .vendor-card-name{font-weight:700;font-size:14px;color:#5a8a8a}
+        .vendor-card-name{font-weight:700;font-size:14px;color:var(--accent)}
         .vendor-card-meta{display:flex;gap:12px;align-items:center}
         .eng-badge{font-size:10px;font-weight:700;padding:2px 6px;border-radius:8px;white-space:nowrap}
         .eng-proven{background:#e6f9ed;color:#1a7a3a}.eng-developing{background:#fff8e1;color:#b8860b}.eng-caution{background:#fde8e8;color:#c0392b}.eng-new{background:var(--bg3);color:var(--muted)}
@@ -342,7 +456,7 @@
 
         /* Material Card styles (list + popup) */
         .mat-card-row{display:flex;justify-content:space-between;align-items:center}
-        .mat-card-mpn{font-weight:700;font-size:15px;font-family:'JetBrains Mono',monospace;color:#0e7a4e}
+        .mat-card-mpn{font-weight:700;font-size:15px;font-family:'JetBrains Mono',monospace;color:var(--green)}
         .mat-card-meta{display:flex;gap:12px;align-items:center;font-size:11px;color:var(--muted)}
         .mp-header{margin-bottom:16px}
         .mp-header h2{font-size:18px;margin-bottom:2px;font-family:'JetBrains Mono',monospace}
@@ -351,7 +465,7 @@
         .mp-label{font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px}
         .mp-vh-row{display:flex;align-items:center;gap:8px;padding:6px 10px;border:1px solid var(--card2);border-radius:6px;margin-bottom:3px;font-size:11px;cursor:pointer;transition:.15s}
         .mp-vh-row:hover{border-color:var(--border2);background:var(--bg)}
-        .mp-vh-vendor{font-weight:700;min-width:140px;color:#5a8a8a}
+        .mp-vh-vendor{font-weight:700;min-width:140px;color:var(--accent)}
         .mp-vh-detail{color:var(--text);font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500}
         .mp-vh-badge{font-size:8px;font-weight:700;padding:1px 5px;border-radius:3px;text-transform:uppercase}
         .mp-vh-times{background:#eaeff5;color:#3d6895;font-size:9px;font-weight:700;padding:1px 5px;border-radius:3px}
@@ -361,22 +475,21 @@
         .mp-tbl th{text-align:left;padding:5px 8px;color:var(--muted);font-weight:600;font-size:9px;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border)}
         .mp-tbl td{padding:5px 8px;border-bottom:1px solid var(--card2);vertical-align:middle}
         .mp-tbl tr:hover td{background:var(--bg)}
-        .mp-tbl-vendor{font-weight:700;font-size:13px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#5a8a8a}
+        .mp-tbl-vendor{font-weight:700;font-size:13px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}
         .mp-tbl-date{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text2);white-space:nowrap;font-weight:500}
 
         @media(max-width:768px){
-            /* Shell */
-            .shell{padding:8px 10px;padding-bottom:env(safe-area-inset-bottom,8px)}
-
-            /* Topbar — stack vertically on mobile */
-            .topbar{flex-direction:column;gap:6px;padding:6px 10px}
-            .topbar-left{flex-direction:column;gap:4px;align-items:flex-start;width:100%}
-            .topbar-logo{height:60px}
-            .topbar-nav{margin-left:0;flex-wrap:wrap;gap:2px;width:100%}
-            .topbar-nav button{padding:6px 10px;font-size:11px;flex:1;min-width:0;text-align:center;min-height:34px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-            .user{width:100%;justify-content:flex-end;font-size:11px;gap:6px}
+            /* Sidebar → hidden drawer on mobile */
+            .sidebar{width:var(--sbw);top:0;transform:translateX(-100%);transition:transform .22s cubic-bezier(.4,0,.2,1);box-shadow:none}
+            .sidebar.mobile-open{transform:translateX(0);box-shadow:4px 0 20px rgba(0,0,0,.3)}
+            .sidebar.collapsed{transform:translateX(-100%)}
+            .main{margin-left:0 !important;padding:12px 10px;padding-top:52px}
+            .mobile-topbar{display:flex !important}
 
             /* Req list */
+            .col-headers{display:none}
+            .req-row{grid-template-columns:1fr;gap:4px;padding:10px 14px}
+            .req-row .c-src{display:none}
             .req-header{flex-direction:column;gap:8px;align-items:stretch}
             .req-header > div{flex-direction:column;gap:6px;display:flex}
             .req-search{width:100%;font-size:16px}
@@ -392,12 +505,6 @@
             .tabs{overflow-x:auto;width:100%;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;scrollbar-width:none}
             .tabs::-webkit-scrollbar{display:none}
             .tab{white-space:nowrap;flex-shrink:0;padding:7px 14px;font-size:11px;min-height:34px}
-
-            /* Requirements table — horizontal scroll wrapper */
-            #tab-requirements .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
-            .tbl{font-size:11px;min-width:480px}
-            .tbl th,.tbl td{padding:5px 6px}
-            .add-row input{font-size:16px;padding:5px 6px}
 
             /* Filter bars — stack */
             .filter-bar{flex-direction:column;gap:6px;align-items:stretch}
@@ -494,14 +601,32 @@
             .login-card{padding:40px 24px 36px;width:92%}
             .login-logo{width:162px}
             .btn-ms{padding:14px 24px;font-size:14px;width:100%;justify-content:center}
+
+            /* v7 toparea — stack on mobile */
+            .toparea{flex-wrap:wrap;gap:8px;padding:8px 12px}
+            .toparea img{height:48px}
+            .topcontrols{flex-direction:column;align-items:stretch;gap:6px}
+            .fpills{width:100%;overflow-x:auto;scrollbar-width:none}
+            .fpills::-webkit-scrollbar{display:none}
+            .sbox{width:100%;font-size:16px}
+            .filter-panel{width:calc(100vw - 24px);left:-12px}
+            .sb-toggle{top:56px;left:8px}
+            body.sb-open .sb-toggle{left:208px}
+            body.sb-open .main{margin-left:0 !important}
+            /* v7 table: horizontal scroll on mobile */
+            .tbl{display:block;overflow-x:auto;white-space:nowrap}
         }
+
+        /* Mobile top bar (hamburger) — hidden on desktop */
+        .mobile-topbar{display:none;position:fixed;top:0;left:0;right:0;height:48px;background:var(--blue);z-index:40;align-items:center;padding:0 12px;gap:10px}
+        .mobile-topbar .hamburger{background:none;border:none;color:var(--navy-nav-active);font-size:22px;cursor:pointer;padding:4px 8px}
+        .mobile-topbar .mobile-logo{height:24px;filter:brightness(0) invert(1);opacity:.9}
+        .sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:45}
+        .sidebar-overlay.open{display:block}
 
         /* Extra small screens (phones in portrait) */
         @media(max-width:420px){
-            .topbar-nav button{font-size:10px;padding:4px 6px;min-height:32px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
             .tab{font-size:10px;padding:6px 10px}
-            .tbl th,.tbl td{padding:4px 4px;font-size:10px}
-            .tbl{min-width:400px}
             .sc-vendor{font-size:12px}
             .act-stat{flex:1 1 calc(50% - 3px)}
             .act-stat-num{font-size:16px}
@@ -510,8 +635,6 @@
             .btn-primary{padding:8px 12px}
             .login-card{padding:32px 16px 28px}
             .login-logo{width:135px}
-            .topbar-logo{height:52px}
-            .shell{padding:6px 8px}
         }
 
         /* ── Data Sources Tab ── */
@@ -578,20 +701,21 @@
 
         /* Status badges */
         .status-badge{display:inline-block;font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;text-transform:uppercase;letter-spacing:.3px;border:1px solid rgba(0,0,0,.08)}
-        .status-active{background:var(--teal-light);color:var(--teal)}
-        .status-sourcing{background:#e0f4f7;color:#0e7490}
+        .status-active{background:var(--blue-lt);color:var(--blue)}
+        .status-sourcing{background:var(--blue-lt);color:var(--blue)}
         .status-quoting{background:var(--amber-light);color:var(--amber)}
-        .status-quoted{background:#dbeafe;color:#2563eb}
-        .status-won{background:var(--green-light);color:var(--green)}
-        .status-lost{background:var(--red-light);color:var(--red)}
-        .status-reopened{background:var(--teal-light);color:var(--teal)}
-        .status-archived{background:var(--bg);color:var(--muted)}
-        .status-draft{background:var(--bg);color:var(--text2)}
+        .status-quoted{background:var(--green-light);color:#065f46}
+        .status-won{background:var(--green-light);color:#065f46}
+        .status-lost{background:var(--red-light);color:#991b1b}
+        .status-reopened{background:var(--blue-lt);color:var(--blue)}
+        .status-archived{background:var(--amber-light);color:#92400e}
+        .status-draft{background:var(--bg2);color:var(--text2)}
         .status-chip{display:inline-block;font-size:10px;font-weight:700;padding:3px 10px;border-radius:10px;text-transform:uppercase;letter-spacing:.4px;transition:all .3s}
         .status-chip.pulse{animation:chipPulse .6s ease}
         @keyframes chipPulse{0%{transform:scale(1)}30%{transform:scale(1.15)}100%{transform:scale(1)}}
         .status-sent{background:#dbeafe;color:#2563eb}
         .status-revised{background:var(--bg);color:var(--muted)}
+        .status-offers{background:var(--purple-lt);color:var(--purple)}
 
         /* Customers tree */
         .cust-card{padding:0;overflow:hidden}
@@ -599,7 +723,7 @@
         .cust-header:hover{background:var(--bg)}
         .cust-expand{font-size:10px;color:var(--muted);transition:transform .2s;width:14px}
         .cust-card.expanded .cust-expand{transform:rotate(90deg)}
-        .cust-name{font-weight:800;font-size:17px;flex:1;color:#5a8a8a}
+        .cust-name{font-weight:800;font-size:17px;flex:1;color:var(--accent)}
         .cust-count{font-size:11px;color:var(--muted);font-family:'JetBrains Mono',monospace}
         .cust-acct-mgr{font-size:10px;color:var(--text2);margin-left:4px}
         .cust-sites{display:none;border-top:1px solid var(--border);padding:8px 16px}
@@ -687,8 +811,8 @@
         .proactive-match{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--bg);font-size:12px}
         .proactive-match:last-child{border-bottom:none}
         .proactive-match label{display:flex;align-items:center;gap:6px;cursor:pointer;flex:1}
-        .proactive-match .pm-mpn{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:14px;min-width:120px;color:#0e7a4e}
-        .proactive-match .pm-vendor{color:#5a8a8a;font-weight:700;min-width:100px}
+        .proactive-match .pm-mpn{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:14px;min-width:120px;color:var(--green)}
+        .proactive-match .pm-vendor{color:var(--accent);font-weight:700;min-width:100px}
         .proactive-match .pm-detail{color:var(--muted)}
         .proactive-actions{display:flex;gap:6px;margin-top:10px}
         .proactive-offer-card{background:var(--white);border:1px solid var(--border);border-left:3px solid var(--green);border-radius:8px;padding:14px 16px;margin-bottom:8px;box-shadow:var(--shadow-sm)}
@@ -875,11 +999,10 @@
 
         /* Tablet breakpoint */
         @media(min-width:769px) and (max-width:1024px){
-            .shell{max-width:100%;padding:12px 16px}
+            .main{padding:16px}
             .lo-form{grid-template-columns:1fr 1fr}
             .src-grid{grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
             .cust-header>span:last-child{flex-wrap:wrap}
-            .topbar-nav button{padding:6px 10px;font-size:11px}
             .modal-lg{max-width:90%}
         }
         /* Utility classes */
@@ -912,13 +1035,10 @@
         .perf-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;text-align:center}
         .perf-card-num{font-size:22px;font-weight:700;color:var(--text)}
         .perf-card-label{font-size:11px;color:var(--muted);margin-top:4px}
-        /* Settings Dropdown */
+        /* Settings Dropdown (inside sidebar) */
         .settings-dropdown{position:relative;display:inline-block}
-        .btn-settings{background:none;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:16px;padding:4px 8px;color:var(--text);line-height:1}
-        .btn-settings:hover{background:var(--surface);border-color:var(--teal)}
-        .settings-dropdown-content{display:none;position:absolute;right:0;top:100%;margin-top:4px;background:var(--bg);border:1px solid var(--border);border-radius:8px;min-width:160px;box-shadow:0 4px 12px rgba(0,0,0,0.15);z-index:100;overflow:hidden}
-        .settings-dropdown-content a{display:block;padding:10px 16px;font-size:13px;color:var(--text);cursor:pointer;text-decoration:none}
-        .settings-dropdown-content a:hover{background:var(--surface)}
+        .settings-dropdown-content a{display:block;cursor:pointer;text-decoration:none;transition:background .1s}
+        .settings-dropdown-content a:hover{background:rgba(255,255,255,.06) !important}
         .settings-panel{margin-top:12px}
 
         /* Email Threads */
@@ -947,6 +1067,112 @@
         .spinner-row{display:flex;align-items:center;justify-content:center;gap:8px;padding:16px;color:var(--muted);font-size:12px}
         .spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--teal);border-radius:50%;animation:spin 0.6s linear infinite}
         @keyframes spin{to{transform:rotate(360deg)}}
+
+        /* ── v7 Prototype Styles ────────────────────────────── */
+
+        /* Top area — logo left, controls right, all on grey */
+        .toparea{display:flex;align-items:center;gap:12px;padding:10px 16px;position:relative;z-index:100}
+        .toparea img{height:64px;flex-shrink:0}
+        .topcontrols{display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap}
+
+        /* Sidebar toggle — below logo */
+        .sb-toggle{position:fixed;top:84px;left:16px;z-index:201;width:36px;height:36px;border-radius:8px;background:var(--white);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:16px;color:var(--muted);box-shadow:0 2px 6px rgba(0,0,0,.08);transition:.2s}
+        .sb-toggle:hover{background:var(--teal-light);color:var(--teal);border-color:var(--teal)}
+        body.sb-open .sb-toggle{left:216px}
+        body.sb-open .sb-toggle .ticon::after{content:'\2715'}
+        body:not(.sb-open) .sb-toggle .ticon::after{content:'\2630'}
+
+        /* v7 Sidebar overlay nav */
+        .sidebar-nav{display:flex;flex-direction:column;gap:2px;padding:10px 8px;flex:1}
+        .sidebar-nav button{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:8px;border:none;background:transparent;color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;transition:.15s;white-space:nowrap;text-align:left;font-family:inherit}
+        .sidebar-nav button:hover{background:var(--surface);color:var(--text)}
+        .sidebar-nav button.active{background:var(--teal-light);color:var(--teal)}
+        .sidebar-nav .ni{font-size:18px;width:22px;text-align:center}
+
+        /* v7 Sidebar footer sub-elements */
+        .sidebar-footer .ui{width:26px;height:26px;border-radius:50%;background:var(--teal);color:#fff;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;flex-shrink:0}
+        .sidebar-footer .un{font-size:11px;color:var(--text2);font-weight:600;flex:1}
+        .sidebar-footer .rb{font-size:9px;font-weight:700;padding:2px 5px;border-radius:3px;background:var(--teal-light);color:var(--teal)}
+        .sidebar-footer .gb{border:none;background:none;cursor:pointer;color:var(--muted);font-size:14px}
+
+        /* Body sidebar-open state */
+        body.sb-open .sidebar{transform:translateX(0)}
+        body.sb-open .main{margin-left:var(--sbw)}
+
+        /* Pills */
+        .fpills{display:flex;gap:2px;background:var(--white);border-radius:8px;padding:3px;border:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.04)}
+        .fp{padding:7px 16px;border-radius:6px;border:none;background:transparent;color:var(--muted);font-size:12px;font-weight:600;cursor:pointer;transition:.15s;font-family:inherit}
+        .fp.on{background:var(--teal);color:#fff}
+        .fp:not(.on):hover{color:var(--text);background:var(--bg)}
+
+        /* Search box — prominent */
+        .sbox{background:var(--white);border:2px solid var(--teal);border-radius:8px;padding:8px 14px;font-size:13px;color:var(--text);width:280px;font-family:inherit;font-weight:500;box-shadow:0 0 0 3px rgba(74,111,165,.08)}
+        .sbox:focus{outline:none;box-shadow:0 0 0 4px rgba(74,111,165,.18)}
+        .sbox::placeholder{color:var(--muted)}
+
+        /* Filter dropdown */
+        .filter-wrap{position:relative}
+        .filter-btn{display:flex;align-items:center;gap:5px;padding:8px 12px;border-radius:8px;border:1px solid var(--border);background:var(--white);font-size:12px;font-weight:600;color:var(--text2);cursor:pointer;font-family:inherit;transition:.15s}
+        .filter-btn:hover{border-color:var(--teal);color:var(--teal)}
+        .filter-btn.has-active{border-color:var(--teal);background:var(--teal-light);color:var(--teal)}
+        .filter-badge{background:var(--teal);color:#fff;font-size:9px;font-weight:800;width:18px;height:18px;border-radius:50%;display:none;align-items:center;justify-content:center}
+        .filter-btn.has-active .filter-badge{display:flex}
+        .filter-panel{display:none;position:absolute;top:100%;left:0;margin-top:6px;background:var(--white);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:12px;width:300px;z-index:300}
+        .filter-panel.open{display:block}
+        .filter-group{margin-bottom:10px}
+        .filter-group:last-child{margin-bottom:0}
+        .filter-group-title{font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+        .filter-group label{display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px;color:var(--text2);cursor:pointer;font-weight:500}
+        .filter-group input[type=checkbox]{accent-color:var(--teal);width:14px;height:14px;cursor:pointer}
+        .filter-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--card2)}
+        .filter-actions button{padding:4px 10px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;border:none}
+        .fa-clear{background:transparent;color:var(--red)}.fa-clear:hover{text-decoration:underline}
+        .fa-apply{background:var(--teal);color:#fff}
+
+        /* v7 Button variants */
+        .btn-p{background:var(--teal);color:#fff}.btn-p:hover{background:#3a5c8a}
+        .btn-g{background:var(--green);color:#fff}.btn-g:hover{background:#0d8f6d}
+
+        /* Expand arrow + detail rows */
+        .ea{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:4px;cursor:pointer;transition:transform .15s;font-size:10px;color:var(--muted);border:1px solid var(--border);background:var(--white)}
+        .ea:hover{background:var(--surface);color:var(--text)}.ea.open{transform:rotate(90deg)}
+        .drow{display:none}.drow.open{display:table-row}
+        .drow>td{padding:8px 12px 14px;background:var(--surface)!important;border:1px solid var(--border)!important;border-radius:0 0 6px 6px!important}
+        .dtbl{width:100%;font-size:11px;border-collapse:collapse;margin-top:4px}
+        .dtbl th{text-align:left;padding:4px 8px;color:var(--text);font-weight:700;font-size:10px;text-transform:uppercase;border-bottom:1px solid var(--border);background:transparent}
+        .dtbl td{padding:4px 8px;border-bottom:1px solid var(--card2)}
+        .dtbl input{border:1px solid var(--border);border-radius:4px;padding:3px 6px;font-size:11px;font-family:'JetBrains Mono',monospace;width:100%;background:var(--white)}
+        .dtbl input:focus{outline:none;border-color:var(--teal)}
+
+        /* Deadline flags */
+        .dl{font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:3px}
+        .dl-ok{color:var(--green)}.dl-w{color:var(--amber)}.dl-u{color:var(--red);animation:pulse 1.5s infinite}.dl-asap{color:var(--red);font-weight:800}
+
+        /* Vendor drill-down */
+        .vhdr{display:flex;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap}
+        .vsrch{border:1px solid var(--border);border-radius:5px;padding:4px 8px;font-size:11px;font-family:inherit;width:180px;background:var(--white)}.vsrch:focus{outline:none;border-color:var(--teal)}
+        .vflt{background:var(--white);border:1px solid var(--border);border-radius:5px;padding:4px 8px;font-size:10px;color:var(--text2);font-family:inherit;cursor:pointer}
+        .clr{font-size:10px;color:var(--red);cursor:pointer;border:none;background:none;font-weight:700;font-family:inherit;padding:2px 6px}.clr:hover{text-decoration:underline}
+        .vrow{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--card2)}.vrow:last-child{border-bottom:none}
+        .vrow input[type=checkbox]{accent-color:var(--teal);width:15px;height:15px;cursor:pointer}
+        .vn{font-weight:600;min-width:150px;font-size:12px}
+        .vs{font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px}
+        .vs-h{background:var(--green-light);color:var(--green)}.vs-m{background:var(--amber-light);color:var(--amber)}.vs-l{background:var(--red-light);color:var(--red)}
+        .vm{font-size:10px;color:var(--muted)}
+
+        /* Progress bars */
+        .prog{display:flex;align-items:center;gap:6px}
+        .prog-bar{width:60px;height:5px;border-radius:3px;background:var(--bg2);overflow:hidden}
+        .prog-fill{height:100%;border-radius:3px;background:var(--teal)}
+        .prog-txt{font-size:10px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+
+        /* v7 Badge variants */
+        .b-draft{background:var(--bg2);color:var(--muted)}
+        .b-off{background:var(--green-light);color:var(--green)}
+        .b-qtd{background:var(--amber-light);color:var(--amber)}
+
+        /* View toggle */
+        .view{display:none}.view.on{display:block}
     </style>
 </head>
 <body>
@@ -964,71 +1190,78 @@
     </div>
 </div>
 {% else %}
-<div class="shell">
-    <div class="topbar">
-        <div class="topbar-left">
-            <img src="/static/avail_logo.png" alt="AVAIL" class="topbar-logo">
-            <div class="topbar-nav">
-                <button class="active" id="navReqs" onclick="showList();setNav(this)">Requisitions</button>
-                <button id="navCustomers" onclick="showCustomers();setNav(this)">Customers</button>
-                <button id="navVendors" onclick="showVendors();setNav(this)">Vendors</button>
-                <button id="navMaterials" onclick="showMaterials();setNav(this)">Materials</button>
-                <button id="navBuyPlans" onclick="showBuyPlans();setNav(this)" style="display:none">Buy Plans</button>
-                <button id="navProactive" onclick="showProactiveOffers();setNav(this)" style="display:none">Proactive <span id="proactiveBadge" class="nav-badge" style="display:none"></span></button>
-                <button id="navPerformance" onclick="showPerformance();setNav(this)" style="display:none">Scorecards</button>
-            </div>
+<!-- TOP AREA — logo on grey bg + controls inline to the right -->
+<div class="toparea">
+    <img src="/static/avail_logo.png" alt="AVAIL" style="height:64px">
+    <div class="topcontrols" id="topcontrols">
+        <button class="btn btn-primary" onclick="openNewReqModal()">+ New RFQ</button>
+        <div class="fpills" id="mainPills">
+            <button class="fp on" data-view="rfq" onclick="setMainView('rfq',this)">RFQ</button>
+            <button class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)">Sourcing</button>
+            <button class="fp" data-view="archive" onclick="setMainView('archive',this)">Archive</button>
         </div>
-        <div class="user">
-            <span id="roleBadge" style="display:none"></span>
-            <span id="m365Status" style="display:none"><span id="m365Dot"></span><span id="m365Label"></span></span>
-            <span style="font-weight:600">{{ user_name }}</span>
-            <div id="settingsMenu" class="settings-dropdown" style="display:none">
-                <button onclick="toggleSettingsDropdown()" class="btn-settings" title="Settings">&#9881;</button>
-                <div class="settings-dropdown-content" id="settingsDropdownContent">
-                    <a onclick="openSettingsTab('users')">Users</a>
-                    <a onclick="openSettingsTab('health')">System Health</a>
-                    <a onclick="openSettingsTab('scoring')">Scoring Weights</a>
-                    <a onclick="openSettingsTab('config')">Configuration</a>
-                    <a onclick="openSettingsTab('sources')">Data Sources</a>
-                    <a onclick="openSettingsTab('enrichment')">Enrichment</a>
-                    <a onclick="openSettingsTab('create-user')">Create User</a>
+        <input type="text" class="sbox" id="mainSearch" placeholder="&#x1f50d;  Search customer, part, RFQ&hellip;" oninput="debouncedMainSearch()">
+        <div class="filter-wrap">
+            <button class="filter-btn" onclick="toggleFilter('mainFilterPanel')">&#x23f7; Filters <span class="filter-badge" id="filterBadge">0</span></button>
+            <div class="filter-panel" id="mainFilterPanel">
+                <div id="filterGroups"></div>
+                <div class="filter-actions">
+                    <button class="fa-clear" onclick="clearAllFilters()">Clear all</button>
+                    <button class="fa-apply" onclick="applyFilters()">Apply</button>
                 </div>
             </div>
-            <button class="btn-out" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())">Logout</button>
         </div>
     </div>
+</div>
 
-    <!-- VIEW: Requisition List -->
+<!-- SIDEBAR TOGGLE — below logo area -->
+<div class="sb-toggle" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar" aria-expanded="false">
+    <span class="ticon"></span>
+</div>
+
+<!-- Mobile top bar -->
+<div class="mobile-topbar">
+    <button class="hamburger" onclick="toggleMobileSidebar()">&#9776;</button>
+    <img src="/static/avail_logo.png" alt="AVAIL" class="mobile-logo">
+</div>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleMobileSidebar()"></div>
+
+<!-- SIDEBAR — v7 slide-out -->
+<aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
+    <nav class="sidebar-nav">
+        <button class="active" id="navReqs" onclick="sidebarNav('reqs',this)"><span class="ni">&#x1f4cb;</span> RFQs</button>
+        <button id="navCustomers" onclick="sidebarNav('customers',this)"><span class="ni">&#x1f3e2;</span> Customers</button>
+        <button id="navVendors" onclick="sidebarNav('vendors',this)"><span class="ni">&#x1f91d;</span> Vendors</button>
+        <button id="navMaterials" onclick="sidebarNav('materials',this)"><span class="ni">&#x1f527;</span> Materials</button>
+        <button id="navScorecards" onclick="sidebarNav('performance',this)"><span class="ni">&#x1f4ca;</span> Scorecards</button>
+        <button id="navProactive" onclick="sidebarNav('proactive',this)" style="display:none"><span class="ni">&#x2b50;</span> Proactive</button>
+    </nav>
+    <div class="sidebar-footer">
+        <span class="ui">{{ user_name[:2]|upper if user_name else 'U' }}</span>
+        <span class="un">{{ user_name }}</span>
+        <span id="roleBadge" style="display:none"></span>
+        {% if is_admin %}<span class="rb">Admin</span>{% endif %}
+        <button class="gb" id="settingsMenu" onclick="toggleSettingsDropdown()" title="Settings" style="display:none">&#x2699;</button>
+        <div class="settings-dropdown-content" id="settingsDropdownContent" style="display:none;margin-top:4px;background:var(--white);border:1px solid var(--border);border-radius:6px">
+            <a onclick="openSettingsTab('users')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">Users</a>
+            <a onclick="openSettingsTab('health')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">System Health</a>
+            <a onclick="openSettingsTab('scoring')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">Scoring Weights</a>
+            <a onclick="openSettingsTab('config')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">Configuration</a>
+            <a onclick="openSettingsTab('sources')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">Data Sources</a>
+            <a onclick="openSettingsTab('enrichment')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">Enrichment</a>
+            <a onclick="openSettingsTab('create-user')" style="color:var(--text2);padding:8px 12px;font-size:11px;display:block;cursor:pointer">Create User</a>
+        </div>
+        <span id="m365Status" style="display:none;font-size:10px;padding:4px 8px"><span id="m365Dot"></span><span id="m365Label"></span></span>
+        <button class="btn-out" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())"><span>Logout</span></button>
+    </div>
+</aside>
+
+<!-- Main content -->
+<div class="main">
+    <div class="main-scroll">
+
+    <!-- VIEW: Requisition List (v7 — header/tabs/filters are in toparea) -->
     <div id="view-list">
-        <div class="req-header">
-            <h2>Requisitions</h2>
-            <div class="flex-center gap-lg">
-                <button class="btn btn-primary" onclick="openNewReqModal()">+ New Requisition</button>
-            </div>
-        </div>
-        <div id="reqStatusBar" class="filter-bar" style="margin-bottom:8px">
-            <input type="text" class="filter-search" id="reqListFilter" placeholder="Search by name, customer, or part number…" oninput="debouncedReqListSearch()" onkeydown="if(event.key==='Enter')submitReqListSearch()">
-            <div class="filter-pills">
-                <button class="filter-pill on" data-req-status="draft" onclick="setReqStatusFilter('draft',this)">Draft</button>
-                <button class="filter-pill" data-req-status="active" onclick="setReqStatusFilter('active',this)">Sourcing</button>
-                <button class="filter-pill" data-req-status="offers" onclick="setReqStatusFilter('offers',this)">Offers</button>
-                <button class="filter-pill" data-req-status="quoted" onclick="setReqStatusFilter('quoted',this)">Quoted</button>
-                <button class="filter-pill" data-req-status="archive" onclick="setReqStatusFilter('archive',this)">Archive</button>
-                <span style="border-left:1px solid var(--border);height:18px;margin:0 4px" id="myReqsDivider"></span>
-                <button class="filter-pill" id="myReqsBtn" onclick="toggleMyReqs(this)">My Reqs</button>
-            </div>
-            <select class="filter-sort" id="reqListSort" onchange="setReqListSort(this.value)">
-                <option value="newest">Newest first</option>
-                <option value="oldest">Oldest first</option>
-                <option value="name-az">Name A→Z</option>
-                <option value="name-za">Name Z→A</option>
-                <option value="parts">Most parts</option>
-                <option value="replies">Most replies</option>
-                <option value="customer">Customer A→Z</option>
-                <option value="last-searched">Last searched</option>
-            </select>
-            <span class="filter-count" id="reqStatusCount"></span>
-        </div>
         <div id="reqList"><p class="empty">Loading…</p></div>
     </div>
 
@@ -1257,15 +1490,19 @@
     <div id="view-vendors" style="display:none">
         <div class="vendor-header">
             <h2>Vendor Directory</h2>
-            <input class="vendor-search" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" aria-label="Search vendors">
         </div>
-        <div class="vendor-filters flex-center gap-sm flex-wrap" style="padding:0 16px 8px">
-            <button class="pill-filter on" onclick="setVendorTier('all',this)">All</button>
-            <button class="pill-filter" onclick="setVendorTier('proven',this)">🟢 Proven</button>
-            <button class="pill-filter" onclick="setVendorTier('developing',this)">🟡 Developing</button>
-            <button class="pill-filter" onclick="setVendorTier('caution',this)">🔴 Caution</button>
-            <button class="pill-filter" onclick="setVendorTier('new',this)">⚪ New</button>
-            <label style="margin-left:auto;font-size:11px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px">
+        <!-- Tier tabs -->
+        <div class="tabs" id="vendorTierTabs" style="margin-bottom:12px">
+            <button class="tab on" onclick="setVendorTier('all',this)">All</button>
+            <button class="tab" onclick="setVendorTier('proven',this)">Proven</button>
+            <button class="tab" onclick="setVendorTier('developing',this)">Developing</button>
+            <button class="tab" onclick="setVendorTier('caution',this)">Caution</button>
+            <button class="tab" onclick="setVendorTier('new',this)">New</button>
+        </div>
+        <!-- Filter bar -->
+        <div class="filter-bar" style="margin-bottom:8px">
+            <input class="filter-search" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" aria-label="Search vendors">
+            <label style="font-size:11px;color:var(--muted);cursor:pointer;display:flex;align-items:center;gap:4px">
                 <input type="checkbox" id="vendorHideBL" onchange="filterVendorList()" aria-label="Hide blacklisted vendors"> Hide blacklisted
             </label>
             <select class="filter-sort" id="vendorSort" onchange="setVendorSort(this.value)">
@@ -1284,13 +1521,11 @@
     <!-- VIEW: Materials -->
     <div id="view-materials" style="display:none">
         <div class="vendor-header">
-            <h2>Material Cards</h2>
-            <div style="display:flex;gap:8px;align-items:center">
-                <button class="btn btn-ghost btn-sm" onclick="toggleStockImport()">📦 Import Stock</button>
-                <input class="vendor-search" id="materialSearch" placeholder="Search by part number…" oninput="debouncedLoadMaterials()" aria-label="Search material cards">
-            </div>
+            <h2>Materials</h2>
         </div>
-        <div class="filter-bar" style="padding:0 16px 8px;display:flex;align-items:center">
+        <!-- Search-first layout -->
+        <div class="filter-bar" style="margin-bottom:8px">
+            <input class="filter-search" id="materialSearch" placeholder="Search by part number or manufacturer…" oninput="debouncedLoadMaterials()" aria-label="Search material cards" style="flex:2;max-width:480px">
             <select class="filter-sort" id="materialSort" onchange="setMaterialSort(this.value)">
                 <option value="last-searched">Last searched</option>
                 <option value="mpn-az">MPN A→Z</option>
@@ -1299,6 +1534,7 @@
                 <option value="most-vendors">Most vendors</option>
                 <option value="oldest-search">Oldest search</option>
             </select>
+            <button class="btn btn-ghost btn-sm" onclick="toggleStockImport()">Import Stock</button>
         </div>
         <div id="stockImportArea" data-role="buyer" style="display:none;margin-bottom:12px" class="card">
             <strong style="font-size:12px;color:var(--muted)">Import a vendor stock list — all rows stored as material cards with vendor history</strong>
@@ -1352,7 +1588,8 @@
         <div id="proactiveSentPanel" style="display:none"><p class="empty">Loading…</p></div>
         <div id="proactiveScorecardPanel" style="display:none"><p class="empty">Loading…</p></div>
     </div>
-</div>
+    </div><!-- /.main -->
+</div><!-- /.shell -->
 
 <!-- New Requisition Modal -->
 <div id="newReqModal" class="modal-bg" onclick="if(event.target===this)closeModal('newReqModal')">
@@ -2050,18 +2287,29 @@
             </div>
         </div>
 
-    </div>
+    </div><!-- end view-settings -->
+    </div><!-- end main-scroll -->
+</div><!-- end main -->
 
 <script>
 window.__userName = "{{ user_name }}";
 window.__userEmail = "{{ user_email }}";
 window.__isAdmin = {{ "true" if is_admin else "false" }};
 window.__isDevAssistant = {{ "true" if is_dev_assistant else "false" }};
-function setNav(btn) {
-    document.querySelectorAll('.topbar-nav button').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
+/* Inline stubs — overridden by app.js with full implementations */
+function setNav(btn) {}
+function toggleMobileSidebar() {
+    var sb = document.getElementById('sidebar');
+    var ov = document.getElementById('sidebarOverlay');
+    if (sb) sb.classList.toggle('mobile-open');
+    if (ov) ov.classList.toggle('open');
 }
-// Data Sources moved to Settings gear menu
+/* Close filter panel on outside click */
+document.addEventListener('click', function(e) {
+    document.querySelectorAll('.filter-panel.open').forEach(function(p) {
+        if (!p.closest('.filter-wrap').contains(e.target)) p.classList.remove('open');
+    });
+});
 </script>
 <script defer src="/static/app.js?v={{ app_version }}"></script>
 <script defer src="/static/crm.js?v={{ app_version }}"></script>

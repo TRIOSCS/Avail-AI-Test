@@ -17,6 +17,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.utils.normalization import normalize_condition, normalize_mpn, normalize_packaging
+
 
 # ── Requisitions ─────────────────────────────────────────────────────
 
@@ -57,13 +59,15 @@ class RequirementCreate(BaseModel):
         v = v.strip()
         if not v:
             raise ValueError("primary_mpn must not be blank")
-        return v
+        return normalize_mpn(v) or v
 
     @field_validator("substitutes", mode="before")
     @classmethod
     def parse_substitutes(cls, v):
         if isinstance(v, str):
-            return [s.strip() for s in v.replace("\n", ",").split(",") if s.strip()]
+            v = [s.strip() for s in v.replace("\n", ",").split(",") if s.strip()]
+        if isinstance(v, list):
+            return [normalize_mpn(s) or s for s in v if s]
         return v
 
 
@@ -77,6 +81,34 @@ class RequirementUpdate(BaseModel):
     hardware_codes: str | None = None
     packaging: str | None = None
     condition: str | None = None
+
+    @field_validator("primary_mpn")
+    @classmethod
+    def normalize_primary_mpn(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_mpn(v) or v
+
+    @field_validator("substitutes", mode="before")
+    @classmethod
+    def normalize_substitutes(cls, v):
+        if isinstance(v, list):
+            return [normalize_mpn(s) or s for s in v if s]
+        return v
+
+    @field_validator("condition")
+    @classmethod
+    def normalize_condition_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_condition(v) or v
+
+    @field_validator("packaging")
+    @classmethod
+    def normalize_packaging_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_packaging(v) or v
 
 
 class RequirementOut(BaseModel):

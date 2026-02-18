@@ -259,15 +259,20 @@ function applyRoleGating() {
     // Show Buy Plans nav for all roles except dev_assistant
     const bpNav = document.getElementById('navBuyPlans');
     if (bpNav && window.userRole !== 'dev_assistant') bpNav.style.display = '';
-    // Proactive nav visible for sales + admin
+    // Proactive nav visible for sales + admin (old + sidebar)
     const pNav = document.getElementById('navProactive');
     if (pNav && (['sales','trader'].includes(window.userRole) || window.__isAdmin)) {
         pNav.style.display = '';
         refreshProactiveBadge();
     }
-    // Performance nav visible to all
+    // Performance nav visible to all (old + sidebar)
     const perfNav = document.getElementById('navPerformance');
     if (perfNav) perfNav.style.display = '';
+    // v7 sidebar nav items
+    const perfNav2 = document.getElementById('navScorecards');
+    if (perfNav2) perfNav2.style.display = '';
+    const pNav2 = document.getElementById('navProactive');
+    if (pNav2 && (['sales','trader'].includes(window.userRole) || window.__isAdmin)) pNav2.style.display = '';
     // Enrichment nav visible to admin, manager, trader
     const enrichNav = document.getElementById('navEnrichment');
     if (enrichNav && (window.__isAdmin || ['manager','trader'].includes(window.userRole))) {
@@ -307,7 +312,17 @@ const ALL_VIEWS = ['view-list', 'view-detail', 'view-vendors', 'view-materials',
 
 function showView(viewId) {
     for (const id of ALL_VIEWS) {
-        document.getElementById(id).style.display = id === viewId ? '' : 'none';
+        const el = document.getElementById(id);
+        if (el) el.style.display = id === viewId ? '' : 'none';
+    }
+    // v7: show pills/search/filters only on list view; hide on other views
+    const topcontrols = document.getElementById('topcontrols');
+    if (topcontrols) {
+        const isListView = viewId === 'view-list';
+        topcontrols.querySelectorAll('.fpills, .filter-wrap').forEach(el => {
+            el.style.display = isListView ? '' : 'none';
+        });
+        // Search box and +New button always visible
     }
 }
 
@@ -530,14 +545,41 @@ async function loadRequisitions(query = '') {
     } catch (e) { console.error('loadRequisitions:', e); }
 }
 
+// v7 table sort state
+let _reqSortCol = null;
+let _reqSortDir = 'asc';
+
+function _sortArrow(col) {
+    if (_reqSortCol !== col) return '\u21c5';
+    return _reqSortDir === 'asc' ? '\u25b2' : '\u25bc';
+}
+
+function sortReqList(col) {
+    if (_reqSortCol === col) {
+        if (_reqSortDir === 'asc') _reqSortDir = 'desc';
+        else { _reqSortCol = null; _reqSortDir = 'asc'; }
+    } else {
+        _reqSortCol = col;
+        _reqSortDir = 'asc';
+    }
+    renderReqList();
+}
+
+function toggleDrillDown(reqId) {
+    const drow = document.getElementById('d-' + reqId);
+    const arrow = document.getElementById('a-' + reqId);
+    if (drow) drow.classList.toggle('open');
+    if (arrow) arrow.classList.toggle('open');
+}
+
 function renderReqList() {
     const el = document.getElementById('reqList');
-    const statusBar = document.getElementById('reqStatusBar');
     let data = _reqListData;
     // When server search is active, skip status/text filters (server already filtered)
     if (!_serverSearchActive) {
-        // Apply status filter
-        if (_reqStatusFilter === 'archive') {
+        if (_reqStatusFilter === 'all') {
+            data = data.filter(r => !['archived', 'won', 'lost'].includes(r.status));
+        } else if (_reqStatusFilter === 'archive') {
             // Backend already returned only archived/won/lost
         } else if (_reqStatusFilter === 'quoted') {
             data = data.filter(r => r.status === 'quoting' || r.status === 'quoted');
@@ -547,89 +589,368 @@ function renderReqList() {
             data = data.filter(r => r.status === _reqStatusFilter);
         }
     }
-    // "My Reqs" filter
     if (_myReqsOnly && window.userId) {
         data = data.filter(r => r.created_by === window.userId);
     }
-    const q = (document.getElementById('reqListFilter')?.value || '').trim().toUpperCase();
-    // Sort
-    const sort = _reqListSort;
-    if (sort === 'oldest') data = [...data].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
-    else if (sort === 'name-az') data = [...data].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    else if (sort === 'name-za') data = [...data].sort((a, b) => (b.name || '').localeCompare(a.name || ''));
-    else if (sort === 'parts') data = [...data].sort((a, b) => (b.requirement_count || 0) - (a.requirement_count || 0));
-    else if (sort === 'replies') data = [...data].sort((a, b) => (b.reply_count || 0) - (a.reply_count || 0));
-    else if (sort === 'customer') data = [...data].sort((a, b) => (a.customer_display || '').localeCompare(b.customer_display || ''));
-    else if (sort === 'last-searched') data = [...data].sort((a, b) => new Date(b.last_searched_at || 0) - new Date(a.last_searched_at || 0));
-    else data = [...data].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    // Apply dropdown filters (v7 filter panel)
+    data = applyDropdownFilters(data);
 
-    // Always show status bar
-    if (statusBar) statusBar.style.display = 'flex';
+    // Sort — column sort takes priority, then dropdown sort
+    if (_reqSortCol) {
+        data = [...data].sort((a, b) => {
+            let va, vb;
+            switch (_reqSortCol) {
+                case 'name': va = (a.customer_display || a.name || ''); vb = (b.customer_display || b.name || ''); break;
+                case 'reqs': va = a.requirement_count || 0; vb = b.requirement_count || 0; break;
+                case 'sourced': va = a.sourced_count || 0; vb = b.sourced_count || 0; break;
+                case 'offers': va = a.reply_count || 0; vb = b.reply_count || 0; break;
+                case 'status': va = a.status || ''; vb = b.status || ''; break;
+                case 'sales': va = a.created_by_name || ''; vb = b.created_by_name || ''; break;
+                case 'deadline': va = a.deadline || '9999-12-31'; vb = b.deadline || '9999-12-31'; break;
+                default: va = 0; vb = 0;
+            }
+            if (typeof va === 'string') return _reqSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+            return _reqSortDir === 'asc' ? va - vb : vb - va;
+        });
+    } else {
+        const sort = _reqListSort;
+        if (sort === 'oldest') data = [...data].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+        else if (sort === 'name-az') data = [...data].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        else if (sort === 'name-za') data = [...data].sort((a, b) => (b.name || '').localeCompare(a.name || ''));
+        else if (sort === 'parts') data = [...data].sort((a, b) => (b.requirement_count || 0) - (a.requirement_count || 0));
+        else if (sort === 'replies') data = [...data].sort((a, b) => (b.reply_count || 0) - (a.reply_count || 0));
+        else if (sort === 'customer') data = [...data].sort((a, b) => (a.customer_display || '').localeCompare(b.customer_display || ''));
+        else if (sort === 'last-searched') data = [...data].sort((a, b) => new Date(b.last_searched_at || 0) - new Date(a.last_searched_at || 0));
+        else data = [...data].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    }
+
+    // Update counts
     const countEl = document.getElementById('reqStatusCount');
-    if (countEl) countEl.textContent = q ? `${data.length} of ${_reqListData.length}` : `${data.length}`;
+    if (countEl) countEl.textContent = `${data.length}`;
 
     if (!data.length) {
-        const labels = {draft:'Draft',active:'Sourcing',offers:'Offers',quoted:'Quoted',archive:'Archive'};
-        el.innerHTML = '<p class="empty">No ' + (labels[_reqStatusFilter] || _reqStatusFilter) + ' requisitions</p>';
+        const labels = {all:'',draft:'Draft',active:'Sourcing',offers:'Offers',quoted:'Quoted',archive:'Archive'};
+        el.innerHTML = '<p class="empty">No ' + (labels[_reqStatusFilter] || '') + ' requisitions</p>';
         return;
     }
-    el.innerHTML = data.map(r => {
-        const isArchived = ['archived', 'won', 'lost'].includes(r.status);
-        const archiveBtn = isArchived
-            ? `<button class="btn-reactivate" onclick="event.stopPropagation();toggleArchive(${r.id})" title="Reactivate">↩ Activate</button>`
-            : `<button class="btn-archive" onclick="event.stopPropagation();toggleArchive(${r.id})" title="Archive">📦 Archive</button>`;
-        const createdBy = r.created_by_name ? `<span title="Created by ${esc(r.created_by_name)}">👤 ${esc(r.created_by_name)}</span>` : '';
-        const custDisplay = r.customer_display ? `<span class="req-customer">${esc(r.customer_display)}</span>` : '';
-        const statusBadge = r.status !== 'active' ? `<span class="status-badge status-${r.status}">${r.status}</span>` : '';
-        // Reply count badge
-        let replyBadge = '';
-        if (r.reply_count > 0) {
-            replyBadge = `<span class="badge" style="background:var(--bg3);color:var(--text2);font-size:10px;padding:2px 8px">💬 ${r.reply_count} repl${r.reply_count !== 1 ? 'ies' : 'y'}</span>`;
-        }
-        let newOffersDot = '';
-        if (r.has_new_offers && r.latest_offer_at) {
-            const hoursAgo = (Date.now() - new Date(r.latest_offer_at).getTime()) / 3600000;
-            if (hoursAgo < 12) {
-                newOffersDot = '<span class="new-offers-dot" title="New offers"></span>';
-            } else if (hoursAgo < 96) {
-                newOffersDot = '<span class="new-offers-dot red" title="New offers — unreviewed"></span>';
-            }
-            // > 96h: no dot shown (auto-clear)
-        }
-        const total = r.requirement_count || 0;
-        const sourced = r.sourced_count || 0;
-        const pct = total > 0 ? Math.round(sourced / total * 100) : 0;
-        const progressBar = total > 0 ? `<div class="req-progress"><div class="req-progress-bar"><div class="req-progress-fill" style="width:${pct}%"></div></div><span class="req-progress-text">${sourced}/${total} sourced</span></div>` : '';
-        return `
-        <div class="card card-clickable ${isArchived ? 'req-archived' : ''}" onclick="showDetail(${r.id}, '${escAttr(r.name)}')">
-            <div class="req-card">
-                <div style="flex:1;min-width:0">
-                    <div class="req-name">${esc(r.name)} ${statusBadge} ${newOffersDot}</div>
-                    <div class="req-detail-row">
-                        ${custDisplay}
-                        ${progressBar}
-                        ${replyBadge}
-                    </div>
-                </div>
-                <div class="req-meta">
-                    ${createdBy}
-                    <span>${r.requirement_count} parts</span>
-                    <span>${r.contact_count} contacts</span>
-                    ${r.reply_count > 0 ? `<span>${r.reply_count} repl${r.reply_count !== 1 ? 'ies' : 'y'}</span>` : ''}
-                    <span>${fmtDate(r.created_at)}</span>
-                    ${archiveBtn}
-                </div>
+
+    // v7 table with sortable headers + expandable drill-down rows
+    const thClass = (col) => _reqSortCol === col ? ' class="sorted"' : '';
+    const thead = `<thead><tr>
+        <th style="width:28px"></th>
+        <th onclick="sortReqList('name')"${thClass('name')}>RFQ <span class="sort-arrow">${_sortArrow('name')}</span></th>
+        <th onclick="sortReqList('reqs')"${thClass('reqs')}>Reqs <span class="sort-arrow">${_sortArrow('reqs')}</span></th>
+        <th onclick="sortReqList('sourced')"${thClass('sourced')}>Sourced <span class="sort-arrow">${_sortArrow('sourced')}</span></th>
+        <th onclick="sortReqList('offers')"${thClass('offers')}>Offers <span class="sort-arrow">${_sortArrow('offers')}</span></th>
+        <th onclick="sortReqList('status')"${thClass('status')}>Status <span class="sort-arrow">${_sortArrow('status')}</span></th>
+        <th onclick="sortReqList('sales')"${thClass('sales')}>Sales <span class="sort-arrow">${_sortArrow('sales')}</span></th>
+        <th onclick="sortReqList('deadline')"${thClass('deadline')}>Needed By <span class="sort-arrow">${_sortArrow('deadline')}</span></th>
+    </tr></thead>`;
+
+    const rows = data.map(r => _renderReqRow(r)).join('');
+    el.innerHTML = `<table class="tbl">${thead}<tbody>${rows}</tbody></table>`;
+}
+
+function _renderReqRow(r) {
+    const total = r.requirement_count || 0;
+    const sourced = r.sourced_count || 0;
+    const offers = r.reply_count || 0;
+    const pct = total > 0 ? Math.round((sourced / total) * 100) : 0;
+
+    // Status badge mapping
+    const badgeMap = {draft:'b-draft',active:'b-src',sourcing:'b-src',offers:'b-off',quoted:'b-qtd',quoting:'b-qtd',archived:'b-draft',won:'b-off',lost:'b-draft'};
+    const bc = badgeMap[r.status] || 'b-draft';
+
+    // Deadline flag
+    let dl = '';
+    if (r.deadline) {
+        const d = new Date(r.deadline);
+        const now = new Date(); now.setHours(0,0,0,0);
+        const diff = (d - now) / 86400000;
+        const fmt = fmtDate(r.deadline);
+        if (diff < 0) dl = `<span class="dl dl-u">\ud83d\udd34 ${fmt}</span>`;
+        else if (diff <= 3) dl = `<span class="dl dl-w">\u26a0 ${fmt}</span>`;
+        else dl = `<span class="dl dl-ok">\u2713 ${fmt}</span>`;
+    } else {
+        dl = `<span class="dl" style="color:var(--muted)">${fmtDate(r.created_at)}</span>`;
+    }
+
+    // Customer display — dedup "Company — Company"
+    let cust = r.customer_display || '';
+    const dp = cust.split(' \u2014 ');
+    if (dp.length === 2 && dp[0].trim() === dp[1].trim()) cust = dp[0].trim();
+    if (!cust) cust = r.name || '';
+
+    // New-offers dot
+    let dot = '';
+    if (r.has_new_offers && r.latest_offer_at) {
+        const h = (Date.now() - new Date(r.latest_offer_at).getTime()) / 3600000;
+        if (h < 12) dot = ' <span class="new-offers-dot" title="New offers"></span>';
+        else if (h < 96) dot = ' <span class="new-offers-dot red" title="New offers"></span>';
+    }
+
+    return `<tr onclick="toggleDrillDown(${r.id})">
+        <td><button class="ea" id="a-${r.id}">\u25b6</button></td>
+        <td><b>${esc(cust)}</b>${dot}<br><span style="font-size:11px;color:var(--muted)">${esc(r.name || '')}</span></td>
+        <td class="mono">${total}</td>
+        <td><div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div><span class="prog-txt">${sourced}/${total}</span></div></td>
+        <td class="mono">${offers}</td>
+        <td><span class="badge ${bc}">${r.status}</span></td>
+        <td>${esc(r.created_by_name || '')}</td>
+        <td>${dl}</td>
+    </tr>
+    <tr class="drow" id="d-${r.id}"><td colspan="8">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
+            <div style="display:flex;gap:6px;align-items:center">
+                <a class="back-link" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}')">Full Detail \u2192</a>
+                <button class="btn btn-g btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','sources')">\u25b6 Source</button>
             </div>
-        </div>`;
-    }).join('');
+        </div>
+        <span style="font-size:11px;color:var(--muted)">${total} parts \u2014 expand for details</span>
+    </td></tr>`;
+}
+
+// ── v7 Filter Dropdown ──────────────────────────────────────────────────
+let _activeFilters = {};  // key → Set of checked values
+
+function toggleFilter(panelId) {
+    const el = document.getElementById(panelId);
+    if (!el) return;
+    const opening = !el.classList.contains('open');
+    el.classList.toggle('open');
+    if (opening) buildFilterGroups();
+}
+
+function buildFilterGroups() {
+    const container = document.getElementById('filterGroups');
+    if (!container) return;
+    let html = '';
+
+    // Quick filters
+    html += _filterGroupHtml('Quick', [
+        {value:'my_accounts', label:'My Accounts only'},
+        {value:'no_offers', label:'No offers yet'},
+        {value:'overdue_asap', label:'Overdue / ASAP'}
+    ]);
+
+    // Status (only when not on archive view)
+    if (_reqStatusFilter !== 'archive') {
+        html += _filterGroupHtml('Status', [
+            {value:'status_draft', label:'Draft'},
+            {value:'status_sourcing', label:'Sourcing'}
+        ]);
+    }
+
+    // Sales person — dynamic from data
+    const salesPeople = [...new Set(_reqListData.map(r => r.created_by_name).filter(Boolean))].sort();
+    if (salesPeople.length) {
+        html += _filterGroupHtml('Sales Person', salesPeople.map(n => ({value:'sales_'+n, label:n})));
+    }
+
+    // Deadline
+    html += _filterGroupHtml('Deadline', [
+        {value:'dl_overdue', label:'Overdue'},
+        {value:'dl_asap', label:'ASAP'},
+        {value:'dl_week', label:'This week'},
+        {value:'dl_month', label:'This month'}
+    ]);
+
+    // Customer — top 10
+    const customers = [...new Set(_reqListData.map(r => r.customer_display).filter(Boolean))].sort().slice(0, 10);
+    if (customers.length) {
+        html += _filterGroupHtml('Customer', customers.map(c => ({value:'cust_'+c, label:c})));
+    }
+
+    container.innerHTML = html;
+    // Restore checked state
+    container.querySelectorAll('input[type=checkbox]').forEach(cb => {
+        cb.checked = !!(_activeFilters[cb.value]);
+    });
+}
+
+function _filterGroupHtml(title, items) {
+    return `<div class="filter-group"><div class="filter-group-title">${title}</div>${
+        items.map(i => `<label><input type="checkbox" value="${i.value}" onchange="countActiveFilters()"> ${esc(i.label)}</label>`).join('')
+    }</div>`;
+}
+
+function countActiveFilters() {
+    const panel = document.getElementById('mainFilterPanel');
+    if (!panel) return;
+    const checked = panel.querySelectorAll('input[type=checkbox]:checked');
+    const n = checked.length;
+    const btn = document.querySelector('.filter-btn');
+    const badge = document.getElementById('filterBadge');
+    if (badge) { badge.textContent = n; badge.style.display = n > 0 ? 'flex' : 'none'; }
+    if (btn) btn.classList.toggle('has-active', n > 0);
+}
+
+function clearAllFilters() {
+    const panel = document.getElementById('mainFilterPanel');
+    if (panel) panel.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
+    _activeFilters = {};
+    _myReqsOnly = false;
+    countActiveFilters();
+    renderReqList();
+}
+
+function applyFilters() {
+    const panel = document.getElementById('mainFilterPanel');
+    if (!panel) return;
+    _activeFilters = {};
+    panel.querySelectorAll('input[type=checkbox]:checked').forEach(cb => {
+        _activeFilters[cb.value] = true;
+    });
+    // Apply My Accounts
+    _myReqsOnly = !!_activeFilters['my_accounts'];
+    // Close panel
+    panel.classList.remove('open');
+    renderReqList();
+}
+
+// Override renderReqList filter logic to include dropdown filters
+const _origFilterData = null; // patched via applyDropdownFilters
+
+function applyDropdownFilters(data) {
+    if (!Object.keys(_activeFilters).length) return data;
+    let filtered = data;
+
+    // No offers yet
+    if (_activeFilters['no_offers']) {
+        filtered = filtered.filter(r => !r.reply_count);
+    }
+    // Overdue / ASAP
+    if (_activeFilters['overdue_asap']) {
+        const now = new Date(); now.setHours(0,0,0,0);
+        filtered = filtered.filter(r => {
+            if (!r.deadline) return false;
+            return new Date(r.deadline) <= now;
+        });
+    }
+    // Status filters
+    if (_activeFilters['status_draft']) {
+        filtered = filtered.filter(r => r.status === 'draft');
+    }
+    if (_activeFilters['status_sourcing']) {
+        filtered = filtered.filter(r => r.status === 'active');
+    }
+    // Sales person
+    const salesFilters = Object.keys(_activeFilters).filter(k => k.startsWith('sales_'));
+    if (salesFilters.length) {
+        const names = new Set(salesFilters.map(k => k.replace('sales_', '')));
+        filtered = filtered.filter(r => names.has(r.created_by_name));
+    }
+    // Deadline
+    if (_activeFilters['dl_overdue']) {
+        const now = new Date(); now.setHours(0,0,0,0);
+        filtered = filtered.filter(r => r.deadline && new Date(r.deadline) < now);
+    }
+    if (_activeFilters['dl_asap']) {
+        filtered = filtered.filter(r => r.deadline && new Date(r.deadline) <= new Date());
+    }
+    if (_activeFilters['dl_week']) {
+        const now = new Date(); now.setHours(0,0,0,0);
+        const week = new Date(now); week.setDate(week.getDate() + 7);
+        filtered = filtered.filter(r => r.deadline && new Date(r.deadline) <= week);
+    }
+    if (_activeFilters['dl_month']) {
+        const now = new Date(); now.setHours(0,0,0,0);
+        const month = new Date(now); month.setDate(month.getDate() + 30);
+        filtered = filtered.filter(r => r.deadline && new Date(r.deadline) <= month);
+    }
+    // Customer
+    const custFilters = Object.keys(_activeFilters).filter(k => k.startsWith('cust_'));
+    if (custFilters.length) {
+        const custs = new Set(custFilters.map(k => k.replace('cust_', '')));
+        filtered = filtered.filter(r => custs.has(r.customer_display));
+    }
+    return filtered;
+}
+
+// ── v7 Main View Switcher ───────────────────────────────────────────────
+function setMainView(view, btn) {
+    document.querySelectorAll('#mainPills .fp').forEach(b => b.classList.remove('on'));
+    if (btn) btn.classList.add('on');
+    _activeFilters = {};
+    countActiveFilters();
+    if (view === 'rfq') {
+        _reqStatusFilter = 'draft';
+        _serverSearchActive = false;
+        loadRequisitions();
+    } else if (view === 'sourcing') {
+        _reqStatusFilter = 'active';
+        _serverSearchActive = false;
+        loadRequisitions();
+    } else if (view === 'archive') {
+        _reqStatusFilter = 'archive';
+        _serverSearchActive = false;
+        apiFetch('/api/requisitions?status=archive')
+            .then(resp => {
+                _reqListData = resp.requisitions || resp;
+                _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
+                renderReqList();
+            })
+            .catch(() => showToast('Failed to load archived requisitions', 'error'));
+    }
+    buildFilterGroups();
+}
+
+// ── v7 Main Search ──────────────────────────────────────────────────────
+function debouncedMainSearch() {
+    const q = (document.getElementById('mainSearch')?.value || '').trim();
+    if (q.length >= 2) loadRequisitions(q);
+    else if (q.length === 0) loadRequisitions();
+}
+
+// ── v7 Sidebar Navigation ───────────────────────────────────────────────
+function toggleSidebar() {
+    document.body.classList.toggle('sb-open');
+    const toggle = document.querySelector('.sb-toggle');
+    if (toggle) toggle.setAttribute('aria-expanded', document.body.classList.contains('sb-open'));
+}
+
+function sidebarNav(page, el) {
+    document.querySelectorAll('.sidebar-nav button').forEach(i => i.classList.remove('active'));
+    if (el) el.classList.add('active');
+    // Close sidebar on mobile
+    const sb = document.getElementById('sidebar');
+    if (sb && sb.classList.contains('mobile-open')) toggleMobileSidebar();
+    document.body.classList.remove('sb-open');
+    const routes = {
+        reqs: () => { showList(); setMainPill('rfq'); },
+        customers: () => showCustomers(),
+        vendors: () => showVendors(),
+        materials: () => showMaterials(),
+        buyplans: () => showBuyPlans(),
+        proactive: () => showProactiveOffers(),
+        performance: () => showPerformance()
+    };
+    if (routes[page]) routes[page]();
+}
+
+function navHighlight(btn) {
+    document.querySelectorAll('.sidebar-nav button').forEach(i => i.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    document.body.classList.remove('sb-open');
+}
+
+function setMainPill(view) {
+    document.querySelectorAll('#mainPills .fp').forEach(b => {
+        b.classList.toggle('on', b.dataset.view === view);
+    });
 }
 
 function setReqStatusFilter(status, btn) {
     const wasArchive = _reqStatusFilter === 'archive';
     const wasSearch = _serverSearchActive;
     _reqStatusFilter = status;
-    document.querySelectorAll('[data-req-status]').forEach(b => b.classList.remove('on'));
-    btn.classList.add('on');
+    // Update tab active state (works with both .tab and .filter-pill)
+    if (btn) {
+        const tabContainer = btn.parentElement;
+        if (tabContainer) tabContainer.querySelectorAll('.tab,.filter-pill').forEach(b => b.classList.remove('on'));
+        btn.classList.add('on');
+    }
     // Clear search when switching tabs
     const searchInput = document.getElementById('reqListFilter');
     if (searchInput) searchInput.value = '';
@@ -644,7 +965,6 @@ function setReqStatusFilter(status, btn) {
             })
             .catch(() => showToast('Failed to load archived requisitions', 'error'));
     } else if (wasArchive || wasSearch) {
-        // Re-fetch full list — data was replaced by filtered results
         loadRequisitions();
     } else {
         renderReqList();
@@ -2369,7 +2689,9 @@ function vendorTier(score) {
 
 function setVendorTier(tier, btn) {
     _vendorTierFilter = tier;
-    document.querySelectorAll('.vendor-filters .pill-filter').forEach(b => b.classList.remove('on'));
+    // Update tab active state
+    const container = btn.parentElement;
+    if (container) container.querySelectorAll('.tab,.pill-filter').forEach(b => b.classList.remove('on'));
     btn.classList.add('on');
     filterVendorList();
 }
@@ -2404,23 +2726,65 @@ function filterVendorList() {
         el.innerHTML = `<p class="empty">${_vendorListData.length ? 'No vendors match filters' : 'No vendors yet — they\'ll appear here after your first search'}</p>`;
         return;
     }
-    el.innerHTML = filtered.map(c => {
-        const tier = vendorTier(c.engagement_score);
-        const tierLabel = {proven:'Proven',developing:'Developing',caution:'Caution',new:'New'}[tier];
-        const tierCls = {proven:'eng-proven',developing:'eng-developing',caution:'eng-caution',new:'eng-new'}[tier];
-        const scoreText = c.engagement_score != null ? `${Math.round(c.engagement_score)} · ${tierLabel}` : tierLabel;
-        return `<div class="card card-clickable ${c.is_blacklisted ? 'vendor-card-bl' : ''}" onclick="openVendorPopup(${c.id})">
-            <div class="vendor-card-row">
-                <div class="vendor-card-name">${esc(c.display_name)} ${c.is_blacklisted ? '<span style="color:var(--red);font-size:10px">🚫 Blacklisted</span>' : ''}</div>
-                <div class="vendor-card-meta">
-                    <span class="eng-badge ${tierCls}">${scoreText}</span>
-                    <span>${stars(c.avg_rating, c.review_count)}</span>
-                    <span class="badge b-email" title="Emails on file">✉ ${(c.emails||[]).length}</span>
-                    <span style="font-size:10px;color:var(--muted)">${c.sighting_count} sightings</span>
-                </div>
+
+    // Group alphabetically
+    const groups = {};
+    filtered.forEach(c => {
+        const letter = (c.display_name || '?')[0].toUpperCase();
+        const key = /[A-Z]/.test(letter) ? letter : '#';
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(c);
+    });
+    const sortedLetters = Object.keys(groups).sort((a, b) => a === '#' ? 1 : b === '#' ? -1 : a.localeCompare(b));
+
+    el.innerHTML = sortedLetters.map(letter => {
+        const vendors = groups[letter];
+        const gid = 'vg-' + letter;
+        const isExpanded = !_collapsedVendorGroups || !_collapsedVendorGroups.has(letter);
+        return `
+        <div class="coll-group ${isExpanded ? '' : 'collapsed'}" id="${gid}">
+            <div class="coll-group-header" onclick="toggleVendorGroup('${letter}')">
+                <span class="coll-chevron">${isExpanded ? '▾' : '▸'}</span>
+                <span class="coll-group-name">${letter}</span>
+                <span class="coll-group-count">(${vendors.length})</span>
+            </div>
+            <div class="coll-group-body" ${isExpanded ? '' : 'style="display:none"'}>
+                ${vendors.map(c => _renderVendorCard(c)).join('')}
             </div>
         </div>`;
     }).join('');
+}
+
+let _collapsedVendorGroups = new Set();
+function toggleVendorGroup(letter) {
+    if (_collapsedVendorGroups.has(letter)) _collapsedVendorGroups.delete(letter);
+    else _collapsedVendorGroups.add(letter);
+    filterVendorList();
+}
+
+function _renderVendorCard(c) {
+    const tier = vendorTier(c.engagement_score);
+    const tierLabel = {proven:'Proven',developing:'Developing',caution:'Caution',new:'New'}[tier];
+    const tierCls = {proven:'eng-proven',developing:'eng-developing',caution:'eng-caution',new:'eng-new'}[tier];
+    const scoreText = c.engagement_score != null ? `${Math.round(c.engagement_score)} · ${tierLabel}` : tierLabel;
+    const primaryEmail = (c.emails || [])[0] || '';
+    const lastActive = c.last_sighting_at ? fmtDate(c.last_sighting_at) : '';
+    return `<div class="card card-clickable ${c.is_blacklisted ? 'vendor-card-bl' : ''}" onclick="openVendorPopup(${c.id})" style="padding:10px 14px;margin-bottom:3px">
+        <div class="vendor-card-row">
+            <div style="flex:1;min-width:0">
+                <div class="vendor-card-name">${esc(c.display_name)} ${c.is_blacklisted ? '<span style="color:var(--red);font-size:10px">Blacklisted</span>' : ''}</div>
+                <div style="display:flex;gap:10px;align-items:center;margin-top:2px;flex-wrap:wrap">
+                    <span class="eng-badge ${tierCls}">${scoreText}</span>
+                    <span>${stars(c.avg_rating, c.review_count)}</span>
+                    <span style="font-size:10px;color:var(--muted)">${c.sighting_count} sightings</span>
+                </div>
+            </div>
+            <div style="text-align:right;flex-shrink:0">
+                ${primaryEmail ? `<div style="font-size:11px;color:var(--text2)">${esc(primaryEmail)}</div>` : ''}
+                ${lastActive ? `<div style="font-size:10px;color:var(--muted)">Last: ${lastActive}</div>` : ''}
+            </div>
+        </div>
+    </div>`;
 }
 
 // ── Materials Tab ──────────────────────────────────────────────────────
@@ -2457,21 +2821,60 @@ function renderMaterialList() {
         el.innerHTML = `<p class="empty">${q ? 'No materials match your search' : 'No material cards yet — they\'ll build automatically as you search'}</p>`;
         return;
     }
-    el.innerHTML = data.map(c => `
-        <div class="card card-clickable" onclick="openMaterialPopup(${c.id})">
-            <div class="mat-card-row">
-                <div>
-                    <div class="mat-card-mpn">${esc(c.display_mpn)}</div>
-                    ${c.manufacturer ? `<div style="font-size:11px;color:var(--text2)">${esc(c.manufacturer)}</div>` : ''}
-                </div>
-                <div class="mat-card-meta">
-                    <span class="badge b-mathistory">${c.vendor_count} vendor${c.vendor_count !== 1 ? 's' : ''}</span>
-                    <span>${c.search_count} searches</span>
-                    <span>${c.last_searched_at ? fmtDate(c.last_searched_at) : '—'}</span>
+
+    // Group by manufacturer
+    const groups = {};
+    data.forEach(c => {
+        const mfr = c.manufacturer || 'Unknown';
+        if (!groups[mfr]) groups[mfr] = [];
+        groups[mfr].push(c);
+    });
+    const sortedMfrs = Object.keys(groups).sort((a, b) => a === 'Unknown' ? 1 : b === 'Unknown' ? -1 : a.localeCompare(b));
+
+    el.innerHTML = sortedMfrs.map(mfr => {
+        const materials = groups[mfr];
+        const gid = 'mg-' + mfr.replace(/[^a-zA-Z0-9]/g, '_');
+        const isExpanded = !_collapsedMatGroups || !_collapsedMatGroups.has(mfr);
+        return `
+        <div class="coll-group ${isExpanded ? '' : 'collapsed'}" id="${gid}">
+            <div class="coll-group-header" onclick="toggleMatGroup('${escAttr(mfr)}')">
+                <span class="coll-chevron">${isExpanded ? '▾' : '▸'}</span>
+                <span class="coll-group-name">${esc(mfr)}</span>
+                <span class="coll-group-count">(${materials.length})</span>
+            </div>
+            <div class="coll-group-body" ${isExpanded ? '' : 'style="display:none"'}>
+                ${materials.map(c => _renderMaterialCard(c)).join('')}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+let _collapsedMatGroups = new Set();
+function toggleMatGroup(mfr) {
+    if (_collapsedMatGroups.has(mfr)) _collapsedMatGroups.delete(mfr);
+    else _collapsedMatGroups.add(mfr);
+    renderMaterialList();
+}
+
+function _renderMaterialCard(c) {
+    const bestPrice = c.best_price != null ? `Best: $${Number(c.best_price).toFixed(2)}` : '';
+    const offerCount = c.offer_count > 0 ? `${c.offer_count} offer${c.offer_count !== 1 ? 's' : ''}` : '';
+    return `<div class="card card-clickable" onclick="openMaterialPopup(${c.id})" style="padding:10px 14px;margin-bottom:3px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+                <div class="mat-card-mpn">${esc(c.display_mpn)}</div>
+                <div style="display:flex;gap:10px;align-items:center;margin-top:2px;font-size:11px;color:var(--muted)">
+                    <span>${c.vendor_count} vendor${c.vendor_count !== 1 ? 's' : ''}</span>
+                    ${bestPrice ? `<span class="mono" style="color:var(--green);font-weight:600">${bestPrice}</span>` : ''}
+                    ${offerCount ? `<span>${offerCount}</span>` : ''}
                 </div>
             </div>
+            <div style="text-align:right;font-size:10px;color:var(--muted)">
+                <div>${c.search_count}x searched</div>
+                <div>${c.last_searched_at ? fmtDate(c.last_searched_at) : '—'}</div>
+            </div>
         </div>
-    `).join('');
+    </div>`;
 }
 
 async function openMaterialPopup(cardId) {

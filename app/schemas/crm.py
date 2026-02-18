@@ -19,6 +19,13 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.utils.normalization import normalize_mpn
+from app.utils.normalization_helpers import (
+    normalize_country,
+    normalize_phone_e164,
+    normalize_us_state,
+)
+
 
 # ── Companies ────────────────────────────────────────────────────────
 
@@ -45,6 +52,13 @@ class CompanyCreate(BaseModel):
             raise ValueError("Company name is required")
         return v
 
+    @field_validator("phone")
+    @classmethod
+    def normalize_phone(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_phone_e164(v) or v
+
 
 class CompanyUpdate(BaseModel):
     name: str | None = None
@@ -67,6 +81,27 @@ class CompanyUpdate(BaseModel):
     preferred_carrier: str | None = None
     is_strategic: bool | None = None
     account_owner_id: int | None = None
+
+    @field_validator("hq_country")
+    @classmethod
+    def normalize_hq_country(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_country(v) or v
+
+    @field_validator("hq_state")
+    @classmethod
+    def normalize_hq_state(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_us_state(v) or v
+
+    @field_validator("phone")
+    @classmethod
+    def normalize_phone(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_phone_e164(v) or v
 
 
 class CompanyOut(BaseModel):
@@ -107,6 +142,25 @@ class SiteCreate(BaseModel):
             raise ValueError("Site name is required")
         return v
 
+    @field_validator("country")
+    @classmethod
+    def normalize_country_field(cls, v: str) -> str:
+        return normalize_country(v) or v
+
+    @field_validator("state")
+    @classmethod
+    def normalize_state_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_us_state(v) or v
+
+    @field_validator("contact_phone")
+    @classmethod
+    def normalize_contact_phone(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_phone_e164(v) or v
+
 
 class SiteUpdate(BaseModel):
     site_name: str | None = None
@@ -130,6 +184,27 @@ class SiteUpdate(BaseModel):
     carrier_account: str | None = None
     notes: str | None = None
     is_active: bool | None = None
+
+    @field_validator("country")
+    @classmethod
+    def normalize_country_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_country(v) or v
+
+    @field_validator("state")
+    @classmethod
+    def normalize_state_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_us_state(v) or v
+
+    @field_validator("contact_phone")
+    @classmethod
+    def normalize_contact_phone(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_phone_e164(v) or v
 
 
 class SiteOut(BaseModel):
@@ -155,6 +230,13 @@ class SiteContactCreate(BaseModel):
         if not v:
             raise ValueError("Contact name is required")
         return v
+
+    @field_validator("phone")
+    @classmethod
+    def normalize_phone(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_phone_e164(v) or v
 
 
 class SiteContactUpdate(BaseModel):
@@ -189,9 +271,17 @@ class OfferCreate(BaseModel):
     status: Literal["active", "expired", "won", "lost"] = "active"
     vendor_website: str | None = None
 
-    @field_validator("mpn", "vendor_name")
+    @field_validator("mpn")
     @classmethod
-    def not_blank(cls, v: str) -> str:
+    def normalize_offer_mpn(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Field must not be blank")
+        return normalize_mpn(v) or v
+
+    @field_validator("vendor_name")
+    @classmethod
+    def vendor_name_not_blank(cls, v: str) -> str:
         v = v.strip()
         if not v:
             raise ValueError("Field must not be blank")

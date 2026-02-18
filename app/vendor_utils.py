@@ -4,6 +4,7 @@ import re
 
 
 # Legal entity suffixes only — conservative to avoid stripping name parts
+# Ordered longest-first to avoid partial matches (e.g. "s.a.s." before "s.a.")
 _SUFFIXES = [
     "incorporated",
     "corporation",
@@ -23,6 +24,12 @@ _SUFFIXES = [
     "p.l.c.",
     "plc",
     "gmbh",
+    "s.a.s.",
+    "s.a.s",
+    "s.r.l.",
+    "s.r.l",
+    "s.p.a.",
+    "s.p.a",
     "s.a.",
     "sa",
     "ag",
@@ -30,13 +37,32 @@ _SUFFIXES = [
     "bv",
     "n.v.",
     "nv",
+    "k.k.",
+    "k.k",
+    "a.s.",
+    "a.s",
+    "a/s",
     "pty",
     "pvt",
+    "sp.z o.o.",
+    "sp. z o.o.",
+    "sp.z o.o",
+    "sp. z o.o",
+    "e.k.",
+    "e.k",
+    "ohg",
+    "kg",
+    "ab",
+    "oy",
+    "oyj",
+    "aps",
 ]
 
-# Compile patterns
+# Compile pattern — use word boundary OR punctuation/space before suffix
+# to avoid stripping fragments like "technologyco"
 _SUFFIX_PATTERN = re.compile(
-    r"\b(?:" + "|".join(re.escape(s) for s in _SUFFIXES) + r")\.?\s*$", re.IGNORECASE
+    r"(?:^|\s|,\s*)(?:" + "|".join(re.escape(s) for s in _SUFFIXES) + r")\.?\s*$",
+    re.IGNORECASE,
 )
 
 
