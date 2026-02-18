@@ -909,7 +909,7 @@ function _renderReqRow(r) {
         <td>${esc(r.created_by_name || '')}</td>
         <td class="mono" style="font-size:11px">${age}</td>
         <td>${dl}</td>
-        <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5;</button> ${srcBtn}</td>
+        <td style="white-space:nowrap"><button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})">&#x1f4e5; Archive</button> ${srcBtn}</td>
     </tr>
     <tr class="drow" id="d-${r.id}"><td colspan="10">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
