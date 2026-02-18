@@ -497,7 +497,7 @@ function showToast(msg, type = 'info') {
     setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, 3000);
 }
 
-const _statusLabels = {draft:'Draft',active:'Sourcing',offers:'Offers',quoting:'Quoting',quoted:'Quoted',won:'Won',lost:'Lost',archived:'Archived'};
+const _statusLabels = {draft:'Draft',active:'Sourcing',closed:'Closed',offers:'Offers',quoting:'Quoting',quoted:'Quoted',won:'Won',lost:'Lost',archived:'Archived'};
 function updateDetailStatus(status) {
     const chip = document.getElementById('detailStatus');
     if (!chip) return;
@@ -887,7 +887,7 @@ function _renderReqRow(r) {
     const v = _currentMainView;
 
     // Status badge mapping
-    const badgeMap = {draft:'b-draft',active:'b-src',sourcing:'b-src',offers:'b-off',quoted:'b-qtd',quoting:'b-qtd',archived:'b-draft',won:'b-off',lost:'b-draft'};
+    const badgeMap = {draft:'b-draft',active:'b-src',sourcing:'b-src',closed:'b-comp',offers:'b-off',quoted:'b-qtd',quoting:'b-qtd',archived:'b-draft',won:'b-off',lost:'b-draft'};
     const bc = badgeMap[r.status] || 'b-draft';
 
     // Age — days since created
@@ -1186,11 +1186,11 @@ function setMainView(view, btn) {
     const stEl = document.getElementById('statusToggle');
     if (stEl) stEl.style.display = 'none';
     if (view === 'rfq') {
-        _reqStatusFilter = 'draft';
+        _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
     } else if (view === 'sourcing') {
-        _reqStatusFilter = 'active';
+        _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
     } else if (view === 'archive') {
