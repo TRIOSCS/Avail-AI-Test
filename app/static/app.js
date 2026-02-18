@@ -330,8 +330,9 @@ function showList() {
     showView('view-list');
     currentReqId = null;
     try { localStorage.removeItem('lastReqId'); localStorage.removeItem('lastReqName'); } catch(e) {}
-    const searchInput = document.getElementById('reqSearchInput');
-    if (searchInput) searchInput.value = '';
+    const mainSearch = document.getElementById('mainSearch');
+    if (mainSearch) mainSearch.value = '';
+    _serverSearchActive = false;
     loadRequisitions();
 }
 
@@ -505,7 +506,7 @@ function notifyStatusChange(data) {
 // ── Requisitions ────────────────────────────────────────────────────────
 let _reqCustomerMap = {};  // id → customer_display
 let _reqListData = [];     // cached list for client-side filtering
-let _reqStatusFilter = 'draft';
+let _reqStatusFilter = 'all';
 let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _serverSearchActive = false; // True when server-side search returned filtered results
@@ -875,7 +876,7 @@ function setMainView(view, btn) {
     _activeFilters = {};
     countActiveFilters();
     if (view === 'rfq') {
-        _reqStatusFilter = 'draft';
+        _reqStatusFilter = 'all';
         _serverSearchActive = false;
         loadRequisitions();
     } else if (view === 'sourcing') {
