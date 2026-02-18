@@ -1,6 +1,6 @@
-"""Scoring engine — ranks vendor sightings by weighted factors.
+"""Lead Opportunity Score — ranks vendor sightings by weighted factors.
 
-Phase 1 scores based on available data:
+Scores 0-100 based on available data:
   Recency(30) + Quantity(20) + Source credibility(20) + Completeness(10) + Vendor reliability(10) + Price(10)
 """
 

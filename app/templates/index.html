@@ -683,6 +683,15 @@
         .b-unavail{background:#fef2f2;color:#991b1b}
         .b-cond-new{background:#d1fae5;color:#065f46;font-weight:600}
         .b-cond-ref{background:#fef3c7;color:#92400e;font-weight:600}
+        .b-cond-used{background:#fee2e2;color:#991b1b;font-weight:600}
+        .b-moq{background:#ede9fe;color:#5b21b6}
+        .b-datecode{background:#e0e7ff;color:#3730a3}
+        .b-packaging{background:#f0f9ff;color:#075985}
+        .b-leadtime{background:#ecfdf5;color:#047857}
+        .sc-los{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;letter-spacing:.3px;white-space:nowrap;flex-shrink:0}
+        .sc-los-high{background:#d1fae5;color:#065f46}
+        .sc-los-mid{background:#fef3c7;color:#92400e}
+        .sc-los-low{background:#fee2e2;color:#991b1b}
         .sc-unavailable{opacity:0.55;text-decoration:line-through}
         .sc-unavailable .sc-vendor{text-decoration:line-through}
         .btn-unavail{font-size:10px;padding:2px 7px;border-radius:4px;border:1px solid var(--border);background:var(--surface);color:var(--text2);cursor:pointer}
@@ -1470,7 +1479,7 @@
                     <button class="filter-pill" data-src-filter="sold" onclick="setSrcFilter('sold',this)">Not Available</button>
                 </div>
                 <select class="filter-sort" id="srcSort" onchange="setSrcSort(this.value)">
-                    <option value="default">Default (score)</option>
+                    <option value="default">Lead Opportunity Score</option>
                     <option value="price-asc">Price Low→High</option>
                     <option value="price-desc">Price High→Low</option>
                     <option value="qty-desc">Qty High→Low</option>

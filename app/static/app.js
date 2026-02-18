@@ -2117,7 +2117,17 @@ function renderSources() {
             const checked = selectedSightings.has(key) ? 'checked' : '';
             const srcLabel = (s.source_type || '').toUpperCase();
             const cond = (s.condition || '').toUpperCase().trim();
-            const condBadge = cond ? `<span class="badge b-cond-${cond === 'NEW' ? 'new' : 'ref'}">${esc(cond)}</span>` : '';
+            const condBadge = cond ? `<span class="badge b-cond-${cond === 'NEW' ? 'new' : cond === 'USED' ? 'used' : 'ref'}">${esc(cond)}</span>` : '';
+
+            // Lead Opportunity Score
+            const los = s.score != null ? Math.round(s.score) : null;
+            const losHtml = los != null ? `<span class="sc-los ${los >= 70 ? 'sc-los-high' : los >= 40 ? 'sc-los-mid' : 'sc-los-low'}" title="Lead Opportunity Score: ${los}/100&#10;Based on recency, quantity, source, completeness, vendor reliability, and price">LOS ${los}</span>` : '';
+
+            // Extended field badges
+            const moqBadge = s.moq ? `<span class="badge b-moq" title="Minimum order quantity">MOQ ${s.moq.toLocaleString()}</span>` : '';
+            const dcBadge = s.date_code ? `<span class="badge b-datecode" title="Date code">DC ${esc(s.date_code)}</span>` : '';
+            const pkgBadge = s.packaging ? `<span class="badge b-packaging" title="Packaging">${esc(s.packaging.toUpperCase())}</span>` : '';
+            const ltBadge = s.lead_time_days != null ? `<span class="badge b-leadtime" title="Lead time">${s.lead_time_days === 0 ? 'In Stock' : s.lead_time_days + 'd'}</span>` : (s.lead_time ? `<span class="badge b-leadtime" title="Lead time">${esc(s.lead_time)}</span>` : '');
             const histBadge = s.is_historical ? `<span class="badge b-hist" title="Previously seen ${s.historical_date || ''}">📋 ${s.historical_date || 'Past'}</span>` : '';
             const matHistBadge = s.is_material_history ? `<span class="badge b-mathistory" title="Seen ${s.material_times_seen || 1}× · Last: ${s.material_last_seen || '?'} · First: ${s.material_first_seen || '?'}">🧩 ${s.material_times_seen || 1}× · Last ${s.material_last_seen || '?'}</span>` : '';
 
@@ -2174,11 +2184,11 @@ function renderSources() {
                 ? `<span class="sc-key-val">${s.qty_available.toLocaleString()}</span>`
                 : '<span class="sc-key-val" style="color:var(--muted)">—</span>';
 
-            // Row 2 badges: collect all, show max 3 + overflow
+            // Row 2 badges: collect all, show max 5 + overflow
             const excessBadge = (s.source_type || '').toLowerCase() === 'excess_list' ? '<span class="badge" style="background:#fef3c7;color:#92400e" title="Excess list from customer">EXCESS</span>' : '';
-            const allBadges = [matchBadge, unavailBadge, excessBadge, s.is_authorized ? '<span class="badge b-auth">Auth</span>' : '', `<span class="badge b-src">${srcLabel}</span>`, condBadge, emailIndicator, histBadge, matHistBadge].filter(b => b);
-            const visibleBadges = allBadges.slice(0, 3).join('');
-            const overflowBadge = allBadges.length > 3 ? `<span class="sc-more-badge">+${allBadges.length - 3}</span>` : '';
+            const allBadges = [matchBadge, unavailBadge, excessBadge, s.is_authorized ? '<span class="badge b-auth">Auth</span>' : '', `<span class="badge b-src">${srcLabel}</span>`, condBadge, moqBadge, dcBadge, pkgBadge, ltBadge, emailIndicator, histBadge, matHistBadge].filter(b => b);
+            const visibleBadges = allBadges.slice(0, 5).join('');
+            const overflowBadge = allBadges.length > 5 ? `<span class="sc-more-badge" title="${allBadges.slice(5).map(b => b.replace(/<[^>]+>/g, '')).join(' · ')}">+${allBadges.length - 5}</span>` : '';
 
             html += `<div class="card sc ${s.is_historical ? 'sc-hist' : ''} ${s.is_material_history ? 'sc-mathistory' : ''} ${isSub ? 'sc-sub' : ''} ${unavailClass}">
                 ${isBuyer() ? `<input type="checkbox" ${checked} onchange="toggleSighting('${key}')">` : ''}
@@ -2186,6 +2196,7 @@ function renderSources() {
                     <div class="sc-top">
                         ${vc.card_id ? `<span class="sc-vendor cust-link" title="${escAttr(s.vendor_name)}" onclick="event.stopPropagation();openVendorPopup(${vc.card_id})">${esc(s.vendor_name)}</span>` : `<span class="sc-vendor" title="${escAttr(s.vendor_name)}">${esc(s.vendor_name)}</span>`}
                         ${ratingHtml}
+                        ${losHtml}
                         <div class="sc-key-vals">
                             <span class="sc-detail-label">QTY</span>${qtyHtml}
                             <span class="sc-detail-label">PRICE</span>${priceHtml}
