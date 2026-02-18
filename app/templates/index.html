@@ -65,7 +65,7 @@
         /* Login */
         .login{display:flex;align-items:center;justify-content:center;height:100vh;background:linear-gradient(160deg,#f0f4f8 0%,#dbeafe 40%,#e8f1f8 100%)}
         .login-card{background:var(--white);border:1px solid var(--border);border-radius:20px;padding:56px 48px 44px;text-align:center;max-width:460px;width:90%;box-shadow:0 8px 40px rgba(0,0,0,.07),0 1px 3px rgba(0,0,0,.04)}
-        .login-logo{width:236px;margin-bottom:12px;mix-blend-mode:multiply}
+        .login-logo{width:280px;margin-bottom:12px}
         .login-divider{width:48px;height:2px;background:var(--border2);margin:0 auto 20px;border-radius:1px}
         .login-card .sub{color:var(--text2);font-size:13px;font-weight:500;margin-bottom:32px;letter-spacing:-.01em}
         .btn-ms{display:inline-flex;align-items:center;gap:10px;background:var(--blue);color:#fff;text-decoration:none;padding:14px 36px;border-radius:10px;font-weight:700;font-size:14px;transition:all .2s;box-shadow:0 2px 8px rgba(74,111,165,.25)}
@@ -76,7 +76,7 @@
         .shell{display:flex;height:100vh;overflow:hidden}
 
         /* Sidebar */
-        .sidebar{position:fixed;top:100px;left:0;bottom:0;width:var(--sbw);background:var(--white);border-right:1px solid var(--border);box-shadow:2px 0 12px rgba(0,0,0,.06);z-index:150;transform:translateX(-100%);transition:transform .3s ease;display:flex;flex-direction:column;overflow:hidden}
+        .sidebar{position:fixed;top:120px;left:0;bottom:0;width:var(--sbw);background:var(--white);border-right:1px solid var(--border);box-shadow:2px 0 12px rgba(0,0,0,.06);z-index:150;transform:translateX(-100%);transition:transform .3s ease;display:flex;flex-direction:column;overflow:hidden}
         .sidebar.collapsed{width:var(--sidebar-collapsed)}
         .logo-zone{height:58px;flex-shrink:0;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
         .logo-avail{position:absolute;display:flex;justify-content:center;align-items:center;width:100%;padding:0 14px;transition:opacity .18s,transform .18s}
@@ -599,18 +599,18 @@
 
             /* Login */
             .login-card{padding:40px 24px 36px;width:92%}
-            .login-logo{width:202px}
+            .login-logo{width:240px}
             .btn-ms{padding:14px 24px;font-size:14px;width:100%;justify-content:center}
 
             /* v7 toparea — stack on mobile */
             .toparea{flex-wrap:wrap;gap:8px;padding:8px 12px}
-            .toparea img{height:60px}
+            .toparea img{height:72px}
             .topcontrols{flex-direction:column;align-items:stretch;gap:6px}
             .fpills{width:100%;overflow-x:auto;scrollbar-width:none}
             .fpills::-webkit-scrollbar{display:none}
             .sbox{width:100%;font-size:16px}
             .filter-panel{width:calc(100vw - 24px);left:-12px}
-            .sb-rail{top:68px}
+            .sb-rail{top:88px}
             body.sb-open .main{margin-left:0 !important}
             /* v7 table: horizontal scroll on mobile */
             .tbl{display:block;overflow-x:auto;white-space:nowrap}
@@ -633,7 +633,7 @@
             .src-stat{flex:1 1 calc(50% - 4px)}
             .btn-primary{padding:8px 12px}
             .login-card{padding:32px 16px 28px}
-            .login-logo{width:169px}
+            .login-logo{width:200px}
         }
 
         /* ── Data Sources Tab ── */
@@ -1071,12 +1071,14 @@
 
         /* Top area — logo left, controls right, all on grey */
         .toparea{display:flex;align-items:center;gap:12px;padding:10px 16px;position:relative;z-index:100}
-        .toparea img{height:80px;flex-shrink:0;mix-blend-mode:multiply}
+        .toparea img{height:100px;flex-shrink:0}
         .topcontrols{display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap}
 
-        /* Sidebar rail — thin blue strip that opens sidebar on click */
-        .sb-rail{position:fixed;top:100px;left:0;bottom:0;width:6px;background:var(--blue);z-index:201;cursor:pointer;transition:width .15s,background .15s,box-shadow .15s}
-        .sb-rail:hover{width:10px;background:var(--blue-dk);box-shadow:2px 0 8px rgba(74,111,165,.25)}
+        /* Sidebar rail — blue strip with chevron that opens sidebar on click */
+        .sb-rail{position:fixed;top:120px;left:0;bottom:0;width:14px;background:var(--blue);z-index:201;cursor:pointer;transition:width .15s,background .15s,box-shadow .15s;display:flex;align-items:center;justify-content:center;border-radius:0 4px 4px 0}
+        .sb-rail:hover{width:20px;background:var(--blue-dk);box-shadow:2px 0 10px rgba(74,111,165,.3)}
+        .sb-rail svg{width:10px;height:10px;fill:none;stroke:#fff;stroke-width:2.5;stroke-linecap:round;stroke-linejoin:round;opacity:.8;transition:opacity .15s}
+        .sb-rail:hover svg{opacity:1}
         body.sb-open .sb-rail{display:none}
 
         /* v7 Sidebar overlay nav */
@@ -1093,7 +1095,7 @@
         .sidebar-footer .gb{border:none;background:none;cursor:pointer;color:var(--muted);font-size:14px}
 
         /* Body sidebar-open state */
-        body.sb-open .sidebar{transform:translateX(0)}
+        body.sb-open .sidebar{transform:translateX(0);border-right:3px solid var(--blue);box-shadow:3px 0 16px rgba(74,111,165,.18)}
         body.sb-open .main{margin-left:var(--sbw)}
         /* Click-away overlay to close sidebar */
         .sb-overlay{display:none;position:fixed;inset:0;z-index:149}
@@ -1192,7 +1194,7 @@
 {% else %}
 <!-- TOP AREA — logo on grey bg + controls inline to the right -->
 <div class="toparea">
-    <img src="/static/avail_logo.png" alt="AVAIL" style="height:64px">
+    <img src="/static/avail_logo.png" alt="AVAIL">
     <div class="topcontrols" id="topcontrols">
         <button class="btn btn-primary" onclick="openNewReqModal()">+ New RFQ</button>
         <div class="fpills" id="mainPills">
@@ -1214,8 +1216,10 @@
     </div>
 </div>
 
-<!-- Sidebar rail — thin blue line that opens sidebar on click -->
-<div class="sb-rail" onclick="toggleSidebar()" title="Open menu" aria-label="Open sidebar"></div>
+<!-- Sidebar rail — blue strip with chevron that opens sidebar on click -->
+<div class="sb-rail" onclick="toggleSidebar()" title="Open menu" aria-label="Open sidebar">
+    <svg viewBox="0 0 10 14"><polyline points="2,2 8,7 2,12"/></svg>
+</div>
 
 <!-- Mobile top bar -->
 <div class="mobile-topbar">
