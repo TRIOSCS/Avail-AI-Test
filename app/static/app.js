@@ -339,6 +339,8 @@ function showList() {
     const mainSearch = document.getElementById('mainSearch');
     if (mainSearch) mainSearch.value = '';
     _serverSearchActive = false;
+    // Reset to consistent state matching the active main pill
+    if (_currentMainView !== 'archive') _reqStatusFilter = 'all';
     loadRequisitions();
 }
 
@@ -519,7 +521,7 @@ function notifyStatusChange(data) {
 // ── Requisitions ────────────────────────────────────────────────────────
 let _reqCustomerMap = {};  // id → customer_display
 let _reqListData = [];     // cached list for client-side filtering
-let _reqStatusFilter = 'draft';
+let _reqStatusFilter = 'all';
 let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _serverSearchActive = false; // True when server-side search returned filtered results

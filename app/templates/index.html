@@ -1258,7 +1258,7 @@
         </div>
         <button class="btn btn-primary" onclick="openNewReqModal()">+ New RFQ</button>
         <input type="text" class="sbox" id="mainSearch" placeholder="&#x1f50d;  Search customer, part, RFQ&hellip;" oninput="debouncedMainSearch()">
-        <div class="fpills fpills-sm" id="statusToggle">
+        <div class="fpills fpills-sm" id="statusToggle" style="display:none">
             <button class="fp fp-sm" data-sf="draft" onclick="setStatusFilter('draft',this)">Draft</button>
             <button class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
         </div>
