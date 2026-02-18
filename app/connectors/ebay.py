@@ -2,8 +2,8 @@
 
 import logging
 import base64
-import httpx
 from .sources import BaseConnector
+from ..http_client import http
 from ..utils import safe_int, safe_float
 
 log = logging.getLogger(__name__)
@@ -35,21 +35,21 @@ class EbayConnector(BaseConnector):
         creds = base64.b64encode(
             f"{self.client_id}:{self.client_secret}".encode()
         ).decode()
-        async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.post(
-                self.TOKEN_URL,
-                headers={
-                    "Authorization": f"Basic {creds}",
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                data={
-                    "grant_type": "client_credentials",
-                    "scope": "https://api.ebay.com/oauth/api_scope",
-                },
-            )
-            r.raise_for_status()
-            self._token = r.json()["access_token"]
-            return self._token
+        r = await http.post(
+            self.TOKEN_URL,
+            headers={
+                "Authorization": f"Basic {creds}",
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            data={
+                "grant_type": "client_credentials",
+                "scope": "https://api.ebay.com/oauth/api_scope",
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        self._token = r.json()["access_token"]
+        return self._token
 
     async def _do_search(self, part_number: str) -> list[dict]:
         if not self.client_id:
@@ -64,8 +64,21 @@ class EbayConnector(BaseConnector):
             "fieldgroups": "MATCHING_ITEMS",
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout) as c:
-            r = await c.get(
+        r = await http.get(
+            self.SEARCH_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+                "Content-Type": "application/json",
+            },
+            params=params,
+            timeout=self.timeout,
+        )
+
+        if r.status_code == 401:
+            self._token = None
+            token = await self._get_token()
+            r = await http.get(
                 self.SEARCH_URL,
                 headers={
                     "Authorization": f"Bearer {token}",
@@ -73,25 +86,13 @@ class EbayConnector(BaseConnector):
                     "Content-Type": "application/json",
                 },
                 params=params,
+                timeout=self.timeout,
             )
 
-            if r.status_code == 401:
-                self._token = None
-                token = await self._get_token()
-                r = await c.get(
-                    self.SEARCH_URL,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
-                        "Content-Type": "application/json",
-                    },
-                    params=params,
-                )
-
-            if r.status_code == 404:
-                return []
-            r.raise_for_status()
-            data = r.json()
+        if r.status_code == 404:
+            return []
+        r.raise_for_status()
+        data = r.json()
 
         return self._parse(data, part_number)
 

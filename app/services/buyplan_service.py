@@ -14,8 +14,9 @@ Depends on: utils/graph_client, models, config
 import html
 import logging
 
-import httpx
 from sqlalchemy.orm import Session
+
+from ..http_client import http
 
 from ..config import settings
 from ..services.credential_service import get_credential_cached
@@ -615,30 +616,30 @@ async def _post_teams_channel(message: str):
         log.debug("Teams webhook not configured — skipping channel post")
         return
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL"),
-                json={
-                    "type": "message",
-                    "attachments": [
-                        {
-                            "contentType": "application/vnd.microsoft.card.adaptive",
-                            "content": {
-                                "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                                "type": "AdaptiveCard",
-                                "version": "1.4",
-                                "body": [
-                                    {"type": "TextBlock", "text": message, "wrap": True}
-                                ],
-                            },
-                        }
-                    ],
-                },
+        resp = await http.post(
+            get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL"),
+            json={
+                "type": "message",
+                "attachments": [
+                    {
+                        "contentType": "application/vnd.microsoft.card.adaptive",
+                        "content": {
+                            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                            "type": "AdaptiveCard",
+                            "version": "1.4",
+                            "body": [
+                                {"type": "TextBlock", "text": message, "wrap": True}
+                            ],
+                        },
+                    }
+                ],
+            },
+            timeout=15,
+        )
+        if resp.status_code not in (200, 202):
+            log.warning(
+                f"Teams webhook returned {resp.status_code}: {resp.text[:200]}"
             )
-            if resp.status_code not in (200, 202):
-                log.warning(
-                    f"Teams webhook returned {resp.status_code}: {resp.text[:200]}"
-                )
     except Exception as e:
         log.error(f"Teams channel post failed: {e}")
 

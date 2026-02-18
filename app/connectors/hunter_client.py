@@ -7,9 +7,8 @@ Gracefully returns empty results when API key is not configured.
 import asyncio
 import logging
 
-import httpx
-
 from app.config import settings
+from app.http_client import http
 
 log = logging.getLogger("avail.hunter")
 
@@ -31,22 +30,22 @@ async def verify_email(email: str) -> dict | None:
 
     async with _semaphore:
         try:
-            async with httpx.AsyncClient(timeout=20) as client:
-                resp = await client.get(
-                    f"{HUNTER_BASE}/email-verifier",
-                    params={"email": email, "api_key": api_key},
-                )
-                if resp.status_code != 200:
-                    log.warning("Hunter verify failed: %s %s", resp.status_code, resp.text[:200])
-                    return None
+            resp = await http.get(
+                f"{HUNTER_BASE}/email-verifier",
+                params={"email": email, "api_key": api_key},
+                timeout=20,
+            )
+            if resp.status_code != 200:
+                log.warning("Hunter verify failed: %s %s", resp.status_code, resp.text[:200])
+                return None
 
-                data = resp.json().get("data", {})
-                return {
-                    "email": data.get("email", email),
-                    "status": data.get("status", "unknown"),
-                    "score": data.get("score", 0),
-                    "sources": data.get("sources", 0),
-                }
+            data = resp.json().get("data", {})
+            return {
+                "email": data.get("email", email),
+                "status": data.get("status", "unknown"),
+                "score": data.get("score", 0),
+                "sources": data.get("sources", 0),
+            }
         except Exception as e:
             log.warning("Hunter verify error: %s", e)
             return None
@@ -66,43 +65,43 @@ async def find_domain_emails(domain: str, limit: int = 10) -> list[dict]:
 
     async with _semaphore:
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.get(
-                    f"{HUNTER_BASE}/domain-search",
-                    params={
-                        "domain": domain,
-                        "api_key": api_key,
-                        "limit": min(limit, 100),
-                        "type": "personal",
-                    },
-                )
-                if resp.status_code != 200:
-                    log.warning("Hunter domain search failed: %s %s", resp.status_code, resp.text[:200])
-                    return []
+            resp = await http.get(
+                f"{HUNTER_BASE}/domain-search",
+                params={
+                    "domain": domain,
+                    "api_key": api_key,
+                    "limit": min(limit, 100),
+                    "type": "personal",
+                },
+                timeout=30,
+            )
+            if resp.status_code != 200:
+                log.warning("Hunter domain search failed: %s %s", resp.status_code, resp.text[:200])
+                return []
 
-                data = resp.json().get("data", {})
-                emails = data.get("emails", [])
+            data = resp.json().get("data", {})
+            emails = data.get("emails", [])
 
-                contacts = []
-                for e in emails[:limit]:
-                    first = (e.get("first_name") or "").strip()
-                    last = (e.get("last_name") or "").strip()
-                    full_name = f"{first} {last}".strip() if first or last else None
+            contacts = []
+            for e in emails[:limit]:
+                first = (e.get("first_name") or "").strip()
+                last = (e.get("last_name") or "").strip()
+                full_name = f"{first} {last}".strip() if first or last else None
 
-                    contacts.append({
-                        "email": e.get("value"),
-                        "first_name": first or None,
-                        "last_name": last or None,
-                        "full_name": full_name,
-                        "position": e.get("position"),
-                        "department": e.get("department"),
-                        "linkedin_url": e.get("linkedin"),
-                        "phone_number": e.get("phone_number"),
-                        "confidence": e.get("confidence", 0),
-                        "source": "hunter",
-                    })
+                contacts.append({
+                    "email": e.get("value"),
+                    "first_name": first or None,
+                    "last_name": last or None,
+                    "full_name": full_name,
+                    "position": e.get("position"),
+                    "department": e.get("department"),
+                    "linkedin_url": e.get("linkedin"),
+                    "phone_number": e.get("phone_number"),
+                    "confidence": e.get("confidence", 0),
+                    "source": "hunter",
+                })
 
-                return contacts
+            return contacts
         except Exception as e:
             log.warning("Hunter domain search error: %s", e)
             return []

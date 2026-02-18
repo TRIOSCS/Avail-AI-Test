@@ -5,13 +5,14 @@ Supports Clay, Explorium (Vibe Prospecting), and AI (Claude + web search)
 as enrichment providers. AI runs last to fill any remaining gaps.
 """
 
-import httpx
+import asyncio
 import logging
 import re
 from datetime import datetime, timezone
 from typing import Optional
 
 from .config import settings
+from .http_client import http
 from .services.credential_service import get_credential_cached
 from .utils.claude_client import claude_json, claude_text
 from .services.ai_service import enrich_contacts_websearch
@@ -271,24 +272,24 @@ async def _clay_find_company(domain: str) -> Optional[dict]:
         log.debug("Clay API key not configured — skipping")
         return None
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"{CLAY_BASE}/enrich-company",
-                headers={
-                    "Authorization": f"Bearer {get_credential_cached("clay_enrichment", "CLAY_API_KEY")}",
-                    "Content-Type": "application/json",
-                },
-                json={"domain": domain},
+        resp = await http.post(
+            f"{CLAY_BASE}/enrich-company",
+            headers={
+                "Authorization": f"Bearer {get_credential_cached('clay_enrichment', 'CLAY_API_KEY')}",
+                "Content-Type": "application/json",
+            },
+            json={"domain": domain},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            log.warning(
+                "Clay company lookup failed: %s %s",
+                resp.status_code,
+                resp.text[:200],
             )
-            if resp.status_code != 200:
-                log.warning(
-                    "Clay company lookup failed: %s %s",
-                    resp.status_code,
-                    resp.text[:200],
-                )
-                return None
-            data = resp.json()
-            return {
+            return None
+        data = resp.json()
+        return {
                 "source": "clay",
                 "legal_name": data.get("name"),
                 "domain": domain,
@@ -314,36 +315,36 @@ async def _clay_find_contacts(domain: str, title_filter: str = "") -> list[dict]
     if not get_credential_cached("clay_enrichment", "CLAY_API_KEY"):
         return []
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            payload = {"domain": domain}
-            if title_filter:
-                payload["title"] = title_filter
-            resp = await client.post(
-                f"{CLAY_BASE}/find-people",
-                headers={
-                    "Authorization": f"Bearer {get_credential_cached("clay_enrichment", "CLAY_API_KEY")}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-            if resp.status_code != 200:
-                log.warning("Clay contacts lookup failed: %s", resp.status_code)
-                return []
-            people = resp.json().get("people") or resp.json().get("contacts") or []
-            return [
-                {
-                    "source": "clay",
-                    "full_name": p.get("name") or p.get("full_name"),
-                    "title": p.get("title") or p.get("latest_experience_title"),
-                    "email": p.get("email"),
-                    "phone": p.get("phone"),
-                    "linkedin_url": p.get("linkedin_url") or p.get("url"),
-                    "location": p.get("location_name") or p.get("location"),
-                    "company": p.get("company") or p.get("latest_experience_company"),
-                }
-                for p in people
-                if p.get("name") or p.get("full_name")
-            ]
+        payload = {"domain": domain}
+        if title_filter:
+            payload["title"] = title_filter
+        resp = await http.post(
+            f"{CLAY_BASE}/find-people",
+            headers={
+                "Authorization": f"Bearer {get_credential_cached('clay_enrichment', 'CLAY_API_KEY')}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            log.warning("Clay contacts lookup failed: %s", resp.status_code)
+            return []
+        people = resp.json().get("people") or resp.json().get("contacts") or []
+        return [
+            {
+                "source": "clay",
+                "full_name": p.get("name") or p.get("full_name"),
+                "title": p.get("title") or p.get("latest_experience_title"),
+                "email": p.get("email"),
+                "phone": p.get("phone"),
+                "linkedin_url": p.get("linkedin_url") or p.get("url"),
+                "location": p.get("location_name") or p.get("location"),
+                "company": p.get("company") or p.get("latest_experience_company"),
+            }
+            for p in people
+            if p.get("name") or p.get("full_name")
+        ]
     except Exception as e:
         log.error("Clay contacts lookup error: %s", e)
         return []
@@ -360,39 +361,39 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
         log.debug("Explorium API key not configured — skipping")
         return None
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                f"{EXPLORIUM_BASE}/match/business",
-                headers={
-                    "Authorization": f"Bearer {get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")}",
-                    "Content-Type": "application/json",
-                },
-                json={"domain": domain, "name": name},
-            )
-            if resp.status_code != 200:
-                log.warning("Explorium company lookup failed: %s", resp.status_code)
-                return None
-            data = resp.json()
-            firmo = {
-                k.replace("firmo_", ""): v
-                for k, v in data.items()
-                if k.startswith("firmo_")
-            }
-            return {
-                "source": "explorium",
-                "legal_name": firmo.get("name"),
-                "domain": domain,
-                "linkedin_url": firmo.get("linkedin_profile"),
-                "industry": firmo.get("linkedin_industry_category"),
-                "employee_size": firmo.get("number_of_employees_range"),
-                "hq_city": firmo.get("city_name"),
-                "hq_state": firmo.get("region_name"),
-                "hq_country": firmo.get("country_name"),
-                "website": firmo.get("website"),
-                "ticker": firmo.get("ticker"),
-                "naics": firmo.get("naics"),
-                "revenue_range": firmo.get("yearly_revenue_range"),
-            }
+        resp = await http.post(
+            f"{EXPLORIUM_BASE}/match/business",
+            headers={
+                "Authorization": f"Bearer {get_credential_cached('explorium_enrichment', 'EXPLORIUM_API_KEY')}",
+                "Content-Type": "application/json",
+            },
+            json={"domain": domain, "name": name},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            log.warning("Explorium company lookup failed: %s", resp.status_code)
+            return None
+        data = resp.json()
+        firmo = {
+            k.replace("firmo_", ""): v
+            for k, v in data.items()
+            if k.startswith("firmo_")
+        }
+        return {
+            "source": "explorium",
+            "legal_name": firmo.get("name"),
+            "domain": domain,
+            "linkedin_url": firmo.get("linkedin_profile"),
+            "industry": firmo.get("linkedin_industry_category"),
+            "employee_size": firmo.get("number_of_employees_range"),
+            "hq_city": firmo.get("city_name"),
+            "hq_state": firmo.get("region_name"),
+            "hq_country": firmo.get("country_name"),
+            "website": firmo.get("website"),
+            "ticker": firmo.get("ticker"),
+            "naics": firmo.get("naics"),
+            "revenue_range": firmo.get("yearly_revenue_range"),
+        }
     except Exception as e:
         log.error("Explorium company lookup error: %s", e)
         return None
@@ -403,35 +404,35 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
     if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY"):
         return []
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            payload = {"company_domain": domain}
-            if title_filter:
-                payload["job_title_keywords"] = [title_filter]
-            resp = await client.post(
-                f"{EXPLORIUM_BASE}/fetch/prospects",
-                headers={
-                    "Authorization": f"Bearer {get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            )
-            if resp.status_code != 200:
-                return []
-            prospects = resp.json().get("prospects") or []
-            return [
-                {
-                    "source": "explorium",
-                    "full_name": p.get("full_name"),
-                    "title": p.get("job_title"),
-                    "email": p.get("email"),
-                    "phone": p.get("phone"),
-                    "linkedin_url": p.get("linkedin_url"),
-                    "location": p.get("location"),
-                    "company": p.get("company_name"),
-                }
-                for p in prospects
-                if p.get("full_name")
-            ]
+        payload = {"company_domain": domain}
+        if title_filter:
+            payload["job_title_keywords"] = [title_filter]
+        resp = await http.post(
+            f"{EXPLORIUM_BASE}/fetch/prospects",
+            headers={
+                "Authorization": f"Bearer {get_credential_cached('explorium_enrichment', 'EXPLORIUM_API_KEY')}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=20,
+        )
+        if resp.status_code != 200:
+            return []
+        prospects = resp.json().get("prospects") or []
+        return [
+            {
+                "source": "explorium",
+                "full_name": p.get("full_name"),
+                "title": p.get("job_title"),
+                "email": p.get("email"),
+                "phone": p.get("phone"),
+                "linkedin_url": p.get("linkedin_url"),
+                "location": p.get("location"),
+                "company": p.get("company_name"),
+            }
+            for p in prospects
+            if p.get("full_name")
+        ]
     except Exception as e:
         log.error("Explorium contacts lookup error: %s", e)
         return []
@@ -540,9 +541,10 @@ async def _ai_find_contacts(
 async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
 
-    Tries Clay first, Explorium fills gaps, AI fills remaining gaps.
+    Phase 1: Clay, Explorium, Clearbit run concurrently.
+    Phase 2: AI fills remaining gaps (conditional — only if Phase 1 left holes).
+    Merge priority: Clay > Explorium > Clearbit > AI.
     Results cached in IntelCache with 14-day TTL keyed by domain.
-    Input is normalized before providers, output is normalized after.
     """
     from .cache.intel_cache import get_cached, set_cached
 
@@ -568,50 +570,45 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
         "source": None,
     }
 
-    # Try Clay
-    clay = await _clay_find_company(domain)
-    if clay:
-        result.update({k: v for k, v in clay.items() if v})
-        result["source"] = "clay"
-
-    # Try Explorium (fills gaps)
-    exp = await _explorium_find_company(domain, name)
-    if exp:
-        for k, v in exp.items():
-            if v and not result.get(k):
-                result[k] = v
-        if not result["source"]:
-            result["source"] = "explorium"
-        elif result["source"] == "clay":
-            result["source"] = "clay+explorium"
-
-    # Try Clearbit (fills gaps after Clay+Explorium)
     _enrichable = [
-        "legal_name",
-        "industry",
-        "employee_size",
-        "hq_city",
-        "hq_state",
-        "hq_country",
-        "website",
-        "linkedin_url",
+        "legal_name", "industry", "employee_size",
+        "hq_city", "hq_state", "hq_country", "website", "linkedin_url",
     ]
-    if any(not result.get(f) for f in _enrichable):
+
+    # ── Phase 1: Clay + Explorium + Clearbit concurrently ──
+    async def _safe_clearbit(domain: str):
         try:
             from .connectors.clearbit_client import enrich_company as clearbit_enrich
-            cb = await clearbit_enrich(domain)
-            if cb:
-                for k, v in cb.items():
-                    if v and not result.get(k):
-                        result[k] = v
-                if not result["source"]:
-                    result["source"] = "clearbit"
-                elif "clearbit" not in result["source"]:
-                    result["source"] = result["source"] + "+clearbit"
+            return await clearbit_enrich(domain)
         except Exception as e:
             log.debug("Clearbit enrichment skipped: %s", e)
+            return None
 
-    # Try AI (fills remaining gaps)
+    clay_result, exp_result, cb_result = await asyncio.gather(
+        _clay_find_company(domain),
+        _explorium_find_company(domain, name),
+        _safe_clearbit(domain),
+        return_exceptions=True,
+    )
+
+    # Merge in priority order: Clay > Explorium > Clearbit
+    sources = []
+    for provider_data, provider_name in [
+        (clay_result, "clay"),
+        (exp_result, "explorium"),
+        (cb_result, "clearbit"),
+    ]:
+        if isinstance(provider_data, Exception) or not provider_data:
+            continue
+        for k, v in provider_data.items():
+            if v and not result.get(k):
+                result[k] = v
+        sources.append(provider_name)
+
+    if sources:
+        result["source"] = "+".join(sources)
+
+    # ── Phase 2: AI fills remaining gaps (conditional) ──
     if any(not result.get(f) for f in _enrichable):
         ai = await _ai_find_company(domain, name)
         if ai:
@@ -638,25 +635,17 @@ async def find_suggested_contacts(
 ) -> list[dict]:
     """Find suggested contacts at a company from all configured providers.
 
+    All 5 sources run concurrently via asyncio.gather.
     Returns deduplicated list sorted by relevance. Each contact has:
     full_name, title, email, phone, linkedin_url, location, source
     """
-    all_contacts = []
 
-    # Gather from all providers
-    clay_contacts = await _clay_find_contacts(domain, title_filter)
-    all_contacts.extend(clay_contacts)
-
-    exp_contacts = await _explorium_find_contacts(domain, title_filter)
-    all_contacts.extend(exp_contacts)
-
-    # Hunter.io domain search
-    try:
-        from .connectors.hunter_client import find_domain_emails
-        hunter_contacts = await find_domain_emails(domain, limit=10)
-        for hc in hunter_contacts:
-            if hc.get("full_name"):
-                all_contacts.append({
+    async def _safe_hunter(domain: str) -> list[dict]:
+        try:
+            from .connectors.hunter_client import find_domain_emails
+            raw = await find_domain_emails(domain, limit=10)
+            return [
+                {
                     "source": "hunter",
                     "full_name": hc["full_name"],
                     "title": hc.get("position"),
@@ -665,19 +654,23 @@ async def find_suggested_contacts(
                     "linkedin_url": hc.get("linkedin_url"),
                     "location": None,
                     "company": name or domain,
-                })
-    except Exception as e:
-        log.debug("Hunter contacts skipped: %s", e)
+                }
+                for hc in raw
+                if hc.get("full_name")
+            ]
+        except Exception as e:
+            log.debug("Hunter contacts skipped: %s", e)
+            return []
 
-    # RocketReach search
-    try:
-        from .connectors.rocketreach_client import search_company_contacts
-        rr_contacts = await search_company_contacts(
-            company=name or domain, domain=domain, title_filter=title_filter, limit=5
-        )
-        for rc in rr_contacts:
-            if rc.get("full_name"):
-                all_contacts.append({
+    async def _safe_rocketreach(domain: str) -> list[dict]:
+        try:
+            from .connectors.rocketreach_client import search_company_contacts
+            raw = await search_company_contacts(
+                company=name or domain, domain=domain,
+                title_filter=title_filter, limit=5,
+            )
+            return [
+                {
                     "source": "rocketreach",
                     "full_name": rc["full_name"],
                     "title": rc.get("title"),
@@ -686,12 +679,30 @@ async def find_suggested_contacts(
                     "linkedin_url": rc.get("linkedin_url"),
                     "location": None,
                     "company": rc.get("company_name") or name or domain,
-                })
-    except Exception as e:
-        log.debug("RocketReach contacts skipped: %s", e)
+                }
+                for rc in raw
+                if rc.get("full_name")
+            ]
+        except Exception as e:
+            log.debug("RocketReach contacts skipped: %s", e)
+            return []
 
-    ai_contacts = await _ai_find_contacts(domain, name, title_filter)
-    all_contacts.extend(ai_contacts)
+    # Run all 5 sources concurrently
+    results = await asyncio.gather(
+        _clay_find_contacts(domain, title_filter),
+        _explorium_find_contacts(domain, title_filter),
+        _safe_hunter(domain),
+        _safe_rocketreach(domain),
+        _ai_find_contacts(domain, name, title_filter),
+        return_exceptions=True,
+    )
+
+    all_contacts = []
+    for r in results:
+        if isinstance(r, Exception):
+            log.debug("Contact provider failed: %s", r)
+            continue
+        all_contacts.extend(r)
 
     # Deduplicate by email or linkedin_url or full_name
     seen = set()

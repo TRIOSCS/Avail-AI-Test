@@ -12,7 +12,7 @@ Usage:
 import asyncio
 import logging
 
-import httpx
+from app.http_client import http
 
 log = logging.getLogger("avail.graph")
 
@@ -42,16 +42,14 @@ class GraphClient:
     ) -> dict:
         """GET → parsed JSON. Raises on non-200 after retries."""
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            return await self._request_with_retry(client, "GET", url, params=params)
+        return await self._request_with_retry("GET", url, params=params, timeout=timeout)
 
     async def post_json(self, path: str, json_data: dict, timeout: int = 30) -> dict:
         """POST → parsed JSON or empty dict on 202."""
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            return await self._request_with_retry(
-                client, "POST", url, json_data=json_data
-            )
+        return await self._request_with_retry(
+            "POST", url, json_data=json_data, timeout=timeout
+        )
 
     async def get_all_pages(
         self,
@@ -63,14 +61,13 @@ class GraphClient:
         """GET with auto-pagination. Returns flat list of items."""
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
         items: list[dict] = []
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            while url and len(items) < max_items:
-                data = await self._request_with_retry(
-                    client, "GET", url, params=params if GRAPH_BASE in url else None
-                )
-                items.extend(data.get("value", []))
-                url = data.get("@odata.nextLink")
-                params = None  # nextLink has params baked in
+        while url and len(items) < max_items:
+            data = await self._request_with_retry(
+                "GET", url, params=params if GRAPH_BASE in url else None, timeout=timeout
+            )
+            items.extend(data.get("value", []))
+            url = data.get("@odata.nextLink")
+            params = None  # nextLink has params baked in
         return items[:max_items]
 
     # ── H8: Delta Query ─────────────────────────────────────────────
@@ -97,21 +94,20 @@ class GraphClient:
         items: list[dict] = []
         new_token: str | None = None
 
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            while url and len(items) < max_items:
-                data = await self._request_with_retry(
-                    client, "GET", url, params=params if not delta_token else None
-                )
-                items.extend(data.get("value", []))
+        while url and len(items) < max_items:
+            data = await self._request_with_retry(
+                "GET", url, params=params if not delta_token else None, timeout=timeout
+            )
+            items.extend(data.get("value", []))
 
-                # Check for delta link (means we've consumed all changes)
-                new_token = data.get("@odata.deltaLink")
-                if new_token:
-                    break
+            # Check for delta link (means we've consumed all changes)
+            new_token = data.get("@odata.deltaLink")
+            if new_token:
+                break
 
-                # More pages of changes
-                url = data.get("@odata.nextLink")
-                params = None
+            # More pages of changes
+            url = data.get("@odata.nextLink")
+            params = None
 
         return items[:max_items], new_token
 
@@ -119,11 +115,11 @@ class GraphClient:
 
     async def _request_with_retry(
         self,
-        client: httpx.AsyncClient,
         method: str,
         url: str,
         params: dict | None = None,
         json_data: dict | None = None,
+        timeout: int = 30,
     ) -> dict:
         """Execute HTTP request with exponential backoff on 429 / 5xx."""
         last_error: Exception | None = None
@@ -131,12 +127,12 @@ class GraphClient:
         for attempt in range(MAX_RETRIES + 1):
             try:
                 if method == "GET":
-                    resp = await client.get(
-                        url, params=params, headers=self._base_headers
+                    resp = await http.get(
+                        url, params=params, headers=self._base_headers, timeout=timeout
                     )
                 else:
-                    resp = await client.post(
-                        url, json=json_data, headers=self._base_headers
+                    resp = await http.post(
+                        url, json=json_data, headers=self._base_headers, timeout=timeout
                     )
 
                 # Success

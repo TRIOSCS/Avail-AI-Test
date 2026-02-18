@@ -1,8 +1,8 @@
 """DigiKey Product Search API connector."""
 
 import logging
-import httpx
 from .sources import BaseConnector
+from ..http_client import http
 from ..utils import safe_int, safe_float
 
 log = logging.getLogger(__name__)
@@ -24,18 +24,18 @@ class DigiKeyConnector(BaseConnector):
     async def _get_token(self) -> str:
         if self._token:
             return self._token
-        async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.post(
-                self.TOKEN_URL,
-                data={
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                    "grant_type": "client_credentials",
-                },
-            )
-            r.raise_for_status()
-            self._token = r.json()["access_token"]
-            return self._token
+        r = await http.post(
+            self.TOKEN_URL,
+            data={
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+                "grant_type": "client_credentials",
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        self._token = r.json()["access_token"]
+        return self._token
 
     async def _do_search(self, part_number: str) -> list[dict]:
         if not self.client_id:
@@ -49,8 +49,24 @@ class DigiKeyConnector(BaseConnector):
             "ExcludeMarketPlaceProducts": False,
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout) as c:
-            r = await c.post(
+        r = await http.post(
+            self.SEARCH_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "X-DIGIKEY-Client-Id": self.client_id,
+                "Content-Type": "application/json",
+                "X-DIGIKEY-Locale-Site": "US",
+                "X-DIGIKEY-Locale-Language": "en",
+                "X-DIGIKEY-Locale-Currency": "USD",
+            },
+            json=payload,
+            timeout=self.timeout,
+        )
+
+        if r.status_code == 401:
+            self._token = None
+            token = await self._get_token()
+            r = await http.post(
                 self.SEARCH_URL,
                 headers={
                     "Authorization": f"Bearer {token}",
@@ -61,26 +77,11 @@ class DigiKeyConnector(BaseConnector):
                     "X-DIGIKEY-Locale-Currency": "USD",
                 },
                 json=payload,
+                timeout=self.timeout,
             )
 
-            if r.status_code == 401:
-                self._token = None
-                token = await self._get_token()
-                r = await c.post(
-                    self.SEARCH_URL,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "X-DIGIKEY-Client-Id": self.client_id,
-                        "Content-Type": "application/json",
-                        "X-DIGIKEY-Locale-Site": "US",
-                        "X-DIGIKEY-Locale-Language": "en",
-                        "X-DIGIKEY-Locale-Currency": "USD",
-                    },
-                    json=payload,
-                )
-
-            r.raise_for_status()
-            data = r.json()
+        r.raise_for_status()
+        data = r.json()
 
         return self._parse(data, part_number)
 

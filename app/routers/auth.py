@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, Request
+from ..http_client import http
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -71,18 +72,18 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
     if not code:
         return RedirectResponse("/")
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                f"{AZURE_AUTH}/token",
-                data={
-                    "client_id": settings.azure_client_id,
-                    "client_secret": settings.azure_client_secret,
-                    "code": code,
-                    "grant_type": "authorization_code",
-                    "redirect_uri": f"{settings.app_url}/auth/callback",
-                    "scope": SCOPES,
-                },
-            )
+        resp = await http.post(
+            f"{AZURE_AUTH}/token",
+            data={
+                "client_id": settings.azure_client_id,
+                "client_secret": settings.azure_client_secret,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": f"{settings.app_url}/auth/callback",
+                "scope": SCOPES,
+            },
+            timeout=15,
+        )
     except httpx.HTTPError as e:
         log.error(f"Azure token exchange failed: {e}")
         return RedirectResponse("/")
@@ -101,11 +102,11 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
     token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            me = await client.get(
-                "https://graph.microsoft.com/v1.0/me",
-                headers={"Authorization": f"Bearer {access_token}"},
-            )
+        me = await http.get(
+            "https://graph.microsoft.com/v1.0/me",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
         if me.status_code != 200:
             log.error(f"Graph /me returned {me.status_code}")
             return RedirectResponse("/")

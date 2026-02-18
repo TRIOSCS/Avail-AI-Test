@@ -8,9 +8,9 @@ Depends on: BaseConnector, httpx
 """
 
 import logging
-import httpx
 from urllib.parse import quote_plus
 from .sources import BaseConnector
+from ..http_client import http
 from ..utils import safe_int, safe_float
 
 log = logging.getLogger(__name__)
@@ -39,10 +39,9 @@ class Element14Connector(BaseConnector):
             "callInfo.responseDataFormat": "json",
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout) as c:
-            r = await c.get(self.SEARCH_URL, params=params)
-            r.raise_for_status()
-            data = r.json()
+        r = await http.get(self.SEARCH_URL, params=params, timeout=self.timeout)
+        r.raise_for_status()
+        data = r.json()
 
         return self._parse(data, part_number)
 

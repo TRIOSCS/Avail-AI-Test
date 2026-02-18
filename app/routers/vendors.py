@@ -22,8 +22,8 @@ import logging
 import re
 import socket
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from ..http_client import http_redirect
 from sqlalchemy import func as sqlfunc, text as sqltext
 from sqlalchemy.exc import IntegrityError
 
@@ -567,29 +567,28 @@ async def scrape_website_contacts(url: str) -> dict:
         "Accept": "text/html,application/xhtml+xml",
     }
 
-    async with httpx.AsyncClient(timeout=10, follow_redirects=True) as client:
-        # Fetch all pages concurrently instead of sequentially
-        import asyncio as _asyncio
-        tasks = [client.get(page_url, headers=headers) for page_url in pages_to_try]
-        results = await _asyncio.gather(*tasks, return_exceptions=True)
+    # Fetch all pages concurrently instead of sequentially
+    import asyncio as _asyncio
+    tasks = [http_redirect.get(page_url, headers=headers, timeout=10) for page_url in pages_to_try]
+    results = await _asyncio.gather(*tasks, return_exceptions=True)
 
-        for resp in results:
-            if isinstance(resp, Exception):
-                continue
-            if resp.status_code != 200:
-                continue
-            html = resp.text[:200_000]  # Cap at 200KB
+    for resp in results:
+        if isinstance(resp, Exception):
+            continue
+        if resp.status_code != 200:
+            continue
+        html = resp.text[:200_000]  # Cap at 200KB
 
-            for mailto in re.findall(r'mailto:([^"\'?\s]+)', html, re.IGNORECASE):
-                email = mailto.split("?")[0].strip().lower()
-                if "@" in email:
-                    emails.add(email)
+        for mailto in re.findall(r'mailto:([^"\'?\s]+)', html, re.IGNORECASE):
+            email = mailto.split("?")[0].strip().lower()
+            if "@" in email:
+                emails.add(email)
 
-            for match in _EMAIL_RE.findall(html):
-                emails.add(match.lower())
+        for match in _EMAIL_RE.findall(html):
+            emails.add(match.lower())
 
-            for tel in re.findall(r'tel:([^"\'<\s]+)', html, re.IGNORECASE):
-                phones.add(tel.strip())
+        for tel in re.findall(r'tel:([^"\'<\s]+)', html, re.IGNORECASE):
+            phones.add(tel.strip())
 
     result = {"emails": clean_emails(list(emails)), "phones": clean_phones(list(phones))}
 

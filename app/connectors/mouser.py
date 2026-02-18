@@ -1,8 +1,8 @@
 """Mouser Search API connector."""
 
 import logging
-import httpx
 from .sources import BaseConnector
+from ..http_client import http
 from ..utils import safe_int, safe_float
 
 log = logging.getLogger(__name__)
@@ -31,14 +31,14 @@ class MouserConnector(BaseConnector):
             }
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout) as c:
-            r = await c.post(
-                f"{self.SEARCH_URL}?apiKey={self.api_key}",
-                json=payload,
-                headers={"Content-Type": "application/json"},
-            )
-            r.raise_for_status()
-            data = r.json()
+        r = await http.post(
+            f"{self.SEARCH_URL}?apiKey={self.api_key}",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=self.timeout,
+        )
+        r.raise_for_status()
+        data = r.json()
 
         return self._parse(data, part_number)
 

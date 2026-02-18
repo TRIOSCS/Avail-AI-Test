@@ -46,6 +46,9 @@ async def lifespan(app):
         await task
     except asyncio.CancelledError:
         pass
+    from .http_client import close_clients
+
+    await close_clients()
 
 
 app = FastAPI(title="AVAIL — Opportunity Management", lifespan=lifespan)

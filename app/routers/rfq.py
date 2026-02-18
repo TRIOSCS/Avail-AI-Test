@@ -16,8 +16,8 @@ Depends on: models, email_service, vendor_utils, engagement_scoring
 
 from datetime import datetime, timedelta, timezone
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request
+from ..http_client import http
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
@@ -596,8 +596,7 @@ async def send_follow_up(
         "saveToSentItems": "true",
     }
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await _graph_post(client, f"{GRAPH}/me/sendMail", token, payload)
+    resp = await _graph_post(http, f"{GRAPH}/me/sendMail", token, payload)
 
     if resp.status_code not in (200, 202):
         raise HTTPException(502, f"Failed to send follow-up: {resp.status_code}")

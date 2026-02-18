@@ -20,9 +20,8 @@ import json
 import logging
 from typing import Any
 
-import httpx
-
 from app.config import settings
+from app.http_client import http
 from app.services.credential_service import get_credential_cached
 
 log = logging.getLogger("avail.claude")
@@ -120,28 +119,28 @@ async def claude_structured(
     body["tool_choice"] = {"type": "tool", "name": "structured_output"}
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(
-                API_URL,
-                headers=_headers(cache=cache_system),
-                json=body,
-            )
+        resp = await http.post(
+            API_URL,
+            headers=_headers(cache=cache_system),
+            json=body,
+            timeout=timeout,
+        )
 
-            if resp.status_code != 200:
-                log.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
-                return None
-
-            data = resp.json()
-            # Tool use response — extract the tool input (guaranteed valid JSON)
-            for block in data.get("content", []):
-                if (
-                    block.get("type") == "tool_use"
-                    and block.get("name") == "structured_output"
-                ):
-                    return block.get("input")
-
-            log.warning("Claude structured output: no tool_use block in response")
+        if resp.status_code != 200:
+            log.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
             return None
+
+        data = resp.json()
+        # Tool use response — extract the tool input (guaranteed valid JSON)
+        for block in data.get("content", []):
+            if (
+                block.get("type") == "tool_use"
+                and block.get("name") == "structured_output"
+            ):
+                return block.get("input")
+
+        log.warning("Claude structured output: no tool_use block in response")
+        return None
 
     except Exception as e:
         log.warning(f"Claude structured call failed: {e}")
@@ -198,23 +197,23 @@ async def claude_text(
         body["tools"] = tools
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(
-                API_URL,
-                headers=_headers(cache=cache_system),
-                json=body,
-            )
+        resp = await http.post(
+            API_URL,
+            headers=_headers(cache=cache_system),
+            json=body,
+            timeout=timeout,
+        )
 
-            if resp.status_code != 200:
-                log.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
-                return None
+        if resp.status_code != 200:
+            log.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
+            return None
 
-            data = resp.json()
-            # Extract text from response (may be interleaved with tool use)
-            texts = [
-                b["text"] for b in data.get("content", []) if b.get("type") == "text"
-            ]
-            return "\n".join(texts) if texts else None
+        data = resp.json()
+        # Extract text from response (may be interleaved with tool use)
+        texts = [
+            b["text"] for b in data.get("content", []) if b.get("type") == "text"
+        ]
+        return "\n".join(texts) if texts else None
 
     except Exception as e:
         log.warning(f"Claude text call failed: {e}")
@@ -351,22 +350,22 @@ async def claude_batch_submit(
     ]
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                BATCH_API_URL,
-                headers=_headers(),
-                json={"requests": batch_requests},
-            )
+        resp = await http.post(
+            BATCH_API_URL,
+            headers=_headers(),
+            json={"requests": batch_requests},
+            timeout=30,
+        )
 
-            if resp.status_code != 200:
-                log.warning(f"Batch API submit {resp.status_code}: {resp.text[:300]}")
-                return None
+        if resp.status_code != 200:
+            log.warning(f"Batch API submit {resp.status_code}: {resp.text[:300]}")
+            return None
 
-            data = resp.json()
-            batch_id = data.get("id")
-            count = data.get("request_counts", {}).get("processing", len(requests))
-            log.info(f"Batch submitted: {batch_id} ({count} requests)")
-            return batch_id
+        data = resp.json()
+        batch_id = data.get("id")
+        count = data.get("request_counts", {}).get("processing", len(requests))
+        log.info(f"Batch submitted: {batch_id} ({count} requests)")
+        return batch_id
 
     except Exception as e:
         log.warning(f"Batch API submit failed: {e}")
@@ -387,79 +386,80 @@ async def claude_batch_results(
         return None
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            # Check batch status
-            resp = await client.get(
-                f"{BATCH_API_URL}/{batch_id}",
-                headers=_headers(),
-            )
+        # Check batch status
+        resp = await http.get(
+            f"{BATCH_API_URL}/{batch_id}",
+            headers=_headers(),
+            timeout=30,
+        )
 
-            if resp.status_code != 200:
-                log.warning(f"Batch status check {resp.status_code}: {resp.text[:200]}")
-                return None
+        if resp.status_code != 200:
+            log.warning(f"Batch status check {resp.status_code}: {resp.text[:200]}")
+            return None
 
-            data = resp.json()
-            status = data.get("processing_status")
+        data = resp.json()
+        status = data.get("processing_status")
 
-            if status != "ended":
-                log.debug(f"Batch {batch_id} status: {status}")
-                return None  # Still processing
+        if status != "ended":
+            log.debug(f"Batch {batch_id} status: {status}")
+            return None  # Still processing
 
-            # Fetch results JSONL
-            results_url = data.get("results_url")
-            if not results_url:
-                log.warning(f"Batch {batch_id} ended but no results_url")
-                return None
+        # Fetch results JSONL
+        results_url = data.get("results_url")
+        if not results_url:
+            log.warning(f"Batch {batch_id} ended but no results_url")
+            return None
 
-            results_resp = await client.get(
-                results_url,
-                headers=_headers(),
-            )
+        results_resp = await http.get(
+            results_url,
+            headers=_headers(),
+            timeout=30,
+        )
 
-            if results_resp.status_code != 200:
-                log.warning(f"Batch results fetch {results_resp.status_code}")
-                return None
+        if results_resp.status_code != 200:
+            log.warning(f"Batch results fetch {results_resp.status_code}")
+            return None
 
-            # Parse JSONL results
-            parsed = {}
-            for line in results_resp.text.strip().split("\n"):
-                if not line.strip():
-                    continue
-                try:
-                    entry = json.loads(line)
-                    cid = entry.get("custom_id", "")
-                    result = entry.get("result", {})
+        # Parse JSONL results
+        parsed = {}
+        for line in results_resp.text.strip().split("\n"):
+            if not line.strip():
+                continue
+            try:
+                entry = json.loads(line)
+                cid = entry.get("custom_id", "")
+                result = entry.get("result", {})
 
-                    if result.get("type") == "succeeded":
-                        message = result.get("message", {})
-                        # Extract tool_use input (same as claude_structured)
-                        for block in message.get("content", []):
-                            if (
-                                block.get("type") == "tool_use"
-                                and block.get("name") == "structured_output"
-                            ):
-                                parsed[cid] = block.get("input")
-                                break
-                        else:
-                            parsed[cid] = None
+                if result.get("type") == "succeeded":
+                    message = result.get("message", {})
+                    # Extract tool_use input (same as claude_structured)
+                    for block in message.get("content", []):
+                        if (
+                            block.get("type") == "tool_use"
+                            and block.get("name") == "structured_output"
+                        ):
+                            parsed[cid] = block.get("input")
+                            break
                     else:
-                        error = result.get("error", {})
-                        log.warning(
-                            f"Batch item {cid} failed: {error.get('type', 'unknown')}"
-                        )
                         parsed[cid] = None
+                else:
+                    error = result.get("error", {})
+                    log.warning(
+                        f"Batch item {cid} failed: {error.get('type', 'unknown')}"
+                    )
+                    parsed[cid] = None
 
-                except json.JSONDecodeError:
-                    log.debug(f"Batch JSONL parse error: {line[:100]}")
-                    continue
+            except json.JSONDecodeError:
+                log.debug(f"Batch JSONL parse error: {line[:100]}")
+                continue
 
-            counts = data.get("request_counts", {})
-            log.info(
-                f"Batch {batch_id} complete: "
-                f"{counts.get('succeeded', 0)} succeeded, "
-                f"{counts.get('errored', 0)} errored"
-            )
-            return parsed
+        counts = data.get("request_counts", {})
+        log.info(
+            f"Batch {batch_id} complete: "
+            f"{counts.get('succeeded', 0)} succeeded, "
+            f"{counts.get('errored', 0)} errored"
+        )
+        return parsed
 
     except Exception as e:
         log.warning(f"Batch results check failed: {e}")

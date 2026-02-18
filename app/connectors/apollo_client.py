@@ -11,9 +11,8 @@ Gracefully returns empty results when API key is not configured.
 import logging
 from typing import Any
 
-import httpx
-
 from app.config import settings
+from app.http_client import http
 
 log = logging.getLogger("avail.apollo")
 
@@ -66,49 +65,49 @@ async def search_contacts(
         payload["q_organization_domains"] = domain
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.post(
-                f"{APOLLO_BASE}/mixed_people/search",
-                json=payload,
-                headers={"Content-Type": "application/json"},
+        resp = await http.post(
+            f"{APOLLO_BASE}/mixed_people/search",
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=30,
+        )
+
+        if resp.status_code != 200:
+            log.warning(
+                f"Apollo search failed: {resp.status_code} {resp.text[:200]}"
+            )
+            return []
+
+        data = resp.json()
+        people = data.get("people", [])
+
+        contacts = []
+        for person in people[:limit]:
+            email = person.get("email")
+            email_status = person.get("email_status", "unavailable")
+
+            # Confidence based on email verification
+            if email and email_status == "verified":
+                confidence = "high"
+            elif email:
+                confidence = "medium"
+            else:
+                confidence = "low"
+
+            contacts.append(
+                {
+                    "full_name": _full_name(person),
+                    "title": person.get("title") or person.get("headline"),
+                    "email": email,
+                    "email_status": email_status,
+                    "phone": _best_phone(person),
+                    "linkedin_url": person.get("linkedin_url"),
+                    "source": "apollo",
+                    "confidence": confidence,
+                }
             )
 
-            if resp.status_code != 200:
-                log.warning(
-                    f"Apollo search failed: {resp.status_code} {resp.text[:200]}"
-                )
-                return []
-
-            data = resp.json()
-            people = data.get("people", [])
-
-            contacts = []
-            for person in people[:limit]:
-                email = person.get("email")
-                email_status = person.get("email_status", "unavailable")
-
-                # Confidence based on email verification
-                if email and email_status == "verified":
-                    confidence = "high"
-                elif email:
-                    confidence = "medium"
-                else:
-                    confidence = "low"
-
-                contacts.append(
-                    {
-                        "full_name": _full_name(person),
-                        "title": person.get("title") or person.get("headline"),
-                        "email": email,
-                        "email_status": email_status,
-                        "phone": _best_phone(person),
-                        "linkedin_url": person.get("linkedin_url"),
-                        "source": "apollo",
-                        "confidence": confidence,
-                    }
-                )
-
-            return contacts
+        return contacts
 
     except Exception as e:
         log.warning(f"Apollo API error: {e}")
@@ -125,33 +124,33 @@ async def enrich_single_contact(email: str) -> dict | None:
         return None
 
     try:
-        async with httpx.AsyncClient(timeout=20) as client:
-            resp = await client.post(
-                f"{APOLLO_BASE}/people/match",
-                json={
-                    "api_key": api_key,
-                    "email": email,
-                },
-                headers={"Content-Type": "application/json"},
-            )
+        resp = await http.post(
+            f"{APOLLO_BASE}/people/match",
+            json={
+                "api_key": api_key,
+                "email": email,
+            },
+            headers={"Content-Type": "application/json"},
+            timeout=20,
+        )
 
-            if resp.status_code != 200:
-                return None
+        if resp.status_code != 200:
+            return None
 
-            person = resp.json().get("person")
-            if not person:
-                return None
+        person = resp.json().get("person")
+        if not person:
+            return None
 
-            return {
-                "full_name": _full_name(person),
-                "title": person.get("title"),
-                "email": person.get("email"),
-                "email_status": person.get("email_status"),
-                "phone": _best_phone(person),
-                "linkedin_url": person.get("linkedin_url"),
-                "company_name": person.get("organization", {}).get("name"),
-                "source": "apollo",
-            }
+        return {
+            "full_name": _full_name(person),
+            "title": person.get("title"),
+            "email": person.get("email"),
+            "email_status": person.get("email_status"),
+            "phone": _best_phone(person),
+            "linkedin_url": person.get("linkedin_url"),
+            "company_name": person.get("organization", {}).get("name"),
+            "source": "apollo",
+        }
 
     except Exception as e:
         log.warning(f"Apollo enrich error: {e}")

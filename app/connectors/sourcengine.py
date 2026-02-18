@@ -1,8 +1,8 @@
 """Sourcengine API connector — B2B electronic component marketplace."""
 
 import logging
-import httpx
 from .sources import BaseConnector
+from ..http_client import http
 from ..utils import safe_int, safe_float
 
 log = logging.getLogger(__name__)
@@ -32,10 +32,9 @@ class SourcengineConnector(BaseConnector):
             "limit": 30,
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout) as c:
-            r = await c.get(self.SEARCH_URL, headers=headers, params=params)
-            r.raise_for_status()
-            data = r.json()
+        r = await http.get(self.SEARCH_URL, headers=headers, params=params, timeout=self.timeout)
+        r.raise_for_status()
+        data = r.json()
 
         return self._parse(data, part_number)
 

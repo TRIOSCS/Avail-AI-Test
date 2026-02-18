@@ -1217,17 +1217,17 @@ async def upload_offer_attachment(
     drive_path = (
         f"/me/drive/root:/AvailAI/Offers/{offer.requisition_id}/{safe_name}:/content"
     )
-    import httpx
+    from ..http_client import http
 
-    async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.put(
-            f"https://graph.microsoft.com/v1.0{drive_path}",
-            content=content,
-            headers={
-                "Authorization": f"Bearer {user.access_token}",
-                "Content-Type": file.content_type or "application/octet-stream",
-            },
-        )
+    resp = await http.put(
+        f"https://graph.microsoft.com/v1.0{drive_path}",
+        content=content,
+        headers={
+            "Authorization": f"Bearer {user.access_token}",
+            "Content-Type": file.content_type or "application/octet-stream",
+        },
+        timeout=30,
+    )
     if resp.status_code not in (200, 201):
         logger.error(f"OneDrive upload failed: {resp.status_code} {resp.text[:300]}")
         raise HTTPException(502, "Failed to upload to OneDrive")
@@ -1308,13 +1308,13 @@ async def delete_offer_attachment(
 
         GraphClient(user.access_token)
         try:
-            import httpx
+            from ..http_client import http
 
-            async with httpx.AsyncClient(timeout=15) as client:
-                await client.delete(
-                    f"https://graph.microsoft.com/v1.0/me/drive/items/{att.onedrive_item_id}",
-                    headers={"Authorization": f"Bearer {user.access_token}"},
-                )
+            await http.delete(
+                f"https://graph.microsoft.com/v1.0/me/drive/items/{att.onedrive_item_id}",
+                headers={"Authorization": f"Bearer {user.access_token}"},
+                timeout=15,
+            )
         except Exception:
             logger.warning(f"Failed to delete OneDrive item {att.onedrive_item_id}")
     db.delete(att)

@@ -419,12 +419,8 @@ class TestBrokerBinConnector:
             ],
         }
 
-        with patch("httpx.AsyncClient") as MockClient:
-            mock_client = AsyncMock()
-            mock_client.get.return_value = mock_response
-            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-            mock_client.__aexit__ = AsyncMock(return_value=False)
-            MockClient.return_value = mock_client
+        with patch("app.http_client.http_redirect") as mock_client:
+            mock_client.get = AsyncMock(return_value=mock_response)
 
             results = await c._do_search("LM317T")
 

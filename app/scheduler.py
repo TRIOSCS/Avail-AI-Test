@@ -11,7 +11,7 @@ import base64
 import logging
 from datetime import datetime, timezone, timedelta
 
-import httpx
+from .http_client import http
 
 log = logging.getLogger(__name__)
 
@@ -98,29 +98,29 @@ async def _refresh_access_token(
     """
     token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        try:
-            r = await client.post(
-                token_url,
-                data={
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "refresh_token": refresh_token,
-                    "grant_type": "refresh_token",
-                    "scope": "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read Calendars.Read ChannelMessage.Send Team.ReadBasic.All",
-                },
-            )
+    try:
+        r = await http.post(
+            token_url,
+            data={
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "refresh_token": refresh_token,
+                "grant_type": "refresh_token",
+                "scope": "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read Calendars.Read ChannelMessage.Send Team.ReadBasic.All",
+            },
+            timeout=15,
+        )
 
-            if r.status_code != 200:
-                log.warning(f"Token refresh failed: {r.status_code} — {r.text[:200]}")
-                return None
-
-            tokens = r.json()
-            return (tokens.get("access_token"), tokens.get("refresh_token"))
-
-        except Exception as e:
-            log.warning(f"Token refresh error: {e}")
+        if r.status_code != 200:
+            log.warning(f"Token refresh failed: {r.status_code} — {r.text[:200]}")
             return None
+
+        tokens = r.json()
+        return (tokens.get("access_token"), tokens.get("refresh_token"))
+
+    except Exception as e:
+        log.warning(f"Token refresh error: {e}")
+        return None
 
 
 # ── Main Scheduler Loop ─────────────────────────────────────────────────

@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 
 import httpx
 from sqlalchemy import func
+
+from ..http_client import http_redirect
 from sqlalchemy.orm import Session
 
 from ..models import VendorCard, VendorContact
@@ -135,53 +137,52 @@ async def scrape_vendor_websites(
     vendors_scraped = 0
     emails_found = 0
 
-    async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=True) as client:
-        for card in vendors:
-            if not card.website:
+    for card in vendors:
+        if not card.website:
+            continue
+
+        try:
+            results = await _scrape_vendor(http_redirect, card.website)
+        except Exception as e:
+            log.debug("Scrape failed for %s: %s", card.website, e)
+            continue
+
+        vendors_scraped += 1
+
+        if not results:
+            continue
+
+        # Merge into VendorCard and create VendorContact records
+        new_emails = [r["email"] for r in results]
+        merge_emails_into_card(card, new_emails)
+
+        for r in results:
+            email = r["email"]
+            existing = (
+                db.query(VendorContact)
+                .filter_by(vendor_card_id=card.id, email=email)
+                .first()
+            )
+            if existing:
                 continue
 
+            vc = VendorContact(
+                vendor_card_id=card.id,
+                email=email,
+                source="website_scrape",
+                confidence=r["confidence"],
+                contact_type="company",
+            )
+            db.add(vc)
+            emails_found += 1
+
+        # Periodic commit (every 50 vendors)
+        if vendors_scraped % 50 == 0:
             try:
-                results = await _scrape_vendor(client, card.website)
+                db.commit()
             except Exception as e:
-                log.debug("Scrape failed for %s: %s", card.website, e)
-                continue
-
-            vendors_scraped += 1
-
-            if not results:
-                continue
-
-            # Merge into VendorCard and create VendorContact records
-            new_emails = [r["email"] for r in results]
-            merge_emails_into_card(card, new_emails)
-
-            for r in results:
-                email = r["email"]
-                existing = (
-                    db.query(VendorContact)
-                    .filter_by(vendor_card_id=card.id, email=email)
-                    .first()
-                )
-                if existing:
-                    continue
-
-                vc = VendorContact(
-                    vendor_card_id=card.id,
-                    email=email,
-                    source="website_scrape",
-                    confidence=r["confidence"],
-                    contact_type="company",
-                )
-                db.add(vc)
-                emails_found += 1
-
-            # Periodic commit (every 50 vendors)
-            if vendors_scraped % 50 == 0:
-                try:
-                    db.commit()
-                except Exception as e:
-                    log.warning("Website scraper periodic commit failed: %s", e)
-                    db.rollback()
+                log.warning("Website scraper periodic commit failed: %s", e)
+                db.rollback()
 
     try:
         db.commit()

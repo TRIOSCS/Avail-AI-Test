@@ -2,7 +2,6 @@
 
 import logging
 import asyncio
-import httpx
 from abc import ABC, abstractmethod
 from urllib.parse import quote_plus
 from ..utils import safe_int, safe_float
@@ -68,43 +67,48 @@ class NexarConnector(BaseConnector):
     async def _get_token(self) -> str:
         if self._token:
             return self._token
-        async with httpx.AsyncClient(timeout=15) as c:
-            r = await c.post(
-                self.TOKEN_URL,
-                data={
-                    "grant_type": "client_credentials",
-                    "client_id": self.client_id,
-                    "client_secret": self.client_secret,
-                },
-            )
-            r.raise_for_status()
-            self._token = r.json()["access_token"]
-            return self._token
+        from ..http_client import http
+
+        r = await http.post(
+            self.TOKEN_URL,
+            data={
+                "grant_type": "client_credentials",
+                "client_id": self.client_id,
+                "client_secret": self.client_secret,
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        self._token = r.json()["access_token"]
+        return self._token
 
     async def _run_query(self, query: str, part_number: str) -> dict:
+        from ..http_client import http
+
         token = await self._get_token()
-        async with httpx.AsyncClient(timeout=self.timeout) as c:
-            r = await c.post(
+        r = await http.post(
+            self.API_URL,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json",
+            },
+            json={"query": query, "variables": {"mpn": part_number}},
+            timeout=self.timeout,
+        )
+        if r.status_code == 401:
+            self._token = None
+            token = await self._get_token()
+            r = await http.post(
                 self.API_URL,
                 headers={
                     "Authorization": f"Bearer {token}",
                     "Content-Type": "application/json",
                 },
                 json={"query": query, "variables": {"mpn": part_number}},
+                timeout=self.timeout,
             )
-            if r.status_code == 401:
-                self._token = None
-                token = await self._get_token()
-                r = await c.post(
-                    self.API_URL,
-                    headers={
-                        "Authorization": f"Bearer {token}",
-                        "Content-Type": "application/json",
-                    },
-                    json={"query": query, "variables": {"mpn": part_number}},
-                )
-            r.raise_for_status()
-            return r.json()
+        r.raise_for_status()
+        return r.json()
 
     async def _do_search(self, part_number: str) -> list[dict]:
         if not self.client_id:
@@ -259,20 +263,21 @@ class BrokerBinConnector(BaseConnector):
             "size": "100",
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as c:
-            r = await c.get(self.API_URL, params=params, headers=headers)
+        from ..http_client import http_redirect
 
-            if r.status_code != 200:
-                log.warning(
-                    f"BrokerBin: HTTP {r.status_code} for {part_number}: {r.text[:200]}"
-                )
-                return []
+        r = await http_redirect.get(self.API_URL, params=params, headers=headers, timeout=self.timeout)
 
-            try:
-                body = r.json()
-            except Exception:
-                log.warning(f"BrokerBin: non-JSON response for {part_number}")
-                return []
+        if r.status_code != 200:
+            log.warning(
+                f"BrokerBin: HTTP {r.status_code} for {part_number}: {r.text[:200]}"
+            )
+            return []
+
+        try:
+            body = r.json()
+        except Exception:
+            log.warning(f"BrokerBin: non-JSON response for {part_number}")
+            return []
 
         items = body.get("data", [])
         if not isinstance(items, list):

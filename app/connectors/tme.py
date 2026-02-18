@@ -13,8 +13,8 @@ import hmac
 import logging
 import urllib.parse
 
-import httpx
 from .sources import BaseConnector
+from ..http_client import http
 from ..utils import safe_int, safe_float
 
 log = logging.getLogger(__name__)
@@ -61,14 +61,14 @@ class TMEConnector(BaseConnector):
         }
         signed = self._sign(self.SEARCH_URL, search_params)
 
-        async with httpx.AsyncClient(timeout=self.timeout) as c:
-            r = await c.post(
-                self.SEARCH_URL,
-                data=signed,
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
-            r.raise_for_status()
-            data = r.json()
+        r = await http.post(
+            self.SEARCH_URL,
+            data=signed,
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=self.timeout,
+        )
+        r.raise_for_status()
+        data = r.json()
 
         products = (data.get("Data") or {}).get("ProductList", [])
         if not products:
@@ -92,14 +92,14 @@ class TMEConnector(BaseConnector):
         signed = self._sign(self.PRICES_URL, params)
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as c:
-                r = await c.post(
-                    self.PRICES_URL,
-                    data=signed,
-                    headers={"Content-Type": "application/x-www-form-urlencoded"},
-                )
-                r.raise_for_status()
-                data = r.json()
+            r = await http.post(
+                self.PRICES_URL,
+                data=signed,
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=self.timeout,
+            )
+            r.raise_for_status()
+            data = r.json()
         except Exception as e:
             log.warning(f"TME price fetch failed: {e}")
             return {}

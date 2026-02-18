@@ -129,29 +129,29 @@ class _AnthropicTestConnector:
     """Test Anthropic API key with a lightweight messages call."""
 
     async def search(self, mpn: str) -> list[dict]:
-        import httpx
+        from ..http_client import http
 
         api_key = get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
         if not api_key:
             raise ValueError("ANTHROPIC_API_KEY not configured")
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                "https://api.anthropic.com/v1/messages",
-                headers={
-                    "x-api-key": api_key,
-                    "anthropic-version": "2023-06-01",
-                    "content-type": "application/json",
-                },
-                json={
-                    "model": "claude-haiku-4-5-20251001",
-                    "max_tokens": 32,
-                    "messages": [{"role": "user", "content": "Reply with only: OK"}],
-                },
-            )
-            if resp.status_code != 200:
-                raise ValueError(f"Anthropic API returned {resp.status_code}: {resp.text[:200]}")
-            model = resp.json().get("model", "unknown")
-            return [{"vendor_name": "Anthropic AI", "mpn_matched": f"Connected — model: {model}", "status": "ok"}]
+        resp = await http.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 32,
+                "messages": [{"role": "user", "content": "Reply with only: OK"}],
+            },
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            raise ValueError(f"Anthropic API returned {resp.status_code}: {resp.text[:200]}")
+        model = resp.json().get("model", "unknown")
+        return [{"vendor_name": "Anthropic AI", "mpn_matched": f"Connected — model: {model}", "status": "ok"}]
 
 
 class _AcctivateTestConnector:
@@ -184,114 +184,113 @@ class _TeamsTestConnector:
     """Test Teams webhook by posting a test adaptive card."""
 
     async def search(self, mpn: str) -> list[dict]:
-        import httpx
+        from ..http_client import http
 
         webhook_url = get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL")
         if not webhook_url:
             raise ValueError("TEAMS_WEBHOOK_URL not configured")
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                webhook_url,
-                json={
-                    "type": "message",
-                    "attachments": [{
-                        "contentType": "application/vnd.microsoft.card.adaptive",
-                        "content": {
-                            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                            "type": "AdaptiveCard",
-                            "version": "1.4",
-                            "body": [{"type": "TextBlock", "text": "AVAIL connection test — OK", "wrap": True}],
-                        },
-                    }],
-                },
-            )
-            if resp.status_code not in (200, 202):
-                raise ValueError(f"Teams webhook returned {resp.status_code}: {resp.text[:200]}")
-            return [{"vendor_name": "Teams", "mpn_matched": "Message posted", "status": "ok"}]
+        resp = await http.post(
+            webhook_url,
+            json={
+                "type": "message",
+                "attachments": [{
+                    "contentType": "application/vnd.microsoft.card.adaptive",
+                    "content": {
+                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                        "type": "AdaptiveCard",
+                        "version": "1.4",
+                        "body": [{"type": "TextBlock", "text": "AVAIL connection test — OK", "wrap": True}],
+                    },
+                }],
+            },
+            timeout=15,
+        )
+        if resp.status_code not in (200, 202):
+            raise ValueError(f"Teams webhook returned {resp.status_code}: {resp.text[:200]}")
+        return [{"vendor_name": "Teams", "mpn_matched": "Message posted", "status": "ok"}]
 
 
 class _ApolloTestConnector:
     """Test Apollo API key with a search query."""
 
     async def search(self, mpn: str) -> list[dict]:
-        import httpx
+        from ..http_client import http
 
         api_key = get_credential_cached("apollo_enrichment", "APOLLO_API_KEY")
         if not api_key:
             raise ValueError("APOLLO_API_KEY not configured")
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                "https://api.apollo.io/v1/mixed_people/search",
-                headers={"Content-Type": "application/json"},
-                json={"api_key": api_key, "q_organization_domains": ["anthropic.com"], "page": 1, "per_page": 1},
-            )
-            if resp.status_code != 200:
-                raise ValueError(f"Apollo API returned {resp.status_code}: {resp.text[:200]}")
-            count = len(resp.json().get("people", []))
-            return [{"vendor_name": "Apollo", "mpn_matched": f"Search OK — {count} result(s)", "status": "ok"}]
+        resp = await http.post(
+            "https://api.apollo.io/v1/mixed_people/search",
+            headers={"Content-Type": "application/json"},
+            json={"api_key": api_key, "q_organization_domains": ["anthropic.com"], "page": 1, "per_page": 1},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            raise ValueError(f"Apollo API returned {resp.status_code}: {resp.text[:200]}")
+        count = len(resp.json().get("people", []))
+        return [{"vendor_name": "Apollo", "mpn_matched": f"Search OK — {count} result(s)", "status": "ok"}]
 
 
 class _ClayTestConnector:
     """Test Clay API key with a company enrichment call."""
 
     async def search(self, mpn: str) -> list[dict]:
-        import httpx
+        from ..http_client import http
 
         api_key = get_credential_cached("clay_enrichment", "CLAY_API_KEY")
         if not api_key:
             raise ValueError("CLAY_API_KEY not configured")
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                "https://api.clay.com/v3/sources/enrich-company",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"domain": "anthropic.com"},
-            )
-            if resp.status_code != 200:
-                raise ValueError(f"Clay API returned {resp.status_code}: {resp.text[:200]}")
-            name = resp.json().get("name", "Unknown")
-            return [{"vendor_name": "Clay", "mpn_matched": f"Enriched: {name}", "status": "ok"}]
+        resp = await http.post(
+            "https://api.clay.com/v3/sources/enrich-company",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"domain": "anthropic.com"},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            raise ValueError(f"Clay API returned {resp.status_code}: {resp.text[:200]}")
+        name = resp.json().get("name", "Unknown")
+        return [{"vendor_name": "Clay", "mpn_matched": f"Enriched: {name}", "status": "ok"}]
 
 
 class _ExploriumTestConnector:
     """Test Explorium API key with a business match call."""
 
     async def search(self, mpn: str) -> list[dict]:
-        import httpx
+        from ..http_client import http
 
         api_key = get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
         if not api_key:
             raise ValueError("EXPLORIUM_API_KEY not configured")
-        async with httpx.AsyncClient(timeout=15) as client:
-            resp = await client.post(
-                "https://api.explorium.ai/v1/match/business",
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json={"domain": "anthropic.com"},
-            )
-            if resp.status_code != 200:
-                raise ValueError(f"Explorium API returned {resp.status_code}: {resp.text[:200]}")
-            data = resp.json()
-            name = data.get("firmo_name", data.get("name", "matched"))
-            return [{"vendor_name": "Explorium", "mpn_matched": f"Match: {name}", "status": "ok"}]
+        resp = await http.post(
+            "https://api.explorium.ai/v1/match/business",
+            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            json={"domain": "anthropic.com"},
+            timeout=15,
+        )
+        if resp.status_code != 200:
+            raise ValueError(f"Explorium API returned {resp.status_code}: {resp.text[:200]}")
+        data = resp.json()
+        name = data.get("firmo_name", data.get("name", "matched"))
+        return [{"vendor_name": "Explorium", "mpn_matched": f"Match: {name}", "status": "ok"}]
 
 
 class _AzureOAuthTestConnector:
     """Test Azure tenant by fetching OpenID configuration."""
 
     async def search(self, mpn: str) -> list[dict]:
-        import httpx
+        from ..http_client import http
 
         tenant_id = settings.azure_tenant_id
         if not tenant_id:
             raise ValueError("AZURE_TENANT_ID not configured")
         url = f"https://login.microsoftonline.com/{tenant_id}/v2.0/.well-known/openid-configuration"
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(url)
-            if resp.status_code != 200:
-                raise ValueError(f"Azure OpenID discovery returned {resp.status_code}")
-            issuer = resp.json().get("issuer", "")
-            if tenant_id not in issuer:
-                raise ValueError(f"Tenant mismatch in issuer: {issuer}")
-            return [{"vendor_name": "Azure OAuth", "mpn_matched": "Tenant verified", "status": "ok"}]
+        resp = await http.get(url, timeout=10)
+        if resp.status_code != 200:
+            raise ValueError(f"Azure OpenID discovery returned {resp.status_code}")
+        issuer = resp.json().get("issuer", "")
+        if tenant_id not in issuer:
+            raise ValueError(f"Tenant mismatch in issuer: {issuer}")
+        return [{"vendor_name": "Azure OAuth", "mpn_matched": "Tenant verified", "status": "ok"}]
 
 
 def _create_sightings_from_attachment(
