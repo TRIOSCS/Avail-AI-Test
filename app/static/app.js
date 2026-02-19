@@ -291,8 +291,6 @@ function applyRoleGating() {
         if (myReqsDiv) myReqsDiv.style.display = 'none';
     }
     // Settings nav visible to admin and dev_assistant
-    const settingsMenu = document.getElementById('settingsMenu');
-    if (settingsMenu && (window.__isAdmin || window.__isDevAssistant)) settingsMenu.style.display = '';
     const navSettings = document.getElementById('navSettings');
     if (navSettings && (window.__isAdmin || window.__isDevAssistant)) navSettings.style.display = '';
     // Dev assistants: hide Users/Scoring/Create User/Data Import tabs

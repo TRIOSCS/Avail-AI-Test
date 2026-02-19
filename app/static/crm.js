@@ -3473,24 +3473,11 @@ function renderSalespersonScorecard(data) {
     el.innerHTML = html;
 }
 
-function toggleSettingsDropdown() {
-    const dd = document.getElementById('settingsDropdownContent');
-    dd.style.display = dd.style.display === 'block' ? 'none' : 'block';
-}
-
-// Close dropdown when clicking outside
-document.addEventListener('click', function(e) {
-    const menu = document.getElementById('settingsMenu');
-    if (menu && !menu.contains(e.target)) {
-        const dd = document.getElementById('settingsDropdownContent');
-        if (dd) dd.style.display = 'none';
-    }
-});
-
 function openSettingsTab(panel) {
-    document.getElementById('settingsDropdownContent').style.display = 'none';
     showView('view-settings');
-    document.querySelectorAll('.topbar-nav button').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
+    const navBtn = document.getElementById('navSettings');
+    if (navBtn) navBtn.classList.add('active');
     // Dev assistant defaults to sources tab (Users tab is hidden for them)
     if (!panel && window.__isDevAssistant && !window.__isAdmin) {
         panel = 'sources';
