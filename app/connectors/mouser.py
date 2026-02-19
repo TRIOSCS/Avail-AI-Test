@@ -40,11 +40,16 @@ class MouserConnector(BaseConnector):
         r.raise_for_status()
         data = r.json()
 
+        # Log Mouser API errors (returned in body even on 200)
+        errors = data.get("Errors") or []
+        if errors:
+            log.warning(f"Mouser API errors for {part_number}: {errors}")
+
         return self._parse(data, part_number)
 
     def _parse(self, data: dict, pn: str) -> list[dict]:
-        search_results = data.get("SearchResults", {})
-        parts = search_results.get("Parts", [])
+        search_results = data.get("SearchResults") or {}
+        parts = search_results.get("Parts") or []
         results = []
 
         for part in parts:

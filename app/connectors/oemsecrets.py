@@ -33,8 +33,15 @@ class OEMSecretsConnector(BaseConnector):
         }
 
         r = await http.get(self.SEARCH_URL, params=params, timeout=self.timeout)
-        r.raise_for_status()
-        data = r.json()
+        if r.status_code != 200:
+            log.warning(f"OEMSecrets: HTTP {r.status_code} for {part_number}: {r.text[:200]}")
+            r.raise_for_status()
+
+        try:
+            data = r.json()
+        except Exception:
+            log.warning(f"OEMSecrets: non-JSON response for {part_number}: {r.text[:200]}")
+            return []
 
         return self._parse(data, part_number)
 

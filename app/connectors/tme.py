@@ -32,21 +32,21 @@ class TMEConnector(BaseConnector):
         self.secret = secret
 
     def _sign(self, url: str, params: dict) -> dict:
-        """Sign a TME API request with HMAC-SHA256."""
+        """Sign a TME API request with HMAC-SHA1 (per TME docs)."""
         params = dict(params)
         params["Token"] = self.token
         sorted_params = sorted(params.items())
         encoded = urllib.parse.urlencode(sorted_params)
         base_string = (
-            f"POST&{urllib.parse.quote(url, safe='')}"
-            f"&{urllib.parse.quote(encoded, safe='')}"
+            "POST&" + urllib.parse.quote(url, safe="")
+            + "&" + urllib.parse.quote(encoded, safe="")
         )
         signature = hmac.new(
             self.secret.encode(),
             base_string.encode(),
-            hashlib.sha256,
+            hashlib.sha1,
         ).digest()
-        params["ApiSignature"] = base64.b64encode(signature).decode()
+        params["ApiSignature"] = base64.b64encode(signature).decode().rstrip()
         return params
 
     async def _do_search(self, part_number: str) -> list[dict]:

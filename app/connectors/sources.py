@@ -58,6 +58,20 @@ class NexarConnector(BaseConnector):
       }
     }"""
 
+    # Fallback query when API key lacks 'sellers' access
+    BASIC_QUERY = """
+    query ($mpn: String!) {
+      supSearchMpn(q: $mpn, limit: 20) {
+        results { part {
+          mpn
+          manufacturer { name }
+          shortDescription
+          bestDatasheet { url }
+          medianPrice1000 { price currency }
+        }}
+      }
+    }"""
+
     def __init__(self, client_id: str, client_secret: str):
         super().__init__()
         self.client_id = client_id
@@ -117,9 +131,16 @@ class NexarConnector(BaseConnector):
         data = await self._run_query(self.FULL_QUERY, part_number)
         errors = data.get("errors", [])
         if errors:
-            log.warning(
-                f"Nexar query error for {part_number}: {errors[0].get('message', '')[:120]}"
-            )
+            msg = errors[0].get("message", "")
+            log.warning(f"Nexar query error for {part_number}: {msg[:120]}")
+            # Fall back to basic query if sellers field is not authorized
+            if "not authorized" in msg.lower() and "sellers" in msg.lower():
+                log.info(f"Nexar: retrying {part_number} with basic query (no sellers)")
+                data = await self._run_query(self.BASIC_QUERY, part_number)
+                results_data = (
+                    (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
+                )
+                return self._parse_basic(results_data, part_number) if results_data else []
 
         results_data = (
             (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
@@ -225,6 +246,39 @@ class NexarConnector(BaseConnector):
                     )
 
         log.info(f"Nexar: {pn} -> {len(results)} seller results")
+        return results
+
+    def _parse_basic(self, results_data: list, pn: str) -> list[dict]:
+        """Parse basic Nexar results (no seller data)."""
+        results = []
+        octopart_url = f"https://octopart.com/search?q={quote_plus(pn)}"
+
+        for hit in results_data:
+            part = hit.get("part") or {}
+            mpn = part.get("mpn", pn)
+            mfr = (part.get("manufacturer") or {}).get("name", "")
+            desc = part.get("shortDescription", "")
+            median = part.get("medianPrice1000") or {}
+            price = median.get("price")
+            currency = median.get("currency", "USD")
+            datasheet = (part.get("bestDatasheet") or {}).get("url", "")
+
+            results.append({
+                "vendor_name": "Octopart (reference)",
+                "manufacturer": mfr,
+                "mpn_matched": mpn,
+                "qty_available": None,
+                "unit_price": round(float(price), 4) if price else None,
+                "currency": currency,
+                "source_type": "octopart",
+                "is_authorized": False,
+                "confidence": 2,
+                "octopart_url": octopart_url,
+                "description": desc,
+                "datasheet_url": datasheet,
+            })
+
+        log.info(f"Nexar: {pn} -> {len(results)} basic results (no seller data)")
         return results
 
 
