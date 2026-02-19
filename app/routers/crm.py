@@ -45,6 +45,12 @@ from ..models import (
     VendorContact,
 )
 from ..vendor_utils import normalize_vendor_name
+from ..utils.normalization import (
+    normalize_mpn,
+    normalize_mpn_key,
+    normalize_condition,
+    normalize_packaging,
+)
 from ..schemas.crm import (
     AddContactsToVendor,
     AddContactToSite,
@@ -2702,15 +2708,28 @@ async def clone_requisition(
     db.add(new_req)
     db.flush()
     for r in req.requirements:
+        cloned_mpn = normalize_mpn(r.primary_mpn) or r.primary_mpn
+        # Dedup substitutes by canonical key
+        seen_keys = {normalize_mpn_key(cloned_mpn)}
+        deduped_subs = []
+        for s in (r.substitutes or []):
+            ns = normalize_mpn(s) or s
+            key = normalize_mpn_key(ns)
+            if key and key not in seen_keys:
+                seen_keys.add(key)
+                deduped_subs.append(ns)
         new_r = Requirement(
             requisition_id=new_req.id,
-            primary_mpn=r.primary_mpn,
+            primary_mpn=cloned_mpn,
+            normalized_mpn=normalize_mpn_key(cloned_mpn),
             oem_pn=r.oem_pn,
             brand=r.brand,
             sku=r.sku,
             target_qty=r.target_qty,
             target_price=r.target_price,
-            substitutes=r.substitutes,
+            substitutes=deduped_subs[:20],
+            condition=normalize_condition(r.condition) or r.condition,
+            packaging=normalize_packaging(r.packaging) or r.packaging,
             notes=r.notes,
         )
         db.add(new_r)

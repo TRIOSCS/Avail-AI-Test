@@ -299,7 +299,17 @@ def _create_sightings_from_attachment(
     rows: list[dict],
 ) -> int:
     """Create Sighting records from parsed attachment rows, matching to Requirements."""
-    from ..utils.normalization import fuzzy_mpn_match
+    from ..utils.normalization import (
+        fuzzy_mpn_match,
+        normalize_mpn,
+        normalize_quantity,
+        normalize_price,
+        normalize_condition,
+        normalize_packaging,
+        normalize_date_code,
+        normalize_lead_time,
+        detect_currency,
+    )
 
     reqs = db.query(Requirement).filter_by(requisition_id=vr.requisition_id).all()
     if not reqs:
@@ -344,17 +354,17 @@ def _create_sightings_from_attachment(
             requirement_id=matched_req.id,
             vendor_name=vr.vendor_name or "",
             vendor_email=vr.vendor_email,
-            mpn_matched=mpn,
+            mpn_matched=normalize_mpn(mpn) or mpn,
             manufacturer=row.get("manufacturer", ""),
-            qty_available=row.get("qty"),
-            unit_price=row.get("unit_price"),
-            currency=row.get("currency", "USD"),
-            moq=row.get("moq"),
+            qty_available=normalize_quantity(row.get("qty")),
+            unit_price=normalize_price(row.get("unit_price")),
+            currency=detect_currency(row.get("currency") or row.get("unit_price")),
+            moq=normalize_quantity(row.get("moq")),
             source_type="email_attachment",
-            condition=row.get("condition"),
-            date_code=row.get("date_code"),
-            packaging=row.get("packaging"),
-            lead_time_days=row.get("lead_time_days"),
+            condition=normalize_condition(row.get("condition")),
+            date_code=normalize_date_code(row.get("date_code")),
+            packaging=normalize_packaging(row.get("packaging")),
+            lead_time_days=normalize_lead_time(row.get("lead_time")),
             lead_time=row.get("lead_time"),
             confidence=0.7,
             raw_data=row,

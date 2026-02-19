@@ -437,11 +437,14 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
     for item in po.line_items or []:
         # Create a requirement
         from ..models import Requirement
+        from ..utils.normalization import normalize_mpn, normalize_mpn_key, normalize_quantity
 
+        norm_mpn = normalize_mpn(item["mpn"]) or item["mpn"]
         requirement = Requirement(
             requisition_id=req.id,
-            primary_mpn=item["mpn"],
-            target_qty=item.get("qty", 0),
+            primary_mpn=norm_mpn,
+            normalized_mpn=normalize_mpn_key(norm_mpn),
+            target_qty=normalize_quantity(item.get("qty")) or item.get("qty", 0),
         )
         db.add(requirement)
         db.flush()

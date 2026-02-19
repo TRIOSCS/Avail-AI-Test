@@ -298,18 +298,28 @@ async def clone_requisition(
     db.add(clone)
     db.flush()  # get clone.id
     for r in src.requirements:
+        # Re-normalize cloned data and dedup substitutes
+        cloned_mpn = normalize_mpn(r.primary_mpn) or r.primary_mpn
+        seen_keys = {normalize_mpn_key(cloned_mpn)}
+        deduped_subs = []
+        for s in (r.substitutes or []):
+            ns = normalize_mpn(s) or s
+            key = normalize_mpn_key(ns)
+            if key and key not in seen_keys:
+                seen_keys.add(key)
+                deduped_subs.append(ns)
         db.add(Requirement(
             requisition_id=clone.id,
-            primary_mpn=r.primary_mpn,
-            normalized_mpn=normalize_mpn_key(r.primary_mpn),
+            primary_mpn=cloned_mpn,
+            normalized_mpn=normalize_mpn_key(cloned_mpn),
             target_qty=r.target_qty,
             target_price=r.target_price,
-            substitutes=r.substitutes[:20] if r.substitutes else [],
+            substitutes=deduped_subs[:20],
             firmware=r.firmware,
             date_codes=r.date_codes,
             hardware_codes=r.hardware_codes,
-            packaging=r.packaging,
-            condition=r.condition,
+            packaging=normalize_packaging(r.packaging) or r.packaging,
+            condition=normalize_condition(r.condition) or r.condition,
             notes=r.notes,
         ))
     db.commit()
@@ -405,13 +415,21 @@ async def add_requirements(
             parsed = RequirementCreate.model_validate(item)
         except Exception:
             continue  # skip invalid items (matches prior behaviour of skipping blank mpn)
+        # Dedup substitutes by canonical key (schema already normalizes display form)
+        seen_keys = {normalize_mpn_key(parsed.primary_mpn)}
+        deduped_subs = []
+        for s in parsed.substitutes:
+            key = normalize_mpn_key(s)
+            if key and key not in seen_keys:
+                seen_keys.add(key)
+                deduped_subs.append(s)
         r = Requirement(
             requisition_id=req_id,
             primary_mpn=parsed.primary_mpn,
             normalized_mpn=normalize_mpn_key(parsed.primary_mpn),
             target_qty=parsed.target_qty,
             target_price=parsed.target_price,
-            substitutes=parsed.substitutes[:20],
+            substitutes=deduped_subs[:20],
         )
         db.add(r)
         created.append(r)
