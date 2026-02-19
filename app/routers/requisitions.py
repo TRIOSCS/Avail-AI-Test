@@ -38,6 +38,7 @@ from ..search_service import (
     _get_material_history,
     _history_to_result,
 )
+from ..utils.normalization import normalize_mpn_key
 from .rfq import _enrich_with_vendor_cards
 from ..models import (
     Contact,
@@ -292,6 +293,7 @@ async def clone_requisition(
         db.add(Requirement(
             requisition_id=clone.id,
             primary_mpn=r.primary_mpn,
+            normalized_mpn=normalize_mpn_key(r.primary_mpn),
             target_qty=r.target_qty,
             target_price=r.target_price,
             substitutes=r.substitutes[:20] if r.substitutes else [],
@@ -398,6 +400,7 @@ async def add_requirements(
         r = Requirement(
             requisition_id=req_id,
             primary_mpn=parsed.primary_mpn,
+            normalized_mpn=normalize_mpn_key(parsed.primary_mpn),
             target_qty=parsed.target_qty,
             target_price=parsed.target_price,
             substitutes=parsed.substitutes[:20],
@@ -480,6 +483,7 @@ async def upload_requirements(
         r = Requirement(
             requisition_id=req_id,
             primary_mpn=mpn,
+            normalized_mpn=normalize_mpn_key(mpn),
             target_qty=int(qty) if qty.isdigit() else 1,
             substitutes=subs[:20],
         )
@@ -519,6 +523,7 @@ async def update_requirement(
         raise HTTPException(403)
     if data.primary_mpn is not None:
         r.primary_mpn = data.primary_mpn.strip()
+        r.normalized_mpn = normalize_mpn_key(data.primary_mpn)
     if data.target_qty is not None:
         r.target_qty = data.target_qty
     if data.substitutes is not None:
@@ -702,15 +707,15 @@ async def import_stock_list(
 
     rows = parse_tabular_file(content, fname)
 
-    # Build a set of MPNs we're looking for in this requisition
+    # Build a set of MPNs we're looking for in this requisition (keyed by canonical form)
     req_mpns = {}
     for r in req.requirements:
-        all_mpns = [r.primary_mpn.strip().lower()] if r.primary_mpn else []
+        all_mpns = [r.primary_mpn] if r.primary_mpn else []
         for sub in r.substitutes or []:
             if sub and sub.strip():
-                all_mpns.append(sub.strip().lower())
-        for mpn in all_mpns:
-            req_mpns[mpn] = r
+                all_mpns.append(sub.strip())
+        for m in all_mpns:
+            req_mpns[normalize_mpn_key(m)] = r
 
     matched = 0
     imported = 0
@@ -732,7 +737,7 @@ async def import_stock_list(
         imported += 1
 
         # Check if this MPN matches any requirement
-        r = req_mpns.get(mpn.lower())
+        r = req_mpns.get(normalize_mpn_key(mpn))
         if not r:
             continue
 

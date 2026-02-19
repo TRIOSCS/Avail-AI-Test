@@ -38,6 +38,8 @@ def run_startup_migrations() -> None:
         _create_performance_tables(conn)
         _create_admin_settings_tables(conn)
         _create_deep_enrichment_tables(conn)
+        _add_normalized_mpn_column(conn)
+    _backfill_normalized_mpn()
     log.info("Startup migrations complete")
 
 
@@ -668,3 +670,68 @@ def _create_deep_enrichment_tables(conn) -> None:
     for stmt in indexes:
         _exec(conn, stmt)
     conn.commit()
+
+
+def _add_normalized_mpn_column(conn) -> None:
+    """Add normalized_mpn column to requirements table."""
+    _exec(conn, "ALTER TABLE requirements ADD COLUMN IF NOT EXISTS normalized_mpn VARCHAR(255)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_requirements_normalized_mpn ON requirements(normalized_mpn)")
+
+
+def _backfill_normalized_mpn() -> None:
+    """One-time backfill: populate requirements.normalized_mpn and re-normalize material_cards.normalized_mpn."""
+    import re
+    _nonalnum = re.compile(r"[^a-z0-9]")
+
+    def _key(raw):
+        if not raw:
+            return ""
+        return _nonalnum.sub("", str(raw).strip().lower())
+
+    with engine.connect() as conn:
+        # 1. Backfill requirements.normalized_mpn where NULL
+        try:
+            rows = conn.execute(
+                sqltext("SELECT id, primary_mpn FROM requirements WHERE normalized_mpn IS NULL AND primary_mpn IS NOT NULL")
+            ).fetchall()
+            if rows:
+                for r in rows:
+                    nk = _key(r[1])
+                    if nk:
+                        conn.execute(
+                            sqltext("UPDATE requirements SET normalized_mpn = :nk WHERE id = :id"),
+                            {"nk": nk, "id": r[0]},
+                        )
+                conn.commit()
+                log.info("Backfilled normalized_mpn on %d requirements", len(rows))
+        except Exception as e:
+            log.warning("Backfill requirements.normalized_mpn failed: %s", e)
+            conn.rollback()
+
+        # 2. Re-normalize material_cards.normalized_mpn (strip non-alnum, lowercase)
+        try:
+            cards = conn.execute(
+                sqltext("SELECT id, normalized_mpn, display_mpn FROM material_cards")
+            ).fetchall()
+            updated = 0
+            for c in cards:
+                old_norm = c[1]
+                new_norm = _key(c[2] or c[1])
+                if new_norm and new_norm != old_norm:
+                    # Only update if no collision
+                    existing = conn.execute(
+                        sqltext("SELECT id FROM material_cards WHERE normalized_mpn = :n AND id != :id"),
+                        {"n": new_norm, "id": c[0]},
+                    ).fetchone()
+                    if not existing:
+                        conn.execute(
+                            sqltext("UPDATE material_cards SET normalized_mpn = :n WHERE id = :id"),
+                            {"n": new_norm, "id": c[0]},
+                        )
+                        updated += 1
+            if updated:
+                conn.commit()
+                log.info("Re-normalized %d material_cards.normalized_mpn values", updated)
+        except Exception as e:
+            log.warning("Re-normalize material_cards failed: %s", e)
+            conn.rollback()

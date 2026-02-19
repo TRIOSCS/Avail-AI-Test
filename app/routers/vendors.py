@@ -58,7 +58,7 @@ from ..models import (
     Company,
 )
 from ..vendor_utils import normalize_vendor_name
-from ..search_service import normalize_mpn_lower as normalize_mpn
+from ..utils.normalization import normalize_mpn_key
 
 log = logging.getLogger(__name__)
 
@@ -1249,7 +1249,7 @@ async def get_material_by_mpn(
     mpn: str, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     """Look up a material card by MPN."""
-    norm = normalize_mpn(mpn)
+    norm = normalize_mpn_key(mpn)
     card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
     if not card:
         raise HTTPException(404, "No material card found for this MPN")
@@ -1353,7 +1353,7 @@ async def import_stock_list_standalone(
             skipped += 1
             continue
 
-        norm = normalize_mpn(parsed["mpn"])
+        norm = normalize_mpn_key(parsed["mpn"])
         if not norm:
             skipped += 1
             continue

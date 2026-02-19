@@ -315,7 +315,10 @@ def normalize_packaging(raw: Any) -> str | None:
 
 
 def normalize_mpn(raw: Any) -> str | None:
-    """Normalize MPN: uppercase, strip whitespace, remove common noise."""
+    """Normalize MPN: uppercase, strip whitespace, remove common noise.
+
+    Use for DISPLAY — keeps dashes (e.g. "LM2596S-5.0" → "LM2596S-5.0").
+    """
     if not raw:
         return None
     s = str(raw).strip().upper()
@@ -327,6 +330,21 @@ def normalize_mpn(raw: Any) -> str | None:
     if len(s) < 3:
         return None
     return s
+
+
+_NONALNUM_RE = re.compile(r"[^a-z0-9]")
+
+
+def normalize_mpn_key(raw: Any) -> str:
+    """Canonical dedup key: strip ALL non-alphanumeric chars and lowercase.
+
+    "LM2596S-5.0" → "lm2596s50"
+    "LM2596S 5.0" → "lm2596s50"
+    " lm-317t "   → "lm317t"
+    """
+    if not raw:
+        return ""
+    return _NONALNUM_RE.sub("", str(raw).strip().lower())
 
 
 def fuzzy_mpn_match(mpn_a: str | None, mpn_b: str | None) -> bool:
@@ -345,9 +363,9 @@ def fuzzy_mpn_match(mpn_a: str | None, mpn_b: str | None) -> bool:
     if a == b:
         return True
 
-    # Strip dashes and compare
-    a_stripped = a.replace("-", "").replace("/", "")
-    b_stripped = b.replace("-", "").replace("/", "")
+    # Strip to canonical key and compare
+    a_stripped = normalize_mpn_key(a)
+    b_stripped = normalize_mpn_key(b)
     if a_stripped == b_stripped:
         return True
 

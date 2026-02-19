@@ -20,7 +20,7 @@ from .models import (
     ApiSource,
 )
 from .scoring import score_sighting
-from .utils.normalization import normalize_mpn
+from .utils.normalization import normalize_mpn, normalize_mpn_key
 from .utils.normalization_helpers import fix_encoding
 from .connectors.sources import NexarConnector, BrokerBinConnector
 from .connectors.ebay import EbayConnector
@@ -47,21 +47,28 @@ _CONNECTOR_SOURCE_MAP = {
 log = logging.getLogger(__name__)
 
 
-def normalize_mpn_lower(mpn: str) -> str:
-    if not mpn:
-        return ""
-    return mpn.strip().lower()
-
-
 def get_all_pns(req: Requirement) -> list[str]:
-    """Primary MPN + substitutes, deduplicated."""
+    """Primary MPN + substitutes, deduplicated by canonical key.
+
+    Returns display-normalized MPNs (uppercase, no spaces, keeps dashes).
+    """
     pns = []
+    seen_keys: set[str] = set()
     if req.primary_mpn and req.primary_mpn.strip():
-        pns.append(req.primary_mpn.strip())
+        display = normalize_mpn(req.primary_mpn) or req.primary_mpn.strip()
+        key = normalize_mpn_key(display)
+        if key:
+            pns.append(display)
+            seen_keys.add(key)
     for sub in req.substitutes or []:
         s = str(sub).strip() if sub else ""
-        if s and s not in pns:
-            pns.append(s)
+        if not s:
+            continue
+        display = normalize_mpn(s) or s
+        key = normalize_mpn_key(display)
+        if key and key not in seen_keys:
+            pns.append(display)
+            seen_keys.add(key)
     return pns
 
 
@@ -239,7 +246,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> list[dict]:
     for r in raw:
         key = (
             r.get("vendor_name", "").lower(),
-            r.get("mpn_matched", "").lower(),
+            normalize_mpn_key(r.get("mpn_matched", "")),
             (r.get("vendor_sku") or "").lower(),
         )
         if key not in seen:
@@ -385,7 +392,7 @@ def _get_material_history(
         return []
 
     # Batch fetch all material cards for these PNs (1 query instead of N)
-    norm_pns = [normalize_mpn_lower(pn) for pn in pns if normalize_mpn_lower(pn)]
+    norm_pns = [normalize_mpn_key(pn) for pn in pns if normalize_mpn_key(pn)]
     if not norm_pns:
         return []
     cards = (
@@ -490,10 +497,11 @@ def _upsert_material_card(
     pn: str, sightings: list[Sighting], db: Session, now: datetime
 ):
     """Upsert material card. Raises on error — caller handles rollback."""
-    norm = normalize_mpn_lower(pn)
+    norm = normalize_mpn_key(pn)
     if not norm:
         return
-    pn_sightings = [s for s in sightings if (s.mpn_matched or "").lower() == pn.lower()]
+    pn_key = normalize_mpn_key(pn)
+    pn_sightings = [s for s in sightings if normalize_mpn_key(s.mpn_matched or "") == pn_key]
     if not pn_sightings:
         return
 

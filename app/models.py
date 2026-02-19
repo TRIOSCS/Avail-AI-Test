@@ -242,6 +242,7 @@ class Requirement(Base):
     id = Column(Integer, primary_key=True)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
     primary_mpn = Column(String(255))
+    normalized_mpn = Column(String(255), index=True)
     oem_pn = Column(String(255))
     brand = Column(String(255))
     sku = Column(String(255))
