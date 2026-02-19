@@ -16,6 +16,7 @@ from sqlalchemy import (
     Date,
     ARRAY,
 )
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, relationship
 
 from .utils.encrypted_type import EncryptedText
@@ -842,6 +843,9 @@ class VendorCard(Base):
     specialty_confidence = Column(Float)
     email_history_scanned_at = Column(DateTime)
 
+    # Full-text search (PostgreSQL tsvector, managed by trigger)
+    search_vector = Column(TSVECTOR)
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,
@@ -915,6 +919,8 @@ class MaterialCard(Base):
     description = Column(String(1000))
     search_count = Column(Integer, default=0)
     last_searched_at = Column(DateTime)
+    # Full-text search (PostgreSQL tsvector, managed by trigger)
+    search_vector = Column(TSVECTOR)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,

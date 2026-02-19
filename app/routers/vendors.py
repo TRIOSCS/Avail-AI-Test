@@ -251,8 +251,29 @@ async def list_vendors(
     q = q.strip().lower()
     query = db.query(VendorCard).order_by(VendorCard.display_name)
     if q:
-        safe_q = q.replace("%", r"\%").replace("_", r"\_")
-        query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
+        if len(q) >= 3:
+            # Full-text search for longer queries (faster + ranked)
+            try:
+                fts_query = db.query(VendorCard).filter(
+                    VendorCard.search_vector.isnot(None),
+                    sqltext("search_vector @@ plainto_tsquery('english', :q)"),
+                ).params(q=q).order_by(
+                    sqltext("ts_rank(search_vector, plainto_tsquery('english', :q)) DESC"),
+                ).params(q=q)
+                fts_count = fts_query.count()
+                if fts_count > 0:
+                    query = fts_query
+                else:
+                    # FTS found nothing, fall back to ILIKE
+                    safe_q = q.replace("%", r"\%").replace("_", r"\_")
+                    query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
+            except Exception:
+                # FTS not available (e.g., SQLite in tests), fall back to ILIKE
+                safe_q = q.replace("%", r"\%").replace("_", r"\_")
+                query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
+        else:
+            safe_q = q.replace("%", r"\%").replace("_", r"\_")
+            query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
     total = query.count()
     cards = query.limit(limit).offset(offset).all()
     if not cards:

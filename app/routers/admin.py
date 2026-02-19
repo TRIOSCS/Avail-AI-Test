@@ -239,6 +239,23 @@ def api_delete_credential(
     return {"status": "removed" if removed else "not_found"}
 
 
+# ── Vendor Dedup Suggestions (admin) ──────────────────────────────────
+
+
+@router.get("/api/admin/vendor-dedup-suggestions")
+def api_vendor_dedup_suggestions(
+    threshold: int = 85,
+    limit: int = 50,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Find potential duplicate vendor cards using fuzzy name matching."""
+    from ..vendor_utils import find_vendor_dedup_candidates
+
+    candidates = find_vendor_dedup_candidates(db, threshold=max(70, min(threshold, 100)), limit=min(limit, 200))
+    return {"candidates": candidates, "count": len(candidates)}
+
+
 # ── Data Import (admin only) ─────────────────────────────────────────
 
 

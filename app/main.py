@@ -34,6 +34,18 @@ async def lifespan(app):
     """App startup/shutdown — launches background scheduler."""
     from .startup import run_startup_migrations
 
+    # Sentry error tracking (conditional on DSN being set)
+    if settings.sentry_dsn:
+        import sentry_sdk
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            traces_sample_rate=settings.sentry_traces_sample_rate,
+            profiles_sample_rate=settings.sentry_profiles_sample_rate,
+            environment="production" if "https" in settings.app_url else "development",
+            release=APP_VERSION,
+        )
+        log.info("Sentry initialized (DSN configured)")
+
     run_startup_migrations()
     _seed_api_sources()
     from .scheduler import start_scheduler
@@ -52,6 +64,17 @@ async def lifespan(app):
 
 
 app = FastAPI(title="AVAIL — Opportunity Management", lifespan=lifespan)
+
+# Rate limiting (slowapi)
+if settings.rate_limit_enabled:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+
+    limiter = Limiter(key_func=get_remote_address, default_limits=[settings.rate_limit_default])
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.secret_key,
@@ -61,6 +84,10 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
+
+# Prometheus metrics
+from prometheus_fastapi_instrumentator import Instrumentator
+Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 # S2: Warn on default secret key
 if settings.secret_key == "change-me-in-production":
@@ -619,3 +646,6 @@ app.include_router(emails_router)
 from .routers.enrichment import router as enrichment_router
 
 app.include_router(enrichment_router)
+from .routers.documents import router as documents_router
+
+app.include_router(documents_router)

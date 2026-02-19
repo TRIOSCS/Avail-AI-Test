@@ -14,6 +14,20 @@ class Settings:
         "DATABASE_URL", "postgresql://availai:availai@db:5432/availai"
     )
 
+    # Sentry error tracking
+    sentry_dsn: str = os.getenv("SENTRY_DSN", "")
+    sentry_traces_sample_rate: float = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1"))
+    sentry_profiles_sample_rate: float = float(os.getenv("SENTRY_PROFILES_SAMPLE_RATE", "0.1"))
+
+    # Rate limiting
+    rate_limit_default: str = os.getenv("RATE_LIMIT_DEFAULT", "120/minute")
+    rate_limit_search: str = os.getenv("RATE_LIMIT_SEARCH", "20/minute")
+    rate_limit_enabled: bool = os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true"
+
+    # Redis caching
+    redis_url: str = os.getenv("REDIS_URL", "redis://redis:6379/0")
+    cache_backend: str = os.getenv("CACHE_BACKEND", "redis")
+
     # Microsoft Azure OAuth
     azure_client_id: str = os.getenv("AZURE_CLIENT_ID", "")
     azure_client_secret: str = os.getenv("AZURE_CLIENT_SECRET", "")

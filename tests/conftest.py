@@ -50,15 +50,16 @@ def event_loop():
 TEST_DB_URL = "sqlite://"  # in-memory, fresh per session
 
 
-def _patch_array_for_sqlite():
-    """Register ARRAY → JSON type adapter so models work on SQLite."""
+def _patch_types_for_sqlite():
+    """Register ARRAY → JSON and TSVECTOR → TEXT type adapters so models work on SQLite."""
     from sqlalchemy import JSON
     from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 
     SQLiteTypeCompiler.visit_ARRAY = lambda self, type_, **kw: "JSON"
+    SQLiteTypeCompiler.visit_TSVECTOR = lambda self, type_, **kw: "TEXT"
 
 
-_patch_array_for_sqlite()
+_patch_types_for_sqlite()
 
 engine = create_engine(
     TEST_DB_URL,

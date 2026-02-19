@@ -1,6 +1,7 @@
-"""Vendor name normalization and card enrichment helpers."""
+"""Vendor name normalization, card enrichment, and fuzzy matching helpers."""
 
 import re
+from typing import Optional
 
 
 # Legal entity suffixes only — conservative to avoid stripping name parts
@@ -143,3 +144,70 @@ def merge_phones_into_card(card, new_phones: list[str]) -> int:
     if added:
         card.phones = merged
     return added
+
+
+def fuzzy_match_vendor(query: str, candidates: list[str], threshold: int = 80) -> list[dict]:
+    """Fuzzy match a vendor name against a list of candidate names.
+
+    Returns list of {"name": str, "score": int} sorted by score descending.
+    Only returns matches at or above the threshold.
+    """
+    from thefuzz import fuzz
+
+    query_norm = normalize_vendor_name(query)
+    if not query_norm:
+        return []
+
+    results = []
+    for name in candidates:
+        name_norm = normalize_vendor_name(name)
+        if not name_norm:
+            continue
+        score = fuzz.token_sort_ratio(query_norm, name_norm)
+        if score >= threshold:
+            results.append({"name": name, "score": score})
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results
+
+
+def find_vendor_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> list[dict]:
+    """Find potential duplicate vendor cards using fuzzy matching.
+
+    Returns groups of vendors that may be duplicates, sorted by match score.
+    """
+    from thefuzz import fuzz
+    from .models import VendorCard
+
+    cards = (
+        db.query(VendorCard.id, VendorCard.display_name, VendorCard.normalized_name, VendorCard.sighting_count)
+        .order_by(VendorCard.sighting_count.desc().nullslast())
+        .limit(500)
+        .all()
+    )
+
+    seen_pairs: set[tuple] = set()
+    candidates = []
+
+    for i, card_a in enumerate(cards):
+        for card_b in cards[i + 1:]:
+            pair_key = (min(card_a.id, card_b.id), max(card_a.id, card_b.id))
+            if pair_key in seen_pairs:
+                continue
+
+            score = fuzz.token_sort_ratio(card_a.normalized_name, card_b.normalized_name)
+            if score >= threshold:
+                seen_pairs.add(pair_key)
+                candidates.append({
+                    "vendor_a": {"id": card_a.id, "name": card_a.display_name, "sightings": card_a.sighting_count or 0},
+                    "vendor_b": {"id": card_b.id, "name": card_b.display_name, "sightings": card_b.sighting_count or 0},
+                    "score": score,
+                })
+
+            if len(candidates) >= limit:
+                break
+        if len(candidates) >= limit:
+            break
+
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    return candidates

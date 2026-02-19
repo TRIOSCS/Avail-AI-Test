@@ -39,6 +39,7 @@ def run_startup_migrations() -> None:
         _create_admin_settings_tables(conn)
         _create_deep_enrichment_tables(conn)
         _add_normalized_mpn_column(conn)
+        _create_fts_indexes(conn)
     _backfill_normalized_mpn()
     log.info("Startup migrations complete")
 
@@ -735,3 +736,82 @@ def _backfill_normalized_mpn() -> None:
         except Exception as e:
             log.warning("Re-normalize material_cards failed: %s", e)
             conn.rollback()
+
+
+def _create_fts_indexes(conn) -> None:
+    """Add PostgreSQL full-text search support to vendor_cards and material_cards."""
+    stmts = [
+        # Add tsvector columns
+        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS search_vector tsvector",
+        "ALTER TABLE material_cards ADD COLUMN IF NOT EXISTS search_vector tsvector",
+        # GIN indexes for fast full-text search
+        "CREATE INDEX IF NOT EXISTS ix_vc_fts ON vendor_cards USING GIN(search_vector)",
+        "CREATE INDEX IF NOT EXISTS ix_mc_fts ON material_cards USING GIN(search_vector)",
+    ]
+    for stmt in stmts:
+        _exec(conn, stmt)
+
+    # Trigger function for vendor_cards
+    _exec(conn, """
+        CREATE OR REPLACE FUNCTION vendor_cards_fts_update() RETURNS trigger AS $$
+        BEGIN
+            NEW.search_vector :=
+                setweight(to_tsvector('english', COALESCE(NEW.display_name, '')), 'A') ||
+                setweight(to_tsvector('english', COALESCE(NEW.normalized_name, '')), 'A') ||
+                setweight(to_tsvector('english', COALESCE(NEW.domain, '')), 'B') ||
+                setweight(to_tsvector('english', COALESCE(NEW.industry, '')), 'C');
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+
+    _exec(conn, """
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_vc_fts') THEN
+                CREATE TRIGGER trg_vc_fts BEFORE INSERT OR UPDATE ON vendor_cards
+                FOR EACH ROW EXECUTE FUNCTION vendor_cards_fts_update();
+            END IF;
+        END $$;
+    """)
+
+    # Trigger function for material_cards
+    _exec(conn, """
+        CREATE OR REPLACE FUNCTION material_cards_fts_update() RETURNS trigger AS $$
+        BEGIN
+            NEW.search_vector :=
+                setweight(to_tsvector('english', COALESCE(NEW.display_mpn, '')), 'A') ||
+                setweight(to_tsvector('english', COALESCE(NEW.normalized_mpn, '')), 'A') ||
+                setweight(to_tsvector('english', COALESCE(NEW.manufacturer, '')), 'B') ||
+                setweight(to_tsvector('english', COALESCE(NEW.description, '')), 'C');
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+
+    _exec(conn, """
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mc_fts') THEN
+                CREATE TRIGGER trg_mc_fts BEFORE INSERT OR UPDATE ON material_cards
+                FOR EACH ROW EXECUTE FUNCTION material_cards_fts_update();
+            END IF;
+        END $$;
+    """)
+
+    # One-time backfill existing rows (only where search_vector is NULL)
+    _exec(conn, """
+        UPDATE vendor_cards SET search_vector =
+            setweight(to_tsvector('english', COALESCE(display_name, '')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(normalized_name, '')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(domain, '')), 'B') ||
+            setweight(to_tsvector('english', COALESCE(industry, '')), 'C')
+        WHERE search_vector IS NULL
+    """)
+
+    _exec(conn, """
+        UPDATE material_cards SET search_vector =
+            setweight(to_tsvector('english', COALESCE(display_mpn, '')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(normalized_mpn, '')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(manufacturer, '')), 'B') ||
+            setweight(to_tsvector('english', COALESCE(description, '')), 'C')
+        WHERE search_vector IS NULL
+    """)
