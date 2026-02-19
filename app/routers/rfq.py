@@ -503,7 +503,8 @@ async def get_follow_ups(
     results = []
     now = datetime.now(timezone.utc)
     for c in stale:
-        days_waiting = (now - c.created_at).days
+        ca = c.created_at.replace(tzinfo=None) if c.created_at else now.replace(tzinfo=None)
+        days_waiting = (now.replace(tzinfo=None) - ca).days
         results.append(
             {
                 "contact_id": c.id,

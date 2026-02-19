@@ -3,11 +3,18 @@ test_routers_rfq.py — Tests for RFQ, Follow-ups & Vendor Enrichment Router
 
 Tests the vendor card enrichment filtering logic: garbage vendor names,
 blacklisted vendors, and summary cache building.
+Also tests RFQ router endpoints via TestClient.
 
-Covers: _enrich_with_vendor_cards filtering, edge cases
+Covers: _enrich_with_vendor_cards filtering, follow-ups, contacts, responses,
+rfq-prepare, phone call logging.
 """
 
+from datetime import datetime, timedelta, timezone
+
 import pytest
+from sqlalchemy.orm import Session
+
+from app.models import Contact, Requisition, User, VendorResponse
 
 
 # ---------------------------------------------------------------------------
@@ -112,3 +119,208 @@ def test_filter_preserves_order():
     ])
     kept = _filter_sightings(results)
     assert [s["vendor_name"] for s in kept] == ["Alpha", "Beta"]
+
+
+# ---------------------------------------------------------------------------
+# Router endpoint tests (via TestClient with auth overrides from conftest)
+# ---------------------------------------------------------------------------
+
+
+def _make_contact(
+    db: Session,
+    requisition: Requisition,
+    user: User,
+    *,
+    vendor_name="Arrow Electronics",
+    vendor_contact="sales@arrow.com",
+    contact_type="email",
+    status="sent",
+    parts=None,
+    days_ago=0,
+):
+    """Helper to create a Contact record.
+
+    Uses naive UTC datetimes for SQLite compatibility (SQLite strips tzinfo,
+    and the router does aware-vs-naive datetime subtraction).
+    """
+    c = Contact(
+        requisition_id=requisition.id,
+        user_id=user.id,
+        contact_type=contact_type,
+        vendor_name=vendor_name,
+        vendor_contact=vendor_contact,
+        parts_included=parts or ["LM317T"],
+        subject=f"RFQ for {vendor_name}",
+        status=status,
+        created_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=days_ago),
+    )
+    db.add(c)
+    db.commit()
+    db.refresh(c)
+    return c
+
+
+# ── GET /api/follow-ups ──────────────────────────────────────────────
+
+
+def test_follow_ups_empty(client):
+    """No stale contacts → empty follow-ups list."""
+    resp = client.get("/api/follow-ups")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 0
+    assert data["follow_ups"] == []
+
+
+def test_follow_ups_returns_stale_contacts(client, db_session, test_user, test_requisition):
+    """Contacts sent >3 days ago with 'sent' status appear as follow-ups."""
+    _make_contact(
+        db_session, test_requisition, test_user,
+        vendor_name="Slow Vendor",
+        vendor_contact="slow@vendor.com",
+        status="sent",
+        days_ago=5,
+    )
+    # Recent contact should NOT appear
+    _make_contact(
+        db_session, test_requisition, test_user,
+        vendor_name="Fast Vendor",
+        vendor_contact="fast@vendor.com",
+        status="sent",
+        days_ago=1,
+    )
+
+    resp = client.get("/api/follow-ups")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["follow_ups"][0]["vendor_name"] == "Slow Vendor"
+    assert data["follow_ups"][0]["days_waiting"] >= 4
+
+
+# ── GET /api/follow-ups/summary ──────────────────────────────────────
+
+
+def test_follow_ups_summary(client, db_session, test_user, test_requisition):
+    """Summary groups stale contacts by requisition."""
+    _make_contact(
+        db_session, test_requisition, test_user,
+        vendor_name="Vendor A", status="sent", days_ago=5,
+    )
+    _make_contact(
+        db_session, test_requisition, test_user,
+        vendor_name="Vendor B", status="opened", days_ago=7,
+    )
+
+    resp = client.get("/api/follow-ups/summary")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 2
+    assert len(data["by_requisition"]) == 1
+    assert data["by_requisition"][0]["count"] == 2
+
+
+# ── GET /api/requisitions/{id}/contacts ──────────────────────────────
+
+
+def test_list_contacts(client, db_session, test_user, test_requisition):
+    """Lists contacts for a requisition."""
+    _make_contact(db_session, test_requisition, test_user)
+
+    resp = client.get(f"/api/requisitions/{test_requisition.id}/contacts")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["vendor_name"] == "Arrow Electronics"
+    assert data[0]["contact_type"] == "email"
+
+
+def test_list_contacts_missing_req(client):
+    """Contacts for nonexistent requisition returns empty list."""
+    resp = client.get("/api/requisitions/99999/contacts")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+# ── GET /api/requisitions/{id}/responses ─────────────────────────────
+
+
+def test_list_responses(client, db_session, test_requisition):
+    """Lists vendor responses for a requisition."""
+    vr = VendorResponse(
+        requisition_id=test_requisition.id,
+        vendor_name="Arrow Electronics",
+        vendor_email="sales@arrow.com",
+        subject="Re: RFQ LM317T",
+        status="new",
+        confidence=0.85,
+        received_at=datetime.now(timezone.utc),
+    )
+    db_session.add(vr)
+    db_session.commit()
+
+    resp = client.get(f"/api/requisitions/{test_requisition.id}/responses")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["vendor_name"] == "Arrow Electronics"
+    assert data[0]["confidence"] == 0.85
+
+
+def test_list_responses_empty(client, test_requisition):
+    """No responses returns empty list."""
+    resp = client.get(f"/api/requisitions/{test_requisition.id}/responses")
+    assert resp.status_code == 200
+    assert resp.json() == []
+
+
+# ── POST /api/requisitions/{id}/rfq-prepare ──────────────────────────
+
+
+def test_rfq_prepare_vendor_data(client, db_session, test_requisition, test_vendor_card):
+    """rfq-prepare returns vendor card data for known vendors."""
+    resp = client.post(
+        f"/api/requisitions/{test_requisition.id}/rfq-prepare",
+        json={"vendors": [{"vendor_name": "Arrow Electronics"}]},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["vendors"]) == 1
+    v = data["vendors"][0]
+    assert v["vendor_name"] == "Arrow Electronics"
+    assert v["card_id"] == test_vendor_card.id
+    assert v["needs_lookup"] is False
+    assert "sales@arrow.com" in v["emails"]
+
+
+def test_rfq_prepare_unknown_vendor(client, test_requisition):
+    """rfq-prepare for unknown vendor returns needs_lookup=True."""
+    resp = client.post(
+        f"/api/requisitions/{test_requisition.id}/rfq-prepare",
+        json={"vendors": [{"vendor_name": "Never Heard Of Inc"}]},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    v = data["vendors"][0]
+    assert v["needs_lookup"] is True
+    assert v["emails"] == []
+
+
+# ── POST /api/contacts/phone ─────────────────────────────────────────
+
+
+def test_log_phone_call(client, test_requisition):
+    """Phone call logging creates a contact record."""
+    resp = client.post(
+        "/api/contacts/phone",
+        json={
+            "requisition_id": test_requisition.id,
+            "vendor_name": "Mouser Electronics",
+            "vendor_phone": "+1-800-346-6873",
+            "parts": ["LM317T"],
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["vendor_name"] == "Mouser Electronics"
+    assert data["contact_type"] == "phone"
