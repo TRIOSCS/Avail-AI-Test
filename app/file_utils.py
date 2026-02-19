@@ -109,14 +109,21 @@ PRICE_HEADERS = {
     "usd",
 }
 MFR_HEADERS = {"manufacturer", "mfr", "mfg", "brand", "make", "vendor", "oem"}
+CONDITION_HEADERS = {"condition", "cond", "quality", "grade"}
+PACKAGING_HEADERS = {"packaging", "package", "pkg", "pack", "packing"}
+DATE_CODE_HEADERS = {"date_code", "date code", "datecode", "dc", "date codes", "date_codes"}
+LEAD_TIME_HEADERS = {"lead_time", "lead time", "leadtime", "lt", "delivery", "availability"}
+CURRENCY_HEADERS = {"currency", "curr", "ccy"}
 
 
 def normalize_stock_row(r: dict) -> dict | None:
-    """Extract mpn/qty/price/manufacturer from a row with varying headers.
+    """Extract mpn/qty/price/manufacturer/condition/packaging/date_code/lead_time from a row.
 
-    Returns {"mpn": str, "qty": int|None, "price": float|None, "manufacturer": str|None}
-    or None if no valid MPN found.
+    Returns dict with normalized fields or None if no valid MPN found.
+    Uses normalization functions for robust parsing.
     """
+    from .utils.normalization import normalize_quantity, normalize_price, detect_currency
+
     norm = {k.strip().lower(): v for k, v in r.items() if k}
 
     mpn = None
@@ -128,23 +135,19 @@ def normalize_stock_row(r: dict) -> dict | None:
     if not mpn or len(mpn) < 3:
         return None
 
-    qty = None
+    qty_raw = None
     for h in QTY_HEADERS:
         if h in norm and norm[h]:
-            try:
-                qty = int(float(str(norm[h]).replace(",", "").strip()))
-            except (ValueError, TypeError):
-                pass
+            qty_raw = norm[h]
             break
+    qty = normalize_quantity(qty_raw)
 
-    price = None
+    price_raw = None
     for h in PRICE_HEADERS:
         if h in norm and norm[h]:
-            try:
-                price = float(str(norm[h]).replace("$", "").replace(",", "").strip())
-            except (ValueError, TypeError):
-                pass
+            price_raw = norm[h]
             break
+    price = normalize_price(price_raw)
 
     mfr = None
     for h in MFR_HEADERS:
@@ -152,7 +155,48 @@ def normalize_stock_row(r: dict) -> dict | None:
             mfr = str(norm[h]).strip()
             break
 
-    return {"mpn": mpn, "qty": qty, "price": price, "manufacturer": mfr}
+    condition = None
+    for h in CONDITION_HEADERS:
+        if h in norm and norm[h]:
+            condition = str(norm[h]).strip()
+            break
+
+    packaging = None
+    for h in PACKAGING_HEADERS:
+        if h in norm and norm[h]:
+            packaging = str(norm[h]).strip()
+            break
+
+    date_code = None
+    for h in DATE_CODE_HEADERS:
+        if h in norm and norm[h]:
+            date_code = str(norm[h]).strip()
+            break
+
+    lead_time = None
+    for h in LEAD_TIME_HEADERS:
+        if h in norm and norm[h]:
+            lead_time = str(norm[h]).strip()
+            break
+
+    currency = None
+    for h in CURRENCY_HEADERS:
+        if h in norm and norm[h]:
+            currency = norm[h]
+            break
+    currency = detect_currency(currency or price_raw)
+
+    return {
+        "mpn": mpn,
+        "qty": qty,
+        "price": price,
+        "manufacturer": mfr,
+        "condition": condition,
+        "packaging": packaging,
+        "date_code": date_code,
+        "lead_time": lead_time,
+        "currency": currency,
+    }
 
 
 def parse_num(val) -> float | None:

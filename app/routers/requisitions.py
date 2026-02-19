@@ -38,7 +38,15 @@ from ..search_service import (
     _get_material_history,
     _history_to_result,
 )
-from ..utils.normalization import normalize_mpn_key
+from ..utils.normalization import (
+    normalize_mpn,
+    normalize_mpn_key,
+    normalize_quantity,
+    normalize_condition,
+    normalize_packaging,
+    normalize_price,
+    detect_currency,
+)
 from .rfq import _enrich_with_vendor_cards
 from ..models import (
     Contact,
@@ -456,7 +464,7 @@ async def upload_requirements(
 
     created = 0
     for row in rows:
-        mpn = (
+        raw_mpn = (
             row.get("primary_mpn")
             or row.get("mpn")
             or row.get("part_number")
@@ -467,9 +475,11 @@ async def upload_requirements(
             or row.get("sku")
             or ""
         )
+        mpn = normalize_mpn(raw_mpn)
         if not mpn:
             continue
-        qty = row.get("target_qty") or row.get("qty") or row.get("quantity") or "1"
+        qty_raw = row.get("target_qty") or row.get("qty") or row.get("quantity") or "1"
+        qty = normalize_quantity(qty_raw) or 1
         subs = []
         sub_str = row.get("substitutes") or row.get("subs") or ""
         if sub_str:
@@ -480,12 +490,46 @@ async def upload_requirements(
             s = row.get(f"sub_{i}") or row.get(f"sub{i}") or ""
             if s:
                 subs.append(s)
+        # Normalize each substitute and dedup by canonical key
+        seen_keys = {normalize_mpn_key(mpn)}
+        deduped_subs = []
+        for s in subs:
+            ns = normalize_mpn(s)
+            if not ns:
+                continue
+            key = normalize_mpn_key(ns)
+            if key not in seen_keys:
+                seen_keys.add(key)
+                deduped_subs.append(ns)
+
+        # Parse optional columns
+        condition = normalize_condition(
+            row.get("condition") or row.get("cond") or ""
+        )
+        packaging = normalize_packaging(
+            row.get("packaging") or row.get("package") or row.get("pkg") or ""
+        )
+        date_codes = (
+            row.get("date_codes") or row.get("date_code") or row.get("dc") or ""
+        ).strip() or None
+        manufacturer = (
+            row.get("manufacturer") or row.get("brand") or row.get("mfr") or ""
+        ).strip() or None
+        notes = (row.get("notes") or row.get("note") or "").strip() or None
+        target_price_raw = row.get("target_price") or row.get("price") or ""
+        target_price = normalize_price(target_price_raw)
+
         r = Requirement(
             requisition_id=req_id,
             primary_mpn=mpn,
             normalized_mpn=normalize_mpn_key(mpn),
-            target_qty=int(qty) if qty.isdigit() else 1,
-            substitutes=subs[:20],
+            target_qty=qty,
+            target_price=target_price,
+            substitutes=deduped_subs[:20],
+            condition=condition,
+            packaging=packaging,
+            date_codes=date_codes,
+            notes=notes,
         )
         db.add(r)
         created += 1
@@ -522,12 +566,21 @@ async def update_requirement(
     if not req:
         raise HTTPException(403)
     if data.primary_mpn is not None:
-        r.primary_mpn = data.primary_mpn.strip()
+        r.primary_mpn = normalize_mpn(data.primary_mpn) or data.primary_mpn.strip()
         r.normalized_mpn = normalize_mpn_key(data.primary_mpn)
     if data.target_qty is not None:
         r.target_qty = data.target_qty
     if data.substitutes is not None:
-        r.substitutes = data.substitutes[:20]
+        # Normalize each substitute and dedup by canonical key
+        seen_keys = {normalize_mpn_key(r.primary_mpn)}
+        deduped = []
+        for s in data.substitutes:
+            ns = normalize_mpn(s) or s.strip()
+            key = normalize_mpn_key(ns)
+            if key and key not in seen_keys:
+                seen_keys.add(key)
+                deduped.append(ns)
+        r.substitutes = deduped[:20]
     if data.target_price is not None:
         r.target_price = data.target_price
     if data.firmware is not None:
@@ -537,9 +590,9 @@ async def update_requirement(
     if data.hardware_codes is not None:
         r.hardware_codes = data.hardware_codes.strip()
     if data.packaging is not None:
-        r.packaging = data.packaging.strip()
+        r.packaging = normalize_packaging(data.packaging) or data.packaging.strip()
     if data.condition is not None:
-        r.condition = data.condition.strip()
+        r.condition = normalize_condition(data.condition) or data.condition.strip()
     if data.notes is not None:
         r.notes = data.notes.strip()
     db.commit()
@@ -720,20 +773,16 @@ async def import_stock_list(
     matched = 0
     imported = 0
 
-    from ..file_utils import parse_num
+    from ..file_utils import normalize_stock_row
+    from ..utils.normalization import normalize_condition as norm_cond
+    from ..utils.normalization import normalize_packaging as norm_pkg
+    from ..utils.normalization import normalize_date_code, normalize_lead_time
 
     for row in rows:
-        mpn = (
-            row.get("mpn")
-            or row.get("part_number")
-            or row.get("part")
-            or row.get("pn")
-            or row.get("sku")
-            or row.get("mfr_part")
-            or ""
-        ).strip()
-        if not mpn:
+        parsed = normalize_stock_row(row)
+        if not parsed:
             continue
+        mpn = parsed["mpn"]
         imported += 1
 
         # Check if this MPN matches any requirement
@@ -741,20 +790,20 @@ async def import_stock_list(
         if not r:
             continue
 
-        qty_str = (
-            row.get("qty") or row.get("quantity") or row.get("qty_available") or ""
-        )
-        price_str = row.get("price") or row.get("unit_price") or row.get("cost") or ""
-        mfg = row.get("manufacturer") or row.get("mfg") or row.get("mfr") or ""
+        display_mpn = normalize_mpn(mpn) or mpn
 
         s = Sighting(
             requirement_id=r.id,
             vendor_name=vendor_name.strip(),
-            mpn_matched=mpn,
-            manufacturer=mfg,
-            qty_available=int(parse_num(qty_str) or 0) if qty_str else None,
-            unit_price=parse_num(price_str),
-            currency=row.get("currency", "USD"),
+            mpn_matched=display_mpn,
+            manufacturer=parsed.get("manufacturer"),
+            qty_available=parsed.get("qty"),
+            unit_price=parsed.get("price"),
+            currency=parsed.get("currency", "USD"),
+            condition=norm_cond(parsed.get("condition")),
+            packaging=norm_pkg(parsed.get("packaging")),
+            date_code=normalize_date_code(parsed.get("date_code")),
+            lead_time_days=normalize_lead_time(parsed.get("lead_time")),
             source_type="stock_list",
             confidence=70,
             raw_data=row,
