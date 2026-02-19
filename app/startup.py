@@ -1,17 +1,13 @@
 """
 startup.py — Database Startup Migrations (Idempotent)
 
-All inline DDL statements that were previously in main.py at module load time.
-These run once at app startup to ensure the schema is up to date. Every statement
-is idempotent (IF NOT EXISTS / IF NOT EXISTS) so re-running is safe.
+Tables, columns, and indexes are defined in the ORM models (models.py) and created
+via Base.metadata.create_all(checkfirst=True). This file only handles PostgreSQL-
+specific operations that can't be expressed in the ORM: triggers, seeds, backfills,
+and CHECK constraints.
 
-Business Rules:
-- All statements must be idempotent — safe to run on every startup.
-- Failures on individual statements are caught and logged, never crash the app.
-- This file replaces 51 inline DDL statements that lived in main.py lines 28-224.
-
-Called by: main.py (at module load)
-Depends on: database.py (engine)
+Called by: main.py lifespan
+Depends on: database.py (engine), models.py (Base)
 """
 
 import logging
@@ -22,24 +18,25 @@ log = logging.getLogger(__name__)
 
 
 def run_startup_migrations() -> None:
-    """Execute all idempotent DDL statements. Safe to call on every app boot."""
+    """Execute all idempotent startup operations. Safe to call on every app boot."""
     import os
 
     if os.environ.get("TESTING"):
         log.info("TESTING mode — skipping startup migrations")
         return
+
+    # Create all tables/columns/indexes defined in ORM models (no-op if they exist)
+    from .models import Base
+    Base.metadata.create_all(bind=engine, checkfirst=True)
+    log.info("ORM schema sync complete (create_all checkfirst=True)")
+
     with engine.connect() as conn:
-        _add_columns(conn)
-        _create_indexes(conn)
-        _create_crm_tables(conn)
-        _add_crm_columns(conn)
-        _create_crm_indexes(conn)
-        _create_proactive_tables(conn)
-        _create_performance_tables(conn)
-        _create_admin_settings_tables(conn)
-        _create_deep_enrichment_tables(conn)
-        _add_normalized_mpn_column(conn)
-        _create_fts_indexes(conn)
+        _create_fts_triggers(conn)
+        _backfill_fts(conn)
+        _seed_system_config(conn)
+        _seed_site_contacts(conn)
+        _add_check_constraints(conn)
+
     _backfill_normalized_mpn()
     log.info("Startup migrations complete")
 
@@ -50,529 +47,95 @@ def _exec(conn, stmt: str) -> None:
         conn.execute(sqltext(stmt))
         conn.commit()
     except Exception as e:
-        log.warning(f"DDL statement failed (may be expected for IF NOT EXISTS): {e}")
+        log.warning("DDL failed: %s", e)
         conn.rollback()
 
 
-# ── Column additions on existing tables ──────────────────────────────
+# ── Full-text search triggers (PostgreSQL-specific) ─────────────────
 
 
-def _add_columns(conn) -> None:
-    stmts = [
-        "ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS last_searched_at TIMESTAMP",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS refresh_token TEXT",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_email_scan TIMESTAMP",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS access_token TEXT",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMP",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS email_signature TEXT",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_inbox_scan TIMESTAMP",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_contacts_sync TIMESTAMP",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS m365_connected BOOLEAN DEFAULT FALSE",
-        "ALTER TABLE sightings ADD COLUMN IF NOT EXISTS is_unavailable BOOLEAN DEFAULT FALSE",
-        "ALTER TABLE vendor_responses ADD COLUMN IF NOT EXISTS message_id VARCHAR(255)",
-        "ALTER TABLE vendor_responses ADD COLUMN IF NOT EXISTS graph_conversation_id VARCHAR(500)",
-        "ALTER TABLE vendor_responses ADD COLUMN IF NOT EXISTS scanned_by_user_id INTEGER",
-        "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS graph_message_id VARCHAR(500)",
-        "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS graph_conversation_id VARCHAR(500)",
-        # v1.2.0 — Roles
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS role VARCHAR(20) DEFAULT 'buyer'",
-        # v1.2.0 — M365 health
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS m365_error_reason VARCHAR(255)",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS m365_last_healthy TIMESTAMP",
-        # v1.2.0 — Contact Enrichment
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS domain_aliases JSON DEFAULT '[]'",
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS last_enriched_at TIMESTAMP",
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS enrichment_source VARCHAR(50)",
-        # v1.2.0 — Email Intelligence: Contact status tracking
-        "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS status VARCHAR(50) DEFAULT 'sent'",
-        "ALTER TABLE contacts ADD COLUMN IF NOT EXISTS status_updated_at TIMESTAMP",
-        # v1.2.0 — Email Intelligence: Reply classification
-        "ALTER TABLE vendor_responses ADD COLUMN IF NOT EXISTS classification VARCHAR(50)",
-        "ALTER TABLE vendor_responses ADD COLUMN IF NOT EXISTS needs_action BOOLEAN DEFAULT false",
-        "ALTER TABLE vendor_responses ADD COLUMN IF NOT EXISTS action_hint VARCHAR(255)",
-        # AI material intelligence
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS brand_tags JSON DEFAULT '[]'",
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS commodity_tags JSON DEFAULT '[]'",
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS material_tags_updated_at TIMESTAMP",
-        # New offers indicator
-        "ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS offers_viewed_at TIMESTAMP",
-        # v1.6.x — Vendor contact activity tracking
-        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS vendor_contact_id INTEGER REFERENCES vendor_contacts(id)",
-        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS notes TEXT",
-        # v1.7.x — Scope activities to requisition
-        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS requisition_id INTEGER REFERENCES requisitions(id)",
-        # v2.0 — Unmatched activity queue (Phase 2A)
-        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS dismissed_at TIMESTAMP",
-        # v2.0 — Excess list differentiation (Phase 2B)
-        "ALTER TABLE sightings ADD COLUMN IF NOT EXISTS source_company_id INTEGER REFERENCES companies(id)",
-    ]
-    for stmt in stmts:
-        _exec(conn, stmt)
+def _create_fts_triggers(conn) -> None:
+    """Create trigger functions and triggers for FTS on vendor_cards and material_cards."""
+    _exec(conn, """
+        CREATE OR REPLACE FUNCTION vendor_cards_fts_update() RETURNS trigger AS $$
+        BEGIN
+            NEW.search_vector :=
+                setweight(to_tsvector('english', COALESCE(NEW.display_name, '')), 'A') ||
+                setweight(to_tsvector('english', COALESCE(NEW.normalized_name, '')), 'A') ||
+                setweight(to_tsvector('english', COALESCE(NEW.domain, '')), 'B') ||
+                setweight(to_tsvector('english', COALESCE(NEW.industry, '')), 'C');
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+
+    _exec(conn, """
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_vc_fts') THEN
+                CREATE TRIGGER trg_vc_fts BEFORE INSERT OR UPDATE ON vendor_cards
+                FOR EACH ROW EXECUTE FUNCTION vendor_cards_fts_update();
+            END IF;
+        END $$;
+    """)
+
+    _exec(conn, """
+        CREATE OR REPLACE FUNCTION material_cards_fts_update() RETURNS trigger AS $$
+        BEGIN
+            NEW.search_vector :=
+                setweight(to_tsvector('english', COALESCE(NEW.display_mpn, '')), 'A') ||
+                setweight(to_tsvector('english', COALESCE(NEW.normalized_mpn, '')), 'A') ||
+                setweight(to_tsvector('english', COALESCE(NEW.manufacturer, '')), 'B') ||
+                setweight(to_tsvector('english', COALESCE(NEW.description, '')), 'C');
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+
+    _exec(conn, """
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mc_fts') THEN
+                CREATE TRIGGER trg_mc_fts BEFORE INSERT OR UPDATE ON material_cards
+                FOR EACH ROW EXECUTE FUNCTION material_cards_fts_update();
+            END IF;
+        END $$;
+    """)
 
 
-# ── Indexes on existing tables ───────────────────────────────────────
+# ── One-time FTS backfill ────────────────────────────────────────────
 
 
-def _create_indexes(conn) -> None:
-    stmts = [
-        "CREATE UNIQUE INDEX IF NOT EXISTS ix_vr_message_id ON vendor_responses(message_id)",
-        "CREATE INDEX IF NOT EXISTS ix_vr_conv_id ON vendor_responses(graph_conversation_id)",
-        "CREATE INDEX IF NOT EXISTS ix_contact_conv_id ON contacts(graph_conversation_id)",
-        "CREATE INDEX IF NOT EXISTS ix_sight_vendor ON sightings(vendor_name)",
-        # v1.2.0 indexes
-        "CREATE INDEX IF NOT EXISTS ix_contact_status ON contacts(status)",
-        "CREATE INDEX IF NOT EXISTS ix_contact_user_status ON contacts(user_id, status, created_at)",
-        "CREATE INDEX IF NOT EXISTS ix_vr_classification ON vendor_responses(classification)",
-        "CREATE INDEX IF NOT EXISTS ix_vc_domain ON vendor_cards(domain)",
-        "CREATE INDEX IF NOT EXISTS ix_activity_vendor_contact ON activity_log(vendor_contact_id, created_at) WHERE vendor_contact_id IS NOT NULL",
-        "CREATE INDEX IF NOT EXISTS ix_activity_requisition ON activity_log(requisition_id, vendor_card_id, created_at) WHERE requisition_id IS NOT NULL",
-        # v2.0 — Unmatched activity queue index
-        "CREATE INDEX IF NOT EXISTS ix_activity_unmatched ON activity_log(created_at DESC) WHERE company_id IS NULL AND vendor_card_id IS NULL AND dismissed_at IS NULL",
-        # v2.0 — Excess list sightings index
-        "CREATE INDEX IF NOT EXISTS ix_sightings_source_company ON sightings(source_company_id) WHERE source_company_id IS NOT NULL",
-        # Phase 6 — vendor_name indexes for contact/response lookups
-        "CREATE INDEX IF NOT EXISTS ix_contact_vendor_name ON contacts(vendor_name)",
-        "CREATE INDEX IF NOT EXISTS ix_vr_vendor_name ON vendor_responses(vendor_name)",
-    ]
-    for stmt in stmts:
-        _exec(conn, stmt)
+def _backfill_fts(conn) -> None:
+    """Backfill search_vector on existing rows where NULL."""
+    _exec(conn, """
+        UPDATE vendor_cards SET search_vector =
+            setweight(to_tsvector('english', COALESCE(display_name, '')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(normalized_name, '')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(domain, '')), 'B') ||
+            setweight(to_tsvector('english', COALESCE(industry, '')), 'C')
+        WHERE search_vector IS NULL
+    """)
+
+    _exec(conn, """
+        UPDATE material_cards SET search_vector =
+            setweight(to_tsvector('english', COALESCE(display_mpn, '')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(normalized_mpn, '')), 'A') ||
+            setweight(to_tsvector('english', COALESCE(manufacturer, '')), 'B') ||
+            setweight(to_tsvector('english', COALESCE(description, '')), 'C')
+        WHERE search_vector IS NULL
+    """)
 
 
-# ── CRM tables (v1.2.0) ─────────────────────────────────────────────
+# ── Seed data ────────────────────────────────────────────────────────
 
 
-def _create_crm_tables(conn) -> None:
-    crm_tables = [
-        """CREATE TABLE IF NOT EXISTS companies (
-            id SERIAL PRIMARY KEY,
-            name VARCHAR(255) NOT NULL,
-            website VARCHAR(500),
-            industry VARCHAR(255),
-            notes TEXT,
-            is_active BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP DEFAULT NOW(),
-            updated_at TIMESTAMP DEFAULT NOW()
-        )""",
-        """CREATE TABLE IF NOT EXISTS customer_sites (
-            id SERIAL PRIMARY KEY,
-            company_id INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-            site_name VARCHAR(255) NOT NULL,
-            owner_id INTEGER REFERENCES users(id),
-            contact_name VARCHAR(255),
-            contact_email VARCHAR(255),
-            contact_phone VARCHAR(100),
-            contact_title VARCHAR(255),
-            address_line1 VARCHAR(500),
-            address_line2 VARCHAR(255),
-            city VARCHAR(255),
-            state VARCHAR(100),
-            zip VARCHAR(20),
-            country VARCHAR(100) DEFAULT 'US',
-            payment_terms VARCHAR(100),
-            shipping_terms VARCHAR(100),
-            notes TEXT,
-            is_active BOOLEAN DEFAULT TRUE,
-            created_at TIMESTAMP DEFAULT NOW(),
-            updated_at TIMESTAMP DEFAULT NOW()
-        )""",
-        """CREATE TABLE IF NOT EXISTS offers (
-            id SERIAL PRIMARY KEY,
-            requisition_id INTEGER NOT NULL REFERENCES requisitions(id) ON DELETE CASCADE,
-            requirement_id INTEGER REFERENCES requirements(id),
-            vendor_card_id INTEGER REFERENCES vendor_cards(id),
-            vendor_name VARCHAR(255) NOT NULL,
-            mpn VARCHAR(255) NOT NULL,
-            manufacturer VARCHAR(255),
-            qty_available INTEGER,
-            unit_price NUMERIC(12,4),
-            currency VARCHAR(10) DEFAULT 'USD',
-            lead_time VARCHAR(100),
-            date_code VARCHAR(100),
-            condition VARCHAR(50),
-            packaging VARCHAR(100),
-            moq INTEGER,
-            valid_until DATE,
-            source VARCHAR(50) DEFAULT 'manual',
-            vendor_response_id INTEGER REFERENCES vendor_responses(id),
-            entered_by_id INTEGER REFERENCES users(id),
-            notes TEXT,
-            status VARCHAR(20) DEFAULT 'active',
-            created_at TIMESTAMP DEFAULT NOW()
-        )""",
-        """CREATE TABLE IF NOT EXISTS quotes (
-            id SERIAL PRIMARY KEY,
-            requisition_id INTEGER NOT NULL REFERENCES requisitions(id) ON DELETE CASCADE,
-            customer_site_id INTEGER NOT NULL REFERENCES customer_sites(id),
-            quote_number VARCHAR(50) NOT NULL UNIQUE,
-            revision INTEGER DEFAULT 1,
-            line_items JSON NOT NULL DEFAULT '[]',
-            subtotal NUMERIC(12,2),
-            total_cost NUMERIC(12,2),
-            total_margin_pct NUMERIC(5,2),
-            payment_terms VARCHAR(100),
-            shipping_terms VARCHAR(100),
-            validity_days INTEGER DEFAULT 7,
-            notes TEXT,
-            status VARCHAR(20) DEFAULT 'draft',
-            sent_at TIMESTAMP,
-            result VARCHAR(20),
-            result_reason VARCHAR(255),
-            result_notes TEXT,
-            result_at TIMESTAMP,
-            won_revenue NUMERIC(12,2),
-            created_by_id INTEGER REFERENCES users(id),
-            created_at TIMESTAMP DEFAULT NOW(),
-            updated_at TIMESTAMP DEFAULT NOW()
-        )""",
-        """CREATE TABLE IF NOT EXISTS site_contacts (
-            id SERIAL PRIMARY KEY,
-            customer_site_id INTEGER NOT NULL REFERENCES customer_sites(id) ON DELETE CASCADE,
-            full_name VARCHAR(255) NOT NULL,
-            title VARCHAR(255),
-            email VARCHAR(255),
-            phone VARCHAR(100),
-            notes TEXT,
-            is_primary BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP DEFAULT NOW(),
-            updated_at TIMESTAMP DEFAULT NOW()
-        )""",
-        """CREATE TABLE IF NOT EXISTS offer_attachments (
-            id SERIAL PRIMARY KEY,
-            offer_id INTEGER NOT NULL REFERENCES offers(id) ON DELETE CASCADE,
-            file_name VARCHAR(500) NOT NULL,
-            onedrive_item_id VARCHAR(500),
-            onedrive_url TEXT,
-            thumbnail_url TEXT,
-            content_type VARCHAR(100),
-            size_bytes INTEGER,
-            uploaded_by_id INTEGER REFERENCES users(id),
-            created_at TIMESTAMP DEFAULT NOW()
-        )""",
-        """CREATE TABLE IF NOT EXISTS buy_plans (
-            id SERIAL PRIMARY KEY,
-            requisition_id INTEGER NOT NULL REFERENCES requisitions(id) ON DELETE CASCADE,
-            quote_id INTEGER NOT NULL REFERENCES quotes(id) ON DELETE CASCADE,
-            status VARCHAR(30) DEFAULT 'pending_approval',
-            line_items JSON NOT NULL DEFAULT '[]',
-            manager_notes TEXT,
-            rejection_reason TEXT,
-            submitted_by_id INTEGER REFERENCES users(id),
-            approved_by_id INTEGER REFERENCES users(id),
-            submitted_at TIMESTAMP DEFAULT NOW(),
-            approved_at TIMESTAMP,
-            rejected_at TIMESTAMP,
-            approval_token VARCHAR(100) UNIQUE,
-            created_at TIMESTAMP DEFAULT NOW()
-        )""",
-    ]
-    for stmt in crm_tables:
-        _exec(conn, stmt)
-    # One-time seed: copy existing inline contacts from customer_sites into site_contacts
-    _seed_site_contacts(conn)
-
-
-def _seed_site_contacts(conn) -> None:
-    """Idempotent: copy contact_name/email/phone/title from customer_sites into site_contacts."""
-    try:
-        row = conn.execute(sqltext("SELECT COUNT(*) FROM site_contacts")).scalar()
-        if row and row > 0:
-            return  # already seeded
-        conn.execute(
-            sqltext("""
-            INSERT INTO site_contacts (customer_site_id, full_name, title, email, phone, is_primary)
-            SELECT id, contact_name, contact_title, contact_email, contact_phone, TRUE
-            FROM customer_sites
-            WHERE contact_name IS NOT NULL AND contact_name != ''
-        """)
-        )
-        conn.commit()
-        log.info("Seeded site_contacts from existing customer_sites data")
-    except Exception:
-        conn.rollback()
-
-
-# ── CRM column additions ────────────────────────────────────────────
-
-
-def _add_crm_columns(conn) -> None:
-    stmts = [
-        "ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS customer_site_id INTEGER REFERENCES customer_sites(id)",
-        "ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS cloned_from_id INTEGER REFERENCES requisitions(id)",
-        "ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS deadline VARCHAR(50)",
-        "ALTER TABLE requirements ADD COLUMN IF NOT EXISTS target_price NUMERIC(12,4)",
-        # v1.4.0: Company account management fields
-        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS account_type VARCHAR(50)",
-        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS phone VARCHAR(100)",
-        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS credit_terms VARCHAR(100)",
-        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS tax_id VARCHAR(100)",
-        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS currency VARCHAR(10) DEFAULT 'USD'",
-        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS preferred_carrier VARCHAR(100)",
-        # v1.4.0: Site operations fields
-        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS site_type VARCHAR(50)",
-        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS timezone VARCHAR(50)",
-        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS receiving_hours VARCHAR(100)",
-        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS carrier_account VARCHAR(100)",
-        # v1.4.1: Buy plan remediation
-        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS sales_order_number VARCHAR(100)",
-        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS salesperson_notes TEXT",
-        # v1.4.2: Buy plan completion, cancellation, audit
-        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS completed_at TIMESTAMP",
-        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS completed_by_id INTEGER REFERENCES users(id)",
-        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP",
-        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS cancelled_by_id INTEGER REFERENCES users(id)",
-        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS cancellation_reason TEXT",
-        # v1.8.0 — Stock sale flag
-        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS is_stock_sale BOOLEAN DEFAULT FALSE",
-        # Salesforce backfill — link requirements to SF requisition items
-        "ALTER TABLE requirements ADD COLUMN IF NOT EXISTS sf_req_item_id VARCHAR(255)",
-        "CREATE INDEX IF NOT EXISTS ix_requirements_sf_req_item_id ON requirements(sf_req_item_id)",
-    ]
-    for stmt in stmts:
-        _exec(conn, stmt)
-
-
-# ── CRM indexes ──────────────────────────────────────────────────────
-
-
-def _create_crm_indexes(conn) -> None:
-    stmts = [
-        "CREATE INDEX IF NOT EXISTS ix_companies_name ON companies(name)",
-        "CREATE INDEX IF NOT EXISTS ix_cs_company ON customer_sites(company_id)",
-        "CREATE INDEX IF NOT EXISTS ix_cs_owner ON customer_sites(owner_id)",
-        "CREATE INDEX IF NOT EXISTS ix_offers_req ON offers(requisition_id)",
-        "CREATE INDEX IF NOT EXISTS ix_offers_requirement ON offers(requirement_id)",
-        "CREATE INDEX IF NOT EXISTS ix_offers_vendor ON offers(vendor_card_id)",
-        "CREATE INDEX IF NOT EXISTS ix_offers_mpn ON offers(mpn)",
-        "CREATE INDEX IF NOT EXISTS ix_quotes_req ON quotes(requisition_id)",
-        "CREATE INDEX IF NOT EXISTS ix_quotes_site ON quotes(customer_site_id)",
-        "CREATE INDEX IF NOT EXISTS ix_quotes_status ON quotes(status)",
-        "CREATE INDEX IF NOT EXISTS ix_site_contacts_site ON site_contacts(customer_site_id)",
-        "CREATE INDEX IF NOT EXISTS ix_site_contacts_email ON site_contacts(email)",
-        "CREATE INDEX IF NOT EXISTS ix_offer_attachments_offer ON offer_attachments(offer_id)",
-        "CREATE INDEX IF NOT EXISTS ix_buyplans_req ON buy_plans(requisition_id)",
-        "CREATE INDEX IF NOT EXISTS ix_buyplans_quote ON buy_plans(quote_id)",
-        "CREATE INDEX IF NOT EXISTS ix_buyplans_status ON buy_plans(status)",
-        "CREATE INDEX IF NOT EXISTS ix_buyplans_token ON buy_plans(approval_token)",
-        # v1.8.0 — Composite indexes for buy plan queries
-        "CREATE INDEX IF NOT EXISTS ix_buyplans_status_created ON buy_plans(status, created_at)",
-        "CREATE INDEX IF NOT EXISTS ix_buyplans_submitter_created ON buy_plans(submitted_by_id, created_at)",
-    ]
-    for stmt in stmts:
-        _exec(conn, stmt)
-
-
-def _create_proactive_tables(conn) -> None:
-    """Proactive offers — matching, sending, throttle."""
-    tables = [
-        """CREATE TABLE IF NOT EXISTS proactive_matches (
-            id SERIAL PRIMARY KEY,
-            offer_id INTEGER NOT NULL REFERENCES offers(id) ON DELETE CASCADE,
-            requirement_id INTEGER NOT NULL REFERENCES requirements(id) ON DELETE CASCADE,
-            requisition_id INTEGER NOT NULL REFERENCES requisitions(id) ON DELETE CASCADE,
-            customer_site_id INTEGER NOT NULL REFERENCES customer_sites(id),
-            salesperson_id INTEGER NOT NULL REFERENCES users(id),
-            mpn VARCHAR(255) NOT NULL,
-            status VARCHAR(20) DEFAULT 'new',
-            created_at TIMESTAMP DEFAULT NOW()
-        )""",
-        """CREATE TABLE IF NOT EXISTS proactive_offers (
-            id SERIAL PRIMARY KEY,
-            customer_site_id INTEGER NOT NULL REFERENCES customer_sites(id),
-            salesperson_id INTEGER NOT NULL REFERENCES users(id),
-            line_items JSON NOT NULL DEFAULT '[]',
-            recipient_contact_ids JSON DEFAULT '[]',
-            recipient_emails JSON DEFAULT '[]',
-            subject VARCHAR(500),
-            email_body_html TEXT,
-            graph_message_id VARCHAR(500),
-            status VARCHAR(20) DEFAULT 'sent',
-            sent_at TIMESTAMP DEFAULT NOW(),
-            converted_requisition_id INTEGER REFERENCES requisitions(id),
-            converted_quote_id INTEGER REFERENCES quotes(id),
-            converted_at TIMESTAMP,
-            total_sell NUMERIC(12,2),
-            total_cost NUMERIC(12,2),
-            created_at TIMESTAMP DEFAULT NOW()
-        )""",
-        """CREATE TABLE IF NOT EXISTS proactive_throttle (
-            id SERIAL PRIMARY KEY,
-            mpn VARCHAR(255) NOT NULL,
-            customer_site_id INTEGER NOT NULL REFERENCES customer_sites(id) ON DELETE CASCADE,
-            last_offered_at TIMESTAMP NOT NULL,
-            proactive_offer_id INTEGER REFERENCES proactive_offers(id)
-        )""",
-    ]
-    for stmt in tables:
-        _exec(conn, stmt)
-    indexes = [
-        "CREATE INDEX IF NOT EXISTS ix_pm_offer ON proactive_matches(offer_id)",
-        "CREATE INDEX IF NOT EXISTS ix_pm_req ON proactive_matches(requisition_id)",
-        "CREATE INDEX IF NOT EXISTS ix_pm_site ON proactive_matches(customer_site_id)",
-        "CREATE INDEX IF NOT EXISTS ix_pm_sales ON proactive_matches(salesperson_id)",
-        "CREATE INDEX IF NOT EXISTS ix_pm_status ON proactive_matches(status)",
-        "CREATE INDEX IF NOT EXISTS ix_pm_mpn_site ON proactive_matches(mpn, customer_site_id)",
-        "CREATE INDEX IF NOT EXISTS ix_poff_site ON proactive_offers(customer_site_id)",
-        "CREATE INDEX IF NOT EXISTS ix_poff_sales ON proactive_offers(salesperson_id)",
-        "CREATE INDEX IF NOT EXISTS ix_poff_status ON proactive_offers(status)",
-        "CREATE INDEX IF NOT EXISTS ix_poff_sent ON proactive_offers(sent_at)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ix_pt_mpn_site ON proactive_throttle(mpn, customer_site_id)",
-        "CREATE INDEX IF NOT EXISTS ix_pt_last_offered ON proactive_throttle(last_offered_at)",
-    ]
-    for stmt in indexes:
-        _exec(conn, stmt)
-    conn.commit()
-
-
-def _create_performance_tables(conn) -> None:
-    """Performance tracking — vendor scorecards, buyer leaderboard, stock list dedup."""
-    tables = [
-        """CREATE TABLE IF NOT EXISTS vendor_metrics_snapshot (
-            id SERIAL PRIMARY KEY,
-            vendor_card_id INTEGER NOT NULL REFERENCES vendor_cards(id) ON DELETE CASCADE,
-            snapshot_date DATE NOT NULL,
-            response_rate FLOAT,
-            quote_accuracy FLOAT,
-            on_time_delivery FLOAT,
-            cancellation_rate FLOAT,
-            rma_rate FLOAT,
-            lead_time_accuracy FLOAT,
-            quote_conversion FLOAT,
-            po_conversion FLOAT,
-            avg_review_rating FLOAT,
-            composite_score FLOAT,
-            interaction_count INTEGER DEFAULT 0,
-            is_sufficient_data BOOLEAN DEFAULT FALSE,
-            rfqs_sent INTEGER DEFAULT 0,
-            rfqs_answered INTEGER DEFAULT 0,
-            pos_in_window INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT NOW()
-        )""",
-        """CREATE TABLE IF NOT EXISTS buyer_leaderboard_snapshot (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-            month DATE NOT NULL,
-            offers_logged INTEGER DEFAULT 0,
-            offers_quoted INTEGER DEFAULT 0,
-            offers_in_buyplan INTEGER DEFAULT 0,
-            offers_po_confirmed INTEGER DEFAULT 0,
-            points_offers INTEGER DEFAULT 0,
-            points_quoted INTEGER DEFAULT 0,
-            points_buyplan INTEGER DEFAULT 0,
-            points_po INTEGER DEFAULT 0,
-            total_points INTEGER DEFAULT 0,
-            rank INTEGER,
-            created_at TIMESTAMP DEFAULT NOW(),
-            updated_at TIMESTAMP DEFAULT NOW()
-        )""",
-        """CREATE TABLE IF NOT EXISTS stock_list_hashes (
-            id SERIAL PRIMARY KEY,
-            user_id INTEGER NOT NULL REFERENCES users(id),
-            content_hash VARCHAR(64) NOT NULL,
-            vendor_card_id INTEGER REFERENCES vendor_cards(id),
-            file_name VARCHAR(500),
-            row_count INTEGER,
-            first_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
-            last_seen_at TIMESTAMP NOT NULL DEFAULT NOW(),
-            upload_count INTEGER DEFAULT 1
-        )""",
-    ]
-    for stmt in tables:
-        _exec(conn, stmt)
-    # Add new columns to existing tables
-    for col_stmt in [
-        "ALTER TABLE vendor_metrics_snapshot ADD COLUMN IF NOT EXISTS quote_conversion FLOAT",
-        "ALTER TABLE vendor_metrics_snapshot ADD COLUMN IF NOT EXISTS po_conversion FLOAT",
-        "ALTER TABLE vendor_metrics_snapshot ADD COLUMN IF NOT EXISTS avg_review_rating FLOAT",
-        # v1.5.2 — Stock list credit in buyer scorecard
-        "ALTER TABLE buyer_leaderboard_snapshot ADD COLUMN IF NOT EXISTS stock_lists_uploaded INTEGER DEFAULT 0",
-        "ALTER TABLE buyer_leaderboard_snapshot ADD COLUMN IF NOT EXISTS points_stock INTEGER DEFAULT 0",
-    ]:
-        _exec(conn, col_stmt)
-    indexes = [
-        "CREATE UNIQUE INDEX IF NOT EXISTS ix_vms_vendor_date ON vendor_metrics_snapshot(vendor_card_id, snapshot_date)",
-        "CREATE INDEX IF NOT EXISTS ix_vms_date ON vendor_metrics_snapshot(snapshot_date)",
-        "CREATE INDEX IF NOT EXISTS ix_vms_composite ON vendor_metrics_snapshot(composite_score)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ix_bls_user_month ON buyer_leaderboard_snapshot(user_id, month)",
-        "CREATE INDEX IF NOT EXISTS ix_bls_month_rank ON buyer_leaderboard_snapshot(month, rank)",
-        "CREATE INDEX IF NOT EXISTS ix_bls_month_points ON buyer_leaderboard_snapshot(month, total_points)",
-        "CREATE INDEX IF NOT EXISTS ix_slh_hash ON stock_list_hashes(content_hash)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ix_slh_user_hash ON stock_list_hashes(user_id, content_hash)",
-        "CREATE INDEX IF NOT EXISTS ix_slh_vendor ON stock_list_hashes(vendor_card_id)",
-    ]
-    for stmt in indexes:
-        _exec(conn, stmt)
-    conn.commit()
-
-
-def _create_admin_settings_tables(conn) -> None:
-    """Admin settings — system_config table, user.is_active column."""
-    # Add is_active column to users
-    _exec(
-        conn,
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
-    )
-    # Create system_config table
-    _exec(
-        conn,
-        """CREATE TABLE IF NOT EXISTS system_config (
-        id SERIAL PRIMARY KEY,
-        key VARCHAR(100) NOT NULL UNIQUE,
-        value TEXT NOT NULL,
-        description VARCHAR(500),
-        updated_by VARCHAR(255),
-        updated_at TIMESTAMP DEFAULT NOW()
-    )""",
-    )
-    _exec(
-        conn, "CREATE UNIQUE INDEX IF NOT EXISTS ix_sysconfig_key ON system_config(key)"
-    )
-    # Add credentials column to api_sources
-    _exec(
-        conn,
-        "ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS credentials JSONB DEFAULT '{}'::jsonb",
-    )
-    # Create pending_batches table for Anthropic Batch API tracking
-    _exec(
-        conn,
-        """CREATE TABLE IF NOT EXISTS pending_batches (
-        id SERIAL PRIMARY KEY,
-        batch_id VARCHAR(255) NOT NULL,
-        batch_type VARCHAR(50) DEFAULT 'inbox_parse',
-        request_map JSONB,
-        status VARCHAR(20) DEFAULT 'processing',
-        submitted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-        completed_at TIMESTAMP WITH TIME ZONE,
-        result_count INTEGER,
-        error_message TEXT
-    )""",
-    )
-    _exec(
-        conn,
-        "CREATE INDEX IF NOT EXISTS ix_pending_batches_batch_id ON pending_batches(batch_id)",
-    )
-    _exec(
-        conn,
-        "CREATE INDEX IF NOT EXISTS ix_pending_batches_status ON pending_batches(status)",
-    )
-    # Seed default scoring weights (idempotent — INSERT ON CONFLICT DO NOTHING)
+def _seed_system_config(conn) -> None:
+    """Seed default scoring weights and feature flags (INSERT ON CONFLICT DO NOTHING)."""
     seeds = [
         ("weight_recency", "30", "Scoring weight for data recency (0-100)"),
         ("weight_quantity", "20", "Scoring weight for quantity match (0-100)"),
-        (
-            "weight_vendor_reliability",
-            "20",
-            "Scoring weight for vendor reliability (0-100)",
-        ),
-        (
-            "weight_data_completeness",
-            "10",
-            "Scoring weight for data completeness (0-100)",
-        ),
-        (
-            "weight_source_credibility",
-            "10",
-            "Scoring weight for source credibility (0-100)",
-        ),
+        ("weight_vendor_reliability", "20", "Scoring weight for vendor reliability (0-100)"),
+        ("weight_data_completeness", "10", "Scoring weight for data completeness (0-100)"),
+        ("weight_source_credibility", "10", "Scoring weight for source credibility (0-100)"),
         ("weight_price", "10", "Scoring weight for price competitiveness (0-100)"),
         ("inbox_scan_interval_min", "30", "Minutes between inbox scan cycles"),
         ("email_mining_enabled", "false", "Enable email mining background job"),
@@ -588,99 +151,32 @@ def _create_admin_settings_tables(conn) -> None:
         )
 
 
-def _create_deep_enrichment_tables(conn) -> None:
-    """Deep enrichment system — jobs, review queue, signature cache + column additions."""
-    tables = [
-        """CREATE TABLE IF NOT EXISTS enrichment_jobs (
-            id SERIAL PRIMARY KEY,
-            job_type VARCHAR(50) NOT NULL,
-            status VARCHAR(20) DEFAULT 'pending',
-            total_items INTEGER DEFAULT 0,
-            processed_items INTEGER DEFAULT 0,
-            enriched_items INTEGER DEFAULT 0,
-            error_count INTEGER DEFAULT 0,
-            scope JSONB DEFAULT '{}',
-            started_by_id INTEGER REFERENCES users(id),
-            started_at TIMESTAMP,
-            completed_at TIMESTAMP,
-            error_log JSONB DEFAULT '[]',
-            created_at TIMESTAMP DEFAULT NOW()
-        )""",
-        """CREATE TABLE IF NOT EXISTS enrichment_queue (
-            id SERIAL PRIMARY KEY,
-            vendor_card_id INTEGER REFERENCES vendor_cards(id) ON DELETE CASCADE,
-            company_id INTEGER REFERENCES companies(id) ON DELETE CASCADE,
-            vendor_contact_id INTEGER REFERENCES vendor_contacts(id) ON DELETE CASCADE,
-            enrichment_type VARCHAR(50) NOT NULL,
-            field_name VARCHAR(100) NOT NULL,
-            current_value TEXT,
-            proposed_value TEXT NOT NULL,
-            confidence FLOAT NOT NULL DEFAULT 0.5,
-            source VARCHAR(50) NOT NULL,
-            status VARCHAR(20) DEFAULT 'pending',
-            batch_job_id INTEGER REFERENCES enrichment_jobs(id) ON DELETE SET NULL,
-            reviewed_by_id INTEGER REFERENCES users(id),
-            reviewed_at TIMESTAMP,
-            created_at TIMESTAMP DEFAULT NOW()
-        )""",
-        """CREATE TABLE IF NOT EXISTS email_signature_extracts (
-            id SERIAL PRIMARY KEY,
-            sender_email VARCHAR(255) NOT NULL UNIQUE,
-            sender_name VARCHAR(255),
-            full_name VARCHAR(255),
-            title VARCHAR(255),
-            company_name VARCHAR(255),
-            phone VARCHAR(100),
-            mobile VARCHAR(100),
-            website VARCHAR(500),
-            address TEXT,
-            linkedin_url VARCHAR(500),
-            extraction_method VARCHAR(20),
-            confidence FLOAT DEFAULT 0.5,
-            seen_count INTEGER DEFAULT 1,
-            created_at TIMESTAMP DEFAULT NOW(),
-            updated_at TIMESTAMP DEFAULT NOW()
-        )""",
-    ]
-    for stmt in tables:
-        _exec(conn, stmt)
-
-    # Column additions on existing tables
-    col_stmts = [
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS deep_enrichment_at TIMESTAMP",
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS specialty_confidence FLOAT",
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS email_history_scanned_at TIMESTAMP",
-        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS deep_enrichment_at TIMESTAMP",
-        "ALTER TABLE users ADD COLUMN IF NOT EXISTS last_deep_email_scan TIMESTAMP",
-    ]
-    for stmt in col_stmts:
-        _exec(conn, stmt)
-
-    # Indexes
-    indexes = [
-        "CREATE INDEX IF NOT EXISTS ix_ej_status ON enrichment_jobs(status)",
-        "CREATE INDEX IF NOT EXISTS ix_ej_type_status ON enrichment_jobs(job_type, status)",
-        "CREATE INDEX IF NOT EXISTS ix_eq_status ON enrichment_queue(status)",
-        "CREATE INDEX IF NOT EXISTS ix_eq_vendor ON enrichment_queue(vendor_card_id)",
-        "CREATE INDEX IF NOT EXISTS ix_eq_company ON enrichment_queue(company_id)",
-        "CREATE INDEX IF NOT EXISTS ix_eq_batch ON enrichment_queue(batch_job_id)",
-        "CREATE INDEX IF NOT EXISTS ix_eq_status_created ON enrichment_queue(status, created_at)",
-        "CREATE UNIQUE INDEX IF NOT EXISTS ix_ese_email ON email_signature_extracts(sender_email)",
-        "CREATE INDEX IF NOT EXISTS ix_ese_company ON email_signature_extracts(company_name)",
-    ]
-    for stmt in indexes:
-        _exec(conn, stmt)
-    conn.commit()
+def _seed_site_contacts(conn) -> None:
+    """One-time: copy contact_name/email/phone/title from customer_sites into site_contacts."""
+    try:
+        row = conn.execute(sqltext("SELECT COUNT(*) FROM site_contacts")).scalar()
+        if row and row > 0:
+            return  # already seeded
+        conn.execute(
+            sqltext("""
+            INSERT INTO site_contacts (customer_site_id, full_name, title, email, phone, is_primary)
+            SELECT id, contact_name, contact_title, contact_email, contact_phone, TRUE
+            FROM customer_sites
+            WHERE contact_name IS NOT NULL AND contact_name != ''
+        """)
+        )
+        conn.commit()
+        log.info("Seeded site_contacts from existing customer_sites data")
+    except Exception as e:
+        log.warning("Seed site_contacts failed: %s", e)
+        conn.rollback()
 
 
-def _add_normalized_mpn_column(conn) -> None:
-    """Add normalized_mpn column to requirements table."""
-    _exec(conn, "ALTER TABLE requirements ADD COLUMN IF NOT EXISTS normalized_mpn VARCHAR(255)")
-    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_requirements_normalized_mpn ON requirements(normalized_mpn)")
+# ── One-time backfills ───────────────────────────────────────────────
 
 
 def _backfill_normalized_mpn() -> None:
-    """One-time backfill: populate requirements.normalized_mpn and re-normalize material_cards.normalized_mpn."""
+    """One-time backfill: populate requirements.normalized_mpn and re-normalize material_cards."""
     import re
     _nonalnum = re.compile(r"[^a-z0-9]")
 
@@ -719,7 +215,6 @@ def _backfill_normalized_mpn() -> None:
                 old_norm = c[1]
                 new_norm = _key(c[2] or c[1])
                 if new_norm and new_norm != old_norm:
-                    # Only update if no collision
                     existing = conn.execute(
                         sqltext("SELECT id FROM material_cards WHERE normalized_mpn = :n AND id != :id"),
                         {"n": new_norm, "id": c[0]},
@@ -738,80 +233,41 @@ def _backfill_normalized_mpn() -> None:
             conn.rollback()
 
 
-def _create_fts_indexes(conn) -> None:
-    """Add PostgreSQL full-text search support to vendor_cards and material_cards."""
-    stmts = [
-        # Add tsvector columns
-        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS search_vector tsvector",
-        "ALTER TABLE material_cards ADD COLUMN IF NOT EXISTS search_vector tsvector",
-        # GIN indexes for fast full-text search
-        "CREATE INDEX IF NOT EXISTS ix_vc_fts ON vendor_cards USING GIN(search_vector)",
-        "CREATE INDEX IF NOT EXISTS ix_mc_fts ON material_cards USING GIN(search_vector)",
+# ── CHECK constraints (PostgreSQL NOT VALID) ─────────────────────────
+
+
+def _add_check_constraints(conn) -> None:
+    """Add CHECK constraints (NOT VALID) — only new inserts/updates are checked."""
+    constraints = [
+        # ── requirements ──
+        ("requirements", "chk_req_target_qty", "target_qty IS NULL OR target_qty >= 1"),
+        ("requirements", "chk_req_target_price", "target_price IS NULL OR target_price >= 0"),
+        ("requirements", "chk_req_condition", "condition IS NULL OR condition IN ('new','refurb','used')"),
+        ("requirements", "chk_req_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape')"),
+        # ── sightings ──
+        ("sightings", "chk_sight_qty", "qty_available IS NULL OR qty_available > 0"),
+        ("sightings", "chk_sight_price", "unit_price IS NULL OR unit_price > 0"),
+        ("sightings", "chk_sight_moq", "moq IS NULL OR moq > 0"),
+        ("sightings", "chk_sight_confidence", "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)"),
+        ("sightings", "chk_sight_score", "score IS NULL OR score >= 0"),
+        ("sightings", "chk_sight_lead_time", "lead_time_days IS NULL OR lead_time_days >= 0"),
+        ("sightings", "chk_sight_condition", "condition IS NULL OR condition IN ('new','refurb','used')"),
+        ("sightings", "chk_sight_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape')"),
+        # ── offers ──
+        ("offers", "chk_offer_qty", "qty_available IS NULL OR qty_available > 0"),
+        ("offers", "chk_offer_price", "unit_price IS NULL OR unit_price > 0"),
+        ("offers", "chk_offer_moq", "moq IS NULL OR moq > 0"),
+        ("offers", "chk_offer_condition", "condition IS NULL OR condition IN ('new','refurb','used')"),
+        ("offers", "chk_offer_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape')"),
+        ("offers", "chk_offer_status", "status IN ('active','expired','won','lost','pending_review')"),
     ]
-    for stmt in stmts:
-        _exec(conn, stmt)
-
-    # Trigger function for vendor_cards
-    _exec(conn, """
-        CREATE OR REPLACE FUNCTION vendor_cards_fts_update() RETURNS trigger AS $$
-        BEGIN
-            NEW.search_vector :=
-                setweight(to_tsvector('english', COALESCE(NEW.display_name, '')), 'A') ||
-                setweight(to_tsvector('english', COALESCE(NEW.normalized_name, '')), 'A') ||
-                setweight(to_tsvector('english', COALESCE(NEW.domain, '')), 'B') ||
-                setweight(to_tsvector('english', COALESCE(NEW.industry, '')), 'C');
-            RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql;
-    """)
-
-    _exec(conn, """
-        DO $$ BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_vc_fts') THEN
-                CREATE TRIGGER trg_vc_fts BEFORE INSERT OR UPDATE ON vendor_cards
-                FOR EACH ROW EXECUTE FUNCTION vendor_cards_fts_update();
-            END IF;
-        END $$;
-    """)
-
-    # Trigger function for material_cards
-    _exec(conn, """
-        CREATE OR REPLACE FUNCTION material_cards_fts_update() RETURNS trigger AS $$
-        BEGIN
-            NEW.search_vector :=
-                setweight(to_tsvector('english', COALESCE(NEW.display_mpn, '')), 'A') ||
-                setweight(to_tsvector('english', COALESCE(NEW.normalized_mpn, '')), 'A') ||
-                setweight(to_tsvector('english', COALESCE(NEW.manufacturer, '')), 'B') ||
-                setweight(to_tsvector('english', COALESCE(NEW.description, '')), 'C');
-            RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql;
-    """)
-
-    _exec(conn, """
-        DO $$ BEGIN
-            IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_mc_fts') THEN
-                CREATE TRIGGER trg_mc_fts BEFORE INSERT OR UPDATE ON material_cards
-                FOR EACH ROW EXECUTE FUNCTION material_cards_fts_update();
-            END IF;
-        END $$;
-    """)
-
-    # One-time backfill existing rows (only where search_vector is NULL)
-    _exec(conn, """
-        UPDATE vendor_cards SET search_vector =
-            setweight(to_tsvector('english', COALESCE(display_name, '')), 'A') ||
-            setweight(to_tsvector('english', COALESCE(normalized_name, '')), 'A') ||
-            setweight(to_tsvector('english', COALESCE(domain, '')), 'B') ||
-            setweight(to_tsvector('english', COALESCE(industry, '')), 'C')
-        WHERE search_vector IS NULL
-    """)
-
-    _exec(conn, """
-        UPDATE material_cards SET search_vector =
-            setweight(to_tsvector('english', COALESCE(display_mpn, '')), 'A') ||
-            setweight(to_tsvector('english', COALESCE(normalized_mpn, '')), 'A') ||
-            setweight(to_tsvector('english', COALESCE(manufacturer, '')), 'B') ||
-            setweight(to_tsvector('english', COALESCE(description, '')), 'C')
-        WHERE search_vector IS NULL
-    """)
+    for table, name, check in constraints:
+        _exec(conn, f"""
+            DO $$ BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_constraint WHERE conname = '{name}'
+                ) THEN
+                    ALTER TABLE {table} ADD CONSTRAINT {name} CHECK ({check}) NOT VALID;
+                END IF;
+            END $$;
+        """)
