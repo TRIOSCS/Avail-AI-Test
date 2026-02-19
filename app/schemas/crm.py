@@ -19,7 +19,12 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from app.utils.normalization import normalize_mpn
+from app.utils.normalization import (
+    normalize_condition,
+    normalize_date_code,
+    normalize_mpn,
+    normalize_packaging,
+)
 from app.utils.normalization_helpers import (
     normalize_country,
     normalize_phone_e164,
@@ -238,6 +243,13 @@ class SiteContactCreate(BaseModel):
             return v
         return normalize_phone_e164(v) or v
 
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return v.strip().lower()
+
 
 class SiteContactUpdate(BaseModel):
     full_name: str | None = None
@@ -246,6 +258,20 @@ class SiteContactUpdate(BaseModel):
     phone: str | None = None
     notes: str | None = None
     is_primary: bool | None = None
+
+    @field_validator("phone")
+    @classmethod
+    def normalize_phone(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_phone_e164(v) or v
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return v.strip().lower()
 
 
 # ── Offers ───────────────────────────────────────────────────────────
@@ -260,7 +286,7 @@ class OfferCreate(BaseModel):
     unit_price: float | None = Field(default=None, ge=0)
     lead_time: str | None = None
     date_code: str | None = None
-    condition: str = "New"
+    condition: str = "new"
     packaging: str | None = None
     firmware: str | None = None
     hardware_code: str | None = None
@@ -268,7 +294,7 @@ class OfferCreate(BaseModel):
     source: str = "manual"
     vendor_response_id: int | None = None
     notes: str | None = None
-    status: Literal["active", "expired", "won", "lost"] = "active"
+    status: Literal["active", "expired", "won", "lost", "pending_review"] = "active"
     vendor_website: str | None = None
 
     @field_validator("mpn")
@@ -287,6 +313,25 @@ class OfferCreate(BaseModel):
             raise ValueError("Field must not be blank")
         return v
 
+    @field_validator("condition")
+    @classmethod
+    def normalize_condition_field(cls, v: str) -> str:
+        return normalize_condition(v) or v
+
+    @field_validator("packaging")
+    @classmethod
+    def normalize_packaging_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_packaging(v) or v
+
+    @field_validator("date_code")
+    @classmethod
+    def normalize_date_code_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_date_code(v) or v
+
 
 class OfferUpdate(BaseModel):
     vendor_name: str | None = None
@@ -302,7 +347,28 @@ class OfferUpdate(BaseModel):
     hardware_code: str | None = None
     moq: int | None = None
     notes: str | None = None
-    status: Literal["active", "expired", "won", "lost"] | None = None
+    status: Literal["active", "expired", "won", "lost", "pending_review"] | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def normalize_mpn_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_mpn(v) or v
+
+    @field_validator("condition")
+    @classmethod
+    def normalize_condition_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_condition(v) or v
+
+    @field_validator("packaging")
+    @classmethod
+    def normalize_packaging_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_packaging(v) or v
 
 
 class OfferOut(BaseModel):

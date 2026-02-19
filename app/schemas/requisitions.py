@@ -75,8 +75,8 @@ class RequirementCreate(BaseModel):
 
 class RequirementUpdate(BaseModel):
     primary_mpn: str | None = None
-    target_qty: int | None = None
-    target_price: float | None = None
+    target_qty: int | None = Field(default=None, ge=1)
+    target_price: float | None = Field(default=None, ge=0)
     substitutes: list[str] | None = None
     firmware: str | None = None
     date_codes: str | None = None

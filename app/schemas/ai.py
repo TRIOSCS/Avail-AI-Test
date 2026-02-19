@@ -18,6 +18,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.utils.normalization import normalize_condition, normalize_mpn, normalize_packaging
+
 
 class ProspectFinderRequest(BaseModel):
     entity_type: Literal["company", "site", "vendor"] = "company"
@@ -45,6 +47,27 @@ class DraftOfferItem(BaseModel):
     moq: int | None = None
     notes: str | None = None
     requirement_id: int | None = None
+
+    @field_validator("mpn")
+    @classmethod
+    def normalize_mpn_field(cls, v: str) -> str:
+        if not v:
+            return v
+        return normalize_mpn(v) or v
+
+    @field_validator("condition")
+    @classmethod
+    def normalize_condition_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_condition(v) or v
+
+    @field_validator("packaging")
+    @classmethod
+    def normalize_packaging_field(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        return normalize_packaging(v) or v
 
 
 class SaveDraftOffersRequest(BaseModel):

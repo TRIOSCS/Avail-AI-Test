@@ -1133,7 +1133,7 @@ function _renderReqRow(r) {
             <td style="font-size:11px">${searched}</td>
             <td class="mono" style="font-size:11px">${age}</td>
             <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>`;
-        actions = `<td style="white-space:nowrap">${srcBtn}</td>`;
+        actions = `<td style="white-space:nowrap">${srcBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">\ud83d\udce5 Archive</button></td>`;
         colspan = 11;
     } else if (v === 'archive') {
         // Archive: Parts, Offers, Outcome, Sales, Age
@@ -1143,7 +1143,7 @@ function _renderReqRow(r) {
             <td><span class="badge ${bc}">${_statusLabels[r.status] || r.status}</span></td>
             <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px">${age}</td>`;
-        actions = `<td style="white-space:nowrap"><button class="btn btn-sm" onclick="event.stopPropagation();cloneFromList(${r.id})" title="Clone as new draft">&#x1f4cb; Clone</button></td>`;
+        actions = `<td style="white-space:nowrap"><button class="btn btn-sm" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Restore from archive">&#x21a9; Restore</button> <button class="btn btn-sm" onclick="event.stopPropagation();cloneFromList(${r.id})" title="Clone as new draft">&#x1f4cb; Clone</button></td>`;
         colspan = 8;
     } else {
         // RFQ (drafts): Parts, Sales, Age, Need By
@@ -1152,7 +1152,7 @@ function _renderReqRow(r) {
             <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px">${age}</td>
             <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>`;
-        actions = `<td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();submitToSourcing(${r.id})" title="Submit to sourcing">&#x25b6; Source</button></td>`;
+        actions = `<td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();submitToSourcing(${r.id})" title="Submit to sourcing">&#x25b6; Source</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5; Archive</button></td>`;
         colspan = 7;
     }
 

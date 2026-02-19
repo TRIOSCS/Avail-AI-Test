@@ -85,7 +85,7 @@ class TestSiteUpdate:
 class TestOfferCreate:
     def test_valid(self) -> None:
         o = OfferCreate(mpn="LM317T", vendor_name="Arrow")
-        assert o.condition == "New"
+        assert o.condition == "new"
         assert o.status == "active"
 
     def test_blank_mpn_raises(self) -> None:

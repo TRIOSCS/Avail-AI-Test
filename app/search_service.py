@@ -20,7 +20,17 @@ from .models import (
     ApiSource,
 )
 from .scoring import score_sighting
-from .utils.normalization import normalize_mpn, normalize_mpn_key
+from .utils.normalization import (
+    detect_currency,
+    normalize_condition,
+    normalize_date_code,
+    normalize_lead_time,
+    normalize_mpn,
+    normalize_mpn_key,
+    normalize_packaging,
+    normalize_price,
+    normalize_quantity,
+)
 from .utils.normalization_helpers import fix_encoding
 from .connectors.sources import NexarConnector, BrokerBinConnector
 from .connectors.ebay import EbayConnector
@@ -290,6 +300,25 @@ def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Si
         raw_vendor = r.get("vendor_name", "Unknown")
         clean_vendor = fix_encoding((raw_vendor or "").strip()) or raw_vendor
 
+        # Normalize numeric and enum fields from raw connector data
+        raw_qty = r.get("qty_available")
+        clean_qty = normalize_quantity(raw_qty)
+        if clean_qty is None and isinstance(raw_qty, (int, float)) and raw_qty > 0:
+            clean_qty = int(raw_qty)
+
+        raw_price = r.get("unit_price")
+        clean_price = normalize_price(raw_price)
+        if clean_price is None and isinstance(raw_price, (int, float)) and raw_price > 0:
+            clean_price = float(raw_price)
+
+        raw_currency = r.get("currency") or r.get("unit_price")
+        clean_currency = detect_currency(raw_currency) if raw_currency else "USD"
+
+        clean_condition = normalize_condition(r.get("condition"))
+        clean_packaging = normalize_packaging(r.get("packaging"))
+        clean_date_code = normalize_date_code(r.get("date_code"))
+        clean_lead_time_days = normalize_lead_time(r.get("lead_time"))
+
         s = Sighting(
             requirement_id=req.id,
             vendor_name=clean_vendor,
@@ -297,13 +326,18 @@ def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Si
             vendor_phone=r.get("vendor_phone"),
             mpn_matched=clean_mpn,
             manufacturer=r.get("manufacturer"),
-            qty_available=r.get("qty_available"),
-            unit_price=r.get("unit_price"),
-            currency=r.get("currency", "USD"),
+            qty_available=clean_qty,
+            unit_price=clean_price,
+            currency=clean_currency,
             moq=r.get("moq"),
             source_type=r.get("source_type"),
             is_authorized=r.get("is_authorized", False),
             confidence=r.get("confidence", 0),
+            condition=clean_condition,
+            packaging=clean_packaging,
+            date_code=clean_date_code,
+            lead_time_days=clean_lead_time_days,
+            lead_time=r.get("lead_time"),
             raw_data=r,
             created_at=datetime.now(timezone.utc),
         )
