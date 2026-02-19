@@ -3564,7 +3564,7 @@ function _renderSourceCards() {
         const group = grouped[cat];
         if (!group || !group.length) continue;
         const label = categoryLabels[cat] || cat;
-        html += `<h3 style="font-size:13px;font-weight:600;color:var(--text2);margin:20px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)">${label}</h3>`;
+        html += `<h3 class="s-cat-heading">${label}</h3>`;
 
         for (const s of group) {
             const dot = s.status === 'live' ? '🟢' : s.status === 'pending' ? '🟡' : s.status === 'error' ? '🔴' : '⚫';
@@ -3578,52 +3578,48 @@ function _renderSourceCards() {
                     ? '<span style="color:var(--teal);font-size:11px;font-weight:600">Set</span>'
                     : '<span style="color:var(--muted);font-size:11px">Not set</span>';
                 credsHtml += `
-                    <div class="cred-row" id="cred-row-${s.id}-${v}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">
-                        <code style="font-size:11px;min-width:180px;color:var(--text2)">${v}</code>
+                    <div class="s-cred-row" id="cred-row-${s.id}-${v}">
+                        <code>${v}</code>
                         <span id="cred-status-${s.id}-${v}">${badge}</span>
                         <div style="flex:1"></div>
-                        <button class="btn-sm" onclick="editCredential(${s.id},'${v}')" style="font-size:11px;padding:2px 10px">Edit</button>
+                        <button class="btn btn-ghost btn-sm" onclick="editCredential(${s.id},'${v}')">Edit</button>
                     </div>
                     <div id="cred-edit-${s.id}-${v}" style="display:none;padding:6px 0 10px">
-                        <div style="display:flex;gap:8px;align-items:center">
-                            <input type="password" id="cred-input-${s.id}-${v}" placeholder="Enter value..."
-                                   style="flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--bg);color:var(--text)">
-                            <button class="btn-sm" onclick="saveCredential(${s.id},'${v}')"
-                                    style="font-size:11px;padding:4px 12px;background:var(--teal);color:#fff;border:none;border-radius:4px">Save</button>
-                            <button class="btn-sm" onclick="cancelCredEdit(${s.id},'${v}')"
-                                    style="font-size:11px;padding:4px 10px">Cancel</button>
+                        <div class="s-row">
+                            <input type="password" id="cred-input-${s.id}-${v}" placeholder="Enter value..." class="s-input" style="flex:1">
+                            <button class="btn btn-primary btn-sm" onclick="saveCredential(${s.id},'${v}')">Save</button>
+                            <button class="btn btn-ghost btn-sm" onclick="cancelCredEdit(${s.id},'${v}')">Cancel</button>
                         </div>
                     </div>`;
             }
 
             const statsHtml = s.total_searches
-                ? `<div style="font-size:10px;color:var(--muted);margin-top:8px">${s.total_searches} searches / ${s.total_results} results / ${s.avg_response_ms}ms avg</div>`
+                ? `<div class="s-hint" style="margin-top:8px">${s.total_searches} searches / ${s.total_results} results / ${s.avg_response_ms}ms avg</div>`
                 : '';
             const errorHtml = s.last_error
-                ? `<div style="font-size:10px;color:var(--red);margin-top:4px">Last error: ${s.last_error}</div>`
+                ? `<div style="font-size:11px;color:var(--red);margin-top:4px">Last error: ${s.last_error}</div>`
                 : '';
 
             const toggleHtml = canToggle && envVars.length
-                ? `<button class="btn-sm" onclick="toggleSourceStatus(${s.id},'${s.status}')"
-                          style="font-size:10px;padding:2px 10px;${s.status === 'disabled' ? 'opacity:0.7' : ''}">${s.status === 'disabled' ? 'Enable' : 'Disable'}</button>`
+                ? `<button class="btn btn-ghost btn-sm" onclick="toggleSourceStatus(${s.id},'${s.status}')"
+                          ${s.status === 'disabled' ? 'style="opacity:0.7"' : ''}>${s.status === 'disabled' ? 'Enable' : 'Disable'}</button>`
                 : '';
 
-            html += `<div class="card" style="padding:16px;margin-bottom:12px">
+            html += `<div class="card s-card" style="max-width:none">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                     <div>
                         <strong style="font-size:14px">${s.display_name}</strong>
-                        <span style="font-size:11px;color:var(--muted);margin-left:8px">${s.source_type}</span>
+                        <span class="s-hint" style="margin-left:8px">${s.source_type}</span>
                     </div>
-                    <div style="display:flex;align-items:center;gap:10px">
-                        <span style="font-size:11px">${dot} ${s.status}</span>
+                    <div class="s-row" style="gap:10px">
+                        <span class="s-hint">${dot} ${s.status}</span>
                         ${toggleHtml}
-                        <button class="btn-sm" id="test-btn-${s.id}" onclick="testSourceCred(${s.id})"
-                                style="font-size:11px;padding:3px 12px">Test</button>
+                        <button class="btn btn-ghost btn-sm" id="test-btn-${s.id}" onclick="testSourceCred(${s.id})">Test</button>
                     </div>
                 </div>
-                <div style="font-size:11px;color:var(--text2);margin-bottom:10px">${s.description || ''}</div>
-                ${s.setup_notes ? '<div style="font-size:10px;color:var(--muted);margin-bottom:8px;padding:6px 10px;background:var(--bg);border-radius:4px">' + s.setup_notes + '</div>' : ''}
-                ${s.signup_url ? '<a href="' + s.signup_url + '" target="_blank" style="font-size:10px;color:var(--teal);text-decoration:none">Get API credentials ↗</a>' : ''}
+                <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${s.description || ''}</div>
+                ${s.setup_notes ? '<div class="s-hint" style="margin-bottom:8px;padding:6px 10px;background:var(--bg);border-radius:4px">' + s.setup_notes + '</div>' : ''}
+                ${s.signup_url ? '<a href="' + s.signup_url + '" target="_blank" style="font-size:11px;color:var(--teal);text-decoration:none">Get API credentials ↗</a>' : ''}
                 <div style="margin-top:10px">${credsHtml}</div>
                 <div id="test-result-${s.id}"></div>
                 ${statsHtml}${errorHtml}
@@ -3650,10 +3646,6 @@ async function loadSettingsSources() {
         for (const s of sources) counts[s.status] = (counts[s.status] || 0) + 1;
         const total = sources.length;
 
-        // Build summary + controls + card container
-        const pillStyle = (active) => `display:inline-block;padding:4px 14px;font-size:12px;font-weight:600;border-radius:20px;cursor:pointer;transition:.15s;border:1px solid var(--border);`
-            + (active ? 'background:var(--teal);color:#fff;border-color:var(--teal);' : 'background:var(--bg);color:var(--text2);');
-
         el.innerHTML = `
             <div style="margin-bottom:16px;padding:12px 16px;background:var(--bg);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2)">
                 <span>🟢 ${counts.live} Live</span>
@@ -3666,10 +3658,10 @@ async function loadSettingsSources() {
                 <span style="color:var(--muted)">·</span>
                 <span style="font-weight:600">${total} total</span>
             </div>
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+            <div class="s-row" style="gap:12px;margin-bottom:16px;flex-wrap:wrap">
                 <div style="display:flex;gap:4px" id="sourcesToggle">
-                    <span id="srcPillAll" style="${pillStyle(true)}" onclick="setSourcesFilter('all')">All</span>
-                    <span id="srcPillActive" style="${pillStyle(false)}" onclick="setSourcesFilter('active')">Active</span>
+                    <span id="srcPillAll" class="s-pill on" onclick="setSourcesFilter('all')">All</span>
+                    <span id="srcPillActive" class="s-pill" onclick="setSourcesFilter('active')">Active</span>
                 </div>
                 <input class="req-search" id="sourcesSearchInput" type="text" placeholder="Search sources…"
                        style="flex:1;min-width:180px" oninput="onSourcesSearch(this.value)" aria-label="Search sources">
@@ -3687,11 +3679,8 @@ function setSourcesFilter(mode) {
     const allPill = document.getElementById('srcPillAll');
     const activePill = document.getElementById('srcPillActive');
     if (allPill && activePill) {
-        const on = 'background:var(--teal);color:#fff;border-color:var(--teal);';
-        const off = 'background:var(--bg);color:var(--text2);border-color:var(--border);';
-        const base = 'display:inline-block;padding:4px 14px;font-size:12px;font-weight:600;border-radius:20px;cursor:pointer;transition:.15s;border:1px solid var(--border);';
-        allPill.style.cssText = base + (mode === 'all' ? on : off);
-        activePill.style.cssText = base + (mode === 'active' ? on : off);
+        allPill.className = 's-pill' + (mode === 'all' ? ' on' : '');
+        activePill.className = 's-pill' + (mode === 'active' ? ' on' : '');
     }
     _renderSourceCards();
 }
@@ -3783,19 +3772,19 @@ async function loadSettingsHealth() {
         let html = '';
 
         // Version
-        html += `<div class="card" style="padding:16px;margin-bottom:16px"><strong>Version:</strong> ${data.version}</div>`;
+        html += `<div class="card s-card"><strong>Version:</strong> ${data.version}</div>`;
 
         // DB stats
-        html += '<div class="card" style="padding:16px;margin-bottom:16px"><h3 style="margin:0 0 12px;font-size:14px">Database Statistics</h3>';
-        html += '<table class="perf-table"><thead><tr><th>Table</th><th>Rows</th></tr></thead><tbody>';
+        html += '<div class="card s-card" style="max-width:none"><h3>Database Statistics</h3>';
+        html += '<table class="tbl"><thead><tr><th>Table</th><th>Rows</th></tr></thead><tbody>';
         for (const [k, v] of Object.entries(data.db_stats || {})) {
             html += `<tr><td>${k}</td><td>${v.toLocaleString()}</td></tr>`;
         }
         html += '</tbody></table></div>';
 
         // Scheduler status
-        html += '<div class="card" style="padding:16px;margin-bottom:16px"><h3 style="margin:0 0 12px;font-size:14px">M365 Scheduler Status</h3>';
-        html += '<table class="perf-table"><thead><tr><th>User</th><th>M365</th><th>Token</th><th>Last Inbox Scan</th></tr></thead><tbody>';
+        html += '<div class="card s-card" style="max-width:none"><h3>M365 Scheduler Status</h3>';
+        html += '<table class="tbl"><thead><tr><th>User</th><th>M365</th><th>Token</th><th>Last Inbox Scan</th></tr></thead><tbody>';
         for (const u of data.scheduler || []) {
             const dot = u.m365_connected ? '<span style="color:var(--teal)">Connected</span>' : '<span style="color:var(--muted)">Disconnected</span>';
             const scan = u.last_inbox_scan ? new Date(u.last_inbox_scan).toLocaleString() : '—';
@@ -3804,8 +3793,8 @@ async function loadSettingsHealth() {
         html += '</tbody></table></div>';
 
         // Connector health
-        html += '<div class="card" style="padding:16px"><h3 style="margin:0 0 12px;font-size:14px">Connector Health</h3>';
-        html += '<table class="perf-table"><thead><tr><th>Name</th><th>Status</th><th>Searches</th><th>Results</th><th>Last Success</th></tr></thead><tbody>';
+        html += '<div class="card s-card" style="max-width:none"><h3>Connector Health</h3>';
+        html += '<table class="tbl"><thead><tr><th>Name</th><th>Status</th><th>Searches</th><th>Results</th><th>Last Success</th></tr></thead><tbody>';
         for (const c of data.connectors || []) {
             const dot = c.status === 'live' ? '🟢' : c.status === 'error' ? '🔴' : '🟡';
             const last = c.last_success ? new Date(c.last_success).toLocaleString() : '—';
@@ -3828,17 +3817,16 @@ async function loadSettingsScoring() {
     try {
         const configs = await apiFetch('/api/admin/config');
         const weights = configs.filter(c => c.key.startsWith('weight_'));
-        let html = '<div class="card" style="padding:20px;max-width:600px">';
-        html += '<h3 style="margin:0 0 16px;font-size:14px">Search Scoring Weights</h3>';
-        html += '<p style="font-size:12px;color:var(--muted);margin:0 0 16px">Weights determine how search results are ranked. Total should equal 100.</p>';
-        html += '<div style="display:flex;flex-direction:column;gap:10px">';
+        let html = '<div class="card s-card">';
+        html += '<h3>Search Scoring Weights</h3>';
+        html += '<p class="s-desc">Weights determine how search results are ranked. Total should equal 100.</p>';
+        html += '<div class="s-form">';
         for (const w of weights) {
             const label = w.key.replace('weight_', '').replace(/_/g, ' ');
-            html += `<div style="display:flex;align-items:center;gap:10px">
+            html += `<div class="s-row">
                 <label style="flex:1;font-size:13px;text-transform:capitalize">${label}</label>
                 <input type="number" min="0" max="100" value="${w.value}" id="sw_${w.key}"
-                    onchange="updateWeightTotal()"
-                    style="width:60px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);text-align:center">
+                    onchange="updateWeightTotal()" class="s-input-num" style="width:60px">
                 <button class="btn btn-ghost btn-sm" onclick="saveConfig('${w.key}', document.getElementById('sw_${w.key}').value)">Save</button>
             </div>`;
         }
@@ -3871,25 +3859,24 @@ async function loadSettingsConfig() {
     try {
         const configs = await apiFetch('/api/admin/config');
         const nonWeights = configs.filter(c => !c.key.startsWith('weight_'));
-        let html = '<div class="card" style="padding:20px;max-width:600px">';
-        html += '<h3 style="margin:0 0 16px;font-size:14px">System Configuration</h3>';
-        html += '<div style="display:flex;flex-direction:column;gap:12px">';
+        let html = '<div class="card s-card">';
+        html += '<h3>System Configuration</h3>';
+        html += '<div class="s-form">';
         for (const c of nonWeights) {
             const isBool = c.value === 'true' || c.value === 'false';
             if (isBool) {
                 const checked = c.value === 'true' ? 'checked' : '';
-                html += `<div style="display:flex;align-items:center;gap:10px">
-                    <label style="flex:1;font-size:13px">${c.key.replace(/_/g, ' ')}<br><span style="font-size:11px;color:var(--muted)">${c.description || ''}</span></label>
+                html += `<div class="s-row">
+                    <label style="flex:1;font-size:13px">${c.key.replace(/_/g, ' ')}<br><span class="s-hint">${c.description || ''}</span></label>
                     <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
                         <input type="checkbox" ${checked} onchange="saveConfig('${c.key}', this.checked ? 'true' : 'false')">
                         <span style="font-size:12px">${c.value === 'true' ? 'On' : 'Off'}</span>
                     </label>
                 </div>`;
             } else {
-                html += `<div style="display:flex;align-items:center;gap:10px">
-                    <label style="flex:1;font-size:13px">${c.key.replace(/_/g, ' ')}<br><span style="font-size:11px;color:var(--muted)">${c.description || ''}</span></label>
-                    <input type="text" value="${c.value}" id="cfg_${c.key}"
-                        style="width:80px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);text-align:center">
+                html += `<div class="s-row">
+                    <label style="flex:1;font-size:13px">${c.key.replace(/_/g, ' ')}<br><span class="s-hint">${c.description || ''}</span></label>
+                    <input type="text" value="${c.value}" id="cfg_${c.key}" class="s-input-num">
                     <button class="btn btn-ghost btn-sm" onclick="saveConfig('${c.key}', document.getElementById('cfg_${c.key}').value)">Save</button>
                 </div>`;
             }
@@ -3897,7 +3884,7 @@ async function loadSettingsConfig() {
         html += '</div>';
         if (nonWeights.length) {
             const lastUpdate = nonWeights.find(c => c.updated_by);
-            if (lastUpdate) html += `<p style="font-size:11px;color:var(--muted);margin-top:12px">Last updated by ${lastUpdate.updated_by}</p>`;
+            if (lastUpdate) html += `<p class="s-hint" style="margin-top:12px">Last updated by ${lastUpdate.updated_by}</p>`;
         }
         html += '</div>';
         el.innerHTML = html;
@@ -3940,7 +3927,7 @@ async function loadAdminUsers() {
 function renderAdminUsers() {
     const el = document.getElementById('adminUsersList');
     if (!_adminUsers.length) { el.innerHTML = '<p class="empty">No users</p>'; return; }
-    let html = `<table class="perf-table"><thead><tr>
+    let html = `<table class="tbl"><thead><tr>
         <th>Name</th><th>Email</th><th>Role</th><th>Active</th><th>M365</th><th>Actions</th>
     </tr></thead><tbody>`;
     for (const u of _adminUsers) {
@@ -3948,7 +3935,7 @@ function renderAdminUsers() {
         html += `<tr>
             <td>${u.name || '—'}</td>
             <td>${u.email}</td>
-            <td><select onchange="updateUserField(${u.id}, 'role', this.value)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text)">
+            <td><select onchange="updateUserField(${u.id}, 'role', this.value)" class="s-select" style="padding:4px 8px;font-size:12px">
                 <option value="buyer" ${u.role==='buyer'?'selected':''}>Buyer</option>
                 <option value="trader" ${u.role==='trader'?'selected':''}>Trader</option>
                 <option value="sales" ${u.role==='sales'?'selected':''}>Sales</option>
@@ -4048,23 +4035,23 @@ async function loadUnmatchedQueue() {
             el.innerHTML = '<p class="empty">No unmatched activities — all clear!</p>';
             return;
         }
-        let html = `<p style="margin:0 0 12px;color:var(--muted);font-size:13px">${data.total} unmatched activit${data.total === 1 ? 'y' : 'ies'} awaiting review</p>`;
-        html += '<div style="display:flex;flex-direction:column;gap:8px">';
+        let html = `<p class="s-hint" style="margin:0 0 12px">${data.total} unmatched activit${data.total === 1 ? 'y' : 'ies'} awaiting review</p>`;
+        html += '<div class="s-form" style="gap:8px">';
         for (const a of items) {
             const contact = a.contact_email || a.contact_phone || 'Unknown';
             const typeIcon = a.channel === 'email' ? '✉' : '📞';
             const dateStr = a.created_at ? new Date(a.created_at).toLocaleDateString() : '';
             const subject = a.subject ? ` — ${esc(a.subject.substring(0, 60))}` : '';
-            html += `<div class="card" style="padding:12px;display:flex;align-items:center;gap:12px" id="unmatched-${a.id}">
+            html += `<div class="card s-row" style="padding:12px;gap:12px;max-width:none" id="unmatched-${a.id}">
                 <span style="font-size:18px">${typeIcon}</span>
                 <div style="flex:1;min-width:0">
                     <div style="font-weight:600;font-size:13px">${esc(contact)}${subject}</div>
-                    <div style="font-size:11px;color:var(--muted)">${esc(a.activity_type)} · ${esc(a.user_name || '')} · ${dateStr}</div>
-                    ${a.contact_name ? `<div style="font-size:11px;color:var(--muted)">Contact: ${esc(a.contact_name)}</div>` : ''}
+                    <div class="s-hint">${esc(a.activity_type)} · ${esc(a.user_name || '')} · ${dateStr}</div>
+                    ${a.contact_name ? `<div class="s-hint">Contact: ${esc(a.contact_name)}</div>` : ''}
                 </div>
                 <div style="display:flex;gap:6px;flex-shrink:0">
-                    <button class="btn" style="font-size:11px;padding:4px 10px" onclick="promptAttributeActivity(${a.id})">Attribute</button>
-                    <button class="btn" style="font-size:11px;padding:4px 10px;opacity:0.7" onclick="dismissActivity(${a.id})">Dismiss</button>
+                    <button class="btn btn-sm" onclick="promptAttributeActivity(${a.id})">Attribute</button>
+                    <button class="btn btn-ghost btn-sm" onclick="dismissActivity(${a.id})">Dismiss</button>
                 </div>
             </div>`;
         }
@@ -4114,34 +4101,33 @@ async function loadTeamsConfig() {
     try {
         const config = await apiFetch('/api/admin/teams/config');
         let html = `
-            <div class="card" style="max-width:600px;padding:20px">
-                <h3 style="margin:0 0 16px;font-size:15px">Teams Channel Notifications</h3>
-                <p style="font-size:12px;color:var(--muted);margin-bottom:16px">
+            <div class="card s-card">
+                <h3>Teams Channel Notifications</h3>
+                <p class="s-desc">
                     Post critical AVAIL events (hot requirements, competitive quotes, ownership warnings, stock matches) to a Teams channel.
                 </p>
-                <div style="display:flex;flex-direction:column;gap:12px">
-                    <div style="display:flex;align-items:center;gap:8px">
-                        <label style="font-size:12px;font-weight:600;width:100px">Enabled</label>
+                <div class="s-form">
+                    <div class="s-row">
+                        <label class="s-label" style="width:100px">Enabled</label>
                         <input type="checkbox" id="teamsEnabled" ${config.enabled ? 'checked' : ''} style="width:16px;height:16px">
                     </div>
                     <div>
-                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Teams Channel</label>
-                        <select id="teamsChannelSelect" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px">
+                        <label class="s-label" style="display:block;margin-bottom:4px">Teams Channel</label>
+                        <select id="teamsChannelSelect" class="s-select" style="width:100%">
                             <option value="">— Select a channel —</option>
                         </select>
                         <button class="btn btn-ghost btn-sm" onclick="refreshTeamsChannels()" style="margin-top:6px;font-size:11px">Refresh Channels</button>
                     </div>
                     <div>
-                        <label style="font-size:12px;font-weight:600;display:block;margin-bottom:4px">Hot Requirement Threshold ($)</label>
-                        <input id="teamsHotThreshold" type="number" value="${config.hot_threshold || 10000}" min="0" step="500"
-                            style="width:160px;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px">
-                        <span style="font-size:11px;color:var(--muted);margin-left:6px">Notify when requirement value exceeds this</span>
+                        <label class="s-label" style="display:block;margin-bottom:4px">Hot Requirement Threshold ($)</label>
+                        <input id="teamsHotThreshold" type="number" value="${config.hot_threshold || 10000}" min="0" step="500" class="s-input" style="width:160px">
+                        <span class="s-hint" style="margin-left:6px">Notify when requirement value exceeds this</span>
                     </div>
-                    <div style="display:flex;gap:8px;margin-top:8px">
+                    <div class="s-row" style="margin-top:8px">
                         <button class="btn btn-primary" onclick="saveTeamsConfig()">Save Configuration</button>
                         <button class="btn btn-ghost" onclick="testTeamsPost()">Send Test Card</button>
                     </div>
-                    <div id="teamsStatus" style="font-size:12px;margin-top:4px"></div>
+                    <div id="teamsStatus" class="s-status"></div>
                 </div>
             </div>`;
         el.innerHTML = html;

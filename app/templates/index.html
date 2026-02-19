@@ -1066,11 +1066,26 @@
         .perf-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px 16px;text-align:center}
         .perf-card-num{font-size:22px;font-weight:700;color:var(--text)}
         .perf-card-label{font-size:11px;color:var(--muted);margin-top:4px}
-        /* Settings Dropdown (inside sidebar) */
-        .settings-dropdown{position:relative;display:inline-block}
-        .settings-dropdown-content a{display:block;cursor:pointer;text-decoration:none;transition:background .1s}
-        .settings-dropdown-content a:hover{background:rgba(255,255,255,.06) !important}
-        .settings-panel{margin-top:12px}
+        /* Settings */
+        #settingsTabs,#enrichTabs{flex-wrap:wrap;width:auto}
+        #settingsTabs .tab,#enrichTabs .tab{white-space:nowrap}
+        .settings-panel{margin-top:16px;padding-bottom:32px}
+        .s-card{padding:20px;margin-bottom:16px;max-width:700px}
+        .s-card h3{margin:0 0 16px;font-size:15px;font-weight:600}
+        .s-desc{font-size:12px;color:var(--muted);margin:0 0 16px}
+        .s-form{display:flex;flex-direction:column;gap:12px}
+        .s-row{display:flex;align-items:center;gap:10px}
+        .s-input{padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;font-family:inherit}
+        .s-input-num{width:80px;text-align:center;padding:6px 8px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--text);font-size:13px}
+        .s-select{padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:13px;font-family:inherit}
+        .s-label{font-size:12px;font-weight:600;color:var(--text2)}
+        .s-hint{font-size:11px;color:var(--muted)}
+        .s-status{font-size:12px;margin-top:8px}
+        .s-pill{display:inline-block;padding:4px 14px;font-size:12px;font-weight:600;border-radius:20px;cursor:pointer;transition:.15s;border:1px solid var(--border);background:var(--bg);color:var(--text2)}
+        .s-pill.on{background:var(--teal);color:#fff;border-color:var(--teal)}
+        .s-cred-row{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)}
+        .s-cred-row code{font-size:11px;min-width:180px;color:var(--text2)}
+        .s-cat-heading{font-size:13px;font-weight:600;color:var(--text2);margin:20px 0 10px;padding-bottom:6px;border-bottom:1px solid var(--border)}
 
         /* Email Threads */
         .email-thread-card{cursor:pointer;transition:border-color 0.15s}
@@ -2282,19 +2297,23 @@
         </div>
 
         <div id="settings-import" class="settings-panel" style="display:none">
-            <div class="card" style="max-width:600px;padding:20px;margin-bottom:16px">
+            <div class="card s-card">
                 <h3>Import Customers</h3>
-                <p style="font-size:11px;color:var(--muted)">CSV: company_name, site_name, contact_name, contact_email, contact_phone</p>
-                <input type="file" id="customerImportFile" accept=".csv" style="margin:8px 0">
-                <button class="btn btn-primary btn-sm" onclick="importCustomers()">Import</button>
-                <div id="customerImportStatus" style="margin-top:8px;font-size:12px"></div>
+                <p class="s-desc">CSV: company_name, site_name, contact_name, contact_email, contact_phone</p>
+                <div class="s-form">
+                    <input type="file" id="customerImportFile" accept=".csv">
+                    <div><button class="btn btn-primary btn-sm" onclick="importCustomers()">Import</button></div>
+                    <div id="customerImportStatus" class="s-status"></div>
+                </div>
             </div>
-            <div class="card" style="max-width:600px;padding:20px">
+            <div class="card s-card">
                 <h3>Import Vendors</h3>
-                <p style="font-size:11px;color:var(--muted)">CSV: vendor_name, domain, website, contact_name, contact_email</p>
-                <input type="file" id="vendorImportFile" accept=".csv" style="margin:8px 0">
-                <button class="btn btn-primary btn-sm" onclick="importVendors()">Import</button>
-                <div id="vendorImportStatus" style="margin-top:8px;font-size:12px"></div>
+                <p class="s-desc">CSV: vendor_name, domain, website, contact_name, contact_email</p>
+                <div class="s-form">
+                    <input type="file" id="vendorImportFile" accept=".csv">
+                    <div><button class="btn btn-primary btn-sm" onclick="importVendors()">Import</button></div>
+                    <div id="vendorImportStatus" class="s-status"></div>
+                </div>
             </div>
         </div>
 
@@ -2308,69 +2327,58 @@
 
             <!-- Review Queue Tab -->
             <div id="enrichQueuePanel">
-                <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center;">
-                    <select id="eqStatusFilter" onchange="loadEnrichmentQueue()" style="padding:4px 8px;border-radius:4px;border:1px solid var(--border)">
+                <div class="s-row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap">
+                    <select id="eqStatusFilter" onchange="loadEnrichmentQueue()" class="s-select" style="padding:6px 10px">
                         <option value="pending">Pending</option>
                         <option value="auto_applied">Auto-Applied</option>
                         <option value="approved">Approved</option>
                         <option value="rejected">Rejected</option>
                         <option value="all">All</option>
                     </select>
-                    <select id="eqEntityFilter" onchange="loadEnrichmentQueue()" style="padding:4px 8px;border-radius:4px;border:1px solid var(--border)">
+                    <select id="eqEntityFilter" onchange="loadEnrichmentQueue()" class="s-select" style="padding:6px 10px">
                         <option value="">All Entities</option>
                         <option value="vendor">Vendors</option>
                         <option value="company">Companies</option>
                     </select>
                     <button class="btn btn-sm" onclick="bulkApproveSelected()" id="eqBulkApproveBtn" style="display:none">Approve Selected</button>
-                    <span id="eqCount" style="color:var(--muted);font-size:13px;margin-left:auto;"></span>
+                    <span id="eqCount" class="s-hint" style="margin-left:auto"></span>
                 </div>
                 <div id="enrichQueueList"><p class="empty">Loading...</p></div>
             </div>
 
             <!-- Backfill Tab -->
             <div id="enrichBackfillPanel" style="display:none">
-                <div class="card" style="max-width:600px;margin-bottom:16px;padding:16px;">
-                    <h3 style="margin-top:0;">Start Deep Enrichment</h3>
-                    <label style="display:block;margin-bottom:8px;">
-                        <input type="checkbox" id="bfVendors" checked> Vendors
-                    </label>
-                    <label style="display:block;margin-bottom:8px;">
-                        <input type="checkbox" id="bfCompanies" checked> Companies
-                    </label>
-                    <label style="display:block;margin-bottom:8px;">
-                        <input type="checkbox" id="bfDeepEmail"> Include Deep Email Mining
-                    </label>
-                    <label style="display:block;margin-bottom:8px;">
-                        Max items: <input type="number" id="bfMaxItems" value="500" min="1" max="2000" style="width:80px;padding:2px 6px;">
-                    </label>
-                    <button class="btn" onclick="startBackfill()">Start Enrichment</button>
-                    <span id="bfStatus" style="margin-left:12px;"></span>
+                <div class="card s-card">
+                    <h3>Start Deep Enrichment</h3>
+                    <div class="s-form">
+                        <label><input type="checkbox" id="bfVendors" checked> Vendors</label>
+                        <label><input type="checkbox" id="bfCompanies" checked> Companies</label>
+                        <label><input type="checkbox" id="bfDeepEmail"> Include Deep Email Mining</label>
+                        <label class="s-row">Max items: <input type="number" id="bfMaxItems" value="500" min="1" max="2000" class="s-input-num"></label>
+                        <div class="s-row"><button class="btn" onclick="startBackfill()">Start Enrichment</button> <span id="bfStatus" class="s-hint"></span></div>
+                    </div>
                 </div>
-                <div id="bfProgressBox" style="display:none;max-width:600px;">
-                    <h4>Running Job</h4>
-                    <div style="background:var(--bg);border-radius:4px;height:20px;overflow:hidden;margin-bottom:8px;">
+                <div id="bfProgressBox" class="s-card" style="display:none">
+                    <h4 style="margin:0 0 12px">Running Job</h4>
+                    <div style="background:var(--bg);border-radius:4px;height:20px;overflow:hidden;margin-bottom:8px">
                         <div id="bfProgressBar" style="height:100%;background:var(--teal);transition:width 0.3s;width:0%"></div>
                     </div>
-                    <span id="bfProgressLabel" style="font-size:13px;color:var(--muted);"></span>
+                    <span id="bfProgressLabel" class="s-hint"></span>
                 </div>
 
-                <!-- Backfill from Existing Data -->
-                <div class="card" style="max-width:600px;margin-bottom:16px;padding:16px;">
-                    <h3 style="margin-top:0;">Backfill from Existing Data</h3>
-                    <p style="color:var(--muted);font-size:13px;margin-bottom:12px;">Recover vendor emails already in the system — activity logs, vendor card imports, and BrokerBin sightings.</p>
-                    <button class="btn" onclick="startEmailBackfill()">Backfill Emails</button>
-                    <span id="emailBfStatus" style="margin-left:12px;"></span>
+                <div class="card s-card">
+                    <h3>Backfill from Existing Data</h3>
+                    <p class="s-desc">Recover vendor emails already in the system — activity logs, vendor card imports, and BrokerBin sightings.</p>
+                    <div class="s-row"><button class="btn" onclick="startEmailBackfill()">Backfill Emails</button> <span id="emailBfStatus" class="s-hint"></span></div>
                 </div>
 
-                <!-- Scrape Vendor Websites -->
-                <div class="card" style="max-width:600px;margin-bottom:16px;padding:16px;">
-                    <h3 style="margin-top:0;">Scrape Vendor Websites</h3>
-                    <p style="color:var(--muted);font-size:13px;margin-bottom:12px;">Scrape contact pages of vendors with websites but few email contacts.</p>
-                    <label style="display:block;margin-bottom:8px;">
-                        Max vendors: <input type="number" id="scrapeMaxVendors" value="500" min="1" max="2000" style="width:80px;padding:2px 6px;">
-                    </label>
-                    <button class="btn" onclick="startWebsiteScrape()">Scrape Websites</button>
-                    <span id="scrapeStatus" style="margin-left:12px;"></span>
+                <div class="card s-card">
+                    <h3>Scrape Vendor Websites</h3>
+                    <p class="s-desc">Scrape contact pages of vendors with websites but few email contacts.</p>
+                    <div class="s-form">
+                        <label class="s-row">Max vendors: <input type="number" id="scrapeMaxVendors" value="500" min="1" max="2000" class="s-input-num"></label>
+                        <div class="s-row"><button class="btn" onclick="startWebsiteScrape()">Scrape Websites</button> <span id="scrapeStatus" class="s-hint"></span></div>
+                    </div>
                 </div>
             </div>
 
@@ -2381,31 +2389,31 @@
 
             <!-- M365 Connection Status -->
             <div id="enrichM365Panel" style="display:none">
-                <div class="card" style="max-width:700px;padding:16px;">
-                    <h3 style="margin-top:0;">M365 Inbox Mining</h3>
-                    <p style="color:var(--muted);font-size:13px;margin-bottom:12px;">Users must authenticate via Azure AD to enable inbox mining for vendor email extraction.</p>
+                <div class="card s-card">
+                    <h3>M365 Inbox Mining</h3>
+                    <p class="s-desc">Users must authenticate via Azure AD to enable inbox mining for vendor email extraction.</p>
                     <div id="m365UserList"><p class="empty">Loading...</p></div>
                 </div>
             </div>
 
             <!-- Stats Summary -->
-            <div id="enrichStatsPanel" style="margin-top:16px;padding:12px;background:var(--bg);border-radius:6px;display:flex;gap:24px;flex-wrap:wrap;">
-                <div><strong id="esVendors">-</strong><br><small style="color:var(--muted)">Vendors Enriched</small></div>
-                <div><strong id="esCompanies">-</strong><br><small style="color:var(--muted)">Companies Enriched</small></div>
-                <div><strong id="esPending">-</strong><br><small style="color:var(--muted)">Pending Review</small></div>
-                <div><strong id="esAutoApplied">-</strong><br><small style="color:var(--muted)">Auto-Applied</small></div>
-                <div><strong id="esActiveJobs">-</strong><br><small style="color:var(--muted)">Active Jobs</small></div>
-                <div><strong id="esVendorEmails">-</strong><br><small style="color:var(--muted)">Vendor Emails</small></div>
+            <div id="enrichStatsPanel" style="margin-top:16px;padding:12px 16px;background:var(--bg);border-radius:8px;border:1px solid var(--border);display:flex;gap:24px;flex-wrap:wrap">
+                <div><strong id="esVendors">-</strong><br><small class="s-hint">Vendors Enriched</small></div>
+                <div><strong id="esCompanies">-</strong><br><small class="s-hint">Companies Enriched</small></div>
+                <div><strong id="esPending">-</strong><br><small class="s-hint">Pending Review</small></div>
+                <div><strong id="esAutoApplied">-</strong><br><small class="s-hint">Auto-Applied</small></div>
+                <div><strong id="esActiveJobs">-</strong><br><small class="s-hint">Active Jobs</small></div>
+                <div><strong id="esVendorEmails">-</strong><br><small class="s-hint">Vendor Emails</small></div>
             </div>
         </div>
 
         <div id="settings-create-user" class="settings-panel" style="display:none">
-            <div class="card" style="max-width:500px;padding:20px">
-                <h3 style="margin:0 0 16px;font-size:15px">Create New User</h3>
-                <div style="display:flex;flex-direction:column;gap:10px">
-                    <input id="newUserName" placeholder="Full name" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
-                    <input id="newUserEmail" placeholder="Email address" type="email" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
-                    <select id="newUserRole" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)">
+            <div class="card s-card">
+                <h3>Create New User</h3>
+                <div class="s-form">
+                    <input id="newUserName" class="s-input" placeholder="Full name">
+                    <input id="newUserEmail" class="s-input" placeholder="Email address" type="email">
+                    <select id="newUserRole" class="s-select">
                         <option value="buyer">Buyer</option>
                         <option value="trader">Trader</option>
                         <option value="sales">Sales</option>
@@ -2413,7 +2421,7 @@
                         <option value="admin">Admin</option>
                         <option value="dev_assistant">Dev Assistant</option>
                     </select>
-                    <button class="btn btn-primary" onclick="createUser()">Create User</button>
+                    <div><button class="btn btn-primary" onclick="createUser()">Create User</button></div>
                 </div>
             </div>
         </div>
