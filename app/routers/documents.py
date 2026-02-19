@@ -1,0 +1,62 @@
+"""Documents API — PDF generation for requisitions and quotes."""
+
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
+from sqlalchemy.orm import Session
+
+from ..database import get_db
+from ..dependencies import require_user
+from ..models import User
+
+router = APIRouter(tags=["documents"])
+log = logging.getLogger(__name__)
+
+
+@router.get("/api/requisitions/{requisition_id}/pdf")
+def download_rfq_pdf(
+    requisition_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Generate and download a PDF summary of a requisition."""
+    from ..services.document_service import generate_rfq_summary_pdf
+
+    try:
+        pdf_bytes = generate_rfq_summary_pdf(requisition_id, db)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        log.error("PDF generation failed for requisition %d: %s", requisition_id, e)
+        raise HTTPException(500, "PDF generation failed")
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=rfq-{requisition_id}.pdf"},
+    )
+
+
+@router.get("/api/quotes/{quote_id}/pdf")
+def download_quote_pdf(
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Generate and download a PDF report for a quote."""
+    from ..services.document_service import generate_quote_report_pdf
+
+    try:
+        pdf_bytes = generate_quote_report_pdf(quote_id, db)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
+    except Exception as e:
+        log.error("PDF generation failed for quote %d: %s", quote_id, e)
+        raise HTTPException(500, "PDF generation failed")
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename=quote-{quote_id}.pdf"},
+    )

@@ -48,16 +48,13 @@ async def lifespan(app):
 
     run_startup_migrations()
     _seed_api_sources()
-    from .scheduler import start_scheduler
+    from .scheduler import scheduler, configure_scheduler
 
-    task = asyncio.create_task(start_scheduler())
-    log.info("Background scheduler launched")
+    configure_scheduler()
+    scheduler.start()
+    log.info("APScheduler started")
     yield
-    task.cancel()
-    try:
-        await task
-    except asyncio.CancelledError:
-        pass
+    scheduler.shutdown(wait=False)
     from .http_client import close_clients
 
     await close_clients()

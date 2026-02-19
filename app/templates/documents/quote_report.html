@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Quote {{ quote.quote_number }}</title>
+<style>
+  @page { size: letter; margin: 1in 0.75in; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11pt; color: #222; line-height: 1.4; }
+  h1 { font-size: 18pt; color: #1a365d; margin-bottom: 4px; }
+  h2 { font-size: 13pt; color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 4px; margin-top: 20px; }
+  .subtitle { color: #718096; font-size: 10pt; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 10pt; }
+  th { background: #edf2f7; color: #2d3748; text-align: left; padding: 6px 8px; border-bottom: 2px solid #cbd5e0; }
+  td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; }
+  tr:nth-child(even) td { background: #f7fafc; }
+  .meta-table { width: auto; margin-bottom: 16px; }
+  .meta-table td { border: none; padding: 2px 12px 2px 0; }
+  .meta-label { font-weight: bold; color: #4a5568; }
+  .totals { margin-top: 16px; text-align: right; }
+  .totals td { border: none; padding: 3px 8px; }
+  .totals .total-label { font-weight: bold; }
+  .footer { margin-top: 24px; font-size: 9pt; color: #a0aec0; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>Quote {{ quote.quote_number }}</h1>
+  <p class="subtitle">Quote Report — Generated {{ generated_at }}</p>
+
+  <h2>Quote Details</h2>
+  <table class="meta-table">
+    <tr><td class="meta-label">Customer</td><td>{{ customer_site.site_name if customer_site else '—' }}</td></tr>
+    <tr><td class="meta-label">Company</td><td>{{ company.name if company else '—' }}</td></tr>
+    <tr><td class="meta-label">Status</td><td>{{ quote.status }}</td></tr>
+    <tr><td class="meta-label">Revision</td><td>{{ quote.revision or 1 }}</td></tr>
+    <tr><td class="meta-label">Valid For</td><td>{{ quote.validity_days or 7 }} days</td></tr>
+    {% if quote.payment_terms %}
+    <tr><td class="meta-label">Payment Terms</td><td>{{ quote.payment_terms }}</td></tr>
+    {% endif %}
+    {% if quote.shipping_terms %}
+    <tr><td class="meta-label">Shipping Terms</td><td>{{ quote.shipping_terms }}</td></tr>
+    {% endif %}
+  </table>
+
+  {% if line_items %}
+  <h2>Line Items ({{ line_items|length }})</h2>
+  <table>
+    <thead>
+      <tr><th>#</th><th>MPN</th><th>Manufacturer</th><th>Qty</th><th>Cost</th><th>Sell</th><th>Margin</th></tr>
+    </thead>
+    <tbody>
+    {% for li in line_items %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ li.get('mpn', '—') }}</td>
+        <td>{{ li.get('manufacturer', '—') }}</td>
+        <td>{{ '{:,}'.format(li.get('qty', 0)) }}</td>
+        <td>{{ '${:,.4f}'.format(li.get('cost_each', 0)|float) }}</td>
+        <td>{{ '${:,.4f}'.format(li.get('sell_each', 0)|float) }}</td>
+        <td>{{ '{:.1f}%'.format(li.get('margin_pct', 0)|float) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <table class="totals">
+    {% if quote.subtotal %}
+    <tr><td class="total-label">Subtotal:</td><td>${{ '{:,.2f}'.format(quote.subtotal|float) }}</td></tr>
+    {% endif %}
+    {% if quote.total_cost %}
+    <tr><td class="total-label">Total Cost:</td><td>${{ '{:,.2f}'.format(quote.total_cost|float) }}</td></tr>
+    {% endif %}
+    {% if quote.total_margin_pct %}
+    <tr><td class="total-label">Margin:</td><td>{{ '{:.1f}%'.format(quote.total_margin_pct|float) }}</td></tr>
+    {% endif %}
+  </table>
+
+  {% if quote.notes %}
+  <h2>Notes</h2>
+  <p>{{ quote.notes }}</p>
+  {% endif %}
+
+  <div class="footer">
+    AVAIL — Opportunity Management | Confidential | {{ generated_at }}
+  </div>
+</body>
+</html>

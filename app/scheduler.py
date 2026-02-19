@@ -1,9 +1,24 @@
-"""Background scheduler — automated M365 integration tasks.
+"""Background scheduler — APScheduler-based automated tasks.
 
-Runs on a 5-minute tick loop. Each tick checks what needs to run:
-  - Token refresh: Every 30 min — keeps all users' Azure tokens valid
-  - Inbox scan: Every 30 min — scans all users' inboxes for vendor replies + stock lists
-  - Contacts sync: Every 24h — pulls Outlook contacts into VendorCards
+Each job runs independently with its own database session. Jobs are configured
+with appropriate intervals using APScheduler's AsyncIOScheduler.
+
+Job overview:
+  - Auto-archive stale requisitions: every 5 min
+  - Token refresh: every 5 min
+  - Inbox scan: configurable (default 30 min)
+  - Batch results processing: every 5 min
+  - Contacts sync: every 24h
+  - Engagement scoring: every 12h
+  - Webhook subscriptions: every 5 min
+  - Ownership sweep: every 12h
+  - Routing expiration: every 12h
+  - PO verification: configurable (default 30 min)
+  - Stock sale auto-complete: daily at configured hour
+  - Proactive matching: every 5 min
+  - Performance tracking: every 12h
+  - Deep email mining: every 4h
+  - Deep enrichment sweep: every 12h
 """
 
 import asyncio
@@ -11,9 +26,22 @@ import base64
 import logging
 from datetime import datetime, timezone, timedelta
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.triggers.cron import CronTrigger
+
 from .http_client import http
 
 log = logging.getLogger(__name__)
+
+# Global scheduler instance
+scheduler = AsyncIOScheduler(
+    job_defaults={
+        "coalesce": True,
+        "max_instances": 1,
+        "misfire_grace_time": 300,
+    }
+)
 
 
 def _utc(dt):
@@ -22,16 +50,6 @@ def _utc(dt):
         return None
     return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt
 
-
-# v1.3.0: Track last ownership sweep run (simple module-level timestamp)
-_last_ownership_sweep = datetime.min.replace(tzinfo=timezone.utc)
-_last_performance_compute = datetime.min.replace(tzinfo=timezone.utc)
-_last_deep_email_scan = datetime.min.replace(tzinfo=timezone.utc)
-_last_deep_enrichment_sweep = datetime.min.replace(tzinfo=timezone.utc)
-
-# Buy plan: PO verification interval & stock sale auto-complete
-_last_po_verify = datetime.min.replace(tzinfo=timezone.utc)
-_last_stock_autocomplete_date = None  # date object — prevents double-runs
 
 # ── Token Management ────────────────────────────────────────────────────
 
@@ -123,76 +141,116 @@ async def _refresh_access_token(
         return None
 
 
-# ── Main Scheduler Loop ─────────────────────────────────────────────────
+# ── Scheduler Configuration ────────────────────────────────────────────
 
 
-async def start_scheduler():
-    """Launch the background scheduler loop. Call once on app startup."""
+def configure_scheduler():
+    """Register all background jobs with the APScheduler instance."""
     from .config import settings
 
-    log.info(
-        f"Background scheduler started — inbox scan every {settings.inbox_scan_interval_min} min"
-    )
+    # Core jobs (always run)
+    scheduler.add_job(_job_auto_archive, IntervalTrigger(minutes=5),
+                      id="auto_archive", name="Auto-archive stale requisitions")
+    scheduler.add_job(_job_token_refresh, IntervalTrigger(minutes=5),
+                      id="token_refresh", name="Token refresh")
+    scheduler.add_job(_job_inbox_scan, IntervalTrigger(minutes=settings.inbox_scan_interval_min),
+                      id="inbox_scan", name="Inbox scan")
+    scheduler.add_job(_job_batch_results, IntervalTrigger(minutes=5),
+                      id="batch_results", name="Process batch results")
+    scheduler.add_job(_job_engagement_scoring, IntervalTrigger(hours=12),
+                      id="engagement_scoring", name="Engagement scoring")
 
-    # Wait 10 seconds on startup before first tick (let app fully boot)
-    await asyncio.sleep(10)
+    # Contacts sync (configurable)
+    if settings.contacts_sync_enabled:
+        scheduler.add_job(_job_contacts_sync, IntervalTrigger(hours=24),
+                          id="contacts_sync", name="Contacts sync")
 
-    while True:
-        try:
-            await _scheduler_tick()
-        except Exception as e:
-            log.error(f"Scheduler tick error: {e}")
-        await asyncio.sleep(300)  # Check every 5 minutes
+    # Activity tracking jobs
+    if settings.activity_tracking_enabled:
+        scheduler.add_job(_job_webhook_subscriptions, IntervalTrigger(minutes=5),
+                          id="webhook_subs", name="Webhook subscriptions")
+        scheduler.add_job(_job_ownership_sweep, IntervalTrigger(hours=12),
+                          id="ownership_sweep", name="Ownership sweep")
+        scheduler.add_job(_job_routing_expiration, IntervalTrigger(hours=12),
+                          id="routing_expiration", name="Routing expiration")
+
+    # Buy plan jobs
+    scheduler.add_job(_job_po_verification, IntervalTrigger(minutes=settings.po_verify_interval_min),
+                      id="po_verification", name="PO verification")
+    scheduler.add_job(_job_stock_autocomplete,
+                      CronTrigger(hour=settings.buyplan_auto_complete_hour,
+                                  timezone=settings.buyplan_auto_complete_tz),
+                      id="stock_autocomplete", name="Stock sale auto-complete")
+
+    # Proactive matching
+    if settings.proactive_matching_enabled:
+        scheduler.add_job(_job_proactive_matching, IntervalTrigger(minutes=5),
+                          id="proactive_matching", name="Proactive matching")
+
+    # Performance tracking
+    scheduler.add_job(_job_performance_tracking, IntervalTrigger(hours=12),
+                      id="performance_tracking", name="Performance tracking")
+
+    # Deep enrichment (conditional)
+    if settings.deep_email_mining_enabled:
+        scheduler.add_job(_job_deep_email_mining, IntervalTrigger(hours=4),
+                          id="deep_email_mining", name="Deep email mining")
+    if settings.deep_enrichment_enabled:
+        scheduler.add_job(_job_deep_enrichment, IntervalTrigger(hours=12),
+                          id="deep_enrichment", name="Deep enrichment sweep")
+
+    # Cache cleanup
+    scheduler.add_job(_job_cache_cleanup, IntervalTrigger(hours=24),
+                      id="cache_cleanup", name="Cache cleanup")
+
+    job_count = len(scheduler.get_jobs())
+    log.info(f"APScheduler configured with {job_count} jobs")
 
 
-async def _scheduler_tick():
-    """Check what tasks need to run this tick."""
-    from .config import settings
+# ── Individual Job Functions ───────────────────────────────────────────
+
+
+async def _job_auto_archive():
+    """Auto-archive stale requisitions (no activity for 30 days)."""
     from .database import SessionLocal
-    from .models import User, Requisition
+    from .models import Requisition
 
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
-
-        # ── Auto-archive stale requisitions (runs every tick, no auth needed) ──
-        try:
-            cutoff = now - timedelta(days=30)
-            archived_count = (
-                db.query(Requisition)
-                .filter(
-                    Requisition.status == "active",
-                    Requisition.last_searched_at.isnot(None),
-                    Requisition.last_searched_at < cutoff,
-                )
-                .update({"status": "archived"}, synchronize_session="fetch")
+        cutoff = now - timedelta(days=30)
+        archived_count = (
+            db.query(Requisition)
+            .filter(
+                Requisition.status == "active",
+                Requisition.last_searched_at.isnot(None),
+                Requisition.last_searched_at < cutoff,
             )
-            if archived_count:
-                db.commit()
-                log.info(f"Auto-archived {archived_count} stale requisition(s)")
-        except Exception as e:
-            log.error(f"Auto-archive error: {e}")
-            db.rollback()
+            .update({"status": "archived"}, synchronize_session="fetch")
+        )
+        if archived_count:
+            db.commit()
+            log.info(f"Auto-archived {archived_count} stale requisition(s)")
+    except Exception as e:
+        log.error(f"Auto-archive error: {e}")
+        db.rollback()
+    finally:
+        db.close()
 
+
+async def _job_token_refresh():
+    """Refresh tokens for all users with refresh tokens."""
+    from .database import SessionLocal
+    from .models import User
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
         users = db.query(User).filter(User.refresh_token.isnot(None)).all()
-        if not users:
-            log.debug(
-                "Scheduler tick: no users with refresh tokens — skipping email tasks"
-            )
-            return
-
-        scan_interval = timedelta(minutes=settings.inbox_scan_interval_min)
-        log.debug(f"Scheduler tick: {len(users)} user(s) with refresh tokens")
-
-        # ── Token refresh (all users, every 30 min) ──
         for user in users:
             needs_refresh = False
             if user.token_expires_at:
-                exp = (
-                    user.token_expires_at.replace(tzinfo=timezone.utc)
-                    if user.token_expires_at.tzinfo is None
-                    else user.token_expires_at
-                )
+                exp = _utc(user.token_expires_at)
                 needs_refresh = now > exp - timedelta(minutes=15)
             elif not user.access_token:
                 needs_refresh = True
@@ -202,15 +260,31 @@ async def _scheduler_tick():
                     await refresh_user_token(user, db)
                 except Exception as e:
                     log.error(f"Token refresh error for {user.email}: {e}")
+    except Exception as e:
+        log.error(f"Token refresh job error: {e}")
+    finally:
+        db.close()
 
-        # ── Inbox scan (all users, every 30 min) ── with per-user timeout
+
+async def _job_inbox_scan():
+    """Scan inboxes for all connected users."""
+    from .config import settings
+    from .database import SessionLocal
+    from .models import User
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
+        scan_interval = timedelta(minutes=settings.inbox_scan_interval_min)
+
         for user in users:
             if not user.access_token or not user.m365_connected:
                 continue
 
             should_scan = False
             if not user.last_inbox_scan:
-                should_scan = True  # First-time — will do backfill
+                should_scan = True
             elif now - _utc(user.last_inbox_scan) > scan_interval:
                 should_scan = True
 
@@ -226,330 +300,392 @@ async def _scheduler_tick():
                     user.m365_error_reason = str(e)[:200]
                     db.commit()
                     db.rollback()
-
-        # ── Process pending AI batches (every tick) ──
-        try:
-            from .email_service import process_batch_results
-
-            batch_applied = await process_batch_results(db)
-            if batch_applied:
-                log.info(f"Batch processing: {batch_applied} results applied")
-        except Exception as e:
-            log.error(f"Batch results processing error: {e}")
-            db.rollback()
-
-        # ── Contacts sync (all users, every 24h) ──
-        if settings.contacts_sync_enabled:
-            for user in users:
-                if not user.access_token or not user.m365_connected:
-                    continue
-                should_sync = False
-                if not user.last_contacts_sync:
-                    should_sync = True
-                elif now - _utc(user.last_contacts_sync) > timedelta(hours=24):
-                    should_sync = True
-
-                if should_sync:
-                    try:
-                        await _sync_user_contacts(user, db)
-                    except Exception as e:
-                        log.error(f"Contacts sync error for {user.email}: {e}")
-                        db.rollback()
-
-        # ── Upgrade 4: Engagement scoring (daily) ──
-        try:
-            from .models import VendorCard
-
-            # Check if we've computed today already
-            latest = (
-                db.query(VendorCard.engagement_computed_at)
-                .filter(VendorCard.engagement_computed_at.isnot(None))
-                .order_by(VendorCard.engagement_computed_at.desc())
-                .first()
-            )
-
-            should_compute = True
-            if latest and latest[0]:
-                last_computed = latest[0]
-                if last_computed.tzinfo is None:
-                    last_computed = last_computed.replace(tzinfo=timezone.utc)
-                if now - last_computed < timedelta(hours=12):
-                    should_compute = False
-
-            if should_compute:
-                await _compute_engagement_scores_job(db)
-        except Exception as e:
-            log.error(f"Engagement scoring error: {e}")
-            db.rollback()
-
-        # ── v1.3.0: Graph webhook subscriptions (every tick) ──
-        if settings.activity_tracking_enabled:
-            try:
-                from .services.webhook_service import (
-                    ensure_all_users_subscribed,
-                    renew_expiring_subscriptions,
-                )
-
-                await renew_expiring_subscriptions(db)
-                await ensure_all_users_subscribed(db)
-            except Exception as e:
-                log.error(f"Webhook subscription error: {e}")
-                db.rollback()
-
-        # ── v1.3.0: Customer ownership sweep (daily) ──
-        if settings.activity_tracking_enabled:
-            try:
-                from .services.ownership_service import run_ownership_sweep
-
-                global _last_ownership_sweep
-                if now - _last_ownership_sweep > timedelta(hours=12):
-                    await run_ownership_sweep(db)
-                    _last_ownership_sweep = now
-            except Exception as e:
-                log.error(f"Ownership sweep error: {e}")
-                db.rollback()
-
-        # ── v1.3.0: Routing & offer expiration sweeps (daily) ──
-        if settings.activity_tracking_enabled:
-            try:
-                from .services.routing_service import (
-                    expire_stale_assignments,
-                    expire_stale_offers,
-                )
-
-                expired_assignments = expire_stale_assignments(db)
-                expired_offers = expire_stale_offers(db)
-                if expired_assignments or expired_offers:
-                    db.commit()
-            except Exception as e:
-                log.error(f"Routing expiration error: {e}")
-                db.rollback()
-
-        # ── Buy Plan PO verification scan (every po_verify_interval_min) ──
-        try:
-            global _last_po_verify
-            po_interval = timedelta(minutes=settings.po_verify_interval_min)
-            if now - _last_po_verify >= po_interval:
-                from .models import BuyPlan
-                from .services.buyplan_service import verify_po_sent
-
-                unverified_plans = (
-                    db.query(BuyPlan).filter(BuyPlan.status == "po_entered").all()
-                )
-                for plan in unverified_plans:
-                    try:
-                        await verify_po_sent(plan, db)
-                    except Exception as e:
-                        log.error(f"PO verify error for plan {plan.id}: {e}")
-                _last_po_verify = now
-        except Exception as e:
-            log.error(f"PO verification scan error: {e}")
-            db.rollback()
-
-        # ── Stock sale auto-complete safety net (daily at configured hour) ──
-        try:
-            global _last_stock_autocomplete_date
-            from zoneinfo import ZoneInfo
-
-            local_tz = ZoneInfo(settings.buyplan_auto_complete_tz)
-            local_now = now.astimezone(local_tz)
-            target_hour = settings.buyplan_auto_complete_hour
-            today_local = local_now.date()
-
-            if (
-                local_now.hour >= target_hour
-                and _last_stock_autocomplete_date != today_local
-            ):
-                from .services.buyplan_service import auto_complete_stock_sales
-
-                completed = auto_complete_stock_sales(db)
-                _last_stock_autocomplete_date = today_local
-                if completed:
-                    log.info(f"Stock sale auto-complete: {completed} plan(s) completed")
-        except Exception as e:
-            log.error(f"Stock sale auto-complete error: {e}")
-            db.rollback()
-
-        # ── Proactive offer matching (every tick) ──
-        if settings.proactive_matching_enabled:
-            try:
-                from .services.proactive_service import scan_new_offers_for_matches
-
-                result = scan_new_offers_for_matches(db)
-                if result.get("matches_created"):
-                    log.info(
-                        f"Proactive matching: {result['matches_created']} new matches from {result['scanned']} offers"
-                    )
-            except Exception as e:
-                log.error(f"Proactive matching error: {e}")
-                db.rollback()
-
-        # ── Performance tracking: vendor scorecards + buyer leaderboard (daily) ──
-        try:
-            global _last_performance_compute
-            if now - _last_performance_compute > timedelta(hours=12):
-                from .services.performance_service import (
-                    compute_all_vendor_scorecards,
-                    compute_buyer_leaderboard,
-                )
-
-                vs_result = compute_all_vendor_scorecards(db)
-                log.info(
-                    f"Vendor scorecards: {vs_result['updated']} updated, "
-                    f"{vs_result['skipped_cold_start']} cold-start"
-                )
-                current_month = now.date().replace(day=1)
-                bl_result = compute_buyer_leaderboard(db, current_month)
-                log.info(
-                    f"Buyer leaderboard: {bl_result['entries']} entries for {current_month}"
-                )
-                # Recompute previous month during grace period (first 7 days)
-                if now.day <= 7:
-                    prev_month = (current_month - timedelta(days=1)).replace(day=1)
-                    compute_buyer_leaderboard(db, prev_month)
-                _last_performance_compute = now
-        except Exception as e:
-            log.error(f"Performance tracking error: {e}")
-            db.rollback()
-
-        # ── Deep email mining (every 4 hours, per user) ──
-        if settings.deep_email_mining_enabled:
-            try:
-                global _last_deep_email_scan
-                if now - _last_deep_email_scan > timedelta(hours=4):
-                    from .connectors.email_mining import EmailMiner
-                    from .services.signature_parser import extract_signature, cache_signature_extract
-                    from .services.deep_enrichment_service import link_contact_to_entities
-
-                    for user in users:
-                        if not user.access_token or not user.m365_connected:
-                            continue
-
-                        # Check per-user staleness
-                        if user.last_deep_email_scan:
-                            last_scan = _utc(user.last_deep_email_scan)
-                            if now - last_scan < timedelta(hours=4):
-                                continue
-
-                        try:
-                            token = await get_valid_token(user, db)
-                            if not token:
-                                continue
-                            miner = EmailMiner(token, db=db, user_id=user.id)
-                            scan_result = await asyncio.wait_for(
-                                miner.deep_scan_inbox(lookback_days=30, max_messages=500),
-                                timeout=120,
-                            )
-                            # Process per-domain results for contact linking
-                            for domain, domain_data in scan_result.get("per_domain", {}).items():
-                                for email_addr in domain_data.get("emails", [])[:10]:
-                                    try:
-                                        link_contact_to_entities(db, email_addr, {
-                                            "full_name": domain_data.get("sender_names", [""])[0] if domain_data.get("sender_names") else None,
-                                            "confidence": 0.6,
-                                        })
-                                    except Exception:
-                                        pass
-
-                            user.last_deep_email_scan = now
-                            db.commit()
-                            log.info(
-                                f"Deep email scan [{user.email}]: {scan_result.get('messages_scanned', 0)} msgs, "
-                                f"{scan_result.get('contacts_found', 0)} contacts"
-                            )
-                        except asyncio.TimeoutError:
-                            log.warning(f"Deep email scan TIMEOUT for {user.email}")
-                        except Exception as e:
-                            log.error(f"Deep email scan error for {user.email}: {e}")
-                            db.rollback()
-
-                    _last_deep_email_scan = now
-            except Exception as e:
-                log.error(f"Deep email mining error: {e}")
-                db.rollback()
-
-        # ── Deep enrichment sweep (every 12 hours) ──
-        if settings.deep_enrichment_enabled:
-            try:
-                global _last_deep_enrichment_sweep
-                if now - _last_deep_enrichment_sweep > timedelta(hours=12):
-                    from .models import VendorCard, Company
-                    from .services.deep_enrichment_service import deep_enrich_vendor, deep_enrich_company
-
-                    # Enrich up to 50 vendors per sweep
-                    stale_vendors = (
-                        db.query(VendorCard.id)
-                        .filter(
-                            (VendorCard.deep_enrichment_at.is_(None)) |
-                            (VendorCard.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
-                        )
-                        .order_by(VendorCard.sighting_count.desc().nullslast())
-                        .limit(50)
-                        .all()
-                    )
-
-                    # Enrich recently created entities (last 24h with no enrichment)
-                    recent_vendors = (
-                        db.query(VendorCard.id)
-                        .filter(
-                            VendorCard.created_at > now - timedelta(hours=24),
-                            VendorCard.deep_enrichment_at.is_(None),
-                        )
-                        .limit(20)
-                        .all()
-                    )
-
-                    # Enrich up to 20 companies
-                    stale_companies = (
-                        db.query(Company.id)
-                        .filter(
-                            (Company.deep_enrichment_at.is_(None)) |
-                            (Company.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
-                        )
-                        .limit(20)
-                        .all()
-                    )
-
-                    # Run all enrichments concurrently in batches of 10
-                    async def _safe_enrich_vendor(vid):
-                        try:
-                            await deep_enrich_vendor(vid, db)
-                        except Exception as e:
-                            log.warning(f"Enrichment sweep vendor {vid} error: {e}")
-                            db.rollback()
-
-                    async def _safe_enrich_company(cid):
-                        try:
-                            await deep_enrich_company(cid, db)
-                        except Exception as e:
-                            log.warning(f"Enrichment sweep company {cid} error: {e}")
-                            db.rollback()
-
-                    all_vendor_ids = [vid for (vid,) in stale_vendors] + [vid for (vid,) in recent_vendors]
-                    # Process in batches of 10 to avoid overwhelming external APIs
-                    for i in range(0, len(all_vendor_ids), 10):
-                        batch = all_vendor_ids[i:i + 10]
-                        await asyncio.gather(*[_safe_enrich_vendor(vid) for vid in batch], return_exceptions=True)
-
-                    if stale_companies:
-                        await asyncio.gather(
-                            *[_safe_enrich_company(cid) for (cid,) in stale_companies],
-                            return_exceptions=True,
-                        )
-
-                    _last_deep_enrichment_sweep = now
-                    log.info(
-                        f"Deep enrichment sweep: {len(stale_vendors)} vendors, "
-                        f"{len(recent_vendors)} new vendors, {len(stale_companies)} companies"
-                    )
-            except Exception as e:
-                log.error(f"Deep enrichment sweep error: {e}")
-                db.rollback()
-
     except Exception as e:
-        log.error(f"Scheduler batch error: {e}")
+        log.error(f"Inbox scan job error: {e}")
     finally:
         db.close()
+
+
+async def _job_batch_results():
+    """Process pending AI batch results."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .email_service import process_batch_results
+        batch_applied = await process_batch_results(db)
+        if batch_applied:
+            log.info(f"Batch processing: {batch_applied} results applied")
+    except Exception as e:
+        log.error(f"Batch results processing error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _job_contacts_sync():
+    """Sync Outlook contacts for all connected users."""
+    from .database import SessionLocal
+    from .models import User
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
+        for user in users:
+            if not user.access_token or not user.m365_connected:
+                continue
+            should_sync = False
+            if not user.last_contacts_sync:
+                should_sync = True
+            elif now - _utc(user.last_contacts_sync) > timedelta(hours=24):
+                should_sync = True
+
+            if should_sync:
+                try:
+                    await _sync_user_contacts(user, db)
+                except Exception as e:
+                    log.error(f"Contacts sync error for {user.email}: {e}")
+                    db.rollback()
+    except Exception as e:
+        log.error(f"Contacts sync job error: {e}")
+    finally:
+        db.close()
+
+
+async def _job_engagement_scoring():
+    """Compute engagement scores for all vendors with outreach data."""
+    from .database import SessionLocal
+    from .models import VendorCard
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        latest = (
+            db.query(VendorCard.engagement_computed_at)
+            .filter(VendorCard.engagement_computed_at.isnot(None))
+            .order_by(VendorCard.engagement_computed_at.desc())
+            .first()
+        )
+
+        should_compute = True
+        if latest and latest[0]:
+            last_computed = latest[0]
+            if last_computed.tzinfo is None:
+                last_computed = last_computed.replace(tzinfo=timezone.utc)
+            if now - last_computed < timedelta(hours=12):
+                should_compute = False
+
+        if should_compute:
+            await _compute_engagement_scores_job(db)
+    except Exception as e:
+        log.error(f"Engagement scoring error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _job_webhook_subscriptions():
+    """Manage Graph webhook subscriptions."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .services.webhook_service import (
+            ensure_all_users_subscribed,
+            renew_expiring_subscriptions,
+        )
+        await renew_expiring_subscriptions(db)
+        await ensure_all_users_subscribed(db)
+    except Exception as e:
+        log.error(f"Webhook subscription error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _job_ownership_sweep():
+    """Run customer ownership sweep."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .services.ownership_service import run_ownership_sweep
+        await run_ownership_sweep(db)
+    except Exception as e:
+        log.error(f"Ownership sweep error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _job_routing_expiration():
+    """Expire stale routing assignments and offers."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .services.routing_service import (
+            expire_stale_assignments,
+            expire_stale_offers,
+        )
+        expired_assignments = expire_stale_assignments(db)
+        expired_offers = expire_stale_offers(db)
+        if expired_assignments or expired_offers:
+            db.commit()
+    except Exception as e:
+        log.error(f"Routing expiration error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _job_po_verification():
+    """Verify PO sent status for pending buy plans."""
+    from .config import settings
+    from .database import SessionLocal
+    from .models import BuyPlan
+
+    db = SessionLocal()
+    try:
+        from .services.buyplan_service import verify_po_sent
+
+        unverified_plans = (
+            db.query(BuyPlan).filter(BuyPlan.status == "po_entered").all()
+        )
+        for plan in unverified_plans:
+            try:
+                await verify_po_sent(plan, db)
+            except Exception as e:
+                log.error(f"PO verify error for plan {plan.id}: {e}")
+    except Exception as e:
+        log.error(f"PO verification scan error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _job_stock_autocomplete():
+    """Auto-complete stock sales at configured hour."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .services.buyplan_service import auto_complete_stock_sales
+        completed = auto_complete_stock_sales(db)
+        if completed:
+            log.info(f"Stock sale auto-complete: {completed} plan(s) completed")
+    except Exception as e:
+        log.error(f"Stock sale auto-complete error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _job_proactive_matching():
+    """Scan new offers for proactive matching."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .services.proactive_service import scan_new_offers_for_matches
+        result = scan_new_offers_for_matches(db)
+        if result.get("matches_created"):
+            log.info(
+                f"Proactive matching: {result['matches_created']} new matches from {result['scanned']} offers"
+            )
+    except Exception as e:
+        log.error(f"Proactive matching error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _job_performance_tracking():
+    """Compute vendor scorecards and buyer leaderboard."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        from .services.performance_service import (
+            compute_all_vendor_scorecards,
+            compute_buyer_leaderboard,
+        )
+
+        vs_result = compute_all_vendor_scorecards(db)
+        log.info(
+            f"Vendor scorecards: {vs_result['updated']} updated, "
+            f"{vs_result['skipped_cold_start']} cold-start"
+        )
+        current_month = now.date().replace(day=1)
+        bl_result = compute_buyer_leaderboard(db, current_month)
+        log.info(
+            f"Buyer leaderboard: {bl_result['entries']} entries for {current_month}"
+        )
+        # Recompute previous month during grace period (first 7 days)
+        if now.day <= 7:
+            prev_month = (current_month - timedelta(days=1)).replace(day=1)
+            compute_buyer_leaderboard(db, prev_month)
+    except Exception as e:
+        log.error(f"Performance tracking error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _job_deep_email_mining():
+    """Deep email mining scan for all connected users."""
+    from .config import settings
+    from .database import SessionLocal
+    from .models import User
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        users = db.query(User).filter(User.refresh_token.isnot(None)).all()
+
+        from .connectors.email_mining import EmailMiner
+        from .services.deep_enrichment_service import link_contact_to_entities
+
+        for user in users:
+            if not user.access_token or not user.m365_connected:
+                continue
+
+            # Check per-user staleness
+            if user.last_deep_email_scan:
+                last_scan = _utc(user.last_deep_email_scan)
+                if now - last_scan < timedelta(hours=4):
+                    continue
+
+            try:
+                token = await get_valid_token(user, db)
+                if not token:
+                    continue
+                miner = EmailMiner(token, db=db, user_id=user.id)
+                scan_result = await asyncio.wait_for(
+                    miner.deep_scan_inbox(lookback_days=30, max_messages=500),
+                    timeout=120,
+                )
+                # Process per-domain results for contact linking
+                for domain, domain_data in scan_result.get("per_domain", {}).items():
+                    for email_addr in domain_data.get("emails", [])[:10]:
+                        try:
+                            link_contact_to_entities(db, email_addr, {
+                                "full_name": domain_data.get("sender_names", [""])[0] if domain_data.get("sender_names") else None,
+                                "confidence": 0.6,
+                            })
+                        except Exception:
+                            pass
+
+                user.last_deep_email_scan = now
+                db.commit()
+                log.info(
+                    f"Deep email scan [{user.email}]: {scan_result.get('messages_scanned', 0)} msgs, "
+                    f"{scan_result.get('contacts_found', 0)} contacts"
+                )
+            except asyncio.TimeoutError:
+                log.warning(f"Deep email scan TIMEOUT for {user.email}")
+            except Exception as e:
+                log.error(f"Deep email scan error for {user.email}: {e}")
+                db.rollback()
+    except Exception as e:
+        log.error(f"Deep email mining error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _job_deep_enrichment():
+    """Deep enrichment sweep for vendors and companies."""
+    from .config import settings
+    from .database import SessionLocal
+    from .models import VendorCard, Company
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+        from .services.deep_enrichment_service import deep_enrich_vendor, deep_enrich_company
+
+        # Enrich up to 50 vendors per sweep
+        stale_vendors = (
+            db.query(VendorCard.id)
+            .filter(
+                (VendorCard.deep_enrichment_at.is_(None)) |
+                (VendorCard.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
+            )
+            .order_by(VendorCard.sighting_count.desc().nullslast())
+            .limit(50)
+            .all()
+        )
+
+        # Enrich recently created entities (last 24h with no enrichment)
+        recent_vendors = (
+            db.query(VendorCard.id)
+            .filter(
+                VendorCard.created_at > now - timedelta(hours=24),
+                VendorCard.deep_enrichment_at.is_(None),
+            )
+            .limit(20)
+            .all()
+        )
+
+        # Enrich up to 20 companies
+        stale_companies = (
+            db.query(Company.id)
+            .filter(
+                (Company.deep_enrichment_at.is_(None)) |
+                (Company.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
+            )
+            .limit(20)
+            .all()
+        )
+
+        # Run all enrichments concurrently in batches of 10
+        async def _safe_enrich_vendor(vid):
+            try:
+                await deep_enrich_vendor(vid, db)
+            except Exception as e:
+                log.warning(f"Enrichment sweep vendor {vid} error: {e}")
+                db.rollback()
+
+        async def _safe_enrich_company(cid):
+            try:
+                await deep_enrich_company(cid, db)
+            except Exception as e:
+                log.warning(f"Enrichment sweep company {cid} error: {e}")
+                db.rollback()
+
+        all_vendor_ids = [vid for (vid,) in stale_vendors] + [vid for (vid,) in recent_vendors]
+        # Process in batches of 10 to avoid overwhelming external APIs
+        for i in range(0, len(all_vendor_ids), 10):
+            batch = all_vendor_ids[i:i + 10]
+            await asyncio.gather(*[_safe_enrich_vendor(vid) for vid in batch], return_exceptions=True)
+
+        if stale_companies:
+            await asyncio.gather(
+                *[_safe_enrich_company(cid) for (cid,) in stale_companies],
+                return_exceptions=True,
+            )
+
+        log.info(
+            f"Deep enrichment sweep: {len(stale_vendors)} vendors, "
+            f"{len(recent_vendors)} new vendors, {len(stale_companies)} companies"
+        )
+    except Exception as e:
+        log.error(f"Deep enrichment sweep error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+async def _job_cache_cleanup():
+    """Clean up expired cache entries."""
+    try:
+        from .cache.intel_cache import cleanup_expired
+        cleanup_expired()
+    except Exception as e:
+        log.error(f"Cache cleanup error: {e}")
 
 
 # ── Inbox Scanning ──────────────────────────────────────────────────────

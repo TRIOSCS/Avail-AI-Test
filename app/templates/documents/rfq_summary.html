@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>RFQ Summary — {{ requisition.name }}</title>
+<style>
+  @page { size: letter; margin: 1in 0.75in; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11pt; color: #222; line-height: 1.4; }
+  h1 { font-size: 18pt; color: #1a365d; margin-bottom: 4px; }
+  h2 { font-size: 13pt; color: #2d3748; border-bottom: 2px solid #e2e8f0; padding-bottom: 4px; margin-top: 20px; }
+  .subtitle { color: #718096; font-size: 10pt; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 10pt; }
+  th { background: #edf2f7; color: #2d3748; text-align: left; padding: 6px 8px; border-bottom: 2px solid #cbd5e0; }
+  td { padding: 5px 8px; border-bottom: 1px solid #e2e8f0; }
+  tr:nth-child(even) td { background: #f7fafc; }
+  .meta-table { width: auto; margin-bottom: 16px; }
+  .meta-table td { border: none; padding: 2px 12px 2px 0; }
+  .meta-label { font-weight: bold; color: #4a5568; }
+  .footer { margin-top: 24px; font-size: 9pt; color: #a0aec0; text-align: center; border-top: 1px solid #e2e8f0; padding-top: 8px; }
+  .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 9pt; font-weight: bold; }
+  .badge-active { background: #c6f6d5; color: #276749; }
+  .badge-closed { background: #fed7d7; color: #9b2c2c; }
+</style>
+</head>
+<body>
+  <h1>{{ requisition.name }}</h1>
+  <p class="subtitle">RFQ Summary Report — Generated {{ generated_at }}</p>
+
+  <h2>Requisition Details</h2>
+  <table class="meta-table">
+    <tr><td class="meta-label">Customer</td><td>{{ requisition.customer_name or '—' }}</td></tr>
+    <tr><td class="meta-label">Status</td><td><span class="badge badge-{{ 'active' if requisition.status in ('active','open','sourcing') else 'closed' }}">{{ requisition.status }}</span></td></tr>
+    <tr><td class="meta-label">Created</td><td>{{ requisition.created_at.strftime('%Y-%m-%d') if requisition.created_at else '—' }}</td></tr>
+    {% if requisition.deadline %}
+    <tr><td class="meta-label">Deadline</td><td>{{ requisition.deadline }}</td></tr>
+    {% endif %}
+  </table>
+
+  <h2>Requirements ({{ requirements|length }})</h2>
+  <table>
+    <thead>
+      <tr><th>#</th><th>MPN</th><th>Qty</th><th>Target Price</th></tr>
+    </thead>
+    <tbody>
+    {% for req in requirements %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ req.primary_mpn }}</td>
+        <td>{{ '{:,}'.format(req.target_qty) if req.target_qty else '—' }}</td>
+        <td>{{ '${:,.4f}'.format(req.target_price) if req.target_price else '—' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if offers %}
+  <h2>Offers ({{ offers|length }})</h2>
+  <table>
+    <thead>
+      <tr><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+    {% for o in offers %}
+      <tr>
+        <td>{{ o.vendor_name }}</td>
+        <td>{{ o.mpn }}</td>
+        <td>{{ '{:,}'.format(o.qty_available) if o.qty_available else '—' }}</td>
+        <td>{{ '${:,.4f}'.format(o.unit_price|float) if o.unit_price else '—' }}</td>
+        <td>{{ o.lead_time or '—' }}</td>
+        <td>{{ o.status }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <div class="footer">
+    AVAIL — Opportunity Management | Confidential | {{ generated_at }}
+  </div>
+</body>
+</html>
