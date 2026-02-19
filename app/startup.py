@@ -320,6 +320,9 @@ def _add_crm_columns(conn) -> None:
         "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS cancellation_reason TEXT",
         # v1.8.0 — Stock sale flag
         "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS is_stock_sale BOOLEAN DEFAULT FALSE",
+        # Salesforce backfill — link requirements to SF requisition items
+        "ALTER TABLE requirements ADD COLUMN IF NOT EXISTS sf_req_item_id VARCHAR(255)",
+        "CREATE INDEX IF NOT EXISTS ix_requirements_sf_req_item_id ON requirements(sf_req_item_id)",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
