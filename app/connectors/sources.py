@@ -66,8 +66,6 @@ class NexarConnector(BaseConnector):
           mpn
           manufacturer { name }
           shortDescription
-          bestDatasheet { url }
-          medianPrice1000 { price currency }
         }}
       }
     }"""
@@ -258,24 +256,19 @@ class NexarConnector(BaseConnector):
             mpn = part.get("mpn", pn)
             mfr = (part.get("manufacturer") or {}).get("name", "")
             desc = part.get("shortDescription", "")
-            median = part.get("medianPrice1000") or {}
-            price = median.get("price")
-            currency = median.get("currency", "USD")
-            datasheet = (part.get("bestDatasheet") or {}).get("url", "")
 
             results.append({
                 "vendor_name": "Octopart (reference)",
                 "manufacturer": mfr,
                 "mpn_matched": mpn,
                 "qty_available": None,
-                "unit_price": round(float(price), 4) if price else None,
-                "currency": currency,
+                "unit_price": None,
+                "currency": "USD",
                 "source_type": "octopart",
                 "is_authorized": False,
                 "confidence": 2,
                 "octopart_url": octopart_url,
                 "description": desc,
-                "datasheet_url": datasheet,
             })
 
         log.info(f"Nexar: {pn} -> {len(results)} basic results (no seller data)")
