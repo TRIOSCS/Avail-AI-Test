@@ -1435,8 +1435,14 @@ function applyDeadlineFilter() {
 }
 
 // ── v7 Main Search ──────────────────────────────────────────────────────
-function debouncedMainSearch() {
-    const q = (document.getElementById('mainSearch')?.value || '').trim();
+function debouncedMainSearch(val) {
+    var ds = document.getElementById('mainSearch');
+    var ms = document.getElementById('mobileMainSearch');
+    if (typeof val === 'string') {
+        if (ds) ds.value = val;
+        if (ms) ms.value = val;
+    }
+    const q = (ds?.value || '').trim();
     if (q.length >= 2) loadRequisitions(q);
     else if (q.length === 0) loadRequisitions();
 }
