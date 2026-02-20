@@ -67,7 +67,7 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 .shell{display:flex;height:100vh;overflow:hidden}
 
 /* Sidebar */
-.sidebar{position:fixed;top:88px;left:0;bottom:0;width:var(--sbw);background:var(--white);border-right:1px solid var(--border);box-shadow:2px 0 12px rgba(0,0,0,.06);z-index:99;transform:translateX(-100%);transition:transform .3s ease;display:flex;flex-direction:column;overflow:hidden;border-top:2px solid var(--blue)}
+.sidebar{position:fixed;top:88px;left:0;bottom:0;width:var(--sbw);background:#f9fafb;border-right:1px solid var(--border);box-shadow:2px 0 12px rgba(0,0,0,.06);z-index:99;transform:translateX(-100%);transition:transform .3s ease;display:flex;flex-direction:column;overflow:hidden;border-top:1px solid var(--blue)}
 .sidebar.collapsed{width:var(--sidebar-collapsed)}
 .logo-zone{height:58px;flex-shrink:0;cursor:pointer;border-bottom:1px solid rgba(255,255,255,.14);display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden}
 .logo-avail{position:absolute;display:flex;justify-content:center;align-items:center;width:100%;padding:0 14px;transition:opacity .18s,transform .18s}
@@ -1106,7 +1106,7 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 
 /* Top area — logo left, controls right, all on grey */
 .toparea{display:flex;align-items:center;gap:12px;padding:2px 16px;position:relative;z-index:200;transition:margin-left .3s}
-.toparea img{height:84px;flex-shrink:0}
+.toparea img{height:84px;flex-shrink:0;transition:width .3s ease,height .3s ease}
 .topcontrols{display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap;justify-content:space-between}
 
 /* Sidebar rail — blue tab centered on page with chevron */
@@ -1133,7 +1133,8 @@ body.sb-open .sb-rail svg{transform:rotate(180deg)}
 .sidebar-footer .gb{border:none;background:none;cursor:pointer;color:var(--muted);font-size:14px}
 
 /* Body sidebar-open state */
-body.sb-open .sidebar{transform:translateX(0);border-right:2px solid var(--blue);box-shadow:3px 0 16px rgba(74,111,165,.18)}
+body.sb-open .sidebar{transform:translateX(0);border-right:1px solid var(--blue);box-shadow:3px 0 16px rgba(74,111,165,.18)}
+body.sb-open .toparea img{width:calc(var(--sbw) - 16px);object-fit:contain;object-position:left center}
 body.sb-open .main{margin-left:var(--sbw)}
 /* Click-away overlay to close sidebar */
 .sb-overlay{display:none;position:fixed;inset:0;z-index:149}
