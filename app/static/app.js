@@ -465,7 +465,7 @@ window.addEventListener('popstate', (e) => {
 });
 
 function showView(viewId) {
-    _pushNav(viewId);
+    try { _pushNav(viewId); } catch(e) { console.warn('pushNav:', e); }
     for (const id of ALL_VIEWS) {
         const el = document.getElementById(id);
         if (el) el.style.display = id === viewId ? '' : 'none';
@@ -2126,7 +2126,8 @@ function sidebarNav(page, el) {
         performance: () => showPerformance(),
         settings: () => showSettings()
     };
-    if (routes[page]) routes[page]();
+    try { if (routes[page]) routes[page](); }
+    catch(e) { console.error('sidebarNav error:', page, e); }
 }
 
 function navHighlight(btn) {
