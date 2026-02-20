@@ -1371,7 +1371,7 @@ function renderReqList() {
     // When server search is active, skip status/text filters (server already filtered)
     if (!_serverSearchActive) {
         if (_reqStatusFilter === 'all') {
-            data = data.filter(r => !['archived', 'won', 'lost'].includes(r.status));
+            data = data.filter(r => !['archived', 'won', 'lost', 'closed'].includes(r.status));
         } else if (_reqStatusFilter === 'archive') {
             // Backend already returned only archived/won/lost
         } else if (_reqStatusFilter === 'quoted') {

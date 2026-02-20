@@ -345,9 +345,9 @@ async def list_requisitions(
             )
         )
     elif status == "archive":
-        query = query.filter(Requisition.status.in_(["archived", "won", "lost"]))
+        query = query.filter(Requisition.status.in_(["archived", "won", "lost", "closed"]))
     else:
-        query = query.filter(Requisition.status.notin_(["archived", "won", "lost"]))
+        query = query.filter(Requisition.status.notin_(["archived", "won", "lost", "closed"]))
 
     total = query.count()
     rows = query.order_by(Requisition.created_at.desc()).offset(offset).limit(limit).all()
