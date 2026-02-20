@@ -456,7 +456,7 @@ async def add_requirements(
                     requisition_id=req_id,
                 ))
     except Exception:
-        pass  # Never block requirement creation
+        log.debug("Activity event creation failed", exc_info=True)
 
     return [{"id": r.id, "primary_mpn": r.primary_mpn} for r in created]
 
@@ -637,7 +637,7 @@ async def search_all(
         body = await request.json()
         requirement_ids = body.get("requirement_ids")
     except Exception:
-        pass  # No body or invalid JSON — search all
+        log.debug("JSON body parse failed, searching all requirements", exc_info=True)
 
     # Filter requirements to search
     reqs_to_search = [

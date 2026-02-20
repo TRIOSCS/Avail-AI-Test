@@ -1134,7 +1134,7 @@ async def create_offer(
                     requisition_id=req_id,
                 ))
     except Exception:
-        pass  # Never block offer creation
+        log.debug("Activity event creation failed", exc_info=True)
 
     return {
         "id": offer.id,
@@ -1554,6 +1554,7 @@ async def send_quote(
     try:
         body = await request.json()
     except Exception:
+        log.debug("JSON body parse failed", exc_info=True)
         body = {}
     override_email = (body.get("to_email") or "").strip()
     override_name = (body.get("to_name") or "").strip()

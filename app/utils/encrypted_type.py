@@ -44,6 +44,9 @@ class EncryptedText(TypeDecorator):
         try:
             f = _get_fernet()
             return f.decrypt(value.encode()).decode()
-        except (InvalidToken, Exception):
+        except InvalidToken:
             # Value may be stored in plaintext (pre-migration data)
+            return value
+        except Exception:
+            log.warning("Unexpected decryption error, returning raw value")
             return value

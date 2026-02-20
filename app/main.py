@@ -34,6 +34,26 @@ async def lifespan(app):
     """App startup/shutdown — launches background scheduler."""
     from .startup import run_startup_migrations
 
+    # S1: Fail-fast on default secret key (skip in test mode)
+    if not os.environ.get("TESTING"):
+        if settings.secret_key == "change-me-in-production":
+            raise RuntimeError(
+                "SESSION_SECRET or SECRET_KEY must be set. "
+                "See .env.example for required variables."
+            )
+
+    # S2: Warn about missing critical env vars (don't crash — vendor keys are optional)
+    if not os.environ.get("TESTING"):
+        missing = []
+        if not settings.azure_client_id:
+            missing.append("AZURE_CLIENT_ID")
+        if not settings.azure_client_secret:
+            missing.append("AZURE_CLIENT_SECRET")
+        if not settings.azure_tenant_id:
+            missing.append("AZURE_TENANT_ID")
+        if missing:
+            log.warning("Missing env vars (some features disabled): %s", ", ".join(missing))
+
     # Sentry error tracking (conditional on DSN being set)
     if settings.sentry_dsn:
         import sentry_sdk
@@ -79,6 +99,23 @@ app.add_middleware(
     same_site="lax",
     max_age=86400,
 )
+
+# CSRF protection (double-submit cookie) — disabled in test mode
+if not os.environ.get("TESTING"):
+    import re
+    from starlette_csrf import CSRFMiddleware
+
+    app.add_middleware(
+        CSRFMiddleware,
+        secret=settings.secret_key,
+        exempt_urls=[
+            re.compile(r"/auth/.*"),
+            re.compile(r"/health"),
+            re.compile(r"/metrics"),
+            re.compile(r"/api/buy-plans/token/.*"),  # external approval links
+        ],
+    )
+
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
@@ -86,11 +123,7 @@ templates = Jinja2Templates(directory="app/templates")
 from prometheus_fastapi_instrumentator import Instrumentator
 Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
-# S2: Warn on default secret key
-if settings.secret_key == "change-me-in-production":
-    log.critical(
-        "⚠️  SESSION_SECRET is using the default value! Set SESSION_SECRET in .env for production."
-    )
+# Secret key validation moved to lifespan (fail-fast)
 
 
 # L1: Request/response middleware — request ID, timing, structured logging
@@ -175,13 +208,18 @@ async def health(db: Session = Depends(get_db)):
     # "degraded" only when a required service is actively failing
     degraded = not db_ok or redis_status == "error" or scheduler_status == "error"
     status = "degraded" if degraded else "ok"
-    return {
-        "status": status,
-        "version": APP_VERSION,
-        "db": "ok" if db_ok else "error",
-        "redis": redis_status,
-        "scheduler": scheduler_status,
-    }
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        content={
+            "status": status,
+            "version": APP_VERSION,
+            "db": "ok" if db_ok else "error",
+            "redis": redis_status,
+            "scheduler": scheduler_status,
+        },
+        status_code=200 if status == "ok" else 503,
+    )
 
 
 # ── Seed API Sources ─────────────────────────────────────────────────────

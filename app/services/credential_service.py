@@ -14,8 +14,11 @@ Depends on: config.py (secret_key), models.py (ApiSource)
 """
 
 import base64
+import logging
 import os
 import time
+
+log = logging.getLogger(__name__)
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
@@ -68,7 +71,7 @@ def get_credential(db: Session, source_name: str, env_var_name: str) -> str | No
             try:
                 return decrypt_value(encrypted)
             except Exception:
-                pass
+                log.debug("Credential decrypt fallback for %s", env_var_name, exc_info=True)
     return os.getenv(env_var_name) or None
 
 
@@ -87,7 +90,7 @@ def get_all_credentials_for_source(db: Session, source_name: str) -> dict[str, s
                 try:
                     val = decrypt_value(encrypted)
                 except Exception:
-                    pass
+                    log.debug("Credential decrypt fallback for %s", var_name, exc_info=True)
         if not val:
             val = os.getenv(var_name) or ""
         if val:

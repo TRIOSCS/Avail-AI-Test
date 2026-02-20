@@ -7,9 +7,9 @@ services:
     image: postgres:16-alpine
     restart: always
     environment:
-      POSTGRES_USER: availai
-      POSTGRES_PASSWORD: availai
-      POSTGRES_DB: availai
+      POSTGRES_USER: ${POSTGRES_USER:-availai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-availai}
+      POSTGRES_DB: ${POSTGRES_DB:-availai}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -44,6 +44,12 @@ services:
     volumes:
       - uploads:/app/uploads
       - static_files:/srv/static
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
   # --- HTTPS (auto-generates SSL certificate for your domain) ---
   caddy:
@@ -58,7 +64,8 @@ services:
       - caddy_config:/config
       - static_files:/srv/static:ro
     depends_on:
-      - app
+      app:
+        condition: service_healthy
 
 volumes:
   pgdata:

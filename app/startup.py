@@ -41,10 +41,10 @@ def run_startup_migrations() -> None:
     log.info("Startup migrations complete")
 
 
-def _exec(conn, stmt: str) -> None:
+def _exec(conn, stmt: str, params: dict | None = None) -> None:
     """Execute a single DDL statement with rollback on failure."""
     try:
-        conn.execute(sqltext(stmt))
+        conn.execute(sqltext(stmt), params or {})
         conn.commit()
     except Exception as e:
         log.warning("DDL failed: %s", e)
@@ -145,9 +145,10 @@ def _seed_system_config(conn) -> None:
     for key, value, desc in seeds:
         _exec(
             conn,
-            f"""INSERT INTO system_config (key, value, description)
-            VALUES ('{key}', '{value}', '{desc}')
+            """INSERT INTO system_config (key, value, description)
+            VALUES (:key, :value, :desc)
             ON CONFLICT (key) DO NOTHING""",
+            {"key": key, "value": value, "desc": desc},
         )
 
 
@@ -260,6 +261,8 @@ def _add_check_constraints(conn) -> None:
         ("offers", "chk_offer_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape')"),
         ("offers", "chk_offer_status", "status IN ('active','expired','won','lost','pending_review')"),
     ]
+    # NOTE: table/constraint names are hardcoded literals above — not user input.
+    # DDL identifiers cannot use bind params. This is safe as-is.
     for table, name, check in constraints:
         _exec(conn, f"""
             DO $$ BEGIN
