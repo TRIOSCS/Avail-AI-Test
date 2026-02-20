@@ -868,6 +868,37 @@ async function deleteDrillRow(rfqId, reqId) {
     } catch(e) { showToast('Failed to remove part', 'error'); }
 }
 
+// ── Effort Score Tooltip Builder ──────────────────────────────────────────
+function _buildEffortTip(score, color, signals) {
+    if (!signals) return '';
+    const s = signals;
+    const rows = [
+        {label: 'Sources found', val: s.sources.val, pct: s.sources.pct, level: s.sources.level,
+         tip: s.sources.level === 'low' ? 'Search more vendors' : ''},
+        {label: 'RFQs sent', val: s.rfqs.val, pct: s.rfqs.pct, level: s.rfqs.level,
+         tip: s.rfqs.level === 'low' ? 'Send more RFQs' : ''},
+        {label: 'Vendor replies', val: s.replies.val + (s.replies.of ? '/' + s.replies.of : ''), pct: s.replies.pct, level: s.replies.level,
+         tip: s.replies.level === 'low' ? 'Follow up on RFQs' : ''},
+        {label: 'Offers received', val: s.offers.val, pct: s.offers.pct, level: s.offers.level,
+         tip: s.offers.level === 'low' ? 'Push for firm offers' : ''},
+        {label: 'Phone calls', val: s.calls.val, pct: s.calls.pct, level: s.calls.level,
+         tip: s.calls.level === 'low' ? 'Pick up the phone' : ''},
+        {label: 'Emails', val: s.emails.val, pct: s.emails.pct, level: s.emails.level,
+         tip: s.emails.level === 'low' ? 'More vendor outreach' : ''},
+    ];
+    // Find weakest signals for summary
+    const weak = rows.filter(r => r.level === 'low').map(r => r.tip).filter(Boolean);
+    const summary = weak.length ? weak.slice(0, 2).join(' · ') : (color === 'green' ? 'Strong effort' : 'Good progress');
+    let html = `<span class="effort-tip">`;
+    html += `<div style="font-weight:700;margin-bottom:6px;font-size:12px">Effort: ${Math.round(score)}/100</div>`;
+    for (const r of rows) {
+        html += `<div class="effort-sig"><span style="min-width:85px">${r.label}</span><span class="effort-sig-bar"><span class="effort-sig-fill ${r.level}" style="width:${r.pct}%"></span></span><span style="min-width:28px;text-align:right;font-weight:600">${r.val}</span></div>`;
+    }
+    html += `<div style="margin-top:6px;font-style:italic;color:var(--muted);font-size:10px">${esc(summary)}</div>`;
+    html += `</span>`;
+    return html;
+}
+
 // ── Sourcing Drill-Down (sightings view) ────────────────────────────────
 // Cache for per-requirement sourcing scores
 const _ddScoreCache = {};
@@ -901,12 +932,12 @@ function _renderSourcingDrillDown(reqId) {
     for (const [rId, group] of groups) {
         const sightings = group.sightings || [];
         const label = group.label || 'Unknown MPN';
-        // Per-requirement effort dot
+        // Per-requirement effort dot with tooltip
         const rs = scoreMap[rId];
         let effortBadge = '';
         if (rs) {
             const dotColor = rs.color === 'green' ? 'var(--green)' : rs.color === 'yellow' ? 'var(--amber)' : 'var(--red)';
-            effortBadge = ` <span class="effort-dot" style="background:${dotColor}" title="Effort: ${rs.score}/100"></span><span style="font-size:9px;color:var(--muted);margin-left:2px">${Math.round(rs.score)}</span>`;
+            effortBadge = ` <span class="effort-wrap"><span class="effort-dot" style="background:${dotColor}"></span><span style="font-size:9px;color:var(--muted);margin-left:2px">${Math.round(rs.score)}</span>${_buildEffortTip(rs.score, rs.color, rs.signals)}</span>`;
         }
         html += `<div style="margin-bottom:10px">
             <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">${esc(label)}${effortBadge} <span style="font-weight:400;color:var(--muted)">(${sightings.length} source${sightings.length !== 1 ? 's' : ''})</span></div>`;
@@ -1275,11 +1306,11 @@ function _renderReqRow(r) {
         const sent = r.rfq_sent_count || 0;
         const respPct = sent > 0 ? Math.round((offers / sent) * 100) + '%' : '\u2014';
 
-        // Sourcing effort score indicator
+        // Sourcing effort score indicator with tooltip
         const scVal = r.sourcing_score != null ? r.sourcing_score : 0;
         const scColor = r.sourcing_color || 'red';
         const scDotColor = scColor === 'green' ? 'var(--green)' : scColor === 'yellow' ? 'var(--amber)' : 'var(--red)';
-        const effortCell = `<td style="text-align:center" title="Effort: ${scVal}/100"><span class="effort-dot" style="background:${scDotColor}"></span><span style="font-size:10px;color:var(--muted);margin-left:3px">${Math.round(scVal)}</span></td>`;
+        const effortCell = `<td style="text-align:center"><span class="effort-wrap"><span class="effort-dot" style="background:${scDotColor}"></span><span style="font-size:10px;color:var(--muted);margin-left:3px">${Math.round(scVal)}</span>${_buildEffortTip(scVal, scColor, r.sourcing_signals)}</span></td>`;
 
         // Offers cell — clickable to go to quote preparation
         let offersCell;

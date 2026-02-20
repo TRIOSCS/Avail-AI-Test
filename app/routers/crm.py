@@ -1306,8 +1306,8 @@ async def delete_offer_attachment(
                 headers={"Authorization": f"Bearer {user.access_token}"},
                 timeout=15,
             )
-        except Exception:
-            logger.warning(f"Failed to delete OneDrive item {att.onedrive_item_id}")
+        except (ConnectionError, TimeoutError, OSError) as e:
+            logger.warning(f"Failed to delete OneDrive item {att.onedrive_item_id}: {e}")
     db.delete(att)
     db.commit()
     return {"ok": True}

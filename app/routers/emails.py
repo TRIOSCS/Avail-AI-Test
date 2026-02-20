@@ -56,7 +56,7 @@ async def list_requirement_emails(
             requirement_id, token, db, user_id=user.id
         )
         return EmailThreadListResponse(threads=threads).model_dump()
-    except Exception as e:
+    except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
         logger.error(f"Failed to fetch threads for requirement {requirement_id}: {e}")
         return EmailThreadListResponse(
             threads=[],
@@ -83,7 +83,7 @@ async def get_thread_messages(
     try:
         messages = await fetch_thread_messages(conversation_id, token)
         return EmailThreadMessagesResponse(messages=messages).model_dump()
-    except Exception as e:
+    except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
         logger.error(f"Failed to fetch thread messages: {e}")
         return EmailThreadMessagesResponse(
             messages=[],
@@ -112,7 +112,7 @@ async def list_vendor_emails(
             vendor_card_id, token, db, user_id=user.id
         )
         return EmailThreadListResponse(threads=threads).model_dump()
-    except Exception as e:
+    except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
         logger.error(f"Failed to fetch threads for vendor {vendor_card_id}: {e}")
         return EmailThreadListResponse(
             threads=[],
@@ -155,7 +155,7 @@ async def send_reply(
             raise HTTPException(502, f"Failed to send reply: {result.get('detail', '')}")
     except HTTPException:
         raise
-    except Exception as e:
+    except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
         logger.error(f"Reply send failed: {e}")
         raise HTTPException(502, f"Failed to send reply: {str(e)[:200]}")
 

@@ -12,7 +12,7 @@ WORKDIR /app
 
 # System deps for thefuzz (C extension) and WeasyPrint (PDF rendering)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc python3-dev \
+    gcc python3-dev curl \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info \
     && rm -rf /var/lib/apt/lists/*
 

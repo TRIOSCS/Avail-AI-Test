@@ -25,7 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy import text as sqltext
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -158,7 +158,7 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
                 _data = _json.loads(cached)
                 brands = _data.get("brands")
                 mpn_count = _data.get("mpn_count")
-        except Exception:
+        except (OSError, ValueError):
             pass
 
     if brands is None:
@@ -203,7 +203,7 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
         if r:
             try:
                 r.setex(cache_key, 21600, _json.dumps({"brands": brands, "mpn_count": mpn_count}))
-            except Exception:
+            except (OSError, TypeError):
                 pass
 
     return {
@@ -290,7 +290,7 @@ async def list_vendors(
                     # FTS found nothing, fall back to ILIKE
                     safe_q = q.replace("%", r"\%").replace("_", r"\_")
                     query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
-            except Exception:
+            except (ProgrammingError, OperationalError):
                 # FTS not available (e.g., SQLite in tests), fall back to ILIKE
                 safe_q = q.replace("%", r"\%").replace("_", r"\_")
                 query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))

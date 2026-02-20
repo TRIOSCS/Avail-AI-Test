@@ -42,7 +42,7 @@ def test_requirement_emails_no_token(mock_token, client):
 
 @patch("app.routers.emails.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
 @patch("app.routers.emails.fetch_threads_for_requirement", new_callable=AsyncMock,
-       side_effect=Exception("Graph error"))
+       side_effect=RuntimeError("Graph error"))
 def test_requirement_emails_service_error(mock_fetch, mock_token, client):
     """Service throws -> error in response (not 500)."""
     resp = client.get("/api/requirements/1/emails")

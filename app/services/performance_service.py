@@ -539,35 +539,56 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
                 if bp.status in ("po_confirmed", "complete"):
                     po_confirmed_offer_ids.add(oid)
 
+    # Batch-fetch all offers and stock counts to avoid N+1 per buyer
+    buyer_ids = [b.id for b in buyers]
+
+    all_month_offers = (
+        db.query(Offer)
+        .filter(
+            Offer.entered_by_id.in_(buyer_ids),
+            Offer.created_at >= month_start_dt,
+            Offer.created_at < month_end_dt,
+        )
+        .all()
+    )
+    month_offers_by_buyer: dict[int, list] = {}
+    for o in all_month_offers:
+        month_offers_by_buyer.setdefault(o.entered_by_id, []).append(o)
+
+    all_grace_offers = (
+        db.query(Offer)
+        .filter(
+            Offer.entered_by_id.in_(buyer_ids),
+            Offer.created_at >= grace_start_dt,
+            Offer.created_at < month_start_dt,
+        )
+        .all()
+    )
+    grace_offers_by_buyer: dict[int, list] = {}
+    for o in all_grace_offers:
+        grace_offers_by_buyer.setdefault(o.entered_by_id, []).append(o)
+
+    stock_counts = dict(
+        db.query(StockListHash.user_id, sqlfunc.count(StockListHash.id))
+        .filter(
+            StockListHash.user_id.in_(buyer_ids),
+            StockListHash.first_seen_at >= month_start_dt,
+            StockListHash.first_seen_at < month_end_dt,
+        )
+        .group_by(StockListHash.user_id)
+        .all()
+    )
+
     entries = []
     for buyer in buyers:
-        # Offers logged in this month (plus grace period offers that advanced)
-        month_offers = (
-            db.query(Offer)
-            .filter(
-                Offer.entered_by_id == buyer.id,
-                Offer.created_at >= month_start_dt,
-                Offer.created_at < month_end_dt,
-            )
-            .all()
-        )
-
-        # Grace offers: created in last 7 days of prev month
-        grace_offers = (
-            db.query(Offer)
-            .filter(
-                Offer.entered_by_id == buyer.id,
-                Offer.created_at >= grace_start_dt,
-                Offer.created_at < month_start_dt,
-            )
-            .all()
-        )
+        month_offers = month_offers_by_buyer.get(buyer.id, [])
+        grace_offers = grace_offers_by_buyer.get(buyer.id, [])
 
         # Grace offers only count if they advanced during this month
-        grace_advanced = []
-        for o in grace_offers:
-            if o.id in quoted_offer_ids or o.id in buyplan_offer_ids:
-                grace_advanced.append(o)
+        grace_advanced = [
+            o for o in grace_offers
+            if o.id in quoted_offer_ids or o.id in buyplan_offer_ids
+        ]
 
         all_offers = month_offers + grace_advanced
         offer_ids = {o.id for o in all_offers}
@@ -576,17 +597,7 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
         quoted = sum(1 for oid in offer_ids if oid in quoted_offer_ids)
         in_buyplan = sum(1 for oid in offer_ids if oid in buyplan_offer_ids)
         po_confirmed = sum(1 for oid in offer_ids if oid in po_confirmed_offer_ids)
-
-        # Stock lists uploaded in this month (unique, non-duplicate)
-        stock_uploaded = (
-            db.query(StockListHash)
-            .filter(
-                StockListHash.user_id == buyer.id,
-                StockListHash.first_seen_at >= month_start_dt,
-                StockListHash.first_seen_at < month_end_dt,
-            )
-            .count()
-        )
+        stock_uploaded = stock_counts.get(buyer.id, 0)
 
         pts_logged = logged * PTS_LOGGED
         pts_quoted = quoted * PTS_QUOTED

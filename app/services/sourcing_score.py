@@ -175,13 +175,23 @@ def compute_requisition_scores(requisition_id: int, db: Session) -> dict:
     # Score each requirement
     req_scores = []
     for r in requirements:
+        r_sightings = sighting_counts.get(r.id, 0)
+        r_offers = offer_counts.get(r.id, 0)
         sc = score_requirement(
-            sighting_count=sighting_counts.get(r.id, 0),
-            offer_count=offer_counts.get(r.id, 0),
+            sighting_count=r_sightings,
+            offer_count=r_offers,
             rfqs_per_part=rfqs_per_part,
             reply_rate=reply_rate,
             calls_per_part=calls_per_part,
             emails_per_part=emails_per_part,
+        )
+        signals = _build_signals(
+            r_sightings, r_offers, rfqs_per_part, reply_rate,
+            calls_per_part, emails_per_part,
+            raw_sourced=r_sightings, raw_rfqs=rfq_sent,
+            raw_replies=reply_count, raw_offers=r_offers,
+            raw_calls=call_count, raw_emails=email_count,
+            parts=num_parts,
         )
         req_scores.append(
             {
@@ -189,6 +199,7 @@ def compute_requisition_scores(requisition_id: int, db: Session) -> dict:
                 "mpn": r.primary_mpn or "",
                 "score": sc,
                 "color": _color(sc),
+                "signals": signals,
             }
         )
 
@@ -211,16 +222,16 @@ def compute_requisition_score_fast(
     offer_count: int,
     call_count: int = 0,
     email_count: int = 0,
-) -> tuple[float, str]:
+) -> tuple[float, str, dict]:
     """Lightweight score for list views — no per-requirement breakdown.
 
     Uses requisition-level aggregates to estimate the score without
     querying individual requirements. Good enough for the row indicator.
 
-    Returns: (score, color)
+    Returns: (score, color, signals)
     """
     if req_count == 0:
-        return (0, "red")
+        return (0, "red", _empty_signals())
 
     # Approximate per-part values from aggregates
     sourced_ratio = sourced_count / req_count
@@ -230,16 +241,83 @@ def compute_requisition_score_fast(
     calls_per_part = call_count / req_count
     emails_per_part = email_count / req_count
 
+    sighting_count = int(sourced_ratio * 5)
+    offer_cnt = int(offers_per_part * req_count) if offers_per_part > 0 else 0
+
     # Use same scoring function with averaged signals
     sc = score_requirement(
-        sighting_count=int(sourced_ratio * 5),  # approx: sourced_ratio maps to ~sighting density
-        offer_count=int(offers_per_part * req_count) if offers_per_part > 0 else 0,
+        sighting_count=sighting_count,
+        offer_count=offer_cnt,
         rfqs_per_part=rfqs_per_part,
         reply_rate=reply_rate,
         calls_per_part=calls_per_part,
         emails_per_part=emails_per_part,
     )
-    return (sc, _color(sc))
+    signals = _build_signals(
+        sighting_count, offer_cnt, rfqs_per_part, reply_rate,
+        calls_per_part, emails_per_part,
+        # raw counts for display
+        raw_sourced=sourced_count, raw_rfqs=rfq_sent_count,
+        raw_replies=reply_count, raw_offers=offer_count,
+        raw_calls=call_count, raw_emails=email_count,
+        parts=req_count,
+    )
+    return (sc, _color(sc), signals)
+
+
+def _signal_level(normalized: float) -> str:
+    """Classify a 0–1 normalized signal as low/mid/good."""
+    if normalized >= 0.65:
+        return "good"
+    if normalized >= 0.35:
+        return "mid"
+    return "low"
+
+
+def _build_signals(
+    sighting_count: int,
+    offer_count: int,
+    rfqs_per_part: float,
+    reply_rate: float,
+    calls_per_part: float,
+    emails_per_part: float,
+    *,
+    raw_sourced: int = 0,
+    raw_rfqs: int = 0,
+    raw_replies: int = 0,
+    raw_offers: int = 0,
+    raw_calls: int = 0,
+    raw_emails: int = 0,
+    parts: int = 1,
+) -> dict:
+    """Build per-signal breakdown for tooltip display."""
+    s_sightings = _sigmoid(sighting_count, midpoint=2, steepness=1.0)
+    s_offers = _sigmoid(offer_count, midpoint=1, steepness=1.5)
+    s_rfqs = _sigmoid(rfqs_per_part, midpoint=1.5, steepness=1.2)
+    s_replies = _sigmoid(reply_rate * 5, midpoint=1.5, steepness=1.0)
+    s_calls = _sigmoid(calls_per_part, midpoint=0.3, steepness=3.0)
+    s_emails = _sigmoid(emails_per_part, midpoint=0.5, steepness=2.0)
+
+    return {
+        "sources":  {"val": raw_sourced, "parts": parts, "pct": round(s_sightings * 100), "level": _signal_level(s_sightings)},
+        "offers":   {"val": raw_offers, "parts": parts, "pct": round(s_offers * 100), "level": _signal_level(s_offers)},
+        "rfqs":     {"val": raw_rfqs, "parts": parts, "pct": round(s_rfqs * 100), "level": _signal_level(s_rfqs)},
+        "replies":  {"val": raw_replies, "of": raw_rfqs, "pct": round(s_replies * 100), "level": _signal_level(s_replies)},
+        "calls":    {"val": raw_calls, "parts": parts, "pct": round(s_calls * 100), "level": _signal_level(s_calls)},
+        "emails":   {"val": raw_emails, "parts": parts, "pct": round(s_emails * 100), "level": _signal_level(s_emails)},
+    }
+
+
+def _empty_signals() -> dict:
+    """Return zeroed signals dict."""
+    return {
+        "sources":  {"val": 0, "parts": 0, "pct": 0, "level": "low"},
+        "offers":   {"val": 0, "parts": 0, "pct": 0, "level": "low"},
+        "rfqs":     {"val": 0, "parts": 0, "pct": 0, "level": "low"},
+        "replies":  {"val": 0, "of": 0, "pct": 0, "level": "low"},
+        "calls":    {"val": 0, "parts": 0, "pct": 0, "level": "low"},
+        "emails":   {"val": 0, "parts": 0, "pct": 0, "level": "low"},
+    }
 
 
 def _color(score: float) -> str:

@@ -52,15 +52,16 @@ async def graph_webhook(request: Request, db: Session = Depends(get_db)):
 
     try:
         payload = await request.json()
-    except Exception:
-        return {"status": "invalid payload"}
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(400, "Invalid JSON payload")
 
     from app.services.webhook_service import handle_notification
 
     try:
         await handle_notification(payload, db)
-    except Exception as e:
-        logger.error(f"Webhook notification error: {e}")
+    except Exception:
+        logger.exception("Webhook notification processing failed")
+        raise HTTPException(502, "Notification processing failed")
     return {"status": "accepted"}
 
 
@@ -191,7 +192,7 @@ async def log_email_click(
 
     try:
         body = await request.json()
-    except Exception:
+    except (ValueError, UnicodeDecodeError):
         body = {}
     email = (body.get("email") or "").strip()
     if not email:

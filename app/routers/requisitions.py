@@ -402,9 +402,10 @@ async def list_requisitions(
                 "proactive_match_count": pm_cnt or 0,
                 "sourcing_score": _sc,
                 "sourcing_color": _sc_color,
+                "sourcing_signals": _sc_signals,
             }
             for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt, rfq_sent, needs_rev, ttv, q_status, q_sent, q_total, q_won, offer_cnt, best_price, await_cnt, pm_cnt, call_cnt, email_act_cnt in rows
-            for _sc, _sc_color in [_compute_sourcing_score(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt)]
+            for _sc, _sc_color, _sc_signals in [_compute_sourcing_score(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt)]
         ],
         "total": total,
         "limit": limit,
@@ -596,7 +597,7 @@ async def add_requirements(
     for item in items:
         try:
             parsed = RequirementCreate.model_validate(item)
-        except Exception:
+        except (ValueError, TypeError):
             continue  # skip invalid items (matches prior behaviour of skipping blank mpn)
         # Dedup substitutes by canonical key (schema already normalizes display form)
         seen_keys = {normalize_mpn_key(parsed.primary_mpn)}
@@ -635,8 +636,8 @@ async def add_requirements(
                     customer_name=customer,
                     requisition_id=req_id,
                 ))
-    except Exception:
-        logger.debug("Activity event creation failed", exc_info=True)
+    except (AttributeError, ValueError, RuntimeError):
+        logger.debug("Teams hot-requirement alert failed", exc_info=True)
 
     return [{"id": r.id, "primary_mpn": r.primary_mpn} for r in created]
 
@@ -820,7 +821,7 @@ async def search_all(
     try:
         body = await request.json()
         requirement_ids = body.get("requirement_ids")
-    except Exception:
+    except (ValueError, UnicodeDecodeError):
         logger.debug("JSON body parse failed, searching all requirements", exc_info=True)
 
     # Filter requirements to search

@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -460,7 +461,7 @@ async def test_api_source(
         src.last_success = datetime.now(timezone.utc)
         src.last_error = None
         src.avg_response_ms = elapsed_ms
-    except Exception as e:
+    except (ValueError, ConnectionError, TimeoutError, OSError) as e:
         elapsed_ms = int((time.time() - start) * 1000)
         error = str(e)[:500]
         src.status = "error"
@@ -513,7 +514,7 @@ async def scan_inbox_for_vendors(
             body = await request.body()
             if body and body.strip():
                 opts = MiningOptions.model_validate_json(body)
-    except Exception:
+    except (ValueError, TypeError):
         logger.debug("Mining options parse failed, using defaults", exc_info=True)
     lookback_days = opts.lookback_days
 
@@ -604,7 +605,7 @@ async def email_mining_scan_outbound(
             raw = await request.body()
             if raw and raw.strip():
                 opts = MiningOptions.model_validate_json(raw)
-    except Exception:
+    except (ValueError, TypeError):
         logger.debug("Mining options parse failed, using defaults", exc_info=True)
     lookback = opts.lookback_days
 
@@ -629,7 +630,7 @@ async def email_mining_scan_outbound(
 
     try:
         db.commit()
-    except Exception:
+    except SQLAlchemyError:
         logger.exception("DB commit failed during email scan")
         db.rollback()
 
@@ -731,7 +732,7 @@ async def parse_response_attachments(
 
     try:
         att_data = await gc.get_json(f"/me/messages/{vr.message_id}/attachments")
-    except Exception as e:
+    except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
         raise HTTPException(502, f"Graph API error: {str(e)[:200]}")
 
     attachments = att_data.get("value", []) if att_data else []
@@ -782,7 +783,7 @@ async def parse_response_attachments(
 
     try:
         db.commit()
-    except Exception as e:
+    except SQLAlchemyError as e:
         db.rollback()
         raise HTTPException(500, f"Save failed: {str(e)[:200]}")
 

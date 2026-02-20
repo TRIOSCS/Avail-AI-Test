@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -519,7 +520,7 @@ def api_backfill_emails(
 
     try:
         db.commit()
-    except Exception as e:
+    except SQLAlchemyError as e:
         db.rollback()
         logger.error("Email backfill commit failed: %s", e)
         raise HTTPException(500, f"Backfill failed: {e}")
@@ -636,7 +637,7 @@ async def api_deep_email_scan(
     target_user.last_deep_email_scan = datetime.now(timezone.utc)
     try:
         db.commit()
-    except Exception as e:
+    except SQLAlchemyError as e:
         db.rollback()
         logger.error("Deep scan commit failed for user %s: %s", target_user.email, e)
         raise HTTPException(500, f"Deep scan failed: {e}")
