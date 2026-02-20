@@ -1143,44 +1143,7 @@
     </div><!-- end main-scroll -->
 </main><!-- end main -->
 
-<script>
-window.__userName = "{{ user_name }}";
-window.__userEmail = "{{ user_email }}";
-window.__isAdmin = {{ "true" if is_admin else "false" }};
-window.__isDevAssistant = {{ "true" if is_dev_assistant else "false" }};
-/* Inline stubs — overridden by app.js with full implementations */
-function setNav(btn) {}
-function toggleMobileSidebar() {
-    var sb = document.getElementById('sidebar');
-    var ov = document.getElementById('sidebarOverlay');
-    if (sb) sb.classList.toggle('mobile-open');
-    if (ov) ov.classList.toggle('open');
-}
-/* Close filter panel on outside click */
-document.addEventListener('click', function(e) {
-    document.querySelectorAll('.filter-panel.open').forEach(function(p) {
-        if (!p.closest('.filter-wrap').contains(e.target)) p.classList.remove('open');
-    });
-});
-/* Sync mobile ↔ desktop search */
-document.addEventListener('DOMContentLoaded', function() {
-    var ms = document.getElementById('mobileMainSearch');
-    var ds = document.getElementById('mainSearch');
-    if (ms && ds) {
-        ms.addEventListener('input', function() { ds.value = ms.value; });
-        ds.addEventListener('input', function() { ms.value = ds.value; });
-    }
-    /* Mirror notification badge to mobile */
-    var nb = document.getElementById('notifBadge');
-    var mb = document.getElementById('mobileNotifBadge');
-    if (nb && mb) {
-        new MutationObserver(function() {
-            mb.textContent = nb.textContent;
-            mb.style.display = nb.style.display;
-        }).observe(nb, {childList:true, attributes:true, attributeFilter:['style']});
-    }
-});
-</script>
+<script type="application/json" id="app-config">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isDevAssistant":{{ "true" if is_dev_assistant else "false" }}}</script>
 <script defer src="/static/app.js?v={{ app_version }}"></script>
 <script defer src="/static/crm.js?v={{ app_version }}"></script>
 {% endif %}

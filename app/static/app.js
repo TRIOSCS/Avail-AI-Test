@@ -869,6 +869,9 @@ async function deleteDrillRow(rfqId, reqId) {
 }
 
 // ── Sourcing Drill-Down (sightings view) ────────────────────────────────
+// Cache for per-requirement sourcing scores
+const _ddScoreCache = {};
+
 function _renderSourcingDrillDown(reqId) {
     const drow = document.getElementById('d-' + reqId);
     if (!drow) return;
@@ -877,6 +880,20 @@ function _renderSourcingDrillDown(reqId) {
     const data = _ddSightingsCache[reqId] || {};
     const groups = Object.entries(data); // [ [reqId, {label, sightings}], ... ]
     if (!groups.length) { dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">No sightings yet</span>'; return; }
+
+    // Fetch per-requirement scores if not cached
+    if (!_ddScoreCache[reqId]) {
+        apiFetch(`/api/requisitions/${reqId}/sourcing-score`).then(scores => {
+            _ddScoreCache[reqId] = {};
+            for (const rs of (scores.requirements || [])) {
+                _ddScoreCache[reqId][rs.requirement_id] = rs;
+            }
+            _renderSourcingDrillDown(reqId); // re-render with scores
+        }).catch(() => {});
+        _ddScoreCache[reqId] = {}; // mark as loading
+    }
+    const scoreMap = _ddScoreCache[reqId] || {};
+
     const sel = _ddSelectedSightings[reqId] || new Set();
     const DD_LIMIT = 100;
     const showAll = dd.dataset.showAll === '1';
@@ -884,8 +901,15 @@ function _renderSourcingDrillDown(reqId) {
     for (const [rId, group] of groups) {
         const sightings = group.sightings || [];
         const label = group.label || 'Unknown MPN';
+        // Per-requirement effort dot
+        const rs = scoreMap[rId];
+        let effortBadge = '';
+        if (rs) {
+            const dotColor = rs.color === 'green' ? 'var(--green)' : rs.color === 'yellow' ? 'var(--amber)' : 'var(--red)';
+            effortBadge = ` <span class="effort-dot" style="background:${dotColor}" title="Effort: ${rs.score}/100"></span><span style="font-size:9px;color:var(--muted);margin-left:2px">${Math.round(rs.score)}</span>`;
+        }
         html += `<div style="margin-bottom:10px">
-            <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">${esc(label)} <span style="font-weight:400;color:var(--muted)">(${sightings.length} source${sightings.length !== 1 ? 's' : ''})</span></div>`;
+            <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">${esc(label)}${effortBadge} <span style="font-weight:400;color:var(--muted)">(${sightings.length} source${sightings.length !== 1 ? 's' : ''})</span></div>`;
         if (!sightings.length) {
             html += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">No sources found</div></div>';
             continue;
@@ -1035,6 +1059,7 @@ function renderReqList() {
                 case 'resp': { const sa = a.rfq_sent_count || 0; const sb = b.rfq_sent_count || 0; va = sa > 0 ? (a.reply_count || 0) / sa : 0; vb = sb > 0 ? (b.reply_count || 0) / sb : 0; break; }
                 case 'searched': va = a.last_searched_at || ''; vb = b.last_searched_at || ''; break;
                 case 'matches': va = a.proactive_match_count || 0; vb = b.proactive_match_count || 0; break;
+                case 'score': va = a.sourcing_score || 0; vb = b.sourcing_score || 0; break;
                 default: va = 0; vb = 0;
             }
             if (typeof va === 'string') return _reqSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
@@ -1071,6 +1096,7 @@ function renderReqList() {
         thead = `<thead><tr>
             <th style="width:80px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6 Expand</th>
             <th onclick="sortReqList('name')"${thClass('name')}>RFQ ${sa('name')}</th>
+            <th onclick="sortReqList('score')"${thClass('score')} title="Sourcing effort score">Effort ${sa('score')}</th>
             <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By ${sa('deadline')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
@@ -1245,9 +1271,15 @@ function _renderReqRow(r) {
     let dataCells, actions, colspan;
 
     if (v === 'sourcing') {
-        // Sourcing: Parts, Sourced, Offers, Status, RFQs Sent, Resp %, Searched, Need By
+        // Sourcing: Effort, Need By, Offers, Parts, Sourced, RFQs Sent, Resp %, Searched, Age, Status
         const sent = r.rfq_sent_count || 0;
         const respPct = sent > 0 ? Math.round((offers / sent) * 100) + '%' : '\u2014';
+
+        // Sourcing effort score indicator
+        const scVal = r.sourcing_score != null ? r.sourcing_score : 0;
+        const scColor = r.sourcing_color || 'red';
+        const scDotColor = scColor === 'green' ? 'var(--green)' : scColor === 'yellow' ? 'var(--amber)' : 'var(--red)';
+        const effortCell = `<td style="text-align:center" title="Effort: ${scVal}/100"><span class="effort-dot" style="background:${scDotColor}"></span><span style="font-size:10px;color:var(--muted);margin-left:3px">${Math.round(scVal)}</span></td>`;
 
         // Offers cell — clickable to go to quote preparation
         let offersCell;
@@ -1272,6 +1304,7 @@ function _renderReqRow(r) {
         }
 
         dataCells = `
+            ${effortCell}
             <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
             ${offersCell}
             <td class="mono">${total}</td>
@@ -1281,7 +1314,7 @@ function _renderReqRow(r) {
             <td style="font-size:11px">${searched}</td>
             <td class="mono" style="font-size:11px">${age}</td>`;
         actions = `<td style="white-space:nowrap">${srcBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">\ud83d\udce5 Archive</button></td>`;
-        colspan = 11;
+        colspan = 12;
     } else if (v === 'archive') {
         // Archive: Parts, Offers, Outcome · $value, Matches, Sales, Age
         const wonVal = r.quote_won_value ? ` <span style="font-size:10px;color:var(--green)">\u00b7 ${fmtDollars(r.quote_won_value)}</span>` : '';

@@ -7,7 +7,7 @@ ignore = ["E501"]  # line length handled separately
 
 [lint.per-file-ignores]
 "tests/*" = ["E402"]  # allow late imports in tests
-"app/models.py" = ["E402"]
+"app/models/*" = ["E402"]
 "app/routers/*" = ["E402"]  # routers use deferred imports for circular dep avoidance
 "app/main.py" = ["E402"]
 "app/services/credential_service.py" = ["E402"]

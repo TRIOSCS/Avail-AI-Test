@@ -36,7 +36,7 @@ alembic upgrade head                              # Apply migrations
 alembic revision --autogenerate -m "description"  # Generate new migration
 ```
 
-Schema is defined in `app/models.py` and synced at boot via `Base.metadata.create_all(checkfirst=True)` in `app/startup.py`. Alembic is for schema evolution during development. The production DB is stamped at revision `001_initial`.
+Schema is defined in `app/models/` (split into domain modules) and synced at boot via `Base.metadata.create_all(checkfirst=True)` in `app/startup.py`. Alembic is for schema evolution during development. The production DB is stamped at revision `001_initial`.
 
 ### Deploy / Update
 ```bash
@@ -54,7 +54,7 @@ bash scripts/update.sh    # Pull, rebuild, migrate
 - **`app/services/`** — Business logic decoupled from HTTP (response_parser, ai_service, attachment_parser, engagement_scorer, routing_service, ownership_service, activity_service, webhook_service, buyer_service).
 - **`app/connectors/`** — External API integrations (Nexar/Octopart, BrokerBin, DigiKey, Mouser, eBay, OEMSecrets, Sourcengine, email_mining). All extend `BaseConnector` ABC with automatic retry and unified error handling. Connector failures never break search — results from working connectors are returned.
 - **`app/schemas/`** — Pydantic request/response models.
-- **`app/models.py`** — All 42 SQLAlchemy ORM models in one file (single source of truth for schema).
+- **`app/models/`** — 42 SQLAlchemy ORM models split into domain modules (auth, crm, sourcing, offers, quotes, vendors, intelligence, performance, enrichment, pipeline, sync, config). `__init__.py` re-exports all models for backward compatibility.
 - **`app/config.py`** — Settings class reading from env vars.
 - **`app/dependencies.py`** — Auth middleware: `require_user`, `require_buyer`, `require_fresh_token`. Role-based access (buyer vs sales vs admin).
 - **`app/startup.py`** — Runs `Base.metadata.create_all()` at boot, plus PostgreSQL-specific operations (FTS triggers, seed data, backfills, CHECK constraints).

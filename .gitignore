@@ -1,5 +1,6 @@
 # Never commit these
 .env
+.env.backup.*
 Caddyfile
 __pycache__/
 *.pyc
@@ -12,3 +13,15 @@ build/
 .venv/
 node_modules/
 .DS_Store
+
+# Dev/test artifacts
+.coverage
+.ruff_cache/
+htmlcov/
+*.bak
+walkthrough_report_*.json
+
+# Reference / scratch
+app/_reference/
+scripts/walkthrough_*.py
+scripts/deep_test.py

@@ -21,9 +21,6 @@ sentry-sdk[fastapi]>=2.19.0
 slowapi>=0.1.9
 # Fuzzy matching
 thefuzz[speedup]>=0.22.0
-# Testing
-pytest-asyncio>=0.23.0
-pytest-cov>=4.1.0
 # PDF generation
 weasyprint>=60.0
 # Scheduling
@@ -32,5 +29,3 @@ apscheduler>=3.10.4,<4.0
 redis[hiredis]>=5.2.0
 # CSRF protection
 starlette-csrf>=3.0.0
-# Linting
-ruff>=0.9.0
