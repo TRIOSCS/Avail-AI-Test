@@ -32,15 +32,15 @@
     <img src="/static/avail_logo.png" alt="AVAIL">
     <div class="topcontrols" id="topcontrols">
         <div class="fpills" id="mainPills">
-            <button class="fp on" data-view="rfq" onclick="setMainView('rfq',this)">RFQ</button>
-            <button class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)">Sourcing</button>
-            <button class="fp" data-view="archive" onclick="setMainView('archive',this)">Archive</button>
+            <button type="button" class="fp on" data-view="rfq" onclick="setMainView('rfq',this)">RFQ</button>
+            <button type="button" class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)">Sourcing</button>
+            <button type="button" class="fp" data-view="archive" onclick="setMainView('archive',this)">Archive</button>
         </div>
-        <button class="btn btn-primary" onclick="openNewReqModal()">+ New RFQ</button>
-        <input type="text" class="sbox" id="mainSearch" placeholder="&#x1f50d;  Search customer, part, RFQ&hellip;" oninput="debouncedMainSearch()">
+        <button type="button" class="btn btn-primary" onclick="openNewReqModal()">+ New RFQ</button>
+        <input type="text" class="sbox" id="mainSearch" placeholder="&#x1f50d;  Search customer, part, RFQ&hellip;" aria-label="Search requisitions" oninput="debouncedMainSearch()">
         <div class="fpills fpills-sm" id="statusToggle" style="display:none">
-            <button class="fp fp-sm" data-sf="draft" onclick="setStatusFilter('draft',this)">Draft</button>
-            <button class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
+            <button type="button" class="fp fp-sm" data-sf="draft" onclick="setStatusFilter('draft',this)">Draft</button>
+            <button type="button" class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
         </div>
         <div class="filter-wrap">
             <select class="tb-select" id="deadlineFilter" onchange="applyDeadlineFilter()">
@@ -53,20 +53,20 @@
             </select>
         </div>
         <div class="filter-wrap">
-            <button class="filter-btn" onclick="toggleFilter('mainFilterPanel')">
+            <button type="button" class="filter-btn" onclick="toggleFilter('mainFilterPanel')">
                 Filters <span class="filter-badge" id="filterBadge">0</span>
             </button>
             <div id="mainFilterPanel" class="filter-panel">
                 <div id="filterGroups"></div>
                 <div class="filter-actions">
-                    <button class="fa-clear" onclick="clearAllFilters()">Clear</button>
-                    <button class="fa-apply" onclick="applyFilters()">Apply</button>
+                    <button type="button" class="fa-clear" onclick="clearAllFilters()">Clear</button>
+                    <button type="button" class="fa-apply" onclick="applyFilters()">Apply</button>
                 </div>
             </div>
         </div>
-        <button class="tb-btn" id="btnMyAccounts" onclick="toggleMyAccounts(this)">My Accounts</button>
+        <button type="button" class="tb-btn" id="btnMyAccounts" onclick="toggleMyAccounts(this)">My Accounts</button>
         <div class="filter-wrap" style="margin-left:auto">
-            <button class="filter-btn" onclick="toggleNotifications()" style="position:relative;padding:6px 10px" title="Notifications">
+            <button type="button" class="filter-btn" onclick="toggleNotifications()" style="position:relative;padding:6px 10px" title="Notifications">
                 &#x1f514;
                 <span id="notifBadge" class="filter-badge" style="position:absolute;top:-4px;right:-4px;background:var(--red)">0</span>
             </button>
@@ -85,11 +85,11 @@
 
 <!-- Mobile top bar -->
 <div class="mobile-topbar">
-    <button class="hamburger" onclick="toggleMobileSidebar()">&#9776;</button>
+    <button type="button" class="hamburger" onclick="toggleMobileSidebar()">&#9776;</button>
     <img src="/static/avail_logo.png" alt="AVAIL" class="mobile-logo">
     <input type="text" class="sbox mobile-search" id="mobileMainSearch"
-           placeholder="&#x1f50d; Search…" oninput="debouncedMainSearch(this.value)">
-    <button class="mobile-notif-btn" onclick="toggleNotifications()" title="Notifications">
+           placeholder="&#x1f50d; Search…" aria-label="Search requisitions" oninput="debouncedMainSearch(this.value)">
+    <button type="button" class="mobile-notif-btn" onclick="toggleNotifications()" title="Notifications">
         &#x1f514;<span id="mobileNotifBadge" class="filter-badge" style="position:absolute;top:-4px;right:-4px;background:var(--red);display:none">0</span>
     </button>
 </div>
@@ -101,15 +101,15 @@
 <!-- SIDEBAR — v7 slide-out -->
 <aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
     <nav class="sidebar-nav">
-        <button class="active" id="navReqs" onclick="sidebarNav('reqs',this)"><span class="ni">&#x1f4cb;</span> RFQs</button>
-        <button id="navCustomers" onclick="sidebarNav('customers',this)"><span class="ni">&#x1f3e2;</span> Customers</button>
-        <button id="navVendors" onclick="sidebarNav('vendors',this)"><span class="ni">&#x1f91d;</span> Vendors</button>
-        <button id="navMaterials" onclick="sidebarNav('materials',this)"><span class="ni">&#x1f527;</span> Materials</button>
-        <button id="navBuyPlans" onclick="sidebarNav('buyplans',this)"><span class="ni">&#x1f4e6;</span> Buy Plans</button>
-        <button id="navScorecards" onclick="sidebarNav('performance',this)"><span class="ni">&#x1f4ca;</span> Scorecards</button>
-        <button id="navProactive" onclick="sidebarNav('proactive',this)" style="display:none"><span class="ni">&#x2b50;</span> Proactive</button>
-        <button id="navSettings" onclick="sidebarNav('settings',this)" style="display:none"><span class="ni">&#x2699;</span> Settings</button>
-        <button class="nav-logout" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())"><span class="ni">&#x1f6aa;</span> Logout</button>
+        <button type="button" class="active" id="navReqs" onclick="sidebarNav('reqs',this)"><span class="ni">&#x1f4cb;</span> RFQs</button>
+        <button type="button" id="navCustomers" onclick="sidebarNav('customers',this)"><span class="ni">&#x1f3e2;</span> Customers</button>
+        <button type="button" id="navVendors" onclick="sidebarNav('vendors',this)"><span class="ni">&#x1f91d;</span> Vendors</button>
+        <button type="button" id="navMaterials" onclick="sidebarNav('materials',this)"><span class="ni">&#x1f527;</span> Materials</button>
+        <button type="button" id="navBuyPlans" onclick="sidebarNav('buyplans',this)"><span class="ni">&#x1f4e6;</span> Buy Plans</button>
+        <button type="button" id="navScorecards" onclick="sidebarNav('performance',this)"><span class="ni">&#x1f4ca;</span> Scorecards</button>
+        <button type="button" id="navProactive" onclick="sidebarNav('proactive',this)" style="display:none"><span class="ni">&#x2b50;</span> Proactive</button>
+        <button type="button" id="navSettings" onclick="sidebarNav('settings',this)" style="display:none"><span class="ni">&#x2699;</span> Settings</button>
+        <button type="button" class="nav-logout" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())"><span class="ni">&#x1f6aa;</span> Logout</button>
     </nav>
     <div class="sidebar-footer">
         <span class="ui">{{ user_name[:2]|upper if user_name else 'U' }}</span>
@@ -121,13 +121,13 @@
 </aside>
 
 <!-- Main content -->
-<div class="main">
+<main class="main">
     <div class="main-scroll">
 
     <!-- VIEW: Requisition List (v7 — header/tabs/filters are in toparea) -->
     <div id="view-list">
         <div id="followUpsPanel" style="display:none"></div>
-        <div id="reqList"><p class="empty">Loading…</p></div>
+        <div id="reqList" aria-live="polite"><p class="empty">Loading…</p></div>
     </div>
 
     <!-- VIEW: Requisition Detail -->
@@ -140,24 +140,24 @@
                 <span id="detailDeadline" class="detail-deadline" onclick="editDetailDeadline()" title="Click to set/change deadline" style="cursor:pointer"></span>
                 <div id="detailSitePicker" style="display:none;margin-top:4px">
                     <div class="site-typeahead" style="max-width:320px">
-                        <input id="detailSiteSearch" placeholder="Search customer site…" autocomplete="off" oninput="filterDetailSiteTypeahead(this.value)">
+                        <input id="detailSiteSearch" placeholder="Search customer site…" aria-label="Search customer sites" autocomplete="off" oninput="filterDetailSiteTypeahead(this.value)">
                         <div class="site-typeahead-list" id="detailSiteList"></div>
                     </div>
                 </div>
             </div>
             <div style="display:flex;gap:8px;align-items:center">
-                <button class="btn btn-ghost btn-sm" id="cloneBtn" onclick="cloneRequisition(currentReqId)" title="Clone this requisition" style="display:none">Clone</button>
-                <button class="btn btn-primary" id="searchAllBtn" onclick="submitOrSearch()">Search Selected</button>
+                <button type="button" class="btn btn-ghost btn-sm" id="cloneBtn" onclick="cloneRequisition(currentReqId)" title="Clone this requisition" style="display:none">Clone</button>
+                <button type="button" class="btn btn-primary" id="searchAllBtn" onclick="submitOrSearch()">Search Selected</button>
             </div>
         </div>
 
         <div class="tabs" id="reqTabs">
-            <button class="tab on" onclick="switchTab('requirements',this)">Requirements</button>
-            <button class="tab" onclick="switchTab('sources',this)">Sources</button>
-            <button class="tab" onclick="switchTab('activity',this)">Activity</button>
-            <button class="tab" onclick="switchTab('offers',this)">Offers</button>
-            <button class="tab" onclick="switchTab('quote',this)">Quote</button>
-            <button class="tab" onclick="switchTab('emails',this)">Emails</button>
+            <button type="button" class="tab on" onclick="switchTab('requirements',this)">Requirements</button>
+            <button type="button" class="tab" onclick="switchTab('sources',this)">Sources</button>
+            <button type="button" class="tab" onclick="switchTab('activity',this)">Activity</button>
+            <button type="button" class="tab" onclick="switchTab('offers',this)">Offers</button>
+            <button type="button" class="tab" onclick="switchTab('quote',this)">Quote</button>
+            <button type="button" class="tab" onclick="switchTab('emails',this)">Emails</button>
         </div>
 
         <!-- Requirements Tab -->
@@ -165,7 +165,7 @@
             <div class="card" style="margin-bottom:12px">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                     <strong style="font-size:12px;color:var(--muted)">Type a part number and press Enter to add</strong>
-                    <button class="btn btn-ghost btn-sm" onclick="toggleUpload()">📁 Upload CSV</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="toggleUpload()">📁 Upload CSV</button>
                 </div>
                 <div id="uploadArea" style="display:none;margin-bottom:12px">
                     <div class="uzone" id="dropZone" onclick="document.getElementById('fileInput').click()">
@@ -176,18 +176,18 @@
                     <div id="uploadReady" style="display:none;margin-bottom:8px">
                         <div style="display:flex;gap:8px;align-items:center">
                             <span style="font-size:12px;color:var(--text2)">📄 <span id="uploadFileName"></span></span>
-                            <button class="btn btn-primary btn-sm" onclick="doUpload()">Upload</button>
-                            <button class="btn btn-ghost btn-sm" onclick="clearFileInput('fileInput','uploadReady')">Cancel</button>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="doUpload()">Upload</button>
+                            <button type="button" class="btn btn-ghost btn-sm" onclick="clearFileInput('fileInput','uploadReady')">Cancel</button>
                         </div>
                     </div>
                     <div id="uploadStatus" class="ustatus"></div>
                 </div>
                 <div class="filter-bar" id="reqFilterBar" style="display:none">
-                    <input type="text" class="filter-search" id="reqFilter" placeholder="Filter parts…" oninput="debouncedRenderReqTable()">
+                    <input type="text" class="filter-search" id="reqFilter" placeholder="Filter parts…" aria-label="Filter requirements" oninput="debouncedRenderReqTable()">
                     <div class="filter-pills">
-                        <button class="filter-pill on" data-req-filter="all" onclick="setReqFilter('all',this)">All</button>
-                        <button class="filter-pill" data-req-filter="nosrc" onclick="setReqFilter('nosrc',this)">No Sources</button>
-                        <button class="filter-pill" data-req-filter="hassubs" onclick="setReqFilter('hassubs',this)">Has Subs</button>
+                        <button type="button" class="filter-pill on" data-req-filter="all" onclick="setReqFilter('all',this)">All</button>
+                        <button type="button" class="filter-pill" data-req-filter="nosrc" onclick="setReqFilter('nosrc',this)">No Sources</button>
+                        <button type="button" class="filter-pill" data-req-filter="hassubs" onclick="setReqFilter('hassubs',this)">Has Subs</button>
                     </div>
                     <select class="filter-sort" id="reqSort" onchange="renderRequirementsTable()">
                         <option value="default">Default order</option>
@@ -206,13 +206,13 @@
                     <tfoot>
                         <tr class="add-row">
                             <td></td>
-                            <td><input id="fMpn" placeholder="Enter part number…" onkeydown="if(event.key==='Enter')addReq()"></td>
+                            <td><input id="fMpn" placeholder="Enter part number…" aria-label="Filter by MPN" onkeydown="if(event.key==='Enter')addReq()"></td>
                             <td><input id="fQty" type="number" value="1" min="1" style="width:50px" onkeydown="if(event.key==='Enter')addReq()"></td>
                             <td><input id="fSubs" placeholder="Alternates…" onkeydown="if(event.key==='Enter')addReq()"></td>
                             <td><input id="fTarget" type="number" step="0.01" min="0" placeholder="—" style="width:60px" onkeydown="if(event.key==='Enter')addReq()"></td>
                             <td colspan="5"></td>
                             <td></td>
-                            <td><button class="btn btn-primary btn-sm" onclick="addReq()" title="Add">+</button></td>
+                            <td><button type="button" class="btn btn-primary btn-sm" onclick="addReq()" title="Add">+</button></td>
                         </tr>
                     </tfoot>
                 </table>
@@ -227,22 +227,22 @@
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                 <strong style="font-size:13px">Search Results</strong>
                 <div style="display:flex;gap:6px">
-                    <button class="btn btn-ghost btn-sm" onclick="expandAllGroups()">Expand All</button>
-                    <button class="btn btn-ghost btn-sm" onclick="collapseAllGroups()">Collapse All</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="expandAllGroups()">Expand All</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="collapseAllGroups()">Collapse All</button>
                     <span style="width:1px;background:var(--border);margin:0 2px"></span>
-                    <button class="btn btn-ghost btn-sm" data-role="buyer" onclick="selectAllSightings()">Select All</button>
-                    <button class="btn btn-ghost btn-sm" data-role="buyer" onclick="clearSelection()">Clear</button>
-                    <button class="btn btn-success btn-sm" id="batchRfqBtn" data-role="buyer" disabled onclick="openBatchRfqModal()">Send Batch RFQ (0)</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-role="buyer" onclick="selectAllSightings()">Select All</button>
+                    <button type="button" class="btn btn-ghost btn-sm" data-role="buyer" onclick="clearSelection()">Clear</button>
+                    <button type="button" class="btn btn-success btn-sm" id="batchRfqBtn" data-role="buyer" disabled onclick="openBatchRfqModal()">Send Batch RFQ (0)</button>
                 </div>
             </div>
             <div class="filter-bar" id="srcFilterBar">
                 <input type="text" class="filter-search" id="srcFilter" placeholder="Search vendor, MPN, manufacturer…" oninput="debouncedRenderSources()" aria-label="Filter search results">
                 <div class="filter-pills">
-                    <button class="filter-pill on" data-src-filter="all" onclick="setSrcFilter('all',this)">All</button>
-                    <button class="filter-pill" data-src-filter="exact" onclick="setSrcFilter('exact',this)">Exact</button>
-                    <button class="filter-pill" data-src-filter="sub" onclick="setSrcFilter('sub',this)">Subs</button>
-                    <button class="filter-pill" data-src-filter="available" onclick="setSrcFilter('available',this)">Available</button>
-                    <button class="filter-pill" data-src-filter="sold" onclick="setSrcFilter('sold',this)">Not Available</button>
+                    <button type="button" class="filter-pill on" data-src-filter="all" onclick="setSrcFilter('all',this)">All</button>
+                    <button type="button" class="filter-pill" data-src-filter="exact" onclick="setSrcFilter('exact',this)">Exact</button>
+                    <button type="button" class="filter-pill" data-src-filter="sub" onclick="setSrcFilter('sub',this)">Subs</button>
+                    <button type="button" class="filter-pill" data-src-filter="available" onclick="setSrcFilter('available',this)">Available</button>
+                    <button type="button" class="filter-pill" data-src-filter="sold" onclick="setSrcFilter('sold',this)">Not Available</button>
                 </div>
                 <select class="filter-sort" id="srcSort" onchange="setSrcSort(this.value)">
                     <option value="default">Lead Opportunity Score</option>
@@ -284,11 +284,11 @@
                 </div>
             </div>
             <div class="filter-bar" id="actFilterBar" style="display:none">
-                <input type="text" class="filter-search" id="actFilter" placeholder="Search vendor, contact, part…" oninput="debouncedRenderActivity()">
+                <input type="text" class="filter-search" id="actFilter" placeholder="Search vendor, contact, part…" aria-label="Filter activity" oninput="debouncedRenderActivity()">
                 <div class="filter-pills">
-                    <button class="filter-pill on" data-act-filter="all" onclick="setActFilter('all',this)">All</button>
-                    <button class="filter-pill" data-act-filter="email" onclick="setActFilter('email',this)">✉ Email</button>
-                    <button class="filter-pill" data-act-filter="phone" onclick="setActFilter('phone',this)">📞 Phone</button>
+                    <button type="button" class="filter-pill on" data-act-filter="all" onclick="setActFilter('all',this)">All</button>
+                    <button type="button" class="filter-pill" data-act-filter="email" onclick="setActFilter('email',this)">✉ Email</button>
+                    <button type="button" class="filter-pill" data-act-filter="phone" onclick="setActFilter('phone',this)">📞 Phone</button>
                 </div>
                 <select class="filter-sort" id="actSort" onchange="renderActivityCards()">
                     <option value="date-desc">Newest first</option>
@@ -307,8 +307,8 @@
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                 <strong style="font-size:13px">Vendor Offers</strong>
                 <div style="display:flex;gap:6px">
-                    <button class="btn btn-ghost btn-sm" onclick="openLogOfferModal()">+ Log Offer</button>
-                    <button class="btn btn-primary btn-sm" id="buildQuoteBtn" disabled onclick="buildQuoteFromSelected()">Build Quote from Selected (0)</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="openLogOfferModal()">+ Log Offer</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="buildQuoteBtn" disabled onclick="buildQuoteFromSelected()">Build Quote from Selected (0)</button>
                 </div>
             </div>
             <div id="offersContent"><p class="empty">No offers yet — log vendor offers as they come in</p></div>
@@ -333,15 +333,15 @@
             <h2>Customers</h2>
             <input class="sbox sbox-wide" id="custFilter" placeholder="Search companies…" oninput="debouncedLoadCustomers()" aria-label="Search companies">
             <div class="fpills fpills-sm">
-                <button class="fp fp-sm" id="custUnassignedPill" onclick="toggleCustUnassigned(this)">Unassigned</button>
+                <button type="button" class="fp fp-sm" id="custUnassignedPill" onclick="toggleCustUnassigned(this)">Unassigned</button>
             </div>
             <label id="custMyOnlyLabel" class="tb-btn" style="display:none;gap:4px;cursor:pointer;align-items:center">
                 <input type="checkbox" id="custMyOnly" onchange="loadCustomers()" style="accent-color:var(--teal)" aria-label="Show only my accounts"> My accounts
             </label>
-            <button class="btn btn-primary btn-sm" onclick="openNewCompanyModal()">+ New Company</button>
+            <button type="button" class="btn btn-primary btn-sm" onclick="openNewCompanyModal()">+ New Company</button>
             <span id="custFilterCount" class="text-muted" style="font-size:11px"></span>
         </div>
-        <div id="custList"><p class="empty">Loading…</p></div>
+        <div id="custList" aria-live="polite"><p class="empty">Loading…</p></div>
     </div>
 
     <!-- VIEW: Vendors -->
@@ -349,11 +349,11 @@
         <div class="view-toolbar">
             <h2>Vendor Directory</h2>
             <div class="fpills" id="vendorTierPills">
-                <button class="fp on" onclick="setVendorTier('all',this)">All</button>
-                <button class="fp" onclick="setVendorTier('proven',this)">Proven</button>
-                <button class="fp" onclick="setVendorTier('developing',this)">Developing</button>
-                <button class="fp" onclick="setVendorTier('caution',this)">Caution</button>
-                <button class="fp" onclick="setVendorTier('new',this)">New</button>
+                <button type="button" class="fp on" onclick="setVendorTier('all',this)">All</button>
+                <button type="button" class="fp" onclick="setVendorTier('proven',this)">Proven</button>
+                <button type="button" class="fp" onclick="setVendorTier('developing',this)">Developing</button>
+                <button type="button" class="fp" onclick="setVendorTier('caution',this)">Caution</button>
+                <button type="button" class="fp" onclick="setVendorTier('new',this)">New</button>
             </div>
             <input class="sbox sbox-med" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" aria-label="Search vendors">
             <label class="tb-btn" style="display:flex;align-items:center;gap:4px;cursor:pointer">
@@ -361,7 +361,7 @@
             </label>
             <span id="vendorFilterCount" class="text-muted"></span>
         </div>
-        <div id="vendorList"><p class="empty">Loading…</p></div>
+        <div id="vendorList" aria-live="polite"><p class="empty">Loading…</p></div>
     </div>
 
     <!-- VIEW: Materials -->
@@ -369,21 +369,21 @@
         <div class="view-toolbar">
             <h2>Materials</h2>
             <input class="sbox sbox-wide" id="materialSearch" placeholder="Search by MPN or manufacturer…" oninput="debouncedLoadMaterials()" aria-label="Search material cards">
-            <button class="tb-btn" onclick="toggleStockImport()">Import Stock</button>
+            <button type="button" class="tb-btn" onclick="toggleStockImport()">Import Stock</button>
         </div>
         <div id="stockImportArea" data-role="buyer" style="display:none;margin-bottom:12px" class="card">
             <strong style="font-size:12px;color:var(--muted)">Import a vendor stock list — all rows stored as material cards with vendor history</strong>
             <div style="display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap">
                 <div class="site-typeahead" style="flex:1;min-width:150px"><input id="stockVendorName" placeholder="Vendor name (required)…" required aria-label="Vendor name for stock import" autocomplete="off" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text)"><div class="site-typeahead-list" id="stockVendorNameList"></div></div>
-                <input id="stockVendorWebsite" placeholder="Website (for new vendor)" class="ac-website-inline" style="display:none;flex:0 0 180px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px">
+                <input id="stockVendorWebsite" placeholder="Website (for new vendor)" aria-label="Vendor website URL" class="ac-website-inline" style="display:none;flex:0 0 180px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--text);font-size:12px">
                 <input type="file" id="stockFileInput" accept=".csv,.xlsx,.xls,.tsv" style="display:none" onchange="showFileReady('stockFileInput','stockFileReady','stockFileName')">
-                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('stockFileInput').click()">Choose File</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="document.getElementById('stockFileInput').click()">Choose File</button>
             </div>
             <div id="stockFileReady" style="display:none;margin-top:8px">
                 <div style="display:flex;gap:8px;align-items:center">
                     <span style="font-size:12px;color:var(--text2)">📄 <span id="stockFileName"></span></span>
-                    <button class="btn btn-primary btn-sm" onclick="doStockImport()">Import</button>
-                    <button class="btn btn-ghost btn-sm" onclick="clearFileInput('stockFileInput','stockFileReady')">Cancel</button>
+                    <button type="button" class="btn btn-primary btn-sm" onclick="doStockImport()">Import</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="clearFileInput('stockFileInput','stockFileReady')">Cancel</button>
                 </div>
             </div>
             <div class="uzone-hint" style="margin-top:4px">CSV/XLSX — columns: mpn (or part_number), qty, price, manufacturer</div>
@@ -397,15 +397,15 @@
         <div class="view-toolbar">
             <h2>Buy Plans</h2>
             <div class="fpills" id="bpStatusPills">
-                <button class="fp on" data-bp-status="" onclick="setBpFilter('',this)">All</button>
-                <button class="fp" data-bp-status="pending_approval" onclick="setBpFilter('pending_approval',this)">Pending</button>
-                <button class="fp" data-bp-status="approved" onclick="setBpFilter('approved',this)">Approved</button>
-                <button class="fp" data-bp-status="po_entered" onclick="setBpFilter('po_entered',this)">PO Entered</button>
-                <button class="fp" data-bp-status="po_confirmed" onclick="setBpFilter('po_confirmed',this)">Confirmed</button>
-                <button class="fp" data-bp-status="complete" onclick="setBpFilter('complete',this)">Complete</button>
-                <button class="fp" data-bp-status="cancelled" onclick="setBpFilter('cancelled',this)">Cancelled</button>
+                <button type="button" class="fp on" data-bp-status="" onclick="setBpFilter('',this)">All</button>
+                <button type="button" class="fp" data-bp-status="pending_approval" onclick="setBpFilter('pending_approval',this)">Pending</button>
+                <button type="button" class="fp" data-bp-status="approved" onclick="setBpFilter('approved',this)">Approved</button>
+                <button type="button" class="fp" data-bp-status="po_entered" onclick="setBpFilter('po_entered',this)">PO Entered</button>
+                <button type="button" class="fp" data-bp-status="po_confirmed" onclick="setBpFilter('po_confirmed',this)">Confirmed</button>
+                <button type="button" class="fp" data-bp-status="complete" onclick="setBpFilter('complete',this)">Complete</button>
+                <button type="button" class="fp" data-bp-status="cancelled" onclick="setBpFilter('cancelled',this)">Cancelled</button>
             </div>
-            <input class="sbox sbox-med" id="bpSearch" placeholder="Search buy plans…" oninput="renderBuyPlansList()">
+            <input class="sbox sbox-med" id="bpSearch" placeholder="Search buy plans…" aria-label="Search buy plans" oninput="renderBuyPlansList()">
         </div>
         <div id="buyPlansList"><p class="empty">Loading…</p></div>
     </div>
@@ -416,9 +416,9 @@
             <h2>Proactive Offers</h2>
         </div>
         <div class="tabs" id="proactiveTabs">
-            <button class="tab on" onclick="switchProactiveTab('matches',this)">Matches</button>
-            <button class="tab" onclick="switchProactiveTab('sent',this)">Sent</button>
-            <button class="tab" onclick="switchProactiveTab('scorecard',this)">Scorecard</button>
+            <button type="button" class="tab on" onclick="switchProactiveTab('matches',this)">Matches</button>
+            <button type="button" class="tab" onclick="switchProactiveTab('sent',this)">Sent</button>
+            <button type="button" class="tab" onclick="switchProactiveTab('scorecard',this)">Scorecard</button>
         </div>
         <div id="proactiveMatchesPanel"><p class="empty">Loading…</p></div>
         <div id="proactiveSentPanel" style="display:none"><p class="empty">Loading…</p></div>
@@ -456,8 +456,8 @@
             </select>
         </div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('newReqModal')">Cancel</button>
-            <button class="btn btn-primary" onclick="createRequisition()">Create</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('newReqModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="createRequisition()">Create</button>
         </div>
     </div>
 </div>
@@ -472,29 +472,29 @@
                 <p id="rfqPrepareStatus" style="font-size:12px;color:var(--text2);margin:0">Checking vendor contacts…</p>
             </div>
             <div id="rfqPrepareVendors" style="max-height:240px;overflow-y:auto;margin-bottom:12px"></div>
-            <button class="btn btn-ghost btn-sm" onclick="delete document.getElementById('rfqModal').dataset.loading;closeModal('rfqModal')">Cancel</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="delete document.getElementById('rfqModal').dataset.loading;closeModal('rfqModal')">Cancel</button>
         </div>
         <div id="rfqReady" style="display:none">
             <p style="font-size:12px;color:var(--text2);margin-bottom:10px" id="rfqSummary"></p>
             <div style="display:flex;gap:8px;margin-bottom:8px">
-                <button class="btn btn-ghost btn-sm" onclick="rfqSelectAllVendors()">Select All</button>
-                <button class="btn btn-ghost btn-sm" onclick="rfqDeselectAllVendors()">Deselect All</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="rfqSelectAllVendors()">Select All</button>
+                <button type="button" class="btn btn-ghost btn-sm" onclick="rfqDeselectAllVendors()">Deselect All</button>
             </div>
             <div id="rfqVendorList" style="max-height:240px;overflow-y:auto;margin-bottom:12px"></div>
             <div class="rfq-condition">
                 <label>Condition Required</label>
-                <button class="rfq-cond-btn active" onclick="setRfqCondition('any',this)">Any</button>
-                <button class="rfq-cond-btn" onclick="setRfqCondition('new',this)">New</button>
-                <button class="rfq-cond-btn" onclick="setRfqCondition('used',this)">Used</button>
+                <button type="button" class="rfq-cond-btn active" onclick="setRfqCondition('any',this)">Any</button>
+                <button type="button" class="rfq-cond-btn" onclick="setRfqCondition('new',this)">New</button>
+                <button type="button" class="rfq-cond-btn" onclick="setRfqCondition('used',this)">Used</button>
             </div>
-            <div class="field"><label>Subject</label><input id="rfqSubject"></div>
+            <div class="field"><label>Subject</label><input id="rfqSubject" aria-label="RFQ email subject"></div>
             <div class="field">
                 <label>Message</label>
                 <textarea id="rfqBody" style="min-height:160px"></textarea>
             </div>
             <div class="mactions">
-                <button class="btn btn-ghost" onclick="closeModal('rfqModal')">Cancel</button>
-                <button class="btn btn-success" id="rfqSendBtn" onclick="sendBatchRfq()">Send</button>
+                <button type="button" class="btn btn-ghost" onclick="closeModal('rfqModal')">Cancel</button>
+                <button type="button" class="btn btn-success" id="rfqSendBtn" onclick="sendBatchRfq()">Send</button>
             </div>
         </div>
     </div>
@@ -505,7 +505,7 @@
     <div class="modal modal-lg">
         <div id="vendorPopupContent"><p class="empty">Loading…</p></div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('vendorPopup')">Close</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('vendorPopup')">Close</button>
         </div>
     </div>
 </div>
@@ -524,8 +524,8 @@
             <div class="field"><label for="vcLabel">Label</label><input id="vcLabel" placeholder="Sales, Support, etc." value="Sales"></div>
         </div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('vendorContactModal')">Cancel</button>
-            <button class="btn btn-primary" onclick="saveVendorContact()">Save Contact</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('vendorContactModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveVendorContact()">Save Contact</button>
         </div>
     </div>
 </div>
@@ -548,8 +548,8 @@
             <div class="field"><label for="vlcNotes">Notes</label><textarea id="vlcNotes" rows="3" placeholder="Call summary..." style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical"></textarea></div>
         </div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('vendorLogCallModal')">Cancel</button>
-            <button class="btn btn-primary" onclick="saveVendorLogCall()">Log Call</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('vendorLogCallModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveVendorLogCall()">Log Call</button>
         </div>
     </div>
 </div>
@@ -564,8 +564,8 @@
             <div class="field"><label for="vlnNotes">Note *</label><textarea id="vlnNotes" rows="4" placeholder="Enter note..." required style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical"></textarea></div>
         </div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('vendorLogNoteModal')">Cancel</button>
-            <button class="btn btn-primary" onclick="saveVendorLogNote()">Save Note</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('vendorLogNoteModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveVendorLogNote()">Save Note</button>
         </div>
     </div>
 </div>
@@ -575,7 +575,7 @@
     <div class="modal modal-lg">
         <div id="materialPopupContent"><p class="empty">Loading…</p></div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('materialPopup')">Close</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('materialPopup')">Close</button>
         </div>
     </div>
 </div>
@@ -589,8 +589,8 @@
         <div class="field"><label for="ncLinkedin">LinkedIn</label><input id="ncLinkedin" placeholder="linkedin.com/company/..." type="url"></div>
         <div class="field"><label for="ncIndustry">Industry</label><input id="ncIndustry" placeholder="Medical, Industrial, etc."></div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('newCompanyModal')">Cancel</button>
-            <button class="btn btn-primary" onclick="createCompany()">Create &amp; Add Site</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('newCompanyModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="createCompany()">Create &amp; Add Site</button>
         </div>
     </div>
 </div>
@@ -627,8 +627,8 @@
             <div class="field"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="ecStrategic"> Strategic Account</label></div>
         </div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('editCompanyModal')">Cancel</button>
-            <button class="btn btn-primary" onclick="saveEditCompany()">Save</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('editCompanyModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveEditCompany()">Save</button>
         </div>
     </div>
 </div>
@@ -663,8 +663,8 @@
             <div class="field"><label for="asSiteNotes">Notes</label><textarea id="asSiteNotes" rows="2" placeholder="Internal notes..." style="width:100%;resize:vertical"></textarea></div>
         </div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('addSiteModal')">Cancel</button>
-            <button class="btn btn-primary" onclick="addSite()">Add Site</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('addSiteModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="addSite()">Add Site</button>
         </div>
     </div>
 </div>
@@ -677,14 +677,14 @@
         <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
             <input class="req-search" id="scTitleFilter" placeholder="Filter by title (e.g. Sales, Procurement)…" style="flex:1"
                    onkeydown="if(event.key==='Enter')searchSuggestedContacts()">
-            <button class="btn btn-ghost btn-sm" onclick="searchSuggestedContacts()">Search</button>
+            <button type="button" class="btn btn-ghost btn-sm" onclick="searchSuggestedContacts()">Search</button>
         </div>
         <div id="scResults" style="max-height:340px;overflow-y:auto;margin-bottom:12px">
             <p class="empty">Click Search or enter a title filter to find contacts</p>
         </div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('suggestedContactsModal')">Cancel</button>
-            <button class="btn btn-primary" id="scAddBtn" onclick="addSelectedSuggestedContacts()" style="display:none">Add Selected (0)</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('suggestedContactsModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" id="scAddBtn" onclick="addSelectedSuggestedContacts()" style="display:none">Add Selected (0)</button>
         </div>
     </div>
 </div>
@@ -717,14 +717,14 @@
                     <label class="btn btn-ghost btn-sm" style="cursor:pointer">
                         Upload File <input type="file" id="loFileInput" multiple accept="image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx" style="display:none" onchange="handleOfferFileSelect(this)">
                     </label>
-                    <button class="btn btn-ghost btn-sm" onclick="openOneDrivePicker()">Browse OneDrive</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="openOneDrivePicker()">Browse OneDrive</button>
                 </div>
             </div>
         </div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('logOfferModal')">Cancel</button>
-            <button class="btn btn-ghost" onclick="saveOffer(true)">Save &amp; Next</button>
-            <button class="btn btn-primary" onclick="saveOffer(false)">Save &amp; Close</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('logOfferModal')">Cancel</button>
+            <button type="button" class="btn btn-ghost" onclick="saveOffer(true)">Save &amp; Next</button>
+            <button type="button" class="btn btn-primary" onclick="saveOffer(false)">Save &amp; Close</button>
         </div>
     </div>
 </div>
@@ -742,8 +742,8 @@
             <input id="sqManualEmail" type="email" placeholder="name@company.com" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px">
         </div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
-            <button class="btn btn-ghost" onclick="closeModal('sendQuoteModal')">Cancel</button>
-            <button class="btn btn-primary" onclick="confirmSendQuote()">Send</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('sendQuoteModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="confirmSendQuote()">Send</button>
         </div>
     </div>
 </div>
@@ -776,8 +776,8 @@
             </div>
         </div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('editOfferModal')">Cancel</button>
-            <button class="btn btn-primary" onclick="updateOffer()">Save Changes</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('editOfferModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="updateOffer()">Save Changes</button>
         </div>
     </div>
 </div>
@@ -791,7 +791,7 @@
         </div>
         <div id="odFileList" style="max-height:400px;overflow-y:auto"><p class="empty">Loading…</p></div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('oneDriveModal')">Close</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('oneDriveModal')">Close</button>
         </div>
     </div>
 </div>
@@ -811,8 +811,8 @@
             <textarea id="bpSalespersonNotes" rows="3" placeholder="Add any context, special instructions, or notes for the purchasing team..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)"></textarea>
         </div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('buyPlanModal')">Cancel</button>
-            <button class="btn btn-success" onclick="submitBuyPlan()">Mark Won &amp; Submit Buy Plan</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('buyPlanModal')">Cancel</button>
+            <button type="button" class="btn btn-success" onclick="submitBuyPlan()">Mark Won &amp; Submit Buy Plan</button>
         </div>
     </div>
 </div>
@@ -835,8 +835,8 @@
         </div>
         <div class="field"><label>Notes</label><input id="lostNotes" placeholder="Optional details…"></div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('lostModal')">Cancel</button>
-            <button class="btn btn-danger" onclick="submitLost()">Mark Lost</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('lostModal')">Cancel</button>
+            <button type="button" class="btn btn-danger" onclick="submitLost()">Mark Lost</button>
         </div>
     </div>
 </div>
@@ -847,7 +847,7 @@
         <h2>Pricing History — <span id="phMpn" style="font-family:'JetBrains Mono',monospace"></span></h2>
         <div id="phContent"><p class="empty">Loading…</p></div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('phModal')">Close</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('phModal')">Close</button>
         </div>
     </div>
 </div>
@@ -867,8 +867,8 @@
         </div>
         <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:12px;color:var(--text2);cursor:pointer"><input id="scPrimary" type="checkbox" style="accent-color:var(--teal)" aria-label="Primary contact"> Primary contact</label>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('siteContactModal')">Cancel</button>
-            <button class="btn btn-primary" onclick="saveSiteContact()">Save Contact</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('siteContactModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveSiteContact()">Save Contact</button>
         </div>
     </div>
 </div>
@@ -891,8 +891,8 @@
             <div class="field"><label for="lcNotes">Notes</label><textarea id="lcNotes" rows="3" placeholder="Call summary..." style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical"></textarea></div>
         </div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('logCallModal')">Cancel</button>
-            <button class="btn btn-primary" onclick="saveLogCall()">Log Call</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('logCallModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveLogCall()">Log Call</button>
         </div>
     </div>
 </div>
@@ -906,8 +906,8 @@
             <div class="field"><label for="lnNotes">Note *</label><textarea id="lnNotes" rows="4" placeholder="Enter note..." required style="width:100%;background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:12px;resize:vertical"></textarea></div>
         </div>
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('logNoteModal')">Cancel</button>
-            <button class="btn btn-primary" onclick="saveLogNote()">Save Note</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('logNoteModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="saveLogNote()">Save Note</button>
         </div>
     </div>
 </div>
@@ -946,8 +946,8 @@
         </div>
 
         <div class="mactions">
-            <button class="btn btn-ghost" onclick="closeModal('proactiveSendModal')">Cancel</button>
-            <button class="btn btn-primary" id="psmSendBtn" onclick="sendProactiveOffer()">Send Email</button>
+            <button type="button" class="btn btn-ghost" onclick="closeModal('proactiveSendModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" id="psmSendBtn" onclick="sendProactiveOffer()">Send Email</button>
         </div>
     </div>
 </div>
@@ -958,10 +958,10 @@
             <h2>Scorecards</h2>
         </div>
         <div class="fpills" id="perfTabs" style="margin:0 16px 12px">
-            <button class="fp on" onclick="switchPerfTab('vendors',this)">Vendor Scorecard</button>
-            <button class="fp" onclick="switchPerfTab('buyers',this)">Buyer Leaderboard</button>
-            <button class="fp" onclick="switchPerfTab('sales',this)">Salesperson Scorecard</button>
-            <button class="fp" id="perfDigestTab" onclick="switchPerfTab('digest',this)" style="display:none">Team Digest</button>
+            <button type="button" class="fp on" onclick="switchPerfTab('vendors',this)">Vendor Scorecard</button>
+            <button type="button" class="fp" onclick="switchPerfTab('buyers',this)">Buyer Leaderboard</button>
+            <button type="button" class="fp" onclick="switchPerfTab('sales',this)">Salesperson Scorecard</button>
+            <button type="button" class="fp" id="perfDigestTab" onclick="switchPerfTab('digest',this)" style="display:none">Team Digest</button>
         </div>
         <div id="perfVendorPanel"><p class="empty">Loading...</p></div>
         <div id="perfBuyerPanel" style="display:none"><p class="empty">Loading...</p></div>
@@ -976,16 +976,16 @@
             <h2>Admin Settings</h2>
         </div>
         <div class="tabs" id="settingsTabs">
-            <button class="tab on settings-tab-users" onclick="switchSettingsTab('users',this)">Users</button>
-            <button class="tab" onclick="switchSettingsTab('health',this)">System Health</button>
-            <button class="tab settings-tab-scoring" onclick="switchSettingsTab('scoring',this)">Scoring Weights</button>
-            <button class="tab" onclick="switchSettingsTab('config',this)">Configuration</button>
-            <button class="tab" onclick="switchSettingsTab('sources',this)">Data Sources</button>
-            <button class="tab settings-tab-users" onclick="switchSettingsTab('create-user',this)">Create User</button>
-            <button class="tab" onclick="switchSettingsTab('enrichment',this)">Enrichment</button>
-            <button class="tab settings-tab-users" onclick="switchSettingsTab('unmatched',this)">Unmatched Queue</button>
-            <button class="tab settings-tab-users" onclick="switchSettingsTab('teams',this)">Teams Integration</button>
-            <button class="tab settings-tab-users" onclick="switchSettingsTab('import',this)">Import</button>
+            <button type="button" class="tab on settings-tab-users" onclick="switchSettingsTab('users',this)">Users</button>
+            <button type="button" class="tab" onclick="switchSettingsTab('health',this)">System Health</button>
+            <button type="button" class="tab settings-tab-scoring" onclick="switchSettingsTab('scoring',this)">Scoring Weights</button>
+            <button type="button" class="tab" onclick="switchSettingsTab('config',this)">Configuration</button>
+            <button type="button" class="tab" onclick="switchSettingsTab('sources',this)">Data Sources</button>
+            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('create-user',this)">Create User</button>
+            <button type="button" class="tab" onclick="switchSettingsTab('enrichment',this)">Enrichment</button>
+            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('unmatched',this)">Unmatched Queue</button>
+            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('teams',this)">Teams Integration</button>
+            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('import',this)">Import</button>
         </div>
 
         <div id="settings-users" class="settings-panel">
@@ -1022,7 +1022,7 @@
                 <p class="s-desc">CSV: company_name, site_name, contact_name, contact_email, contact_phone</p>
                 <div class="s-form">
                     <input type="file" id="customerImportFile" accept=".csv">
-                    <div><button class="btn btn-primary btn-sm" onclick="importCustomers()">Import</button></div>
+                    <div><button type="button" class="btn btn-primary btn-sm" onclick="importCustomers()">Import</button></div>
                     <div id="customerImportStatus" class="s-status"></div>
                 </div>
             </div>
@@ -1031,7 +1031,7 @@
                 <p class="s-desc">CSV: vendor_name, domain, website, contact_name, contact_email</p>
                 <div class="s-form">
                     <input type="file" id="vendorImportFile" accept=".csv">
-                    <div><button class="btn btn-primary btn-sm" onclick="importVendors()">Import</button></div>
+                    <div><button type="button" class="btn btn-primary btn-sm" onclick="importVendors()">Import</button></div>
                     <div id="vendorImportStatus" class="s-status"></div>
                 </div>
             </div>
@@ -1039,10 +1039,10 @@
 
         <div id="settings-enrichment" class="settings-panel" style="display:none">
             <div class="tabs" id="enrichTabs">
-                <button class="tab on" onclick="switchEnrichTab('queue',this)">Review Queue</button>
-                <button class="tab" onclick="switchEnrichTab('backfill',this)">Backfill</button>
-                <button class="tab" onclick="switchEnrichTab('jobs',this)">Job History</button>
-                <button class="tab" onclick="switchEnrichTab('m365',this)">Inbox Mining</button>
+                <button type="button" class="tab on" onclick="switchEnrichTab('queue',this)">Review Queue</button>
+                <button type="button" class="tab" onclick="switchEnrichTab('backfill',this)">Backfill</button>
+                <button type="button" class="tab" onclick="switchEnrichTab('jobs',this)">Job History</button>
+                <button type="button" class="tab" onclick="switchEnrichTab('m365',this)">Inbox Mining</button>
             </div>
 
             <!-- Review Queue Tab -->
@@ -1060,7 +1060,7 @@
                         <option value="vendor">Vendors</option>
                         <option value="company">Companies</option>
                     </select>
-                    <button class="btn btn-sm" onclick="bulkApproveSelected()" id="eqBulkApproveBtn" style="display:none">Approve Selected</button>
+                    <button type="button" class="btn btn-sm" onclick="bulkApproveSelected()" id="eqBulkApproveBtn" style="display:none">Approve Selected</button>
                     <span id="eqCount" class="s-hint" style="margin-left:auto"></span>
                 </div>
                 <div id="enrichQueueList"><p class="empty">Loading...</p></div>
@@ -1075,7 +1075,7 @@
                         <label><input type="checkbox" id="bfCompanies" checked> Companies</label>
                         <label><input type="checkbox" id="bfDeepEmail"> Include Deep Email Mining</label>
                         <label class="s-row">Max items: <input type="number" id="bfMaxItems" value="500" min="1" max="2000" class="s-input-num"></label>
-                        <div class="s-row"><button class="btn" onclick="startBackfill()">Start Enrichment</button> <span id="bfStatus" class="s-hint"></span></div>
+                        <div class="s-row"><button type="button" class="btn" onclick="startBackfill()">Start Enrichment</button> <span id="bfStatus" class="s-hint"></span></div>
                     </div>
                 </div>
                 <div id="bfProgressBox" class="s-card" style="display:none">
@@ -1089,7 +1089,7 @@
                 <div class="card s-card">
                     <h3>Backfill from Existing Data</h3>
                     <p class="s-desc">Recover vendor emails already in the system — activity logs, vendor card imports, and BrokerBin sightings.</p>
-                    <div class="s-row"><button class="btn" onclick="startEmailBackfill()">Backfill Emails</button> <span id="emailBfStatus" class="s-hint"></span></div>
+                    <div class="s-row"><button type="button" class="btn" onclick="startEmailBackfill()">Backfill Emails</button> <span id="emailBfStatus" class="s-hint"></span></div>
                 </div>
 
                 <div class="card s-card">
@@ -1097,7 +1097,7 @@
                     <p class="s-desc">Scrape contact pages of vendors with websites but few email contacts.</p>
                     <div class="s-form">
                         <label class="s-row">Max vendors: <input type="number" id="scrapeMaxVendors" value="500" min="1" max="2000" class="s-input-num"></label>
-                        <div class="s-row"><button class="btn" onclick="startWebsiteScrape()">Scrape Websites</button> <span id="scrapeStatus" class="s-hint"></span></div>
+                        <div class="s-row"><button type="button" class="btn" onclick="startWebsiteScrape()">Scrape Websites</button> <span id="scrapeStatus" class="s-hint"></span></div>
                     </div>
                 </div>
             </div>
@@ -1141,14 +1141,14 @@
                         <option value="admin">Admin</option>
                         <option value="dev_assistant">Dev Assistant</option>
                     </select>
-                    <div><button class="btn btn-primary" onclick="createUser()">Create User</button></div>
+                    <div><button type="button" class="btn btn-primary" onclick="createUser()">Create User</button></div>
                 </div>
             </div>
         </div>
 
     </div><!-- end view-settings -->
     </div><!-- end main-scroll -->
-</div><!-- end main -->
+</main><!-- end main -->
 
 <script>
 window.__userName = "{{ user_name }}";
