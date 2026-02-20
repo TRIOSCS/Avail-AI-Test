@@ -675,38 +675,83 @@ function _renderDdActivity(reqId, data, panel) {
         <span><b>${totalCalls}</b> calls</span>
         <span><b>${totalEmails}</b> emails</span>
     </div>`;
-    // Vendor cards
-    html += '<div style="max-height:400px;overflow-y:auto">';
+    let msgIdx = 0;
+    html += '<div style="max-height:500px;overflow-y:auto">';
     for (const v of vendors) {
         const contacts = v.contacts || [];
         const responses = v.responses || [];
         const activities = v.activities || [];
-        const parts = v.all_parts || [];
         const hasReply = responses.length > 0;
         const dotColor = hasReply ? 'var(--green)' : 'var(--amber)';
-        html += `<div style="margin-bottom:8px;padding:6px 8px;background:var(--bg,rgba(255,255,255,.02));border-radius:6px;border:1px solid var(--border)">`;
-        html += `<div style="font-size:11px;font-weight:700;display:flex;align-items:center;gap:6px"><span style="width:6px;height:6px;border-radius:50%;background:${dotColor};display:inline-block"></span>${esc(v.vendor_name)} <span style="font-weight:400;color:var(--muted)">${contacts.length} sent, ${responses.length} replied</span></div>`;
-        // Timeline: interleave contacts, responses, activities by date
+        html += `<div class="act-vendor-card">`;
+        html += `<div style="font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="width:7px;height:7px;border-radius:50%;background:${dotColor};display:inline-block"></span>${esc(v.vendor_name)} <span style="font-weight:400;color:var(--muted);font-size:11px">${contacts.length} sent, ${responses.length} replied</span></div>`;
+        // Build timeline with email bodies
         const timeline = [];
-        for (const c of contacts) timeline.push({type:'sent', date: c.created_at, text: `${c.contact_type} to ${c.vendor_contact || 'vendor'}`, user: c.user_name});
-        for (const r of responses) timeline.push({type:'reply', date: r.received_at, text: `Reply: ${r.subject || '(no subject)'}`, status: r.status, confidence: r.confidence});
-        for (const a of activities) timeline.push({type:'activity', date: a.created_at, text: `${a.channel || a.activity_type}: ${a.notes || ''}`.trim(), user: a.user_name});
+        for (const c of contacts) timeline.push({type:'sent', date: c.created_at, subject: c.subject || '', body: c.body || '', text: `${c.contact_type} to ${c.vendor_contact || 'vendor'}`, user: c.user_name, parts: c.parts_included || []});
+        for (const r of responses) timeline.push({type:'reply', date: r.received_at, subject: r.subject || '', body: r.body || '', text: r.vendor_email || 'vendor', status: r.status, confidence: r.confidence, classification: r.classification});
+        for (const a of activities) timeline.push({type:'activity', date: a.created_at, subject: '', body: a.notes || '', text: `${a.channel || a.activity_type}: ${a.notes || ''}`.trim(), user: a.user_name});
         timeline.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
         if (timeline.length) {
-            html += '<div style="margin-top:4px;padding-left:12px;border-left:2px solid var(--border)">';
-            for (const t of timeline.slice(0, 8)) {
+            html += '<div class="act-thread">';
+            for (const t of timeline) {
                 const ago = t.date ? fmtRelative(t.date) : '';
-                const icon = t.type === 'sent' ? '\u2709' : t.type === 'reply' ? '\u21a9' : '\u260e';
-                const color = t.type === 'reply' ? 'var(--green)' : 'var(--text2)';
-                html += `<div style="font-size:10px;color:${color};margin:2px 0">${icon} ${esc(t.text)} <span style="color:var(--muted)">${ago}</span></div>`;
+                const isSent = t.type === 'sent';
+                const isReply = t.type === 'reply';
+                const isActivity = t.type === 'activity';
+                const icon = isSent ? '\u2709' : isReply ? '\u21a9\ufe0f' : '\u260e';
+                const headerColor = isReply ? 'var(--green)' : 'var(--text2)';
+                const mid = 'actMsg-' + reqId + '-' + (msgIdx++);
+                const hasBody = !!(t.body || t.subject);
+                // Confidence badge for parsed replies
+                let confBadge = '';
+                if (isReply && t.confidence != null) {
+                    const pct = Math.round(t.confidence * 100);
+                    const cc = pct >= 80 ? 'var(--green)' : pct >= 50 ? 'var(--amber)' : 'var(--red)';
+                    confBadge = ` <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:${cc}20;color:${cc}">${pct}%</span>`;
+                }
+                // Classification badge
+                let classBadge = '';
+                if (isReply && t.classification && t.classification !== 'unknown') {
+                    const classColors = {quote:'var(--green)',decline:'var(--red)',partial:'var(--amber)',info:'var(--blue)'};
+                    const clc = classColors[t.classification] || 'var(--muted)';
+                    classBadge = ` <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:${clc}20;color:${clc}">${t.classification}</span>`;
+                }
+                html += `<div class="act-msg${isReply ? ' act-msg-reply' : isSent ? ' act-msg-sent' : ''}">`;
+                html += `<div class="act-msg-header" ${hasBody ? `onclick="document.getElementById('${mid}').classList.toggle('act-body-open')" style="cursor:pointer"` : ''}>`;
+                html += `<span style="color:${headerColor}">${icon}</span> `;
+                if (isSent) html += `<b style="color:${headerColor}">RFQ sent</b> to ${esc(t.text)}`;
+                else if (isReply) html += `<b style="color:${headerColor}">Reply</b> from ${esc(t.text)}${confBadge}${classBadge}`;
+                else html += `<span style="color:${headerColor}">${esc(t.text)}</span>`;
+                html += ` <span class="act-msg-time">${ago}${t.user ? ' · ' + esc(t.user) : ''}</span>`;
+                if (hasBody) html += ` <span class="act-expand-hint">\u25b6</span>`;
+                html += `</div>`;
+                if (hasBody) {
+                    // Subject line + body preview, collapsed by default
+                    let bodyHtml = '';
+                    if (t.subject) bodyHtml += `<div style="font-weight:600;margin-bottom:4px">${esc(t.subject)}</div>`;
+                    if (isSent && t.parts && t.parts.length) bodyHtml += `<div style="color:var(--muted);margin-bottom:4px">Parts: ${t.parts.map(p => esc(p)).join(', ')}</div>`;
+                    bodyHtml += `<div class="act-body-text">${_formatEmailBody(t.body)}</div>`;
+                    html += `<div class="act-body" id="${mid}">${bodyHtml}</div>`;
+                }
+                html += `</div>`;
             }
-            if (timeline.length > 8) html += `<div style="font-size:10px;color:var(--muted)">+${timeline.length - 8} more\u2026</div>`;
             html += '</div>';
         }
         html += '</div>';
     }
     html += '</div>';
     panel.innerHTML = html;
+}
+
+function _formatEmailBody(text) {
+    if (!text) return '';
+    // Convert plain text email to readable HTML — preserve line breaks, linkify URLs
+    let safe = esc(text);
+    // Linkify URLs
+    safe = safe.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--teal)">$1</a>');
+    // Preserve line breaks
+    safe = safe.replace(/\n/g, '<br>');
+    return safe;
 }
 
 function _renderDdOffers(reqId, data, panel) {
@@ -959,7 +1004,7 @@ async function deleteDrillRow(rfqId, reqId) {
     } catch(e) { showToast('Failed to remove part', 'error'); }
 }
 
-// ── Effort Score Tooltip Builder ──────────────────────────────────────────
+// ── Sourcing Score Tooltip Builder ────────────────────────────────────────
 function _buildEffortTip(score, color, signals) {
     if (!signals) return '';
     const s = signals;
@@ -979,9 +1024,9 @@ function _buildEffortTip(score, color, signals) {
     ];
     // Find weakest signals for summary
     const weak = rows.filter(r => r.level === 'low').map(r => r.tip).filter(Boolean);
-    const summary = weak.length ? weak.slice(0, 2).join(' · ') : (color === 'green' ? 'Strong effort' : 'Good progress');
+    const summary = weak.length ? weak.slice(0, 2).join(' · ') : (color === 'green' ? 'Strong sourcing' : 'Good progress');
     let html = `<span class="effort-tip">`;
-    html += `<div style="font-weight:700;margin-bottom:6px;font-size:12px">Effort: ${Math.round(score)}/100</div>`;
+    html += `<div style="font-weight:700;margin-bottom:6px;font-size:12px">Sourcing Score: ${Math.round(score)}/100</div>`;
     for (const r of rows) {
         html += `<div class="effort-sig"><span style="min-width:85px">${r.label}</span><span class="effort-sig-bar"><span class="effort-sig-fill ${r.level}" style="width:${r.pct}%"></span></span><span style="min-width:28px;text-align:right;font-weight:600">${r.val}</span></div>`;
     }
@@ -1021,7 +1066,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
     for (const [rId, group] of groups) {
         const sightings = group.sightings || [];
         const label = group.label || 'Unknown MPN';
-        // Per-requirement effort dot with tooltip
+        // Per-requirement sourcing score dot with tooltip
         const rs = scoreMap[rId];
         let effortBadge = '';
         if (rs) {
@@ -1290,9 +1335,9 @@ function renderReqList() {
     let thead;
     if (v === 'sourcing') {
         thead = `<thead><tr>
-            <th style="width:80px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6 Expand</th>
-            <th onclick="sortReqList('name')"${thClass('name')}>RFQ ${sa('name')}</th>
-            <th onclick="sortReqList('score')"${thClass('score')} title="Sourcing effort score">Effort ${sa('score')}</th>
+            <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
+            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">RFQ ${sa('name')}</th>
+            <th onclick="sortReqList('score')"${thClass('score')} title="Sourcing score">Score ${sa('score')}</th>
             <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By ${sa('deadline')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
@@ -1305,8 +1350,8 @@ function renderReqList() {
         </tr></thead>`;
     } else if (v === 'archive') {
         thead = `<thead><tr>
-            <th style="width:80px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6 Expand</th>
-            <th onclick="sortReqList('name')"${thClass('name')}>RFQ ${sa('name')}</th>
+            <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
+            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">RFQ ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
             <th onclick="sortReqList('status')"${thClass('status')}>Outcome ${sa('status')}</th>
@@ -1317,11 +1362,11 @@ function renderReqList() {
         </tr></thead>`;
     } else {
         thead = `<thead><tr>
-            <th style="width:80px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6 Expand</th>
-            <th onclick="sortReqList('name')"${thClass('name')}>RFQ ${sa('name')}</th>
+            <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
+            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">RFQ ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th>Quote</th>
-            <th>Activity</th>
+            <th>Sourcing</th>
             <th>Offers</th>
             <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
@@ -1467,11 +1512,11 @@ function _renderReqRow(r) {
     let dataCells, actions, colspan;
 
     if (v === 'sourcing') {
-        // Sourcing: Effort, Need By, Offers, Parts, Sourced, RFQs Sent, Resp %, Searched, Age, Status
+        // Sourcing: Score, Need By, Offers, Parts, Sourced, RFQs Sent, Resp %, Searched, Age, Status
         const sent = r.rfq_sent_count || 0;
         const respPct = sent > 0 ? Math.round((offers / sent) * 100) + '%' : '\u2014';
 
-        // Sourcing effort score indicator with tooltip
+        // Sourcing score indicator with tooltip
         const scVal = r.sourcing_score != null ? r.sourcing_score : 0;
         const scColor = r.sourcing_color || 'red';
         const scDotColor = scColor === 'green' ? 'var(--green)' : scColor === 'yellow' ? 'var(--amber)' : 'var(--red)';
@@ -1495,7 +1540,7 @@ function _renderReqRow(r) {
             <td class="mono">${respPct}</td>
             <td style="font-size:11px">${searched}</td>
             <td class="mono" style="font-size:11px">${age}</td>`;
-        actions = `<td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed offer">+ Log Offer</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">\ud83d\udce5</button></td>`;
+        actions = `<td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed offer">+ Log Offer</button></td>`;
         colspan = 12;
     } else if (v === 'archive') {
         // Archive: Parts, Offers, Outcome · $value, Matches, Sales, Age
@@ -1514,7 +1559,7 @@ function _renderReqRow(r) {
         actions = `<td style="white-space:nowrap"><button class="btn btn-sm" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Restore from archive">&#x21a9; Restore</button> <button class="btn btn-sm" onclick="event.stopPropagation();cloneFromList(${r.id})" title="Clone as new draft">&#x1f4cb; Clone</button> <button class="btn btn-sm" onclick="event.stopPropagation();requoteFromList(${r.id})" title="Re-quote this RFQ">&#x1f4dd; Re-quote</button></td>`;
         colspan = 9;
     } else {
-        // RFQ: Parts, Quote, Activity, Offers, Sales, Age, Need By
+        // RFQ: Parts, Quote, Sourcing, Offers, Sales, Age, Need By
         // Quote status cell
         let qCell = '<span style="color:var(--muted)">\u2014</span>';
         if (r.quote_status === 'won') qCell = `<span style="color:var(--green);font-weight:600">Won${r.quote_won_value ? ' ' + fmtDollars(r.quote_won_value) : ''}</span>`;
@@ -1522,15 +1567,14 @@ function _renderReqRow(r) {
         else if (r.quote_status === 'sent') qCell = `<span style="color:var(--blue)">Sent ${fmtRelative(r.quote_sent_at)}</span>`;
         else if (r.quote_status === 'revised') qCell = '<span style="color:var(--amber)">Revised</span>';
         else if (r.quote_status === 'draft') qCell = '<span style="color:var(--muted)">Draft</span>';
-        // Activity cell
-        const _replied = r.reply_count || 0;
-        const _awaiting = r.awaiting_reply_count || 0;
-        const _rfqSent = r.rfq_sent_count || 0;
-        let actParts = [];
-        if (_replied > 0) actParts.push(`<span style="color:var(--green)">${_replied} replied</span>`);
-        if (_awaiting > 0) actParts.push(`<span style="color:var(--amber)">${_awaiting} awaiting</span>`);
-        if (_rfqSent > 0 && !_replied && !_awaiting) actParts.push(`${_rfqSent} sent`);
-        const actCell = actParts.length ? actParts.join(' \u00b7 ') : '<span style="color:var(--muted)">\u2014</span>';
+        // Source Progress cell — compact sourcing status
+        const _srcPct = total > 0 ? Math.round((sourced / total) * 100) : 0;
+        let srcCell;
+        if (total === 0) srcCell = '<span style="color:var(--muted)">\u2014</span>';
+        else {
+            const barColor = _srcPct >= 80 ? 'var(--green)' : _srcPct >= 40 ? 'var(--amber)' : 'var(--red)';
+            srcCell = `<div style="display:flex;align-items:center;gap:4px"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:32px"><div style="height:100%;width:${_srcPct}%;background:${barColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${sourced}/${total}</span></div>`;
+        }
         // Offers cell
         let offCell = '<span style="color:var(--muted)">\u2014</span>';
         const _oCnt = r.offer_count || 0;
@@ -1542,7 +1586,7 @@ function _renderReqRow(r) {
         dataCells = `
             <td class="mono">${total}</td>
             <td style="font-size:11px;white-space:nowrap">${qCell}</td>
-            <td style="font-size:11px;white-space:nowrap">${actCell}</td>
+            <td style="font-size:11px;white-space:nowrap;min-width:80px">${srcCell}</td>
             <td style="font-size:11px;white-space:nowrap">${offCell}</td>
             <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px">${age}</td>

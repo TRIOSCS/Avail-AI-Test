@@ -1343,7 +1343,7 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .archive-group-header td { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 13px; }
 .archive-group-header:hover td { background: var(--bg2); }
 
-/* Sourcing effort dot + tooltip */
+/* Sourcing score dot + tooltip */
 .effort-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; }
 .effort-wrap { position: relative; display: inline-flex; align-items: center; cursor: default; }
 .effort-tip { display: none; position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); z-index: 999;
@@ -1368,4 +1368,17 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .dd-tab:hover { color: var(--text); background: var(--bg, rgba(255,255,255,.03)); }
 .dd-tab.on { color: var(--teal); border-bottom-color: var(--teal); }
 .dd-panel { min-height: 40px; }
+
+/* Activity thread — email-readable drill-down */
+.act-vendor-card { margin-bottom:10px; padding:8px 10px; background:var(--bg,rgba(255,255,255,.02)); border-radius:6px; border:1px solid var(--border); }
+.act-thread { margin-top:6px; }
+.act-msg { padding:5px 8px; border-radius:5px; margin-bottom:3px; }
+.act-msg-sent { background:var(--teal-light,rgba(61,104,149,.06)); border-left:3px solid var(--teal); }
+.act-msg-reply { background:rgba(166,218,149,.08); border-left:3px solid var(--green); }
+.act-msg-header { font-size:11px; display:flex; align-items:center; gap:4px; flex-wrap:wrap; }
+.act-msg-time { color:var(--muted); font-size:10px; margin-left:auto; white-space:nowrap; }
+.act-expand-hint { font-size:8px; color:var(--muted); transition:transform .15s; }
+.act-body { display:none; margin-top:6px; padding:8px 10px; background:var(--surface,rgba(255,255,255,.04)); border-radius:4px; border:1px solid var(--border); font-size:11px; line-height:1.6; color:var(--text); max-height:300px; overflow-y:auto; }
+.act-body.act-body-open { display:block; }
+.act-body-text { white-space:pre-wrap; word-break:break-word; }
 
