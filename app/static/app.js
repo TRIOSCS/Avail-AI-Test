@@ -329,6 +329,11 @@ function showView(viewId) {
         const el = document.getElementById(id);
         if (el) el.style.display = id === viewId ? '' : 'none';
     }
+    // Clean up background polling when navigating away from settings/enrichment
+    if (typeof _bfPollInterval !== 'undefined' && _bfPollInterval) {
+        clearInterval(_bfPollInterval);
+        _bfPollInterval = null;
+    }
     // Hide entire toparea on views that don't need it (settings, etc.)
     const toparea = document.querySelector('.toparea');
     const hideToparea = ['view-settings'].includes(viewId);
@@ -2332,7 +2337,7 @@ async function markUnavailable(sightingId, unavail) {
             ref.sighting.is_unavailable = unavail;
         }
         renderSources();
-    } catch(e) { alert('Error: ' + e.message); }
+    } catch(e) { showToast('Error: ' + e.message, 'error'); }
 }
 
 function updateBatchCount() {
@@ -2412,7 +2417,7 @@ async function openBatchRfqModal(prebuiltGroups) {
             };
         });
     } catch (e) {
-        alert('Failed to prepare RFQ: ' + e.message);
+        showToast('Failed to prepare RFQ: ' + e.message, 'error');
         closeModal('rfqModal');
         return;
     }
@@ -2688,7 +2693,7 @@ async function sendBatchRfq() {
     const subject = document.getElementById('rfqSubject').value;
     // Build per-vendor payloads with personalized body
     const sendable = rfqVendorData.filter(g => g.included && g.selected_email && _vendorHasPartsToSend(g));
-    if (!sendable.length) { alert('No vendors with email and new parts to send'); btn.disabled = false; btn.textContent = 'Send'; return; }
+    if (!sendable.length) { showToast('No vendors with email and new parts to send', 'error'); btn.disabled = false; btn.textContent = 'Send'; return; }
     const payload = sendable.map(g => {
         const body = buildVendorBody(g);
         // All parts being sent (for contact tracking)
@@ -2704,7 +2709,7 @@ async function sendBatchRfq() {
             method: 'POST', body: { groups: payload }
         });
         const sent = (data.results || []).filter(r => r.status === 'sent').length;
-        alert(`${sent} of ${payload.length} emails sent successfully`);
+        showToast(`${sent} of ${payload.length} emails sent successfully`, 'success');
         closeModal('rfqModal');
         selectedSightings.clear();
         // Clear sourcing drill-down state so next expand re-fetches fresh data
@@ -2713,7 +2718,7 @@ async function sendBatchRfq() {
         renderSources();
         loadActivity();
     } catch (e) {
-        alert('Send error: ' + e.message);
+        showToast('Send error: ' + e.message, 'error');
     }
     btn.disabled = false; btn.textContent = 'Send';
 }
@@ -3063,7 +3068,7 @@ function vpSetRating(n) {
 }
 
 async function vpSubmitReview(cardId) {
-    if (vpRating === 0) { alert('Please select a rating'); return; }
+    if (vpRating === 0) { showToast('Please select a rating', 'error'); return; }
     const comment = document.getElementById('vpComment').value.trim();
     try {
         await apiFetch(`/api/vendors/${cardId}/reviews`, { method: 'POST', body: { rating: vpRating, comment } });

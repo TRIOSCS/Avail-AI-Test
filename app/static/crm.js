@@ -2922,9 +2922,12 @@ function updateProactivePreview() {
     if (previewEl) previewEl.innerHTML = `Revenue: <strong>$${totalSell.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong> · Margin: <strong>${totalMargin}%</strong> · Profit: <strong>$${(totalSell - totalCost).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong>`;
 }
 
+let _sendProactiveBusy = false;
 async function sendProactiveOffer() {
+    if (_sendProactiveBusy) return;
     const contactIds = Array.from(document.querySelectorAll('.ps-contact:checked')).map(c => parseInt(c.value));
     if (!contactIds.length) { showToast('Select at least one contact', 'error'); return; }
+    _sendProactiveBusy = true;
 
     const sellPrices = {};
     document.querySelectorAll('.ps-sell').forEach(input => {
@@ -2947,6 +2950,7 @@ async function sendProactiveOffer() {
         loadProactiveMatches();
         if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
     } catch (e) { showToast('Failed to send', 'error'); }
+    finally { _sendProactiveBusy = false; }
 }
 
 async function loadProactiveSent() {
@@ -3240,7 +3244,7 @@ async function refreshVendorScorecards() {
         await apiFetch('/api/performance/vendors/refresh', {method:'POST'});
         loadVendorScorecards();
     } catch (e) {
-        alert('Error refreshing: ' + (e.message || e));
+        showToast('Error refreshing: ' + (e.message || e), 'error');
     }
 }
 
@@ -3310,7 +3314,7 @@ function renderBuyerLeaderboard(data, months) {
     </tr></thead><tbody>`;
 
     for (const e of entries) {
-        const isMe = e.user_name && currentEmail && entries.some(x => x.user_id === e.user_id);
+        const isMe = e.user_id && e.user_id === window.userId;
         let rowCls = '';
         if (e.rank === 1) rowCls = 'sc-gold';
         else if (e.rank === 2) rowCls = 'sc-silver';
@@ -3339,7 +3343,7 @@ async function refreshBuyerLeaderboard() {
         await apiFetch('/api/performance/buyers/refresh', {method:'POST'});
         loadBuyerLeaderboard(_leaderboardMonth);
     } catch (e) {
-        alert('Error refreshing: ' + (e.message || e));
+        showToast('Error refreshing: ' + (e.message || e), 'error');
     }
 }
 
@@ -3721,8 +3725,7 @@ async function saveCredential(sourceId, varName) {
         body[varName] = value;
         await apiFetch(`/api/admin/sources/${sourceId}/credentials`, {
             method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify(body),
+            body: body,
         });
         showToast('Credential saved', 'success');
         cancelCredEdit(sourceId, varName);
@@ -3760,8 +3763,7 @@ async function toggleSourceStatus(sourceId, currentStatus) {
     try {
         await apiFetch(`/api/sources/${sourceId}/toggle`, {
             method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({status: newStatus}),
+            body: {status: newStatus},
         });
         showToast(`Source ${newStatus === 'disabled' ? 'disabled' : 'enabled'}`, 'success');
         loadSettingsSources();
@@ -3905,14 +3907,13 @@ async function saveConfig(key, value) {
     try {
         await apiFetch(`/api/admin/config/${key}`, {
             method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({value: String(value)})
+            body: {value: String(value)}
         });
         // Reload the panel that owns this key
         if (key.startsWith('weight_')) loadSettingsScoring();
         else loadSettingsConfig();
     } catch (e) {
-        alert('Error saving: ' + (e.message || e));
+        showToast('Error saving: ' + (e.message || e), 'error');
     }
 }
 
@@ -3964,9 +3965,9 @@ async function updateUserField(userId, field, value) {
     try {
         const body = {};
         body[field] = value;
-        await apiFetch(`/api/admin/users/${userId}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+        await apiFetch(`/api/admin/users/${userId}`, {method:'PUT', body:body});
     } catch (e) {
-        alert('Error: ' + (e.message || e));
+        showToast('Error: ' + (e.message || e), 'error');
         loadAdminUsers();
     }
 }
@@ -3975,9 +3976,10 @@ async function deleteAdminUser(userId, name) {
     if (!confirm(`Delete user "${name}"? This cannot be undone.`)) return;
     try {
         await apiFetch(`/api/admin/users/${userId}`, {method:'DELETE'});
+        _userListCache = null;  // Invalidate cache
         loadAdminUsers();
     } catch (e) {
-        alert('Error: ' + (e.message || e));
+        showToast('Error: ' + (e.message || e), 'error');
     }
 }
 
@@ -3985,20 +3987,22 @@ async function createUser() {
     const name = document.getElementById('newUserName').value.trim();
     const email = document.getElementById('newUserEmail').value.trim();
     const role = document.getElementById('newUserRole').value;
-    if (!name || !email) { alert('Name and email are required'); return; }
+    if (!name || !email) { showToast('Name and email are required', 'error'); return; }
     try {
-        await apiFetch('/api/admin/users', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name, email, role})});
+        await apiFetch('/api/admin/users', {method:'POST', body:{name, email, role}});
         document.getElementById('newUserName').value = '';
         document.getElementById('newUserEmail').value = '';
-        alert('User created successfully');
+        _userListCache = null;  // Invalidate cache
+        showToast('User created successfully', 'success');
+        if (typeof loadAdminUsers === 'function') loadAdminUsers();
     } catch (e) {
-        alert('Error: ' + (e.message || e));
+        showToast('Error: ' + (e.message || e), 'error');
     }
 }
 
 async function importCustomers() {
     const fileInput = document.getElementById('customerImportFile');
-    if (!fileInput.files.length) { alert('Select a CSV file first'); return; }
+    if (!fileInput.files.length) { showToast('Select a CSV file first', 'error'); return; }
     const form = new FormData();
     form.append('file', fileInput.files[0]);
     const statusEl = document.getElementById('customerImportStatus');
@@ -4014,7 +4018,7 @@ async function importCustomers() {
 
 async function importVendors() {
     const fileInput = document.getElementById('vendorImportFile');
-    if (!fileInput.files.length) { alert('Select a CSV file first'); return; }
+    if (!fileInput.files.length) { showToast('Select a CSV file first', 'error'); return; }
     const form = new FormData();
     form.append('file', fileInput.files[0]);
     const statusEl = document.getElementById('vendorImportStatus');
@@ -4078,13 +4082,12 @@ async function promptAttributeActivity(activityId) {
     try {
         await apiFetch(`/api/activities/${activityId}/attribute`, {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({entity_type: entityType, entity_id: parseInt(entityId)})
+            body: {entity_type: entityType, entity_id: parseInt(entityId)}
         });
         const row = document.getElementById('unmatched-' + activityId);
         if (row) row.remove();
     } catch (e) {
-        alert('Error: ' + (e.message || e));
+        showToast('Error: ' + (e.message || e), 'error');
     }
 }
 
@@ -4094,7 +4097,7 @@ async function dismissActivity(activityId) {
         const row = document.getElementById('unmatched-' + activityId);
         if (row) row.remove();
     } catch (e) {
-        alert('Error: ' + (e.message || e));
+        showToast('Error: ' + (e.message || e), 'error');
     }
 }
 
@@ -4203,14 +4206,13 @@ async function saveTeamsConfig() {
     try {
         await apiFetch('/api/admin/teams/config', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
+            body: {
                 team_id: teamId,
                 channel_id: channelId,
                 channel_name: channelName,
                 enabled: enabled,
                 hot_threshold: hotThreshold,
-            }),
+            },
         });
         if (status) status.innerHTML = '<span style="color:var(--green)">Configuration saved.</span>';
     } catch (e) {
