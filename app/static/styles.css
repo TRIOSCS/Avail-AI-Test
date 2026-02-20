@@ -1192,7 +1192,7 @@ body.sb-open .sb-overlay{display:block}
 .ts-pill{display:flex;align-items:center;gap:4px;cursor:pointer;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.2px;transition:all .15s;border:1px solid transparent;user-select:none}
 .ts-pill:hover{filter:brightness(.95)}
 .ts-pill.active{border-color:currentColor}
-.ts-pill .ts-n{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:800}
+.ts-pill .ts-n{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:800;padding-right:6px;margin-right:2px;border-right:1px solid currentColor;opacity:.9}
 .ts-green{color:#0b7a50;background:#d4f5e6}
 .ts-yellow{color:#946b00;background:#fff3c4}
 .ts-orange{color:#b84500;background:#ffe4cc}
