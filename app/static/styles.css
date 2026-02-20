@@ -1360,3 +1360,12 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .effort-sig-fill.mid { background: var(--amber); }
 .effort-sig-fill.low { background: var(--red); }
 
+/* Drill-down sub-tabs */
+.dd-tabs { display: flex; gap: 2px; margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
+.dd-tab { background: none; border: none; padding: 5px 12px; font-size: 11px; font-weight: 600;
+  color: var(--muted); cursor: pointer; border-radius: 4px 4px 0 0; font-family: inherit;
+  border-bottom: 2px solid transparent; transition: all .15s; }
+.dd-tab:hover { color: var(--text); background: var(--bg, rgba(255,255,255,.03)); }
+.dd-tab.on { color: var(--teal); border-bottom-color: var(--teal); }
+.dd-panel { min-height: 40px; }
+

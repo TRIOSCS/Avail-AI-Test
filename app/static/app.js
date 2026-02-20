@@ -690,6 +690,235 @@ function sortReqList(col) {
     renderReqList();
 }
 
+// ── Drill-Down Sub-Tab State ────────────────────────────────────────────
+const _ddTabCache = {};   // reqId → { sightings: data, activity: data, offers: data, ... }
+const _ddActiveTab = {};  // reqId → current sub-tab name
+
+function _ddSubTabs(mainView) {
+    if (mainView === 'sourcing') return ['sightings', 'activity', 'offers'];
+    if (mainView === 'archive') return ['parts'];
+    return ['parts', 'offers', 'quotes']; // rfq tab
+}
+
+function _ddDefaultTab(mainView) {
+    return mainView === 'sourcing' ? 'sightings' : 'parts';
+}
+
+function _ddTabLabel(tab) {
+    const map = {sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes'};
+    return map[tab] || tab;
+}
+
+async function expandToSubTab(reqId, tabName) {
+    const drow = document.getElementById('d-' + reqId);
+    if (!drow) return;
+    if (!drow.classList.contains('open')) {
+        await toggleDrillDown(reqId);
+    }
+    _switchDdTab(reqId, tabName);
+}
+
+function _renderDdTabPills(reqId) {
+    const tabs = _ddSubTabs(_currentMainView);
+    const active = _ddActiveTab[reqId] || _ddDefaultTab(_currentMainView);
+    return tabs.map(t =>
+        `<button class="dd-tab${t === active ? ' on' : ''}" data-tab="${t}" onclick="event.stopPropagation();_switchDdTab(${reqId},'${t}')">${_ddTabLabel(t)}</button>`
+    ).join('');
+}
+
+async function _switchDdTab(reqId, tabName) {
+    _ddActiveTab[reqId] = tabName;
+    const drow = document.getElementById('d-' + reqId);
+    if (!drow) return;
+    // Update pill state
+    drow.querySelectorAll('.dd-tab').forEach(t => t.classList.toggle('on', t.dataset.tab === tabName));
+    const panel = drow.querySelector('.dd-panel');
+    if (!panel) return;
+    await _loadDdSubTab(reqId, tabName, panel);
+}
+
+async function _loadDdSubTab(reqId, tabName, panel) {
+    if (!_ddTabCache[reqId]) _ddTabCache[reqId] = {};
+    const cached = _ddTabCache[reqId][tabName];
+    if (cached) { _renderDdTab(reqId, tabName, cached, panel); return; }
+
+    panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading\u2026</span>';
+    try {
+        let data;
+        switch (tabName) {
+            case 'parts':
+                data = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`);
+                _ddReqCache[reqId] = data;
+                break;
+            case 'sightings':
+                data = _ddSightingsCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/sightings`);
+                _ddSightingsCache[reqId] = data;
+                if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
+                break;
+            case 'activity':
+                data = await apiFetch(`/api/requisitions/${reqId}/activity`);
+                break;
+            case 'offers':
+                data = await apiFetch(`/api/requisitions/${reqId}/offers`);
+                break;
+            case 'quotes':
+                data = await apiFetch(`/api/requisitions/${reqId}/quote`);
+                break;
+        }
+        _ddTabCache[reqId][tabName] = data;
+        _renderDdTab(reqId, tabName, data, panel);
+    } catch(e) {
+        panel.innerHTML = '<span style="font-size:11px;color:var(--red)">Failed to load</span>';
+    }
+}
+
+function _renderDdTab(reqId, tabName, data, panel) {
+    switch (tabName) {
+        case 'parts': _renderDrillDownTable(reqId, panel); break;
+        case 'sightings': _renderSourcingDrillDown(reqId, panel); break;
+        case 'activity': _renderDdActivity(reqId, data, panel); break;
+        case 'offers': _renderDdOffers(reqId, data, panel); break;
+        case 'quotes': _renderDdQuotes(reqId, data, panel); break;
+        default: panel.innerHTML = '';
+    }
+}
+
+function _renderDdActivity(reqId, data, panel) {
+    const vendors = data.vendors || [];
+    if (!vendors.length) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No activity yet</span>'; return; }
+    // Summary stats
+    let totalContacts = 0, totalReplies = 0, totalCalls = 0, totalEmails = 0;
+    for (const v of vendors) {
+        totalContacts += (v.contacts || []).length;
+        totalReplies += (v.responses || []).length;
+        for (const a of (v.activities || [])) {
+            if (a.channel === 'phone') totalCalls++;
+            if (a.channel === 'email') totalEmails++;
+        }
+    }
+    let html = `<div style="display:flex;gap:16px;margin-bottom:8px;font-size:11px">
+        <span><b>${totalContacts}</b> RFQs sent</span>
+        <span><b>${totalReplies}</b> replies</span>
+        <span><b>${totalCalls}</b> calls</span>
+        <span><b>${totalEmails}</b> emails</span>
+    </div>`;
+    // Vendor cards
+    html += '<div style="max-height:400px;overflow-y:auto">';
+    for (const v of vendors) {
+        const contacts = v.contacts || [];
+        const responses = v.responses || [];
+        const activities = v.activities || [];
+        const parts = v.all_parts || [];
+        const hasReply = responses.length > 0;
+        const dotColor = hasReply ? 'var(--green)' : 'var(--amber)';
+        html += `<div style="margin-bottom:8px;padding:6px 8px;background:var(--bg,rgba(255,255,255,.02));border-radius:6px;border:1px solid var(--border)">`;
+        html += `<div style="font-size:11px;font-weight:700;display:flex;align-items:center;gap:6px"><span style="width:6px;height:6px;border-radius:50%;background:${dotColor};display:inline-block"></span>${esc(v.vendor_name)} <span style="font-weight:400;color:var(--muted)">${contacts.length} sent, ${responses.length} replied</span></div>`;
+        // Timeline: interleave contacts, responses, activities by date
+        const timeline = [];
+        for (const c of contacts) timeline.push({type:'sent', date: c.created_at, text: `${c.contact_type} to ${c.vendor_contact || 'vendor'}`, user: c.user_name});
+        for (const r of responses) timeline.push({type:'reply', date: r.received_at, text: `Reply: ${r.subject || '(no subject)'}`, status: r.status, confidence: r.confidence});
+        for (const a of activities) timeline.push({type:'activity', date: a.created_at, text: `${a.channel || a.activity_type}: ${a.notes || ''}`.trim(), user: a.user_name});
+        timeline.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+        if (timeline.length) {
+            html += '<div style="margin-top:4px;padding-left:12px;border-left:2px solid var(--border)">';
+            for (const t of timeline.slice(0, 8)) {
+                const ago = t.date ? fmtRelative(t.date) : '';
+                const icon = t.type === 'sent' ? '\u2709' : t.type === 'reply' ? '\u21a9' : '\u260e';
+                const color = t.type === 'reply' ? 'var(--green)' : 'var(--text2)';
+                html += `<div style="font-size:10px;color:${color};margin:2px 0">${icon} ${esc(t.text)} <span style="color:var(--muted)">${ago}</span></div>`;
+            }
+            if (timeline.length > 8) html += `<div style="font-size:10px;color:var(--muted)">+${timeline.length - 8} more\u2026</div>`;
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+    html += '</div>';
+    panel.innerHTML = html;
+}
+
+function _renderDdOffers(reqId, data, panel) {
+    const groups = data.groups || data || [];
+    // Flatten all offers
+    let allOffers = [];
+    if (Array.isArray(groups)) {
+        for (const g of groups) {
+            for (const o of (g.offers || [])) {
+                allOffers.push({...o, mpn: g.mpn || g.label || ''});
+            }
+        }
+    }
+    if (!allOffers.length) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet</span>'; return; }
+    // Sort by price
+    allOffers.sort((a, b) => (a.unit_price || 999999) - (b.unit_price || 999999));
+    let html = `<div style="font-size:11px;margin-bottom:6px"><b>${allOffers.length}</b> offer${allOffers.length !== 1 ? 's' : ''}</div>`;
+    html += `<table class="dtbl"><thead><tr><th>MPN</th><th>Vendor</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Condition</th><th>Date</th><th>Source</th></tr></thead><tbody>`;
+    for (const o of allOffers) {
+        const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(2) : '\u2014';
+        const date = o.created_at ? fmtRelative(o.created_at) : '';
+        const src = o.source || o.offer_source || '';
+        html += `<tr>
+            <td class="mono">${esc(o.mpn || o.offered_mpn || '')}</td>
+            <td>${esc(o.vendor_name || '')}</td>
+            <td class="mono">${o.quantity || '\u2014'}</td>
+            <td class="mono" style="color:var(--teal)">${price}</td>
+            <td>${esc(o.lead_time || '\u2014')}</td>
+            <td>${esc(o.condition || '')}</td>
+            <td style="font-size:10px">${date}</td>
+            <td style="font-size:10px;color:var(--muted)">${esc(src)}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    panel.innerHTML = html;
+}
+
+function _renderDdQuotes(reqId, data, panel) {
+    if (!data || (!data.id && !data.quote_id && !(data.lines || []).length)) {
+        panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No quote prepared yet</span>';
+        return;
+    }
+    const q = data;
+    const lines = q.lines || q.line_items || [];
+    let html = '';
+    // Quote header
+    const statusMap = {draft:'Draft',sent:'Sent',revised:'Revised',won:'Won',lost:'Lost'};
+    const statusLabel = statusMap[q.status] || q.status || 'Draft';
+    const statusColor = q.status === 'won' ? 'var(--green)' : q.status === 'lost' ? 'var(--red)' : q.status === 'sent' ? 'var(--blue)' : 'var(--muted)';
+    html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:700">Quote #${q.id || q.quote_id || ''} <span style="color:${statusColor};font-weight:600">${statusLabel}</span></span>
+        ${q.sent_at ? `<span style="font-size:10px;color:var(--muted)">Sent ${fmtRelative(q.sent_at)}</span>` : ''}
+    </div>`;
+    if (lines.length) {
+        html += `<table class="dtbl"><thead><tr><th>MPN</th><th>Qty</th><th>Buy $</th><th>Sell $</th><th>Margin</th><th>Vendor</th></tr></thead><tbody>`;
+        let totalCost = 0, totalRev = 0;
+        for (const l of lines) {
+            const buy = l.buy_price || l.unit_cost || 0;
+            const sell = l.sell_price || l.unit_sell || 0;
+            const qty = l.quantity || 0;
+            const margin = sell > 0 ? Math.round(((sell - buy) / sell) * 100) : 0;
+            const marginColor = margin >= 20 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)';
+            totalCost += buy * qty;
+            totalRev += sell * qty;
+            html += `<tr>
+                <td class="mono">${esc(l.mpn || l.offered_mpn || '')}</td>
+                <td class="mono">${qty}</td>
+                <td class="mono">$${parseFloat(buy).toFixed(2)}</td>
+                <td class="mono" style="color:var(--teal)">$${parseFloat(sell).toFixed(2)}</td>
+                <td style="color:${marginColor};font-weight:600">${margin}%</td>
+                <td>${esc(l.vendor_name || '')}</td>
+            </tr>`;
+        }
+        const totalMargin = totalRev > 0 ? Math.round(((totalRev - totalCost) / totalRev) * 100) : 0;
+        html += `</tbody><tfoot><tr style="font-weight:700">
+            <td colspan="2">Total</td>
+            <td class="mono">$${totalCost.toFixed(2)}</td>
+            <td class="mono" style="color:var(--teal)">$${totalRev.toFixed(2)}</td>
+            <td>${totalMargin}%</td>
+            <td></td>
+        </tr></tfoot></table>`;
+    }
+    panel.innerHTML = html;
+}
+
 async function toggleDrillDown(reqId) {
     const drow = document.getElementById('d-' + reqId);
     const arrow = document.getElementById('a-' + reqId);
@@ -699,41 +928,19 @@ async function toggleDrillDown(reqId) {
     if (arrow) arrow.classList.toggle('open');
     _updateDrillToggleLabel();
     if (!opening) return;
-    const dd = drow.querySelector('.dd-content');
-    if (!dd) return;
 
-    if (_currentMainView === 'sourcing') {
-        // Sourcing: fetch sightings, not requirements
-        if (!_ddSightingsCache[reqId]) {
-            dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading…</span>';
-            try {
-                _ddSightingsCache[reqId] = await apiFetch(`/api/requisitions/${reqId}/sightings`);
-            } catch(e) {
-                dd.innerHTML = '<span style="font-size:11px;color:var(--red)">Failed to load</span>';
-                return;
-            }
-        }
-        if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
-        _renderSourcingDrillDown(reqId);
-    } else {
-        // RFQ / Archive: fetch requirements (existing behavior)
-        if (!_ddReqCache[reqId]) {
-            dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading…</span>';
-            try {
-                _ddReqCache[reqId] = await apiFetch(`/api/requisitions/${reqId}/requirements`);
-            } catch(e) {
-                dd.innerHTML = '<span style="font-size:11px;color:var(--red)">Failed to load</span>';
-                return;
-            }
-        }
-        _renderDrillDownTable(reqId);
-    }
+    // Load default sub-tab
+    const defaultTab = _ddActiveTab[reqId] || _ddDefaultTab(_currentMainView);
+    _ddActiveTab[reqId] = defaultTab;
+    // Update pill active state
+    drow.querySelectorAll('.dd-tab').forEach(t => t.classList.toggle('on', t.dataset.tab === defaultTab));
+    const panel = drow.querySelector('.dd-panel');
+    if (!panel) return;
+    await _loadDdSubTab(reqId, defaultTab, panel);
 }
 
-function _renderDrillDownTable(rfqId) {
-    const drow = document.getElementById('d-' + rfqId);
-    if (!drow) return;
-    const dd = drow.querySelector('.dd-content');
+function _renderDrillDownTable(rfqId, targetPanel) {
+    const dd = targetPanel || (document.getElementById('d-' + rfqId) || {}).querySelector?.('.dd-panel');
     if (!dd) return;
     const reqs = _ddReqCache[rfqId] || [];
     if (!reqs.length) { dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">No parts yet</span>'; return; }
@@ -763,7 +970,7 @@ function _renderDrillDownTable(rfqId) {
     }
     html += '</tbody></table>';
     if (!showAll && reqs.length > DD_LIMIT) {
-        html += `<a onclick="event.stopPropagation();this.parentElement.dataset.showAll='1';_renderDrillDownTable(${rfqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin-top:4px">Show all ${reqs.length} parts\u2026</a>`;
+        html += `<a onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderDrillDownTable(${rfqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin-top:4px">Show all ${reqs.length} parts\u2026</a>`;
     }
     dd.innerHTML = html;
 }
@@ -914,10 +1121,8 @@ function _buildEffortTip(score, color, signals) {
 // Cache for per-requirement sourcing scores
 const _ddScoreCache = {};
 
-function _renderSourcingDrillDown(reqId) {
-    const drow = document.getElementById('d-' + reqId);
-    if (!drow) return;
-    const dd = drow.querySelector('.dd-content');
+function _renderSourcingDrillDown(reqId, targetPanel) {
+    const dd = targetPanel || (document.getElementById('d-' + reqId) || {}).querySelector?.('.dd-panel');
     if (!dd) return;
     const data = _ddSightingsCache[reqId] || {};
     const groups = Object.entries(data); // [ [reqId, {label, sightings}], ... ]
@@ -983,7 +1188,7 @@ function _renderSourcingDrillDown(reqId) {
         }
         html += '</tbody></table>';
         if (!showAll && sightings.length > DD_LIMIT) {
-            html += `<a onclick="event.stopPropagation();this.closest('.dd-content').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin-top:4px">Show all ${sightings.length} sources\u2026</a>`;
+            html += `<a onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin-top:4px">Show all ${sightings.length} sources\u2026</a>`;
         }
         html += '</div>';
     }
@@ -1407,8 +1612,37 @@ function _renderReqRow(r) {
             <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px">${age}</td>
             <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>`;
-        actions = `<td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();submitToSourcing(${r.id})" title="Submit to sourcing">&#x25b6; Source</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5; Archive</button></td>`;
+        // RFQ tab button state machine: blue Source → yellow Sourcing → green Offers
+        let rfqBtn;
+        if (r.status === 'draft') {
+            rfqBtn = `<button class="btn btn-primary btn-sm" onclick="event.stopPropagation();inlineSourceAll(${r.id})" title="Submit to sourcing">&#x25b6; Source</button>`;
+        } else if (r.status === 'quoted' || r.status === 'quoting') {
+            rfqBtn = `<button class="btn btn-q btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'quotes')" title="View quote">Quoted</button>`;
+        } else if (offers > 0 && r.has_new_offers) {
+            rfqBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="New offers — click to review">Offers (${offers})</button>`;
+        } else if (offers > 0) {
+            rfqBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View offers">Offers (${offers})</button>`;
+        } else {
+            rfqBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'parts')" title="Sourcing in progress">Sourcing</button>`;
+        }
+        actions = `<td style="white-space:nowrap">${rfqBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5; Archive</button></td>`;
         colspan = 10;
+    }
+
+    // Build drill-down header: action buttons vary by tab
+    let ddHeader;
+    if (v === 'sourcing') {
+        ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+            <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
+            <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Send Bulk RFQ (0)</button>
+        </div>`;
+    } else if (v === 'archive') {
+        ddHeader = `<div style="margin-bottom:2px"><span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span></div>`;
+    } else {
+        ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
+            <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
+            <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
+        </div>`;
     }
 
     return `<tr class="${dlClass}" onclick="toggleDrillDown(${r.id})">
@@ -1418,13 +1652,9 @@ function _renderReqRow(r) {
         ${actions}
     </tr>
     <tr class="drow" id="d-${r.id}"><td colspan="${colspan}">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
-            ${v === 'sourcing'
-                ? `<button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Send Bulk RFQ (0)</button>`
-                : `<button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>`}
-        </div>
-        <div class="dd-content"><span style="font-size:11px;color:var(--muted)">${total} parts \u2014 expand for details</span></div>
+        ${ddHeader}
+        <div class="dd-tabs">${_renderDdTabPills(r.id)}</div>
+        <div class="dd-panel"><span style="font-size:11px;color:var(--muted)">${total} parts \u2014 expand for details</span></div>
     </td></tr>`;
 }
 
@@ -2186,6 +2416,37 @@ async function submitToSourcing(reqId) {
     }
     updateSearchAllBar();
     searchAll();
+}
+
+async function inlineSourceAll(reqId) {
+    // Inline version: searches all parts without navigating to detail page
+    // 1. Fetch requirements to get their IDs
+    const btn = event ? event.target : null;
+    if (btn) { btn.disabled = true; btn.textContent = 'Searching\u2026'; }
+    try {
+        const reqs = await apiFetch(`/api/requisitions/${reqId}/requirements`);
+        _ddReqCache[reqId] = reqs;
+        if (!reqs.length) { showToast('No parts to search', 'warn'); return; }
+        // 2. Fire search
+        const body = { requirement_ids: reqs.map(r => r.id) };
+        const results = await apiFetch(`/api/requisitions/${reqId}/search`, { method: 'POST', body });
+        // 3. Update caches — convert search results to sightings format for drill-down
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].sightings;
+        delete _ddSightingsCache[reqId];
+        // 4. Update status in list data
+        const reqInfo = _reqListData.find(r => r.id === reqId);
+        if (reqInfo) {
+            if (reqInfo.status === 'draft') reqInfo.status = 'active';
+            reqInfo.last_searched_at = new Date().toISOString();
+        }
+        // 5. Re-render list to show updated button state
+        renderReqList();
+        showToast('Search complete — parts are being sourced', 'success');
+    } catch(e) {
+        showToast('Search error: ' + e.message, 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '\u25b6 Source'; }
+    }
 }
 
 function submitOrSearch() {
