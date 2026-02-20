@@ -32,7 +32,6 @@ from ..models import (
     BuyPlan,
     Company,
     CustomerSite,
-    InventorySnapshot,
     Offer,
     OfferAttachment,
     Quote,
@@ -840,27 +839,6 @@ async def get_sync_logs(
         for entry in logs
     ]
 
-
-@router.get("/api/inventory")
-async def get_inventory(
-    mpn: str = "",
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Check current inventory from Acctivate snapshot."""
-    q = db.query(InventorySnapshot).filter(InventorySnapshot.qty_on_hand > 0)
-    if mpn:
-        q = q.filter(InventorySnapshot.product_id.ilike(f"%{mpn}%"))
-    items = q.order_by(InventorySnapshot.product_id).limit(500).all()
-    return [
-        {
-            "product_id": i.product_id,
-            "warehouse_id": i.warehouse_id,
-            "qty_on_hand": i.qty_on_hand,
-            "synced_at": i.synced_at.isoformat() if i.synced_at else None,
-        }
-        for i in items
-    ]
 
 
 # ── Users (simple list for dropdowns) ────────────────────────────────────

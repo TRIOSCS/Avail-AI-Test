@@ -175,6 +175,7 @@ async def get_activity(
             ActivityLog.vendor_card_id.isnot(None),
         )
         .order_by(ActivityLog.created_at.desc())
+        .limit(500)
         .all()
     )
 

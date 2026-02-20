@@ -256,7 +256,6 @@ class Requirement(Base):
     hardware_codes = Column(String(100))
     packaging = Column(String(100))
     condition = Column(String(50))
-    sf_req_item_id = Column(String(255), index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="requirements")

@@ -1807,7 +1807,7 @@ function editReqName(h2) {
             await apiFetch(`/api/requisitions/${currentReqId}`, { method: 'PUT', body: { name: val } });
             currentReqName = val;
             h2.textContent = val;
-            loadList();
+            loadRequisitions();
         } catch(e) { h2.textContent = current; showToast('Failed to rename', 'error'); }
     };
     input.addEventListener('blur', save);
@@ -1911,7 +1911,7 @@ async function submitToSourcing(reqId) {
     // Select all requirements
     const checkboxes = document.querySelectorAll('.req-checkbox');
     checkboxes.forEach(cb => { cb.checked = true; selectedRequirements.add(parseInt(cb.value)); });
-    updateSearchBtnCount();
+    updateSearchAllBar();
     searchAll();
 }
 

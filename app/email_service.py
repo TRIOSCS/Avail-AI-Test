@@ -52,20 +52,20 @@ async def send_batch_rfq(
         except Exception as e:
             log.warning(f"AI rephrase failed, using original bodies: {e}")
 
+    # Build payloads and send all emails in parallel
+    avail_token = f"[AVAIL-{requisition_id}]"
+    send_tasks = []
+    send_groups = []  # Track which groups we're sending for
+
     for group in vendor_groups:
         email = group.get("vendor_email")
         if not email:
             continue
 
         html_body = _build_html_body(group["body"])
-
-        # Inject [AVAIL-{req_id}] token for reply matching
         raw_subject = group["subject"]
-        avail_token = f"[AVAIL-{requisition_id}]"
-        if avail_token not in raw_subject:
-            tagged_subject = f"{avail_token} {raw_subject}"
-        else:
-            tagged_subject = raw_subject
+        tagged_subject = f"{avail_token} {raw_subject}" if avail_token not in raw_subject else raw_subject
+        group["_tagged_subject"] = tagged_subject
 
         payload = {
             "message": {
@@ -77,68 +77,57 @@ async def send_batch_rfq(
             },
             "saveToSentItems": "true",
         }
+        send_tasks.append(gc.post_json("/me/sendMail", payload))
+        send_groups.append(group)
 
-        try:
-            result = await gc.post_json("/me/sendMail", payload)
-            # post_json returns {} on 202 success, or {"error": ...} on client error
-            if "error" in result:
-                log.error(f"Send failed to {email}: {result}")
-                results.append(
-                    {
-                        "vendor_name": group["vendor_name"],
-                        "vendor_email": email,
-                        "status": "failed",
-                        "error": str(result.get("detail", ""))[:200],
-                    }
-                )
-                continue
+    # Fire all sends in parallel
+    send_results = await asyncio.gather(*send_tasks, return_exceptions=True)
 
-            contact = Contact(
-                requisition_id=requisition_id,
-                user_id=user_id,
-                contact_type="email",
-                vendor_name=group["vendor_name"],
-                vendor_contact=email,
-                parts_included=group.get("parts", []),
-                subject=tagged_subject,
-                details=group["body"],
-                status="sent",
-                status_updated_at=datetime.now(timezone.utc),
-                created_at=datetime.now(timezone.utc),
-            )
-            db.add(contact)
-            db.flush()
+    # Process results: create Contact records, then batch-lookup sent message IDs
+    contacts_to_lookup = []  # (contact, tagged_subject) pairs
+    for group, send_result in zip(send_groups, send_results):
+        email = group["vendor_email"]
+        tagged_subject = group.pop("_tagged_subject")
 
-            # Try to get the sent message ID for reply matching
-            try:
-                sent_msg = await _find_sent_message(gc, tagged_subject)
-                if sent_msg:
-                    contact.graph_message_id = sent_msg.get("id")
-                    contact.graph_conversation_id = sent_msg.get("conversationId")
-            except Exception as e:
-                log.debug(f"Could not capture sent message ID: {e}")
+        if isinstance(send_result, Exception):
+            log.error(f"Send error to {email}: {send_result}")
+            results.append({"vendor_name": group["vendor_name"], "vendor_email": email,
+                            "status": "error", "error": str(send_result)[:200]})
+            continue
 
-            db.commit()
-            results.append(
-                {
-                    "id": contact.id,
-                    "vendor_name": contact.vendor_name,
-                    "vendor_email": email,
-                    "parts_count": len(contact.parts_included),
-                    "status": "sent",
-                }
-            )
-        except Exception as e:
-            log.error(f"Send error to {email}: {e}")
-            results.append(
-                {
-                    "vendor_name": group["vendor_name"],
-                    "vendor_email": email,
-                    "status": "error",
-                    "error": str(e)[:200],
-                }
-            )
+        if "error" in send_result:
+            log.error(f"Send failed to {email}: {send_result}")
+            results.append({"vendor_name": group["vendor_name"], "vendor_email": email,
+                            "status": "failed", "error": str(send_result.get("detail", ""))[:200]})
+            continue
 
+        contact = Contact(
+            requisition_id=requisition_id, user_id=user_id, contact_type="email",
+            vendor_name=group["vendor_name"], vendor_contact=email,
+            parts_included=group.get("parts", []), subject=tagged_subject,
+            details=group["body"], status="sent",
+            status_updated_at=datetime.now(timezone.utc),
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(contact)
+        db.flush()
+        contacts_to_lookup.append((contact, tagged_subject))
+        results.append({"id": contact.id, "vendor_name": contact.vendor_name,
+                        "vendor_email": email, "parts_count": len(contact.parts_included),
+                        "status": "sent"})
+
+    # Batch-lookup sent message IDs in parallel for reply matching
+    if contacts_to_lookup:
+        lookup_results = await asyncio.gather(
+            *[_find_sent_message(gc, subj) for _, subj in contacts_to_lookup],
+            return_exceptions=True,
+        )
+        for (contact, _), sent_msg in zip(contacts_to_lookup, lookup_results):
+            if isinstance(sent_msg, dict) and sent_msg:
+                contact.graph_message_id = sent_msg.get("id")
+                contact.graph_conversation_id = sent_msg.get("conversationId")
+
+    db.commit()
     return results
 
 

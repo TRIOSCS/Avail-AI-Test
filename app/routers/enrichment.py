@@ -57,18 +57,34 @@ def api_list_queue(
     total = q.count()
     items = q.order_by(EnrichmentQueue.created_at.desc()).offset(offset).limit(limit).all()
 
+    # Batch-fetch related entities to avoid N+1 queries
+    vendor_ids = [i.vendor_card_id for i in items if i.vendor_card_id]
+    company_ids = [i.company_id for i in items if i.company_id]
+    vendor_map = {}
+    company_map = {}
+    if vendor_ids:
+        vendor_map = {
+            v.id: v.display_name
+            for v in db.query(VendorCard.id, VendorCard.display_name)
+            .filter(VendorCard.id.in_(vendor_ids)).all()
+        }
+    if company_ids:
+        company_map = {
+            c.id: c.name
+            for c in db.query(Company.id, Company.name)
+            .filter(Company.id.in_(company_ids)).all()
+        }
+
     results = []
     for item in items:
         entity_type_str = None
         entity_name = None
         if item.vendor_card_id:
             entity_type_str = "vendor"
-            card = db.get(VendorCard, item.vendor_card_id)
-            entity_name = card.display_name if card else f"Vendor #{item.vendor_card_id}"
+            entity_name = vendor_map.get(item.vendor_card_id, f"Vendor #{item.vendor_card_id}")
         elif item.company_id:
             entity_type_str = "company"
-            company = db.get(Company, item.company_id)
-            entity_name = company.name if company else f"Company #{item.company_id}"
+            entity_name = company_map.get(item.company_id, f"Company #{item.company_id}")
         elif item.vendor_contact_id:
             entity_type_str = "contact"
 

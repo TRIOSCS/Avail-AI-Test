@@ -205,16 +205,15 @@ def _backfill_normalized_mpn() -> None:
             log.warning("Backfill requirements.normalized_mpn failed: %s", e)
             conn.rollback()
 
-        # 2. Re-normalize material_cards.normalized_mpn (strip non-alnum, lowercase)
+        # 2. Backfill material_cards.normalized_mpn where NULL only (skip full re-scan)
         try:
             cards = conn.execute(
-                sqltext("SELECT id, normalized_mpn, display_mpn FROM material_cards")
+                sqltext("SELECT id, display_mpn FROM material_cards WHERE normalized_mpn IS NULL AND display_mpn IS NOT NULL")
             ).fetchall()
             updated = 0
             for c in cards:
-                old_norm = c[1]
-                new_norm = _key(c[2] or c[1])
-                if new_norm and new_norm != old_norm:
+                new_norm = _key(c[1])
+                if new_norm:
                     existing = conn.execute(
                         sqltext("SELECT id FROM material_cards WHERE normalized_mpn = :n AND id != :id"),
                         {"n": new_norm, "id": c[0]},
@@ -227,9 +226,9 @@ def _backfill_normalized_mpn() -> None:
                         updated += 1
             if updated:
                 conn.commit()
-                log.info("Re-normalized %d material_cards.normalized_mpn values", updated)
+                log.info("Backfilled normalized_mpn on %d material_cards", updated)
         except Exception as e:
-            log.warning("Re-normalize material_cards failed: %s", e)
+            log.warning("Backfill material_cards.normalized_mpn failed: %s", e)
             conn.rollback()
 
 
