@@ -1,0 +1,14 @@
+target-version = "py312"
+line-length = 120
+
+[lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # line length handled separately
+
+[lint.per-file-ignores]
+"tests/*" = ["E402"]  # allow late imports in tests
+"app/models.py" = ["E402"]
+"app/routers/*" = ["E402"]  # routers use deferred imports for circular dep avoidance
+"app/main.py" = ["E402"]
+"app/services/credential_service.py" = ["E402"]
+"app/services/routing_service.py" = ["E402"]
