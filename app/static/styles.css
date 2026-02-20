@@ -1150,6 +1150,7 @@ body.on-settings .toparea{margin-left:0 !important}
 .dtbl input:focus,.dtbl textarea:focus,.dtbl select:focus{outline:none;border-color:var(--teal)}
 .dtbl input[type="checkbox"]{cursor:pointer;accent-color:var(--teal);width:auto}
 .dtbl input[type="checkbox"]:disabled{cursor:not-allowed;opacity:.4}
+.dtbl tr.selected>td{background:var(--teal-light)}
 .dd-edit{cursor:pointer}
 .dd-edit:hover{background:var(--bg);border-radius:3px}
 

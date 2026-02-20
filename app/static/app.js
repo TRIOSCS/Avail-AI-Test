@@ -742,6 +742,8 @@ function _formatEmailBody(text) {
     return safe;
 }
 
+let _ddSelectedOffers = {};   // reqId → Set of offer IDs
+
 function _renderDdOffers(reqId, data, panel) {
     const groups = data.groups || data || [];
     // Flatten all offers
@@ -754,15 +756,23 @@ function _renderDdOffers(reqId, data, panel) {
         }
     }
     if (!allOffers.length) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet</span>'; return; }
+    if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
+    const sel = _ddSelectedOffers[reqId];
     // Sort by price
     allOffers.sort((a, b) => (a.unit_price || 999999) - (b.unit_price || 999999));
-    let html = `<div style="font-size:11px;margin-bottom:6px"><b>${allOffers.length}</b> offer${allOffers.length !== 1 ? 's' : ''}</div>`;
-    html += `<table class="dtbl"><thead><tr><th>MPN</th><th>Vendor</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Condition</th><th>Date</th><th>Source</th></tr></thead><tbody>`;
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <span style="font-size:11px"><b>${allOffers.length}</b> offer${allOffers.length !== 1 ? 's' : ''}${sel.size > 0 ? ` &middot; <b>${sel.size}</b> selected` : ''}</span>
+        <button class="btn btn-primary btn-sm" id="ddBuildQuoteBtn-${reqId}" ${sel.size === 0 ? 'disabled style="opacity:.5"' : ''} onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote (${sel.size})</button>
+    </div>`;
+    html += `<table class="dtbl"><thead><tr><th style="width:28px"><input type="checkbox" onchange="ddToggleAllOffers(${reqId},this.checked)" ${sel.size === allOffers.length ? 'checked' : ''}></th><th>MPN</th><th>Vendor</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Condition</th><th>Date</th><th>Source</th></tr></thead><tbody>`;
     for (const o of allOffers) {
+        const oid = o.id || o.offer_id;
+        const checked = sel.has(oid) ? 'checked' : '';
         const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(2) : '\u2014';
         const date = o.created_at ? fmtRelative(o.created_at) : '';
         const src = o.source || o.offer_source || '';
-        html += `<tr>
+        html += `<tr class="${checked ? 'selected' : ''}" onclick="ddToggleOffer(${reqId},${oid},event)">
+            <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
             <td class="mono">${esc(o.mpn || o.offered_mpn || '')}</td>
             <td>${esc(o.vendor_name || '')}</td>
             <td class="mono">${o.quantity || '\u2014'}</td>
@@ -775,6 +785,62 @@ function _renderDdOffers(reqId, data, panel) {
     }
     html += '</tbody></table>';
     panel.innerHTML = html;
+}
+
+function ddToggleOffer(reqId, offerId, event) {
+    if (event) event.stopPropagation();
+    if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
+    const sel = _ddSelectedOffers[reqId];
+    if (sel.has(offerId)) sel.delete(offerId); else sel.add(offerId);
+    // Re-render to update button and checkboxes
+    const data = _ddTabCache[reqId]?.offers;
+    const drow = document.getElementById('d-' + reqId);
+    if (data && drow) {
+        const panel = drow.querySelector('.dd-panel');
+        if (panel) _renderDdOffers(reqId, data, panel);
+    }
+}
+
+function ddToggleAllOffers(reqId, checked) {
+    const data = _ddTabCache[reqId]?.offers;
+    if (!data) return;
+    const groups = data.groups || data || [];
+    if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
+    const sel = _ddSelectedOffers[reqId];
+    sel.clear();
+    if (checked) {
+        for (const g of (Array.isArray(groups) ? groups : [])) {
+            for (const o of (g.offers || [])) {
+                sel.add(o.id || o.offer_id);
+            }
+        }
+    }
+    const drow = document.getElementById('d-' + reqId);
+    if (drow) {
+        const panel = drow.querySelector('.dd-panel');
+        if (panel) _renderDdOffers(reqId, data, panel);
+    }
+}
+
+async function ddBuildQuote(reqId) {
+    const sel = _ddSelectedOffers[reqId];
+    if (!sel || sel.size === 0) return;
+    try {
+        await apiFetch('/api/requisitions/' + reqId + '/quote', {
+            method: 'POST', body: { offer_ids: Array.from(sel) }
+        });
+        showToast('Quote built — switching to Quotes tab', 'success');
+        // Clear cache and switch to quotes tab
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
+        _switchDdTab(reqId, 'quotes');
+    } catch (e) {
+        const msg = (e.message || '').toLowerCase();
+        if (e.status === 400 && msg.includes('customer site')) {
+            showToast('Link this requisition to a customer site first', 'error');
+        } else {
+            showToast('Error building quote: ' + (e.message || 'unknown'), 'error');
+        }
+    }
 }
 
 function _renderDdQuotes(reqId, data, panel) {
@@ -1662,7 +1728,10 @@ function _renderReqRow(r) {
     } else {
         ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
-            <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
+            <div style="display:flex;gap:6px">
+                <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
+                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="Select offers and build quote">+ Quote</button>
+            </div>
         </div>`;
     }
 
