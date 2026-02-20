@@ -43,16 +43,6 @@
             <button type="button" class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
         </div>
         <div class="filter-wrap">
-            <select class="tb-select" id="deadlineFilter" onchange="applyDeadlineFilter()">
-                <option value="">Deadline</option>
-                <option value="overdue">Overdue</option>
-                <option value="today">Today</option>
-                <option value="3days">Next 3 Days</option>
-                <option value="week">This Week</option>
-                <option value="none">No Deadline</option>
-            </select>
-        </div>
-        <div class="filter-wrap">
             <button type="button" class="filter-btn" onclick="toggleFilter('mainFilterPanel')">
                 Filters <span class="filter-badge" id="filterBadge">0</span>
             </button>
@@ -64,8 +54,7 @@
                 </div>
             </div>
         </div>
-        <button type="button" class="tb-btn" id="btnMyAccounts" onclick="toggleMyAccounts(this)">My Accounts</button>
-        <div class="filter-wrap u-ml-auto">
+        <div class="filter-wrap">
             <button type="button" class="filter-btn" onclick="toggleNotifications()" style="position:relative;padding:6px 10px" title="Notifications">
                 &#x1f514;
                 <span id="notifBadge" class="filter-badge" style="position:absolute;top:-4px;right:-4px;background:var(--red)">0</span>
@@ -75,6 +64,7 @@
                 <div id="notifList"><p class="empty" style="font-size:12px">No notifications</p></div>
             </div>
         </div>
+        <div class="toolbar-stats u-ml-auto" id="toolbarStats"></div>
     </div>
 </div>
 

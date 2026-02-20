@@ -1159,7 +1159,7 @@ body.sb-open .sb-overlay{display:block}
 .tb-select:hover,.tb-select:focus{border-color:var(--teal);outline:none}
 
 /* Search box — prominent */
-.sbox{background:var(--white);border:2px solid var(--teal);border-radius:8px;padding:6px 14px;font-size:13px;color:var(--text);flex:1;min-width:180px;font-family:inherit;font-weight:500;box-shadow:0 0 0 3px rgba(74,111,165,.08)}
+.sbox{background:var(--white);border:2px solid var(--teal);border-radius:8px;padding:6px 14px;font-size:13px;color:var(--text);flex:1;min-width:180px;max-width:320px;font-family:inherit;font-weight:500;box-shadow:0 0 0 3px rgba(74,111,165,.08)}
 .sbox:focus{outline:none;box-shadow:0 0 0 4px rgba(74,111,165,.18)}
 .sbox::placeholder{color:var(--muted)}
 
@@ -1170,17 +1170,34 @@ body.sb-open .sb-overlay{display:block}
 .filter-btn.has-active{border-color:var(--teal);background:var(--teal-light);color:var(--teal)}
 .filter-badge{background:var(--teal);color:#fff;font-size:9px;font-weight:800;width:18px;height:18px;border-radius:50%;display:none;align-items:center;justify-content:center}
 .filter-btn.has-active .filter-badge{display:flex}
-.filter-panel{display:none;position:absolute;top:100%;left:0;margin-top:6px;background:var(--white);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:12px;width:300px;z-index:300}
+.filter-panel{display:none;position:absolute;top:100%;right:0;margin-top:6px;background:var(--white);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:12px;width:400px;z-index:300}
 .filter-panel.open{display:block}
+.filter-cols{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}
 .filter-group{margin-bottom:10px}
 .filter-group:last-child{margin-bottom:0}
 .filter-group-title{font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px}
+.filter-group-title.collapsible{cursor:pointer;display:flex;align-items:center;gap:4px;user-select:none}
+.filter-group-title.collapsible::before{content:'\25b6';font-size:7px;transition:transform .2s}
+.filter-group-title.collapsible.open::before{transform:rotate(90deg)}
+.filter-group-body{display:none}.filter-group-body.open{display:block}
 .filter-group label{display:flex;align-items:center;gap:6px;padding:3px 0;font-size:12px;color:var(--text2);cursor:pointer;font-weight:500}
 .filter-group input[type=checkbox]{accent-color:var(--teal);width:14px;height:14px;cursor:pointer}
 .filter-actions{display:flex;justify-content:flex-end;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--card2)}
 .filter-actions button{padding:4px 10px;border-radius:5px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;border:none}
 .fa-clear{background:transparent;color:var(--red)}.fa-clear:hover{text-decoration:underline}
 .fa-apply{background:var(--teal);color:#fff}
+
+/* Toolbar status indicators */
+.toolbar-stats{display:flex;align-items:center;gap:5px}
+.ts-pill{display:flex;align-items:center;gap:4px;cursor:pointer;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.2px;transition:all .15s;border:1px solid transparent;user-select:none}
+.ts-pill:hover{filter:brightness(.95)}
+.ts-pill.active{border-color:currentColor}
+.ts-pill .ts-n{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:800}
+.ts-green{color:var(--green);background:var(--green-light)}
+.ts-yellow{color:var(--amber);background:var(--amber-light)}
+.ts-orange{color:#c45a00;background:#fff0e0}
+.ts-red{color:var(--red);background:var(--red-light)}
+.ts-grey{color:var(--text2);background:var(--surface)}
 
 /* v7 Button variants */
 .btn-p{background:var(--teal);color:#fff}.btn-p:hover{background:#3a5c8a}

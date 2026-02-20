@@ -574,7 +574,6 @@ let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _serverSearchActive = false; // True when server-side search returned filtered results
 let _currentMainView = 'rfq';  // 'rfq' | 'sourcing' | 'archive'
-let _deadlineFilter = '';  // Deadline dropdown filter
 
 function setReqListSort(val) {
     _reqListSort = val;
@@ -967,23 +966,7 @@ function renderReqList() {
     if (_myReqsOnly && window.userId) {
         data = data.filter(r => r.created_by === window.userId);
     }
-    // Deadline filter
-    if (_deadlineFilter) {
-        const now = new Date(); now.setHours(0,0,0,0);
-        data = data.filter(r => {
-            if (_deadlineFilter === 'none') return !r.deadline;
-            if (!r.deadline) return false;
-            if (r.deadline === 'ASAP') return _deadlineFilter === 'overdue' || _deadlineFilter === 'today';
-            const d = new Date(r.deadline); d.setHours(0,0,0,0);
-            const diff = Math.round((d - now) / 86400000);
-            if (_deadlineFilter === 'overdue') return diff < 0;
-            if (_deadlineFilter === 'today') return diff === 0;
-            if (_deadlineFilter === '3days') return diff >= 0 && diff <= 3;
-            if (_deadlineFilter === 'week') return diff >= 0 && diff <= 7;
-            return true;
-        });
-    }
-    // Apply dropdown filters (v7 filter panel)
+    // Apply filter panel filters
     data = applyDropdownFilters(data);
 
     // Sort — column sort takes priority, then dropdown sort
@@ -1073,6 +1056,44 @@ function renderReqList() {
 
     const rows = data.map(r => _renderReqRow(r)).join('');
     el.innerHTML = `<table class="tbl">${thead}<tbody>${rows}</tbody></table>`;
+    _updateToolbarStats();
+}
+
+function setToolbarQuickFilter(key) {
+    _toolbarQuickFilter = (_toolbarQuickFilter === key) ? '' : key;
+    renderReqList();
+}
+
+function _updateToolbarStats() {
+    const el = document.getElementById('toolbarStats');
+    if (!el) return;
+    const all = _reqListData;
+    const now = new Date(); now.setHours(0,0,0,0);
+
+    let nGreen = 0, nYellow = 0, nOrange = 0, nRed = 0;
+    for (const r of all) {
+        if (r.reply_count > 0) nGreen++;
+        const dl = r.deadline;
+        if (!dl) continue;
+        const isAsap = String(dl).toUpperCase() === 'ASAP';
+        if (isAsap) { nRed++; continue; }
+        const d = new Date(dl); d.setHours(0,0,0,0);
+        const diff = Math.round((d - now) / 86400000);
+        if (diff < 0) nRed++;
+        else if (diff === 0) nOrange++;
+        else if (diff >= 1 && diff <= 3) nYellow++;
+    }
+
+    const qf = _toolbarQuickFilter;
+    const pill = (color, count, label) =>
+        `<div class="ts-pill ts-${color}${qf === color ? ' active' : ''}" onclick="setToolbarQuickFilter('${color}')"><span class="ts-n">${count}</span> ${label}</div>`;
+
+    el.innerHTML =
+        pill('green', nGreen, 'Offers') +
+        pill('red', nRed, 'Past Due') +
+        pill('orange', nOrange, 'Due Today') +
+        pill('yellow', nYellow, 'Coming Due') +
+        `<div class="ts-pill ts-grey${qf ? '' : ' active'}" onclick="setToolbarQuickFilter('')"><span class="ts-n">${all.length}</span> Clear</div>`;
 }
 
 function _renderReqRow(r) {
@@ -1280,8 +1301,9 @@ function editDetailDeadline() {
     el.querySelector('input[type=date]')?.focus();
 }
 
-// ── v7 Filter Dropdown ──────────────────────────────────────────────────
-let _activeFilters = {};  // key → Set of checked values
+// ── v7 Filter Panel (unified) ───────────────────────────────────────────
+let _activeFilters = {};
+let _toolbarQuickFilter = '';
 
 function toggleFilter(panelId) {
     const el = document.getElementById(panelId);
@@ -1291,34 +1313,46 @@ function toggleFilter(panelId) {
     if (opening) buildFilterGroups();
 }
 
+function toggleFilterSection(titleEl) {
+    titleEl.classList.toggle('open');
+    const body = titleEl.nextElementSibling;
+    if (body) body.classList.toggle('open');
+}
+
 function buildFilterGroups() {
     const container = document.getElementById('filterGroups');
     if (!container) return;
-    let html = '';
 
-    // Quick filters
-    html += _filterGroupHtml('Quick Filters', [
-        {value:'my_accounts', label:'My Accounts only'},
-        {value:'no_offers', label:'No offers yet'},
-        {value:'overdue_asap', label:'Overdue / ASAP'}
+    // Left column: Quick Filters (always visible)
+    let left = _filterGroupHtml('Quick Filters', [
+        {value:'my_accounts', label:'My Accounts'},
+        {value:'no_offers', label:'No Offers Yet'}
     ]);
 
-    // Sales person — dynamic from data
+    // Right column: Sales Person + Customer (collapsible)
+    let right = '';
     const salesPeople = [...new Set(_reqListData.map(r => r.created_by_name).filter(Boolean))].sort();
     if (salesPeople.length) {
-        html += _filterGroupHtml('Sales Person', salesPeople.map(n => ({value:'sales_'+n, label:n})));
+        right += _collapsibleGroupHtml('Sales Person', salesPeople.map(n => ({value:'sales_'+n, label:n})));
     }
-
-    // Customer — top 10
-    const customers = [...new Set(_reqListData.map(r => r.customer_display).filter(Boolean))].sort().slice(0, 10);
+    const customers = [...new Set(_reqListData.map(r => r.customer_display).filter(Boolean))].sort();
     if (customers.length) {
-        html += _filterGroupHtml('Customer', customers.map(c => ({value:'cust_'+c, label:c})));
+        right += _collapsibleGroupHtml('Customer', customers.map(c => ({value:'cust_'+c, label:c})));
     }
 
-    container.innerHTML = html;
+    container.innerHTML = `<div class="filter-cols"><div class="filter-col">${left}</div><div class="filter-col">${right}</div></div>`;
+
     // Restore checked state
     container.querySelectorAll('input[type=checkbox]').forEach(cb => {
         cb.checked = !!(_activeFilters[cb.value]);
+    });
+    // Auto-expand sections that have active filters
+    container.querySelectorAll('.filter-group-title.collapsible').forEach(t => {
+        const body = t.nextElementSibling;
+        if (body && body.querySelector('input:checked')) {
+            t.classList.add('open');
+            body.classList.add('open');
+        }
     });
 }
 
@@ -1328,11 +1362,16 @@ function _filterGroupHtml(title, items) {
     }</div>`;
 }
 
+function _collapsibleGroupHtml(title, items) {
+    return `<div class="filter-group"><div class="filter-group-title collapsible" onclick="toggleFilterSection(this)">${title}</div><div class="filter-group-body">${
+        items.map(i => `<label><input type="checkbox" value="${i.value}" onchange="countActiveFilters()"> ${esc(i.label)}</label>`).join('')
+    }</div></div>`;
+}
+
 function countActiveFilters() {
     const panel = document.getElementById('mainFilterPanel');
     if (!panel) return;
-    const checked = panel.querySelectorAll('input[type=checkbox]:checked');
-    const n = checked.length;
+    const n = panel.querySelectorAll('input[type=checkbox]:checked').length;
     const btn = document.querySelector('.filter-btn');
     const badge = document.getElementById('filterBadge');
     if (badge) { badge.textContent = n; badge.style.display = n > 0 ? 'flex' : 'none'; }
@@ -1344,6 +1383,7 @@ function clearAllFilters() {
     if (panel) panel.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
     _activeFilters = {};
     _myReqsOnly = false;
+    _toolbarQuickFilter = '';
     countActiveFilters();
     renderReqList();
 }
@@ -1355,31 +1395,18 @@ function applyFilters() {
     panel.querySelectorAll('input[type=checkbox]:checked').forEach(cb => {
         _activeFilters[cb.value] = true;
     });
-    // Apply My Accounts
     _myReqsOnly = !!_activeFilters['my_accounts'];
-    // Close panel
     panel.classList.remove('open');
     renderReqList();
 }
 
-// Override renderReqList filter logic to include dropdown filters
-
 function applyDropdownFilters(data) {
-    if (!Object.keys(_activeFilters).length) return data;
+    if (!Object.keys(_activeFilters).length && !_toolbarQuickFilter) return data;
     let filtered = data;
 
     // No offers yet
     if (_activeFilters['no_offers']) {
         filtered = filtered.filter(r => !r.reply_count);
-    }
-    // Overdue / ASAP
-    if (_activeFilters['overdue_asap']) {
-        const now = new Date(); now.setHours(0,0,0,0);
-        filtered = filtered.filter(r => {
-            if (!r.deadline) return false;
-            if (String(r.deadline).toUpperCase() === 'ASAP') return true;
-            return new Date(r.deadline) <= now;
-        });
     }
     // Sales person
     const salesFilters = Object.keys(_activeFilters).filter(k => k.startsWith('sales_'));
@@ -1393,6 +1420,24 @@ function applyDropdownFilters(data) {
         const custs = new Set(custFilters.map(k => k.replace('cust_', '')));
         filtered = filtered.filter(r => custs.has(r.customer_display));
     }
+    // Toolbar pill quick filter
+    if (_toolbarQuickFilter) {
+        const now = new Date(); now.setHours(0,0,0,0);
+        filtered = filtered.filter(r => {
+            const dl = r.deadline;
+            const isAsap = dl && String(dl).toUpperCase() === 'ASAP';
+            const d = (dl && !isAsap) ? new Date(dl) : null;
+            if (d) d.setHours(0,0,0,0);
+            const diff = d ? Math.round((d - now) / 86400000) : null;
+            switch (_toolbarQuickFilter) {
+                case 'green': return r.reply_count > 0;
+                case 'red': return isAsap || (diff !== null && diff < 0);
+                case 'orange': return diff === 0;
+                case 'yellow': return diff !== null && diff >= 1 && diff <= 3;
+                default: return true;
+            }
+        });
+    }
     return filtered;
 }
 
@@ -1402,9 +1447,8 @@ function setMainView(view, btn) {
     document.querySelectorAll('#mainPills .fp').forEach(b => b.classList.remove('on'));
     if (btn) btn.classList.add('on');
     _activeFilters = {};
-    _deadlineFilter = '';
-    const dlSel = document.getElementById('deadlineFilter');
-    if (dlSel) dlSel.value = '';
+    _myReqsOnly = false;
+    _toolbarQuickFilter = '';
     countActiveFilters();
     // Hide status toggle — tabs are now locked to their status
     const stEl = document.getElementById('statusToggle');
@@ -1444,11 +1488,6 @@ function setStatusFilter(sf, btn) {
     renderReqList();
 }
 
-function toggleMyAccounts(btn) {
-    _myReqsOnly = !_myReqsOnly;
-    btn.classList.toggle('active', _myReqsOnly);
-    renderReqList();
-}
 
 function toggleAllDrillRows() {
     const openRows = document.querySelectorAll('.drow.open');
@@ -1473,10 +1512,6 @@ function _updateDrillToggleLabel() {
     el.textContent = anyOpen ? '\u25bc Collapse' : '\u25b6 Expand';
 }
 
-function applyDeadlineFilter() {
-    _deadlineFilter = document.getElementById('deadlineFilter')?.value || '';
-    renderReqList();
-}
 
 // ── v7 Main Search ──────────────────────────────────────────────────────
 function debouncedMainSearch(val) {
