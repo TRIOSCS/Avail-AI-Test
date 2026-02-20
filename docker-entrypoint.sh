@@ -1,7 +1,8 @@
 #!/bin/sh
-# Copy static files to shared volume for Caddy direct serving
-if [ -d /srv/static ] && [ -w /srv/static ]; then
+# Copy static files to shared volume for Caddy direct serving (runs as root)
+if [ -d /srv/static ]; then
     cp -r app/static/* /srv/static/
 fi
 
-exec "$@"
+# Drop to non-root user for the app process
+exec runuser -u appuser -- "$@"

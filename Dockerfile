@@ -34,11 +34,10 @@ COPY migrate_*.py .
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
 
-# Run as non-root user
+# Create non-root user for running the app process
 RUN useradd -r -u 1000 -m appuser \
     && chown -R appuser:appuser /app \
     && mkdir -p /var/log/avail && chown appuser:appuser /var/log/avail
-USER appuser
 
 ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
