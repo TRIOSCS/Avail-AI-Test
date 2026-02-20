@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_user
 from ..models import (
+    ActivityLog,
     Contact,
     Offer,
     ProactiveMatch,
@@ -61,6 +62,21 @@ from ..utils.normalization import (
 from .rfq import _enrich_with_vendor_cards
 
 router = APIRouter(tags=["requisitions"])
+
+
+def _compute_sourcing_score(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt):
+    """Lightweight sourcing score for list views."""
+    from ..services.sourcing_score import compute_requisition_score_fast
+
+    return compute_requisition_score_fast(
+        req_count=req_cnt or 0,
+        sourced_count=sourced_cnt or 0,
+        rfq_sent_count=rfq_sent or 0,
+        reply_count=reply_cnt or 0,
+        offer_count=offer_cnt or 0,
+        call_count=call_cnt or 0,
+        email_count=email_act_cnt or 0,
+    )
 
 
 @router.get("/api/requisitions")
@@ -255,6 +271,27 @@ async def list_requisitions(
         .scalar_subquery()
         .label("proactive_match_count")
     )
+    # Sourcing activity score signals: phone calls and emails on this requisition
+    call_count_sq = (
+        select(sqlfunc.count(ActivityLog.id))
+        .where(
+            ActivityLog.requisition_id == Requisition.id,
+            ActivityLog.channel == "phone",
+        )
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("call_count")
+    )
+    email_activity_count_sq = (
+        select(sqlfunc.count(ActivityLog.id))
+        .where(
+            ActivityLog.requisition_id == Requisition.id,
+            ActivityLog.channel == "email",
+        )
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("email_activity_count")
+    )
 
     query = db.query(
         Requisition,
@@ -276,6 +313,8 @@ async def list_requisitions(
         best_offer_price_sq,
         awaiting_reply_sq,
         proactive_match_count_sq,
+        call_count_sq,
+        email_activity_count_sq,
     )
     # Sales sees own reqs only; all other roles see everything
     if user.role == "sales":
@@ -361,13 +400,31 @@ async def list_requisitions(
                 "best_offer_price": float(best_price) if best_price else None,
                 "awaiting_reply_count": await_cnt or 0,
                 "proactive_match_count": pm_cnt or 0,
+                "sourcing_score": _sc,
+                "sourcing_color": _sc_color,
             }
-            for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt, rfq_sent, needs_rev, ttv, q_status, q_sent, q_total, q_won, offer_cnt, best_price, await_cnt, pm_cnt in rows
+            for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt, rfq_sent, needs_rev, ttv, q_status, q_sent, q_total, q_won, offer_cnt, best_price, await_cnt, pm_cnt, call_cnt, email_act_cnt in rows
+            for _sc, _sc_color in [_compute_sourcing_score(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt)]
         ],
         "total": total,
         "limit": limit,
         "offset": offset,
     }
+
+
+@router.get("/api/requisitions/{req_id}/sourcing-score")
+async def requisition_sourcing_score(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get detailed per-requirement sourcing scores for a requisition."""
+    req = db.get(Requisition, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    from ..services.sourcing_score import compute_requisition_scores
+
+    return compute_requisition_scores(req_id, db)
 
 
 @router.post("/api/requisitions", response_model=RequisitionOut)
