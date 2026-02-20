@@ -39,5 +39,9 @@ app.availai.net {
         reverse_proxy app:8000
     }
 
-    reverse_proxy app:8000
+    # HTML pages — never cache so version-busted URLs are always fresh
+    handle {
+        header Cache-Control "no-cache"
+        reverse_proxy app:8000
+    }
 }
