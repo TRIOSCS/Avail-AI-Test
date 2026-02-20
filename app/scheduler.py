@@ -169,8 +169,6 @@ def configure_scheduler():
                           id="webhook_subs", name="Webhook subscriptions")
         scheduler.add_job(_job_ownership_sweep, IntervalTrigger(hours=12),
                           id="ownership_sweep", name="Ownership sweep")
-        scheduler.add_job(_job_routing_expiration, IntervalTrigger(hours=12),
-                          id="routing_expiration", name="Routing expiration")
 
     # Buy plan jobs
     scheduler.add_job(_job_po_verification, IntervalTrigger(minutes=settings.po_verify_interval_min),
@@ -435,27 +433,6 @@ async def _job_ownership_sweep():
         await run_ownership_sweep(db)
     except Exception as e:
         logger.error(f"Ownership sweep error: {e}")
-        db.rollback()
-    finally:
-        db.close()
-
-
-async def _job_routing_expiration():
-    """Expire stale routing assignments and offers."""
-    from .database import SessionLocal
-
-    db = SessionLocal()
-    try:
-        from .services.routing_service import (
-            expire_stale_assignments,
-            expire_stale_offers,
-        )
-        expired_assignments = expire_stale_assignments(db)
-        expired_offers = expire_stale_offers(db)
-        if expired_assignments or expired_offers:
-            db.commit()
-    except Exception as e:
-        logger.error(f"Routing expiration error: {e}")
         db.rollback()
     finally:
         db.close()
