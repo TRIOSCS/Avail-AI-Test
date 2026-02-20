@@ -15,11 +15,10 @@ Depends on: models, config, dependencies, connectors/, services/
 """
 
 import base64
-import logging
 import os
 import time
 
-log = logging.getLogger(__name__)
+from loguru import logger
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -516,7 +515,7 @@ async def scan_inbox_for_vendors(
             if body and body.strip():
                 opts = MiningOptions.model_validate_json(body)
     except Exception:
-        log.debug("Mining options parse failed, using defaults", exc_info=True)
+        logger.debug("Mining options parse failed, using defaults", exc_info=True)
     lookback_days = opts.lookback_days
 
     from ..connectors.email_mining import EmailMiner
@@ -607,7 +606,7 @@ async def email_mining_scan_outbound(
             if raw and raw.strip():
                 opts = MiningOptions.model_validate_json(raw)
     except Exception:
-        log.debug("Mining options parse failed, using defaults", exc_info=True)
+        logger.debug("Mining options parse failed, using defaults", exc_info=True)
     lookback = opts.lookback_days
 
     miner = EmailMiner(token, db=db, user_id=user.id)
@@ -632,7 +631,7 @@ async def email_mining_scan_outbound(
     try:
         db.commit()
     except Exception:
-        log.exception("DB commit failed during email scan")
+        logger.exception("DB commit failed during email scan")
         db.rollback()
 
     return {

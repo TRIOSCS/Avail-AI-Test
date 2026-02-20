@@ -15,7 +15,7 @@ Called by: main.py (router mount)
 Depends on: dependencies, models, config
 """
 
-import logging
+from loguru import logger
 from datetime import datetime, timedelta, timezone
 
 import httpx
@@ -30,7 +30,7 @@ from ..database import get_db
 from ..dependencies import get_user
 from ..models import User
 
-log = logging.getLogger(__name__)
+
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -89,14 +89,14 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
             timeout=15,
         )
     except httpx.HTTPError as e:
-        log.error(f"Azure token exchange failed: {e}")
+        logger.error(f"Azure token exchange failed: {e}")
         return RedirectResponse("/")
     if resp.status_code != 200:
         return RedirectResponse("/")
     tokens = resp.json()
     access_token = tokens.get("access_token")
     if not access_token:
-        log.error("Azure token response missing access_token")
+        logger.error("Azure token response missing access_token")
         return RedirectResponse("/")
 
 
@@ -111,10 +111,10 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
             timeout=10,
         )
         if me.status_code != 200:
-            log.error(f"Graph /me returned {me.status_code}")
+            logger.error(f"Graph /me returned {me.status_code}")
             return RedirectResponse("/")
     except httpx.HTTPError as e:
-        log.error(f"Graph /me request failed: {e}")
+        logger.error(f"Graph /me request failed: {e}")
         return RedirectResponse("/")
     profile = me.json()
     email = (
@@ -133,7 +133,7 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
     # Bootstrap admin: auto-promote users in admin_emails env var
     if user.email.lower() in settings.admin_emails and user.role != "admin":
         user.role = "admin"
-        log.info(f"Auto-promoted {user.email} to admin via admin_emails bootstrap")
+        logger.info(f"Auto-promoted {user.email} to admin via admin_emails bootstrap")
 
     # Store tokens in DB (not just session) for background jobs
     user.access_token = access_token
@@ -146,7 +146,7 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
 
     # Trigger first-time backfill if user has never been scanned
     if not user.last_inbox_scan:
-        log.info(
+        logger.info(
             f"New M365 connection for {user.email} — backfill will run on next scheduler tick"
         )
 

@@ -1,6 +1,6 @@
 """Performance Tracking API — Vendor Scorecards & Buyer Leaderboard."""
 
-import logging
+from loguru import logger
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -11,7 +11,6 @@ from ..dependencies import require_user, is_admin as _is_admin
 from ..models import User
 
 router = APIRouter(tags=["performance"])
-log = logging.getLogger(__name__)
 
 
 @router.get("/api/performance/vendors")

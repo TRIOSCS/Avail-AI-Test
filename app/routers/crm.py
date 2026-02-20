@@ -1147,7 +1147,7 @@ async def create_offer(
                     requisition_id=req_id,
                 ))
     except Exception:
-        log.debug("Activity event creation failed", exc_info=True)
+        logger.debug("Activity event creation failed", exc_info=True)
 
     return {
         "id": offer.id,

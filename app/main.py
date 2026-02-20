@@ -5,7 +5,6 @@ from .logging_config import setup_logging
 setup_logging()  # Must run before any other module logs
 
 import os
-import logging
 import asyncio
 import uuid
 from contextlib import asynccontextmanager
@@ -15,13 +14,13 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
+from loguru import logger
+
 from .config import settings, APP_VERSION
 from .database import get_db
 from .models import (
     ApiSource,
 )
-
-log = logging.getLogger(__name__)
 
 # Schema managed by Alembic migrations — see alembic/ directory
 # To apply:  alembic upgrade head
@@ -52,7 +51,7 @@ async def lifespan(app):
         if not settings.azure_tenant_id:
             missing.append("AZURE_TENANT_ID")
         if missing:
-            log.warning("Missing env vars (some features disabled): %s", ", ".join(missing))
+            logger.warning("Missing env vars (some features disabled): %s", ", ".join(missing))
 
     # Sentry error tracking (conditional on DSN being set)
     if settings.sentry_dsn:
@@ -64,7 +63,7 @@ async def lifespan(app):
             environment="production" if "https" in settings.app_url else "development",
             release=APP_VERSION,
         )
-        log.info("Sentry initialized (DSN configured)")
+        logger.info("Sentry initialized (DSN configured)")
 
     run_startup_migrations()
     _seed_api_sources()
@@ -76,7 +75,7 @@ async def lifespan(app):
 
     configure_scheduler()
     scheduler.start()
-    log.info("APScheduler started")
+    logger.info("APScheduler started")
     yield
     scheduler.shutdown(wait=False)
     from .http_client import close_clients
@@ -630,13 +629,13 @@ def _seed_api_sources():
             s["name"] in existing_map for s in SOURCES
         ):
             # All sources present — skip update (descriptions only change on code update)
-            log.debug(
+            logger.debug(
                 f"API sources up to date ({len(SOURCES)} sources, hash={source_hash})"
             )
             return
 
         # Batch fetch all existing sources (1 query instead of 25+)
-        log.info(f"Seeding API sources ({len(SOURCES)} sources, hash={source_hash})")
+        logger.info(f"Seeding API sources ({len(SOURCES)} sources, hash={source_hash})")
         for src in SOURCES:
             existing = existing_map.get(src["name"])
             if existing:
@@ -660,7 +659,7 @@ def _seed_api_sources():
 
         db.commit()
     except Exception as e:
-        log.warning(f"API source seed error: {e}")
+        logger.warning(f"API source seed error: {e}")
         db.rollback()
     finally:
         db.close()

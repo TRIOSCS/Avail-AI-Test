@@ -1,7 +1,7 @@
 """Documents API — PDF generation for requisitions and quotes."""
 
 import asyncio
-import logging
+from loguru import logger
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
@@ -13,7 +13,6 @@ from ..models import User
 from ..rate_limit import limiter
 
 router = APIRouter(tags=["documents"])
-log = logging.getLogger(__name__)
 
 
 @router.get("/api/requisitions/{requisition_id}/pdf")
@@ -35,7 +34,7 @@ async def download_rfq_pdf(
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
-        log.error("PDF generation failed for requisition %d: %s", requisition_id, e)
+        logger.error("PDF generation failed for requisition %d: %s", requisition_id, e)
         raise HTTPException(500, "PDF generation failed")
 
     return Response(
@@ -64,7 +63,7 @@ async def download_quote_pdf(
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
-        log.error("PDF generation failed for quote %d: %s", quote_id, e)
+        logger.error("PDF generation failed for quote %d: %s", quote_id, e)
         raise HTTPException(500, "PDF generation failed")
 
     return Response(

@@ -1,6 +1,6 @@
 """Enrichment API — review queue, backfill jobs, on-demand enrichment, stats."""
 
-import logging
+from loguru import logger
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -26,7 +26,6 @@ from ..schemas.enrichment import (
 )
 
 router = APIRouter(tags=["enrichment"])
-log = logging.getLogger(__name__)
 
 
 # ── Queue endpoints ──────────────────────────────────────────────────
@@ -523,11 +522,11 @@ def api_backfill_emails(
         db.commit()
     except Exception as e:
         db.rollback()
-        log.error("Email backfill commit failed: %s", e)
+        logger.error("Email backfill commit failed: %s", e)
         raise HTTPException(500, f"Backfill failed: {e}")
 
     total = activity_log_created + vendor_card_created + brokerbin_created
-    log.info(
+    logger.info(
         "Email backfill complete: %d total (%d activity_log, %d vendor_card, %d brokerbin)",
         total, activity_log_created, vendor_card_created, brokerbin_created,
     )
@@ -640,10 +639,10 @@ async def api_deep_email_scan(
         db.commit()
     except Exception as e:
         db.rollback()
-        log.error("Deep scan commit failed for user %s: %s", target_user.email, e)
+        logger.error("Deep scan commit failed for user %s: %s", target_user.email, e)
         raise HTTPException(500, f"Deep scan failed: {e}")
 
-    log.info("Deep email scan for %s: %d contacts created", target_user.email, contacts_created)
+    logger.info("Deep email scan for %s: %d contacts created", target_user.email, contacts_created)
     return {
         "messages_scanned": results.get("messages_scanned", 0),
         "contacts_created": contacts_created,

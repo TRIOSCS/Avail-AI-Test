@@ -23,16 +23,15 @@ Job overview:
 
 import asyncio
 import base64
-import logging
 from datetime import datetime, timezone, timedelta
+
+from loguru import logger
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
 
 from .http_client import http
-
-log = logging.getLogger(__name__)
 
 # Global scheduler instance
 scheduler = AsyncIOScheduler(
@@ -93,7 +92,7 @@ async def refresh_user_token(user, db) -> str | None:
     if not result:
         user.m365_connected = False
         db.commit()
-        log.warning(f"Token refresh failed for {user.email}")
+        logger.warning(f"Token refresh failed for {user.email}")
         return None
 
     access_token, new_refresh = result
@@ -103,7 +102,7 @@ async def refresh_user_token(user, db) -> str | None:
     if new_refresh:
         user.refresh_token = new_refresh
     db.commit()
-    log.info(f"Token refreshed for {user.email}")
+    logger.info(f"Token refreshed for {user.email}")
     return access_token
 
 
@@ -130,14 +129,14 @@ async def _refresh_access_token(
         )
 
         if r.status_code != 200:
-            log.warning(f"Token refresh failed: {r.status_code} — {r.text[:200]}")
+            logger.warning(f"Token refresh failed: {r.status_code} — {r.text[:200]}")
             return None
 
         tokens = r.json()
         return (tokens.get("access_token"), tokens.get("refresh_token"))
 
     except Exception as e:
-        log.warning(f"Token refresh error: {e}")
+        logger.warning(f"Token refresh error: {e}")
         return None
 
 
@@ -204,7 +203,7 @@ def configure_scheduler():
                       id="cache_cleanup", name="Cache cleanup")
 
     job_count = len(scheduler.get_jobs())
-    log.info(f"APScheduler configured with {job_count} jobs")
+    logger.info(f"APScheduler configured with {job_count} jobs")
 
 
 # ── Individual Job Functions ───────────────────────────────────────────
@@ -230,9 +229,9 @@ async def _job_auto_archive():
         )
         if archived_count:
             db.commit()
-            log.info(f"Auto-archived {archived_count} stale requisition(s)")
+            logger.info(f"Auto-archived {archived_count} stale requisition(s)")
     except Exception as e:
-        log.error(f"Auto-archive error: {e}")
+        logger.error(f"Auto-archive error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -264,12 +263,12 @@ async def _job_token_refresh():
             try:
                 await refresh_user_token(user, db)
             except Exception as e:
-                log.error(f"Token refresh error for {user.email}: {e}")
+                logger.error(f"Token refresh error for {user.email}: {e}")
 
         if users_to_refresh:
             await asyncio.gather(*[_safe_refresh(u) for u in users_to_refresh])
     except Exception as e:
-        log.error(f"Token refresh job error: {e}")
+        logger.error(f"Token refresh job error: {e}")
     finally:
         db.close()
 
@@ -308,11 +307,11 @@ async def _job_inbox_scan():
                 try:
                     await asyncio.wait_for(_scan_user_inbox(user, db), timeout=90)
                 except asyncio.TimeoutError:
-                    log.error(f"Inbox scan TIMEOUT for {user.email} (90s) — skipping")
+                    logger.error(f"Inbox scan TIMEOUT for {user.email} (90s) — skipping")
                     user.m365_error_reason = "Inbox scan timed out"
                     db.commit()
                 except Exception as e:
-                    log.error(f"Inbox scan error for {user.email}: {e}")
+                    logger.error(f"Inbox scan error for {user.email}: {e}")
                     user.m365_error_reason = str(e)[:200]
                     db.commit()
                     db.rollback()
@@ -320,7 +319,7 @@ async def _job_inbox_scan():
         if users_to_scan:
             await asyncio.gather(*[_safe_scan(u) for u in users_to_scan])
     except Exception as e:
-        log.error(f"Inbox scan job error: {e}")
+        logger.error(f"Inbox scan job error: {e}")
     finally:
         db.close()
 
@@ -334,12 +333,12 @@ async def _job_batch_results():
         from .email_service import process_batch_results
         batch_applied = await asyncio.wait_for(process_batch_results(db), timeout=120)
         if batch_applied:
-            log.info(f"Batch processing: {batch_applied} results applied")
+            logger.info(f"Batch processing: {batch_applied} results applied")
     except asyncio.TimeoutError:
-        log.error("Batch results processing timed out (120s)")
+        logger.error("Batch results processing timed out (120s)")
         db.rollback()
     except Exception as e:
-        log.error(f"Batch results processing error: {e}")
+        logger.error(f"Batch results processing error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -367,11 +366,11 @@ async def _job_contacts_sync():
                 try:
                     await _sync_user_contacts(user, db)
                 except Exception as e:
-                    log.warning(f"Contacts sync failed for {user.email}: {e}")
+                    logger.warning(f"Contacts sync failed for {user.email}: {e}")
                     db.rollback()
                     continue
     except Exception as e:
-        log.error(f"Contacts sync job error: {e}")
+        logger.error(f"Contacts sync job error: {e}")
     finally:
         db.close()
 
@@ -402,7 +401,7 @@ async def _job_engagement_scoring():
         if should_compute:
             await _compute_engagement_scores_job(db)
     except Exception as e:
-        log.error(f"Engagement scoring error: {e}")
+        logger.error(f"Engagement scoring error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -421,7 +420,7 @@ async def _job_webhook_subscriptions():
         await renew_expiring_subscriptions(db)
         await ensure_all_users_subscribed(db)
     except Exception as e:
-        log.error(f"Webhook subscription error: {e}")
+        logger.error(f"Webhook subscription error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -436,7 +435,7 @@ async def _job_ownership_sweep():
         from .services.ownership_service import run_ownership_sweep
         await run_ownership_sweep(db)
     except Exception as e:
-        log.error(f"Ownership sweep error: {e}")
+        logger.error(f"Ownership sweep error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -457,7 +456,7 @@ async def _job_routing_expiration():
         if expired_assignments or expired_offers:
             db.commit()
     except Exception as e:
-        log.error(f"Routing expiration error: {e}")
+        logger.error(f"Routing expiration error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -481,12 +480,12 @@ async def _job_po_verification():
             try:
                 await verify_po_sent(plan, db)
             except Exception as e:
-                log.error(f"PO verify error for plan {plan.id}: {e}")
+                logger.error(f"PO verify error for plan {plan.id}: {e}")
 
         if unverified_plans:
             await asyncio.gather(*[_safe_verify(p) for p in unverified_plans])
     except Exception as e:
-        log.error(f"PO verification scan error: {e}")
+        logger.error(f"PO verification scan error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -501,9 +500,9 @@ async def _job_stock_autocomplete():
         from .services.buyplan_service import auto_complete_stock_sales
         completed = auto_complete_stock_sales(db)
         if completed:
-            log.info(f"Stock sale auto-complete: {completed} plan(s) completed")
+            logger.info(f"Stock sale auto-complete: {completed} plan(s) completed")
     except Exception as e:
-        log.error(f"Stock sale auto-complete error: {e}")
+        logger.error(f"Stock sale auto-complete error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -518,11 +517,11 @@ async def _job_proactive_matching():
         from .services.proactive_service import scan_new_offers_for_matches
         result = scan_new_offers_for_matches(db)
         if result.get("matches_created"):
-            log.info(
+            logger.info(
                 f"Proactive matching: {result['matches_created']} new matches from {result['scanned']} offers"
             )
     except Exception as e:
-        log.error(f"Proactive matching error: {e}")
+        logger.error(f"Proactive matching error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -542,13 +541,13 @@ async def _job_performance_tracking():
 
         loop = asyncio.get_running_loop()
         vs_result = await loop.run_in_executor(None, compute_all_vendor_scorecards, db)
-        log.info(
+        logger.info(
             f"Vendor scorecards: {vs_result['updated']} updated, "
             f"{vs_result['skipped_cold_start']} cold-start"
         )
         current_month = now.date().replace(day=1)
         bl_result = await loop.run_in_executor(None, compute_buyer_leaderboard, db, current_month)
-        log.info(
+        logger.info(
             f"Buyer leaderboard: {bl_result['entries']} entries for {current_month}"
         )
         # Recompute previous month during grace period (first 7 days)
@@ -556,7 +555,7 @@ async def _job_performance_tracking():
             prev_month = (current_month - timedelta(days=1)).replace(day=1)
             await loop.run_in_executor(None, compute_buyer_leaderboard, db, prev_month)
     except Exception as e:
-        log.error(f"Performance tracking error: {e}")
+        logger.error(f"Performance tracking error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -611,20 +610,20 @@ async def _job_deep_email_mining():
 
                     user.last_deep_email_scan = now
                     db.commit()
-                    log.info(
+                    logger.info(
                         f"Deep email scan [{user.email}]: {scan_result.get('messages_scanned', 0)} msgs, "
                         f"{scan_result.get('contacts_found', 0)} contacts"
                     )
                 except asyncio.TimeoutError:
-                    log.warning(f"Deep email scan TIMEOUT for {user.email}")
+                    logger.warning(f"Deep email scan TIMEOUT for {user.email}")
                 except Exception as e:
-                    log.error(f"Deep email scan error for {user.email}: {e}")
+                    logger.error(f"Deep email scan error for {user.email}: {e}")
                     db.rollback()
 
         if users_to_scan:
             await asyncio.gather(*[_safe_deep_scan(u) for u in users_to_scan])
     except Exception as e:
-        log.error(f"Deep email mining error: {e}")
+        logger.error(f"Deep email mining error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -682,7 +681,7 @@ async def _job_deep_enrichment():
                 await deep_enrich_vendor(vid, db)
                 db.commit()  # release savepoint
             except Exception as e:
-                log.warning(f"Enrichment sweep vendor {vid} error: {e}")
+                logger.warning(f"Enrichment sweep vendor {vid} error: {e}")
                 db.rollback()  # rollback to savepoint only
 
         async def _safe_enrich_company(cid):
@@ -691,7 +690,7 @@ async def _job_deep_enrichment():
                 await deep_enrich_company(cid, db)
                 db.commit()  # release savepoint
             except Exception as e:
-                log.warning(f"Enrichment sweep company {cid} error: {e}")
+                logger.warning(f"Enrichment sweep company {cid} error: {e}")
                 db.rollback()  # rollback to savepoint only
 
         all_vendor_ids = [vid for (vid,) in stale_vendors] + [vid for (vid,) in recent_vendors]
@@ -713,12 +712,12 @@ async def _job_deep_enrichment():
                 timeout=300,
             )
 
-        log.info(
+        logger.info(
             f"Deep enrichment sweep: {len(stale_vendors)} vendors, "
             f"{len(recent_vendors)} new vendors, {len(stale_companies)} companies"
         )
     except Exception as e:
-        log.error(f"Deep enrichment sweep error: {e}")
+        logger.error(f"Deep enrichment sweep error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -730,7 +729,7 @@ async def _job_cache_cleanup():
         from .cache.intel_cache import cleanup_expired
         cleanup_expired()
     except Exception as e:
-        log.error(f"Cache cleanup error: {e}")
+        logger.error(f"Cache cleanup error: {e}")
 
 
 # ── Inbox Scanning ──────────────────────────────────────────────────────
@@ -743,7 +742,7 @@ async def _scan_user_inbox(user, db):
 
     is_backfill = user.last_inbox_scan is None
     if is_backfill:
-        log.info(
+        logger.info(
             f"First-time inbox backfill for {user.email} ({settings.inbox_backfill_days} days)"
         )
 
@@ -751,7 +750,7 @@ async def _scan_user_inbox(user, db):
     try:
         token = await get_valid_token(user, db)
         if not token:
-            log.warning(f"Skipping inbox poll for {user.email} — no valid token")
+            logger.warning(f"Skipping inbox poll for {user.email} — no valid token")
             return
         new_responses = await poll_inbox(
             token=token,
@@ -759,28 +758,28 @@ async def _scan_user_inbox(user, db):
             scanned_by_user_id=user.id,
         )
         if new_responses:
-            log.info(f"Inbox scan [{user.email}]: {len(new_responses)} new responses")
+            logger.info(f"Inbox scan [{user.email}]: {len(new_responses)} new responses")
     except Exception as e:
-        log.error(f"Inbox poll failed for {user.email}: {e}")
+        logger.error(f"Inbox poll failed for {user.email}: {e}")
 
     # Run independent sub-operations in parallel
     async def _safe_stock_scan():
         try:
             await _scan_stock_list_attachments(user, db, is_backfill)
         except Exception as e:
-            log.error(f"Stock list scan failed for {user.email}: {e}")
+            logger.error(f"Stock list scan failed for {user.email}: {e}")
 
     async def _safe_mine_contacts():
         try:
             await _mine_vendor_contacts(user, db, is_backfill)
         except Exception as e:
-            log.error(f"Vendor mining failed for {user.email}: {e}")
+            logger.error(f"Vendor mining failed for {user.email}: {e}")
 
     async def _safe_outbound_scan():
         try:
             await _scan_outbound_rfqs(user, db, is_backfill)
         except Exception as e:
-            log.error(f"Outbound scan failed for {user.email}: {e}")
+            logger.error(f"Outbound scan failed for {user.email}: {e}")
 
     await asyncio.gather(
         _safe_stock_scan(),
@@ -806,7 +805,7 @@ async def _scan_stock_list_attachments(user, db, is_backfill: bool = False):
     if not stock_emails:
         return
 
-    log.info(
+    logger.info(
         f"Stock list scan [{user.email}]: found {len(stock_emails)} emails with attachments"
     )
 
@@ -823,7 +822,7 @@ async def _scan_stock_list_attachments(user, db, is_backfill: bool = False):
                     vendor_email=email_info.get("from_email", ""),
                 )
             except Exception as e:
-                log.error(f"Stock list import failed [{att_info.get('filename')}]: {e}")
+                logger.error(f"Stock list import failed [{att_info.get('filename')}]: {e}")
 
 
 async def _download_and_import_stock_list(
@@ -854,11 +853,11 @@ async def _download_and_import_stock_list(
             f"/me/messages/{message_id}/attachments/{attachment_id}"
         )
     except Exception as e:
-        log.warning(f"Attachment download failed: {e}")
+        logger.warning(f"Attachment download failed: {e}")
         return
 
     if not att_data or "error" in att_data:
-        log.warning(f"Attachment download error: {att_data}")
+        logger.warning(f"Attachment download error: {att_data}")
         return
 
     content_bytes = att_data.get("contentBytes")
@@ -872,7 +871,7 @@ async def _download_and_import_stock_list(
 
     is_valid, detected_type = validate_file(file_bytes, filename)
     if not is_valid:
-        log.warning(f"File validation failed for {filename}: detected {detected_type}")
+        logger.warning(f"File validation failed for {filename}: detected {detected_type}")
         return
 
     # Parse the file — use new AI-powered parser (Upgrade 2), fallback to legacy
@@ -883,11 +882,11 @@ async def _download_and_import_stock_list(
             file_bytes, filename, vendor_domain=vendor_domain, db=db
         )
     except Exception as e:
-        log.warning(f"AI attachment parser failed, using legacy parser: {e}")
+        logger.warning(f"AI attachment parser failed, using legacy parser: {e}")
         rows = _parse_stock_file(file_bytes, filename)
 
     if not rows:
-        log.info(f"No valid rows in {filename}")
+        logger.info(f"No valid rows in {filename}")
         return
 
     # Phase 2B: Classify sender — stock list (vendor) vs excess list (customer)
@@ -901,7 +900,7 @@ async def _download_and_import_stock_list(
         if sender_match and sender_match["type"] == "company":
             is_excess_list = True
             source_company_id = sender_match["id"]
-            log.info(
+            logger.info(
                 f"Excess list detected from company '{sender_match['name']}' ({vendor_email}): {filename}"
             )
 
@@ -949,7 +948,7 @@ async def _download_and_import_stock_list(
                 db.flush()
                 card_map[mpn] = card
             except Exception as e:
-                log.debug(f"MaterialCard flush conflict for '{mpn}': {e}")
+                logger.debug(f"MaterialCard flush conflict for '{mpn}': {e}")
                 db.rollback()
                 continue
 
@@ -982,9 +981,9 @@ async def _download_and_import_stock_list(
     try:
         db.commit()
         list_type = "excess list" if is_excess_list else "stock list"
-        log.info(f"Auto-imported {imported} parts from {list_type} {filename} ({vendor_name})")
+        logger.info(f"Auto-imported {imported} parts from {list_type} {filename} ({vendor_name})")
     except Exception as e:
-        log.error(f"Stock list commit failed: {e}")
+        logger.error(f"Stock list commit failed: {e}")
         db.rollback()
         return
 
@@ -1016,7 +1015,7 @@ async def _download_and_import_stock_list(
                     vendor_name=vendor_name,
                 )
     except Exception as e:
-        log.debug(f"Teams stock match check skipped: {e}")
+        logger.debug(f"Teams stock match check skipped: {e}")
 
 
 def _parse_stock_file(file_bytes: bytes, filename: str) -> list[dict]:
@@ -1085,7 +1084,7 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
                 db.flush()
                 card_map[norm] = card
             except Exception as e:
-                log.debug(f"VendorCard flush conflict for '{norm}': {e}")
+                logger.debug(f"VendorCard flush conflict for '{norm}': {e}")
                 db.rollback()
                 continue
 
@@ -1099,9 +1098,9 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
     try:
         db.commit()
         if enriched:
-            log.info(f"Contact mining [{user.email}]: enriched {enriched} contacts")
+            logger.info(f"Contact mining [{user.email}]: enriched {enriched} contacts")
     except Exception as e:
-        log.error(f"Contact mining commit failed for {user.email}: {e}")
+        logger.error(f"Contact mining commit failed for {user.email}: {e}")
         db.rollback()
 
 
@@ -1158,11 +1157,11 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
     try:
         db.commit()
         if updated:
-            log.info(
+            logger.info(
                 f"Outbound scan [{user.email}]: {rfqs} RFQs, {updated} vendor cards updated"
             )
     except Exception as e:
-        log.error(f"Outbound scan commit failed for {user.email}: {e}")
+        logger.error(f"Outbound scan commit failed for {user.email}: {e}")
         db.rollback()
 
 
@@ -1178,11 +1177,11 @@ async def _compute_engagement_scores_job(db):
 
     try:
         result = await compute_all_engagement_scores(db)
-        log.info(
+        logger.info(
             f"Engagement scoring complete: {result['updated']} updated, {result['skipped']} skipped"
         )
     except Exception as e:
-        log.error(f"Engagement scoring failed: {e}")
+        logger.error(f"Engagement scoring failed: {e}")
 
 
 # ── Contacts Sync (Outlook → VendorCards) ───────────────────────────────
@@ -1211,7 +1210,7 @@ async def _sync_user_contacts(user, db):
             max_items=2500,
         )
     except Exception as e:
-        log.warning(f"Contacts sync failed for {user.email}: {e}")
+        logger.warning(f"Contacts sync failed for {user.email}: {e}")
         return
 
     enriched = 0
@@ -1247,7 +1246,7 @@ async def _sync_user_contacts(user, db):
                 db.flush()
                 sync_card_map[norm] = card
             except Exception as e:
-                log.debug(f"VendorCard flush conflict for '{norm}': {e}")
+                logger.debug(f"VendorCard flush conflict for '{norm}': {e}")
                 db.rollback()
                 continue
 
@@ -1267,9 +1266,9 @@ async def _sync_user_contacts(user, db):
     try:
         user.last_contacts_sync = datetime.now(timezone.utc)
         db.commit()
-        log.info(
+        logger.info(
             f"Contacts sync [{user.email}]: {len(contacts)} contacts, {enriched} new emails"
         )
     except Exception as e:
-        log.error(f"Contacts sync commit failed: {e}")
+        logger.error(f"Contacts sync commit failed: {e}")
         db.rollback()

@@ -18,7 +18,7 @@ Depends on: models, dependencies, vendor_utils, config
 import asyncio
 from datetime import datetime, timezone
 import ipaddress
-import logging
+from loguru import logger
 import re
 import socket
 
@@ -59,8 +59,6 @@ from ..models import (
 )
 from ..vendor_utils import normalize_vendor_name
 from ..utils.normalization import normalize_mpn_key
-
-log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["vendors"])
 
@@ -116,7 +114,7 @@ async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str)
             if card:
                 apply_enrichment_to_vendor(card, enrichment)
                 db.commit()
-                log.info(
+                logger.info(
                     "Background enrichment completed for vendor %s (card %d): %s",
                     vendor_name,
                     card_id,
@@ -125,14 +123,14 @@ async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str)
         finally:
             db.close()
     except Exception:
-        log.exception("Background enrichment failed for vendor card %d", card_id)
+        logger.exception("Background enrichment failed for vendor card %d", card_id)
 
     # Also run AI material analysis if vendor has sighting data
     if get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         try:
             await _analyze_vendor_materials(card_id)
         except Exception:
-            log.exception(
+            logger.exception(
                 "Background material analysis failed for vendor card %d", card_id
             )
 
@@ -605,7 +603,7 @@ async def scrape_website_contacts(url: str) -> dict:
 
     loop = asyncio.get_running_loop()
     if await loop.run_in_executor(None, is_private_url, url):
-        log.warning(f"SSRF blocked: {url}")
+        logger.warning(f"SSRF blocked: {url}")
         return {"emails": [], "phones": []}
 
     pages_to_try = [url + "/contact", url + "/contact-us", url]
@@ -706,7 +704,7 @@ async def lookup_vendor_contact(
 
     # TIER 2: Website scrape (free, ~1-2 sec)
     if card.website:
-        log.info(f"Tier 2: Scraping {card.website} for {vendor_name}")
+        logger.info(f"Tier 2: Scraping {card.website} for {vendor_name}")
         try:
             scraped = await scrape_website_contacts(card.website)
             if scraped["emails"] or scraped["phones"]:
@@ -725,7 +723,7 @@ async def lookup_vendor_contact(
                         "tier": 2,
                     }
         except Exception as e:
-            log.warning(f"Tier 2 scrape failed for {vendor_name}: {e}")
+            logger.warning(f"Tier 2 scrape failed for {vendor_name}: {e}")
 
     # TIER 3: AI lookup (expensive, last resort)
     if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
@@ -740,7 +738,7 @@ async def lookup_vendor_contact(
             "error": "No API key configured",
         }
 
-    log.info(f"Tier 3: AI lookup for {vendor_name}")
+    logger.info(f"Tier 3: AI lookup for {vendor_name}")
     try:
         website_hint = f" Their website may be {card.website}." if card.website else ""
 
@@ -807,7 +805,7 @@ async def lookup_vendor_contact(
         }
 
     except Exception as e:
-        log.warning(f"Tier 3 AI lookup failed for {vendor_name}: {e}")
+        logger.warning(f"Tier 3 AI lookup failed for {vendor_name}: {e}")
         return {
             "vendor_name": vendor_name,
             "emails": card.emails or [],
@@ -1794,7 +1792,7 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
         card.material_tags_updated_at = datetime.now(timezone.utc)
         db.commit()
 
-        log.info(
+        logger.info(
             "Material tags updated for vendor %s (card %d): %d brands, %d commodities",
             card.display_name,
             card_id,
@@ -1802,7 +1800,7 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
             len(card.commodity_tags),
         )
     except Exception:
-        log.exception("Material analysis failed for vendor card %d", card_id)
+        logger.exception("Material analysis failed for vendor card %d", card_id)
         if own_session:
             db.rollback()
     finally:

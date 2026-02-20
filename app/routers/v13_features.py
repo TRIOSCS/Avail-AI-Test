@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
-from loguru import logger as log
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -65,7 +65,7 @@ async def graph_webhook(request: Request, db: Session = Depends(get_db)):
     try:
         await handle_notification(payload, db)
     except Exception as e:
-        log.error(f"Webhook notification error: {e}")
+        logger.error(f"Webhook notification error: {e}")
     return {"status": "accepted"}
 
 
@@ -732,7 +732,7 @@ async def create_routing(
 
         await notify_routing_assignment(assignment, db)
     except Exception as e:
-        log.error(f"Routing notification error: {e}")
+        logger.error(f"Routing notification error: {e}")
 
     from app.services.routing_service import get_assignment_details
 
@@ -767,7 +767,7 @@ async def reload_routing_maps_endpoint(user: User = Depends(require_user)):
     try:
         load_routing_maps()
     except Exception as exc:
-        log.error(f"Failed to reload routing maps: {exc}")
+        logger.error(f"Failed to reload routing maps: {exc}")
         raise HTTPException(500, f"Reload failed: {exc}")
     return {
         "status": "reloaded",

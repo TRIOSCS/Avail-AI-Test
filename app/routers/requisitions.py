@@ -15,7 +15,7 @@ Depends on: models, search_service, file_utils, scoring, vendor_utils
 """
 
 import asyncio
-import logging
+from loguru import logger
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
@@ -59,7 +59,7 @@ from ..models import (
     VendorResponse,
 )
 
-log = logging.getLogger(__name__)
+
 
 router = APIRouter(tags=["requisitions"])
 
@@ -456,7 +456,7 @@ async def add_requirements(
                     requisition_id=req_id,
                 ))
     except Exception:
-        log.debug("Activity event creation failed", exc_info=True)
+        logger.debug("Activity event creation failed", exc_info=True)
 
     return [{"id": r.id, "primary_mpn": r.primary_mpn} for r in created]
 
@@ -641,7 +641,7 @@ async def search_all(
         body = await request.json()
         requirement_ids = body.get("requirement_ids")
     except Exception:
-        log.debug("JSON body parse failed, searching all requirements", exc_info=True)
+        logger.debug("JSON body parse failed, searching all requirements", exc_info=True)
 
     # Filter requirements to search
     reqs_to_search = [
@@ -656,7 +656,7 @@ async def search_all(
     results = {}
     for r, sightings in zip(reqs_to_search, search_results):
         if isinstance(sightings, Exception):
-            log.error(f"Search failed for requirement {r.id}: {sightings}")
+            logger.error(f"Search failed for requirement {r.id}: {sightings}")
             sightings = []
         label = r.primary_mpn or f"Req #{r.id}"
         results[str(r.id)] = {"label": label, "sightings": sightings}

@@ -14,7 +14,7 @@ Called by: main.py (router mount)
 Depends on: services/email_threads.py, email_service.py, dependencies.py
 """
 
-import logging
+from loguru import logger
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
@@ -32,8 +32,6 @@ from ..services.email_threads import (
     fetch_threads_for_requirement,
     fetch_threads_for_vendor,
 )
-
-log = logging.getLogger("avail.email_router")
 
 router = APIRouter(tags=["emails"])
 
@@ -60,7 +58,7 @@ async def list_requirement_emails(
         )
         return EmailThreadListResponse(threads=threads).model_dump()
     except Exception as e:
-        log.error(f"Failed to fetch threads for requirement {requirement_id}: {e}")
+        logger.error(f"Failed to fetch threads for requirement {requirement_id}: {e}")
         return EmailThreadListResponse(
             threads=[],
             error="Could not load emails — please try again",
@@ -87,7 +85,7 @@ async def get_thread_messages(
         messages = await fetch_thread_messages(conversation_id, token)
         return EmailThreadMessagesResponse(messages=messages).model_dump()
     except Exception as e:
-        log.error(f"Failed to fetch thread messages: {e}")
+        logger.error(f"Failed to fetch thread messages: {e}")
         return EmailThreadMessagesResponse(
             messages=[],
             error="Could not load thread messages",
@@ -116,7 +114,7 @@ async def list_vendor_emails(
         )
         return EmailThreadListResponse(threads=threads).model_dump()
     except Exception as e:
-        log.error(f"Failed to fetch threads for vendor {vendor_card_id}: {e}")
+        logger.error(f"Failed to fetch threads for vendor {vendor_card_id}: {e}")
         return EmailThreadListResponse(
             threads=[],
             error="Could not load emails — please try again",
@@ -159,7 +157,7 @@ async def send_reply(
     except HTTPException:
         raise
     except Exception as e:
-        log.error(f"Reply send failed: {e}")
+        logger.error(f"Reply send failed: {e}")
         raise HTTPException(502, f"Failed to send reply: {str(e)[:200]}")
 
     # Invalidate cache for threads involving this conversation

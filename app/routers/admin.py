@@ -3,7 +3,7 @@
 import asyncio
 import csv
 import io
-import logging
+from loguru import logger
 import os
 from typing import Optional
 
@@ -34,7 +34,6 @@ from ..services.admin_service import (
 from ..services.credential_service import encrypt_value, decrypt_value, mask_value
 
 router = APIRouter(tags=["admin"])
-log = logging.getLogger(__name__)
 
 
 # ── Schemas ──────────────────────────────────────────────────────────
@@ -179,7 +178,7 @@ def api_get_credentials(
                     "source": "db",
                 }
             except Exception:
-                log.warning("Credential decryption failed for %s", var_name, exc_info=True)
+                logger.warning("Credential decryption failed for %s", var_name, exc_info=True)
                 result[var_name] = {"status": "error", "masked": "", "source": "db"}
         elif os.getenv(var_name):
             result[var_name] = {
@@ -218,7 +217,7 @@ def api_set_credentials(
             updated.append(var_name)
     src.credentials = creds
     db.commit()
-    log.info(f"Credentials updated for {src.name} by {user.email}: {updated}")
+    logger.info(f"Credentials updated for {src.name} by {user.email}: {updated}")
     return {"status": "ok", "updated": updated}
 
 
@@ -237,7 +236,7 @@ def api_delete_credential(
     removed = creds.pop(var_name, None)
     src.credentials = creds
     db.commit()
-    log.info(f"Credential {var_name} removed from {src.name} by {user.email}")
+    logger.info(f"Credential {var_name} removed from {src.name} by {user.email}")
     return {"status": "removed" if removed else "not_found"}
 
 
@@ -531,7 +530,7 @@ def api_set_teams_config(
     if body.hot_threshold is not None:
         _upsert_config(db, "teams_hot_threshold", str(body.hot_threshold), user.email)
     db.commit()
-    log.info(f"Teams config updated by {user.email}: team={body.team_id}, channel={body.channel_id}, enabled={body.enabled}")
+    logger.info(f"Teams config updated by {user.email}: team={body.team_id}, channel={body.channel_id}, enabled={body.enabled}")
     return {"status": "saved"}
 
 
