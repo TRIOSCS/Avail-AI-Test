@@ -9,14 +9,11 @@ Called by: pytest
 Depends on: routers/vendors.py
 """
 
-from types import SimpleNamespace
 from datetime import datetime, timezone
-from unittest.mock import patch, MagicMock
-
-import pytest
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from app.routers.vendors import card_to_dict, get_or_create_card
-
 
 # ── Stub factories ───────────────────────────────────────────────────────
 
@@ -174,7 +171,7 @@ def test_clean_phones_filters_short():
 
 def test_clean_phones_deduplicates():
     """Same digits in different formats are deduped."""
-    raw = ["+1-555-0100", "15550100", "(555) 010-0"]
+    raw = ["+1-555-0100", "1-555-0100", "15550100"]
     result = clean_phones(raw)
     assert len(result) == 1
 
@@ -252,10 +249,9 @@ def test_material_card_to_dict_no_history():
 
 # ── Contact cleaning tests ───────────────────────────────────────────────
 
-from app.routers.vendors import clean_emails, clean_phones, is_private_url
 
 
-def test_clean_emails_filters_junk():
+def test_clean_emails_filters_junk_extended():
     """Removes junk emails: noreply, image files, known bad domains."""
     raw = [
         "sales@acme.com",
@@ -273,12 +269,12 @@ def test_clean_emails_filters_junk():
     assert len(result) == 1  # only sales@acme.com survives
 
 
-def test_clean_emails_deduplicates():
+def test_clean_emails_deduplicates_case():
     raw = ["a@b.com", "A@B.COM", "a@b.com"]
     assert clean_emails(raw) == ["a@b.com"]
 
 
-def test_clean_phones_filters_short():
+def test_clean_phones_filters_short_extended():
     """Rejects numbers with fewer than 7 digits."""
     raw = ["+1-555-0100", "123", "+44 20 7946 0958", ""]
     result = clean_phones(raw)
@@ -288,19 +284,19 @@ def test_clean_phones_filters_short():
     assert len(result) == 2
 
 
-def test_clean_phones_deduplicates():
+def test_clean_phones_deduplicates_formats():
     """Same digits in different formats = one entry."""
     raw = ["+1-555-0100", "1-555-0100", "(1) 555-0100"]
     result = clean_phones(raw)
     assert len(result) == 1  # all resolve to digits "15550100"
 
 
-def test_is_private_url_blocks_localhost():
+def test_is_private_url_blocks_localhost_variants():
     assert is_private_url("http://localhost/contact") is True
     assert is_private_url("http://127.0.0.1/api") is True
 
 
-def test_is_private_url_blocks_empty():
+def test_is_private_url_blocks_empty_malformed():
     assert is_private_url("") is True
     assert is_private_url("not-a-url") is True
 

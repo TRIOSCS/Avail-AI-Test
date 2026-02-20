@@ -1,6 +1,7 @@
 """Tests for element14/Newark connector — parse logic and error handling."""
 
 import pytest
+
 from app.connectors.element14 import Element14Connector
 
 

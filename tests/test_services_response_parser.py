@@ -8,20 +8,20 @@ Called by: pytest
 Depends on: app/services/response_parser.py
 """
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.services.response_parser import (
-    should_auto_apply,
-    should_flag_review,
-    extract_draft_offers,
-    _clean_email_body,
-    _normalize_parsed_parts,
-    _cross_validate,
     CONFIDENCE_AUTO,
     CONFIDENCE_REVIEW,
+    _clean_email_body,
+    _cross_validate,
+    _normalize_parsed_parts,
+    extract_draft_offers,
+    should_auto_apply,
+    should_flag_review,
 )
-
 
 # ── Confidence threshold tests ──────────────────────────────────────
 

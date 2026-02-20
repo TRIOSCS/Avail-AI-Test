@@ -10,29 +10,30 @@ Depends on: models, database
 
 import hashlib
 import logging
-from datetime import datetime, date, timezone, timedelta
+from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import func as sqlfunc, and_, or_
+from sqlalchemy import and_, or_
+from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
 from ..models import (
+    ActivityLog,
+    BuyerLeaderboardSnapshot,
+    BuyPlan,
+    Company,
+    Contact,
+    CustomerSite,
+    Offer,
+    ProactiveOffer,
+    Quote,
+    Requisition,
+    SiteContact,
+    StockListHash,
     User,
     VendorCard,
-    VendorReview,
-    Contact,
-    VendorResponse,
-    Offer,
-    Quote,
-    BuyPlan,
     VendorMetricsSnapshot,
-    BuyerLeaderboardSnapshot,
-    StockListHash,
-    Company,
-    CustomerSite,
-    SiteContact,
-    ActivityLog,
-    Requisition,
-    ProactiveOffer,
+    VendorResponse,
+    VendorReview,
 )
 
 log = logging.getLogger("avail.performance")
@@ -367,7 +368,8 @@ def get_vendor_scorecard_list(
     search: str | None = None,
 ) -> dict:
     """Return paginated vendor scorecards with latest snapshot."""
-    from sqlalchemy import desc as sql_desc, asc as sql_asc
+    from sqlalchemy import asc as sql_asc
+    from sqlalchemy import desc as sql_desc
 
     # Subquery: latest snapshot date per vendor
     latest_sq = (

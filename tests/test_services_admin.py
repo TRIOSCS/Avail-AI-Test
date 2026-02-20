@@ -10,17 +10,16 @@ Depends on: app/services/admin_service.py, conftest.py
 
 from datetime import datetime, timezone
 
-from app.models import User, SystemConfig, Requisition, Company, VendorCard
+from app.models import SystemConfig
 from app.services.admin_service import (
-    list_users,
-    update_user,
+    VALID_ROLES,
     get_all_config,
-    set_config_value,
     get_scoring_weights,
     get_system_health,
-    VALID_ROLES,
+    list_users,
+    set_config_value,
+    update_user,
 )
-
 
 # ── Helpers ─────────────────────────────────────────────────────────
 

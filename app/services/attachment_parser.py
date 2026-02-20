@@ -263,6 +263,7 @@ def _parse_excel(file_bytes: bytes) -> tuple[list[str], list[list[str]]]:
 def _parse_csv(file_bytes: bytes, filename: str) -> tuple[list[str], list[list[str]]]:
     """Parse CSV/TSV file with encoding detection, return (headers, rows)."""
     import csv
+
     from app.utils.file_validation import detect_encoding
 
     encoding = detect_encoding(file_bytes)
@@ -292,15 +293,15 @@ def _parse_csv(file_bytes: bytes, filename: str) -> tuple[list[str], list[list[s
 def _extract_row(row: list[str], mapping: dict[int, str]) -> dict | None:
     """Extract a single row using the column mapping. Returns dict or None if no MPN."""
     from app.utils.normalization import (
-        normalize_mpn,
-        normalize_price,
-        normalize_quantity,
+        detect_currency,
         normalize_condition,
         normalize_date_code,
         normalize_lead_time,
-        normalize_packaging,
-        detect_currency,
         normalize_moq,
+        normalize_mpn,
+        normalize_packaging,
+        normalize_price,
+        normalize_quantity,
     )
 
     result = {}
@@ -358,7 +359,7 @@ async def parse_attachment(
 
     Returns: List of dicts with normalized electronic component fields.
     """
-    from app.utils.file_validation import validate_file, file_fingerprint
+    from app.utils.file_validation import file_fingerprint, validate_file
 
     # H3: Validate file type
     is_valid, detected_type = validate_file(file_bytes, filename)

@@ -15,40 +15,16 @@ Depends on: models, search_service, file_utils, scoring, vendor_utils
 """
 
 import asyncio
-from loguru import logger
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
-
-from ..schemas.requisitions import (
-    RequisitionCreate,
-    RequisitionUpdate,
-    RequirementCreate,
-    RequirementUpdate,
-    RequisitionOut,
-    SightingUnavailableIn,
-)
+from loguru import logger
 from sqlalchemy import func as sqlfunc
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_user
-from ..search_service import (
-    search_requirement,
-    sighting_to_dict,
-    _get_material_history,
-    _history_to_result,
-)
-from ..utils.normalization import (
-    normalize_mpn,
-    normalize_mpn_key,
-    normalize_quantity,
-    normalize_condition,
-    normalize_packaging,
-    normalize_price,
-    detect_currency,
-)
-from .rfq import _enrich_with_vendor_cards
 from ..models import (
     Contact,
     Offer,
@@ -58,9 +34,29 @@ from ..models import (
     User,
     VendorResponse,
 )
-from sqlalchemy import select
-
-
+from ..schemas.requisitions import (
+    RequirementCreate,
+    RequirementUpdate,
+    RequisitionCreate,
+    RequisitionOut,
+    RequisitionUpdate,
+    SightingUnavailableIn,
+)
+from ..search_service import (
+    _get_material_history,
+    _history_to_result,
+    search_requirement,
+    sighting_to_dict,
+)
+from ..utils.normalization import (
+    normalize_condition,
+    normalize_mpn,
+    normalize_mpn_key,
+    normalize_packaging,
+    normalize_price,
+    normalize_quantity,
+)
+from .rfq import _enrich_with_vendor_cards
 
 router = APIRouter(tags=["requisitions"])
 
@@ -114,7 +110,7 @@ async def list_requisitions(
         .label("latest_reply_at")
     )
     # Detect unseen offers: latest offer created_at > offers_viewed_at (or viewed_at is NULL and offers exist)
-    from sqlalchemy import case, and_, or_, literal
+    from sqlalchemy import and_, case, literal, or_
 
     latest_offer_sq = (
         select(sqlfunc.max(Offer.created_at))
@@ -194,7 +190,7 @@ async def list_requisitions(
 
     if q.strip():
         safe_q = q.strip().replace("%", r"\%").replace("_", r"\_")
-        from sqlalchemy import or_, exists, cast, String
+        from sqlalchemy import String, cast, exists, or_
         # Search by req name, customer name, primary MPN, or substitutes
         mpn_match = exists(
             select(Requirement.id).where(
@@ -558,7 +554,7 @@ async def upload_requirements(
         date_codes = (
             row.get("date_codes") or row.get("date_code") or row.get("dc") or ""
         ).strip() or None
-        manufacturer = (
+        manufacturer = (  # noqa: F841
             row.get("manufacturer") or row.get("brand") or row.get("mfr") or ""
         ).strip() or None
         notes = (row.get("notes") or row.get("note") or "").strip() or None
@@ -843,8 +839,8 @@ async def import_stock_list(
 
     from ..file_utils import normalize_stock_row
     from ..utils.normalization import normalize_condition as norm_cond
-    from ..utils.normalization import normalize_packaging as norm_pkg
     from ..utils.normalization import normalize_date_code, normalize_lead_time
+    from ..utils.normalization import normalize_packaging as norm_pkg
 
     for row in rows:
         parsed = normalize_stock_row(row)

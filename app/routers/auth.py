@@ -15,22 +15,20 @@ Called by: main.py (router mount)
 Depends on: dependencies, models, config
 """
 
-from loguru import logger
 from datetime import datetime, timedelta, timezone
 
 import httpx
 from fastapi import APIRouter, Depends, Request
-from ..http_client import http
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from loguru import logger
 from sqlalchemy.orm import Session
 
-from ..config import settings, APP_VERSION
+from ..config import APP_VERSION, settings
 from ..database import get_db
 from ..dependencies import get_user
+from ..http_client import http
 from ..models import User
-
-
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")

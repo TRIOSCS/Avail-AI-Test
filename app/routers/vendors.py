@@ -16,49 +16,48 @@ Depends on: models, dependencies, vendor_utils, config
 """
 
 import asyncio
-from datetime import datetime, timezone
 import ipaddress
-from loguru import logger
 import re
 import socket
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from ..http_client import http_redirect
-from sqlalchemy import func as sqlfunc, text as sqltext
+from loguru import logger
+from sqlalchemy import func as sqlfunc
+from sqlalchemy import text as sqltext
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
 
+from ..database import get_db
+from ..dependencies import require_admin, require_buyer, require_user
+from ..http_client import http_redirect
+from ..models import (
+    Company,
+    Contact,
+    MaterialCard,
+    MaterialVendorHistory,
+    Offer,
+    Requirement,
+    Sighting,
+    User,
+    VendorCard,
+    VendorContact,
+    VendorResponse,
+    VendorReview,
+)
 from ..schemas.vendors import (
     MaterialCardUpdate,
     VendorBlacklistToggle,
     VendorCardUpdate,
     VendorContactCreate,
-    VendorContactUpdate,
     VendorContactLookup,
+    VendorContactUpdate,
     VendorEmailAdd,
     VendorReviewCreate,
 )
-from sqlalchemy.orm import Session
-
-from ..config import settings
 from ..services.credential_service import get_credential_cached
-from ..database import get_db
-from ..dependencies import require_admin, require_user, require_buyer
-from ..models import (
-    User,
-    VendorCard,
-    VendorContact,
-    VendorReview,
-    Contact,
-    VendorResponse,
-    MaterialCard,
-    MaterialVendorHistory,
-    Offer,
-    Sighting,
-    Requirement,
-    Company,
-)
-from ..vendor_utils import normalize_vendor_name
 from ..utils.normalization import normalize_mpn_key
+from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["vendors"])
 
@@ -101,8 +100,8 @@ def get_or_create_card(vendor_name: str, db: Session) -> VendorCard:
 
 async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str):
     """Fire-and-forget enrichment for a vendor card. Runs in background."""
-    from ..enrichment_service import enrich_entity, apply_enrichment_to_vendor
     from ..database import SessionLocal
+    from ..enrichment_service import apply_enrichment_to_vendor, enrich_entity
 
     try:
         enrichment = await enrich_entity(domain, vendor_name)
@@ -146,6 +145,7 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
 
     # Try Redis cache for expensive material profile queries
     import json as _json
+
     from ..cache.intel_cache import _get_redis
     cache_key = f"vprofile:{card.id}"
     brands = None
@@ -1352,7 +1352,7 @@ async def import_stock_list_standalone(
     if len(content) > 10_000_000:
         raise HTTPException(413, "File too large — 10MB maximum")
 
-    from ..file_utils import parse_tabular_file, normalize_stock_row
+    from ..file_utils import normalize_stock_row, parse_tabular_file
 
     rows = parse_tabular_file(content, file.filename or "upload.csv")
 
@@ -1696,8 +1696,8 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
 
     If db_session is None, creates its own session (for background use).
     """
-    from ..utils.claude_client import claude_json
     from ..database import SessionLocal
+    from ..utils.claude_client import claude_json
 
     own_session = db_session is None
     db = db_session or SessionLocal()

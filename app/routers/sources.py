@@ -17,18 +17,15 @@ Depends on: models, config, dependencies, connectors/, services/
 import base64
 import os
 import time
-
-from loguru import logger
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..services.credential_service import get_credential_cached
 from ..dependencies import require_fresh_token, require_settings_access, require_user
-from ..schemas.sources import MiningOptions, SourceStatusToggle
 from ..models import (
     ApiSource,
     Requirement,
@@ -37,6 +34,8 @@ from ..models import (
     VendorCard,
     VendorResponse,
 )
+from ..schemas.sources import MiningOptions, SourceStatusToggle
+from ..services.credential_service import get_credential_cached
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter()
@@ -48,12 +47,12 @@ router = APIRouter()
 def _get_connector_for_source(name: str, db: Session = None):
     """Instantiate the right connector for a source name.
     Checks DB credentials first, falls back to env vars."""
-    from ..connectors.sources import NexarConnector, BrokerBinConnector
-    from ..connectors.ebay import EbayConnector
     from ..connectors.digikey import DigiKeyConnector
+    from ..connectors.ebay import EbayConnector
     from ..connectors.mouser import MouserConnector
     from ..connectors.oemsecrets import OEMSecretsConnector
     from ..connectors.sourcengine import SourcengineConnector
+    from ..connectors.sources import BrokerBinConnector, NexarConnector
     from ..services.credential_service import get_credential
 
     def _cred(var_name):
@@ -302,15 +301,15 @@ def _create_sightings_from_attachment(
 ) -> int:
     """Create Sighting records from parsed attachment rows, matching to Requirements."""
     from ..utils.normalization import (
+        detect_currency,
         fuzzy_mpn_match,
-        normalize_mpn,
-        normalize_quantity,
-        normalize_price,
         normalize_condition,
-        normalize_packaging,
         normalize_date_code,
         normalize_lead_time,
-        detect_currency,
+        normalize_mpn,
+        normalize_packaging,
+        normalize_price,
+        normalize_quantity,
     )
 
     reqs = db.query(Requirement).filter_by(requisition_id=vr.requisition_id).all()
@@ -724,8 +723,8 @@ async def parse_response_attachments(
     if not vr.message_id:
         raise HTTPException(400, "No message ID — cannot fetch attachments")
 
-    from ..utils.graph_client import GraphClient
     from ..scheduler import get_valid_token
+    from ..utils.graph_client import GraphClient
 
     token = await get_valid_token(user, db) or user.access_token
     gc = GraphClient(token)

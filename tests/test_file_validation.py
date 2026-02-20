@@ -9,16 +9,14 @@ Depends on: app/utils/file_validation.py
 """
 
 from app.utils.file_validation import (
-    validate_file,
-    detect_encoding,
-    decode_text,
-    file_fingerprint,
-    _get_extension,
-    is_password_protected,
     MAX_FILE_SIZE,
-    PROCESSABLE_EXTENSIONS,
+    _get_extension,
+    decode_text,
+    detect_encoding,
+    file_fingerprint,
+    is_password_protected,
+    validate_file,
 )
-
 
 # ── validate_file ──────────────────────────────────────────────────
 

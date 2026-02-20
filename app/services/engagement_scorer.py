@@ -158,7 +158,7 @@ async def compute_all_engagement_scores(db: Session) -> dict:
 
     Returns: {"updated": int, "skipped": int}
     """
-    from app.models import VendorCard, Contact, VendorResponse, Offer
+    from app.models import Contact, Offer, VendorCard, VendorResponse
     from app.vendor_utils import normalize_vendor_name
 
     now = datetime.now(timezone.utc)
@@ -270,7 +270,6 @@ async def compute_all_engagement_scores(db: Session) -> dict:
         win_map[norm] = win_map.get(norm, 0) + row.total_wins
 
     # ── Update ALL VendorCards in batches (avoid loading 10k+ ORM objects at once) ──
-    all_norms = set(outreach_map.keys()) | set(response_map.keys())
     total_count = db.query(func.count(VendorCard.id)).scalar() or 0
 
     updated = 0
@@ -341,7 +340,7 @@ async def compute_all_engagement_scores(db: Session) -> dict:
 
 def compute_single_vendor_score(card, db: Session) -> float | None:
     """Compute engagement score for a single VendorCard. Returns score or None."""
-    from app.models import Contact, VendorResponse, Offer
+    from app.models import Contact, Offer, VendorResponse
 
     norm = card.normalized_name
     now = datetime.now(timezone.utc)

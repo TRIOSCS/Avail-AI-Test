@@ -10,14 +10,13 @@ Depends on: app/services/ownership_service.py, conftest.py
 
 from datetime import datetime, timedelta, timezone
 
-from app.models import ActivityLog, Company, User
+from app.models import Company, User
 from app.services.ownership_service import (
     check_and_claim_open_account,
     get_accounts_at_risk,
-    get_open_pool_accounts,
     get_my_accounts,
+    get_open_pool_accounts,
 )
-
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
@@ -129,7 +128,7 @@ class TestGetOpenPoolAccounts:
 class TestGetMyAccounts:
     def test_returns_owned_accounts(self, db_session):
         sales = _make_sales_user(db_session)
-        co = _make_company(
+        _make_company(
             db_session, name="My Account", owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc),
         )
@@ -153,7 +152,7 @@ class TestGetMyAccounts:
 
     def test_health_status_green(self, db_session):
         sales = _make_sales_user(db_session)
-        co = _make_company(
+        _make_company(
             db_session, name="Fresh Co", owner_id=sales.id,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=2),
         )

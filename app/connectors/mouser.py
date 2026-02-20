@@ -1,9 +1,10 @@
 """Mouser Search API connector."""
 
 import logging
-from .sources import BaseConnector
+
 from ..http_client import http
-from ..utils import safe_int, safe_float
+from ..utils import safe_float
+from .sources import BaseConnector
 
 log = logging.getLogger(__name__)
 

@@ -10,8 +10,8 @@ Usage:
 import logging
 from datetime import datetime, timezone
 
-from sqlalchemy.orm import Session
 from sqlalchemy import func
+from sqlalchemy.orm import Session
 
 from app.models import ActivityLog, Company, CustomerSite, VendorCard, VendorContact
 

@@ -1,9 +1,9 @@
 """Enrichment API — review queue, backfill jobs, on-demand enrichment, stats."""
 
-from loguru import logger
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -12,13 +12,13 @@ from ..database import get_db
 from ..dependencies import require_admin, require_user
 from ..models import (
     ActivityLog,
+    Company,
     EnrichmentJob,
     EnrichmentQueue,
     Sighting,
     User,
     VendorCard,
     VendorContact,
-    Company,
 )
 from ..schemas.enrichment import (
     BackfillRequest,
@@ -353,7 +353,7 @@ def api_enrichment_stats(
     db: Session = Depends(get_db),
 ):
     """Get enrichment statistics — queue counts, coverage, active jobs."""
-    from sqlalchemy import func, case
+    from sqlalchemy import case
 
     # Consolidate queue stats + counts into fewer queries
     queue_stats = (
@@ -410,7 +410,6 @@ def api_backfill_emails(
     """One-time backfill: recover vendor emails from activity_log, VendorCard.emails, and BrokerBin sightings."""
     from ..vendor_utils import normalize_vendor_name
 
-    now = datetime.now(timezone.utc)
     activity_log_created = 0
     vendor_card_created = 0
     brokerbin_created = 0
@@ -573,7 +572,7 @@ async def api_deep_email_scan(
     """Trigger a deep inbox scan for a specific user to extract vendor contacts."""
     from ..connectors.email_mining import EmailMiner
     from ..scheduler import get_valid_token
-    from ..vendor_utils import normalize_vendor_name, merge_emails_into_card
+    from ..vendor_utils import merge_emails_into_card, normalize_vendor_name
 
     target_user = db.get(User, user_id)
     if not target_user:

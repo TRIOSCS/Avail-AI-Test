@@ -22,11 +22,11 @@ _fake_weasyprint.HTML = _mock_html_cls
 sys.modules.setdefault("weasyprint", _fake_weasyprint)
 
 from app.models import (  # noqa: E402
-    Company, CustomerSite, Offer, Quote, Requisition, Requirement, User,
+    Quote,
 )
 from app.services.document_service import (  # noqa: E402
-    generate_rfq_summary_pdf,
     generate_quote_report_pdf,
+    generate_rfq_summary_pdf,
 )
 
 

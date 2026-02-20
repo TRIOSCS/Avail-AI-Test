@@ -6,18 +6,27 @@
 - Vendor card enrichment (ratings, blacklist) happens in main.py
 """
 
-import logging
 import asyncio
+import logging
 import time
 from datetime import datetime, timezone
+
 from sqlalchemy.orm import Session
 
+from .connectors.digikey import DigiKeyConnector
+from .connectors.ebay import EbayConnector
+from .connectors.element14 import Element14Connector
+from .connectors.mouser import MouserConnector
+from .connectors.oemsecrets import OEMSecretsConnector
+from .connectors.sourcengine import SourcengineConnector
+from .connectors.sources import BrokerBinConnector, NexarConnector
+from .connectors.tme import TMEConnector
 from .models import (
-    Requirement,
-    Sighting,
+    ApiSource,
     MaterialCard,
     MaterialVendorHistory,
-    ApiSource,
+    Requirement,
+    Sighting,
 )
 from .scoring import score_sighting
 from .utils.normalization import (
@@ -32,14 +41,6 @@ from .utils.normalization import (
     normalize_quantity,
 )
 from .utils.normalization_helpers import fix_encoding
-from .connectors.sources import NexarConnector, BrokerBinConnector
-from .connectors.ebay import EbayConnector
-from .connectors.digikey import DigiKeyConnector
-from .connectors.mouser import MouserConnector
-from .connectors.oemsecrets import OEMSecretsConnector
-from .connectors.sourcengine import SourcengineConnector
-from .connectors.element14 import Element14Connector
-from .connectors.tme import TMEConnector
 
 # Map connector class names to ApiSource.name for stats tracking
 _CONNECTOR_SOURCE_MAP = {
@@ -355,7 +356,7 @@ def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Si
 def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
     """Create VendorContact records from sighting emails (e.g. BrokerBin)."""
     from .models import VendorCard, VendorContact
-    from .vendor_utils import normalize_vendor_name, merge_emails_into_card
+    from .vendor_utils import merge_emails_into_card, normalize_vendor_name
 
     # Collect unique vendor_name -> email pairs
     email_map: dict[str, set[str]] = {}

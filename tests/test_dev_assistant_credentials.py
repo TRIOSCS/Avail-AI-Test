@@ -1,6 +1,7 @@
 """Tests for dev_assistant role: credential access, toggle, and security boundaries."""
 
 import os
+
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
@@ -10,7 +11,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import ApiSource, User
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -33,8 +33,9 @@ def dev_assistant_user(db_session: Session) -> User:
 @pytest.fixture()
 def dev_assistant_client(db_session: Session, dev_assistant_user: User):
     from fastapi import HTTPException
+
     from app.database import get_db
-    from app.dependencies import require_user, require_admin, require_settings_access
+    from app.dependencies import require_admin, require_settings_access, require_user
     from app.main import app
 
     def _db():
@@ -141,8 +142,9 @@ def test_dev_assistant_cannot_write_config(dev_assistant_client):
 def test_buyer_cannot_access_credentials(db_session, test_user, test_source):
     """Buyer role should be denied credential endpoints."""
     from fastapi import HTTPException
+
     from app.database import get_db
-    from app.dependencies import require_user, require_settings_access
+    from app.dependencies import require_settings_access, require_user
     from app.main import app
 
     def _db():
@@ -165,8 +167,9 @@ def test_buyer_cannot_access_credentials(db_session, test_user, test_source):
 def test_sales_cannot_access_credentials(db_session, sales_user, test_source):
     """Sales role should be denied credential endpoints."""
     from fastapi import HTTPException
+
     from app.database import get_db
-    from app.dependencies import require_user, require_settings_access
+    from app.dependencies import require_settings_access, require_user
     from app.main import app
 
     def _db():

@@ -18,7 +18,6 @@ from app.schemas.crm import (
     SuggestedSiteContact,
 )
 
-
 # ── Company schemas ──────────────────────────────────────────────────
 
 

@@ -31,7 +31,6 @@ from app.utils.normalization_helpers import (
     normalize_us_state,
 )
 
-
 # ── Companies ────────────────────────────────────────────────────────
 
 

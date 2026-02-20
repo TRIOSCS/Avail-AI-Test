@@ -14,16 +14,15 @@ Depends on: conftest.py fixtures, app.services.activity_service, app.routers.v13
 """
 
 import os
+
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
-from app.models import ActivityLog, Company, User, VendorCard
-
+from app.models import ActivityLog
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -98,8 +97,8 @@ class TestUnmatchedEmailLogging:
 
     def test_matched_email_still_works(self, db_session, test_user, test_company):
         """Emails matching a company still attribute correctly."""
-        from app.services.activity_service import log_email_activity
         from app.models import CustomerSite
+        from app.services.activity_service import log_email_activity
 
         site = CustomerSite(
             company_id=test_company.id,

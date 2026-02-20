@@ -9,16 +9,13 @@ Depends on: app.routers.crm
 """
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from app.routers.crm import (
     get_last_quoted_price,
     next_quote_number,
     quote_to_dict,
 )
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────────
 

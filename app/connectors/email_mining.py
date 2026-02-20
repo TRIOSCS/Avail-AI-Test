@@ -18,7 +18,7 @@ Enriches VendorCards with verified contact info from real correspondence.
 
 import logging
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger(__name__)
 

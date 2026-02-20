@@ -23,13 +23,12 @@ Job overview:
 
 import asyncio
 import base64
-from datetime import datetime, timezone, timedelta
-
-from loguru import logger
+from datetime import datetime, timedelta, timezone
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+from loguru import logger
 
 from .http_client import http
 
@@ -464,7 +463,6 @@ async def _job_routing_expiration():
 
 async def _job_po_verification():
     """Verify PO sent status for pending buy plans."""
-    from .config import settings
     from .database import SessionLocal
     from .models import BuyPlan
 
@@ -563,7 +561,6 @@ async def _job_performance_tracking():
 
 async def _job_deep_email_mining():
     """Deep email mining scan for all connected users."""
-    from .config import settings
     from .database import SessionLocal
     from .models import User
 
@@ -633,12 +630,12 @@ async def _job_deep_enrichment():
     """Deep enrichment sweep for vendors and companies."""
     from .config import settings
     from .database import SessionLocal
-    from .models import VendorCard, Company
+    from .models import Company, VendorCard
 
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
-        from .services.deep_enrichment_service import deep_enrich_vendor, deep_enrich_company
+        from .services.deep_enrichment_service import deep_enrich_company, deep_enrich_vendor
 
         # Enrich up to 50 vendors per sweep
         stale_vendors = (
@@ -899,7 +896,7 @@ async def _download_and_import_stock_list(
         sender_match = match_email_to_entity(vendor_email, db)
         if sender_match and sender_match["type"] == "company":
             is_excess_list = True
-            source_company_id = sender_match["id"]
+            source_company_id = sender_match["id"]  # noqa: F841
             logger.info(
                 f"Excess list detected from company '{sender_match['name']}' ({vendor_email}): {filename}"
             )
@@ -990,6 +987,7 @@ async def _download_and_import_stock_list(
     # Teams: check if imported MPNs match any open requirements
     try:
         from sqlalchemy import func as sa_func
+
         from app.models import Requirement, Requisition
         from app.services.teams import send_stock_match_alert
 
@@ -1020,7 +1018,7 @@ async def _download_and_import_stock_list(
 
 def _parse_stock_file(file_bytes: bytes, filename: str) -> list[dict]:
     """Parse a stock list file (CSV/XLSX) into rows with mpn, qty, price, manufacturer."""
-    from .file_utils import parse_tabular_file, normalize_stock_row
+    from .file_utils import normalize_stock_row, parse_tabular_file
 
     raw_rows = parse_tabular_file(file_bytes, filename)
     rows = []
@@ -1038,8 +1036,8 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
     """Extract vendor contact info from recent emails into VendorCards."""
     from .config import settings
     from .connectors.email_mining import EmailMiner
-    from .vendor_utils import normalize_vendor_name
     from .models import VendorCard
+    from .vendor_utils import normalize_vendor_name
 
     lookback = settings.inbox_backfill_days if is_backfill else 1
     fresh_token = await get_valid_token(user, db) or user.access_token
@@ -1189,15 +1187,15 @@ async def _compute_engagement_scores_job(db):
 
 async def _sync_user_contacts(user, db):
     """Pull contacts from Outlook into VendorCards."""
-    from .models import VendorCard
-    from .vendor_utils import (
-        normalize_vendor_name,
-        merge_emails_into_card,
-        merge_phones_into_card,
-    )
-
     # Use GraphClient for pagination with retry (H1, H6)
     from app.utils.graph_client import GraphClient
+
+    from .models import VendorCard
+    from .vendor_utils import (
+        merge_emails_into_card,
+        merge_phones_into_card,
+        normalize_vendor_name,
+    )
 
     gc = GraphClient(user.access_token)
     try:

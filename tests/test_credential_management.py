@@ -1,23 +1,21 @@
 """Tests for credential management: encryption, API endpoints, access control."""
 
 import os
+
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
-from app.models import ApiSource, User
-
+from app.models import ApiSource
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
 def _make_admin_client(db_session, admin_user):
     """Return a TestClient authenticated as admin."""
     from app.database import get_db
-    from app.dependencies import require_user, require_admin, require_settings_access
+    from app.dependencies import require_admin, require_settings_access, require_user
     from app.main import app
 
     def _db():
@@ -64,7 +62,7 @@ def test_source(db_session):
 
 def test_encrypt_decrypt_roundtrip():
     """Encrypt then decrypt should return original value."""
-    from app.services.credential_service import encrypt_value, decrypt_value
+    from app.services.credential_service import decrypt_value, encrypt_value
     original = "my-super-secret-api-key-12345"
     encrypted = encrypt_value(original)
     assert encrypted != original
@@ -189,7 +187,7 @@ def test_get_credential_fallback_to_env(db_session, test_source, monkeypatch):
 
 
 def test_credential_is_set_db(db_session, test_source):
-    from app.services.credential_service import encrypt_value, credential_is_set
+    from app.services.credential_service import credential_is_set, encrypt_value
     test_source.credentials = {"TEST_API_KEY": encrypt_value("something")}
     db_session.commit()
     assert credential_is_set(db_session, "test_connector", "TEST_API_KEY") is True

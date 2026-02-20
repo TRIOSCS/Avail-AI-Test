@@ -1,10 +1,11 @@
 """API connectors — Nexar (Octopart) and BrokerBin."""
 
-import logging
 import asyncio
+import logging
 from abc import ABC, abstractmethod
 from urllib.parse import quote_plus
-from ..utils import safe_int, safe_float
+
+from ..utils import safe_float, safe_int
 
 log = logging.getLogger(__name__)
 

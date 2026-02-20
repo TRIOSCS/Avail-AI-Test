@@ -1,5 +1,4 @@
 """Comprehensive tests for app/utils/normalization.py functions."""
-import pytest
 
 from app.utils.normalization import (
     detect_currency,
@@ -14,7 +13,6 @@ from app.utils.normalization import (
     normalize_price,
     normalize_quantity,
 )
-
 
 # ── normalize_quantity ────────────────────────────────────────────────
 

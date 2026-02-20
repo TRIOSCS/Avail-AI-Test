@@ -165,7 +165,7 @@ class GraphClient:
                 log.error(f"Graph {resp.status_code}: {resp.text[:300]}")
                 return {"error": resp.status_code, "detail": resp.text[:300]}
 
-            except (httpx.TimeoutException, httpx.ConnectError) as e:
+            except Exception as e:
                 last_error = e
                 wait = BACKOFF_BASE ** (attempt + 1)
                 log.warning(f"Graph connection error — retry in {wait}s: {e}")

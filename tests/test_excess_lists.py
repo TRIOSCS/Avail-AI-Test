@@ -11,25 +11,19 @@ Depends on: conftest.py fixtures, app.services.activity_service, app.models
 """
 
 import os
+
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
 
-import pytest
-from sqlalchemy.orm import Session
-
 from app.models import (
     ActivityLog,
-    Company,
     CustomerSite,
     MaterialCard,
     MaterialVendorHistory,
     Requirement,
     Sighting,
-    User,
-    VendorCard,
 )
-
 
 # ── Model tests ────────────────────────────────────────────────────────
 

@@ -11,7 +11,9 @@ Depends on: database.py (engine), models.py (Base)
 """
 
 import logging
+
 from sqlalchemy import text as sqltext
+
 from .database import engine
 
 log = logging.getLogger(__name__)

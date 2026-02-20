@@ -1,23 +1,22 @@
 """Tests for admin settings: roles, permissions, config, health."""
 
 import os
+
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
-from app.models import User, SystemConfig
-
+from app.models import SystemConfig, User
 
 # ── Helper: create client with specific user role ────────────────────
 
 def _make_client(db_session, user):
     """Return a TestClient authenticated as the given user."""
     from app.database import get_db
-    from app.dependencies import require_user, require_buyer, require_admin, require_settings_access
+    from app.dependencies import require_admin, require_buyer, require_settings_access, require_user
     from app.main import app
 
     def _override_db():

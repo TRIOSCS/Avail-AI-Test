@@ -8,13 +8,13 @@ Called by: pytest
 Depends on: app/routers/admin.py, conftest.py
 """
 
-import pytest
 from datetime import datetime, timezone
+
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import User, SystemConfig
-
+from app.models import SystemConfig, User
 
 # ── Admin client fixture ────────────────────────────────────────────
 

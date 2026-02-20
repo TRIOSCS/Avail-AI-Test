@@ -19,7 +19,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.utils.normalization import normalize_condition, normalize_mpn, normalize_packaging
 
-
 # ── Requisitions ─────────────────────────────────────────────────────
 
 

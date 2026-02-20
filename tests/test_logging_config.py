@@ -10,7 +10,6 @@ Depends on: app/logging_config.py
 
 import logging
 import os
-from io import StringIO
 from unittest.mock import patch
 
 import pytest
@@ -98,7 +97,6 @@ def test_context_not_leaked():
 
 def test_production_mode_uses_serialize():
     """When APP_URL contains 'availai.net', serialize=True (JSON output)."""
-    messages = []
     logger.remove()
 
     with patch.dict(os.environ, {"APP_URL": "https://app.availai.net"}):

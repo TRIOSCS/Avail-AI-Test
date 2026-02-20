@@ -8,8 +8,7 @@ Called by: pytest
 Depends on: app/services/teams.py, conftest.py
 """
 
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

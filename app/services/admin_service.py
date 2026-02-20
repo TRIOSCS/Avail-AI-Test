@@ -5,22 +5,22 @@ import os
 import time
 from datetime import datetime, timezone
 
-from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
+from sqlalchemy.orm import Session
 
-from ..config import settings, APP_VERSION
+from ..config import APP_VERSION, settings
 from ..models import (
-    User,
-    SystemConfig,
-    Requisition,
-    Requirement,
-    Sighting,
+    ApiSource,
     Company,
-    VendorCard,
     MaterialCard,
     Offer,
     Quote,
-    ApiSource,
+    Requirement,
+    Requisition,
+    Sighting,
+    SystemConfig,
+    User,
+    VendorCard,
 )
 
 log = logging.getLogger(__name__)

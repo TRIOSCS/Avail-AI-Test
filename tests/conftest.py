@@ -16,6 +16,7 @@ Depends on: app.models (Base), app.database (get_db), app.dependencies
 
 import asyncio
 import os
+
 os.environ["TESTING"] = "1"  # Must be set before importing app modules
 
 from datetime import datetime, timezone
@@ -27,8 +28,16 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.models import (
-    Base, Company, CustomerSite, Requisition, Requirement, User, VendorCard,
-    ActivityLog, Quote, Offer, BuyPlan,
+    ActivityLog,
+    Base,
+    Company,
+    CustomerSite,
+    Offer,
+    Quote,
+    Requirement,
+    Requisition,
+    User,
+    VendorCard,
 )
 
 # ── Event loop isolation ─────────────────────────────────────────────
@@ -52,7 +61,6 @@ TEST_DB_URL = "sqlite://"  # in-memory, fresh per session
 
 def _patch_types_for_sqlite():
     """Register ARRAY → JSON and TSVECTOR → TEXT type adapters so models work on SQLite."""
-    from sqlalchemy import JSON
     from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 
     SQLiteTypeCompiler.visit_ARRAY = lambda self, type_, **kw: "JSON"

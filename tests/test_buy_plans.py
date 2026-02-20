@@ -25,8 +25,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.dependencies import require_buyer, require_user
 from app.main import app
-from app.models import BuyPlan, Offer, Quote, Requisition, User
-
+from app.models import BuyPlan, Offer, User
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -1265,7 +1264,6 @@ class TestStockSaleDetection:
     def test_all_stock_vendors(self, db_session, sales_client, sales_user, test_quote):
         """All vendor_names match stock_sale_vendor_names → is_stock_sale=True."""
         # Create an offer with a stock sale vendor name
-        from app.models import Offer
         offer = Offer(
             requisition_id=test_quote.requisition_id,
             vendor_name="Trio Supply Chain",
@@ -1289,7 +1287,6 @@ class TestStockSaleDetection:
 
     def test_mixed_vendors(self, db_session, sales_client, sales_user, test_quote, test_offer):
         """Mix of stock + external vendors → is_stock_sale=False."""
-        from app.models import Offer
         stock_offer = Offer(
             requisition_id=test_quote.requisition_id,
             vendor_name="Trio",
@@ -1439,6 +1436,7 @@ class TestAutoCompleteStockSales:
 
     def test_old_approved_stock_sale_completed(self, db_session, test_requisition, test_quote, test_user):
         from datetime import timedelta
+
         from app.services.buyplan_service import auto_complete_stock_sales
 
         plan = _create_buy_plan(
@@ -1479,6 +1477,7 @@ class TestAutoCompleteStockSales:
 
     def test_non_stock_sale_skipped(self, db_session, test_requisition, test_quote, test_user):
         from datetime import timedelta
+
         from app.services.buyplan_service import auto_complete_stock_sales
 
         plan = _create_buy_plan(

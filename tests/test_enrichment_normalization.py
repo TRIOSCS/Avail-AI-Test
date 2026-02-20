@@ -1,6 +1,7 @@
 """Tests for enrichment normalization layers."""
-import pytest
 from unittest.mock import AsyncMock, patch
+
+import pytest
 
 from app.enrichment_service import (
     _clean_domain,
@@ -9,7 +10,6 @@ from app.enrichment_service import (
     normalize_company_input,
     normalize_company_output,
 )
-
 
 # ── _clean_domain ────────────────────────────────────────────────────────
 

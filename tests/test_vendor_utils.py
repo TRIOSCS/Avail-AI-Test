@@ -1,16 +1,14 @@
 """Tests for app.vendor_utils — vendor name normalization, merging, and fuzzy matching."""
 
-import pytest
 from unittest.mock import MagicMock
 
 from app.vendor_utils import (
-    normalize_vendor_name,
+    find_vendor_dedup_candidates,
+    fuzzy_match_vendor,
     merge_emails_into_card,
     merge_phones_into_card,
-    fuzzy_match_vendor,
-    find_vendor_dedup_candidates,
+    normalize_vendor_name,
 )
-
 
 # ── normalize_vendor_name ────────────────────────────────────────────
 
@@ -240,8 +238,9 @@ class TestFuzzyMatchVendor:
 
 class TestFindVendorDedupCandidates:
     def test_finds_similar_vendors(self, db_session):
-        from app.models import VendorCard
         from datetime import datetime, timezone
+
+        from app.models import VendorCard
 
         cards = [
             VendorCard(
@@ -278,8 +277,9 @@ class TestFindVendorDedupCandidates:
         assert "sightings" in pair["vendor_a"]
 
     def test_no_duplicates_when_all_distinct(self, db_session):
-        from app.models import VendorCard
         from datetime import datetime, timezone
+
+        from app.models import VendorCard
 
         cards = [
             VendorCard(
@@ -302,8 +302,9 @@ class TestFindVendorDedupCandidates:
         assert results == []
 
     def test_respects_limit(self, db_session):
-        from app.models import VendorCard
         from datetime import datetime, timezone
+
+        from app.models import VendorCard
 
         # Create many similar vendors to exceed limit
         for i in range(10):
@@ -323,8 +324,9 @@ class TestFindVendorDedupCandidates:
         assert results == []
 
     def test_results_sorted_by_score(self, db_session):
-        from app.models import VendorCard
         from datetime import datetime, timezone
+
+        from app.models import VendorCard
 
         cards = [
             VendorCard(normalized_name="arrow electronics", display_name="Arrow Electronics",

@@ -16,12 +16,12 @@ Usage:
 
 import logging
 import secrets
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import GraphSubscription, User
 from app.config import settings
+from app.models import GraphSubscription, User
 
 log = logging.getLogger("avail.webhook")
 
@@ -197,10 +197,10 @@ async def handle_notification(payload: dict, db: Session):
     from Graph, log it as an activity, and trigger inbox poll for RFQ
     reply matching when inbound messages are detected.
     """
-    from app.scheduler import get_valid_token
-    from app.utils.graph_client import GraphClient
-    from app.services.activity_service import log_email_activity
     from app.email_service import poll_inbox
+    from app.scheduler import get_valid_token
+    from app.services.activity_service import log_email_activity
+    from app.utils.graph_client import GraphClient
 
     notifications = payload.get("value", [])
     if not notifications:

@@ -8,7 +8,6 @@ Called by: pytest
 Depends on: app/main.py (middleware), tests/conftest.py (client fixture)
 """
 
-import pytest
 
 
 def test_request_id_header_present(client):

@@ -8,7 +8,7 @@ Called by: pytest
 Depends on: conftest.py fixtures
 """
 
-from app.models import Requisition, User, VendorCard
+from app.models import User
 
 
 def test_db_session_creates_tables(db_session):

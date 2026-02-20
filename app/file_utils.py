@@ -122,7 +122,7 @@ def normalize_stock_row(r: dict) -> dict | None:
     Returns dict with normalized fields or None if no valid MPN found.
     Uses normalization functions for robust parsing.
     """
-    from .utils.normalization import normalize_quantity, normalize_price, detect_currency
+    from .utils.normalization import detect_currency, normalize_price, normalize_quantity
 
     norm = {k.strip().lower(): v for k, v in r.items() if k}
 

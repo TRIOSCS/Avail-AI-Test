@@ -3,11 +3,11 @@
 import asyncio
 import csv
 import io
-from loguru import logger
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -15,23 +15,23 @@ from ..database import get_db
 from ..dependencies import require_admin, require_settings_access
 from ..models import (
     ApiSource,
-    SystemConfig,
-    User,
     Company,
     CustomerSite,
     SiteContact,
+    SystemConfig,
+    User,
     VendorCard,
     VendorContact,
 )
 from ..services.admin_service import (
-    list_users,
-    update_user,
-    get_all_config,
-    set_config_value,
-    get_system_health,
     VALID_ROLES,
+    get_all_config,
+    get_system_health,
+    list_users,
+    set_config_value,
+    update_user,
 )
-from ..services.credential_service import encrypt_value, decrypt_value, mask_value
+from ..services.credential_service import decrypt_value, encrypt_value, mask_value
 
 router = APIRouter(tags=["admin"])
 
@@ -592,8 +592,8 @@ async def api_test_teams_post(
     db: Session = Depends(get_db),
 ):
     """Send a test Adaptive Card to the configured Teams channel."""
-    from ..services.teams import _get_teams_config, _make_card, post_to_channel
     from ..scheduler import get_valid_token
+    from ..services.teams import _get_teams_config, _make_card, post_to_channel
 
     channel_id, team_id, enabled = _get_teams_config()
     if not channel_id or not team_id:

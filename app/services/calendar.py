@@ -15,7 +15,7 @@ Depends on: utils/graph_client.py, scheduler.py (get_valid_token)
 """
 
 import logging
-from datetime import date, datetime, timezone
+from datetime import date
 
 log = logging.getLogger("avail.calendar")
 

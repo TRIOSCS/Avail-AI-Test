@@ -18,13 +18,13 @@ Usage:
 import asyncio
 import html
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
 
-from app.models import ActivityLog, Company, User
 from app.config import settings
+from app.models import ActivityLog, Company, User
 
 log = logging.getLogger("avail.ownership")
 
@@ -428,7 +428,7 @@ async def _send_warning_alert(
             <p>No activity has been logged on <strong>{html.escape(str(company.name))}</strong> in <strong>{days_inactive} days</strong>.</p>
             <p>You'll lose ownership in <strong>{days_remaining} day{"s" if days_remaining != 1 else ""}</strong> unless you make contact.</p>
             <p style="margin-top: 20px;">
-                <a href="{settings.app_url}/companies/{company.id}" 
+                <a href="{settings.app_url}/companies/{company.id}"
                    style="background: #2563eb; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">
                     View Account & Re-engage
                 </a>

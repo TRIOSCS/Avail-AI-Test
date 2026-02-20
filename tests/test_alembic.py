@@ -12,9 +12,6 @@ import importlib.util
 import inspect
 from pathlib import Path
 
-from app.models import Base
-
-
 MIGRATION_DIR = Path(__file__).parent.parent / "alembic" / "versions"
 
 

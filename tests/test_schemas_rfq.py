@@ -13,7 +13,6 @@ from pydantic import ValidationError
 
 from app.schemas.rfq import BatchRfqSend, FollowUpEmail, PhoneCallLog, RfqPrepare
 
-
 # ── PhoneCallLog ─────────────────────────────────────────────────────
 
 class TestPhoneCallLog:

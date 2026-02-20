@@ -5,12 +5,9 @@ Creates a signed Starlette session cookie for user_id=1 (admin)
 so tests can skip the Azure OAuth flow.
 """
 
-import json
 import base64
-import hmac
-import hashlib
+import json
 import os
-import time
 
 import pytest
 

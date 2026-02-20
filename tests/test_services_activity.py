@@ -11,19 +11,22 @@ Depends on: app/services/activity_service.py, conftest.py
 from datetime import datetime, timedelta, timezone
 
 from app.models import (
-    ActivityLog, Company, CustomerSite, VendorCard, VendorContact,
+    ActivityLog,
+    Company,
+    CustomerSite,
+    VendorCard,
+    VendorContact,
 )
 from app.services.activity_service import (
+    days_since_last_activity,
+    get_company_activities,
+    get_user_activities,
+    get_vendor_activities,
+    log_call_activity,
+    log_email_activity,
     match_email_to_entity,
     match_phone_to_entity,
-    log_email_activity,
-    log_call_activity,
-    get_company_activities,
-    get_vendor_activities,
-    get_user_activities,
-    days_since_last_activity,
 )
-
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
@@ -104,7 +107,7 @@ class TestMatchEmailToEntity:
         assert result["id"] == co.id
 
     def test_match_vendor_by_domain(self, db_session):
-        card = _make_vendor_card(db_session, domain="vendorco.com")
+        _make_vendor_card(db_session, domain="vendorco.com")
         db_session.commit()
 
         result = match_email_to_entity("someone@vendorco.com", db_session)

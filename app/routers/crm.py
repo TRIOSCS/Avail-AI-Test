@@ -26,9 +26,9 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..config import settings
-from ..services.credential_service import get_credential_cached
 from ..database import get_db
-from ..dependencies import is_admin as _is_admin, require_admin, require_buyer, require_user
+from ..dependencies import is_admin as _is_admin
+from ..dependencies import require_admin, require_buyer, require_user
 from ..models import (
     ActivityLog,
     BuyPlan,
@@ -44,13 +44,6 @@ from ..models import (
     User,
     VendorCard,
     VendorContact,
-)
-from ..vendor_utils import normalize_vendor_name
-from ..utils.normalization import (
-    normalize_mpn,
-    normalize_mpn_key,
-    normalize_condition,
-    normalize_packaging,
 )
 from ..schemas.crm import (
     AddContactsToVendor,
@@ -78,6 +71,14 @@ from ..schemas.crm import (
     SiteCreate,
     SiteUpdate,
 )
+from ..services.credential_service import get_credential_cached
+from ..utils.normalization import (
+    normalize_condition,
+    normalize_mpn,
+    normalize_mpn_key,
+    normalize_packaging,
+)
+from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter()
 
@@ -351,7 +352,7 @@ async def create_company(
         or get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
         or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
     ):
-        from ..enrichment_service import enrich_entity, apply_enrichment_to_company
+        from ..enrichment_service import apply_enrichment_to_company, enrich_entity
 
         async def _enrich_company_bg(cid, d, n):
             from ..database import SessionLocal
@@ -1672,7 +1673,7 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
         terms_rows += f'<tr><td style="padding:6px 0;color:#666;width:120px">Payment</td><td style="padding:6px 0;font-weight:600">{quote.payment_terms}</td></tr>'
     if quote.shipping_terms:
         terms_rows += f'<tr><td style="padding:6px 0;color:#666">Shipping</td><td style="padding:6px 0;font-weight:600">{quote.shipping_terms}</td></tr>'
-    terms_rows += f'<tr><td style="padding:6px 0;color:#666">Currency</td><td style="padding:6px 0;font-weight:600">USD</td></tr>'
+    terms_rows += '<tr><td style="padding:6px 0;color:#666">Currency</td><td style="padding:6px 0;font-weight:600">USD</td></tr>'
     terms_rows += f'<tr><td style="padding:6px 0;color:#666">Valid Until</td><td style="padding:6px 0;font-weight:600">{expires_str}</td></tr>'
 
     greeting = f"Dear {to_name}," if to_name else "Dear Valued Customer,"
@@ -2028,7 +2029,7 @@ async def submit_buy_plan(
     db.commit()
 
     # Send notifications asynchronously (own DB session)
-    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_submitted
+    from ..services.buyplan_service import notify_buyplan_submitted, run_buyplan_bg
 
     run_buyplan_bg(notify_buyplan_submitted, plan.id)
 
@@ -2114,7 +2115,7 @@ async def approve_buyplan_by_token(
         )
     db.commit()
 
-    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_approved
+    from ..services.buyplan_service import notify_buyplan_approved, run_buyplan_bg
 
     if plan.is_stock_sale:
         from ..services.buyplan_service import notify_stock_sale_approved
@@ -2150,7 +2151,7 @@ async def reject_buyplan_by_token(
     )
     db.commit()
 
-    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_rejected
+    from ..services.buyplan_service import notify_buyplan_rejected, run_buyplan_bg
 
     run_buyplan_bg(notify_buyplan_rejected, plan.id)
     return {"ok": True, "status": "rejected"}
@@ -2219,7 +2220,7 @@ async def approve_buy_plan(
         )
     db.commit()
 
-    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_approved
+    from ..services.buyplan_service import notify_buyplan_approved, run_buyplan_bg
 
     if plan.is_stock_sale:
         from ..services.buyplan_service import notify_stock_sale_approved
@@ -2260,7 +2261,7 @@ async def reject_buy_plan(
     )
     db.commit()
 
-    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_rejected
+    from ..services.buyplan_service import notify_buyplan_rejected, run_buyplan_bg
 
     run_buyplan_bg(notify_buyplan_rejected, plan.id)
 
@@ -2294,6 +2295,7 @@ async def enter_po_number(
     plan.status = "po_entered"
 
     from sqlalchemy.orm.attributes import flag_modified
+
     from ..services.buyplan_service import log_buyplan_activity
 
     flag_modified(plan, "line_items")
@@ -2361,7 +2363,7 @@ async def complete_buy_plan(
     log_buyplan_activity(db, user.id, plan, "buyplan_completed", "marked complete")
     db.commit()
 
-    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_completed
+    from ..services.buyplan_service import notify_buyplan_completed, run_buyplan_bg
 
     run_buyplan_bg(
         notify_buyplan_completed, plan.id,
@@ -2441,7 +2443,7 @@ async def cancel_buy_plan(
     )
     db.commit()
 
-    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_cancelled
+    from ..services.buyplan_service import notify_buyplan_cancelled, run_buyplan_bg
 
     run_buyplan_bg(notify_buyplan_cancelled, plan.id)
 
@@ -2531,7 +2533,7 @@ async def resubmit_buy_plan(
     )
     db.commit()
 
-    from ..services.buyplan_service import run_buyplan_bg, notify_buyplan_submitted
+    from ..services.buyplan_service import notify_buyplan_submitted, run_buyplan_bg
 
     run_buyplan_bg(notify_buyplan_submitted, new_plan.id)
 
@@ -2560,6 +2562,7 @@ async def bulk_po_entry(
         raise HTTPException(400, "No PO entries provided")
 
     from sqlalchemy.orm.attributes import flag_modified
+
     from ..services.buyplan_service import log_buyplan_activity
 
     now = datetime.now(timezone.utc).isoformat()

@@ -10,9 +10,6 @@ Covers: activity serialization, null handling, GET/POST activity endpoints
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
-import pytest
-
-
 # ═══════════════════════════════════════════════════════════════════════
 #  _activity_to_dict unit tests (existing)
 # ═══════════════════════════════════════════════════════════════════════
@@ -113,7 +110,6 @@ def test_get_vendor_activities_with_data(client, db_session, test_user, test_ven
 
 
 def test_get_user_activities(client, test_activity):
-    from app.models import User
     resp = client.get(f"/api/users/{test_activity.user_id}/activities")
     assert resp.status_code == 200
     assert len(resp.json()) >= 1

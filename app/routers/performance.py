@@ -1,13 +1,13 @@
 """Performance Tracking API — Vendor Scorecards & Buyer Leaderboard."""
 
-from loguru import logger
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..dependencies import require_user, is_admin as _is_admin
+from ..dependencies import is_admin as _is_admin
+from ..dependencies import require_user
 from ..models import User
 
 router = APIRouter(tags=["performance"])

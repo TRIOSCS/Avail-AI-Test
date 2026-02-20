@@ -18,13 +18,8 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import is_admin as _is_admin, require_user
-from ..schemas.ai import (
-    ProspectContactSave,
-    ProspectFinderRequest,
-    RfqDraftRequest,
-    SaveDraftOffersRequest,
-)
+from ..dependencies import is_admin as _is_admin
+from ..dependencies import require_user
 from ..models import (
     Contact,
     CustomerSite,
@@ -34,6 +29,12 @@ from ..models import (
     User,
     VendorCard,
     VendorResponse,
+)
+from ..schemas.ai import (
+    ProspectContactSave,
+    ProspectFinderRequest,
+    RfqDraftRequest,
+    SaveDraftOffersRequest,
 )
 from ..vendor_utils import normalize_vendor_name
 
@@ -303,10 +304,10 @@ async def ai_parse_response(
         ]
 
     from app.services.response_parser import (
+        extract_draft_offers,
         parse_vendor_response,
         should_auto_apply,
         should_flag_review,
-        extract_draft_offers,
     )
 
     result = await parse_vendor_response(

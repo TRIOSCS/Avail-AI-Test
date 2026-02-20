@@ -1,10 +1,11 @@
 """eBay Browse API connector — searches electronic components on eBay."""
 
-import logging
 import base64
-from .sources import BaseConnector
+import logging
+
 from ..http_client import http
-from ..utils import safe_int, safe_float
+from ..utils import safe_float, safe_int
+from .sources import BaseConnector
 
 log = logging.getLogger(__name__)
 

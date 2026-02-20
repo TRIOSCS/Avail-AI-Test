@@ -1,6 +1,7 @@
 """Tests for TME connector — parse logic, signing, and error handling."""
 
 import pytest
+
 from app.connectors.tme import TMEConnector
 
 

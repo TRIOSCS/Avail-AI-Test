@@ -1,8 +1,6 @@
 """Vendor name normalization, card enrichment, and fuzzy matching helpers."""
 
 import re
-from typing import Optional
-
 
 # Legal entity suffixes only — conservative to avoid stripping name parts
 # Ordered longest-first to avoid partial matches (e.g. "s.a.s." before "s.a.")
@@ -177,6 +175,7 @@ def find_vendor_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> li
     Returns groups of vendors that may be duplicates, sorted by match score.
     """
     from thefuzz import fuzz
+
     from .models import VendorCard
 
     cards = (

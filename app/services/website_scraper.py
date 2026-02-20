@@ -3,14 +3,12 @@
 import asyncio
 import logging
 import re
-from datetime import datetime, timezone
 
 import httpx
 from sqlalchemy import func
-
-from ..http_client import http_redirect
 from sqlalchemy.orm import Session
 
+from ..http_client import http_redirect
 from ..models import VendorCard, VendorContact
 from ..vendor_utils import merge_emails_into_card
 

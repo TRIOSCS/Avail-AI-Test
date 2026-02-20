@@ -15,8 +15,8 @@ Design rules:
 
 import logging
 
-from app.utils.claude_client import claude_text, claude_json
 from app.cache.intel_cache import get_cached, set_cached
+from app.utils.claude_client import claude_json, claude_text
 
 log = logging.getLogger("avail.ai_service")
 

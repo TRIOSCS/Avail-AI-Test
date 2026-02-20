@@ -9,9 +9,10 @@ Depends on: BaseConnector, httpx
 
 import logging
 from urllib.parse import quote_plus
-from .sources import BaseConnector
+
 from ..http_client import http
-from ..utils import safe_int, safe_float
+from ..utils import safe_float, safe_int
+from .sources import BaseConnector
 
 log = logging.getLogger(__name__)
 

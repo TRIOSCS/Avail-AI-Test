@@ -16,36 +16,34 @@ Depends on: conftest.py fixtures, app.services.email_threads
 """
 
 import os
+
 os.environ["TESTING"] = "1"
 
-import time
-from datetime import datetime, timezone, timedelta
-from unittest.mock import AsyncMock, patch, MagicMock
+from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.models import Contact, Requirement, Requisition, Sighting, User, VendorCard, VendorResponse
+from app.models import Contact
 from app.schemas.emails import (
     EmailMessage,
     EmailReplyRequest,
     EmailThreadListResponse,
-    EmailThreadMessagesResponse,
     EmailThreadSummary,
 )
 from app.services.email_threads import (
+    _build_thread_summary,
+    _cache_get,
+    _cache_set,
     _detect_needs_response,
     _extract_direction,
     _is_internal_message,
     _is_trioscs_domain,
-    _build_thread_summary,
-    _cache_get,
-    _cache_set,
     clear_cache,
     fetch_thread_messages,
     fetch_threads_for_requirement,
     fetch_threads_for_vendor,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Unit Tests — Helper functions

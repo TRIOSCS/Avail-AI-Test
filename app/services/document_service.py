@@ -16,7 +16,7 @@ _jinja_env = Environment(
 
 def generate_rfq_summary_pdf(requisition_id: int, db: Session) -> bytes:
     """Generate a PDF summary of a requisition with its requirements and offers."""
-    from app.models import Requisition, Requirement, Offer
+    from app.models import Offer, Requirement, Requisition
 
     requisition = db.get(Requisition, requisition_id)
     if not requisition:
@@ -50,7 +50,7 @@ def generate_rfq_summary_pdf(requisition_id: int, db: Session) -> bytes:
 
 def generate_quote_report_pdf(quote_id: int, db: Session) -> bytes:
     """Generate a PDF report for a quote."""
-    from app.models import Quote, CustomerSite, Company
+    from app.models import Company, CustomerSite, Quote
 
     quote = db.get(Quote, quote_id)
     if not quote:

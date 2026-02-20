@@ -12,19 +12,12 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 from app.dependencies import (
+    get_req_for_user,
     get_user,
-    require_user,
-    require_buyer,
-    require_admin,
-    require_settings_access,
     is_admin,
     user_reqs_query,
-    get_req_for_user,
 )
-from app.models import Requisition, User
-import pytest
-from fastapi import HTTPException
-
+from app.models import User
 
 # ── Helpers ─────────────────────────────────────────────────────────
 

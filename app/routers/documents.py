@@ -1,10 +1,10 @@
 """Documents API — PDF generation for requisitions and quotes."""
 
 import asyncio
-from loguru import logger
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..database import get_db

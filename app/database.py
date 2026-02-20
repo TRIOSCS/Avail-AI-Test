@@ -6,7 +6,7 @@ listener to prevent naive-vs-aware comparison errors.
 
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, event, DateTime, TypeDecorator
+from sqlalchemy import DateTime, TypeDecorator, create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from .config import settings

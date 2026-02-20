@@ -27,20 +27,20 @@ Usage:
 import asyncio
 import html
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import (
-    RoutingAssignment,
     BuyerProfile,
     BuyerVendorStats,
-    Requirement,
-    VendorCard,
     Offer,
+    Requirement,
+    RoutingAssignment,
     User,
+    VendorCard,
 )
-from app.config import settings
 
 log = logging.getLogger("avail.routing")
 
@@ -682,7 +682,7 @@ async def notify_routing_assignment(
     )
 
     # Send notifications to all buyers in parallel
-    send_results = []
+    send_results = []  # noqa: F841
 
     async def _send_to_buyer(buyer_id, score, rank):
         if not buyer_id:

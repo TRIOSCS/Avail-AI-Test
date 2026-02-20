@@ -17,11 +17,10 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from ..http_client import http
-
 from ..config import settings
-from ..services.credential_service import get_credential_cached
+from ..http_client import http
 from ..models import ActivityLog, BuyPlan, Offer, User
+from ..services.credential_service import get_credential_cached
 
 log = logging.getLogger("avail.buyplan")
 
@@ -83,8 +82,8 @@ def log_buyplan_activity(
 
 async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
     """Notify admins that a buy plan needs approval."""
-    from ..scheduler import get_valid_token
     from ..models import Quote
+    from ..scheduler import get_valid_token
 
     submitter = db.get(User, plan.submitted_by_id)
     submitter_name = submitter.name or submitter.email if submitter else "Unknown"
@@ -211,8 +210,8 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
 
 async def notify_buyplan_approved(plan: BuyPlan, db: Session):
     """Notify buyers that their offers need to be purchased."""
-    from ..scheduler import get_valid_token
     from ..models import Quote
+    from ..scheduler import get_valid_token
 
     approver = db.get(User, plan.approved_by_id)
     approver_name = approver.name or approver.email if approver else "Manager"
@@ -792,7 +791,7 @@ def auto_complete_stock_sales(db: Session) -> int:
 
     Returns the number of plans auto-completed.
     """
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
 
     cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
     stuck = (

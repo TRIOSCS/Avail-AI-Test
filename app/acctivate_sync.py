@@ -14,12 +14,11 @@ Design rules (from data architecture spec):
 """
 
 import logging
-from datetime import datetime, timezone
 from contextlib import contextmanager
+from datetime import datetime, timezone
 
 import pymssql  # type: ignore
 
-from .config import settings
 from .services.credential_service import get_credential_cached
 
 log = logging.getLogger("avail.acctivate")
@@ -204,7 +203,7 @@ def run_sync(db_session):
     Returns:
         dict with keys: started_at, finished_at, status, counts, errors
     """
-    from .models import VendorCard, SyncLog
+    from .models import SyncLog, VendorCard
     from .vendor_utils import normalize_vendor_name
 
     started = datetime.now(timezone.utc)

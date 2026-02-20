@@ -180,7 +180,7 @@ def test_get_saved_sightings_empty(client):
 
 def test_get_saved_sightings_returns_data(client, db_session):
     """Sightings saved in DB are returned grouped by requirement."""
-    from app.models import Requirement, Sighting
+    from app.models import Sighting
 
     resp = client.post("/api/requisitions", json={
         "name": "REQ-SIGHT-DATA", "customer_name": "SightCo",

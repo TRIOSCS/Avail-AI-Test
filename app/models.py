@@ -1,20 +1,21 @@
 """Database models — Requisition-based sourcing with CRM."""
 
 from datetime import datetime, timezone
+
 from sqlalchemy import (
-    Column,
-    Integer,
-    String,
-    Float,
-    DateTime,
-    Text,
-    Boolean,
-    ForeignKey,
-    JSON,
-    Index,
-    Numeric,
-    Date,
     ARRAY,
+    JSON,
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
 )
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import DeclarativeBase, relationship

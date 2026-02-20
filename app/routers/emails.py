@@ -14,9 +14,8 @@ Called by: main.py (router mount)
 Depends on: services/email_threads.py, email_service.py, dependencies.py
 """
 
-from loguru import logger
-
 from fastapi import APIRouter, Depends, HTTPException, Request
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..database import get_db

@@ -20,7 +20,6 @@ import json
 import logging
 from typing import Any
 
-from app.config import settings
 from app.http_client import http
 from app.services.credential_service import get_credential_cached
 

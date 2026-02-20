@@ -14,11 +14,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.routers.sources import (
-    _EmailMiningTestConnector,
     _create_sightings_from_attachment,
+    _EmailMiningTestConnector,
     _get_connector_for_source,
 )
-
 
 # ── _EmailMiningTestConnector ─────────────────────────────────────────
 

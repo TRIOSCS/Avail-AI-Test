@@ -11,11 +11,9 @@ rfq-prepare, phone call logging.
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Contact, Requisition, User, VendorResponse
-
 
 # ---------------------------------------------------------------------------
 # Garbage vendor filtering (pure logic, no DB needed)

@@ -16,7 +16,6 @@ from datetime import datetime, timedelta, timezone
 
 from app.models import ActivityLog
 
-
 # ── GET /api/companies/{id}/activities ────────────────────────────────
 
 def test_get_company_activities_returns_list(client, test_activity):

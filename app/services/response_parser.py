@@ -17,15 +17,15 @@ import logging
 
 from app.utils.claude_client import claude_structured
 from app.utils.normalization import (
-    normalize_price,
-    normalize_quantity,
-    normalize_lead_time,
-    normalize_condition,
-    normalize_date_code,
-    normalize_moq,
-    normalize_packaging,
     detect_currency,
     fuzzy_mpn_match,
+    normalize_condition,
+    normalize_date_code,
+    normalize_lead_time,
+    normalize_moq,
+    normalize_packaging,
+    normalize_price,
+    normalize_quantity,
 )
 
 log = logging.getLogger("avail.response_parser")

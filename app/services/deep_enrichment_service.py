@@ -11,7 +11,7 @@ through a three-tier confidence system:
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 log = logging.getLogger("avail.deep_enrichment")
 
@@ -21,7 +21,7 @@ log = logging.getLogger("avail.deep_enrichment")
 
 def link_contact_to_entities(db, sender_email: str, signature_data: dict) -> None:
     """Match sender by email domain to VendorCard/Company, create/update VendorContact or SiteContact."""
-    from ..models import VendorCard, VendorContact, Company, SiteContact, CustomerSite
+    from ..models import Company, CustomerSite, SiteContact, VendorCard, VendorContact
 
     if not sender_email or "@" not in sender_email:
         return
@@ -39,7 +39,7 @@ def link_contact_to_entities(db, sender_email: str, signature_data: dict) -> Non
     )
     if not cards:
         # Try domain_aliases (JSON array)
-        from sqlalchemy import cast, String
+        from sqlalchemy import String
         cards = (
             db.query(VendorCard)
             .filter(VendorCard.domain_aliases.cast(String).contains(domain))
@@ -185,7 +185,7 @@ def route_enrichment(
 
 def _apply_field_update(db, entity_type: str, entity_id: int, field_name: str, value) -> None:
     """Apply a single field update to an entity."""
-    from ..models import VendorCard, Company, VendorContact
+    from ..models import Company, VendorCard, VendorContact
 
     model_map = {
         "vendor_card": VendorCard,
@@ -214,7 +214,6 @@ def _apply_field_update(db, entity_type: str, entity_id: int, field_name: str, v
 
 def apply_queue_item(db, queue_item, user_id: int | None = None) -> bool:
     """Apply a pending enrichment queue item. Returns True on success."""
-    from ..models import EnrichmentQueue
 
     if queue_item.status not in ("pending", "low_confidence"):
         return False
@@ -287,7 +286,7 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
     # 1. Company enrichment via existing waterfall
     if card.domain:
         try:
-            from ..enrichment_service import enrich_entity, apply_enrichment_to_vendor
+            from ..enrichment_service import enrich_entity
             data = await enrich_entity(card.domain, card.display_name)
             if data:
                 for field in ("legal_name", "industry", "employee_size", "hq_city",
@@ -527,7 +526,7 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
         try:
             from ..enrichment_service import find_suggested_contacts
             new_contacts = await find_suggested_contacts(domain, company.name)
-            from ..models import SiteContact, CustomerSite
+            from ..models import CustomerSite, SiteContact
             # Find a site to attach contacts to
             site = db.query(CustomerSite).filter(
                 CustomerSite.company_id == company_id
@@ -585,7 +584,7 @@ async def run_backfill_job(db, started_by_id: int, scope: dict | None = None) ->
         lookback_days: 365,
     }
     """
-    from ..models import EnrichmentJob, VendorCard, Company, User
+    from ..models import Company, EnrichmentJob, VendorCard
 
     scope = scope or {}
     entity_types = scope.get("entity_types", ["vendor", "company"])
@@ -626,7 +625,7 @@ async def run_backfill_job(db, started_by_id: int, scope: dict | None = None) ->
 async def _execute_backfill(job_id: int, entity_types: list, max_items: int, scope: dict):
     """Execute the backfill job in the background."""
     from ..database import SessionLocal
-    from ..models import EnrichmentJob, VendorCard, Company, User
+    from ..models import Company, EnrichmentJob, User, VendorCard
 
     db = SessionLocal()
     try:
@@ -762,13 +761,13 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
         # Deep email mining per user (if enabled)
         if scope.get("include_deep_email"):
             try:
-                from ..scheduler import get_valid_token
                 from ..connectors.email_mining import EmailMiner
-                from .signature_parser import extract_signature, cache_signature_extract
+                from ..scheduler import get_valid_token
+                from .signature_parser import cache_signature_extract, extract_signature
 
                 users = db.query(User).filter(
                     User.refresh_token.isnot(None),
-                    User.m365_connected == True,
+                    User.m365_connected.is_(True),
                 ).all()
 
                 lookback = scope.get("lookback_days", 365)

@@ -14,6 +14,7 @@ Called by: pytest tests/test_deep_enrichment.py -v
 """
 
 import os
+
 os.environ["TESTING"] = "1"
 
 import json
@@ -24,26 +25,29 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import (
-    Base, Company, EnrichmentJob, EnrichmentQueue, EmailSignatureExtract,
-    User, VendorCard,
-)
-from app.services.signature_parser import (
-    parse_signature_regex,
-    cache_signature_extract,
-    _extract_signature_block,
-)
-from app.services.specialty_detector import (
-    detect_brands_from_text,
-    detect_commodities_from_text,
-    BRAND_LIST,
-    COMMODITY_MAP,
+    Company,
+    EmailSignatureExtract,
+    EnrichmentJob,
+    EnrichmentQueue,
+    User,
+    VendorCard,
 )
 from app.services.deep_enrichment_service import (
-    route_enrichment,
-    apply_queue_item,
     _apply_field_update,
+    apply_queue_item,
+    route_enrichment,
 )
-
+from app.services.signature_parser import (
+    _extract_signature_block,
+    cache_signature_extract,
+    parse_signature_regex,
+)
+from app.services.specialty_detector import (
+    BRAND_LIST,
+    COMMODITY_MAP,
+    detect_brands_from_text,
+    detect_commodities_from_text,
+)
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 

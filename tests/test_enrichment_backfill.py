@@ -13,6 +13,7 @@ Called by: pytest tests/test_enrichment_backfill.py -v
 """
 
 import os
+
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
@@ -24,7 +25,6 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     ActivityLog,
-    Base,
     Requirement,
     Requisition,
     Sighting,
@@ -32,7 +32,6 @@ from app.models import (
     VendorCard,
     VendorContact,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 
@@ -200,7 +199,7 @@ class TestEmailBackfill:
     def test_backfill_no_duplicates(self, admin_client, db_session, vendor_arrow):
         """Running backfill twice doesn't create duplicate contacts."""
         resp1 = admin_client.post("/api/enrichment/backfill-emails")
-        count1 = resp1.json()["total_created"]
+        _count1 = resp1.json()["total_created"]  # noqa: F841
 
         resp2 = admin_client.post("/api/enrichment/backfill-emails")
         count2 = resp2.json()["total_created"]

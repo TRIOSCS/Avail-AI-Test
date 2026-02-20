@@ -3,12 +3,12 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy.orm import Session
 
-from .config import settings
+from .models import ActivityLog, Contact, PendingBatch, ProcessedMessage, Requisition, VendorResponse
 from .services.credential_service import get_credential_cached
-from .models import ActivityLog, Contact, Requisition, VendorResponse, ProcessedMessage, PendingBatch
 
 log = logging.getLogger(__name__)
 
@@ -203,8 +203,9 @@ async def poll_inbox(
     Returns list of new responses found (already saved to DB).
     """
     import re
-    from app.utils.graph_client import GraphClient
+
     from app.models import SyncState
+    from app.utils.graph_client import GraphClient
 
     gc = GraphClient(token)
 
@@ -705,8 +706,8 @@ async def _submit_parse_batch(
     db: Session,
 ) -> None:
     """Submit pending VendorResponses to Anthropic Batch API for parsing."""
-    from app.utils.claude_client import claude_batch_submit
     from app.services.response_parser import RESPONSE_PARSE_SCHEMA, SYSTEM_PROMPT, _clean_email_body
+    from app.utils.claude_client import claude_batch_submit
 
     requests = []
     request_map = {}  # custom_id -> vendor_response_id
@@ -800,8 +801,8 @@ async def process_batch_results(db: Session) -> int:
 
     Called by scheduler every tick. Returns count of results applied.
     """
-    from app.utils.claude_client import claude_batch_results
     from app.services.response_parser import _normalize_parsed_parts
+    from app.utils.claude_client import claude_batch_results
 
     pending_batches = (
         db.query(PendingBatch)

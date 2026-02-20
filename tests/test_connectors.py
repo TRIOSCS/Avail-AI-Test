@@ -8,9 +8,9 @@ Called by: pytest
 Depends on: app/connectors/*
 """
 
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-import httpx
-from unittest.mock import AsyncMock, patch, MagicMock
 
 # ── DigiKey ─────────────────────────────────────────────────────────
 
@@ -25,7 +25,6 @@ class TestDigiKeyConnector:
         return c
 
     def test_parse_products(self):
-        from app.connectors.digikey import DigiKeyConnector
         c = self._make_connector()
         data = {
             "Products": [

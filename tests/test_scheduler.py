@@ -20,7 +20,6 @@ from sqlalchemy.orm import Session
 from app.models import Requisition, VendorCard
 from app.scheduler import _utc, configure_scheduler, scheduler
 
-
 # ── Fixtures ───────────────────────────────────────────────────────────
 
 

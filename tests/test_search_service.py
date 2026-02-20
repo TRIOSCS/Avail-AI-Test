@@ -10,7 +10,6 @@ All tests use the in-memory SQLite session from conftest.
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -31,7 +30,6 @@ from app.search_service import (
     get_all_pns,
     sighting_to_dict,
 )
-
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -286,8 +284,6 @@ def test_save_sightings_clears_previous(db_session, test_user):
     )
     db_session.add(old)
     db_session.commit()
-    old_id = old.id
-
     fresh = [
         {
             "vendor_name": "New Vendor",

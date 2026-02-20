@@ -11,19 +11,17 @@ Depends on: app/services/engagement_scorer.py
 from datetime import datetime, timedelta, timezone
 
 from app.services.engagement_scorer import (
-    compute_engagement_score,
-    W_RESPONSE_RATE,
-    W_GHOST_RATE,
-    W_RECENCY,
-    W_VELOCITY,
-    W_WIN_RATE,
-    MIN_OUTREACH_FOR_SCORE,
-    VELOCITY_IDEAL_HOURS,
-    VELOCITY_MAX_HOURS,
     RECENCY_IDEAL_DAYS,
     RECENCY_MAX_DAYS,
+    VELOCITY_IDEAL_HOURS,
+    VELOCITY_MAX_HOURS,
+    W_GHOST_RATE,
+    W_RECENCY,
+    W_RESPONSE_RATE,
+    W_VELOCITY,
+    W_WIN_RATE,
+    compute_engagement_score,
 )
-
 
 NOW = datetime(2026, 2, 15, 12, 0, 0, tzinfo=timezone.utc)
 

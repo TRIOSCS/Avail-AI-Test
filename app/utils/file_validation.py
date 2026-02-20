@@ -133,8 +133,9 @@ def _get_extension(filename: str) -> str:
 def is_password_protected(content: bytes) -> bool:
     """Check if an Excel file appears to be password-protected."""
     try:
-        import openpyxl
         import io
+
+        import openpyxl
 
         openpyxl.load_workbook(io.BytesIO(content), read_only=True)
         return False

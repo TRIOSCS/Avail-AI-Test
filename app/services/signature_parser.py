@@ -110,7 +110,7 @@ def parse_signature_regex(body: str) -> dict:
         "confidence": 0.0,
     }
 
-    lines = [l.strip() for l in sig_block.split("\n") if l.strip()]
+    lines = [line.strip() for line in sig_block.split("\n") if line.strip()]
 
     # Extract phone numbers
     phones = []

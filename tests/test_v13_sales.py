@@ -10,11 +10,9 @@ Called by: pytest
 Depends on: conftest (client, test_company, test_user, sales_user)
 """
 
-from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
-
 
 # ── Helper: client authenticated as sales user ──────────────────────
 

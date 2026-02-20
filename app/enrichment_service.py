@@ -11,11 +11,10 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 
-from .config import settings
 from .http_client import http
+from .services.ai_service import enrich_contacts_websearch
 from .services.credential_service import get_credential_cached
 from .utils.claude_client import claude_json, claude_text
-from .services.ai_service import enrich_contacts_websearch
 
 log = logging.getLogger("avail.enrichment")
 

@@ -23,7 +23,8 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import is_admin as _is_admin, require_admin, require_user
+from ..dependencies import is_admin as _is_admin
+from ..dependencies import require_admin, require_user
 from ..models import ActivityLog, Company, User, VendorCard
 from ..schemas.v13_features import (
     ActivityAttributeRequest,
@@ -482,8 +483,8 @@ async def company_activity_status(
     company_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     """Get activity health status for a company (for dashboard indicators)."""
-    from app.services.activity_service import days_since_last_activity
     from app.config import settings as cfg
+    from app.services.activity_service import days_since_last_activity
 
     company = db.get(Company, company_id)
     if not company:
@@ -809,9 +810,9 @@ async def reload_routing_maps_endpoint(user: User = Depends(require_user)):
     if not _is_admin(user):
         raise HTTPException(403, "Admin only")
     from app.routing_maps import (
-        load_routing_maps,
         get_brand_commodity_map,
         get_country_region_map,
+        load_routing_maps,
     )
 
     try:

@@ -18,7 +18,6 @@ from app.schemas.v13_features import (
     StrategicToggle,
 )
 
-
 # ── BuyerProfileUpsert ──────────────────────────────────────────────
 
 class TestBuyerProfileUpsert:

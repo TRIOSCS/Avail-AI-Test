@@ -18,7 +18,6 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from ..http_client import http
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
@@ -29,6 +28,8 @@ from ..dependencies import (
     require_fresh_token,
     require_user,
 )
+from ..email_service import log_phone_contact, poll_inbox, send_batch_rfq
+from ..http_client import http
 from ..models import (
     ActivityLog,
     Contact,
@@ -40,7 +41,6 @@ from ..models import (
     VendorReview,
 )
 from ..schemas.rfq import BatchRfqSend, FollowUpEmail, PhoneCallLog, RfqPrepare
-from ..email_service import log_phone_contact, send_batch_rfq, poll_inbox
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["rfq"])
@@ -585,7 +585,7 @@ async def send_follow_up(
         parts_str = ", ".join(contact.parts_included or ["your parts"])
         body = f"Hi, following up on our RFQ below regarding {parts_str}. Please advise on availability and pricing at your earliest convenience. Thank you."
 
-    from ..email_service import _graph_post, _build_html_body, GRAPH
+    from ..email_service import GRAPH, _build_html_body, _graph_post
 
     html_body = _build_html_body(body)
 

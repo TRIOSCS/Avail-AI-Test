@@ -5,18 +5,17 @@ from .logging_config import setup_logging
 setup_logging()  # Must run before any other module logs
 
 import os
-import asyncio
 import uuid
 from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from loguru import logger
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
-from loguru import logger
-
-from .config import settings, APP_VERSION
+from .config import APP_VERSION, settings
 from .database import get_db
 from .models import (
     ApiSource,
@@ -71,7 +70,7 @@ async def lifespan(app):
     _connector_status = log_connector_status()
     app.state.connector_status = _connector_status
 
-    from .scheduler import scheduler, configure_scheduler
+    from .scheduler import configure_scheduler, scheduler
 
     configure_scheduler()
     scheduler.start()
@@ -106,6 +105,7 @@ app.add_middleware(
 # CSRF protection (double-submit cookie) — disabled in test mode
 if not os.environ.get("TESTING"):
     import re
+
     from starlette_csrf import CSRFMiddleware
 
     app.add_middleware(
@@ -124,6 +124,7 @@ templates = Jinja2Templates(directory="app/templates")
 
 # Prometheus metrics
 from prometheus_fastapi_instrumentator import Instrumentator
+
 Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 # Secret key validation moved to lifespan (fail-fast)
@@ -133,6 +134,7 @@ Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrumen
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next):
     import time
+
     from loguru import logger
 
     req_id = str(uuid.uuid4())[:8]
@@ -188,8 +190,9 @@ async def api_version_middleware(request: Request, call_next):
 @app.get("/health")
 async def health(request: Request, db: Session = Depends(get_db)):
     from sqlalchemy import text
-    from .cache.intel_cache import _get_redis
+
     from . import scheduler as sched_mod
+    from .cache.intel_cache import _get_redis
 
     db_ok = True
     try:
@@ -235,6 +238,7 @@ def _seed_api_sources():
     """Seed the api_sources table with all known data sources.
     Uses a version hash so it only writes when the source list changes."""
     import hashlib
+
     from .database import SessionLocal
 
     db = SessionLocal()

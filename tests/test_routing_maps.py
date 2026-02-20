@@ -10,8 +10,6 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 
 class TestLoadFromFile:
     """Test the internal _load_from_file function."""

@@ -7,7 +7,6 @@ to generate brand_tags and commodity_tags for vendor cards.
 import logging
 import re
 from collections import Counter
-from datetime import datetime, timezone
 
 log = logging.getLogger("avail.specialty_detector")
 
@@ -135,7 +134,7 @@ def analyze_vendor_specialties(vendor_card_id: int, db) -> dict:
 
     Returns: {brand_tags: [...], commodity_tags: [...], confidence: float}
     """
-    from ..models import Sighting, Offer, VendorCard
+    from ..models import Offer, Sighting, VendorCard
 
     card = db.get(VendorCard, vendor_card_id)
     if not card:

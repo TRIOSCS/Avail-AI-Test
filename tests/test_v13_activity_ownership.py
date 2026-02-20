@@ -9,10 +9,9 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.v13_features
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-from app.models import ActivityLog, Company, User
-
+from app.models import ActivityLog, User
 
 # ═══════════════════════════════════════════════════════════════════════
 #  ACTIVITY LOG ENDPOINTS
