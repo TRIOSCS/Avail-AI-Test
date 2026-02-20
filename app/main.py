@@ -152,14 +152,36 @@ async def api_version_middleware(request: Request, call_next):
 @app.get("/health")
 async def health(db: Session = Depends(get_db)):
     from sqlalchemy import text
+    from .cache.intel_cache import _get_redis
+    from . import scheduler as sched_mod
 
     db_ok = True
     try:
         db.execute(text("SELECT 1"))
     except Exception:
         db_ok = False
-    status = "ok" if db_ok else "degraded"
-    return {"status": status, "version": APP_VERSION, "db": "ok" if db_ok else "error"}
+
+    redis_status = "off"
+    try:
+        r = _get_redis()
+        if r is not None:
+            redis_status = "ok" if r.ping() else "error"
+    except Exception:
+        redis_status = "error"
+
+    scheduler_running = getattr(sched_mod.scheduler, "running", False)
+    scheduler_status = "ok" if scheduler_running else "off"
+
+    # "degraded" only when a required service is actively failing
+    degraded = not db_ok or redis_status == "error" or scheduler_status == "error"
+    status = "degraded" if degraded else "ok"
+    return {
+        "status": status,
+        "version": APP_VERSION,
+        "db": "ok" if db_ok else "error",
+        "redis": redis_status,
+        "scheduler": scheduler_status,
+    }
 
 
 # ── Seed API Sources ─────────────────────────────────────────────────────

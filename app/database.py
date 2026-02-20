@@ -25,8 +25,8 @@ class UTCDateTime(TypeDecorator):
 
 engine = create_engine(
     settings.database_url,
-    pool_size=10,
-    max_overflow=20,
+    pool_size=15,
+    max_overflow=30,
     pool_pre_ping=True,
     pool_recycle=3600,
     connect_args={"connect_timeout": 10},
