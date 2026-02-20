@@ -1451,7 +1451,7 @@ function renderBuyPlanStatus(targetId) {
     // Deal context header
     let contextHtml = '';
     if (bp.customer_name || bp.quote_number || bp.sales_order_number) {
-        contextHtml = `<div style="background:var(--bg2);padding:10px;border-radius:6px;margin-bottom:12px;font-size:12px">
+        contextHtml = `<div class="info-card">
             ${bp.customer_name ? '<div><strong>Customer:</strong> '+esc(bp.customer_name)+'</div>' : ''}
             ${bp.quote_number ? '<div><strong>Quote:</strong> '+esc(bp.quote_number)+'</div>' : ''}
             ${bp.sales_order_number ? '<div><strong>Acctivate SO#:</strong> '+esc(bp.sales_order_number)+'</div>' : ''}
@@ -1462,7 +1462,7 @@ function renderBuyPlanStatus(targetId) {
     let marginHtml = '';
     if (bp.total_revenue > 0) {
         const profitColor = bp.total_profit >= 0 ? 'var(--green)' : 'var(--red)';
-        marginHtml = `<div style="display:flex;gap:16px;background:var(--bg2);padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:12px;flex-wrap:wrap">
+        marginHtml = `<div class="stat-row">
             <div><strong>Cost:</strong> $${bp.total_cost.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
             <div><strong>Revenue:</strong> $${bp.total_revenue.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
             <div style="color:${profitColor}"><strong>Profit:</strong> $${bp.total_profit.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</div>
@@ -1840,7 +1840,7 @@ async function checkTokenApproval() {
         el.innerHTML = `
             <div class="card" style="max-width:600px;margin:40px auto;border-left:4px solid var(--amber)">
                 <h2 style="margin-bottom:16px">Buy Plan Approval</h2>
-                <div style="background:var(--bg2);padding:10px;border-radius:6px;margin-bottom:12px;font-size:12px">
+                <div class="info-card">
                     ${bp.customer_name ? '<div><strong>Customer:</strong> '+esc(bp.customer_name)+'</div>' : ''}
                     ${bp.quote_number ? '<div><strong>Quote:</strong> '+esc(bp.quote_number)+'</div>' : ''}
                     <div><strong>Status:</strong> ${esc(statusLabel)}</div>
@@ -2646,7 +2646,7 @@ async function loadCompanyActivityStatus(companyId) {
         const colors = { green: 'var(--green)', yellow: 'var(--amber)', red: 'var(--red)', no_activity: 'var(--muted)' };
         const labels = { green: 'Active', yellow: 'At risk', red: 'Stale', no_activity: 'No activity' };
         const daysText = d.days_since_activity != null ? ' (' + d.days_since_activity + 'd)' : '';
-        el.innerHTML = `<span class="badge" style="background:color-mix(in srgb,${colors[d.status]} 15%,transparent);color:${colors[d.status]};font-size:9px;padding:1px 6px;border-radius:8px">${labels[d.status]}${daysText}</span>`;
+        el.innerHTML = `<span class="badge activity-badge" style="background:color-mix(in srgb,${colors[d.status]} 15%,transparent);color:${colors[d.status]}">${labels[d.status]}${daysText}</span>`;
         el.dataset.loaded = '1';
     } catch(e) { logCatchError('companyActivityStatus', e); showToast('Failed to load activity status', 'error'); }
 }

@@ -65,7 +65,7 @@
             </div>
         </div>
         <button type="button" class="tb-btn" id="btnMyAccounts" onclick="toggleMyAccounts(this)">My Accounts</button>
-        <div class="filter-wrap" class="u-ml-auto">
+        <div class="filter-wrap u-ml-auto">
             <button type="button" class="filter-btn" onclick="toggleNotifications()" style="position:relative;padding:6px 10px" title="Notifications">
                 &#x1f514;
                 <span id="notifBadge" class="filter-badge" style="position:absolute;top:-4px;right:-4px;background:var(--red)">0</span>
@@ -136,8 +136,8 @@
             <div>
                 <a class="back-link" onclick="showList()">← Back</a>
                 <div style="display:flex;align-items:center;gap:8px"><h2 id="detailTitle" onclick="editReqName(this)" title="Click to rename" class="u-cursor-pointer"></h2><span id="detailStatus" class="status-chip"></span></div>
-                <span id="detailCustomer" class="req-customer" onclick="openDetailSitePicker()" title="Click to link/change customer" class="u-cursor-pointer"></span>
-                <span id="detailDeadline" class="detail-deadline" onclick="editDetailDeadline()" title="Click to set/change deadline" class="u-cursor-pointer"></span>
+                <span id="detailCustomer" class="req-customer u-cursor-pointer" onclick="openDetailSitePicker()" title="Click to link/change customer"></span>
+                <span id="detailDeadline" class="detail-deadline u-cursor-pointer" onclick="editDetailDeadline()" title="Click to set/change deadline"></span>
                 <div id="detailSitePicker" style="display:none;margin-top:4px">
                     <div class="site-typeahead" style="max-width:320px">
                         <input id="detailSiteSearch" placeholder="Search customer site…" aria-label="Search customer sites" autocomplete="off" oninput="filterDetailSiteTypeahead(this.value)">
@@ -162,7 +162,7 @@
 
         <!-- Requirements Tab -->
         <div id="tab-requirements" class="tc on">
-            <div class="card" class="u-mb-md">
+            <div class="card u-mb-md">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                     <strong style="font-size:12px;color:var(--muted)">Type a part number and press Enter to add</strong>
                     <button type="button" class="btn btn-ghost btn-sm" onclick="toggleUpload()">📁 Upload CSV</button>
@@ -339,7 +339,7 @@
                 <input type="checkbox" id="custMyOnly" onchange="loadCustomers()" class="u-accent-teal" aria-label="Show only my accounts"> My accounts
             </label>
             <button type="button" class="btn btn-primary btn-sm" onclick="openNewCompanyModal()">+ New Company</button>
-            <span id="custFilterCount" class="text-muted" class="u-fs-xs"></span>
+            <span id="custFilterCount" class="text-muted u-fs-xs"></span>
         </div>
         <div id="custList" aria-live="polite"><p class="empty">Loading…</p></div>
     </div>
@@ -645,8 +645,8 @@
             <div class="field"><label for="asSiteAddr2">Address Line 2</label><input id="asSiteAddr2" placeholder="Suite 200"></div>
             <div style="display:flex;gap:8px">
                 <div class="field" style="flex:2"><label for="asSiteCity">City</label><input id="asSiteCity" placeholder="Austin"></div>
-                <div class="field" class="u-flex-1"><label for="asSiteState">State</label><input id="asSiteState" placeholder="TX"></div>
-                <div class="field" class="u-flex-1"><label for="asSiteZip">Zip</label><input id="asSiteZip" placeholder="78701"></div>
+                <div class="field u-flex-1"><label for="asSiteState">State</label><input id="asSiteState" placeholder="TX"></div>
+                <div class="field u-flex-1"><label for="asSiteZip">Zip</label><input id="asSiteZip" placeholder="78701"></div>
             </div>
             <div class="field"><label for="asSiteCountry">Country</label><input id="asSiteCountry" placeholder="US" value="US"></div>
             <div class="field"><label for="asSitePayTerms">Payment Terms</label><input id="asSitePayTerms" placeholder="Net 30"></div>
@@ -675,7 +675,7 @@
         <h2 id="scModalTitle">Suggested Contacts</h2>
         <p class="u-fs-xs u-color-muted u-mb-md" id="scModalSubtitle">Select contacts to add</p>
         <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
-            <input class="req-search" id="scTitleFilter" placeholder="Filter by title (e.g. Sales, Procurement)…" class="u-flex-1"
+            <input class="req-search u-flex-1" id="scTitleFilter" placeholder="Filter by title (e.g. Sales, Procurement)…"
                    onkeydown="if(event.key==='Enter')searchSuggestedContacts()">
             <button type="button" class="btn btn-ghost btn-sm" onclick="searchSuggestedContacts()">Search</button>
         </div>
@@ -714,7 +714,7 @@
                 <label>Attachments</label>
                 <div id="loAttachments" class="u-flex u-flex-wrap u-gap-sm u-mb-sm"></div>
                 <div class="u-flex u-gap-sm">
-                    <label class="btn btn-ghost btn-sm" class="u-cursor-pointer">
+                    <label class="btn btn-ghost btn-sm u-cursor-pointer">
                         Upload File <input type="file" id="loFileInput" multiple accept="image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx" style="display:none" onchange="handleOfferFileSelect(this)">
                     </label>
                     <button type="button" class="btn btn-ghost btn-sm" onclick="openOneDrivePicker()">Browse OneDrive</button>
@@ -801,12 +801,12 @@
     <div class="modal modal-lg">
         <h2>Mark Won &amp; Submit Buy Plan</h2>
         <p class="u-fs-xs u-color-muted u-mb-md">Select items and set the quantity to purchase from each vendor. This will be sent to management for approval.</p>
-        <table class="tbl" class="u-mb-md">
+        <table class="tbl u-mb-md">
             <thead><tr><th style="width:30px"></th><th>MPN</th><th>Mfr</th><th>Avail Qty</th><th>Plan Qty</th><th>Unit Cost</th><th>Line Total</th><th>Lead</th></tr></thead>
             <tbody id="bpItems"></tbody>
         </table>
         <div style="text-align:right;font-weight:600;margin-bottom:12px">Total Cost: <span id="bpTotal"></span></div>
-        <div class="field" class="u-mb-md">
+        <div class="field u-mb-md">
             <label>Notes for Manager &amp; Buyers</label>
             <textarea id="bpSalespersonNotes" rows="3" placeholder="Add any context, special instructions, or notes for the purchasing team..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)"></textarea>
         </div>
@@ -935,7 +935,7 @@
             <div id="psmContacts" style="font-size:12px"><span class="empty">Loading contacts…</span></div>
         </div>
 
-        <div class="field" class="u-mt-md">
+        <div class="field u-mt-md">
             <label for="psmSubject">Subject</label>
             <input id="psmSubject" placeholder="Parts Available — Company">
         </div>
@@ -1061,7 +1061,7 @@
                         <option value="company">Companies</option>
                     </select>
                     <button type="button" class="btn btn-sm" onclick="bulkApproveSelected()" id="eqBulkApproveBtn" style="display:none">Approve Selected</button>
-                    <span id="eqCount" class="s-hint" class="u-ml-auto"></span>
+                    <span id="eqCount" class="s-hint u-ml-auto"></span>
                 </div>
                 <div id="enrichQueueList"><p class="empty">Loading...</p></div>
             </div>

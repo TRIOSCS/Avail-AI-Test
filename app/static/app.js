@@ -2809,7 +2809,7 @@ async function openVendorPopup(cardId) {
         const engScore = Math.round(card.engagement_score);
         const engClass = engScore >= 70 ? 'eng-high' : engScore >= 40 ? 'eng-med' : 'eng-low';
         const respRate = card.total_outreach > 0 ? Math.round((card.total_responses / card.total_outreach) * 100) : null;
-        html += `<div style="display:flex;gap:12px;align-items:center;margin-top:10px;padding:8px 12px;background:var(--surface);border-radius:6px;border:1px solid var(--border)">
+        html += `<div class="metrics-panel u-items-center">
             <div class="engagement-ring ${engClass}">${engScore}</div>
             <div style="flex:1;font-size:11px">
                 <div style="font-weight:700;margin-bottom:2px">Engagement Score</div>
@@ -2980,7 +2980,7 @@ async function loadVendorEmailMetrics(cardId) {
     try {
         const m = await apiFetch(`/api/vendors/${cardId}/email-metrics`);
         const avgResp = m.avg_response_hours != null ? (m.avg_response_hours < 24 ? Math.round(m.avg_response_hours) + 'h' : Math.round(m.avg_response_hours / 24) + 'd') : '—';
-        el.innerHTML = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0;padding:8px 12px;background:var(--surface);border-radius:6px;border:1px solid var(--border);font-size:11px">
+        el.innerHTML = `<div class="metrics-panel">
             <div style="text-align:center"><div style="font-weight:800;font-size:14px;color:var(--blue)">${m.total_rfqs_sent || 0}</div><div style="color:var(--muted)">RFQs Sent</div></div>
             <div style="text-align:center"><div style="font-weight:800;font-size:14px;color:var(--green)">${m.total_replies || 0}</div><div style="color:var(--muted)">Replies</div></div>
             <div style="text-align:center"><div style="font-weight:800;font-size:14px;color:var(--amber)">${m.total_quotes || 0}</div><div style="color:var(--muted)">Quotes</div></div>
@@ -3233,7 +3233,7 @@ async function loadVendorActivityStatus(cardId) {
         const colors = { green: 'var(--green)', yellow: 'var(--amber)', red: 'var(--red)', no_activity: 'var(--muted)' };
         const labels = { green: 'Active', yellow: 'At risk', red: 'Stale', no_activity: 'No activity' };
         const daysText = d.days_since_activity != null ? ' (' + d.days_since_activity + 'd)' : '';
-        el.innerHTML = `<span class="badge" style="background:color-mix(in srgb,${colors[d.status]} 15%,transparent);color:${colors[d.status]};font-size:9px;padding:1px 6px;border-radius:8px">${labels[d.status]}${daysText}</span>`;
+        el.innerHTML = `<span class="badge activity-badge" style="background:color-mix(in srgb,${colors[d.status]} 15%,transparent);color:${colors[d.status]}">${labels[d.status]}${daysText}</span>`;
     } catch(e) { logCatchError('vendorActivityStatus', e); }
 }
 
