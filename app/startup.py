@@ -296,3 +296,17 @@ def _create_perf_indexes(conn) -> None:
         CREATE INDEX IF NOT EXISTS ix_sightings_vendor_lower
         ON sightings (LOWER(TRIM(vendor_name)))
     """)
+    # pg_trgm for fast ILIKE search on requisitions + requirements
+    _exec(conn, "CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_requisitions_name_trgm
+        ON requisitions USING gin (name gin_trgm_ops)
+    """)
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_requisitions_customer_name_trgm
+        ON requisitions USING gin (customer_name gin_trgm_ops)
+    """)
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_requirements_mpn_trgm
+        ON requirements USING gin (primary_mpn gin_trgm_ops)
+    """)

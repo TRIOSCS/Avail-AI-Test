@@ -349,8 +349,9 @@ async def list_requisitions(
     else:
         query = query.filter(Requisition.status.notin_(["archived", "won", "lost", "closed"]))
 
-    total = query.count()
+    # Skip expensive COUNT for search queries — use result length instead
     rows = query.order_by(Requisition.created_at.desc()).offset(offset).limit(limit).all()
+    total = (offset + len(rows)) if q.strip() else query.count()
     # Pre-load creator names (all roles see all reqs now)
     creator_names = {}
     creator_ids = {r.created_by for r, *_ in rows if r.created_by}

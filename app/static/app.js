@@ -255,17 +255,38 @@ function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
 // ── Init ────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
     initNameAutocomplete('stockVendorName', 'stockVendorNameList', null, { types: 'vendor', websiteId: 'stockVendorWebsite' });
+    // Route based on URL hash (supports bookmarks + page refresh)
+    const initHash = location.hash.replace('#', '');
+    const initView = _hashToView[initHash];
+    if (initView && initView !== 'view-list') {
+        _navFromPopstate = true;
+        const initRoutes = {
+            'view-vendors': () => showVendors(),
+            'view-materials': () => showMaterials(),
+            'view-customers': () => showCustomers(),
+            'view-buyplans': () => showBuyPlans(),
+            'view-proactive': () => showProactiveOffers(),
+            'view-performance': () => showPerformance(),
+            'view-settings': () => showSettings(),
+        };
+        if (initRoutes[initView]) initRoutes[initView]();
+        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-performance':'navScorecards','view-settings':'navSettings'};
+        const navBtn = document.getElementById(sidebarMap[initView]);
+        if (navBtn) navHighlight(navBtn);
+        _navFromPopstate = false;
+    }
     await loadRequisitions();
     // Restore last viewed requisition on page reload
-    try {
-        const lastId = parseInt(localStorage.getItem('lastReqId'));
-        const lastName = localStorage.getItem('lastReqName') || '';
-        if (lastId) {
-            // Auto-expand the last viewed requisition drill-down
-            const found = _reqListData.find(r => r.id === lastId);
-            if (found) setTimeout(() => toggleDrillDown(lastId), 300);
-        }
-    } catch(e) { logCatchError('restoreLastReq', e); }
+    if (!initView || initView === 'view-list') {
+        try {
+            const lastId = parseInt(localStorage.getItem('lastReqId'));
+            const lastName = localStorage.getItem('lastReqName') || '';
+            if (lastId) {
+                const found = _reqListData.find(r => r.id === lastId);
+                if (found) setTimeout(() => toggleDrillDown(lastId), 300);
+            }
+        } catch(e) { logCatchError('restoreLastReq', e); }
+    }
     checkM365Status();
     const dz = document.getElementById('dropZone');
     if (dz) {
@@ -400,7 +421,51 @@ async function refreshProactiveBadge() {
 // ── Navigation ──────────────────────────────────────────────────────────
 const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-performance', 'view-settings'];
 
+// Hash-based routing for browser back/forward
+const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-performance':'performance','view-settings':'settings'};
+const _hashToView = Object.fromEntries(Object.entries(_viewToHash).map(([k,v])=>[v,k]));
+let _navFromPopstate = false;
+
+let _lastPushedHash = '';
+function _pushNav(viewId) {
+    if (_navFromPopstate) return;
+    const hash = '#' + (_viewToHash[viewId] || 'rfqs');
+    if (hash === _lastPushedHash) return;
+    _lastPushedHash = hash;
+    if (!location.hash || location.hash === '#') {
+        history.replaceState({view: viewId}, '', hash);
+    } else {
+        history.pushState({view: viewId}, '', hash);
+    }
+}
+
+window.addEventListener('popstate', (e) => {
+    const hash = location.hash.replace('#','');
+    // Skip approve-token hashes (handled by crm.js)
+    if (hash.startsWith('approve-token/')) return;
+    const viewId = _hashToView[hash] || 'view-list';
+    _navFromPopstate = true;
+    // Route to the correct view
+    const routes = {
+        'view-list': () => { showList(); setMainPill('rfq'); },
+        'view-vendors': () => showVendors(),
+        'view-materials': () => showMaterials(),
+        'view-customers': () => showCustomers(),
+        'view-buyplans': () => showBuyPlans(),
+        'view-proactive': () => showProactiveOffers(),
+        'view-performance': () => showPerformance(),
+        'view-settings': () => showSettings(),
+    };
+    if (routes[viewId]) routes[viewId]();
+    // Highlight correct sidebar button
+    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-performance':'navScorecards','view-settings':'navSettings'};
+    const navBtn = document.getElementById(sidebarMap[viewId]);
+    if (navBtn) navHighlight(navBtn);
+    _navFromPopstate = false;
+});
+
 function showView(viewId) {
+    _pushNav(viewId);
     for (const id of ALL_VIEWS) {
         const el = document.getElementById(id);
         if (el) el.style.display = id === viewId ? '' : 'none';
@@ -520,15 +585,25 @@ const debouncedReqListSearch = debounce(() => {
 }, 300);
 
 
+let _reqAbort = null;  // AbortController for in-flight requisition searches
+
 async function loadRequisitions(query = '') {
+    // Cancel any in-flight request
+    if (_reqAbort) { try { _reqAbort.abort(); } catch(e){} }
+    _reqAbort = new AbortController();
+    const signal = _reqAbort.signal;
     try {
-        const url = query ? `/api/requisitions?q=${encodeURIComponent(query)}` : '/api/requisitions';
+        const status = _currentMainView === 'archive' ? '&status=archive' : '';
+        const url = query ? `/api/requisitions?q=${encodeURIComponent(query)}${status}` : `/api/requisitions?limit=200${status}`;
         _serverSearchActive = !!query;
-        const resp = await apiFetch(url);
+        const resp = await apiFetch(url, { signal });
         _reqListData = resp.requisitions || resp;
         _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
         renderReqList();
-    } catch (e) { logCatchError('loadRequisitions', e); showToast('Failed to load requisitions', 'error'); }
+    } catch (e) {
+        if (e.name === 'AbortError') return;  // superseded by newer search
+        logCatchError('loadRequisitions', e); showToast('Failed to load requisitions', 'error');
+    }
 }
 
 // v7 table sort state
@@ -2017,7 +2092,7 @@ function _updateDrillToggleLabel() {
 
 
 // ── v7 Main Search ──────────────────────────────────────────────────────
-function debouncedMainSearch(val) {
+const debouncedMainSearch = debounce(function(val) {
     var ds = document.getElementById('mainSearch');
     var ms = document.getElementById('mobileMainSearch');
     if (typeof val === 'string') {
@@ -2027,7 +2102,7 @@ function debouncedMainSearch(val) {
     const q = (ds?.value || '').trim();
     if (q.length >= 2) loadRequisitions(q);
     else if (q.length === 0) loadRequisitions();
-}
+}, 350);
 
 // ── v7 Sidebar Navigation ───────────────────────────────────────────────
 function toggleSidebar() {
