@@ -8,13 +8,14 @@ Called by: main.py (router mount)
 Depends on: models, dependencies, services/proactive_service
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import require_user
 from ..models import ProactiveMatch, SiteContact, User
 from ..scheduler import get_valid_token
+from ..schemas.proactive import DismissMatches, SendProactive
 
 router = APIRouter()
 
@@ -44,13 +45,12 @@ async def proactive_match_count(
 
 @router.post("/api/proactive/dismiss")
 async def dismiss_matches(
-    request: Request,
+    body: DismissMatches,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Dismiss selected proactive matches."""
-    body = await request.json()
-    match_ids = body.get("match_ids", [])
+    match_ids = body.match_ids
     if not match_ids:
         raise HTTPException(400, "No match IDs provided")
     updated = (
@@ -68,17 +68,16 @@ async def dismiss_matches(
 
 @router.post("/api/proactive/send")
 async def send_proactive(
-    request: Request,
+    body: SendProactive,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Send a proactive offer email to customer contacts."""
-    body = await request.json()
-    match_ids = body.get("match_ids", [])
-    contact_ids = body.get("contact_ids", [])
-    sell_prices = body.get("sell_prices", {})
-    subject = body.get("subject")
-    notes = body.get("notes")
+    match_ids = body.match_ids
+    contact_ids = body.contact_ids
+    sell_prices = body.sell_prices
+    subject = body.subject
+    notes = body.notes
 
     if not match_ids:
         raise HTTPException(400, "Select at least one match")

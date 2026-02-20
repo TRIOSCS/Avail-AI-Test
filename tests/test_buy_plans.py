@@ -445,7 +445,7 @@ class TestApproveBuyPlan:
             f"/api/buy-plans/{plan.id}/approve",
             json={},
         )
-        assert r.status_code == 400
+        assert r.status_code == 422  # Pydantic validates sales_order_number is required
 
     def test_wrong_status(self, db_session, manager_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(
@@ -597,7 +597,7 @@ class TestTokenBased:
             f"/api/buy-plans/token/{plan.approval_token}/approve",
             json={},
         )
-        assert r.status_code == 400
+        assert r.status_code == 422  # Pydantic validates sales_order_number is required
 
     def test_reject_by_token(self, db_session, noauth_client, test_requisition, test_quote, test_user):
         plan = _create_buy_plan(
@@ -673,7 +673,7 @@ class TestSinglePO:
             f"/api/buy-plans/{plan.id}/po",
             json={"line_index": 0},
         )
-        assert r.status_code == 400
+        assert r.status_code == 422  # Pydantic validates po_number is required
 
     def test_po_invalid_line_index(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
         plan = _create_buy_plan(

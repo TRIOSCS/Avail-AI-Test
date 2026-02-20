@@ -54,14 +54,23 @@ from ..utils.normalization import (
 from ..schemas.crm import (
     AddContactsToVendor,
     AddContactToSite,
+    BuyPlanApprove,
+    BuyPlanCancel,
+    BuyPlanPOBulk,
+    BuyPlanPOEntry,
+    BuyPlanReject,
+    BuyPlanResubmit,
+    BuyPlanSubmit,
     CompanyCreate,
     CompanyUpdate,
     EnrichDomainRequest,
     OfferCreate,
     OfferUpdate,
+    OneDriveAttach,
     QuoteCreate,
     QuoteReopen,
     QuoteResult,
+    QuoteSendOverride,
     QuoteUpdate,
     SiteContactCreate,
     SiteContactUpdate,
@@ -1241,6 +1250,7 @@ async def upload_offer_attachment(
 @router.post("/api/offers/{offer_id}/attachments/onedrive")
 async def attach_from_onedrive(
     offer_id: int,
+    body: OneDriveAttach,
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -1249,10 +1259,7 @@ async def attach_from_onedrive(
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404)
-    body = await request.json()
-    item_id = body.get("item_id")
-    if not item_id:
-        raise HTTPException(400, "item_id required")
+    item_id = body.item_id
     from ..utils.graph_client import GraphClient
 
     if not user.access_token:
@@ -1545,6 +1552,7 @@ async def update_quote(
 async def send_quote(
     quote_id: int,
     request: Request,
+    body: QuoteSendOverride | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1555,13 +1563,8 @@ async def send_quote(
         raise HTTPException(404)
 
     # Allow caller to override recipient email/name
-    try:
-        body = await request.json()
-    except Exception:
-        log.debug("JSON body parse failed", exc_info=True)
-        body = {}
-    override_email = (body.get("to_email") or "").strip()
-    override_name = (body.get("to_name") or "").strip()
+    override_email = ((body.to_email if body else None) or "").strip()
+    override_name = ((body.to_name if body else None) or "").strip()
 
     site = db.get(CustomerSite, quote.customer_site_id)
     to_email = override_email or (site.contact_email if site else None)
@@ -1928,6 +1931,7 @@ def _buyplan_to_dict(bp: BuyPlan) -> dict:
 @router.post("/api/quotes/{quote_id}/buy-plan")
 async def submit_buy_plan(
     quote_id: int,
+    body: BuyPlanSubmit,
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -1936,12 +1940,11 @@ async def submit_buy_plan(
     quote = db.get(Quote, quote_id)
     if not quote:
         raise HTTPException(404)
-    body = await request.json()
-    offer_ids = body.get("offer_ids", [])
+    offer_ids = body.offer_ids
     if not offer_ids:
         raise HTTPException(400, "At least one offer must be selected")
-    salesperson_notes = (body.get("salesperson_notes") or "").strip()
-    plan_qtys = body.get("plan_qtys", {})  # {offer_id: qty}
+    salesperson_notes = body.salesperson_notes.strip()
+    plan_qtys = body.plan_qtys
 
     # Build buy plan line items from selected offers
     offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
@@ -2058,6 +2061,7 @@ async def get_buyplan_by_token(
 @router.put("/api/buy-plans/token/{token}/approve")
 async def approve_buyplan_by_token(
     token: str,
+    body: BuyPlanApprove,
     request: Request,
     db: Session = Depends(get_db),
 ):
@@ -2068,14 +2072,13 @@ async def approve_buyplan_by_token(
     if plan.status != "pending_approval":
         raise HTTPException(400, f"Cannot approve plan in status: {plan.status}")
 
-    body = await request.json()
-    so_number = (body.get("sales_order_number") or "").strip()
+    so_number = body.sales_order_number.strip()
     if not so_number:
         raise HTTPException(400, "Acctivate Sales Order # is required")
 
     plan.sales_order_number = so_number
-    if "manager_notes" in body:
-        plan.manager_notes = body["manager_notes"]
+    if body.manager_notes is not None:
+        plan.manager_notes = body.manager_notes
 
     plan.status = "approved"
     plan.approved_at = datetime.now(timezone.utc)
@@ -2112,6 +2115,7 @@ async def approve_buyplan_by_token(
 @router.put("/api/buy-plans/token/{token}/reject")
 async def reject_buyplan_by_token(
     token: str,
+    body: BuyPlanReject,
     request: Request,
     db: Session = Depends(get_db),
 ):
@@ -2122,8 +2126,7 @@ async def reject_buyplan_by_token(
     if plan.status != "pending_approval":
         raise HTTPException(400, f"Cannot reject plan in status: {plan.status}")
 
-    body = await request.json()
-    plan.rejection_reason = body.get("reason", "")
+    plan.rejection_reason = body.reason
     plan.status = "rejected"
     plan.rejected_at = datetime.now(timezone.utc)
 
@@ -2158,6 +2161,7 @@ async def get_buy_plan(
 @router.put("/api/buy-plans/{plan_id}/approve")
 async def approve_buy_plan(
     plan_id: int,
+    body: BuyPlanApprove,
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -2171,16 +2175,15 @@ async def approve_buy_plan(
     if plan.status != "pending_approval":
         raise HTTPException(400, f"Cannot approve plan in status: {plan.status}")
 
-    body = await request.json()
-    so_number = (body.get("sales_order_number") or "").strip()
+    so_number = body.sales_order_number.strip()
     if not so_number:
         raise HTTPException(400, "Acctivate Sales Order # is required")
     plan.sales_order_number = so_number
 
-    if "line_items" in body:
-        plan.line_items = body["line_items"]
-    if "manager_notes" in body:
-        plan.manager_notes = body["manager_notes"]
+    if body.line_items is not None:
+        plan.line_items = body.line_items
+    if body.manager_notes is not None:
+        plan.manager_notes = body.manager_notes
 
     plan.status = "approved"
     plan.approved_by_id = user.id
@@ -2218,6 +2221,7 @@ async def approve_buy_plan(
 @router.put("/api/buy-plans/{plan_id}/reject")
 async def reject_buy_plan(
     plan_id: int,
+    body: BuyPlanReject,
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -2231,8 +2235,7 @@ async def reject_buy_plan(
     if plan.status != "pending_approval":
         raise HTTPException(400, f"Cannot reject plan in status: {plan.status}")
 
-    body = await request.json()
-    plan.rejection_reason = body.get("reason", "")
+    plan.rejection_reason = body.reason
     plan.status = "rejected"
     plan.approved_by_id = user.id  # reuse field for who acted
     plan.rejected_at = datetime.now(timezone.utc)
@@ -2254,6 +2257,7 @@ async def reject_buy_plan(
 @router.put("/api/buy-plans/{plan_id}/po")
 async def enter_po_number(
     plan_id: int,
+    body: BuyPlanPOEntry,
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -2265,11 +2269,10 @@ async def enter_po_number(
     if plan.status not in ("approved", "po_entered"):
         raise HTTPException(400, f"Cannot enter PO for plan in status: {plan.status}")
 
-    body = await request.json()
-    line_index = body.get("line_index")
-    po_number = body.get("po_number", "").strip()
-    if line_index is None or not po_number:
-        raise HTTPException(400, "line_index and po_number required")
+    line_index = body.line_index
+    po_number = body.po_number.strip()
+    if not po_number:
+        raise HTTPException(400, "po_number required")
     if line_index < 0 or line_index >= len(plan.line_items or []):
         raise HTTPException(400, "Invalid line_index")
 
@@ -2358,6 +2361,7 @@ async def complete_buy_plan(
 @router.put("/api/buy-plans/{plan_id}/cancel")
 async def cancel_buy_plan(
     plan_id: int,
+    body: BuyPlanCancel,
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -2389,8 +2393,7 @@ async def cancel_buy_plan(
     else:
         raise HTTPException(400, f"Cannot cancel plan in status: {plan.status}")
 
-    body = await request.json()
-    reason = (body.get("reason") or "").strip()
+    reason = body.reason.strip()
 
     plan.status = "cancelled"
     plan.cancelled_at = datetime.now(timezone.utc)
@@ -2435,6 +2438,7 @@ async def cancel_buy_plan(
 @router.put("/api/buy-plans/{plan_id}/resubmit")
 async def resubmit_buy_plan(
     plan_id: int,
+    body: BuyPlanResubmit,
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -2451,8 +2455,7 @@ async def resubmit_buy_plan(
             400, f"Can only resubmit from rejected/cancelled, current: {plan.status}"
         )
 
-    body = await request.json()
-    salesperson_notes = (body.get("salesperson_notes") or "").strip()
+    salesperson_notes = body.salesperson_notes.strip()
 
     import secrets
 
@@ -2525,6 +2528,7 @@ async def resubmit_buy_plan(
 @router.put("/api/buy-plans/{plan_id}/po-bulk")
 async def bulk_po_entry(
     plan_id: int,
+    body: BuyPlanPOBulk,
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -2538,8 +2542,7 @@ async def bulk_po_entry(
             400, f"Cannot modify POs for plan in status: {plan.status}"
         )
 
-    body = await request.json()
-    entries = body.get("entries", [])
+    entries = body.entries
     if not entries:
         raise HTTPException(400, "No PO entries provided")
 
@@ -2550,8 +2553,8 @@ async def bulk_po_entry(
     changes = 0
 
     for entry in entries:
-        idx = entry.get("line_index")
-        po = (entry.get("po_number") or "").strip() or None
+        idx = entry.line_index
+        po = entry.po_number.strip() or None
 
         if idx is None or idx < 0 or idx >= len(plan.line_items or []):
             continue
