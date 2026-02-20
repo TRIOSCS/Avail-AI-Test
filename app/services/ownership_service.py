@@ -524,18 +524,19 @@ async def send_manager_digest_email(db: Session):
 
     html_body = "\n".join(lines)
 
-    # Send to all admins
-    for admin_email in settings.admin_emails:
+    # Send to all admins in parallel
+    import asyncio
+    from app.scheduler import get_valid_token
+    from app.utils.graph_client import GraphClient
+
+    async def _send_digest_to_admin(admin_email):
         admin = db.query(User).filter(func.lower(User.email) == admin_email).first()
         if not admin:
-            continue
+            return
         try:
-            from app.scheduler import get_valid_token
-            from app.utils.graph_client import GraphClient
-
             token = await get_valid_token(admin, db)
             if not token:
-                continue
+                return
 
             gc = GraphClient(token)
             payload = {
@@ -550,3 +551,5 @@ async def send_manager_digest_email(db: Session):
             log.info(f"Manager digest sent to {admin_email}")
         except Exception as e:
             log.error(f"Failed to send manager digest to {admin_email}: {e}")
+
+    await asyncio.gather(*[_send_digest_to_admin(e) for e in settings.admin_emails])

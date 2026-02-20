@@ -154,29 +154,26 @@ async def get_activity(
     req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     """Combined activity view: contacts + responses + tracking, grouped by vendor."""
-    contacts = (
-        db.query(Contact)
-        .filter_by(requisition_id=req_id)
-        .order_by(Contact.created_at.desc())
-        .all()
-    )
-    responses = (
-        db.query(VendorResponse)
-        .filter_by(requisition_id=req_id)
-        .order_by(VendorResponse.received_at.desc())
-        .all()
-    )
+    import asyncio
 
-    # Manual activities (calls, notes) scoped to this requisition
-    manual_activities = (
-        db.query(ActivityLog)
-        .filter(
+    loop = asyncio.get_event_loop()
+
+    def _q_contacts():
+        return db.query(Contact).filter_by(requisition_id=req_id).order_by(Contact.created_at.desc()).all()
+
+    def _q_responses():
+        return db.query(VendorResponse).filter_by(requisition_id=req_id).order_by(VendorResponse.received_at.desc()).all()
+
+    def _q_activities():
+        return db.query(ActivityLog).filter(
             ActivityLog.requisition_id == req_id,
             ActivityLog.vendor_card_id.isnot(None),
-        )
-        .order_by(ActivityLog.created_at.desc())
-        .limit(500)
-        .all()
+        ).order_by(ActivityLog.created_at.desc()).limit(500).all()
+
+    contacts, responses, manual_activities = await asyncio.gather(
+        loop.run_in_executor(None, _q_contacts),
+        loop.run_in_executor(None, _q_responses),
+        loop.run_in_executor(None, _q_activities),
     )
 
     # Build a vendor_card_id → vendor_name lookup for activities

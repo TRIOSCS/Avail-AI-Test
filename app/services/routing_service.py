@@ -255,11 +255,19 @@ async def rank_buyers_with_availability(
         return ranked
 
     try:
+        import asyncio
         from app.services.calendar import is_buyer_available
         check_date = date.today()
+
+        # Check all buyers' calendars in parallel
+        availability = await asyncio.gather(
+            *[is_buyer_available(entry["user_id"], check_date, db) for entry in ranked],
+            return_exceptions=True,
+        )
+
         available = []
-        for entry in ranked:
-            if await is_buyer_available(entry["user_id"], check_date, db):
+        for entry, is_avail in zip(ranked, availability):
+            if isinstance(is_avail, Exception) or is_avail:
                 available.append(entry)
             else:
                 entry["score_details"]["calendar_ooo"] = True
@@ -672,14 +680,17 @@ async def notify_routing_assignment(
         else "48 hours"
     )
 
-    sent = 0
-    for buyer_id, score, rank in buyer_ids:
+    # Send notifications to all buyers in parallel
+    import asyncio
+    send_results = []
+
+    async def _send_to_buyer(buyer_id, score, rank):
         if not buyer_id:
-            continue
+            return 0
 
         buyer = db.get(User, buyer_id)
         if not buyer or not buyer.email:
-            continue
+            return 0
 
         subject = f"🔔 Routing Assignment: {mpn} ({brand}) from {vendor_name}"
 
@@ -695,7 +706,7 @@ async def notify_routing_assignment(
 </table>
 <p><strong>⏱ You have {hours} hours to claim this assignment</strong> by entering an offer.</p>
 <p style="margin-top: 8px; font-size: 13px; color: #666;">
-  The first buyer to enter an offer claims the routing. After 24 hours, 
+  The first buyer to enter an offer claims the routing. After 24 hours,
   the assignment opens to all buyers.
 </p>
 </body></html>"""
@@ -712,11 +723,15 @@ async def notify_routing_assignment(
                     "saveToSentItems": False,
                 },
             )
-            sent += 1
             log.info(
                 f"Routing notification sent to {buyer.email} (rank #{rank}) for assignment {assignment.id}"
             )
+            return 1
         except Exception as e:
             log.error(f"Failed to send routing notification to {buyer.email}: {e}")
+            return 0
 
-    return sent
+    results = await asyncio.gather(
+        *[_send_to_buyer(bid, score, rank) for bid, score, rank in buyer_ids]
+    )
+    return sum(results)

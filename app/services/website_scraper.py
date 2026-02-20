@@ -75,16 +75,20 @@ async def _scrape_vendor(client: httpx.AsyncClient, website: str) -> list[dict]:
     results = []
     seen_emails = set()
 
-    for path in CONTACT_PATHS:
-        url = website + path
-        html = await _fetch_page(client, url)
-        if not html:
+    # Fetch all contact pages in parallel
+    urls_and_paths = [(website + path, path) for path in CONTACT_PATHS]
+    pages = await asyncio.gather(
+        *[_fetch_page(client, url) for url, _ in urls_and_paths],
+        return_exceptions=True,
+    )
+
+    for (_, path), html in zip(urls_and_paths, pages):
+        if isinstance(html, Exception) or not html:
             continue
 
         emails = EMAIL_RE.findall(html)
         for email in emails:
             email_lower = email.strip().lower()
-            # Skip image/file extensions that look like emails
             if email_lower.endswith((".png", ".jpg", ".gif", ".svg", ".css", ".js")):
                 continue
             if email_lower in seen_emails:
@@ -92,8 +96,6 @@ async def _scrape_vendor(client: httpx.AsyncClient, website: str) -> list[dict]:
             seen_emails.add(email_lower)
             confidence = _classify_email(email_lower, path)
             results.append({"email": email_lower, "confidence": confidence})
-
-        await asyncio.sleep(RATE_LIMIT_DELAY)
 
     return results
 
@@ -137,22 +139,35 @@ async def scrape_vendor_websites(
     vendors_scraped = 0
     emails_found = 0
 
-    for card in vendors:
-        if not card.website:
+    # Process vendors in batches of 10 concurrently
+    sem = asyncio.Semaphore(10)
+
+    async def _scrape_one(card):
+        async with sem:
+            if not card.website:
+                return None
+            try:
+                scrape_results = await _scrape_vendor(http_redirect, card.website)
+                await asyncio.sleep(RATE_LIMIT_DELAY)  # Rate limit between vendors
+                return (card, scrape_results)
+            except Exception as e:
+                log.debug("Scrape failed for %s: %s", card.website, e)
+                return None
+
+    scrape_results_list = await asyncio.gather(
+        *[_scrape_one(c) for c in vendors], return_exceptions=True
+    )
+
+    for result in scrape_results_list:
+        if isinstance(result, Exception) or result is None:
             continue
 
-        try:
-            results = await _scrape_vendor(http_redirect, card.website)
-        except Exception as e:
-            log.debug("Scrape failed for %s: %s", card.website, e)
-            continue
-
+        card, results = result
         vendors_scraped += 1
 
         if not results:
             continue
 
-        # Merge into VendorCard and create VendorContact records
         new_emails = [r["email"] for r in results]
         merge_emails_into_card(card, new_emails)
 
@@ -176,7 +191,6 @@ async def scrape_vendor_websites(
             db.add(vc)
             emails_found += 1
 
-        # Periodic commit (every 50 vendors)
         if vendors_scraped % 50 == 0:
             try:
                 db.commit()

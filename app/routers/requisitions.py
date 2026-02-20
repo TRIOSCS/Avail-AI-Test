@@ -15,6 +15,7 @@ Depends on: models, search_service, file_utils, scoring, vendor_utils
 """
 
 import asyncio
+import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
@@ -57,6 +58,8 @@ from ..models import (
     User,
     VendorResponse,
 )
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["requisitions"])
 
@@ -637,11 +640,22 @@ async def search_all(
     except Exception:
         pass  # No body or invalid JSON — search all
 
+    # Filter requirements to search
+    reqs_to_search = [
+        r for r in req.requirements
+        if not requirement_ids or r.id in requirement_ids
+    ]
+
+    # Search all requirements in parallel
+    import asyncio
+    search_tasks = [search_requirement(r, db) for r in reqs_to_search]
+    search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
+
     results = {}
-    for r in req.requirements:
-        if requirement_ids and r.id not in requirement_ids:
-            continue
-        sightings = await search_requirement(r, db)
+    for r, sightings in zip(reqs_to_search, search_results):
+        if isinstance(sightings, Exception):
+            log.error(f"Search failed for requirement {r.id}: {sightings}")
+            sightings = []
         label = r.primary_mpn or f"Req #{r.id}"
         results[str(r.id)] = {"label": label, "sightings": sightings}
 
@@ -692,13 +706,20 @@ async def get_saved_sightings(
         raise HTTPException(404)
     now = datetime.now(timezone.utc)
     results: dict = {}
+    # Batch-fetch all sightings for this requisition's requirements in one query
+    req_ids = [r.id for r in req.requirements]
+    all_sightings = (
+        db.query(Sighting)
+        .filter(Sighting.requirement_id.in_(req_ids))
+        .order_by(Sighting.score.desc())
+        .all()
+    ) if req_ids else []
+    sightings_by_req: dict[int, list] = {}
+    for s in all_sightings:
+        sightings_by_req.setdefault(s.requirement_id, []).append(s)
+
     for r in req.requirements:
-        rows = (
-            db.query(Sighting)
-            .filter(Sighting.requirement_id == r.id)
-            .order_by(Sighting.score.desc())
-            .all()
-        )
+        rows = sightings_by_req.get(r.id, [])
         label = r.primary_mpn or f"Req #{r.id}"
         sighting_dicts = []
         for s in rows:

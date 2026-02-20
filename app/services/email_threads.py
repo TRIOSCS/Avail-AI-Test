@@ -15,6 +15,7 @@ Called by: routers/emails.py
 Depends on: utils/graph_client.py, models.py, services/activity_service.py
 """
 
+import asyncio
 import logging
 import re
 import time
@@ -358,10 +359,12 @@ async def fetch_threads_for_requirement(
             if card.domain:
                 vendor_domains.add(card.domain.lower())
 
-    # Search by vendor domains (limit to avoid excessive API calls)
-    for domain in list(vendor_domains)[:5]:
-        if domain in _TRIOSCS_DOMAINS:
-            continue
+    # Search by vendor domains in parallel (limit to avoid excessive API calls)
+    import asyncio
+
+    search_domains = [d for d in list(vendor_domains)[:5] if d not in _TRIOSCS_DOMAINS]
+
+    async def _search_domain(domain):
         try:
             domain_msgs = await gc.get_all_pages(
                 "/me/messages",
@@ -372,6 +375,7 @@ async def fetch_threads_for_requirement(
                 },
                 max_items=15,
             )
+            domain_threads = {}
             by_conv: dict[str, list[dict]] = {}
             for m in domain_msgs:
                 cid = m.get("conversationId", "")
@@ -387,11 +391,18 @@ async def fetch_threads_for_requirement(
                     )
                 ]
                 if external_msgs:
-                    threads[cid] = _build_thread_summary(
+                    domain_threads[cid] = _build_thread_summary(
                         cid, external_msgs, "vendor_domain"
                     )
+            return domain_threads
         except Exception as e:
             log.warning(f"Graph domain search failed for {domain}: {e}")
+            return {}
+
+    if search_domains:
+        domain_results = await asyncio.gather(*[_search_domain(d) for d in search_domains])
+        for domain_threads_result in domain_results:
+            threads.update(domain_threads_result)
 
     result = sorted(
         threads.values(),
@@ -541,7 +552,8 @@ async def fetch_threads_for_vendor(
     gc = GraphClient(user_token)
     threads: dict[str, dict] = {}
 
-    for domain in list(domains)[:5]:
+    # Search all domains in parallel
+    async def _search_vendor_domain(domain):
         try:
             msgs = await gc.get_all_pages(
                 "/me/messages",
@@ -553,6 +565,7 @@ async def fetch_threads_for_vendor(
                 max_items=50,
             )
 
+            domain_threads = {}
             by_conv: dict[str, list[dict]] = {}
             for m in msgs:
                 cid = m.get("conversationId", "")
@@ -568,11 +581,19 @@ async def fetch_threads_for_vendor(
                     )
                 ]
                 if external_msgs:
-                    threads[cid] = _build_thread_summary(
+                    domain_threads[cid] = _build_thread_summary(
                         cid, external_msgs, "vendor_domain"
                     )
+            return domain_threads
         except Exception as e:
             log.warning(f"Graph vendor search failed for domain {domain}: {e}")
+            return {}
+
+    search_domains = list(domains)[:5]
+    if search_domains:
+        domain_results = await asyncio.gather(*[_search_vendor_domain(d) for d in search_domains])
+        for domain_threads_result in domain_results:
+            threads.update(domain_threads_result)
 
     result = sorted(
         threads.values(),

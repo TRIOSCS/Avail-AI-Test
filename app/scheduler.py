@@ -247,6 +247,7 @@ async def _job_token_refresh():
     try:
         now = datetime.now(timezone.utc)
         users = db.query(User).filter(User.refresh_token.isnot(None)).all()
+        users_to_refresh = []
         for user in users:
             needs_refresh = False
             if user.token_expires_at:
@@ -256,10 +257,17 @@ async def _job_token_refresh():
                 needs_refresh = True
 
             if needs_refresh:
-                try:
-                    await refresh_user_token(user, db)
-                except Exception as e:
-                    log.error(f"Token refresh error for {user.email}: {e}")
+                users_to_refresh.append(user)
+
+        # Refresh all users in parallel
+        async def _safe_refresh(user):
+            try:
+                await refresh_user_token(user, db)
+            except Exception as e:
+                log.error(f"Token refresh error for {user.email}: {e}")
+
+        if users_to_refresh:
+            await asyncio.gather(*[_safe_refresh(u) for u in users_to_refresh])
     except Exception as e:
         log.error(f"Token refresh job error: {e}")
     finally:
@@ -278,6 +286,7 @@ async def _job_inbox_scan():
         users = db.query(User).filter(User.refresh_token.isnot(None)).all()
         scan_interval = timedelta(minutes=settings.inbox_scan_interval_min)
 
+        users_to_scan = []
         for user in users:
             if not user.access_token or not user.m365_connected:
                 continue
@@ -289,6 +298,13 @@ async def _job_inbox_scan():
                 should_scan = True
 
             if should_scan:
+                users_to_scan.append(user)
+
+        # Scan all users in parallel with concurrency limit
+        sem = asyncio.Semaphore(3)
+
+        async def _safe_scan(user):
+            async with sem:
                 try:
                     await asyncio.wait_for(_scan_user_inbox(user, db), timeout=90)
                 except asyncio.TimeoutError:
@@ -300,6 +316,9 @@ async def _job_inbox_scan():
                     user.m365_error_reason = str(e)[:200]
                     db.commit()
                     db.rollback()
+
+        if users_to_scan:
+            await asyncio.gather(*[_safe_scan(u) for u in users_to_scan])
     except Exception as e:
         log.error(f"Inbox scan job error: {e}")
     finally:
@@ -453,11 +472,15 @@ async def _job_po_verification():
         unverified_plans = (
             db.query(BuyPlan).filter(BuyPlan.status == "po_entered").all()
         )
-        for plan in unverified_plans:
+
+        async def _safe_verify(plan):
             try:
                 await verify_po_sent(plan, db)
             except Exception as e:
                 log.error(f"PO verify error for plan {plan.id}: {e}")
+
+        if unverified_plans:
+            await asyncio.gather(*[_safe_verify(p) for p in unverified_plans])
     except Exception as e:
         log.error(f"PO verification scan error: {e}")
         db.rollback()
@@ -513,20 +536,21 @@ async def _job_performance_tracking():
             compute_buyer_leaderboard,
         )
 
-        vs_result = compute_all_vendor_scorecards(db)
+        loop = asyncio.get_event_loop()
+        vs_result = await loop.run_in_executor(None, compute_all_vendor_scorecards, db)
         log.info(
             f"Vendor scorecards: {vs_result['updated']} updated, "
             f"{vs_result['skipped_cold_start']} cold-start"
         )
         current_month = now.date().replace(day=1)
-        bl_result = compute_buyer_leaderboard(db, current_month)
+        bl_result = await loop.run_in_executor(None, compute_buyer_leaderboard, db, current_month)
         log.info(
             f"Buyer leaderboard: {bl_result['entries']} entries for {current_month}"
         )
         # Recompute previous month during grace period (first 7 days)
         if now.day <= 7:
             prev_month = (current_month - timedelta(days=1)).replace(day=1)
-            compute_buyer_leaderboard(db, prev_month)
+            await loop.run_in_executor(None, compute_buyer_leaderboard, db, prev_month)
     except Exception as e:
         log.error(f"Performance tracking error: {e}")
         db.rollback()
@@ -548,47 +572,53 @@ async def _job_deep_email_mining():
         from .connectors.email_mining import EmailMiner
         from .services.deep_enrichment_service import link_contact_to_entities
 
+        users_to_scan = []
         for user in users:
             if not user.access_token or not user.m365_connected:
                 continue
-
-            # Check per-user staleness
             if user.last_deep_email_scan:
                 last_scan = _utc(user.last_deep_email_scan)
                 if now - last_scan < timedelta(hours=4):
                     continue
+            users_to_scan.append(user)
 
-            try:
-                token = await get_valid_token(user, db)
-                if not token:
-                    continue
-                miner = EmailMiner(token, db=db, user_id=user.id)
-                scan_result = await asyncio.wait_for(
-                    miner.deep_scan_inbox(lookback_days=30, max_messages=500),
-                    timeout=120,
-                )
-                # Process per-domain results for contact linking
-                for domain, domain_data in scan_result.get("per_domain", {}).items():
-                    for email_addr in domain_data.get("emails", [])[:10]:
-                        try:
-                            link_contact_to_entities(db, email_addr, {
-                                "full_name": domain_data.get("sender_names", [""])[0] if domain_data.get("sender_names") else None,
-                                "confidence": 0.6,
-                            })
-                        except Exception:
-                            pass
+        sem = asyncio.Semaphore(3)
 
-                user.last_deep_email_scan = now
-                db.commit()
-                log.info(
-                    f"Deep email scan [{user.email}]: {scan_result.get('messages_scanned', 0)} msgs, "
-                    f"{scan_result.get('contacts_found', 0)} contacts"
-                )
-            except asyncio.TimeoutError:
-                log.warning(f"Deep email scan TIMEOUT for {user.email}")
-            except Exception as e:
-                log.error(f"Deep email scan error for {user.email}: {e}")
-                db.rollback()
+        async def _safe_deep_scan(user):
+            async with sem:
+                try:
+                    token = await get_valid_token(user, db)
+                    if not token:
+                        return
+                    miner = EmailMiner(token, db=db, user_id=user.id)
+                    scan_result = await asyncio.wait_for(
+                        miner.deep_scan_inbox(lookback_days=30, max_messages=500),
+                        timeout=120,
+                    )
+                    for domain, domain_data in scan_result.get("per_domain", {}).items():
+                        for email_addr in domain_data.get("emails", [])[:10]:
+                            try:
+                                link_contact_to_entities(db, email_addr, {
+                                    "full_name": domain_data.get("sender_names", [""])[0] if domain_data.get("sender_names") else None,
+                                    "confidence": 0.6,
+                                })
+                            except Exception:
+                                pass
+
+                    user.last_deep_email_scan = now
+                    db.commit()
+                    log.info(
+                        f"Deep email scan [{user.email}]: {scan_result.get('messages_scanned', 0)} msgs, "
+                        f"{scan_result.get('contacts_found', 0)} contacts"
+                    )
+                except asyncio.TimeoutError:
+                    log.warning(f"Deep email scan TIMEOUT for {user.email}")
+                except Exception as e:
+                    log.error(f"Deep email scan error for {user.email}: {e}")
+                    db.rollback()
+
+        if users_to_scan:
+            await asyncio.gather(*[_safe_deep_scan(u) for u in users_to_scan])
     except Exception as e:
         log.error(f"Deep email mining error: {e}")
         db.rollback()
@@ -718,23 +748,30 @@ async def _scan_user_inbox(user, db):
     except Exception as e:
         log.error(f"Inbox poll failed for {user.email}: {e}")
 
-    # Scan for stock list attachments
-    try:
-        await _scan_stock_list_attachments(user, db, is_backfill)
-    except Exception as e:
-        log.error(f"Stock list scan failed for {user.email}: {e}")
+    # Run independent sub-operations in parallel
+    async def _safe_stock_scan():
+        try:
+            await _scan_stock_list_attachments(user, db, is_backfill)
+        except Exception as e:
+            log.error(f"Stock list scan failed for {user.email}: {e}")
 
-    # Enrich vendor cards from inbox (email mining)
-    try:
-        await _mine_vendor_contacts(user, db, is_backfill)
-    except Exception as e:
-        log.error(f"Vendor mining failed for {user.email}: {e}")
+    async def _safe_mine_contacts():
+        try:
+            await _mine_vendor_contacts(user, db, is_backfill)
+        except Exception as e:
+            log.error(f"Vendor mining failed for {user.email}: {e}")
 
-    # Upgrade 3: Scan Sent Items for outbound AVAIL RFQs
-    try:
-        await _scan_outbound_rfqs(user, db, is_backfill)
-    except Exception as e:
-        log.error(f"Outbound scan failed for {user.email}: {e}")
+    async def _safe_outbound_scan():
+        try:
+            await _scan_outbound_rfqs(user, db, is_backfill)
+        except Exception as e:
+            log.error(f"Outbound scan failed for {user.email}: {e}")
+
+    await asyncio.gather(
+        _safe_stock_scan(),
+        _safe_mine_contacts(),
+        _safe_outbound_scan(),
+    )
 
     user.last_inbox_scan = datetime.now(timezone.utc)
     db.commit()

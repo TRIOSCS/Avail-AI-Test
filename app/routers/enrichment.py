@@ -354,8 +354,9 @@ def api_enrichment_stats(
     db: Session = Depends(get_db),
 ):
     """Get enrichment statistics — queue counts, coverage, active jobs."""
-    from sqlalchemy import func
+    from sqlalchemy import func, case
 
+    # Consolidate queue stats + counts into fewer queries
     queue_stats = (
         db.query(EnrichmentQueue.status, func.count(EnrichmentQueue.id))
         .group_by(EnrichmentQueue.status)
@@ -363,15 +364,21 @@ def api_enrichment_stats(
     )
     status_counts = {s: c for s, c in queue_stats}
 
-    vendors_total = db.query(func.count(VendorCard.id)).scalar() or 0
-    vendors_enriched = db.query(func.count(VendorCard.id)).filter(
-        VendorCard.deep_enrichment_at.isnot(None)
-    ).scalar() or 0
+    # Single query for vendor stats (total + enriched)
+    vendor_stats = db.query(
+        func.count(VendorCard.id),
+        func.count(case((VendorCard.deep_enrichment_at.isnot(None), 1))),
+    ).first()
+    vendors_total = vendor_stats[0] or 0
+    vendors_enriched = vendor_stats[1] or 0
 
-    companies_total = db.query(func.count(Company.id)).scalar() or 0
-    companies_enriched = db.query(func.count(Company.id)).filter(
-        Company.deep_enrichment_at.isnot(None)
-    ).scalar() or 0
+    # Single query for company stats (total + enriched)
+    company_stats = db.query(
+        func.count(Company.id),
+        func.count(case((Company.deep_enrichment_at.isnot(None), 1))),
+    ).first()
+    companies_total = company_stats[0] or 0
+    companies_enriched = company_stats[1] or 0
 
     active_jobs = db.query(func.count(EnrichmentJob.id)).filter(
         EnrichmentJob.status == "running"

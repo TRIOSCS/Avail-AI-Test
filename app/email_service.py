@@ -749,14 +749,19 @@ async def _parse_sequential_fallback(
     pending: list[VendorResponse],
     db: Session,
 ) -> None:
-    """Fallback: parse emails sequentially when batch API fails."""
-    for vr in pending:
-        try:
-            parsed = await parse_response_ai(vr.body, vr.subject)
-            if parsed:
-                _apply_parsed_result(vr, parsed)
-        except Exception as e:
-            log.warning(f"Sequential AI parse failed for VR {vr.id}: {e}")
+    """Fallback: parse emails concurrently (with semaphore) when batch API fails."""
+    sem = asyncio.Semaphore(5)
+
+    async def _parse_one(vr):
+        async with sem:
+            try:
+                parsed = await parse_response_ai(vr.body, vr.subject)
+                if parsed:
+                    _apply_parsed_result(vr, parsed)
+            except Exception as e:
+                log.warning(f"Sequential AI parse failed for VR {vr.id}: {e}")
+
+    await asyncio.gather(*[_parse_one(vr) for vr in pending])
 
 
 def _apply_parsed_result(vr: VendorResponse, parsed: dict) -> None:

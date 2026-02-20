@@ -11,6 +11,7 @@ Called by: routers/crm.py (buy plan endpoints)
 Depends on: utils/graph_client, models, config
 """
 
+import asyncio
 import html
 import logging
 
@@ -157,13 +158,14 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
     </div>
     """
 
-    # Send email to each admin
+    # Send email to all admins in parallel
     admin_users = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
-    for admin in admin_users:
+
+    async def _send_admin_email(admin):
         try:
             token = await get_valid_token(admin, db)
             if not token:
-                continue
+                return
             from ..utils.graph_client import GraphClient
 
             gc = GraphClient(token)
@@ -181,6 +183,8 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
             log.info(f"Buy plan email sent to admin {admin.email}")
         except Exception as e:
             log.error(f"Failed to send buy plan email to {admin.email}: {e}")
+
+    await asyncio.gather(*[_send_admin_email(a) for a in admin_users])
 
     # In-app notification
     for admin in admin_users:
@@ -201,10 +205,10 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
         f"Total: ${total_cost:,.2f} | {len(plan.line_items or [])} line items\n\n"
         f"[Review in AVAIL]({settings.app_url}/#buyplan/{plan.id})"
     )
-    for admin in admin_users:
-        await _send_teams_dm(
-            admin, f"Buy Plan #{plan.id} needs your approval — ${total_cost:,.2f}", db
-        )
+    await asyncio.gather(*[
+        _send_teams_dm(admin, f"Buy Plan #{plan.id} needs your approval — ${total_cost:,.2f}", db)
+        for admin in admin_users
+    ])
 
 
 async def notify_buyplan_approved(plan: BuyPlan, db: Session):
@@ -243,7 +247,7 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
 
     buyers = db.query(User).filter(User.id.in_(buyer_ids)).all() if buyer_ids else []
 
-    for buyer in buyers:
+    async def _notify_buyer(buyer):
         buyer_items = [
             i for i in (plan.line_items or []) if i.get("entered_by_id") == buyer.id
         ]
@@ -299,7 +303,7 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
         try:
             token = await get_valid_token(buyer, db)
             if not token:
-                continue
+                return
             from ..utils.graph_client import GraphClient
 
             gc = GraphClient(token)
@@ -336,6 +340,7 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
             db,
         )
 
+    await asyncio.gather(*[_notify_buyer(b) for b in buyers])
     db.commit()
 
     # Teams channel post
@@ -476,7 +481,8 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
             from ..utils.graph_client import GraphClient
 
             gc = GraphClient(token)
-            for email_addr in settings.stock_sale_notify_emails:
+
+            async def _send_stock_email(email_addr):
                 try:
                     await gc.post_json(
                         "/me/sendMail",
@@ -492,6 +498,8 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
                     log.info(f"Stock sale email sent to {email_addr}")
                 except Exception as e:
                     log.error(f"Failed to send stock sale email to {email_addr}: {e}")
+
+            await asyncio.gather(*[_send_stock_email(e) for e in settings.stock_sale_notify_emails])
 
     # In-app notification to submitter
     if submitter:

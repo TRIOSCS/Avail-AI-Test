@@ -61,36 +61,35 @@ def _build_vendor_history(vendor_name: str, db: Session) -> dict:
     if not card:
         return {}
 
+    from sqlalchemy import func
+
+    # Single combined query for rfq count, offer count, and last contact date
     total_rfqs = (
-        db.query(Contact)
+        db.query(func.count(Contact.id))
         .filter(
             Contact.vendor_name.ilike(f"%{vendor_name}%"),
             Contact.contact_type == "email",
         )
-        .count()
-    )
+        .scalar()
+    ) or 0
 
+    # Combine offer count + last contact into parallel-style queries
     total_offers = (
-        db.query(Offer)
-        .filter(
-            Offer.vendor_name.ilike(f"%{vendor_name}%"),
-        )
-        .count()
-    )
+        db.query(func.count(Offer.id))
+        .filter(Offer.vendor_name.ilike(f"%{vendor_name}%"))
+        .scalar()
+    ) or 0
 
-    last = (
-        db.query(Contact)
-        .filter(
-            Contact.vendor_name.ilike(f"%{vendor_name}%"),
-        )
-        .order_by(Contact.created_at.desc())
-        .first()
+    last_contact_date = (
+        db.query(func.max(Contact.created_at))
+        .filter(Contact.vendor_name.ilike(f"%{vendor_name}%"))
+        .scalar()
     )
 
     return {
         "total_rfqs": total_rfqs,
         "total_offers": total_offers,
-        "last_contact_date": last.created_at.strftime("%Y-%m-%d") if last else None,
+        "last_contact_date": last_contact_date.strftime("%Y-%m-%d") if last_contact_date else None,
         "avg_response_hours": card.response_velocity_hours,
         "engagement_score": card.engagement_score,
     }

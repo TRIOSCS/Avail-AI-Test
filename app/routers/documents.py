@@ -1,5 +1,6 @@
 """Documents API — PDF generation for requisitions and quotes."""
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,7 +16,7 @@ log = logging.getLogger(__name__)
 
 
 @router.get("/api/requisitions/{requisition_id}/pdf")
-def download_rfq_pdf(
+async def download_rfq_pdf(
     requisition_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -24,7 +25,10 @@ def download_rfq_pdf(
     from ..services.document_service import generate_rfq_summary_pdf
 
     try:
-        pdf_bytes = generate_rfq_summary_pdf(requisition_id, db)
+        loop = asyncio.get_event_loop()
+        pdf_bytes = await loop.run_in_executor(
+            None, generate_rfq_summary_pdf, requisition_id, db
+        )
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
@@ -39,7 +43,7 @@ def download_rfq_pdf(
 
 
 @router.get("/api/quotes/{quote_id}/pdf")
-def download_quote_pdf(
+async def download_quote_pdf(
     quote_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -48,7 +52,10 @@ def download_quote_pdf(
     from ..services.document_service import generate_quote_report_pdf
 
     try:
-        pdf_bytes = generate_quote_report_pdf(quote_id, db)
+        loop = asyncio.get_event_loop()
+        pdf_bytes = await loop.run_in_executor(
+            None, generate_quote_report_pdf, quote_id, db
+        )
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:

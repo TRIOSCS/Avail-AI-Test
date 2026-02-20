@@ -309,24 +309,39 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
             errors.append(f"company_enrichment: {e}")
             log.warning("Company enrichment failed for vendor %d: %s", vendor_card_id, e)
 
-    # 2. Email verification via Hunter.io
+    # 2. Email verification via Hunter.io (parallel across contacts)
     try:
         from ..connectors.hunter_client import verify_email
         contacts = db.query(VendorContact).filter(
             VendorContact.vendor_card_id == vendor_card_id,
             VendorContact.email.isnot(None),
         ).limit(20).all()
-        for contact in contacts:
-            result = await verify_email(contact.email)
-            if result and result.get("status") in ("valid", "accept_all"):
-                if not contact.is_verified:
-                    contact.is_verified = True
-                    enriched_fields.append(f"verified:{contact.email}")
+
+        async def _verify_one(contact):
+            try:
+                result = await verify_email(contact.email)
+                if result and result.get("status") in ("valid", "accept_all"):
+                    if not contact.is_verified:
+                        contact.is_verified = True
+                        return f"verified:{contact.email}"
+            except Exception:
+                pass
+            return None
+
+        verify_results = await asyncio.gather(*[_verify_one(c) for c in contacts])
+        enriched_fields.extend(r for r in verify_results if r)
     except Exception as e:
         errors.append(f"email_verification: {e}")
 
-    # 3. Contact discovery (multi-source)
-    if card.domain:
+    # 3-5: Run contact discovery, specialty detection, and AI analysis in parallel
+    _contact_errors = []
+    _specialty_result = {}
+    _material_ok = False
+
+    async def _contact_discovery():
+        nonlocal _contact_errors
+        if not card.domain:
+            return
         try:
             from ..enrichment_service import find_suggested_contacts
             new_contacts = await find_suggested_contacts(
@@ -360,43 +375,60 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
                     )
                     existing_emails.add(email)
         except Exception as e:
-            errors.append(f"contact_discovery: {e}")
+            _contact_errors.append(f"contact_discovery: {e}")
 
-    # 4. Specialty detection
-    specialties = {}
-    try:
-        from .specialty_detector import analyze_vendor_specialties
-        specialties = analyze_vendor_specialties(vendor_card_id, db)
-        if specialties.get("brand_tags"):
-            route_enrichment(
-                db, "vendor_card", card.id, "brand_tags",
-                card.brand_tags,
-                specialties["brand_tags"],
-                confidence=specialties.get("confidence", 0.5),
-                source="specialty_analysis",
-                enrichment_type="brand_tags",
-                job_id=job_id,
+    async def _specialty_detection():
+        nonlocal _specialty_result
+        try:
+            from .specialty_detector import analyze_vendor_specialties
+            loop = asyncio.get_event_loop()
+            _specialty_result = await loop.run_in_executor(
+                None, analyze_vendor_specialties, vendor_card_id, db
             )
-        if specialties.get("commodity_tags"):
-            route_enrichment(
-                db, "vendor_card", card.id, "commodity_tags",
-                card.commodity_tags,
-                specialties["commodity_tags"],
-                confidence=specialties.get("confidence", 0.5),
-                source="specialty_analysis",
-                enrichment_type="commodity_tags",
-                job_id=job_id,
-            )
-    except Exception as e:
-        errors.append(f"specialty_detection: {e}")
+        except Exception as e:
+            _contact_errors.append(f"specialty_detection: {e}")
 
-    # 5. AI material analysis (brand/commodity tags from part history)
-    try:
-        from ..routers.vendors import _analyze_vendor_materials
-        await _analyze_vendor_materials(vendor_card_id, db_session=db)
+    async def _material_analysis():
+        nonlocal _material_ok
+        try:
+            from ..routers.vendors import _analyze_vendor_materials
+            await _analyze_vendor_materials(vendor_card_id, db_session=db)
+            _material_ok = True
+        except Exception as e:
+            _contact_errors.append(f"material_analysis: {e}")
+
+    await asyncio.gather(
+        _contact_discovery(),
+        _specialty_detection(),
+        _material_analysis(),
+    )
+
+    errors.extend(_contact_errors)
+    specialties = _specialty_result
+    if _material_ok:
         enriched_fields.append("material_tags")
-    except Exception as e:
-        errors.append(f"material_analysis: {e}")
+
+    # Apply specialty results
+    if specialties.get("brand_tags"):
+        route_enrichment(
+            db, "vendor_card", card.id, "brand_tags",
+            card.brand_tags,
+            specialties["brand_tags"],
+            confidence=specialties.get("confidence", 0.5),
+            source="specialty_analysis",
+            enrichment_type="brand_tags",
+            job_id=job_id,
+        )
+    if specialties.get("commodity_tags"):
+        route_enrichment(
+            db, "vendor_card", card.id, "commodity_tags",
+            card.commodity_tags,
+            specialties["commodity_tags"],
+            confidence=specialties.get("confidence", 0.5),
+            source="specialty_analysis",
+            enrichment_type="commodity_tags",
+            job_id=job_id,
+        )
 
     # Update timestamp
     card.deep_enrichment_at = datetime.now(timezone.utc)
@@ -621,26 +653,43 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
             )
 
             batch_size = 20
+            sem = asyncio.Semaphore(5)
+
             for i in range(0, len(vendors), batch_size):
                 batch = vendors[i:i + batch_size]
-                for card in batch:
-                    # Check if job was cancelled
-                    db.refresh(job)
-                    if job.status == "cancelled":
-                        job.completed_at = datetime.now(timezone.utc)
-                        db.commit()
-                        return
 
-                    try:
-                        result = await deep_enrich_vendor(card.id, db, job_id=job.id)
-                        if result.get("status") == "completed":
-                            enriched += 1
-                        if result.get("errors"):
-                            error_count += len(result["errors"])
-                            error_log.extend(result["errors"][:3])
-                    except Exception as e:
+                # Check if job was cancelled
+                db.refresh(job)
+                if job.status == "cancelled":
+                    job.completed_at = datetime.now(timezone.utc)
+                    db.commit()
+                    return
+
+                async def _enrich_vendor(card):
+                    async with sem:
+                        try:
+                            result = await deep_enrich_vendor(card.id, db, job_id=job.id)
+                            return result
+                        except Exception as e:
+                            return {"status": "error", "error": f"vendor_{card.id}: {str(e)[:100]}"}
+
+                batch_results = await asyncio.gather(
+                    *[_enrich_vendor(c) for c in batch], return_exceptions=True
+                )
+
+                for r in batch_results:
+                    if isinstance(r, Exception):
                         error_count += 1
-                        error_log.append(f"vendor_{card.id}: {str(e)[:100]}")
+                        error_log.append(str(r)[:100])
+                    elif isinstance(r, dict):
+                        if r.get("status") == "completed":
+                            enriched += 1
+                        if r.get("errors"):
+                            error_count += len(r["errors"])
+                            error_log.extend(r["errors"][:3])
+                        if r.get("error"):
+                            error_count += 1
+                            error_log.append(r["error"])
                     processed += 1
 
                 # Update progress
@@ -667,25 +716,41 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                 )
 
                 batch_size = 20
+                co_sem = asyncio.Semaphore(5)
+
                 for i in range(0, len(companies), batch_size):
                     batch = companies[i:i + batch_size]
-                    for company in batch:
-                        db.refresh(job)
-                        if job.status == "cancelled":
-                            job.completed_at = datetime.now(timezone.utc)
-                            db.commit()
-                            return
 
-                        try:
-                            result = await deep_enrich_company(company.id, db, job_id=job.id)
-                            if result.get("status") == "completed":
-                                enriched += 1
-                            if result.get("errors"):
-                                error_count += len(result["errors"])
-                                error_log.extend(result["errors"][:3])
-                        except Exception as e:
+                    db.refresh(job)
+                    if job.status == "cancelled":
+                        job.completed_at = datetime.now(timezone.utc)
+                        db.commit()
+                        return
+
+                    async def _enrich_co(company):
+                        async with co_sem:
+                            try:
+                                return await deep_enrich_company(company.id, db, job_id=job.id)
+                            except Exception as e:
+                                return {"status": "error", "error": f"company_{company.id}: {str(e)[:100]}"}
+
+                    batch_results = await asyncio.gather(
+                        *[_enrich_co(c) for c in batch], return_exceptions=True
+                    )
+
+                    for r in batch_results:
+                        if isinstance(r, Exception):
                             error_count += 1
-                            error_log.append(f"company_{company.id}: {str(e)[:100]}")
+                            error_log.append(str(r)[:100])
+                        elif isinstance(r, dict):
+                            if r.get("status") == "completed":
+                                enriched += 1
+                            if r.get("errors"):
+                                error_count += len(r["errors"])
+                                error_log.extend(r["errors"][:3])
+                            if r.get("error"):
+                                error_count += 1
+                                error_log.append(r["error"])
                         processed += 1
 
                     job.processed_items = processed

@@ -243,16 +243,20 @@ def api_delete_credential(
 
 
 @router.get("/api/admin/vendor-dedup-suggestions")
-def api_vendor_dedup_suggestions(
+async def api_vendor_dedup_suggestions(
     threshold: int = 85,
     limit: int = 50,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Find potential duplicate vendor cards using fuzzy name matching."""
+    import asyncio
     from ..vendor_utils import find_vendor_dedup_candidates
 
-    candidates = find_vendor_dedup_candidates(db, threshold=max(70, min(threshold, 100)), limit=min(limit, 200))
+    loop = asyncio.get_event_loop()
+    candidates = await loop.run_in_executor(
+        None, find_vendor_dedup_candidates, db, max(70, min(threshold, 100)), min(limit, 200)
+    )
     return {"candidates": candidates, "count": len(candidates)}
 
 
@@ -551,22 +555,35 @@ async def api_list_teams_channels(
         raise HTTPException(502, f"Graph API error: {teams_result.get('error', {}).get('message', 'Unknown')}")
 
     teams_list = teams_result.get("value", [])
-    result = []
 
-    for team in teams_list:
+    # Fetch channels for all teams in parallel
+    import asyncio
+
+    async def _fetch_channels(team):
         channels_result = await gc.get_json(
             f"/teams/{team['id']}/channels",
             params={"$select": "id,displayName,membershipType"},
         )
         channels = channels_result.get("value", [])
-        for ch in channels:
-            result.append({
+        return [
+            {
                 "team_id": team["id"],
                 "team_name": team.get("displayName", ""),
                 "channel_id": ch["id"],
                 "channel_name": ch.get("displayName", ""),
                 "membership_type": ch.get("membershipType", ""),
-            })
+            }
+            for ch in channels
+        ]
+
+    channel_lists = await asyncio.gather(
+        *[_fetch_channels(t) for t in teams_list], return_exceptions=True
+    )
+    result = []
+    for channels in channel_lists:
+        if isinstance(channels, Exception):
+            continue
+        result.extend(channels)
 
     return {"channels": result}
 

@@ -426,25 +426,27 @@ async def update_site(
 async def get_site(
     site_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
+    import asyncio
+
     site = db.get(CustomerSite, site_id)
     if not site:
         raise HTTPException(404)
-    reqs = (
-        db.query(Requisition)
-        .filter(
+
+    loop = asyncio.get_event_loop()
+
+    def _q_reqs():
+        return db.query(Requisition).filter(
             Requisition.customer_site_id == site_id,
-        )
-        .order_by(Requisition.created_at.desc())
-        .limit(20)
-        .all()
-    )
-    contacts = (
-        db.query(SiteContact)
-        .filter(
+        ).order_by(Requisition.created_at.desc()).limit(20).all()
+
+    def _q_contacts():
+        return db.query(SiteContact).filter(
             SiteContact.customer_site_id == site_id,
-        )
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
-        .all()
+        ).order_by(SiteContact.is_primary.desc(), SiteContact.full_name).all()
+
+    reqs, contacts = await asyncio.gather(
+        loop.run_in_executor(None, _q_reqs),
+        loop.run_in_executor(None, _q_contacts),
     )
     return {
         "id": site.id,
@@ -805,9 +807,11 @@ async def acctivate_run_sync(
         raise HTTPException(403, "Admin only")
     if not settings.acctivate_host:
         raise HTTPException(400, "ACCTIVATE_HOST not configured")
+    import asyncio
     from ..acctivate_sync import run_sync
 
-    result = run_sync(db)
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, run_sync, db)
     return result
 
 
@@ -1420,6 +1424,7 @@ async def create_quote(
     line_items = payload.line_items
     if offer_ids and not line_items:
         offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
+        quoted_prices = _preload_last_quoted_prices(db)
         line_items = []
         for o in offers:
             target = None
@@ -1430,7 +1435,7 @@ async def create_quote(
                     if o.requirement.target_price
                     else None
                 )
-                lq = get_last_quoted_price(o.mpn, db)
+                lq = quoted_prices.get((o.mpn or "").upper().strip())
                 last_q_price = lq.get("sell_price") if lq else None
             cost = float(o.unit_price) if o.unit_price else 0
             line_items.append(
