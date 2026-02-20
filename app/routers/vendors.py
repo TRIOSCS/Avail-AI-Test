@@ -28,6 +28,8 @@ from sqlalchemy import text as sqltext
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
+from ..services.vendor_analysis_service import _analyze_vendor_materials
+
 from ..database import get_db
 from ..dependencies import require_admin, require_buyer, require_user
 from ..http_client import http_redirect
@@ -1691,7 +1693,6 @@ async def get_vendor_parts_summary(
 # ── AI Material Analysis ────────────────────────────────────────────────
 
 
-from ..services.vendor_analysis_service import _analyze_vendor_materials  # noqa: E402
 
 
 @router.post("/api/vendors/{card_id}/analyze-materials")

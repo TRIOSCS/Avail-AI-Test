@@ -134,7 +134,7 @@ class Settings:
     # Admin
     admin_emails: list = [
         e.strip().lower()
-        for e in os.getenv("ADMIN_EMAILS", "mkhoury@trioscs.com").split(",")
+        for e in os.getenv("ADMIN_EMAILS", "").split(",")
         if e.strip()
     ]
 
@@ -186,6 +186,13 @@ class Settings:
     buyplan_auto_complete_hour: int = int(os.getenv("BUYPLAN_AUTO_COMPLETE_HOUR", "18"))
     buyplan_auto_complete_tz: str = os.getenv("BUYPLAN_AUTO_COMPLETE_TZ", "America/New_York")
     po_verify_interval_min: int = int(os.getenv("PO_VERIFY_INTERVAL_MIN", "30"))
+
+    # Own company domains — used to filter internal emails from vendor threads
+    own_domains: frozenset = frozenset(
+        d.strip().lower()
+        for d in os.getenv("OWN_DOMAINS", "trioscs.com").split(",")
+        if d.strip()
+    )
 
 
 settings = Settings()

@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_user
+from ..rate_limit import limiter
 from ..models import (
     ActivityLog,
     Contact,
@@ -713,7 +714,7 @@ async def upload_requirements(
         date_codes = (
             row.get("date_codes") or row.get("date_code") or row.get("dc") or ""
         ).strip() or None
-        manufacturer = (  # noqa: F841
+        manufacturer = (
             row.get("manufacturer") or row.get("brand") or row.get("mfr") or ""
         ).strip() or None
         notes = (row.get("notes") or row.get("note") or "").strip() or None
@@ -730,6 +731,7 @@ async def upload_requirements(
             condition=condition,
             packaging=packaging,
             date_codes=date_codes,
+            brand=manufacturer,
             notes=notes,
         )
         db.add(r)
@@ -801,7 +803,6 @@ async def update_requirement(
 
 
 # ── Search ───────────────────────────────────────────────────────────────
-from ..rate_limit import limiter
 
 
 @router.post("/api/requisitions/{req_id}/search")

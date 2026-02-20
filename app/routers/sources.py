@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..database import get_db
 from ..dependencies import require_fresh_token, require_settings_access, require_user
+from ..rate_limit import limiter
 from ..models import (
     ApiSource,
     Requirement,
@@ -437,8 +438,9 @@ async def list_api_sources(
 
 
 @router.post("/api/sources/{source_id}/test")
+@limiter.limit("5/minute")
 async def test_api_source(
-    source_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+    source_id: int, request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     """Test a specific API source with a known part number."""
     src = db.get(ApiSource, source_id)
@@ -502,6 +504,7 @@ async def toggle_api_source(
 
 
 @router.post("/api/email-mining/scan")
+@limiter.limit("2/minute")
 async def scan_inbox_for_vendors(
     request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
@@ -586,6 +589,7 @@ async def email_mining_status(
 
 
 @router.post("/api/email-mining/scan-outbound")
+@limiter.limit("2/minute")
 async def email_mining_scan_outbound(
     request: Request,
     user: User = Depends(require_user),
@@ -644,7 +648,9 @@ async def email_mining_scan_outbound(
 
 
 @router.post("/api/email-mining/compute-engagement")
+@limiter.limit("2/minute")
 async def email_mining_compute_engagement(
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):

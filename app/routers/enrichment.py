@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from loguru import logger
 from pydantic import BaseModel
 from sqlalchemy import func
@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import require_admin, require_user
+from ..rate_limit import limiter
 from ..models import (
     ActivityLog,
     Company,
@@ -657,7 +658,9 @@ class ScrapeRequest(BaseModel):
 
 
 @router.post("/api/enrichment/scrape-websites")
+@limiter.limit("2/minute")
 async def api_scrape_websites(
+    request: Request,
     body: ScrapeRequest = ScrapeRequest(),
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),

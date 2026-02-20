@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from ..config import settings
 from ..database import get_db
 from ..dependencies import is_admin as _is_admin
+from ..rate_limit import limiter
 from ..dependencies import require_admin, require_buyer, require_user
 from ..models import (
     ActivityLog,
@@ -859,9 +860,6 @@ async def list_users_simple(
 # ── Customer Import ──────────────────────────────────────────────────────
 
 
-from ..rate_limit import limiter
-
-
 @router.post("/api/customers/import")
 @limiter.limit("5/minute")
 async def import_customers(
@@ -1613,7 +1611,10 @@ async def send_quote(
 
 def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user: User) -> str:
     """Build a professional HTML quote email with Trio branding."""
+    import html as _html
     from datetime import timedelta
+
+    _esc = _html.escape
 
     BLUE = "#127fbf"
     DARK = "#1a2a3a"
@@ -1637,14 +1638,14 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
         bg = row_bg[idx % 2]
         td = f'style="padding:10px 12px;border-bottom:1px solid #e8ecf0;background:{bg}"'
         rows += f"""<tr>
-            <td {td}><strong>{item.get('mpn','')}</strong></td>
-            <td {td}>{item.get('manufacturer','') or '—'}</td>
+            <td {td}><strong>{_esc(item.get('mpn',''))}</strong></td>
+            <td {td}>{_esc(item.get('manufacturer','') or '—')}</td>
             <td {td} style="padding:10px 12px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:center">{qty}</td>
-            <td {td}>{cond}</td>
-            <td {td}>{dc}</td>
-            <td {td}>{pkg}</td>
+            <td {td}>{_esc(cond)}</td>
+            <td {td}>{_esc(dc)}</td>
+            <td {td}>{_esc(pkg)}</td>
             <td {td} style="padding:10px 12px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:right">{price}</td>
-            <td {td} style="padding:10px 12px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:right">{item.get('lead_time','') or '—'}</td>
+            <td {td} style="padding:10px 12px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:right">{_esc(item.get('lead_time','') or '—')}</td>
             <td {td} style="padding:10px 12px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:right;font-weight:600">{ext}</td>
         </tr>"""
 
@@ -1653,16 +1654,16 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
     # Terms table
     terms_rows = ""
     if quote.payment_terms:
-        terms_rows += f'<tr><td style="padding:6px 0;color:#666;width:120px">Payment</td><td style="padding:6px 0;font-weight:600">{quote.payment_terms}</td></tr>'
+        terms_rows += f'<tr><td style="padding:6px 0;color:#666;width:120px">Payment</td><td style="padding:6px 0;font-weight:600">{_esc(quote.payment_terms)}</td></tr>'
     if quote.shipping_terms:
-        terms_rows += f'<tr><td style="padding:6px 0;color:#666">Shipping</td><td style="padding:6px 0;font-weight:600">{quote.shipping_terms}</td></tr>'
+        terms_rows += f'<tr><td style="padding:6px 0;color:#666">Shipping</td><td style="padding:6px 0;font-weight:600">{_esc(quote.shipping_terms)}</td></tr>'
     terms_rows += '<tr><td style="padding:6px 0;color:#666">Currency</td><td style="padding:6px 0;font-weight:600">USD</td></tr>'
     terms_rows += f'<tr><td style="padding:6px 0;color:#666">Valid Until</td><td style="padding:6px 0;font-weight:600">{expires_str}</td></tr>'
 
-    greeting = f"Dear {to_name}," if to_name else "Dear Valued Customer,"
-    notes_block = f'<div style="margin-top:16px;padding:12px 16px;background:#f0f7ff;border-left:3px solid {BLUE};border-radius:4px;font-size:13px;color:#444">{quote.notes}</div>' if quote.notes else ""
+    greeting = f"Dear {_esc(to_name)}," if to_name else "Dear Valued Customer,"
+    notes_block = f'<div style="margin-top:16px;padding:12px 16px;background:#f0f7ff;border-left:3px solid {BLUE};border-radius:4px;font-size:13px;color:#444">{_esc(quote.notes)}</div>' if quote.notes else ""
     signature = user.email_signature or f"{user.name or 'Trio Supply Chain Solutions'}"
-    sig_html = signature.replace("\n", "<br>")
+    sig_html = _esc(signature).replace("\n", "<br>")
 
     th = f'style="padding:10px 12px;text-align:left;border-bottom:2px solid {BLUE};font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:{DARK}"'
 
@@ -1690,7 +1691,7 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
 <!-- Body -->
 <tr><td style="padding:28px 32px">
     <p style="margin:0 0 4px;font-size:15px;color:#333">{greeting}</p>
-    <p style="margin:0 0 20px;font-size:14px;color:#666">Thank you for your interest. Please find our quotation for <strong>{company_name or 'your company'}</strong> below.</p>
+    <p style="margin:0 0 20px;font-size:14px;color:#666">Thank you for your interest. Please find our quotation for <strong>{_esc(company_name or 'your company')}</strong> below.</p>
 
     <!-- Line Items Table -->
     <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:12px;margin-bottom:16px">
@@ -1979,6 +1980,7 @@ async def submit_buy_plan(
         for item in line_items
     )
 
+    from datetime import timedelta
     plan = BuyPlan(
         requisition_id=quote.requisition_id,
         quote_id=quote_id,
@@ -1987,6 +1989,7 @@ async def submit_buy_plan(
         line_items=line_items,
         submitted_by_id=user.id,
         approval_token=secrets.token_urlsafe(32),
+        token_expires_at=datetime.now(timezone.utc) + timedelta(days=30),
         is_stock_sale=is_stock,
     )
     db.add(plan)
@@ -2032,7 +2035,18 @@ async def list_buy_plans(
     db: Session = Depends(get_db),
 ):
     """List buy plans. Admins see all, sales see own, buyers see their offers."""
-    query = db.query(BuyPlan).order_by(BuyPlan.created_at.desc())
+    query = (
+        db.query(BuyPlan)
+        .options(
+            joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(BuyPlan.requisition),
+            joinedload(BuyPlan.submitted_by),
+            joinedload(BuyPlan.approved_by),
+            joinedload(BuyPlan.completed_by),
+            joinedload(BuyPlan.cancelled_by),
+        )
+        .order_by(BuyPlan.created_at.desc())
+    )
     if status:
         query = query.filter(BuyPlan.status == status)
     if not _is_admin(user):
@@ -2052,6 +2066,8 @@ async def get_buyplan_by_token(
     plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
     if not plan:
         raise HTTPException(404, "Invalid or expired token")
+    if plan.token_expires_at and plan.token_expires_at < datetime.now(timezone.utc):
+        raise HTTPException(410, "Token has expired")
     return _buyplan_to_dict(plan)
 
 
@@ -2066,6 +2082,8 @@ async def approve_buyplan_by_token(
     plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
     if not plan:
         raise HTTPException(404, "Invalid or expired token")
+    if plan.token_expires_at and plan.token_expires_at < datetime.now(timezone.utc):
+        raise HTTPException(410, "Token has expired")
     if plan.status != "pending_approval":
         raise HTTPException(400, f"Cannot approve plan in status: {plan.status}")
 
@@ -2079,6 +2097,7 @@ async def approve_buyplan_by_token(
 
     plan.status = "approved"
     plan.approved_at = datetime.now(timezone.utc)
+    plan.approval_token = None  # Invalidate after use
     # approved_by_id stays None (token-based, no logged-in user)
 
     from ..services.buyplan_service import log_buyplan_activity
@@ -2120,12 +2139,15 @@ async def reject_buyplan_by_token(
     plan = db.query(BuyPlan).filter(BuyPlan.approval_token == token).first()
     if not plan:
         raise HTTPException(404, "Invalid or expired token")
+    if plan.token_expires_at and plan.token_expires_at < datetime.now(timezone.utc):
+        raise HTTPException(410, "Token has expired")
     if plan.status != "pending_approval":
         raise HTTPException(400, f"Cannot reject plan in status: {plan.status}")
 
     plan.rejection_reason = body.reason
     plan.status = "rejected"
     plan.rejected_at = datetime.now(timezone.utc)
+    plan.approval_token = None  # Invalidate after use
 
     from ..services.buyplan_service import log_buyplan_activity
 
@@ -2476,6 +2498,7 @@ async def resubmit_buy_plan(
         for item in new_line_items
     )
 
+    from datetime import timedelta
     new_plan = BuyPlan(
         requisition_id=plan.requisition_id,
         quote_id=plan.quote_id,
@@ -2484,6 +2507,7 @@ async def resubmit_buy_plan(
         line_items=new_line_items,
         submitted_by_id=user.id,
         approval_token=secrets.token_urlsafe(32),
+        token_expires_at=datetime.now(timezone.utc) + timedelta(days=30),
         is_stock_sale=is_stock,
     )
     db.add(new_plan)

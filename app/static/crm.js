@@ -303,7 +303,7 @@ async function toggleSiteDetail(siteId) {
                 <div class="si-reqs">
                     <strong style="font-size:11px;color:var(--muted)">Recent Requisitions</strong>
                     ${(s.recent_reqs || []).length ? s.recent_reqs.map(r => `
-                        <div class="si-req" onclick="showDetail(${r.id},'${escAttr(r.name)}')">
+                        <div class="si-req" onclick="sidebarNav('reqs');setTimeout(()=>toggleDrillDown(${r.id}),300)">
                             <span>REQ-${String(r.id).padStart(3,'0')}</span>
                             <span>${r.requirement_count} MPNs</span>
                             <span class="status-badge status-${r.status}">${r.status}</span>
@@ -716,105 +716,6 @@ function updateBuildQuoteBtn() {
     }
 }
 
-function openLogOfferModal() {
-    openModal('logOfferModal');
-    _pendingOfferFiles = [];
-    document.getElementById('loAttachments').innerHTML = '';
-    const sel = document.getElementById('loMpn');
-    sel.innerHTML = crmOffers.map(g => '<option value="' + g.requirement_id + '" data-mpn="' + escAttr(g.mpn) + '">' + esc(g.mpn) + ' (need ' + g.target_qty + ')</option>').join('');
-    // Populate vendor dropdown with RFQ'd vendors (from activity data)
-    const vendorSel = document.getElementById('loVendor');
-    const rfqVendors = _getRfqVendorNames();
-    vendorSel.innerHTML = '<option value="">Select vendor…</option>'
-        + rfqVendors.map(n => '<option value="' + escAttr(n) + '">' + esc(n) + '</option>').join('');
-    setTimeout(() => vendorSel.focus(), 100);
-}
-
-function _getRfqVendorNames() {
-    // Collect unique vendor names from activity data (vendors who've been RFQ'd)
-    const seen = new Set();
-    const names = [];
-    for (const v of (activityData.vendors || [])) {
-        const norm = (v.vendor_name || '').trim().toLowerCase();
-        if (!norm || seen.has(norm)) continue;
-        seen.add(norm);
-        names.push(v.vendor_name);
-    }
-    return names.sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
-}
-
-async function saveOffer(andNext) {
-    const sel = document.getElementById('loMpn');
-    const reqId = sel.value;
-    const mpn = sel.options[sel.selectedIndex]?.getAttribute('data-mpn') || '';
-    const data = {
-        requirement_id: parseInt(reqId) || null,
-        mpn: mpn,
-        vendor_name: document.getElementById('loVendor').value.trim(),
-        qty_available: parseInt(document.getElementById('loQty').value) || null,
-        unit_price: parseFloat(document.getElementById('loPrice').value) || null,
-        lead_time: document.getElementById('loLead').value.trim(),
-        condition: document.getElementById('loCond').value,
-        date_code: document.getElementById('loDC').value.trim(),
-        firmware: document.getElementById('loFirmware').value.trim() || null,
-        hardware_code: document.getElementById('loHardware').value.trim() || null,
-        packaging: document.getElementById('loPackaging').value.trim() || null,
-        moq: parseInt(document.getElementById('loMoq').value) || null,
-        notes: document.getElementById('loNotes').value.trim(),
-    };
-    if (!data.vendor_name || !data.mpn) return;
-    try {
-        const result = await apiFetch('/api/requisitions/' + currentReqId + '/offers', {
-            method: 'POST', body: data
-        });
-        // Upload pending attachments
-        if (_pendingOfferFiles.length && result.id) {
-            for (const f of _pendingOfferFiles) {
-                try {
-                    if (f._onedrive_item_id) {
-                        await apiFetch('/api/offers/' + result.id + '/attachments/onedrive', {
-                            method: 'POST', body: { item_id: f._onedrive_item_id }
-                        });
-                    } else {
-                        const fd = new FormData();
-                        fd.append('file', f);
-                        await apiFetch('/api/offers/' + result.id + '/attachments', { method: 'POST', body: fd });
-                    }
-                } catch (e) { logCatchError('attachmentUpload', e); }
-            }
-        }
-        _pendingOfferFiles = [];
-        showToast('Offer from ' + data.vendor_name + ' saved', 'success');
-        notifyStatusChange(result);
-        if (andNext) {
-            ['loQty','loPrice','loLead','loDC','loFirmware','loHardware','loPackaging','loMoq','loNotes'].forEach(id => document.getElementById(id).value = '');
-            document.getElementById('loVendor').value = '';
-            document.getElementById('loCond').value = 'New';
-            document.getElementById('loAttachments').innerHTML = '';
-            document.getElementById('loVendor').focus();
-        } else {
-            closeModal('logOfferModal');
-        }
-        loadOffers();
-    } catch (e) { console.error('saveOffer:', e); showToast('Error saving offer', 'error'); }
-}
-
-function handleOfferFileSelect(input) {
-    const files = Array.from(input.files);
-    _pendingOfferFiles.push(...files);
-    renderPendingAttachments();
-    input.value = '';
-}
-
-function renderPendingAttachments() {
-    const el = document.getElementById('loAttachments');
-    el.innerHTML = _pendingOfferFiles.map((f, i) =>
-        `<span class="badge" style="background:var(--bg3);font-size:10px;padding:2px 8px;display:inline-flex;align-items:center;gap:4px">
-            ${esc(f.name)} <button onclick="_pendingOfferFiles.splice(${i},1);renderPendingAttachments()" style="border:none;background:none;cursor:pointer;color:var(--muted);font-size:12px">✕</button>
-        </span>`
-    ).join('');
-}
-
 // ── OneDrive Browser ────────────────────────────────────────────────────
 
 let _odCurrentPath = '';
@@ -884,12 +785,8 @@ async function selectOneDriveFile(itemId) {
             const items = await apiFetch('/api/onedrive/browse' + (_odCurrentPath ? '?path=' + encodeURIComponent(_odCurrentPath) : ''));
             const item = items.find(i => i.id === itemId);
             if (item) {
-                // Store as a special OneDrive reference in pending files
-                const odRef = new File([], item.name);
-                odRef._onedrive_item_id = itemId;
-                odRef._onedrive_name = item.name;
-                _pendingOfferFiles.push(odRef);
-                renderPendingAttachments();
+                // OneDrive attachment selection (kept for edit-offer flow)
+                showToast('File selected: ' + item.name, 'info');
             }
             closeModal('oneDriveModal');
         } catch (e) { showToast('Failed to select file', 'error'); }
@@ -1972,7 +1869,8 @@ async function cloneRequisition(reqId) {
     try {
         const data = await apiFetch('/api/requisitions/' + reqId + '/clone', { method: 'POST' });
         showToast('Requisition cloned', 'success');
-        showDetail(data.id, data.name);
+        await loadRequisitions();
+        toggleDrillDown(data.id);
     } catch (e) { console.error('cloneRequisition:', e); showToast('Error cloning requisition', 'error'); }
 }
 
@@ -2246,7 +2144,7 @@ async function unifiedEnrichVendor(vendorId) {
 document.addEventListener('DOMContentLoaded', function() {
     loadUserOptions('asSiteOwner');
     loadSiteOptions();
-    // loVendor is now a <select> populated per-requisition in openLogOfferModal()
+    // loVendor is now a text input in the inline Log Offer modal (app.js)
     initNameAutocomplete('ncName', 'ncNameList', null, { types: 'all' });
     // Check for token-based approval links
     checkTokenApproval();

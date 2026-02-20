@@ -106,6 +106,7 @@ class BuyPlan(Base):
     cancellation_reason = Column(Text)
 
     approval_token = Column(String(100), unique=True)
+    token_expires_at = Column(DateTime)
     is_stock_sale = Column(Boolean, default=False)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

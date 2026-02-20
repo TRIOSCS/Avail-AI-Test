@@ -399,10 +399,15 @@ def get_vendor_scorecard_list(
     # Count before pagination
     total = q.count()
 
-    # Sort
-    sort_col = getattr(
-        VendorMetricsSnapshot, sort_by, VendorMetricsSnapshot.composite_score
-    )
+    # Sort — whitelist allowed columns to prevent attribute probing
+    _ALLOWED_SORT_COLS = {
+        "composite_score", "response_rate", "quote_conversion", "po_conversion",
+        "avg_review_rating", "interaction_count", "snapshot_date",
+    }
+    if sort_by not in _ALLOWED_SORT_COLS:
+        sort_by = "composite_score"
+    sort_col = getattr(VendorMetricsSnapshot, sort_by)
+    order = order if order in ("asc", "desc") else "desc"
     if order == "asc":
         q = q.order_by(sql_asc(sort_col).nulls_last())
     else:

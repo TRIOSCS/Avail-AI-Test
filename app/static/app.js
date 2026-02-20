@@ -261,9 +261,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         const lastId = parseInt(localStorage.getItem('lastReqId'));
         const lastName = localStorage.getItem('lastReqName') || '';
         if (lastId) {
-            // Try to find it in the loaded list; if not, still open detail (it fetches its own data)
+            // Auto-expand the last viewed requisition drill-down
             const found = _reqListData.find(r => r.id === lastId);
-            showDetail(lastId, found ? found.name : lastName);
+            if (found) setTimeout(() => toggleDrillDown(lastId), 300);
         }
     } catch(e) { logCatchError('restoreLastReq', e); }
     checkM365Status();
@@ -398,7 +398,7 @@ async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-detail', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-performance', 'view-settings'];
+const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-performance', 'view-settings'];
 
 function showView(viewId) {
     for (const id of ALL_VIEWS) {
@@ -437,128 +437,13 @@ function showList() {
     loadRequisitions();
 }
 
-function openDetailSitePicker() {
-    const picker = document.getElementById('detailSitePicker');
-    if (!picker) return;
-    if (picker.style.display === 'none') {
-        picker.style.display = '';
-        document.getElementById('detailSiteSearch').focus();
-        if (typeof loadSiteOptions === 'function' && (!window._siteListCache || !window._siteListCache.length)) loadSiteOptions();
-        filterDetailSiteTypeahead('');
-    } else {
-        picker.style.display = 'none';
-    }
-}
-
-function filterDetailSiteTypeahead(query) {
-    const list = document.getElementById('detailSiteList');
-    if (!list) return;
-    const cache = window._siteListCache || [];
-    const q = query.toLowerCase().trim();
-    const matches = q ? cache.filter(s => s.label.toLowerCase().includes(q)).slice(0, 8) : cache.slice(0, 8);
-    list.innerHTML = matches.length
-        ? matches.map(s => '<div class="site-typeahead-item" onclick="selectDetailSite('+s.id+',\''+s.label.replace(/'/g,"\\'")+'\')">' + (typeof esc === 'function' ? esc(s.label) : s.label) + '</div>').join('')
-        : '<div class="site-typeahead-item" style="color:var(--muted)">No sites found</div>';
-    list.classList.add('show');
-}
-
-async function selectDetailSite(siteId, label) {
-    document.getElementById('detailSitePicker').style.display = 'none';
-    try {
-        await apiFetch(`/api/requisitions/${currentReqId}`, { method: 'PUT', body: { customer_site_id: siteId } });
-        document.getElementById('detailCustomer').textContent = label;
-        _reqCustomerMap[currentReqId] = label;
-        const reqInfo = _reqListData.find(r => r.id === currentReqId);
-        if (reqInfo) reqInfo.customer_site_id = siteId;
-        showToast('Customer site linked', 'success');
-    } catch (e) { showToast('Failed to link site', 'error'); }
-}
-
+// showDetail — redirects to inline drill-down (detail page removed)
 function showDetail(id, name, tab) {
+    showView('view-list');
     currentReqId = id;
     currentReqName = name;
     try { localStorage.setItem('lastReqId', id); localStorage.setItem('lastReqName', name || ''); } catch(e) {}
-    showView('view-detail');
-    document.getElementById('detailTitle').textContent = name;
-    // Show customer display — prompt to link if missing
-    const custEl = document.getElementById('detailCustomer');
-    if (custEl) {
-        const custName = _reqCustomerMap[id];
-        const reqInfo2 = _reqListData.find(r => r.id === id);
-        const compId = reqInfo2 ? reqInfo2.company_id : null;
-        if (custName && compId) {
-            custEl.innerHTML = `<span class="cust-link" onclick="goToCompany(${compId})">${esc(custName)}</span>`;
-            custEl.style.color = '';
-        } else {
-            custEl.textContent = custName || '+ Link Customer';
-            custEl.style.color = custName ? '' : 'var(--teal)';
-        }
-    }
-    // Show deadline in detail header
-    const dlEl = document.getElementById('detailDeadline');
-    if (dlEl) {
-        const reqDl = _reqListData.find(r => r.id === id);
-        _renderDetailDeadline(dlEl, reqDl?.deadline);
-    }
-    // Hide site picker when switching requisitions
-    const picker = document.getElementById('detailSitePicker');
-    if (picker) picker.style.display = 'none';
-    // Show Clone button only for archived/won/lost; set Submit vs Search All label
-    const reqInfo = _reqListData.find(r => r.id === id);
-    const cloneBtn = document.getElementById('cloneBtn');
-    if (cloneBtn) {
-        cloneBtn.style.display = (reqInfo && ['archived', 'won', 'lost'].includes(reqInfo.status)) ? '' : 'none';
-    }
-    const searchBtn = document.getElementById('searchAllBtn');
-    if (searchBtn) {
-        searchBtn.textContent = 'Search Selected';
-    }
-    // Set status chip (no pulse on initial load)
-    const chip = document.getElementById('detailStatus');
-    if (chip && reqInfo) {
-        chip.className = 'status-chip status-' + reqInfo.status;
-        chip.textContent = _statusLabels[reqInfo.status] || reqInfo.status;
-    }
-    // Reset tab caches so stale data doesn't show when switching RFQs
-    if (typeof _emailThreadsLoaded !== 'undefined') _emailThreadsLoaded = null;
-    if (typeof _emailThreadsData !== 'undefined') _emailThreadsData = [];
-    if (typeof selectedOffers !== 'undefined') selectedOffers.clear();
-    if (typeof _currentBuyPlan !== 'undefined') _currentBuyPlan = null;
-    // Restore cached results or load saved sightings from DB
-    if (searchResultsCache[id]) {
-        searchResults = searchResultsCache[id];
-        _rebuildSightingIndex();
-        renderSources();
-    } else {
-        searchResults = {};
-        selectedSightings.clear();
-        // Background fetch: load any previously saved sightings
-        apiFetch(`/api/requisitions/${id}/sightings`)
-            .then(data => {
-                if (data && Object.keys(data).length && currentReqId === id) {
-                    searchResults = data;
-                    searchResultsCache[id] = data;
-                    _rebuildSightingIndex();
-                    renderSources();
-                }
-            })
-            .catch(() => {});  // Silent — empty Sources tab is fine
-    }
-    // Set initial new-offers state from list data before loadOffers runs
-    if (reqInfo && typeof _hasNewOffers !== 'undefined') {
-        _hasNewOffers = reqInfo.has_new_offers || false;
-        if (typeof _latestOfferAt !== 'undefined') _latestOfferAt = reqInfo.latest_offer_at || null;
-    }
-    // Load all tab data in parallel for faster detail view
-    loadRequirements();
-    loadActivity();
-    if (typeof loadOffers === 'function') loadOffers();
-    if (typeof loadQuote === 'function') loadQuote();
-    // Restore last active tab or default to requirements
-    const lastTab = tab || activeTabCache[id] || 'requirements';
-    const tabMap = {requirements:0, sources:1, activity:2, offers:3, quote:4, emails:5};
-    const tabBtns = document.querySelectorAll('#reqTabs .tab');
-    switchTab(lastTab, tabBtns[tabMap[lastTab] || 0]);
+    setTimeout(() => toggleDrillDown(id), 200);
 }
 
 function showVendors() {
@@ -571,18 +456,6 @@ function showMaterials() {
     showView('view-materials');
     currentReqId = null;
     loadMaterialList();
-}
-
-function switchTab(name, btn) {
-    document.querySelectorAll('.tc').forEach(t => t.classList.remove('on'));
-    document.querySelectorAll('#reqTabs .tab').forEach(t => t.classList.remove('on'));
-    document.getElementById('tab-' + name).classList.add('on');
-    btn.classList.add('on');
-    if (currentReqId) activeTabCache[currentReqId] = name;
-    // Auto-load CRM tabs on first switch
-    if (name === 'offers' && typeof loadOffers === 'function') loadOffers();
-    if (name === 'quote' && typeof loadQuote === 'function') loadQuote();
-    if (name === 'emails' && typeof loadEmailThreads === 'function') loadEmailThreads();
 }
 
 // ── Modals ──────────────────────────────────────────────────────────────
@@ -1263,6 +1136,82 @@ function ddSendBulkRfq(reqId) {
     openBatchRfqModal(vendorGroups);
 }
 
+// ── Log Offer Modal ─────────────────────────────────────────────────────
+async function openLogOfferFromList(reqId) {
+    document.getElementById('loReqId').value = reqId;
+    // Load requirements to populate part picker
+    const reqs = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`).catch(() => []);
+    _ddReqCache[reqId] = reqs;
+    const sel = document.getElementById('loReqPart');
+    sel.innerHTML = '<option value="">Select part...</option>';
+    for (const r of (reqs || [])) {
+        sel.innerHTML += `<option value="${r.id}" data-mpn="${escAttr(r.primary_mpn || '')}">${esc(r.primary_mpn || 'Part #' + r.id)}${r.target_qty ? ' (qty ' + r.target_qty + ')' : ''}</option>`;
+    }
+    // Clear form fields
+    document.getElementById('loVendor').value = '';
+    document.getElementById('loQty').value = '';
+    document.getElementById('loPrice').value = '';
+    document.getElementById('loLead').value = '';
+    document.getElementById('loMoq').value = '';
+    document.getElementById('loCond').value = 'new';
+    document.getElementById('loDc').value = '';
+    document.getElementById('loPkg').value = '';
+    document.getElementById('loMfr').value = '';
+    document.getElementById('loNotes').value = '';
+    openModal('logOfferModal', 'loVendor');
+}
+
+function closeLogOfferModal() {
+    closeModal('logOfferModal');
+}
+
+async function submitLogOffer() {
+    const reqId = parseInt(document.getElementById('loReqId').value);
+    const partSel = document.getElementById('loReqPart');
+    const reqPartId = partSel.value ? parseInt(partSel.value) : null;
+    const mpn = partSel.selectedOptions[0]?.dataset?.mpn || partSel.selectedOptions[0]?.textContent || '';
+    const vendor = document.getElementById('loVendor').value.trim();
+    if (!vendor) { showToast('Vendor name is required', 'error'); return; }
+    if (!mpn) { showToast('Select a part', 'error'); return; }
+    const btn = document.getElementById('loSubmitBtn');
+    btn.disabled = true; btn.textContent = 'Saving\u2026';
+    try {
+        const body = {
+            mpn: mpn,
+            vendor_name: vendor,
+            requirement_id: reqPartId,
+            qty_available: parseInt(document.getElementById('loQty').value) || null,
+            unit_price: parseFloat(document.getElementById('loPrice').value) || null,
+            lead_time: document.getElementById('loLead').value.trim() || null,
+            moq: parseInt(document.getElementById('loMoq').value) || null,
+            condition: document.getElementById('loCond').value || 'new',
+            date_code: document.getElementById('loDc').value.trim() || null,
+            packaging: document.getElementById('loPkg').value.trim() || null,
+            manufacturer: document.getElementById('loMfr').value.trim() || null,
+            notes: document.getElementById('loNotes').value.trim() || null,
+            source: 'manual',
+            status: 'active',
+        };
+        await apiFetch(`/api/requisitions/${reqId}/offers`, { method: 'POST', body });
+        closeLogOfferModal();
+        showToast('Offer logged', 'success');
+        // Invalidate caches and refresh list
+        if (_ddTabCache[reqId]) { delete _ddTabCache[reqId].offers; }
+        // Update offer count in list data
+        const reqInfo = _reqListData.find(r => r.id === reqId);
+        if (reqInfo) {
+            reqInfo.reply_count = (reqInfo.reply_count || 0) + 1;
+            reqInfo.offer_count = (reqInfo.offer_count || 0) + 1;
+            reqInfo.has_new_offers = true;
+        }
+        renderReqList();
+    } catch(e) {
+        showToast('Failed to log offer: ' + (e.message || e), 'error');
+    } finally {
+        btn.disabled = false; btn.textContent = 'Log Offer';
+    }
+}
+
 function renderReqList() {
     _ddReqCache = {};
     _ddSightingsCache = {};
@@ -1352,7 +1301,7 @@ function renderReqList() {
             <th onclick="sortReqList('resp')"${thClass('resp')}>Resp % ${sa('resp')}</th>
             <th onclick="sortReqList('searched')"${thClass('searched')}>Searched ${sa('searched')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
-            <th onclick="sortReqList('status')"${thClass('status')} title="Sourcing / Offers / Quoted">Status ${sa('status')}</th>
+            <th style="width:100px"></th>
         </tr></thead>`;
     } else if (v === 'archive') {
         thead = `<thead><tr>
@@ -1528,26 +1477,12 @@ function _renderReqRow(r) {
         const scDotColor = scColor === 'green' ? 'var(--green)' : scColor === 'yellow' ? 'var(--amber)' : 'var(--red)';
         const effortCell = `<td style="text-align:center"><span class="effort-wrap"><span class="effort-dot" style="background:${scDotColor}"></span><span style="font-size:10px;color:var(--muted);margin-left:3px">${Math.round(scVal)}</span>${_buildEffortTip(scVal, scColor, r.sourcing_signals)}</span></td>`;
 
-        // Offers cell — clickable to go to quote preparation
+        // Offers cell — clickable to expand offers sub-tab
         let offersCell;
         if (offers > 0) {
-            offersCell = `<td class="mono"><b class="cust-link" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','quote')" title="Go to quote preparation">${offers}</b></td>`;
+            offersCell = `<td class="mono"><b class="cust-link" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="View offers">${offers}</b></td>`;
         } else {
             offersCell = `<td class="mono">${offers}</td>`;
-        }
-
-        // Action buttons for sourcing
-        // State-aware action button
-        let srcBtn;
-        const isQuoted = r.status === 'quoted' || r.status === 'quoting';
-        if (isQuoted) {
-            srcBtn = `<button class="btn btn-q btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','quote')" title="Quote prepared">Quoted</button>`;
-        } else if (offers > 0 && r.has_new_offers) {
-            srcBtn = `<button class="btn btn-g btn-sm btn-flash" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','quote')" title="New offers — click to review">Offers (${offers})</button>`;
-        } else if (offers > 0) {
-            srcBtn = `<button class="btn btn-g btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','quote')" title="Prepare quote">Offers (${offers})</button>`;
-        } else {
-            srcBtn = `<button class="btn btn-y btn-sm" onclick="event.stopPropagation();showDetail(${r.id},'${escAttr(r.name)}','sources')" title="Sourcing in progress">Sourcing</button>`;
         }
 
         dataCells = `
@@ -1560,7 +1495,7 @@ function _renderReqRow(r) {
             <td class="mono">${respPct}</td>
             <td style="font-size:11px">${searched}</td>
             <td class="mono" style="font-size:11px">${age}</td>`;
-        actions = `<td style="white-space:nowrap">${srcBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">\ud83d\udce5 Archive</button></td>`;
+        actions = `<td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();openLogOfferFromList(${r.id})" title="Log a confirmed offer">+ Log Offer</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">\ud83d\udce5</button></td>`;
         colspan = 12;
     } else if (v === 'archive') {
         // Archive: Parts, Offers, Outcome · $value, Matches, Sales, Age
@@ -2069,7 +2004,8 @@ async function createRequisition() {
         document.getElementById('nrAsap').checked = false;
         document.getElementById('nrSiteSelected').style.display = 'none';
         document.getElementById('nrContactField').style.display = 'none';
-        showDetail(data.id, data.name);
+        await loadRequisitions();
+        toggleDrillDown(data.id);
     } catch (e) { showToast('Failed to create requisition', 'error'); }
 }
 
@@ -2129,7 +2065,7 @@ async function requoteFromList(reqId) {
         const srcBtn = document.querySelector('#mainPills .fp:nth-child(2)');
         if (srcBtn) setMainView('sourcing', srcBtn);
         await loadRequisitions();
-        showDetail(resp.id, reName, 'sources');
+        expandToSubTab(resp.id, 'sightings');
     } catch (e) { showToast('Failed to re-quote', 'error'); }
 }
 
@@ -2405,17 +2341,8 @@ function updateSearchAllBar() {
 }
 
 async function submitToSourcing(reqId) {
-    // Submit a draft RFQ to sourcing — opens detail and searches all parts
-    const reqInfo = _reqListData.find(r => r.id === reqId);
-    showDetail(reqId, reqInfo ? reqInfo.name : '', 'sources');
-    // Wait for detail to load requirements
-    await new Promise(resolve => setTimeout(resolve, 800));
-    // Select all requirements from reqData (the loaded requirements array)
-    if (typeof reqData !== 'undefined' && reqData.length) {
-        selectedRequirements = new Set(reqData.map(r => r.id));
-    }
-    updateSearchAllBar();
-    searchAll();
+    // Redirect to inline source-all (detail page removed)
+    await inlineSourceAll(reqId);
 }
 
 async function inlineSourceAll(reqId) {

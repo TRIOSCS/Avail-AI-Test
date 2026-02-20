@@ -557,6 +557,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
         line_items=bp_line_items,
         submitted_by_id=user.id,
         approval_token=secrets.token_urlsafe(32),
+        token_expires_at=datetime.now(timezone.utc) + timedelta(days=30),
     )
     db.add(buy_plan)
 
