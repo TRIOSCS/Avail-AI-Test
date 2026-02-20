@@ -1189,15 +1189,15 @@ body.sb-open .sb-overlay{display:block}
 
 /* Toolbar status indicators */
 .toolbar-stats{display:flex;align-items:center;gap:5px}
-.ts-pill{display:flex;align-items:center;gap:4px;cursor:pointer;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.2px;transition:all .15s;border:1px solid currentColor;user-select:none}
+.ts-pill{display:flex;align-items:center;gap:4px;cursor:pointer;padding:3px 9px;border-radius:6px;font-size:10px;font-weight:700;letter-spacing:.2px;transition:all .15s;border:1px solid transparent;user-select:none}
 .ts-pill:hover{filter:brightness(.95)}
-.ts-pill.active{border-color:transparent}
+.ts-pill.active{border-color:currentColor}
 .ts-pill .ts-n{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:800}
 .ts-green{color:#0b7a50;background:#d4f5e6}
 .ts-yellow{color:#946b00;background:#fff3c4}
 .ts-orange{color:#b84500;background:#ffe4cc}
 .ts-red{color:#b91c2e;background:#fdd8dc}
-.ts-grey{color:var(--blue);background:#dce6f2;border-color:var(--blue)!important}
+.ts-grey{color:var(--blue);background:#dce6f2}
 
 /* v7 Button variants */
 .btn-p{background:var(--teal);color:#fff}.btn-p:hover{background:#3a5c8a}

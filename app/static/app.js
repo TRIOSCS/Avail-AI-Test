@@ -1070,7 +1070,7 @@ function _updateToolbarStats() {
     const all = _reqListData;
     const now = new Date(); now.setHours(0,0,0,0);
 
-    let nGreen = 0, nOrange = 0;
+    let nGreen = 0, nYellow = 0;
     for (const r of all) {
         if (r.reply_count > 0) nGreen++;
         const dl = r.deadline;
@@ -1079,7 +1079,7 @@ function _updateToolbarStats() {
         if (isAsap) continue;
         const d = new Date(dl); d.setHours(0,0,0,0);
         const diff = Math.round((d - now) / 86400000);
-        if (diff === 0) nOrange++;
+        if (diff === 0) nYellow++;
     }
 
     const qf = _toolbarQuickFilter;
@@ -1088,7 +1088,7 @@ function _updateToolbarStats() {
 
     el.innerHTML =
         pill('green', nGreen, 'Offers') +
-        pill('orange', nOrange, 'Due Today') +
+        pill('yellow', nYellow, 'Bid Due') +
         `<div class="ts-pill ts-grey${qf ? '' : ' active'}" onclick="setToolbarQuickFilter('')"><span class="ts-n">${all.length}</span> All</div>`;
 }
 
@@ -1442,9 +1442,7 @@ function applyDropdownFilters(data) {
             const diff = d ? Math.round((d - now) / 86400000) : null;
             switch (_toolbarQuickFilter) {
                 case 'green': return r.reply_count > 0;
-                case 'red': return isAsap || (diff !== null && diff < 0);
-                case 'orange': return diff === 0;
-                case 'yellow': return diff !== null && diff >= 1 && diff <= 3;
+                case 'yellow': return diff === 0;
                 default: return true;
             }
         });
