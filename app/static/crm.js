@@ -332,6 +332,25 @@ function openNewCompanyModal() {
     openModal('newCompanyModal', 'ncName');
 }
 
+const debouncedCheckDupCompany = debounce(async (val) => {
+    const warn = document.getElementById('ncDupWarning');
+    if (!warn) return;
+    const q = (val || '').trim();
+    if (q.length < 3) { warn.style.display = 'none'; return; }
+    try {
+        const resp = await apiFetch('/api/companies/check-duplicate?name=' + encodeURIComponent(q));
+        if (resp.matches && resp.matches.length > 0) {
+            const names = resp.matches.map(m =>
+                '<b>' + esc(m.name) + '</b>' + (m.match === 'exact' ? ' (exact match)' : '')
+            ).join(', ');
+            warn.innerHTML = 'Possible duplicate: ' + names;
+            warn.style.display = '';
+        } else {
+            warn.style.display = 'none';
+        }
+    } catch (e) { warn.style.display = 'none'; }
+}, 400);
+
 async function createCompany() {
     const name = document.getElementById('ncName').value.trim();
     if (!name) return;
@@ -348,9 +367,15 @@ async function createCompany() {
             closeModal('newCompanyModal');
             ['ncName','ncWebsite','ncLinkedin','ncIndustry'].forEach(id => document.getElementById(id).value = '');
             showToast('Company "' + data.name + '" created', 'success');
-            openAddSiteModal(data.id, data.name);
+            await loadSiteOptions();
             loadCustomers();
-            loadSiteOptions();
+            // If created from req modal, auto-select the new company and go back
+            if (window._quickCreateFromReq && data.default_site_id) {
+                window._quickCreateFromReq = false;
+                selectSite(data.default_site_id, data.name);
+                return;
+            }
+            openAddSiteModal(data.id, data.name);
         } catch (e) { showToast('Failed to create company', 'error'); }
     });
 }
@@ -1889,14 +1914,28 @@ async function loadSiteOptions() {
         const companies = await apiFetch('/api/companies');
         _siteListCache = [];
         companies.forEach(c => {
-            (c.sites || []).forEach(s => {
+            const sites = c.sites || [];
+            if (sites.length === 0) {
+                // Company exists but has no site — still show it
                 _siteListCache.push({
-                    id: s.id,
-                    label: c.name + ' — ' + s.site_name,
+                    id: null,
+                    companyId: c.id,
+                    label: c.name,
                     companyName: c.name,
-                    siteName: s.site_name,
+                    siteName: '',
+                    needsSite: true,
                 });
-            });
+            } else {
+                sites.forEach(s => {
+                    _siteListCache.push({
+                        id: s.id,
+                        companyId: c.id,
+                        label: c.name + (sites.length > 1 ? ' — ' + s.site_name : ''),
+                        companyName: c.name,
+                        siteName: s.site_name,
+                    });
+                });
+            }
         });
     } catch (e) { console.error('loadSiteOptions:', e); }
 }
@@ -1911,13 +1950,21 @@ function filterSiteTypeahead(query) {
     }
     const q = query.toLowerCase().trim();
     const matches = q ? _siteListCache.filter(s => s.label.toLowerCase().includes(q)).slice(0, 8) : _siteListCache.slice(0, 8);
+    let html = '';
     if (matches.length === 0) {
-        list.innerHTML = '<div class="site-typeahead-item" style="color:var(--muted)">No matches</div>';
+        html = '<div class="site-typeahead-item" style="color:var(--muted)">No matches found</div>';
     } else {
-        list.innerHTML = matches.map(s =>
-            '<div class="site-typeahead-item" onclick="selectSite(' + s.id + ',\'' + escAttr(s.label) + '\')">' + esc(s.label) + '</div>'
-        ).join('');
+        html = matches.map(s => {
+            if (s.needsSite) {
+                return '<div class="site-typeahead-item" onclick="autoCreateSiteAndSelect(' + s.companyId + ',\'' + escAttr(s.companyName) + '\')" style="color:var(--amber)">' + esc(s.companyName) + ' <span style="font-size:10px;opacity:.7">(no site — click to add)</span></div>';
+            }
+            return '<div class="site-typeahead-item" onclick="selectSite(' + s.id + ',\'' + escAttr(s.label) + '\')">' + esc(s.label) + '</div>';
+        }).join('');
     }
+    // Always show "+ New Customer" at the bottom
+    const qEsc = escAttr(q);
+    html += '<div class="site-typeahead-item site-typeahead-add" onclick="quickCreateCompany(\'' + qEsc + '\')">+ New Customer' + (q ? ': <b>' + esc(q) + '</b>' : '') + '</div>';
+    list.innerHTML = html;
     list.classList.add('show');
 }
 
@@ -1934,6 +1981,27 @@ function selectSite(id, label) {
     }
     // Load contacts for the selected site's company
     loadNrContacts(id);
+}
+
+async function autoCreateSiteAndSelect(companyId, companyName) {
+    // Company exists without a site — auto-create "HQ" site and select it
+    try {
+        const site = await apiFetch('/api/companies/' + companyId + '/sites', {
+            method: 'POST', body: { site_name: 'HQ' }
+        });
+        await loadSiteOptions();
+        selectSite(site.id, companyName);
+        showToast('Default site created for ' + companyName, 'success');
+    } catch (e) { showToast('Failed to create site', 'error'); }
+}
+
+async function quickCreateCompany(prefill) {
+    // Close typeahead, open the new company modal with pre-filled name
+    document.getElementById('nrSiteList').classList.remove('show');
+    document.getElementById('ncName').value = prefill || '';
+    // Mark that we came from the req modal so we can auto-select after
+    window._quickCreateFromReq = true;
+    openModal('newCompanyModal', 'ncName');
 }
 
 async function loadNrContacts(siteId) {

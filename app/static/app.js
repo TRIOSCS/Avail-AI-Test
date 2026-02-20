@@ -414,6 +414,8 @@ function showView(viewId) {
     const toparea = document.querySelector('.toparea');
     const hideToparea = ['view-settings'].includes(viewId);
     if (toparea) toparea.style.display = hideToparea ? 'none' : '';
+    // Toggle body class so CSS can adjust sidebar for settings view
+    document.body.classList.toggle('on-settings', hideToparea);
     // v7: show pills/search/filters only on list view; hide on other views
     const topcontrols = document.getElementById('topcontrols');
     if (topcontrols) {
@@ -1532,7 +1534,7 @@ function _renderReqRow(r) {
     }
 
     // Name cell — shared across all tabs (no summary div — info goes in dedicated columns)
-    const nameCell = `<td>${r.company_id ? `<b class="cust-link" onclick="event.stopPropagation();goToCompany(${r.company_id})">${esc(cust)}</b>` : `<b>${esc(cust)}</b>`}${dot}<br><span style="font-size:11px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
+    const nameCell = `<td>${r.company_id ? `<b class="cust-link" onclick="event.stopPropagation();goToCompany(${r.company_id})">${esc(cust)}</b>` : `<b>${esc(cust)}</b>`}${dot} <span style="font-size:10px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
 
     // Last Searched — relative timestamp
     let searched = '';

@@ -450,7 +450,7 @@
 <div id="newCompanyModal" class="modal-bg" onclick="if(event.target===this)closeModal('newCompanyModal')">
     <div class="modal">
         <h2>New Company</h2>
-        <div class="field"><label for="ncName">Company Name</label><div class="site-typeahead"><input id="ncName" placeholder="e.g. Siemens" required autocomplete="off" onkeydown="if(event.key==='Enter'&&!document.getElementById('ncNameList').classList.contains('show'))createCompany()"><div class="site-typeahead-list" id="ncNameList"></div></div></div>
+        <div class="field"><label for="ncName">Company Name</label><div class="site-typeahead"><input id="ncName" placeholder="e.g. Siemens" required autocomplete="off" oninput="debouncedCheckDupCompany(this.value)" onkeydown="if(event.key==='Enter'&&!document.getElementById('ncNameList').classList.contains('show'))createCompany()"><div class="site-typeahead-list" id="ncNameList"></div></div><div id="ncDupWarning" style="display:none;margin-top:4px;padding:6px 10px;background:var(--amber-light,#fff8e1);border:1px solid var(--amber,#f59e0b);border-radius:6px;font-size:11px;color:var(--text)"></div></div>
         <div class="field"><label for="ncWebsite">Website</label><input id="ncWebsite" placeholder="siemens.com" type="url"></div>
         <div class="field"><label for="ncLinkedin">LinkedIn</label><input id="ncLinkedin" placeholder="linkedin.com/company/..." type="url"></div>
         <div class="field"><label for="ncIndustry">Industry</label><input id="ncIndustry" placeholder="Medical, Industrial, etc."></div>

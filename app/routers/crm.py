@@ -297,6 +297,61 @@ async def list_companies(
     return result
 
 
+@router.get("/api/companies/check-duplicate")
+async def check_company_duplicate(
+    name: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Check if a company name is a near-duplicate of an existing company.
+
+    Normalizes to lowercase, strips suffixes (Inc, LLC, Ltd, Corp, etc.),
+    and compares for matches.
+    """
+    import re
+
+    _suffixes = re.compile(
+        r"\b(inc\.?|llc\.?|ltd\.?|corp\.?|co\.?|plc\.?|gmbh|ag|sa|s\.?a\.?|"
+        r"s\.?r\.?l\.?|pty\.?|b\.?v\.?|n\.?v\.?|a\.?s\.?|oy|ab|limited|"
+        r"corporation|incorporated|company)\s*$",
+        re.IGNORECASE,
+    )
+
+    def _normalize(n: str) -> str:
+        n = n.strip().lower()
+        n = re.sub(r"[^\w\s]", " ", n)  # punctuation → space
+        n = _suffixes.sub("", n).strip()
+        n = re.sub(r"\s+", " ", n)
+        return n
+
+    clean = _normalize(name)
+    if not clean:
+        return {"matches": []}
+
+    # Pull all company names (cached at 500 limit, same as list_companies)
+    companies = (
+        db.query(Company.id, Company.name)
+        .filter(Company.is_active == True)  # noqa: E712
+        .limit(2000)
+        .all()
+    )
+    matches = []
+    for c in companies:
+        cn = _normalize(c.name)
+        if not cn:
+            continue
+        # Exact normalized match
+        if cn == clean:
+            matches.append({"id": c.id, "name": c.name, "match": "exact"})
+        # Containment (one is substring of the other)
+        elif cn in clean or clean in cn:
+            matches.append({"id": c.id, "name": c.name, "match": "similar"})
+        # Prefix match (first 6+ chars match)
+        elif len(clean) >= 6 and len(cn) >= 6 and cn[:6] == clean[:6]:
+            matches.append({"id": c.id, "name": c.name, "match": "similar"})
+    return {"matches": matches[:5]}
+
+
 @router.post("/api/companies")
 async def create_company(
     payload: CompanyCreate,
@@ -326,6 +381,11 @@ async def create_company(
         linkedin_url=payload.linkedin_url,
     )
     db.add(company)
+    db.flush()  # get company.id before creating site
+
+    # Auto-create default "HQ" site so company appears in req typeahead
+    default_site = CustomerSite(company_id=company.id, site_name="HQ")
+    db.add(default_site)
     db.commit()
 
     # Auto-enrich if domain is available
@@ -362,6 +422,7 @@ async def create_company(
     return {
         "id": company.id,
         "name": company.name,
+        "default_site_id": default_site.id,
         "enrich_triggered": enrich_triggered,
     }
 
