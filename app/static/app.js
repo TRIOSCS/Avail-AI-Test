@@ -1490,35 +1490,7 @@ function setMainPill(view) {
     });
 }
 
-function setReqStatusFilter(status, btn) {
-    const wasArchive = _reqStatusFilter === 'archive';
-    const wasSearch = _serverSearchActive;
-    _reqStatusFilter = status;
-    // Update tab active state (works with both .tab and .filter-pill)
-    if (btn) {
-        const tabContainer = btn.parentElement;
-        if (tabContainer) tabContainer.querySelectorAll('.tab,.filter-pill').forEach(b => b.classList.remove('on'));
-        btn.classList.add('on');
-    }
-    // Clear search when switching tabs
-    const searchInput = document.getElementById('reqListFilter');
-    if (searchInput) searchInput.value = '';
-    _serverSearchActive = false;
-    if (status === 'archive') {
-        apiFetch('/api/requisitions?status=archive')
-            .then(resp => {
-                const data = resp.requisitions || resp;
-                _reqListData = data;
-                data.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
-                renderReqList();
-            })
-            .catch(() => showToast('Failed to load archived requisitions', 'error'));
-    } else if (wasArchive || wasSearch) {
-        loadRequisitions();
-    } else {
-        renderReqList();
-    }
-}
+
 
 const searchRequisitions = debounce(query => loadRequisitions(query), 300);
 

@@ -52,22 +52,20 @@ def _get_teams_config() -> tuple[str, str, bool]:
     team_id = settings.teams_team_id
     enabled = bool(channel_id and team_id)
 
-    # Try to read from SystemConfig (runtime override)
+    # Try cached SystemConfig (runtime override, 5-min TTL)
     try:
         from app.database import SessionLocal
-        from app.models import SystemConfig
+        from app.services.admin_service import get_config_values
 
         db = SessionLocal()
         try:
-            for row in db.query(SystemConfig).filter(
-                SystemConfig.key.in_(["teams_channel_id", "teams_team_id", "teams_enabled"])
-            ).all():
-                if row.key == "teams_channel_id" and row.value:
-                    channel_id = row.value
-                elif row.key == "teams_team_id" and row.value:
-                    team_id = row.value
-                elif row.key == "teams_enabled":
-                    enabled = row.value.lower() == "true"
+            cfg = get_config_values(db, ["teams_channel_id", "teams_team_id", "teams_enabled"])
+            if cfg.get("teams_channel_id"):
+                channel_id = cfg["teams_channel_id"]
+            if cfg.get("teams_team_id"):
+                team_id = cfg["teams_team_id"]
+            if "teams_enabled" in cfg:
+                enabled = cfg["teams_enabled"].lower() == "true"
         finally:
             db.close()
     except Exception:

@@ -98,18 +98,18 @@ def test_build_vendor_history_with_card():
 
     db = MagicMock()
     # first query().filter().first() = card
-    # second query().filter().count() = rfq count
-    # third query().filter().count() = offer count
-    # fourth query().filter().order_by().first() = last contact
-    call_results = iter([card, 15, 3, last_contact])
+    # second query(func.count()).filter().scalar() = rfq count
+    # third query(func.count()).filter().scalar() = offer count
+    # fourth query(func.max()).filter().scalar() = last contact date
+    call_results = iter([card, 15, 3, last_contact.created_at])
 
     def side_effect(*a, **kw):
         mock = MagicMock()
         val = next(call_results)
         if isinstance(val, int):
-            mock.filter.return_value.count.return_value = val
-        elif hasattr(val, "created_at"):
-            mock.filter.return_value.order_by.return_value.first.return_value = val
+            mock.filter.return_value.scalar.return_value = val
+        elif isinstance(val, datetime):
+            mock.filter.return_value.scalar.return_value = val
         else:
             mock.filter.return_value.first.return_value = val
         return mock

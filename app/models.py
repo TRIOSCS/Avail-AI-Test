@@ -773,6 +773,7 @@ class VendorResponse(Base):
         Index("ix_vr_scanned_by", "scanned_by_user_id"),
         Index("ix_vr_req_email", "requisition_id", "vendor_email"),
         Index("ix_vr_vendor_name", "vendor_name"),
+        Index("ix_vr_received_email", "received_at", "vendor_email"),
     )
 
 

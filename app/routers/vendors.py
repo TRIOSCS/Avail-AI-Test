@@ -138,50 +138,75 @@ async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str)
 
 
 def card_to_dict(card: VendorCard, db: Session) -> dict:
-    """Serialize a VendorCard with reviews, brand profile, and engagement metrics."""
+    """Serialize a VendorCard with reviews, brand profile, and engagement metrics.
+
+    Uses Redis cache (6h TTL) for expensive brand/MPN aggregation queries.
+    """
     from sqlalchemy.orm import joinedload
     reviews = db.query(VendorReview).options(joinedload(VendorReview.user)).filter_by(vendor_card_id=card.id).all()
     avg = round(sum(r.rating for r in reviews) / len(reviews), 1) if reviews else None
 
-    # Material profile: brands/manufacturers this vendor carries
-    # Note: sightings.vendor_name is raw (needs LOWER/TRIM),
-    # material_vendor_history.vendor_name is already normalized
-    norm = card.normalized_name
-    mfr_rows = db.execute(
-        sqltext("""
-        SELECT manufacturer, SUM(cnt) as total FROM (
-            SELECT manufacturer, COUNT(*) as cnt FROM sightings
-            WHERE LOWER(TRIM(vendor_name)) = :norm
-              AND manufacturer IS NOT NULL AND manufacturer != ''
-            GROUP BY manufacturer
-            UNION ALL
-            SELECT last_manufacturer as manufacturer, COUNT(*) as cnt FROM material_vendor_history
-            WHERE vendor_name = :norm
-              AND last_manufacturer IS NOT NULL AND last_manufacturer != ''
-            GROUP BY last_manufacturer
-        ) combined
-        GROUP BY manufacturer ORDER BY total DESC LIMIT 15
-    """),
-        {"norm": norm},
-    ).fetchall()
-    brands = [{"name": r[0], "count": r[1]} for r in mfr_rows]
+    # Try Redis cache for expensive material profile queries
+    import json as _json
+    from ..cache.intel_cache import _get_redis
+    cache_key = f"vprofile:{card.id}"
+    brands = None
+    mpn_count = None
+    r = _get_redis()
+    if r:
+        try:
+            cached = r.get(cache_key)
+            if cached:
+                _data = _json.loads(cached)
+                brands = _data.get("brands")
+                mpn_count = _data.get("mpn_count")
+        except Exception:
+            pass
 
-    mpn_count = (
-        db.execute(
+    if brands is None:
+        norm = card.normalized_name
+        mfr_rows = db.execute(
             sqltext("""
-        SELECT COUNT(*) FROM (
-            SELECT DISTINCT mpn_matched as mpn FROM sightings
-            WHERE LOWER(TRIM(vendor_name)) = :norm AND mpn_matched IS NOT NULL
-            UNION
-            SELECT DISTINCT mc.normalized_mpn as mpn FROM material_vendor_history mvh
-            JOIN material_cards mc ON mc.id = mvh.material_card_id
-            WHERE mvh.vendor_name = :norm
-        ) all_mpns
-    """),
+            SELECT manufacturer, SUM(cnt) as total FROM (
+                SELECT manufacturer, COUNT(*) as cnt FROM sightings
+                WHERE LOWER(TRIM(vendor_name)) = :norm
+                  AND manufacturer IS NOT NULL AND manufacturer != ''
+                GROUP BY manufacturer
+                UNION ALL
+                SELECT last_manufacturer as manufacturer, COUNT(*) as cnt FROM material_vendor_history
+                WHERE vendor_name = :norm
+                  AND last_manufacturer IS NOT NULL AND last_manufacturer != ''
+                GROUP BY last_manufacturer
+            ) combined
+            GROUP BY manufacturer ORDER BY total DESC LIMIT 15
+        """),
             {"norm": norm},
-        ).scalar()
-        or 0
-    )
+        ).fetchall()
+        brands = [{"name": r[0], "count": r[1]} for r in mfr_rows]
+
+        mpn_count = (
+            db.execute(
+                sqltext("""
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT mpn_matched as mpn FROM sightings
+                WHERE LOWER(TRIM(vendor_name)) = :norm AND mpn_matched IS NOT NULL
+                UNION
+                SELECT DISTINCT mc.normalized_mpn as mpn FROM material_vendor_history mvh
+                JOIN material_cards mc ON mc.id = mvh.material_card_id
+                WHERE mvh.vendor_name = :norm
+            ) all_mpns
+        """),
+                {"norm": norm},
+            ).scalar()
+            or 0
+        )
+
+        # Cache for 6 hours
+        if r:
+            try:
+                r.setex(cache_key, 21600, _json.dumps({"brands": brands, "mpn_count": mpn_count}))
+            except Exception:
+                pass
 
     return {
         "id": card.id,
