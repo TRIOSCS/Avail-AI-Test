@@ -332,9 +332,12 @@ async def _job_batch_results():
     db = SessionLocal()
     try:
         from .email_service import process_batch_results
-        batch_applied = await process_batch_results(db)
+        batch_applied = await asyncio.wait_for(process_batch_results(db), timeout=120)
         if batch_applied:
             log.info(f"Batch processing: {batch_applied} results applied")
+    except asyncio.TimeoutError:
+        log.error("Batch results processing timed out (120s)")
+        db.rollback()
     except Exception as e:
         log.error(f"Batch results processing error: {e}")
         db.rollback()
@@ -364,8 +367,9 @@ async def _job_contacts_sync():
                 try:
                     await _sync_user_contacts(user, db)
                 except Exception as e:
-                    log.error(f"Contacts sync error for {user.email}: {e}")
+                    log.warning(f"Contacts sync failed for {user.email}: {e}")
                     db.rollback()
+                    continue
     except Exception as e:
         log.error(f"Contacts sync job error: {e}")
     finally:
@@ -674,28 +678,39 @@ async def _job_deep_enrichment():
         # Run all enrichments concurrently in batches of 10
         async def _safe_enrich_vendor(vid):
             try:
+                db.begin_nested()  # SAVEPOINT for per-vendor isolation
                 await deep_enrich_vendor(vid, db)
+                db.commit()  # release savepoint
             except Exception as e:
                 log.warning(f"Enrichment sweep vendor {vid} error: {e}")
-                db.rollback()
+                db.rollback()  # rollback to savepoint only
 
         async def _safe_enrich_company(cid):
             try:
+                db.begin_nested()  # SAVEPOINT for per-company isolation
                 await deep_enrich_company(cid, db)
+                db.commit()  # release savepoint
             except Exception as e:
                 log.warning(f"Enrichment sweep company {cid} error: {e}")
-                db.rollback()
+                db.rollback()  # rollback to savepoint only
 
         all_vendor_ids = [vid for (vid,) in stale_vendors] + [vid for (vid,) in recent_vendors]
         # Process in batches of 10 to avoid overwhelming external APIs
         for i in range(0, len(all_vendor_ids), 10):
             batch = all_vendor_ids[i:i + 10]
-            await asyncio.gather(*[_safe_enrich_vendor(vid) for vid in batch], return_exceptions=True)
+            tasks = [_safe_enrich_vendor(vid) for vid in batch]
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=300,
+            )
 
         if stale_companies:
-            await asyncio.gather(
-                *[_safe_enrich_company(cid) for (cid,) in stale_companies],
-                return_exceptions=True,
+            await asyncio.wait_for(
+                asyncio.gather(
+                    *[_safe_enrich_company(cid) for (cid,) in stale_companies],
+                    return_exceptions=True,
+                ),
+                timeout=300,
             )
 
         log.info(
