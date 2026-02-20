@@ -2070,11 +2070,32 @@ function setStatusFilter(sf, btn) {
 function toggleAllDrillRows() {
     const openRows = document.querySelectorAll('.drow.open');
     if (openRows.length > 0) {
-        // Collapse all
+        // Collapse all drill-downs (and archive groups if in archive mode)
         openRows.forEach(row => row.classList.remove('open'));
         document.querySelectorAll('.ea.open').forEach(a => a.classList.remove('open'));
+        if (_currentMainView === 'archive') {
+            _archiveGroupsOpen.clear();
+            renderReqList();
+        }
     } else {
-        // Expand all — trigger toggleDrillDown for each row to fetch data
+        // In archive mode, first expand all customer groups so rows are visible
+        if (_currentMainView === 'archive' && _archiveGroupsOpen.size === 0) {
+            for (const r of _reqListData) {
+                const key = r.company_id || r.customer_display || 'Unknown';
+                _archiveGroupsOpen.add(key);
+            }
+            renderReqList();
+            // Defer drill-down expansion until DOM is updated
+            setTimeout(() => {
+                document.querySelectorAll('.drow').forEach(row => {
+                    const id = parseInt(row.id.replace('d-', ''));
+                    if (id) toggleDrillDown(id);
+                });
+                _updateDrillToggleLabel();
+            }, 50);
+            return;
+        }
+        // Expand all drill-down rows
         document.querySelectorAll('.drow').forEach(row => {
             const id = parseInt(row.id.replace('d-', ''));
             if (id) toggleDrillDown(id);
