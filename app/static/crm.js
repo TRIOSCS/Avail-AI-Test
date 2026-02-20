@@ -69,7 +69,9 @@ async function showCustomers() {
     await loadCustomers();
 }
 
+let _custLoadSeq = 0;
 async function loadCustomers() {
+    const seq = ++_custLoadSeq;
     try {
         const filter = document.getElementById('custFilter')?.value || '';
         const isManagerOrAdmin = window.__isAdmin || ['manager','trader'].includes(window.userRole);
@@ -79,7 +81,9 @@ async function loadCustomers() {
         // Sales always sees only their accounts; managers/admins/traders can toggle
         if ((isSalesOnly || myOnly) && window.userId) url += '&owner_id=' + window.userId;
         if (_custUnassigned) url += '&unassigned=1';
-        crmCustomers = await apiFetch(url);
+        const result = await apiFetch(url);
+        if (seq !== _custLoadSeq) return;  // Stale response — newer request in flight
+        crmCustomers = result;
         renderCustomers();
     } catch (e) { showToast('Failed to load customers', 'error'); console.error(e); }
 }
@@ -108,6 +112,7 @@ async function goToCompany(companyId) {
 
 function renderCustomers() {
     const el = document.getElementById('custList');
+    if (!el) return;
     const countEl = document.getElementById('custFilterCount');
     if (!crmCustomers.length) {
         el.innerHTML = '<p class="empty">No customers yet \u2014 add a company to get started</p>';
@@ -328,9 +333,12 @@ function openNewCompanyModal() {
     setTimeout(() => document.getElementById('ncName').focus(), 100);
 }
 
+let _createCompanyBusy = false;
 async function createCompany() {
+    if (_createCompanyBusy) return;
     const name = document.getElementById('ncName').value.trim();
     if (!name) return;
+    _createCompanyBusy = true;
     try {
         const data = await apiFetch('/api/companies', {
             method: 'POST', body: {
@@ -346,6 +354,7 @@ async function createCompany() {
         loadCustomers();
         loadSiteOptions();
     } catch (e) { showToast('Failed to create company', 'error'); }
+    finally { _createCompanyBusy = false; }
 }
 
 async function openEditCompany(companyId) {
@@ -686,14 +695,17 @@ function openOfferGallery(offerId) {
     }
     show(0);
 
-    document.getElementById('galClose').onclick = () => gal.remove();
+    function closeGallery() {
+        document.removeEventListener('keydown', galKey);
+        gal.remove();
+    }
+    document.getElementById('galClose').onclick = closeGallery;
     document.getElementById('galPrev').onclick = (e) => { e.stopPropagation(); show((idx - 1 + images.length) % images.length); };
     document.getElementById('galNext').onclick = (e) => { e.stopPropagation(); show((idx + 1) % images.length); };
-    gal.onclick = (e) => { if (e.target === gal) gal.remove(); };
+    gal.onclick = (e) => { if (e.target === gal) closeGallery(); };
     // Keyboard nav
     function galKey(e) {
-        if (!document.getElementById('offerGalleryOverlay')) { document.removeEventListener('keydown', galKey); return; }
-        if (e.key === 'Escape') gal.remove();
+        if (e.key === 'Escape') closeGallery();
         if (e.key === 'ArrowLeft') show((idx - 1 + images.length) % images.length);
         if (e.key === 'ArrowRight') show((idx + 1) % images.length);
     }
@@ -1224,8 +1236,11 @@ function onSqContactChange() {
     if (manual) setTimeout(function() { document.getElementById('sqManualEmail').focus(); }, 50);
 }
 
+let _sendQuoteBusy = false;
 async function confirmSendQuote() {
+    if (_sendQuoteBusy) return;
     if (!crmQuote) return;
+    _sendQuoteBusy = true;
     var sel = document.getElementById('sqContactSelect');
     var toEmail, toName;
     if (sel.value === '__manual__') {
@@ -1247,6 +1262,7 @@ async function confirmSendQuote() {
         notifyStatusChange(sendData);
         loadQuote();
     } catch (e) { console.error('sendQuoteEmail:', e); showToast('Error sending quote: ' + (e.message||''), 'error'); }
+    finally { _sendQuoteBusy = false; }
 }
 
 // ── Quote History ──────────────────────────────────────────────────────
@@ -1355,8 +1371,11 @@ function updateBpTotals() {
     document.getElementById('bpTotal').textContent = '$' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 
+let _submitBuyPlanBusy = false;
 async function submitBuyPlan() {
+    if (_submitBuyPlanBusy) return;
     if (!crmQuote) return;
+    _submitBuyPlanBusy = true;
     const checks = document.querySelectorAll('.bp-check:checked');
     const selectedIndices = Array.from(checks).map(c => parseInt(c.dataset.idx));
     if (!selectedIndices.length) { showToast('Select at least one item', 'error'); return; }
@@ -1391,7 +1410,7 @@ async function submitBuyPlan() {
     } catch (e) {
         console.error('submitBuyPlan:', e);
         showToast('Failed to submit buy plan', 'error');
-    }
+    } finally { _submitBuyPlanBusy = false; }
 }
 
 async function loadBuyPlan() {
@@ -1827,16 +1846,16 @@ async function checkTokenApproval() {
             <div class="card" style="max-width:600px;margin:40px auto;border-left:4px solid var(--amber)">
                 <h2 style="margin-bottom:16px">Buy Plan Approval</h2>
                 <div style="background:var(--bg2);padding:10px;border-radius:6px;margin-bottom:12px;font-size:12px">
-                    ${bp.customer_name ? '<div><strong>Customer:</strong> '+bp.customer_name+'</div>' : ''}
-                    ${bp.quote_number ? '<div><strong>Quote:</strong> '+bp.quote_number+'</div>' : ''}
-                    <div><strong>Status:</strong> ${statusLabel}</div>
-                    <div><strong>Submitted by:</strong> ${bp.submitted_by || '\u2014'}</div>
+                    ${bp.customer_name ? '<div><strong>Customer:</strong> '+esc(bp.customer_name)+'</div>' : ''}
+                    ${bp.quote_number ? '<div><strong>Quote:</strong> '+esc(bp.quote_number)+'</div>' : ''}
+                    <div><strong>Status:</strong> ${esc(statusLabel)}</div>
+                    <div><strong>Submitted by:</strong> ${esc(bp.submitted_by || '\u2014')}</div>
                     <div><strong>Items:</strong> ${(bp.line_items||[]).length} line items</div>
                 </div>
-                ${bp.salesperson_notes ? '<div style="background:#f0f9ff;padding:8px 10px;border-left:3px solid #2563eb;border-radius:4px;margin-bottom:12px;font-size:12px"><strong>Salesperson:</strong> '+bp.salesperson_notes+'</div>' : ''}
+                ${bp.salesperson_notes ? '<div style="background:#f0f9ff;padding:8px 10px;border-left:3px solid #2563eb;border-radius:4px;margin-bottom:12px;font-size:12px"><strong>Salesperson:</strong> '+esc(bp.salesperson_notes)+'</div>' : ''}
                 <table class="tbl" style="margin-bottom:12px">
                     <thead><tr><th>MPN</th><th>Vendor</th><th>Plan Qty</th><th>Cost</th><th>Lead</th></tr></thead>
-                    <tbody>${(bp.line_items||[]).map(li => '<tr><td>'+li.mpn+'</td><td>'+li.vendor_name+'</td><td>'+(li.plan_qty||li.qty||0)+'</td><td>$'+(Number(li.cost_price||0).toFixed(4))+'</td><td>'+(li.lead_time||'\u2014')+'</td></tr>').join('')}</tbody>
+                    <tbody>${(bp.line_items||[]).map(li => '<tr><td>'+esc(li.mpn)+'</td><td>'+esc(li.vendor_name)+'</td><td>'+(li.plan_qty||li.qty||0)+'</td><td>$'+(Number(li.cost_price||0).toFixed(4))+'</td><td>'+esc(li.lead_time||'\u2014')+'</td></tr>').join('')}</tbody>
                 </table>
                 ${bp.status === 'pending_approval' ? `
                 <div style="margin-top:16px">
@@ -1848,8 +1867,8 @@ async function checkTokenApproval() {
                         <textarea id="tokenManagerNotes" placeholder="Manager notes (optional)..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;min-height:40px"></textarea>
                     </div>
                     <div style="display:flex;gap:8px">
-                        <button class="btn btn-success" onclick="tokenApprovePlan('${token}')">Approve</button>
-                        <button class="btn btn-danger" onclick="tokenRejectPlan('${token}')">Reject</button>
+                        <button class="btn btn-success" onclick="tokenApprovePlan('${escAttr(token)}')">Approve</button>
+                        <button class="btn btn-danger" onclick="tokenRejectPlan('${escAttr(token)}')">Reject</button>
                     </div>
                 </div>` : '<p style="color:var(--muted);font-size:12px">This plan is no longer pending approval (status: '+statusLabel+').</p>'}
             </div>`;
@@ -1968,7 +1987,7 @@ async function loadUserOptions(selectId) {
     try {
         if (!_userListCache) {
             try { _userListCache = await apiFetch('/api/users/list'); }
-            catch { _userListCache = []; }
+            catch (e) { console.warn('Failed to load user list:', e); _userListCache = []; }
         }
         const sel = document.getElementById(selectId);
         if (!sel) return;
@@ -2641,10 +2660,8 @@ async function loadCompanyActivityStatus(companyId) {
 }
 
 async function loadCompanyActivities(companyId) {
-    const section = document.getElementById('actSection-' + companyId);
     const el = document.getElementById('actList-' + companyId);
-    if (!section || !el) return;
-    section.style.display = 'block';
+    if (!el) return;
     try {
         const activities = await apiFetch('/api/companies/' + companyId + '/activities');
         if (!activities.length) {

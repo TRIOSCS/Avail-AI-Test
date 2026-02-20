@@ -8,6 +8,7 @@ function api(path) { return API_BASE + path; }
 let currentReqId = null;
 let currentReqName = '';
 let searchResults = {};
+let _sightingIndex = {};  // sightingId → {reqId, sighting} for O(1) lookups
 let searchResultsCache = {};  // keyed by reqId
 let selectedSightings = new Set();
 let rfqVendorData = [];
@@ -19,6 +20,15 @@ let _ddReqCache = {};  // drill-down requirements cache: rfqId → [requirements
 let _ddSightingsCache = {};      // reqId -> sightings API response
 let _ddSelectedSightings = {};   // reqId -> Set of sighting IDs
 const CONDITION_OPTIONS = ['New', 'ETN', 'Factory Refurbished', 'Pulls'];
+
+function _rebuildSightingIndex() {
+    _sightingIndex = {};
+    for (const reqId of Object.keys(searchResults)) {
+        for (const s of (searchResults[reqId].sightings || [])) {
+            if (s.id != null) _sightingIndex[s.id] = { reqId, sighting: s };
+        }
+    }
+}
 
 // ── Shared Helpers ──────────────────────────────────────────────────────
 async function apiFetch(url, opts = {}) {
@@ -348,6 +358,7 @@ function showList() {
 
 function openDetailSitePicker() {
     const picker = document.getElementById('detailSitePicker');
+    if (!picker) return;
     if (picker.style.display === 'none') {
         picker.style.display = '';
         document.getElementById('detailSiteSearch').focus();
@@ -430,9 +441,12 @@ function showDetail(id, name, tab) {
     // Reset tab caches so stale data doesn't show when switching RFQs
     if (typeof _emailThreadsLoaded !== 'undefined') _emailThreadsLoaded = null;
     if (typeof _emailThreadsData !== 'undefined') _emailThreadsData = [];
+    if (typeof selectedOffers !== 'undefined') selectedOffers.clear();
+    if (typeof _currentBuyPlan !== 'undefined') _currentBuyPlan = null;
     // Restore cached results or load saved sightings from DB
     if (searchResultsCache[id]) {
         searchResults = searchResultsCache[id];
+        _rebuildSightingIndex();
         renderSources();
     } else {
         searchResults = {};
@@ -443,6 +457,7 @@ function showDetail(id, name, tab) {
                 if (data && Object.keys(data).length && currentReqId === id) {
                     searchResults = data;
                     searchResultsCache[id] = data;
+                    _rebuildSightingIndex();
                     renderSources();
                 }
             })
@@ -709,7 +724,9 @@ function editDrillCell(td, rfqId, reqId, field) {
     el.focus();
     if (el.select) el.select();
 
+    let _cancelled = false;
     const save = async () => {
+        if (_cancelled) return;
         const val = el.value.trim();
         if (val === currentVal) { _renderDrillDownTable(rfqId); return; }
         const body = {};
@@ -731,7 +748,7 @@ function editDrillCell(td, rfqId, reqId, field) {
     }
     el.addEventListener('keydown', e => {
         if (e.key === 'Enter' && field !== 'notes') { e.preventDefault(); el.blur(); }
-        if (e.key === 'Escape') { e.preventDefault(); _renderDrillDownTable(rfqId); }
+        if (e.key === 'Escape') { e.preventDefault(); _cancelled = true; _renderDrillDownTable(rfqId); }
     });
 }
 
@@ -868,7 +885,7 @@ async function ddPromptVendorEmail(reqId, sightingId, vendorName) {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) { showToast('Invalid email address', 'error'); return; }
     try {
         await apiFetch('/api/vendor-card/add-email', {
-            method: 'POST', body: JSON.stringify({ vendor_name: vendorName, email: trimmed })
+            method: 'POST', body: { vendor_name: vendorName, email: trimmed }
         });
         showToast(`Email added for ${vendorName}`, 'success');
         // Update cached sighting so re-render picks it up
@@ -1325,7 +1342,6 @@ function applyFilters() {
 }
 
 // Override renderReqList filter logic to include dropdown filters
-const _origFilterData = null; // patched via applyDropdownFilters
 
 function applyDropdownFilters(data) {
     if (!Object.keys(_activeFilters).length) return data;
@@ -1340,6 +1356,7 @@ function applyDropdownFilters(data) {
         const now = new Date(); now.setHours(0,0,0,0);
         filtered = filtered.filter(r => {
             if (!r.deadline) return false;
+            if (String(r.deadline).toUpperCase() === 'ASAP') return true;
             return new Date(r.deadline) <= now;
         });
     }
@@ -1413,10 +1430,10 @@ function toggleMyAccounts(btn) {
 }
 
 function toggleAllDrillRows() {
-    const anyOpen = document.querySelectorAll('.drow.open').length > 0;
-    if (anyOpen) {
+    const openRows = document.querySelectorAll('.drow.open');
+    if (openRows.length > 0) {
         // Collapse all
-        document.querySelectorAll('.drow.open').forEach(row => row.classList.remove('open'));
+        openRows.forEach(row => row.classList.remove('open'));
         document.querySelectorAll('.ea.open').forEach(a => a.classList.remove('open'));
     } else {
         // Expand all — trigger toggleDrillDown for each row to fetch data
@@ -1585,7 +1602,7 @@ async function toggleArchive(id) {
             data.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
             renderReqList();
         } else {
-            const q = document.getElementById('reqSearchInput').value.trim();
+            const q = document.getElementById('mainSearch')?.value?.trim() || '';
             loadRequisitions(q);
         }
     } catch (e) { showToast('Failed to toggle archive', 'error'); }
@@ -1734,7 +1751,9 @@ function editReqCell(td, reqId, field) {
     el.focus();
     if (el.select) el.select();
 
+    let _cancelled = false;
     const save = async () => {
+        if (_cancelled) return;
         const val = el.value.trim();
         if (val === currentVal) { loadRequirements(); return; }
         const body = {};
@@ -1747,7 +1766,9 @@ function editReqCell(td, reqId, field) {
         } else {
             body[field] = val;
         }
-        await apiFetch(`/api/requirements/${reqId}`, { method: 'PUT', body });
+        try {
+            await apiFetch(`/api/requirements/${reqId}`, { method: 'PUT', body });
+        } catch(e) { showToast('Failed to save', 'error'); }
         loadRequirements();
     };
 
@@ -1757,7 +1778,7 @@ function editReqCell(td, reqId, field) {
     }
     el.addEventListener('keydown', e => {
         if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
-        if (e.key === 'Escape') { loadRequirements(); }
+        if (e.key === 'Escape') { _cancelled = true; loadRequirements(); }
     });
 }
 
@@ -1772,7 +1793,9 @@ function editReqName(h2) {
     h2.appendChild(input);
     input.focus();
     input.select();
+    let _cancelled = false;
     const save = async () => {
+        if (_cancelled) return;
         const val = input.value.trim();
         if (!val || val === current) { h2.textContent = current; return; }
         try {
@@ -1785,7 +1808,7 @@ function editReqName(h2) {
     input.addEventListener('blur', save);
     input.addEventListener('keydown', e => {
         if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-        if (e.key === 'Escape') { h2.textContent = current; }
+        if (e.key === 'Escape') { _cancelled = true; h2.textContent = current; }
     });
 }
 
@@ -1814,6 +1837,7 @@ async function deleteReq(id) {
     try { await apiFetch(`/api/requirements/${id}`, { method: 'DELETE' }); } catch(e) { showToast('Failed to delete requirement', 'error'); return; }
     // Clear cached search results & selections for this requirement
     delete searchResults[id];
+    _rebuildSightingIndex();
     for (const key of [...selectedSightings]) {
         if (key.startsWith(id + ':')) selectedSightings.delete(key);
     }
@@ -1878,11 +1902,12 @@ async function submitToSourcing(reqId) {
     // Submit a draft RFQ to sourcing — opens detail and searches all parts
     const reqInfo = _reqListData.find(r => r.id === reqId);
     showDetail(reqId, reqInfo ? reqInfo.name : '', 'sources');
-    // Wait for detail to load, then select all and search
-    await new Promise(resolve => setTimeout(resolve, 600));
-    // Select all requirements
-    const checkboxes = document.querySelectorAll('.req-checkbox');
-    checkboxes.forEach(cb => { cb.checked = true; selectedRequirements.add(parseInt(cb.value)); });
+    // Wait for detail to load requirements
+    await new Promise(resolve => setTimeout(resolve, 800));
+    // Select all requirements from reqData (the loaded requirements array)
+    if (typeof reqData !== 'undefined' && reqData.length) {
+        selectedRequirements = new Set(reqData.map(r => r.id));
+    }
     updateSearchAllBar();
     searchAll();
 }
@@ -1891,15 +1916,22 @@ function submitOrSearch() {
     searchAll();
 }
 
+let _searchInFlight = false;
 async function searchAll() {
     if (!currentReqId) return;
-    if (!selectedRequirements.size) { alert('No parts selected'); return; }
+    if (_searchInFlight) return;
+    if (!selectedRequirements.size) { showToast('No parts selected', 'warn'); return; }
     const btn = document.getElementById('searchAllBtn');
+    const reqIdAtStart = currentReqId;
+    _searchInFlight = true;
     btn.disabled = true; btn.textContent = 'Searching…';
     try {
         const body = { requirement_ids: [...selectedRequirements] };
-        searchResults = await apiFetch(`/api/requisitions/${currentReqId}/search`, { method: 'POST', body });
+        const results = await apiFetch(`/api/requisitions/${reqIdAtStart}/search`, { method: 'POST', body });
+        if (currentReqId !== reqIdAtStart) return;  // User navigated away
+        searchResults = results;
         searchResultsCache[currentReqId] = searchResults;
+        _rebuildSightingIndex();
         selectedSightings.clear();
         expandedGroups.clear();
         renderSources();
@@ -1912,7 +1944,9 @@ async function searchAll() {
             notifyStatusChange({status_changed: true, req_status: 'active'});
         }
     } catch (e) {
-        alert('Search error: ' + e.message);
+        showToast('Search error: ' + e.message, 'error');
+    } finally {
+        _searchInFlight = false;
     }
     btn.disabled = false; btn.textContent = 'Search Selected';
 }
@@ -2292,15 +2326,10 @@ async function markUnavailable(sightingId, unavail) {
         await apiFetch(`/api/sightings/${sightingId}/unavailable`, {
             method: 'PUT', body: { unavailable: unavail }
         });
-        // Update local state
-        for (const reqId of Object.keys(searchResults)) {
-            const sightings = searchResults[reqId].sightings || [];
-            for (const s of sightings) {
-                if (s.id === sightingId) {
-                    s.is_unavailable = unavail;
-                    break;
-                }
-            }
+        // Update local state — use index for O(1) lookup
+        const ref = _sightingIndex[sightingId];
+        if (ref) {
+            ref.sighting.is_unavailable = unavail;
         }
         renderSources();
     } catch(e) { alert('Error: ' + e.message); }
@@ -2410,7 +2439,8 @@ async function openBatchRfqModal(prebuiltGroups) {
                 v.lookup_status = v.emails.length ? 'ready' : 'no_email';
                 v.contact_source = data.source || null;
                 v.contact_tier = data.tier || 0;
-            } catch {
+            } catch (e) {
+                console.warn(`Vendor lookup failed for ${v.vendor_name}:`, e);
                 v.lookup_status = 'no_email';
             }
             done++;
@@ -2701,6 +2731,7 @@ async function logCall(event, vendorName, vendorPhone, mpn) {
 
 // ── Vendor Card Popup ──────────────────────────────────────────────────
 async function openVendorPopup(cardId) {
+    _vendorEmailsLoaded = null;  // Reset so emails reload for new vendor
     let card;
     try { card = await apiFetch(`/api/vendors/${cardId}`); }
     catch (e) { console.error('Failed to load vendor:', e); return; }
@@ -4465,7 +4496,7 @@ async function sendEmailReply(conversationId, to, subject) {
             method: 'POST',
             body: { conversation_id: conversationId, to: to, subject: subject, body: body }
         });
-        showToast('Reply sent', 'ok');
+        showToast('Reply sent', 'success');
         // Refresh thread
         _emailThreadsLoaded = null;
         loadEmailThreads();

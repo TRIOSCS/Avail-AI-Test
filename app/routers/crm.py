@@ -1368,6 +1368,11 @@ async def get_quote(
         raise HTTPException(404)
     quote = (
         db.query(Quote)
+        .options(
+            joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(Quote.customer_site).joinedload(CustomerSite.site_contacts),
+            joinedload(Quote.created_by),
+        )
         .filter(
             Quote.requisition_id == req_id,
         )
@@ -1389,7 +1394,6 @@ async def list_quotes(
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404)
-    from sqlalchemy.orm import joinedload
     quotes = (
         db.query(Quote)
         .options(
@@ -1524,6 +1528,17 @@ async def update_quote(
     for field, value in updates.items():
         setattr(quote, field, value)
     db.commit()
+    # Eager-load relations for serialization
+    quote = (
+        db.query(Quote)
+        .options(
+            joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+            joinedload(Quote.customer_site).joinedload(CustomerSite.site_contacts),
+            joinedload(Quote.created_by),
+        )
+        .filter(Quote.id == quote.id)
+        .first()
+    )
     return quote_to_dict(quote)
 
 

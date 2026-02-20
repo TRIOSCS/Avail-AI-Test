@@ -309,6 +309,7 @@ class Sighting(Base):
         Index("ix_sight_req", "requirement_id"),
         Index("ix_sightings_source_company", "source_company_id"),
         Index("ix_sightings_req_vendor", "requirement_id", "vendor_name"),
+        Index("ix_sightings_req_score", "requirement_id", score.desc()),
     )
 
 
@@ -1374,6 +1375,10 @@ class PendingBatch(Base):
     result_count = Column(Integer)
     error_message = Column(String)
 
+    __table_args__ = (
+        Index("ix_pending_batches_status", "status", "submitted_at"),
+    )
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Deep Enrichment System — Bulk enrichment jobs, review queue, signature cache
@@ -1444,6 +1449,7 @@ class EnrichmentQueue(Base):
         Index("ix_eq_company", "company_id"),
         Index("ix_eq_batch", "batch_job_id"),
         Index("ix_eq_status_created", "status", "created_at"),
+        Index("ix_eq_status_source", "status", "source"),
     )
 
 

@@ -8,6 +8,7 @@
     <meta name="apple-mobile-web-app-title" content="AVAIL">
     <title>AVAIL — Opportunity Management</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -59,7 +60,7 @@
         .text-right{text-align:right}.text-center{text-align:center}
         .flex-between{display:flex;justify-content:space-between;align-items:center}
         .flex-center{display:flex;align-items:center}.flex-gap-sm{display:flex;align-items:center;gap:6px}
-        .flex-gap{display:flex;align-items:center;gap:10px}.hidden{display:none}
+        .flex-gap{display:flex;align-items:center;gap:10px}
         .clickable{cursor:pointer}.card-empty{text-align:center;padding:16px;color:var(--muted);font-size:13px}
         html,body{height:100%;overflow:hidden}
         body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);display:flex;flex-direction:column}
@@ -142,7 +143,7 @@
         .btn-out:hover{border-color:var(--accent);color:var(--accent)}
 
         /* Buttons */
-        .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;transition:all .2s ease;border:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+        .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 18px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;transition:background .2s ease,box-shadow .2s ease,transform .2s ease,color .2s ease,border-color .2s ease,opacity .2s ease;border:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
         .btn-primary{background:var(--blue);color:#fff;box-shadow:0 1px 3px rgba(74,111,165,.25)}.btn-primary:hover{background:var(--blue-dk);box-shadow:0 3px 8px rgba(74,111,165,.3);transform:translateY(-1px)}
         .btn-success{background:var(--green);color:#fff;box-shadow:0 1px 3px rgba(15,166,127,.25)}.btn-success:hover{background:#0d9070;box-shadow:0 3px 8px rgba(15,166,127,.3);transform:translateY(-1px)}
         .btn-ghost{background:none;border:1px solid var(--border);color:var(--text2)}.btn-ghost:hover{border-color:var(--teal);color:var(--teal);background:var(--teal-light)}
@@ -151,7 +152,7 @@
         .btn:disabled{opacity:.4;cursor:default}
 
         /* Cards */
-        .card{background:var(--white);border:1px solid var(--border);border-left:3px solid var(--border2);border-radius:8px;padding:14px 16px;margin-bottom:6px;transition:all .2s ease;box-shadow:var(--shadow-sm)}
+        .card{background:var(--white);border:1px solid var(--border);border-left:3px solid var(--border2);border-radius:8px;padding:14px 16px;margin-bottom:6px;transition:border-color .2s ease,box-shadow .2s ease;box-shadow:var(--shadow-sm)}
         .card:hover{border-color:var(--border2);border-left-color:var(--teal);box-shadow:var(--shadow-md)}
         .card-clickable{cursor:pointer}
         .empty{color:var(--muted);font-size:13px;padding:40px 0;text-align:center}
@@ -302,7 +303,7 @@
 
         /* Activity — Summary stats */
         .act-summary{display:flex;gap:8px;margin-bottom:12px}
-        .act-stat{flex:1;padding:12px 16px;border-radius:10px;background:var(--white);border:1px solid var(--border);cursor:pointer;transition:all .2s ease;text-align:center;box-shadow:var(--shadow-sm)}
+        .act-stat{flex:1;padding:12px 16px;border-radius:10px;background:var(--white);border:1px solid var(--border);cursor:pointer;transition:border-color .2s ease,box-shadow .2s ease,background .2s ease;text-align:center;box-shadow:var(--shadow-sm)}
         .act-stat:hover{border-color:var(--border2);box-shadow:var(--shadow-md)}
         .act-stat.on{border-color:var(--teal);background:var(--teal-light)}
         .act-stat-num{font-size:22px;font-weight:800;font-family:'JetBrains Mono',monospace}
@@ -313,7 +314,7 @@
         .act-stat-awaiting .act-stat-num{color:var(--amber)}
 
         /* Activity — Vendor cards */
-        .act-card{background:var(--white);border:1px solid var(--border);border-left:3px solid var(--border2);border-radius:10px;padding:14px 16px;margin-bottom:6px;transition:all .2s ease;box-shadow:var(--shadow-sm)}
+        .act-card{background:var(--white);border:1px solid var(--border);border-left:3px solid var(--border2);border-radius:10px;padding:14px 16px;margin-bottom:6px;transition:border-color .2s ease,box-shadow .2s ease;box-shadow:var(--shadow-sm)}
         .act-card:hover{border-color:var(--border2);border-left-color:var(--teal);box-shadow:var(--shadow-md)}
         .act-card-header{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
         .act-card-vendor{font-size:16px;font-weight:700;color:var(--accent)}
@@ -351,7 +352,7 @@
         .filter-sort{padding:5px 10px;border-radius:6px;border:1px solid var(--border);background:var(--white);color:var(--text2);font-size:11px;font-weight:600;cursor:pointer;outline:none;appearance:auto}
 
         /* Modal */
-        .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;z-index:100;padding:20px;backdrop-filter:blur(4px)}
+        .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);display:none;align-items:center;justify-content:center;z-index:500;padding:20px}
         .modal-bg.open{display:flex}
         .modal{background:var(--white);border:1px solid var(--border);border-radius:16px;max-width:640px;width:100%;max-height:85vh;overflow-y:auto;padding:24px;box-shadow:0 16px 56px rgba(0,0,0,.2),0 4px 12px rgba(0,0,0,.08)}
         .modal-lg{max-width:760px}
@@ -548,9 +549,6 @@
             .email-select{max-width:100%;font-size:16px}
             .rfq-condition{flex-wrap:wrap;gap:4px}
 
-            /* Modal — fullscreen-like on mobile */
-            .modal-bg{padding:8px;align-items:flex-start;padding-top:40px}
-            .modal{padding:16px;max-height:calc(100vh - 60px);border-radius:10px}
             .modal-lg{max-width:100%}
             .modal h2{font-size:15px;margin-bottom:12px}
             .mactions{flex-wrap:wrap}
@@ -634,7 +632,7 @@
         }
 
         /* Mobile top bar (hamburger) — hidden on desktop */
-        .mobile-topbar{display:none;position:fixed;top:0;left:0;right:0;height:calc(48px + env(safe-area-inset-top));background:var(--blue);z-index:40;align-items:center;padding:env(safe-area-inset-top) 12px 0;gap:10px}
+        .mobile-topbar{display:none;position:fixed;top:0;left:0;right:0;height:calc(48px + env(safe-area-inset-top));background:var(--blue);z-index:151;align-items:center;padding:env(safe-area-inset-top) 12px 0;gap:10px}
         .mobile-topbar .hamburger{background:none;border:none;color:var(--navy-nav-active);font-size:22px;cursor:pointer;padding:4px 8px}
         .mobile-topbar .mobile-logo{height:30px;filter:brightness(0) invert(1);opacity:.9}
         .mobile-search{flex:1;min-width:0;height:32px;font-size:14px;border-radius:6px;border:none;padding:0 10px}
@@ -957,7 +955,7 @@
         .btn-ai:disabled{opacity:.4;cursor:default}
 
         /* AI Contact Panel (modal overlay) */
-        .ai-panel-bg{position:fixed;inset:0;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;z-index:110;padding:20px;backdrop-filter:blur(3px)}
+        .ai-panel-bg{position:fixed;inset:0;background:rgba(0,0,0,.3);display:flex;align-items:center;justify-content:center;z-index:510;padding:20px}
         .ai-panel{background:var(--white);border:1px solid var(--border);border-radius:14px;max-width:640px;width:100%;max-height:80vh;overflow-y:auto;padding:24px;box-shadow:0 12px 48px rgba(0,0,0,.1)}
         .ai-panel-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
         .ai-panel-header h3{font-size:15px;font-weight:800;margin:0}
@@ -1013,7 +1011,7 @@
         .eng-low{border-color:var(--red);color:var(--red);background:var(--red-light)}
 
         /* Toast container */
-        #toastContainer{position:fixed;top:16px;right:16px;z-index:200;display:flex;flex-direction:column;gap:6px;pointer-events:none}
+        #toastContainer{position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:6px;pointer-events:none}
         #toastContainer > *{pointer-events:auto}
 
         @media(max-width:768px){
@@ -1133,7 +1131,7 @@
         body.sb-open .sb-rail svg{transform:rotate(180deg)}
 
         /* v7 Sidebar overlay nav */
-        .sidebar-nav{display:flex;flex-direction:column;gap:2px;padding:10px 8px;flex:1}
+        .sidebar-nav{display:flex;flex-direction:column;gap:2px;padding:10px 8px;flex:1;overflow-y:auto}
         .sidebar-nav button{display:flex;align-items:center;gap:10px;padding:11px 14px;border-radius:8px;border:none;background:transparent;color:var(--text2);font-size:13px;font-weight:600;cursor:pointer;transition:.15s;white-space:nowrap;text-align:left;font-family:inherit}
         .sidebar-nav button:hover{background:var(--surface);color:var(--text)}
         .sidebar-nav button.active{background:var(--teal-light);color:var(--teal)}
@@ -1148,7 +1146,7 @@
         .sidebar-footer .gb{border:none;background:none;cursor:pointer;color:var(--muted);font-size:14px}
 
         /* Body sidebar-open state */
-        body.sb-open .sidebar{transform:translateX(0);border-right:3px solid var(--blue);box-shadow:3px 0 16px rgba(74,111,165,.18)}
+        body.sb-open .sidebar{transform:translateX(0);border-right:1px solid var(--blue);box-shadow:3px 0 16px rgba(74,111,165,.18)}
         body.sb-open .toparea{margin-left:var(--sbw);transition:margin-left .3s}
         body.sb-open .main{margin-left:var(--sbw)}
         /* Click-away overlay to close sidebar */
@@ -1203,7 +1201,7 @@
         .btn-g{background:var(--green);color:#fff}.btn-g:hover{background:#0d8f6d}
         .btn-y{background:var(--amber);color:#fff}.btn-y:hover{background:#d4930a}
         .btn-q{background:#8b5cf6;color:#fff;border:none}.btn-q:hover{background:#7c3aed}
-        .btn-flash{animation:flash-green 1.2s ease-in-out infinite}
+        .btn-flash{animation:flash-green 1.2s ease-in-out 3}
         @keyframes flash-green{0%,100%{opacity:1}50%{opacity:.35}}
 
         /* Clickable company/vendor name links */
@@ -1227,13 +1225,13 @@
         /* Deadline flags */
         .dl{font-size:11px;font-weight:700;display:inline-flex;align-items:center;gap:3px}
         .dl-ok{color:var(--green)}.dl-w{color:var(--amber)}.dl-u{color:var(--red)}.dl-asap{color:var(--red);font-weight:800}
-        .dl-flash{animation:dl-blink .8s ease-in-out infinite;font-weight:800}
-        @keyframes dl-blink{0%,100%{color:var(--red);opacity:1}50%{color:#fff;opacity:.7}}
+        .dl-flash{animation:dl-blink 1.5s ease-in-out 3;font-weight:800}
+        @keyframes dl-blink{0%,100%{opacity:1}50%{opacity:.4}}
         .dl-set{color:var(--blue);font-weight:500;cursor:pointer;font-size:11px}
         .dl-cell{cursor:pointer}.dl-cell:hover{background:var(--blue-light)!important;border-radius:4px}
         .detail-deadline{display:inline-block;margin-top:2px;font-size:12px}
         /* Row-level deadline alerts */
-        tr.dl-row-today>td{background:rgba(217,68,82,.1)!important;animation:row-flash 1.2s ease-in-out infinite}
+        tr.dl-row-today>td{background:rgba(217,68,82,.1)!important;animation:row-flash 1.2s ease-in-out 3}
         tr.dl-row-overdue>td{background:rgba(217,68,82,.07)!important}
         tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
         @keyframes row-flash{0%,100%{background:rgba(217,68,82,.1)}50%{background:rgba(217,68,82,.25)}}
@@ -1724,7 +1722,7 @@
                 <input type="hidden" id="nrSiteId">
                 <div class="site-typeahead-list" id="nrSiteList"></div>
             </div>
-            <div id="nrSiteSelected" style="display:none;margin-top:6px;padding:8px 12px;background:var(--teal-light);border:1px solid rgba(61,104,149,.15);border-radius:6px;font-size:12px;display:none">
+            <div id="nrSiteSelected" style="display:none;margin-top:6px;padding:8px 12px;background:var(--teal-light);border:1px solid rgba(61,104,149,.15);border-radius:6px;font-size:12px">
                 <span id="nrSiteSelectedLabel" style="font-weight:600"></span>
                 <span onclick="clearNrSite()" style="margin-left:8px;color:var(--red);cursor:pointer;font-size:11px">Clear</span>
             </div>

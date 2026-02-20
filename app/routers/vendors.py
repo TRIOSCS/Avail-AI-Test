@@ -603,7 +603,9 @@ async def scrape_website_contacts(url: str) -> dict:
     emails: set[str] = set()
     phones: set[str] = set()
 
-    if is_private_url(url):
+    import asyncio
+    loop = asyncio.get_event_loop()
+    if await loop.run_in_executor(None, is_private_url, url):
         log.warning(f"SSRF blocked: {url}")
         return {"emails": [], "phones": []}
 

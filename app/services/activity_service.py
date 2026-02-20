@@ -86,7 +86,8 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
 def match_phone_to_entity(phone: str, db: Session) -> dict | None:
     """Match a phone number to a company or vendor card.
 
-    Simple normalized-suffix match (last 10 digits).
+    Uses SQL suffix match on PostgreSQL (regexp_replace), Python fallback on SQLite.
+    Batch-loads VendorCards to avoid N+1.
     """
     if not phone:
         return None
@@ -95,27 +96,54 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
         return None
     suffix = digits[-10:]  # last 10 digits for matching
 
-    # Check customer_sites
-    sites = (
-        db.query(CustomerSite)
-        .filter(
-            CustomerSite.contact_phone.isnot(None), CustomerSite.is_active.is_(True)
+    # Check customer_sites — try PostgreSQL regex, fall back to basic LIKE
+    try:
+        sites = (
+            db.query(CustomerSite)
+            .filter(
+                CustomerSite.contact_phone.isnot(None),
+                CustomerSite.is_active.is_(True),
+                func.regexp_replace(CustomerSite.contact_phone, r"\D", "", "g").like(f"%{suffix}"),
+            )
+            .all()
         )
-        .all()
-    )
+    except Exception:
+        db.rollback()
+        sites = (
+            db.query(CustomerSite)
+            .filter(CustomerSite.contact_phone.isnot(None), CustomerSite.is_active.is_(True))
+            .all()
+        )
     for site in sites:
         site_digits = "".join(c for c in (site.contact_phone or "") if c.isdigit())
         if site_digits and site_digits[-10:] == suffix:
             return {"type": "company", "id": site.company_id, "name": site.site_name}
 
-    # Check vendor_contacts
-    vcs = db.query(VendorContact).filter(VendorContact.phone.isnot(None)).all()
-    for vc in vcs:
-        vc_digits = "".join(c for c in (vc.phone or "") if c.isdigit())
-        if vc_digits and vc_digits[-10:] == suffix:
-            card = db.get(VendorCard, vc.vendor_card_id)
-            if card:
-                return {"type": "vendor", "id": card.id, "name": card.display_name, "vendor_contact_id": vc.id}
+    # Check vendor_contacts — batch VendorCard lookup to avoid N+1
+    try:
+        vcs = (
+            db.query(VendorContact)
+            .filter(
+                VendorContact.phone.isnot(None),
+                func.regexp_replace(VendorContact.phone, r"\D", "", "g").like(f"%{suffix}"),
+            )
+            .all()
+        )
+    except Exception:
+        db.rollback()
+        vcs = db.query(VendorContact).filter(VendorContact.phone.isnot(None)).all()
+    if vcs:
+        card_ids = [vc.vendor_card_id for vc in vcs if vc.vendor_card_id]
+        card_map = (
+            {c.id: c for c in db.query(VendorCard).filter(VendorCard.id.in_(card_ids)).all()}
+            if card_ids else {}
+        )
+        for vc in vcs:
+            vc_digits = "".join(c for c in (vc.phone or "") if c.isdigit())
+            if vc_digits and vc_digits[-10:] == suffix:
+                card = card_map.get(vc.vendor_card_id)
+                if card:
+                    return {"type": "vendor", "id": card.id, "name": card.display_name, "vendor_contact_id": vc.id}
 
     return None
 

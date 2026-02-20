@@ -159,13 +159,19 @@ async def get_activity(
     loop = asyncio.get_event_loop()
 
     def _q_contacts():
-        return db.query(Contact).filter_by(requisition_id=req_id).order_by(Contact.created_at.desc()).all()
+        from sqlalchemy.orm import joinedload
+        return db.query(Contact).options(
+            joinedload(Contact.user),
+        ).filter_by(requisition_id=req_id).order_by(Contact.created_at.desc()).all()
 
     def _q_responses():
         return db.query(VendorResponse).filter_by(requisition_id=req_id).order_by(VendorResponse.received_at.desc()).all()
 
     def _q_activities():
-        return db.query(ActivityLog).filter(
+        from sqlalchemy.orm import joinedload
+        return db.query(ActivityLog).options(
+            joinedload(ActivityLog.user),
+        ).filter(
             ActivityLog.requisition_id == req_id,
             ActivityLog.vendor_card_id.isnot(None),
         ).order_by(ActivityLog.created_at.desc()).limit(500).all()
