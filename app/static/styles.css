@@ -1337,3 +1337,11 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .activity-badge { font-size: 9px; padding: 1px 6px; border-radius: 8px; }
 .info-card { background: var(--bg2); padding: 10px; border-radius: 6px; margin-bottom: 12px; font-size: 12px; }
 .stat-row { display: flex; gap: 16px; background: var(--bg2); padding: 10px 14px; border-radius: 6px; margin-bottom: 12px; font-size: 12px; flex-wrap: wrap; }
+
+/* Archive customer group headers */
+.archive-group-header { cursor: pointer; background: var(--surface); }
+.archive-group-header td { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 13px; }
+.archive-group-header:hover td { background: var(--bg2); }
+
+/* RFQ card inline summary */
+.req-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); margin-top: 2px; }

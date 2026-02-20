@@ -28,6 +28,8 @@ from ..dependencies import get_req_for_user, require_buyer, require_user
 from ..models import (
     Contact,
     Offer,
+    ProactiveMatch,
+    Quote,
     Requirement,
     Requisition,
     Sighting,
@@ -171,6 +173,89 @@ async def list_requisitions(
         .scalar_subquery()
         .label("total_target_value")
     )
+    # ── New card-summary subqueries ─────────────────────────────────────
+    # Best quote status (priority: won > lost > sent > revised > draft)
+    _quote_priority = case(
+        (Quote.status == "won", literal(1)),
+        (Quote.status == "lost", literal(2)),
+        (Quote.status == "sent", literal(3)),
+        (Quote.status == "revised", literal(4)),
+        else_=literal(5),
+    )
+    quote_status_sq = (
+        select(Quote.status)
+        .where(Quote.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .order_by(_quote_priority)
+        .limit(1)
+        .scalar_subquery()
+        .label("quote_status")
+    )
+    # Quote sent date — most recent
+    quote_sent_at_sq = (
+        select(sqlfunc.max(Quote.sent_at))
+        .where(Quote.requisition_id == Requisition.id, Quote.sent_at.isnot(None))
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("quote_sent_at")
+    )
+    # Quote total — subtotal from the best-priority quote
+    quote_total_sq = (
+        select(Quote.subtotal)
+        .where(Quote.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .order_by(_quote_priority)
+        .limit(1)
+        .scalar_subquery()
+        .label("quote_total")
+    )
+    # Won revenue — max won_revenue from won quotes
+    quote_won_value_sq = (
+        select(sqlfunc.max(Quote.won_revenue))
+        .where(Quote.requisition_id == Requisition.id, Quote.status == "won")
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("quote_won_value")
+    )
+    # Offer count
+    offer_count_sq = (
+        select(sqlfunc.count(Offer.id))
+        .where(Offer.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("offer_count")
+    )
+    # Best offer price (lowest positive unit_price)
+    best_offer_price_sq = (
+        select(sqlfunc.min(Offer.unit_price))
+        .where(Offer.requisition_id == Requisition.id, Offer.unit_price > 0)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("best_offer_price")
+    )
+    # Awaiting reply count — contacts with status in ('sent', 'opened')
+    awaiting_reply_sq = (
+        select(sqlfunc.count(Contact.id))
+        .where(
+            Contact.requisition_id == Requisition.id,
+            Contact.status.in_(["sent", "opened"]),
+        )
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("awaiting_reply_count")
+    )
+    # Proactive match count — non-dismissed matches
+    proactive_match_count_sq = (
+        select(sqlfunc.count(ProactiveMatch.id))
+        .where(
+            ProactiveMatch.requisition_id == Requisition.id,
+            ProactiveMatch.status != "dismissed",
+        )
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("proactive_match_count")
+    )
+
     query = db.query(
         Requisition,
         req_count_sq,
@@ -183,6 +268,14 @@ async def list_requisitions(
         rfq_sent_count_sq,
         needs_review_sq,
         total_target_value_sq,
+        quote_status_sq,
+        quote_sent_at_sq,
+        quote_total_sq,
+        quote_won_value_sq,
+        offer_count_sq,
+        best_offer_price_sq,
+        awaiting_reply_sq,
+        proactive_match_count_sq,
     )
     # Sales sees own reqs only; all other roles see everything
     if user.role == "sales":
@@ -217,7 +310,7 @@ async def list_requisitions(
     rows = query.order_by(Requisition.created_at.desc()).offset(offset).limit(limit).all()
     # Pre-load creator names (all roles see all reqs now)
     creator_names = {}
-    creator_ids = {r.created_by for r, _, _, _, _, _, _, _, _, _, _ in rows if r.created_by}
+    creator_ids = {r.created_by for r, *_ in rows if r.created_by}
     if creator_ids:
         creators = (
             db.query(User.id, User.name, User.email)
@@ -260,8 +353,16 @@ async def list_requisitions(
                 "deadline": r.deadline,
                 "needs_review_count": needs_rev or 0,
                 "total_target_value": float(ttv or 0),
+                "quote_status": q_status,
+                "quote_sent_at": q_sent.isoformat() if q_sent else None,
+                "quote_total": float(q_total) if q_total else None,
+                "quote_won_value": float(q_won) if q_won else None,
+                "offer_count": offer_cnt or 0,
+                "best_offer_price": float(best_price) if best_price else None,
+                "awaiting_reply_count": await_cnt or 0,
+                "proactive_match_count": pm_cnt or 0,
             }
-            for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt, rfq_sent, needs_rev, ttv in rows
+            for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt, rfq_sent, needs_rev, ttv, q_status, q_sent, q_total, q_won, offer_cnt, best_price, await_cnt, pm_cnt in rows
         ],
         "total": total,
         "limit": limit,

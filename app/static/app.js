@@ -574,6 +574,7 @@ let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
 let _serverSearchActive = false; // True when server-side search returned filtered results
 let _currentMainView = 'rfq';  // 'rfq' | 'sourcing' | 'archive'
+let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
 function setReqListSort(val) {
     _reqListSort = val;
@@ -985,6 +986,7 @@ function renderReqList() {
                 case 'sent': va = a.rfq_sent_count || 0; vb = b.rfq_sent_count || 0; break;
                 case 'resp': { const sa = a.rfq_sent_count || 0; const sb = b.rfq_sent_count || 0; va = sa > 0 ? (a.reply_count || 0) / sa : 0; vb = sb > 0 ? (b.reply_count || 0) / sb : 0; break; }
                 case 'searched': va = a.last_searched_at || ''; vb = b.last_searched_at || ''; break;
+                case 'matches': va = a.proactive_match_count || 0; vb = b.proactive_match_count || 0; break;
                 default: va = 0; vb = 0;
             }
             if (typeof va === 'string') return _reqSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
@@ -1021,14 +1023,14 @@ function renderReqList() {
         thead = `<thead><tr>
             <th style="width:80px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6 Expand</th>
             <th onclick="sortReqList('name')"${thClass('name')}>RFQ ${sa('name')}</th>
+            <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By ${sa('deadline')}</th>
+            <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('sourced')"${thClass('sourced')}>Sourced ${sa('sourced')}</th>
-            <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
             <th onclick="sortReqList('sent')"${thClass('sent')}>RFQs Sent ${sa('sent')}</th>
             <th onclick="sortReqList('resp')"${thClass('resp')}>Resp % ${sa('resp')}</th>
             <th onclick="sortReqList('searched')"${thClass('searched')}>Searched ${sa('searched')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
-            <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By ${sa('deadline')}</th>
             <th onclick="sortReqList('status')"${thClass('status')} title="Sourcing / Offers / Quoted">Status ${sa('status')}</th>
         </tr></thead>`;
     } else if (v === 'archive') {
@@ -1038,9 +1040,10 @@ function renderReqList() {
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
             <th onclick="sortReqList('status')"${thClass('status')}>Outcome ${sa('status')}</th>
+            <th onclick="sortReqList('matches')"${thClass('matches')}>Matches ${sa('matches')}</th>
             <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
-            <th style="width:60px"></th>
+            <th style="width:90px"></th>
         </tr></thead>`;
     } else {
         thead = `<thead><tr>
@@ -1054,13 +1057,43 @@ function renderReqList() {
         </tr></thead>`;
     }
 
-    const rows = data.map(r => _renderReqRow(r)).join('');
-    el.innerHTML = `<table class="tbl">${thead}<tbody>${rows}</tbody></table>`;
+    let rowsHtml;
+    if (v === 'archive' && !_reqSortCol) {
+        // Group by customer when no column sort is active
+        const groups = new Map();
+        for (const r of data) {
+            const key = r.company_id || r.customer_display || 'Unknown';
+            if (!groups.has(key)) groups.set(key, { label: r.customer_display || r.name || 'Unknown', company_id: r.company_id, reqs: [] });
+            groups.get(key).reqs.push(r);
+        }
+        let html = '';
+        for (const [key, g] of groups) {
+            const isOpen = _archiveGroupsOpen.has(key);
+            const wonTotal = g.reqs.reduce((s, r) => s + (r.quote_won_value || 0), 0);
+            const wonStr = wonTotal > 0 ? ` | Won: ${fmtDollars(wonTotal)}` : '';
+            html += `<tr class="archive-group-header" onclick="toggleArchiveGroup('${String(key).replace(/'/g, "\\'")}')">
+                <td colspan="9"><span style="margin-right:6px">${isOpen ? '\u25bc' : '\u25b6'}</span><b>${esc(g.label)}</b> <span style="font-size:11px;color:var(--muted)">(${g.reqs.length} req${g.reqs.length !== 1 ? 's' : ''}${wonStr})</span></td>
+            </tr>`;
+            if (isOpen) html += g.reqs.map(r => _renderReqRow(r)).join('');
+        }
+        rowsHtml = html;
+    } else {
+        rowsHtml = data.map(r => _renderReqRow(r)).join('');
+    }
+    el.innerHTML = `<table class="tbl">${thead}<tbody>${rowsHtml}</tbody></table>`;
     _updateToolbarStats();
 }
 
 function setToolbarQuickFilter(key) {
     _toolbarQuickFilter = (_toolbarQuickFilter === key) ? '' : key;
+    renderReqList();
+}
+
+function toggleArchiveGroup(key) {
+    // Convert back from string for numeric company_id
+    const k = isNaN(key) ? key : Number(key);
+    if (_archiveGroupsOpen.has(k)) _archiveGroupsOpen.delete(k);
+    else _archiveGroupsOpen.add(k);
     renderReqList();
 }
 
@@ -1142,7 +1175,35 @@ function _renderReqRow(r) {
     }
 
     // Name cell — shared across all tabs
-    const nameCell = `<td>${r.company_id ? `<b class="cust-link" onclick="event.stopPropagation();goToCompany(${r.company_id})">${esc(cust)}</b>` : `<b>${esc(cust)}</b>`}${dot}<br><span style="font-size:11px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
+    let nameSummary = '';
+    if (v === 'rfq') {
+        // Quote status badge
+        let qBadge = '<span style="color:var(--muted)">No Quote</span>';
+        if (r.quote_status === 'won') qBadge = `<span style="color:var(--green);font-weight:600">Won ${r.quote_won_value ? fmtDollars(r.quote_won_value) : ''}</span>`;
+        else if (r.quote_status === 'lost') qBadge = '<span style="color:var(--red)">Lost</span>';
+        else if (r.quote_status === 'sent') qBadge = `<span style="color:var(--blue)">Sent ${fmtRelative(r.quote_sent_at)}</span>`;
+        else if (r.quote_status === 'revised') qBadge = '<span style="color:var(--amber)">Revised</span>';
+        else if (r.quote_status === 'draft') qBadge = '<span style="color:var(--muted)">Draft</span>';
+        // Activity pulse
+        const replied = r.reply_count || 0;
+        const awaiting = r.awaiting_reply_count || 0;
+        const sent = r.rfq_sent_count || 0;
+        let actParts = [];
+        if (replied > 0) actParts.push(`\u2705 ${replied} replied`);
+        if (awaiting > 0) actParts.push(`\u23f3 ${awaiting} awaiting`);
+        if (sent > 0) actParts.push(`\u2709 ${sent} sent`);
+        const actPulse = actParts.length ? actParts.join(' ') : '';
+        // Offer line
+        let offerLine = '';
+        if ((r.offer_count || 0) > 0) {
+            offerLine = `${r.offer_count} offers`;
+            if (r.best_offer_price) offerLine += ` \u00b7 Best: ${fmtDollars(r.best_offer_price)}`;
+            if (r.total_target_value > 0) offerLine += ` \u00b7 Target: ${fmtDollars(r.total_target_value)}`;
+        }
+        const parts = [qBadge, actPulse, offerLine].filter(Boolean);
+        if (parts.length) nameSummary = `<div class="req-summary">${parts.join(' <span style="color:var(--border2)">|</span> ')}</div>`;
+    }
+    const nameCell = `<td>${r.company_id ? `<b class="cust-link" onclick="event.stopPropagation();goToCompany(${r.company_id})">${esc(cust)}</b>` : `<b>${esc(cust)}</b>`}${dot}<br><span style="font-size:11px;color:var(--muted)">${esc(r.name || '')}</span>${nameSummary}</td>`;
 
     // Last Searched — relative timestamp
     let searched = '';
@@ -1186,26 +1247,32 @@ function _renderReqRow(r) {
         }
 
         dataCells = `
+            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
+            ${offersCell}
             <td class="mono">${total}</td>
             <td><div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div><span class="prog-txt">${sourced}/${total}</span></div></td>
-            ${offersCell}
             <td class="mono">${sent}</td>
             <td class="mono">${respPct}</td>
             <td style="font-size:11px">${searched}</td>
-            <td class="mono" style="font-size:11px">${age}</td>
-            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>`;
+            <td class="mono" style="font-size:11px">${age}</td>`;
         actions = `<td style="white-space:nowrap">${srcBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">\ud83d\udce5 Archive</button></td>`;
         colspan = 11;
     } else if (v === 'archive') {
-        // Archive: Parts, Offers, Outcome, Sales, Age
+        // Archive: Parts, Offers, Outcome (with $value), Matches, Sales, Age
+        const wonVal = r.quote_won_value ? `<br><span style="font-size:10px;color:var(--green)">${fmtDollars(r.quote_won_value)}</span>` : '';
+        const pmCnt = r.proactive_match_count || 0;
+        const matchBadge = pmCnt > 0
+            ? `<span style="color:var(--green);font-weight:600">\ud83d\udfe2 ${pmCnt} match${pmCnt !== 1 ? 'es' : ''}</span>`
+            : '<span style="color:var(--muted)">\u2014</span>';
         dataCells = `
             <td class="mono">${total}</td>
             <td class="mono">${offers}</td>
-            <td><span class="badge ${bc}">${_statusLabels[r.status] || r.status}</span></td>
+            <td><span class="badge ${bc}">${_statusLabels[r.status] || r.status}</span>${wonVal}</td>
+            <td style="font-size:11px">${matchBadge}</td>
             <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px">${age}</td>`;
-        actions = `<td style="white-space:nowrap"><button class="btn btn-sm" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Restore from archive">&#x21a9; Restore</button> <button class="btn btn-sm" onclick="event.stopPropagation();cloneFromList(${r.id})" title="Clone as new draft">&#x1f4cb; Clone</button></td>`;
-        colspan = 8;
+        actions = `<td style="white-space:nowrap"><button class="btn btn-sm" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Restore from archive">&#x21a9; Restore</button> <button class="btn btn-sm" onclick="event.stopPropagation();cloneFromList(${r.id})" title="Clone as new draft">&#x1f4cb; Clone</button> <button class="btn btn-sm" onclick="event.stopPropagation();requoteFromList(${r.id})" title="Re-quote this RFQ">&#x1f4dd; Re-quote</button></td>`;
+        colspan = 9;
     } else {
         // RFQ (drafts): Parts, Sales, Age, Need By
         dataCells = `
@@ -1690,6 +1757,23 @@ async function cloneFromList(reqId) {
         if (rfqBtn) setMainView('rfq', rfqBtn);
         else loadRequisitions();
     } catch (e) { showToast('Failed to clone', 'error'); }
+}
+
+async function requoteFromList(reqId) {
+    try {
+        const resp = await apiFetch(`/api/requisitions/${reqId}/clone`, { method: 'POST' });
+        // Rename from "(copy)" to "(re-quote)"
+        const reName = resp.name.replace('(copy)', '(re-quote)');
+        if (reName !== resp.name) {
+            await apiFetch(`/api/requisitions/${resp.id}`, { method: 'PUT', body: { name: reName } });
+        }
+        showToast(`Re-quoted as "${reName}"`);
+        // Switch to sourcing view and open the cloned req
+        const srcBtn = document.querySelector('#mainPills .fp:nth-child(2)');
+        if (srcBtn) setMainView('sourcing', srcBtn);
+        await loadRequisitions();
+        showDetail(resp.id, reName, 'sources');
+    } catch (e) { showToast('Failed to re-quote', 'error'); }
 }
 
 // ── Requirements ────────────────────────────────────────────────────────
@@ -4105,6 +4189,12 @@ function fmtRelative(iso) {
     if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
     if (diff < 604800) return `${Math.floor(diff/86400)}d ago`;
     return d.toLocaleDateString();
+}
+
+function fmtDollars(n) {
+    if (n == null || isNaN(n)) return '';
+    if (n >= 1000) return '$' + (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+    return '$' + Number(n).toFixed(2);
 }
 
 function threadSearchFilter(query) {
