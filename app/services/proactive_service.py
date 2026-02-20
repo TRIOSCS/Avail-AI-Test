@@ -418,7 +418,7 @@ async def send_proactive_offer(
 
 def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -> dict:
     """Convert a proactive offer to a won requisition + quote + buy plan."""
-    from ..routers.crm import next_quote_number
+    from .crm_service import next_quote_number
 
     po = db.get(ProactiveOffer, proactive_offer_id)
     if not po:

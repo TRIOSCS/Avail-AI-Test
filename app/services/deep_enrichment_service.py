@@ -390,7 +390,7 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
     async def _material_analysis():
         nonlocal _material_ok
         try:
-            from ..routers.vendors import _analyze_vendor_materials
+            from .vendor_analysis_service import _analyze_vendor_materials
             await _analyze_vendor_materials(vendor_card_id, db_session=db)
             _material_ok = True
         except Exception as e:

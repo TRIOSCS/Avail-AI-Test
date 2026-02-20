@@ -86,24 +86,7 @@ router = APIRouter()
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 
-def next_quote_number(db: Session) -> str:
-    """Generate next sequential quote number: Q-YYYY-NNNN."""
-    year = datetime.now(timezone.utc).year
-    prefix = f"Q-{year}-"
-    last = (
-        db.query(Quote)
-        .filter(Quote.quote_number.like(f"{prefix}%"))
-        .order_by(Quote.id.desc())
-        .first()
-    )
-    if last:
-        try:
-            seq = int(last.quote_number.split("-")[-1]) + 1
-        except ValueError:
-            seq = 1
-    else:
-        seq = 1
-    return f"{prefix}{seq:04d}"
+from ..services.crm_service import next_quote_number  # noqa: E402
 
 
 def get_last_quoted_price(mpn: str, db: Session) -> dict | None:
