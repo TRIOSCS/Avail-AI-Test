@@ -1343,5 +1343,3 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .archive-group-header td { padding: 8px 12px; border-bottom: 2px solid var(--border); font-size: 13px; }
 .archive-group-header:hover td { background: var(--bg2); }
 
-/* RFQ card inline summary */
-.req-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); margin-top: 2px; }

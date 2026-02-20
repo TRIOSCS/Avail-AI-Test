@@ -1,5 +1,53 @@
 /* AVAIL v1.2.0 — CRM, offers, quotes, target pricing */
 
+// ── Bootstrap: read server-rendered config from JSON block ────────────
+(function() {
+    var el = document.getElementById('app-config');
+    if (el) {
+        try {
+            var cfg = JSON.parse(el.textContent);
+            window.__userName = cfg.userName || '';
+            window.__userEmail = cfg.userEmail || '';
+            window.__isAdmin = !!cfg.isAdmin;
+            window.__isDevAssistant = !!cfg.isDevAssistant;
+        } catch(e) { console.warn('Failed to parse app-config', e); }
+    }
+})();
+
+// ── Early stubs (available before full init for onclick handlers) ──────
+function setNav(btn) {}
+function toggleMobileSidebar() {
+    var sb = document.getElementById('sidebar');
+    var ov = document.getElementById('sidebarOverlay');
+    if (sb) sb.classList.toggle('mobile-open');
+    if (ov) ov.classList.toggle('open');
+}
+
+// Close filter panel on outside click
+document.addEventListener('click', function(e) {
+    document.querySelectorAll('.filter-panel.open').forEach(function(p) {
+        if (!p.closest('.filter-wrap').contains(e.target)) p.classList.remove('open');
+    });
+});
+
+// Sync mobile <-> desktop search + mirror notification badge
+document.addEventListener('DOMContentLoaded', function() {
+    var ms = document.getElementById('mobileMainSearch');
+    var ds = document.getElementById('mainSearch');
+    if (ms && ds) {
+        ms.addEventListener('input', function() { ds.value = ms.value; });
+        ds.addEventListener('input', function() { ms.value = ds.value; });
+    }
+    var nb = document.getElementById('notifBadge');
+    var mb = document.getElementById('mobileNotifBadge');
+    if (nb && mb) {
+        new MutationObserver(function() {
+            mb.textContent = nb.textContent;
+            mb.style.display = nb.style.display;
+        }).observe(nb, {childList:true, attributes:true, attributeFilter:['style']});
+    }
+});
+
 let currentReqId = null;
 let currentReqName = '';
 let searchResults = {};
@@ -1050,6 +1098,9 @@ function renderReqList() {
             <th style="width:80px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6 Expand</th>
             <th onclick="sortReqList('name')"${thClass('name')}>RFQ ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
+            <th>Quote</th>
+            <th>Activity</th>
+            <th>Offers</th>
             <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By ${sa('deadline')}</th>
@@ -1156,6 +1207,8 @@ function _renderReqRow(r) {
         else if (diff === 0) { dl = `<span class="dl dl-u dl-flash">\ud83d\udd34 DUE TODAY</span>`; dlClass = ' dl-row-today'; }
         else if (diff <= 3) { dl = `<span class="dl dl-w">\u26a0\ufe0f ${fmt}</span>`; dlClass = ' dl-row-warn'; }
         else dl = `<span class="dl dl-ok">\u2713 ${fmt}</span>`;
+    } else if (v === 'sourcing') {
+        dl = '<span class="dl dl-asap">ASAP</span>';
     } else {
         dl = '<span class="dl dl-set" title="Click to set deadline">+ Set date</span>';
     }
@@ -1174,36 +1227,8 @@ function _renderReqRow(r) {
         else if (h < 96) dot = ' <span class="new-offers-dot red" title="New offers"></span>';
     }
 
-    // Name cell — shared across all tabs
-    let nameSummary = '';
-    if (v === 'rfq') {
-        // Quote status badge
-        let qBadge = '<span style="color:var(--muted)">No Quote</span>';
-        if (r.quote_status === 'won') qBadge = `<span style="color:var(--green);font-weight:600">Won ${r.quote_won_value ? fmtDollars(r.quote_won_value) : ''}</span>`;
-        else if (r.quote_status === 'lost') qBadge = '<span style="color:var(--red)">Lost</span>';
-        else if (r.quote_status === 'sent') qBadge = `<span style="color:var(--blue)">Sent ${fmtRelative(r.quote_sent_at)}</span>`;
-        else if (r.quote_status === 'revised') qBadge = '<span style="color:var(--amber)">Revised</span>';
-        else if (r.quote_status === 'draft') qBadge = '<span style="color:var(--muted)">Draft</span>';
-        // Activity pulse
-        const replied = r.reply_count || 0;
-        const awaiting = r.awaiting_reply_count || 0;
-        const sent = r.rfq_sent_count || 0;
-        let actParts = [];
-        if (replied > 0) actParts.push(`\u2705 ${replied} replied`);
-        if (awaiting > 0) actParts.push(`\u23f3 ${awaiting} awaiting`);
-        if (sent > 0) actParts.push(`\u2709 ${sent} sent`);
-        const actPulse = actParts.length ? actParts.join(' ') : '';
-        // Offer line
-        let offerLine = '';
-        if ((r.offer_count || 0) > 0) {
-            offerLine = `${r.offer_count} offers`;
-            if (r.best_offer_price) offerLine += ` \u00b7 Best: ${fmtDollars(r.best_offer_price)}`;
-            if (r.total_target_value > 0) offerLine += ` \u00b7 Target: ${fmtDollars(r.total_target_value)}`;
-        }
-        const parts = [qBadge, actPulse, offerLine].filter(Boolean);
-        if (parts.length) nameSummary = `<div class="req-summary">${parts.join(' <span style="color:var(--border2)">|</span> ')}</div>`;
-    }
-    const nameCell = `<td>${r.company_id ? `<b class="cust-link" onclick="event.stopPropagation();goToCompany(${r.company_id})">${esc(cust)}</b>` : `<b>${esc(cust)}</b>`}${dot}<br><span style="font-size:11px;color:var(--muted)">${esc(r.name || '')}</span>${nameSummary}</td>`;
+    // Name cell — shared across all tabs (no summary div — info goes in dedicated columns)
+    const nameCell = `<td>${r.company_id ? `<b class="cust-link" onclick="event.stopPropagation();goToCompany(${r.company_id})">${esc(cust)}</b>` : `<b>${esc(cust)}</b>`}${dot}<br><span style="font-size:11px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
 
     // Last Searched — relative timestamp
     let searched = '';
@@ -1258,30 +1283,57 @@ function _renderReqRow(r) {
         actions = `<td style="white-space:nowrap">${srcBtn} <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">\ud83d\udce5 Archive</button></td>`;
         colspan = 11;
     } else if (v === 'archive') {
-        // Archive: Parts, Offers, Outcome (with $value), Matches, Sales, Age
-        const wonVal = r.quote_won_value ? `<br><span style="font-size:10px;color:var(--green)">${fmtDollars(r.quote_won_value)}</span>` : '';
+        // Archive: Parts, Offers, Outcome · $value, Matches, Sales, Age
+        const wonVal = r.quote_won_value ? ` <span style="font-size:10px;color:var(--green)">\u00b7 ${fmtDollars(r.quote_won_value)}</span>` : '';
         const pmCnt = r.proactive_match_count || 0;
         const matchBadge = pmCnt > 0
-            ? `<span style="color:var(--green);font-weight:600">\ud83d\udfe2 ${pmCnt} match${pmCnt !== 1 ? 'es' : ''}</span>`
+            ? `<span style="color:var(--green);font-weight:600">${pmCnt}</span>`
             : '<span style="color:var(--muted)">\u2014</span>';
         dataCells = `
             <td class="mono">${total}</td>
             <td class="mono">${offers}</td>
-            <td><span class="badge ${bc}">${_statusLabels[r.status] || r.status}</span>${wonVal}</td>
-            <td style="font-size:11px">${matchBadge}</td>
+            <td style="white-space:nowrap"><span class="badge ${bc}">${_statusLabels[r.status] || r.status}</span>${wonVal}</td>
+            <td class="mono" style="font-size:11px">${matchBadge}</td>
             <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px">${age}</td>`;
         actions = `<td style="white-space:nowrap"><button class="btn btn-sm" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Restore from archive">&#x21a9; Restore</button> <button class="btn btn-sm" onclick="event.stopPropagation();cloneFromList(${r.id})" title="Clone as new draft">&#x1f4cb; Clone</button> <button class="btn btn-sm" onclick="event.stopPropagation();requoteFromList(${r.id})" title="Re-quote this RFQ">&#x1f4dd; Re-quote</button></td>`;
         colspan = 9;
     } else {
-        // RFQ (drafts): Parts, Sales, Age, Need By
+        // RFQ: Parts, Quote, Activity, Offers, Sales, Age, Need By
+        // Quote status cell
+        let qCell = '<span style="color:var(--muted)">\u2014</span>';
+        if (r.quote_status === 'won') qCell = `<span style="color:var(--green);font-weight:600">Won${r.quote_won_value ? ' ' + fmtDollars(r.quote_won_value) : ''}</span>`;
+        else if (r.quote_status === 'lost') qCell = '<span style="color:var(--red)">Lost</span>';
+        else if (r.quote_status === 'sent') qCell = `<span style="color:var(--blue)">Sent ${fmtRelative(r.quote_sent_at)}</span>`;
+        else if (r.quote_status === 'revised') qCell = '<span style="color:var(--amber)">Revised</span>';
+        else if (r.quote_status === 'draft') qCell = '<span style="color:var(--muted)">Draft</span>';
+        // Activity cell
+        const _replied = r.reply_count || 0;
+        const _awaiting = r.awaiting_reply_count || 0;
+        const _rfqSent = r.rfq_sent_count || 0;
+        let actParts = [];
+        if (_replied > 0) actParts.push(`<span style="color:var(--green)">${_replied} replied</span>`);
+        if (_awaiting > 0) actParts.push(`<span style="color:var(--amber)">${_awaiting} awaiting</span>`);
+        if (_rfqSent > 0 && !_replied && !_awaiting) actParts.push(`${_rfqSent} sent`);
+        const actCell = actParts.length ? actParts.join(' \u00b7 ') : '<span style="color:var(--muted)">\u2014</span>';
+        // Offers cell
+        let offCell = '<span style="color:var(--muted)">\u2014</span>';
+        const _oCnt = r.offer_count || 0;
+        if (_oCnt > 0) {
+            offCell = `<b>${_oCnt}</b>`;
+            if (r.best_offer_price) offCell += ` \u00b7 ${fmtDollars(r.best_offer_price)}`;
+        }
+
         dataCells = `
             <td class="mono">${total}</td>
+            <td style="font-size:11px;white-space:nowrap">${qCell}</td>
+            <td style="font-size:11px;white-space:nowrap">${actCell}</td>
+            <td style="font-size:11px;white-space:nowrap">${offCell}</td>
             <td>${esc(r.created_by_name || '')}</td>
             <td class="mono" style="font-size:11px">${age}</td>
             <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>`;
         actions = `<td style="white-space:nowrap"><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();submitToSourcing(${r.id})" title="Submit to sourcing">&#x25b6; Source</button> <button class="btn-archive" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Archive">&#x1f4e5; Archive</button></td>`;
-        colspan = 7;
+        colspan = 10;
     }
 
     return `<tr class="${dlClass}" onclick="toggleDrillDown(${r.id})">
