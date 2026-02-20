@@ -31,6 +31,7 @@ def run_startup_migrations() -> None:
     log.info("ORM schema sync complete (create_all checkfirst=True)")
 
     with engine.connect() as conn:
+        _enable_pg_stat_statements(conn)
         _create_fts_triggers(conn)
         _backfill_fts(conn)
         _seed_system_config(conn)
@@ -49,6 +50,14 @@ def _exec(conn, stmt: str, params: dict | None = None) -> None:
     except Exception as e:
         log.warning("DDL failed: %s", e)
         conn.rollback()
+
+
+# ── pg_stat_statements extension ─────────────────────────────────────
+
+
+def _enable_pg_stat_statements(conn) -> None:
+    """Enable pg_stat_statements extension for query performance monitoring."""
+    _exec(conn, "CREATE EXTENSION IF NOT EXISTS pg_stat_statements")
 
 
 # ── Full-text search triggers (PostgreSQL-specific) ─────────────────

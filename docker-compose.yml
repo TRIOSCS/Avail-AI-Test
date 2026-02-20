@@ -6,6 +6,10 @@ services:
   db:
     image: postgres:16-alpine
     restart: always
+    command: >
+      postgres
+      -c shared_preload_libraries=pg_stat_statements
+      -c pg_stat_statements.track=all
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-availai}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-availai}
