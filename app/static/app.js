@@ -1070,18 +1070,16 @@ function _updateToolbarStats() {
     const all = _reqListData;
     const now = new Date(); now.setHours(0,0,0,0);
 
-    let nGreen = 0, nYellow = 0, nOrange = 0, nRed = 0;
+    let nGreen = 0, nOrange = 0;
     for (const r of all) {
         if (r.reply_count > 0) nGreen++;
         const dl = r.deadline;
         if (!dl) continue;
         const isAsap = String(dl).toUpperCase() === 'ASAP';
-        if (isAsap) { nRed++; continue; }
+        if (isAsap) continue;
         const d = new Date(dl); d.setHours(0,0,0,0);
         const diff = Math.round((d - now) / 86400000);
-        if (diff < 0) nRed++;
-        else if (diff === 0) nOrange++;
-        else if (diff >= 1 && diff <= 3) nYellow++;
+        if (diff === 0) nOrange++;
     }
 
     const qf = _toolbarQuickFilter;
@@ -1090,9 +1088,7 @@ function _updateToolbarStats() {
 
     el.innerHTML =
         pill('green', nGreen, 'Offers') +
-        pill('red', nRed, 'Past Due') +
         pill('orange', nOrange, 'Due Today') +
-        pill('yellow', nYellow, 'Coming Due') +
         `<div class="ts-pill ts-grey${qf ? '' : ' active'}" onclick="setToolbarQuickFilter('')"><span class="ts-n">${all.length}</span> All</div>`;
 }
 
