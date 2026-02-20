@@ -63,6 +63,23 @@ function escAttr(s) {
     if (!s) return '';
     return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+function logCatchError(ctx, err) { if (err) console.warn('[' + ctx + ']', err); }
+
+function openModal(id, focusId) {
+    var el = document.getElementById(id);
+    if (el) el.classList.add('open');
+    if (focusId) setTimeout(function() { var f = document.getElementById(focusId); if (f) f.focus(); }, 100);
+}
+
+async function guardBtn(btn, loadingText, action) {
+    if (!btn || btn.disabled) return;
+    var orig = btn.textContent;
+    btn.disabled = true;
+    if (loadingText) btn.textContent = loadingText;
+    try { return await action(); }
+    finally { btn.disabled = false; btn.textContent = orig; }
+}
+
 function fmtDate(iso) {
     if (!iso) return '';
     return new Date(iso).toLocaleDateString();
