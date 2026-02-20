@@ -65,7 +65,7 @@
             </div>
         </div>
         <button type="button" class="tb-btn" id="btnMyAccounts" onclick="toggleMyAccounts(this)">My Accounts</button>
-        <div class="filter-wrap" style="margin-left:auto">
+        <div class="filter-wrap" class="u-ml-auto">
             <button type="button" class="filter-btn" onclick="toggleNotifications()" style="position:relative;padding:6px 10px" title="Notifications">
                 &#x1f514;
                 <span id="notifBadge" class="filter-badge" style="position:absolute;top:-4px;right:-4px;background:var(--red)">0</span>
@@ -135,9 +135,9 @@
         <div class="detail-header">
             <div>
                 <a class="back-link" onclick="showList()">← Back</a>
-                <div style="display:flex;align-items:center;gap:8px"><h2 id="detailTitle" onclick="editReqName(this)" title="Click to rename" style="cursor:pointer"></h2><span id="detailStatus" class="status-chip"></span></div>
-                <span id="detailCustomer" class="req-customer" onclick="openDetailSitePicker()" title="Click to link/change customer" style="cursor:pointer"></span>
-                <span id="detailDeadline" class="detail-deadline" onclick="editDetailDeadline()" title="Click to set/change deadline" style="cursor:pointer"></span>
+                <div style="display:flex;align-items:center;gap:8px"><h2 id="detailTitle" onclick="editReqName(this)" title="Click to rename" class="u-cursor-pointer"></h2><span id="detailStatus" class="status-chip"></span></div>
+                <span id="detailCustomer" class="req-customer" onclick="openDetailSitePicker()" title="Click to link/change customer" class="u-cursor-pointer"></span>
+                <span id="detailDeadline" class="detail-deadline" onclick="editDetailDeadline()" title="Click to set/change deadline" class="u-cursor-pointer"></span>
                 <div id="detailSitePicker" style="display:none;margin-top:4px">
                     <div class="site-typeahead" style="max-width:320px">
                         <input id="detailSiteSearch" placeholder="Search customer site…" aria-label="Search customer sites" autocomplete="off" oninput="filterDetailSiteTypeahead(this.value)">
@@ -162,7 +162,7 @@
 
         <!-- Requirements Tab -->
         <div id="tab-requirements" class="tc on">
-            <div class="card" style="margin-bottom:12px">
+            <div class="card" class="u-mb-md">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                     <strong style="font-size:12px;color:var(--muted)">Type a part number and press Enter to add</strong>
                     <button type="button" class="btn btn-ghost btn-sm" onclick="toggleUpload()">📁 Upload CSV</button>
@@ -226,7 +226,7 @@
         <div id="tab-sources" class="tc">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                 <strong style="font-size:13px">Search Results</strong>
-                <div style="display:flex;gap:6px">
+                <div class="u-flex u-gap-sm">
                     <button type="button" class="btn btn-ghost btn-sm" onclick="expandAllGroups()">Expand All</button>
                     <button type="button" class="btn btn-ghost btn-sm" onclick="collapseAllGroups()">Collapse All</button>
                     <span style="width:1px;background:var(--border);margin:0 2px"></span>
@@ -263,7 +263,7 @@
         <div id="tab-activity" class="tc">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                 <strong style="font-size:13px">Contact Activity</strong>
-                <span style="font-size:10px;color:var(--muted)">Inbox checked automatically every 30 min</span>
+                <span class="u-fs-xxs u-color-muted">Inbox checked automatically every 30 min</span>
             </div>
             <div class="act-summary" id="actSummary" style="display:none">
                 <div class="act-stat act-stat-sent" data-act-stat="all" onclick="setActStat('all',this)">
@@ -306,7 +306,7 @@
         <div id="tab-offers" class="tc">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                 <strong style="font-size:13px">Vendor Offers</strong>
-                <div style="display:flex;gap:6px">
+                <div class="u-flex u-gap-sm">
                     <button type="button" class="btn btn-ghost btn-sm" onclick="openLogOfferModal()">+ Log Offer</button>
                     <button type="button" class="btn btn-primary btn-sm" id="buildQuoteBtn" disabled onclick="buildQuoteFromSelected()">Build Quote from Selected (0)</button>
                 </div>
@@ -336,10 +336,10 @@
                 <button type="button" class="fp fp-sm" id="custUnassignedPill" onclick="toggleCustUnassigned(this)">Unassigned</button>
             </div>
             <label id="custMyOnlyLabel" class="tb-btn" style="display:none;gap:4px;cursor:pointer;align-items:center">
-                <input type="checkbox" id="custMyOnly" onchange="loadCustomers()" style="accent-color:var(--teal)" aria-label="Show only my accounts"> My accounts
+                <input type="checkbox" id="custMyOnly" onchange="loadCustomers()" class="u-accent-teal" aria-label="Show only my accounts"> My accounts
             </label>
             <button type="button" class="btn btn-primary btn-sm" onclick="openNewCompanyModal()">+ New Company</button>
-            <span id="custFilterCount" class="text-muted" style="font-size:11px"></span>
+            <span id="custFilterCount" class="text-muted" class="u-fs-xs"></span>
         </div>
         <div id="custList" aria-live="polite"><p class="empty">Loading…</p></div>
     </div>
@@ -357,7 +357,7 @@
             </div>
             <input class="sbox sbox-med" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" aria-label="Search vendors">
             <label class="tb-btn" style="display:flex;align-items:center;gap:4px;cursor:pointer">
-                <input type="checkbox" id="vendorHideBL" onchange="filterVendorList()" aria-label="Hide blacklisted" style="accent-color:var(--teal)"> Hide blacklisted
+                <input type="checkbox" id="vendorHideBL" onchange="filterVendorList()" aria-label="Hide blacklisted" class="u-accent-teal"> Hide blacklisted
             </label>
             <span id="vendorFilterCount" class="text-muted"></span>
         </div>
@@ -438,13 +438,13 @@
                 <div class="site-typeahead-list" id="nrSiteList"></div>
             </div>
             <div id="nrSiteSelected" style="display:none;margin-top:6px;padding:8px 12px;background:var(--teal-light);border:1px solid rgba(61,104,149,.15);border-radius:6px;font-size:12px">
-                <span id="nrSiteSelectedLabel" style="font-weight:600"></span>
+                <span id="nrSiteSelectedLabel" class="u-fw-600"></span>
                 <span onclick="clearNrSite()" style="margin-left:8px;color:var(--red);cursor:pointer;font-size:11px">Clear</span>
             </div>
         </div>
         <div class="field" style="margin-top:10px">
             <label>Need By</label>
-            <div style="display:flex;align-items:center;gap:10px">
+            <div class="u-flex u-items-center u-gap-md">
                 <input type="date" id="nrDeadline" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--white);color:var(--text)">
                 <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="nrAsap" onchange="if(this.checked)document.getElementById('nrDeadline').value=''"> ASAP</label>
             </div>
@@ -467,7 +467,7 @@
     <div class="modal modal-lg">
         <h2>Send Batch RFQ</h2>
         <div id="rfqPrepare">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+            <div class="u-flex u-items-center u-gap-md u-mb-md">
                 <div class="spinner"></div>
                 <p id="rfqPrepareStatus" style="font-size:12px;color:var(--text2);margin:0">Checking vendor contacts…</p>
             </div>
@@ -624,7 +624,7 @@
             <div class="field"><label>Currency</label><input id="ecCurrency" placeholder="USD" style="width:80px"></div>
             <div class="field"><label>Preferred Carrier</label><input id="ecCarrier" placeholder="FedEx, UPS..."></div>
             <div class="field" style="grid-column:1/-1"><label>Notes</label><textarea id="ecNotes" rows="2" style="width:100%"></textarea></div>
-            <div class="field"><label style="display:flex;align-items:center;gap:6px"><input type="checkbox" id="ecStrategic"> Strategic Account</label></div>
+            <div class="field"><label class="u-flex u-items-center u-gap-sm"><input type="checkbox" id="ecStrategic"> Strategic Account</label></div>
         </div>
         <div class="mactions">
             <button type="button" class="btn btn-ghost" onclick="closeModal('editCompanyModal')">Cancel</button>
@@ -645,8 +645,8 @@
             <div class="field"><label for="asSiteAddr2">Address Line 2</label><input id="asSiteAddr2" placeholder="Suite 200"></div>
             <div style="display:flex;gap:8px">
                 <div class="field" style="flex:2"><label for="asSiteCity">City</label><input id="asSiteCity" placeholder="Austin"></div>
-                <div class="field" style="flex:1"><label for="asSiteState">State</label><input id="asSiteState" placeholder="TX"></div>
-                <div class="field" style="flex:1"><label for="asSiteZip">Zip</label><input id="asSiteZip" placeholder="78701"></div>
+                <div class="field" class="u-flex-1"><label for="asSiteState">State</label><input id="asSiteState" placeholder="TX"></div>
+                <div class="field" class="u-flex-1"><label for="asSiteZip">Zip</label><input id="asSiteZip" placeholder="78701"></div>
             </div>
             <div class="field"><label for="asSiteCountry">Country</label><input id="asSiteCountry" placeholder="US" value="US"></div>
             <div class="field"><label for="asSitePayTerms">Payment Terms</label><input id="asSitePayTerms" placeholder="Net 30"></div>
@@ -673,9 +673,9 @@
 <div id="suggestedContactsModal" class="modal-bg" onclick="if(event.target===this)closeModal('suggestedContactsModal')">
     <div class="modal modal-lg">
         <h2 id="scModalTitle">Suggested Contacts</h2>
-        <p style="font-size:11px;color:var(--muted);margin-bottom:10px" id="scModalSubtitle">Select contacts to add</p>
+        <p class="u-fs-xs u-color-muted u-mb-md" id="scModalSubtitle">Select contacts to add</p>
         <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
-            <input class="req-search" id="scTitleFilter" placeholder="Filter by title (e.g. Sales, Procurement)…" style="flex:1"
+            <input class="req-search" id="scTitleFilter" placeholder="Filter by title (e.g. Sales, Procurement)…" class="u-flex-1"
                    onkeydown="if(event.key==='Enter')searchSuggestedContacts()">
             <button type="button" class="btn btn-ghost btn-sm" onclick="searchSuggestedContacts()">Search</button>
         </div>
@@ -712,9 +712,9 @@
             <div class="field field-full"><label>Notes</label><input id="loNotes" placeholder="Optional notes…"></div>
             <div class="field field-full">
                 <label>Attachments</label>
-                <div id="loAttachments" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px"></div>
-                <div style="display:flex;gap:6px">
-                    <label class="btn btn-ghost btn-sm" style="cursor:pointer">
+                <div id="loAttachments" class="u-flex u-flex-wrap u-gap-sm u-mb-sm"></div>
+                <div class="u-flex u-gap-sm">
+                    <label class="btn btn-ghost btn-sm" class="u-cursor-pointer">
                         Upload File <input type="file" id="loFileInput" multiple accept="image/*,.pdf,.xlsx,.xls,.csv,.doc,.docx" style="display:none" onchange="handleOfferFileSelect(this)">
                     </label>
                     <button type="button" class="btn btn-ghost btn-sm" onclick="openOneDrivePicker()">Browse OneDrive</button>
@@ -732,7 +732,7 @@
 <!-- Send Quote Modal -->
 <div id="sendQuoteModal" class="modal-bg" onclick="if(event.target===this)closeModal('sendQuoteModal')">
     <div class="modal" style="max-width:440px">
-        <h3 style="margin-bottom:12px">Send Quote</h3>
+        <h3 class="u-mb-md">Send Quote</h3>
         <p id="sqQuoteNum" style="font-size:12px;color:var(--text2);margin-bottom:12px"></p>
         <label style="display:block;margin-bottom:8px;font-size:12px;font-weight:600">Recipient</label>
         <select id="sqContactSelect" onchange="onSqContactChange()" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;margin-bottom:8px">
@@ -786,8 +786,8 @@
 <div id="oneDriveModal" class="modal-bg" onclick="if(event.target===this)closeModal('oneDriveModal')">
     <div class="modal modal-lg">
         <h2>Browse OneDrive</h2>
-        <div id="odBreadcrumb" style="font-size:12px;color:var(--muted);margin-bottom:8px">
-            <a onclick="browseOneDrive('')" style="cursor:pointer;color:var(--teal)">Root</a>
+        <div id="odBreadcrumb" class="u-fs-xs u-color-muted u-mb-sm">
+            <a onclick="browseOneDrive('')" class="u-cursor-pointer" style="color:var(--teal)">Root</a>
         </div>
         <div id="odFileList" style="max-height:400px;overflow-y:auto"><p class="empty">Loading…</p></div>
         <div class="mactions">
@@ -800,13 +800,13 @@
 <div id="buyPlanModal" class="modal-bg" onclick="if(event.target===this)closeModal('buyPlanModal')">
     <div class="modal modal-lg">
         <h2>Mark Won &amp; Submit Buy Plan</h2>
-        <p style="font-size:12px;color:var(--muted);margin-bottom:12px">Select items and set the quantity to purchase from each vendor. This will be sent to management for approval.</p>
-        <table class="tbl" style="margin-bottom:12px">
+        <p class="u-fs-xs u-color-muted u-mb-md">Select items and set the quantity to purchase from each vendor. This will be sent to management for approval.</p>
+        <table class="tbl" class="u-mb-md">
             <thead><tr><th style="width:30px"></th><th>MPN</th><th>Mfr</th><th>Avail Qty</th><th>Plan Qty</th><th>Unit Cost</th><th>Line Total</th><th>Lead</th></tr></thead>
             <tbody id="bpItems"></tbody>
         </table>
         <div style="text-align:right;font-weight:600;margin-bottom:12px">Total Cost: <span id="bpTotal"></span></div>
-        <div class="field" style="margin-bottom:12px">
+        <div class="field" class="u-mb-md">
             <label>Notes for Manager &amp; Buyers</label>
             <textarea id="bpSalespersonNotes" rows="3" placeholder="Add any context, special instructions, or notes for the purchasing team..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)"></textarea>
         </div>
@@ -865,7 +865,7 @@
             <div class="field"><label for="scPhone">Phone</label><input id="scPhone" type="tel" placeholder="+1 555-000-0000"></div>
             <div class="field field-full"><label for="scNotes">Notes</label><textarea id="scNotes" rows="2" placeholder="Optional notes"></textarea></div>
         </div>
-        <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:12px;color:var(--text2);cursor:pointer"><input id="scPrimary" type="checkbox" style="accent-color:var(--teal)" aria-label="Primary contact"> Primary contact</label>
+        <label style="display:flex;align-items:center;gap:8px;margin:8px 0;font-size:12px;color:var(--text2);cursor:pointer"><input id="scPrimary" type="checkbox" class="u-accent-teal" aria-label="Primary contact"> Primary contact</label>
         <div class="mactions">
             <button type="button" class="btn btn-ghost" onclick="closeModal('siteContactModal')">Cancel</button>
             <button type="button" class="btn btn-primary" onclick="saveSiteContact()">Save Contact</button>
@@ -920,7 +920,7 @@
         <h2>Send Proactive Offer</h2>
         <p id="psmCustomer" style="font-size:13px;color:var(--text2);margin-bottom:12px"></p>
 
-        <div style="margin-bottom:12px">
+        <div class="u-mb-md">
             <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Selected Items</label>
             <table class="offer-table" style="width:100%;font-size:12px">
                 <thead><tr><th>MPN</th><th>Vendor</th><th>Qty</th><th>Cost</th><th>Sell Price</th><th>Condition</th></tr></thead>
@@ -930,12 +930,12 @@
 
         <div class="send-preview" id="psmPreview"></div>
 
-        <div style="margin-top:12px">
+        <div class="u-mt-md">
             <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Contacts</label>
             <div id="psmContacts" style="font-size:12px"><span class="empty">Loading contacts…</span></div>
         </div>
 
-        <div class="field" style="margin-top:12px">
+        <div class="field" class="u-mt-md">
             <label for="psmSubject">Subject</label>
             <input id="psmSubject" placeholder="Parts Available — Company">
         </div>
@@ -1061,7 +1061,7 @@
                         <option value="company">Companies</option>
                     </select>
                     <button type="button" class="btn btn-sm" onclick="bulkApproveSelected()" id="eqBulkApproveBtn" style="display:none">Approve Selected</button>
-                    <span id="eqCount" class="s-hint" style="margin-left:auto"></span>
+                    <span id="eqCount" class="s-hint" class="u-ml-auto"></span>
                 </div>
                 <div id="enrichQueueList"><p class="empty">Loading...</p></div>
             </div>
