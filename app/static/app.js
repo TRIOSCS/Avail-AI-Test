@@ -4738,3 +4738,14 @@ if (document.readyState === 'loading') {
 } else {
     setTimeout(loadNotificationBadge, 2000);
 }
+
+// "/" keyboard shortcut to focus search bar
+document.addEventListener('keydown', function(e) {
+    if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        const tag = document.activeElement?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+        e.preventDefault();
+        const sb = document.getElementById('mainSearch');
+        if (sb) sb.focus();
+    }
+});
