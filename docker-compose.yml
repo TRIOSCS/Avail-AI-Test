@@ -43,6 +43,7 @@ services:
         condition: service_healthy
     volumes:
       - uploads:/app/uploads
+      - static_files:/srv/static
 
   # --- HTTPS (auto-generates SSL certificate for your domain) ---
   caddy:
@@ -55,6 +56,7 @@ services:
       - ./Caddyfile:/etc/caddy/Caddyfile
       - caddy_data:/data
       - caddy_config:/config
+      - static_files:/srv/static:ro
     depends_on:
       - app
 
@@ -64,3 +66,4 @@ volumes:
   redisdata:
   caddy_data:
   caddy_config:
+  static_files:

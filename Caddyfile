@@ -12,7 +12,8 @@ app.availai.net {
     @static path /static/*
     handle @static {
         header Cache-Control "public, max-age=31536000, immutable"
-        reverse_proxy app:8000
+        root * /srv
+        file_server
     }
 
     # Safe read-only GET endpoints — 30s browser cache reduces redundant

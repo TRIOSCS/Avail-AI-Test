@@ -1,3 +1,11 @@
+# Stage 1: Minify JS assets
+FROM node:20-alpine AS minifier
+WORKDIR /build
+RUN npm install -g terser
+COPY app/static/*.js ./
+RUN for f in *.js; do terser "$f" -o "$f" -c -m; done
+
+# Stage 2: Python application
 FROM python:3.12-slim
 
 WORKDIR /app
@@ -13,21 +21,18 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && apt-get purge -y gcc python3-dev && apt-get autoremove -y || true
 
-# Install Node.js + terser for JS minification (lightweight, no full Node app)
-RUN apt-get update && apt-get install -y --no-install-recommends nodejs npm \
-    && npm install -g terser \
-    && apt-get purge -y npm && apt-get autoremove -y \
-    && rm -rf /var/lib/apt/lists/* /root/.npm
-
 # Copy app code
 COPY app/ app/
 
-# Minify JS assets (~40-50% size reduction)
-RUN terser app/static/app.js -o app/static/app.js -c -m \
-    && terser app/static/crm.js -o app/static/crm.js -c -m
+# Overlay minified JS from stage 1
+COPY --from=minifier /build/*.js app/static/
 
 # Copy migration scripts
 COPY migrate_*.py .
 
-# Run the app
+# Copy entrypoint
+COPY docker-entrypoint.sh .
+RUN chmod +x docker-entrypoint.sh
+
+ENTRYPOINT ["./docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
