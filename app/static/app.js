@@ -27,6 +27,9 @@ function _rebuildSightingIndex() {
 
 // ── Shared Helpers ──────────────────────────────────────────────────────
 async function apiFetch(url, opts = {}) {
+    // CSRF: include double-submit cookie value as header
+    const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
+    if (csrf) opts.headers = {...(opts.headers || {}), 'x-csrftoken': csrf};
     if (opts.body && typeof opts.body === 'object' && !(opts.body instanceof FormData)) {
         opts.headers = {'Content-Type': 'application/json', ...(opts.headers || {})};
         opts.body = JSON.stringify(opts.body);
@@ -140,7 +143,7 @@ function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
                 showWebsite(true);
             }
             list.classList.add('show');
-        } catch (e) { console.error('autocomplete:', e); list.classList.remove('show'); }
+        } catch (e) { logCatchError('autocomplete', e); list.classList.remove('show'); }
     }, 250);
 
     input.addEventListener('input', function() {
@@ -203,7 +206,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const found = _reqListData.find(r => r.id === lastId);
             showDetail(lastId, found ? found.name : lastName);
         }
-    } catch(e) {}
+    } catch(e) { logCatchError('restoreLastReq', e); }
     checkM365Status();
     const dz = document.getElementById('dropZone');
     if (dz) {
@@ -332,7 +335,7 @@ async function refreshProactiveBadge() {
             if (data.count > 0) { badge.textContent = data.count; badge.style.display = ''; }
             else { badge.style.display = 'none'; }
         }
-    } catch (e) {}
+    } catch (e) { logCatchError('proactiveBadge', e); }
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
@@ -525,8 +528,7 @@ function switchTab(name, btn) {
 
 // ── Modals ──────────────────────────────────────────────────────────────
 function openNewReqModal() {
-    document.getElementById('newReqModal').classList.add('open');
-    setTimeout(() => document.getElementById('nrName').focus(), 100);
+    openModal('newReqModal', 'nrName');
 }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
@@ -606,7 +608,7 @@ async function loadRequisitions(query = '') {
         _reqListData = resp.requisitions || resp;
         _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
         renderReqList();
-    } catch (e) { console.error('loadRequisitions:', e); }
+    } catch (e) { logCatchError('loadRequisitions', e); showToast('Failed to load requisitions', 'error'); }
 }
 
 // v7 table sort state
@@ -757,7 +759,7 @@ function editDrillCell(td, rfqId, reqId, field) {
             await apiFetch(`/api/requirements/${reqId}`, { method: 'PUT', body });
             const idx = reqs.findIndex(x => x.id === reqId);
             if (idx >= 0) Object.assign(reqs[idx], body);
-        } catch(e) { console.error('editDrillCell:', e); }
+        } catch(e) { logCatchError('editDrillCell', e); }
         _renderDrillDownTable(rfqId);
     };
 
@@ -1655,7 +1657,7 @@ async function loadRequirements() {
     const reqId = currentReqId;
     delete _ddReqCache[reqId];
     try { reqData = await apiFetch(`/api/requisitions/${reqId}/requirements`); }
-    catch(e) { console.error('loadRequirements:', e); return; }
+    catch(e) { logCatchError('loadRequirements', e); showToast('Failed to load requirements', 'error'); return; }
     if (currentReqId !== reqId) return; // RFQ changed while loading
     window._currentRequirements = reqData;  // expose for AI Smart RFQ
     // Auto-select all requirements
@@ -1935,39 +1937,34 @@ function submitOrSearch() {
     searchAll();
 }
 
-let _searchInFlight = false;
 async function searchAll() {
     if (!currentReqId) return;
-    if (_searchInFlight) return;
     if (!selectedRequirements.size) { showToast('No parts selected', 'warn'); return; }
     const btn = document.getElementById('searchAllBtn');
     const reqIdAtStart = currentReqId;
-    _searchInFlight = true;
-    btn.disabled = true; btn.textContent = 'Searching…';
-    try {
-        const body = { requirement_ids: [...selectedRequirements] };
-        const results = await apiFetch(`/api/requisitions/${reqIdAtStart}/search`, { method: 'POST', body });
-        if (currentReqId !== reqIdAtStart) return;  // User navigated away
-        searchResults = results;
-        searchResultsCache[currentReqId] = searchResults;
-        _rebuildSightingIndex();
-        selectedSightings.clear();
-        expandedGroups.clear();
-        renderSources();
-        updateRequirementCounts();
-        switchTab('sources', document.querySelectorAll('#reqTabs .tab')[1]);
-        // Update status in cached list (draft→active after submit)
-        const reqInfo = _reqListData.find(r => r.id === currentReqId);
-        if (reqInfo && reqInfo.status === 'draft') {
-            reqInfo.status = 'active';
-            notifyStatusChange({status_changed: true, req_status: 'active'});
+    await guardBtn(btn, 'Searching…', async () => {
+        try {
+            const body = { requirement_ids: [...selectedRequirements] };
+            const results = await apiFetch(`/api/requisitions/${reqIdAtStart}/search`, { method: 'POST', body });
+            if (currentReqId !== reqIdAtStart) return;  // User navigated away
+            searchResults = results;
+            searchResultsCache[currentReqId] = searchResults;
+            _rebuildSightingIndex();
+            selectedSightings.clear();
+            expandedGroups.clear();
+            renderSources();
+            updateRequirementCounts();
+            switchTab('sources', document.querySelectorAll('#reqTabs .tab')[1]);
+            // Update status in cached list (draft→active after submit)
+            const reqInfo = _reqListData.find(r => r.id === currentReqId);
+            if (reqInfo && reqInfo.status === 'draft') {
+                reqInfo.status = 'active';
+                notifyStatusChange({status_changed: true, req_status: 'active'});
+            }
+        } catch (e) {
+            showToast('Search error: ' + e.message, 'error');
         }
-    } catch (e) {
-        showToast('Search error: ' + e.message, 'error');
-    } finally {
-        _searchInFlight = false;
-    }
-    btn.disabled = false; btn.textContent = 'Search Selected';
+    });
 }
 
 function updateRequirementCounts() {
@@ -2703,38 +2700,38 @@ function rfqRemoveVendor(idx) {
 
 async function sendBatchRfq() {
     const btn = document.getElementById('rfqSendBtn');
-    btn.disabled = true; btn.textContent = 'Sending…';
-    const subject = document.getElementById('rfqSubject').value;
-    // Build per-vendor payloads with personalized body
-    const sendable = rfqVendorData.filter(g => g.included && g.selected_email && _vendorHasPartsToSend(g));
-    if (!sendable.length) { showToast('No vendors with email and new parts to send', 'error'); btn.disabled = false; btn.textContent = 'Send'; return; }
-    const payload = sendable.map(g => {
-        const body = buildVendorBody(g);
-        // All parts being sent (for contact tracking)
-        let sentParts = [...g.new_listing, ...g.new_other];
-        if (g.include_repeats) sentParts = [...sentParts, ...g.repeat_listing, ...g.repeat_other];
-        return {
-            vendor_name: g.vendor_name, vendor_email: g.selected_email,
-            parts: sentParts, subject, body
-        };
-    });
-    try {
-        const data = await apiFetch(`/api/requisitions/${currentReqId}/rfq`, {
-            method: 'POST', body: { groups: payload }
+    await guardBtn(btn, 'Sending…', async () => {
+        const subject = document.getElementById('rfqSubject').value;
+        // Build per-vendor payloads with personalized body
+        const sendable = rfqVendorData.filter(g => g.included && g.selected_email && _vendorHasPartsToSend(g));
+        if (!sendable.length) { showToast('No vendors with email and new parts to send', 'error'); return; }
+        const payload = sendable.map(g => {
+            const body = buildVendorBody(g);
+            // All parts being sent (for contact tracking)
+            let sentParts = [...g.new_listing, ...g.new_other];
+            if (g.include_repeats) sentParts = [...sentParts, ...g.repeat_listing, ...g.repeat_other];
+            return {
+                vendor_name: g.vendor_name, vendor_email: g.selected_email,
+                parts: sentParts, subject, body
+            };
         });
-        const sent = (data.results || []).filter(r => r.status === 'sent').length;
-        showToast(`${sent} of ${payload.length} emails sent successfully`, 'success');
-        closeModal('rfqModal');
-        selectedSightings.clear();
-        // Clear sourcing drill-down state so next expand re-fetches fresh data
-        if (_ddSelectedSightings[currentReqId]) delete _ddSelectedSightings[currentReqId];
-        if (_ddSightingsCache[currentReqId]) delete _ddSightingsCache[currentReqId];
-        renderSources();
-        loadActivity();
-    } catch (e) {
-        showToast('Send error: ' + e.message, 'error');
-    }
-    btn.disabled = false; btn.textContent = 'Send';
+        try {
+            const data = await apiFetch(`/api/requisitions/${currentReqId}/rfq`, {
+                method: 'POST', body: { groups: payload }
+            });
+            const sent = (data.results || []).filter(r => r.status === 'sent').length;
+            showToast(`${sent} of ${payload.length} emails sent successfully`, 'success');
+            closeModal('rfqModal');
+            selectedSightings.clear();
+            // Clear sourcing drill-down state so next expand re-fetches fresh data
+            if (_ddSelectedSightings[currentReqId]) delete _ddSelectedSightings[currentReqId];
+            if (_ddSightingsCache[currentReqId]) delete _ddSightingsCache[currentReqId];
+            renderSources();
+            loadActivity();
+        } catch (e) {
+            showToast('Send error: ' + e.message, 'error');
+        }
+    });
 }
 
 // ── Click-to-Call Logging ───────────────────────────────────────────────
@@ -2745,7 +2742,7 @@ async function logCall(event, vendorName, vendorPhone, mpn) {
                                    vendor_phone: vendorPhone, parts: mpn ? [mpn] : [] }
         });
         loadActivity();
-    } catch (e) { console.error('Failed to log call:', e); }
+    } catch (e) { logCatchError('logCall', e); showToast('Failed to log call', 'error'); }
 }
 
 // ── Vendor Card Popup ──────────────────────────────────────────────────
@@ -2753,7 +2750,7 @@ async function openVendorPopup(cardId) {
     _vendorEmailsLoaded = null;  // Reset so emails reload for new vendor
     let card;
     try { card = await apiFetch(`/api/vendors/${cardId}`); }
-    catch (e) { console.error('Failed to load vendor:', e); return; }
+    catch (e) { logCatchError('openVendorPopup', e); showToast('Failed to load vendor', 'error'); return; }
 
     let html = `<div class="vp-header">
         <h2 onclick="editVendorField(${card.id},'display_name',this)" style="cursor:pointer" title="Click to edit">${esc(card.display_name)}</h2>
@@ -2964,7 +2961,7 @@ async function openVendorPopup(cardId) {
     </div>`;
 
     document.getElementById('vendorPopupContent').innerHTML = html;
-    document.getElementById('vendorPopup').classList.add('open');
+    openModal('vendorPopup');
 
     // Load contacts, activities, metrics, and intel asynchronously
     loadVendorContacts(card.id);
@@ -2991,7 +2988,7 @@ async function loadVendorEmailMetrics(cardId) {
             <div style="text-align:center"><div style="font-weight:800;font-size:14px">${avgResp}</div><div style="color:var(--muted)">Avg Response</div></div>
             <div style="text-align:center"><div style="font-weight:800;font-size:14px;color:var(--purple)">${m.active_rfqs || 0}</div><div style="color:var(--muted)">Active RFQs</div></div>
         </div>`;
-    } catch { el.innerHTML = ''; }
+    } catch(e) { logCatchError('vendorMetrics', e); el.innerHTML = ''; }
 }
 
 // ── Vendor Offer History ─────────────────────────────────────────────────
@@ -3145,8 +3142,7 @@ function openAddVendorContact(cardId) {
     document.getElementById('vendorContactModalTitle').textContent = 'Add Vendor Contact';
     ['vcFullName','vcTitle','vcEmail','vcPhone','vcLabel'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('vcLabel').value = 'Sales';
-    document.getElementById('vendorContactModal').classList.add('open');
-    setTimeout(() => document.getElementById('vcEmail').focus(), 100);
+    openModal('vendorContactModal', 'vcEmail');
 }
 
 async function openEditVendorContact(cardId, contactId) {
@@ -3162,9 +3158,8 @@ async function openEditVendorContact(cardId, contactId) {
         document.getElementById('vcEmail').value = c.email || '';
         document.getElementById('vcPhone').value = c.phone || '';
         document.getElementById('vcLabel').value = c.label || '';
-        document.getElementById('vendorContactModal').classList.add('open');
-        setTimeout(() => document.getElementById('vcFullName').focus(), 100);
-    } catch(e) { console.error('openEditVendorContact:', e); showToast('Error loading contact', 'error'); }
+        openModal('vendorContactModal', 'vcFullName');
+    } catch(e) { logCatchError('openEditVendorContact', e); showToast('Error loading contact', 'error'); }
 }
 
 async function saveVendorContact() {
@@ -3239,7 +3234,7 @@ async function loadVendorActivityStatus(cardId) {
         const labels = { green: 'Active', yellow: 'At risk', red: 'Stale', no_activity: 'No activity' };
         const daysText = d.days_since_activity != null ? ' (' + d.days_since_activity + 'd)' : '';
         el.innerHTML = `<span class="badge" style="background:color-mix(in srgb,${colors[d.status]} 15%,transparent);color:${colors[d.status]};font-size:9px;padding:1px 6px;border-radius:8px">${labels[d.status]}${daysText}</span>`;
-    } catch(e) { console.error('loadVendorActivityStatus:', e); }
+    } catch(e) { logCatchError('vendorActivityStatus', e); }
 }
 
 function openVendorLogCallModal(cardId, vendorName, reqId) {
@@ -3248,7 +3243,7 @@ function openVendorLogCallModal(cardId, vendorName, reqId) {
     ['vlcPhone','vlcContactName','vlcDuration','vlcNotes'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('vlcDirection').value = 'outbound';
     window._vlcReqId = reqId || null;
-    document.getElementById('vendorLogCallModal').classList.add('open');
+    openModal('vendorLogCallModal');
     setTimeout(() => document.getElementById('vlcPhone').focus(), 100);
 }
 
@@ -3319,8 +3314,7 @@ function openVendorLogNoteModal(cardId, vendorName, reqId) {
     document.getElementById('vlnVendorName').textContent = vendorName;
     ['vlnContactName','vlnNotes'].forEach(id => document.getElementById(id).value = '');
     window._vlnReqId = reqId || null;
-    document.getElementById('vendorLogNoteModal').classList.add('open');
-    setTimeout(() => document.getElementById('vlnNotes').focus(), 100);
+    openModal('vendorLogNoteModal', 'vlnNotes');
 }
 
 async function saveVendorLogNote() {
@@ -3436,7 +3430,7 @@ async function loadMorePartsSightings(cardId) {
         listEl.innerHTML += renderPartsSightingItems(data.items);
         _partsSightingsOffset += data.items.length;
         moreEl.style.display = _partsSightingsOffset < data.total ? '' : 'none';
-    } catch(e) {}
+    } catch(e) { logCatchError('partsSightings', e); }
 }
 
 function renderPartsSightingItems(items) {
@@ -3502,7 +3496,7 @@ async function loadVendorList() {
     const q = (document.getElementById('vendorSearch') || {}).value || '';
     let resp;
     try { resp = await apiFetch(`/api/vendors?q=${encodeURIComponent(q)}`); }
-    catch (e) { console.error('Failed to load vendors:', e); return; }
+    catch (e) { logCatchError('loadVendorList', e); showToast('Failed to load vendors', 'error'); return; }
     _vendorListData = resp.vendors || resp;
     filterVendorList();
 }
@@ -3625,7 +3619,7 @@ async function loadMaterialList() {
     const q = (document.getElementById('materialSearch') || {}).value || '';
     let resp;
     try { resp = await apiFetch(`/api/materials?q=${encodeURIComponent(q)}`); }
-    catch (e) { console.error('Failed to load materials:', e); return; }
+    catch (e) { logCatchError('loadMaterialList', e); showToast('Failed to load materials', 'error'); return; }
     _materialListData = resp.materials || resp;
     renderMaterialList();
 }
@@ -3692,7 +3686,7 @@ function renderMaterialList() {
 async function openMaterialPopup(cardId) {
     let card, pricingHistory;
     try { card = await apiFetch(`/api/materials/${cardId}`); }
-    catch (e) { console.error('Failed to load material:', e); return; }
+    catch (e) { logCatchError('openMaterialPopup', e); showToast('Failed to load material', 'error'); return; }
 
     // Fetch customer quote history for this MPN
     const mpn = card.display_mpn || card.normalized_mpn;
@@ -3783,13 +3777,13 @@ async function openMaterialPopup(cardId) {
     html += '</div>';
 
     document.getElementById('materialPopupContent').innerHTML = html;
-    document.getElementById('materialPopup').classList.add('open');
+    openModal('materialPopup');
 }
 
 async function openVendorPopupByName(vendorName) {
     let resp;
     try { resp = await apiFetch(`/api/vendors?q=${encodeURIComponent(vendorName)}`); }
-    catch (e) { console.error('Failed to load vendor:', e); return; }
+    catch (e) { logCatchError('openVendorPopupByName', e); showToast('Vendor not found', 'error'); return; }
     const data = resp.vendors || resp;
     if (data.length) {
         const exact = data.find(c => c.display_name.toLowerCase() === vendorName.toLowerCase());

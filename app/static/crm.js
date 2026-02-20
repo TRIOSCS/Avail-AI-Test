@@ -36,7 +36,7 @@ function sortCustList(col) {
 function autoLogCrmCall(phone) {
     apiFetch('/api/activities/call', {
         method: 'POST', body: { phone: phone, direction: 'outbound' }
-    }).catch(function(e) { console.error('autoLogCrmCall:', e); });
+    }).catch(function(e) { logCatchError('autoLogCrmCall', e); });
 }
 
 // ── Customer Filter / Sort Helpers ─────────────────────────────────────
@@ -322,39 +322,37 @@ async function toggleSiteDetail(siteId) {
             if (intelEl && s.company_name) {
                 loadCompanyIntel(s.company_name, siteDomain, intelEl);
             }
-        } catch (e) { panel.innerHTML = '<p class="empty" style="padding:8px">Error loading site</p>'; }
+        } catch (e) { logCatchError('loadSiteDetail', e); panel.innerHTML = '<p class="empty" style="padding:8px">Error loading site</p>'; }
     } else {
         panel.style.display = 'none';
     }
 }
 
 function openNewCompanyModal() {
-    document.getElementById('newCompanyModal').classList.add('open');
-    setTimeout(() => document.getElementById('ncName').focus(), 100);
+    openModal('newCompanyModal', 'ncName');
 }
 
-let _createCompanyBusy = false;
 async function createCompany() {
-    if (_createCompanyBusy) return;
     const name = document.getElementById('ncName').value.trim();
     if (!name) return;
-    _createCompanyBusy = true;
-    try {
-        const data = await apiFetch('/api/companies', {
-            method: 'POST', body: {
-                name, website: document.getElementById('ncWebsite').value.trim(),
-                linkedin_url: document.getElementById('ncLinkedin').value.trim() || null,
-                industry: document.getElementById('ncIndustry').value.trim(),
-            }
-        });
-        closeModal('newCompanyModal');
-        ['ncName','ncWebsite','ncLinkedin','ncIndustry'].forEach(id => document.getElementById(id).value = '');
-        showToast('Company "' + data.name + '" created', 'success');
-        openAddSiteModal(data.id, data.name);
-        loadCustomers();
-        loadSiteOptions();
-    } catch (e) { showToast('Failed to create company', 'error'); }
-    finally { _createCompanyBusy = false; }
+    const btn = document.querySelector('#newCompanyModal .btn-primary');
+    await guardBtn(btn, 'Creating…', async () => {
+        try {
+            const data = await apiFetch('/api/companies', {
+                method: 'POST', body: {
+                    name, website: document.getElementById('ncWebsite').value.trim(),
+                    linkedin_url: document.getElementById('ncLinkedin').value.trim() || null,
+                    industry: document.getElementById('ncIndustry').value.trim(),
+                }
+            });
+            closeModal('newCompanyModal');
+            ['ncName','ncWebsite','ncLinkedin','ncIndustry'].forEach(id => document.getElementById(id).value = '');
+            showToast('Company "' + data.name + '" created', 'success');
+            openAddSiteModal(data.id, data.name);
+            loadCustomers();
+            loadSiteOptions();
+        } catch (e) { showToast('Failed to create company', 'error'); }
+    });
 }
 
 async function openEditCompany(companyId) {
@@ -381,8 +379,7 @@ async function openEditCompany(companyId) {
     document.getElementById('ecStrategic').checked = !!c.is_strategic;
     await loadUserOptions('ecOwner');
     if (c.account_owner_id) document.getElementById('ecOwner').value = c.account_owner_id;
-    document.getElementById('editCompanyModal').classList.add('open');
-    setTimeout(function() { document.getElementById('ecName').focus(); }, 100);
+    openModal('editCompanyModal', 'ecName');
 }
 
 async function saveEditCompany() {
@@ -430,8 +427,7 @@ function openAddSiteModal(companyId, companyName) {
     document.getElementById('asSiteCountry').value = 'US';
     document.getElementById('asSiteType').value = '';
     document.getElementById('asSiteNotes').value = '';
-    document.getElementById('addSiteModal').classList.add('open');
-    setTimeout(() => document.getElementById('asSiteName').focus(), 100);
+    openModal('addSiteModal', 'asSiteName');
 }
 
 async function addSite() {
@@ -494,7 +490,7 @@ async function openEditSiteModal(siteId) {
         document.getElementById('asSiteRecvHours').value = s.receiving_hours || '';
         document.getElementById('asSiteCarrierAcct').value = s.carrier_account || '';
         document.getElementById('asSiteNotes').value = s.notes || '';
-        document.getElementById('addSiteModal').classList.add('open');
+        openModal('addSiteModal');
         document.querySelector('#addSiteModal h2').innerHTML = 'Edit Site — <span>' + esc(s.site_name || '') + '</span>';
     } catch (e) { console.error('openEditSiteModal:', e); showToast('Error loading site', 'error'); }
 }
@@ -519,7 +515,7 @@ async function loadOffers() {
         selectedOffers.clear();
         renderOffers();
         updateOfferTabBadge();
-    } catch (e) { console.error('loadOffers:', e); }
+    } catch (e) { logCatchError('loadOffers', e); showToast('Failed to load offers', 'error'); }
 }
 
 function updateOfferTabBadge() {
@@ -721,7 +717,7 @@ function updateBuildQuoteBtn() {
 }
 
 function openLogOfferModal() {
-    document.getElementById('logOfferModal').classList.add('open');
+    openModal('logOfferModal');
     _pendingOfferFiles = [];
     document.getElementById('loAttachments').innerHTML = '';
     const sel = document.getElementById('loMpn');
@@ -784,7 +780,7 @@ async function saveOffer(andNext) {
                         fd.append('file', f);
                         await apiFetch('/api/offers/' + result.id + '/attachments', { method: 'POST', body: fd });
                     }
-                } catch (e) { console.error('Attachment upload failed:', e); }
+                } catch (e) { logCatchError('attachmentUpload', e); }
             }
         }
         _pendingOfferFiles = [];
@@ -827,7 +823,7 @@ let _odTargetOfferId = null;
 function openOneDrivePicker(offerId) {
     _odTargetOfferId = offerId || null;
     _odCurrentPath = '';
-    document.getElementById('oneDriveModal').classList.add('open');
+    openModal('oneDriveModal');
     browseOneDrive('');
 }
 
@@ -940,7 +936,7 @@ function openEditOffer(offerId) {
     document.getElementById('eoMoq').value = offer.moq || '';
     document.getElementById('eoNotes').value = offer.notes || '';
     document.getElementById('eoStatus').value = offer.status || 'active';
-    document.getElementById('editOfferModal').classList.add('open');
+    openModal('editOfferModal');
 }
 
 async function updateOffer() {
@@ -1226,7 +1222,7 @@ function sendQuoteEmail() {
     document.getElementById('sqQuoteNum').textContent = q.quote_number + ' Rev ' + q.revision;
     document.getElementById('sqManualEmail').value = '';
     onSqContactChange();
-    document.getElementById('sendQuoteModal').classList.add('open');
+    openModal('sendQuoteModal');
 }
 
 function onSqContactChange() {
@@ -1236,11 +1232,8 @@ function onSqContactChange() {
     if (manual) setTimeout(function() { document.getElementById('sqManualEmail').focus(); }, 50);
 }
 
-let _sendQuoteBusy = false;
 async function confirmSendQuote() {
-    if (_sendQuoteBusy) return;
     if (!crmQuote) return;
-    _sendQuoteBusy = true;
     var sel = document.getElementById('sqContactSelect');
     var toEmail, toName;
     if (sel.value === '__manual__') {
@@ -1251,18 +1244,20 @@ async function confirmSendQuote() {
         toEmail = sel.value;
         toName = sel.options[sel.selectedIndex].dataset.name || '';
     }
-    closeModal('sendQuoteModal');
-    try {
-        await saveQuoteDraft();
-        var sendData = await apiFetch('/api/quotes/' + crmQuote.id + '/send', {
-            method: 'POST',
-            body: { to_email: toEmail, to_name: toName }
-        });
-        showToast('Quote sent to ' + (sendData.sent_to || toEmail), 'success');
-        notifyStatusChange(sendData);
-        loadQuote();
-    } catch (e) { console.error('sendQuoteEmail:', e); showToast('Error sending quote: ' + (e.message||''), 'error'); }
-    finally { _sendQuoteBusy = false; }
+    var btn = document.querySelector('#sendQuoteModal .btn-primary');
+    await guardBtn(btn, 'Sending…', async () => {
+        closeModal('sendQuoteModal');
+        try {
+            await saveQuoteDraft();
+            var sendData = await apiFetch('/api/quotes/' + crmQuote.id + '/send', {
+                method: 'POST',
+                body: { to_email: toEmail, to_name: toName }
+            });
+            showToast('Quote sent to ' + (sendData.sent_to || toEmail), 'success');
+            notifyStatusChange(sendData);
+            loadQuote();
+        } catch (e) { logCatchError('sendQuoteEmail', e); showToast('Error sending quote: ' + (e.message||''), 'error'); }
+    });
 }
 
 // ── Quote History ──────────────────────────────────────────────────────
@@ -1296,7 +1291,7 @@ async function loadQuoteHistory() {
                 <tbody>${rows}</tbody>
             </table>
         </div>`;
-    } catch (e) { console.error('loadQuoteHistory:', e); }
+    } catch (e) { logCatchError('loadQuoteHistory', e); showToast('Failed to load quote history', 'error'); }
 }
 
 async function loadSpecificQuote(quoteId) {
@@ -1304,7 +1299,7 @@ async function loadSpecificQuote(quoteId) {
         const quotes = await apiFetch('/api/requisitions/' + currentReqId + '/quotes');
         const q = quotes.find(x => x.id === quoteId);
         if (q) { crmQuote = q; renderQuote(); }
-    } catch (e) { console.error('loadSpecificQuote:', e); }
+    } catch (e) { logCatchError('loadSpecificQuote', e); showToast('Failed to load quote', 'error'); }
 }
 
 async function markQuoteResult(result) {
@@ -1325,7 +1320,7 @@ async function markQuoteResult(result) {
 }
 
 function openLostModal() {
-    document.getElementById('lostModal').classList.add('open');
+    openModal('lostModal');
 }
 
 // ── Buy Plan ────────────────────────────────────────────────────────────
@@ -1335,7 +1330,7 @@ let _currentBuyPlan = null;
 function openBuyPlanModal() {
     if (!crmQuote) return;
     const modal = document.getElementById('buyPlanModal');
-    modal.classList.add('open');
+    openModal('buyPlanModal');
     const items = (crmQuote.line_items || []).map((item, i) => {
         const qty = item.qty || 0;
         return `
@@ -1371,11 +1366,8 @@ function updateBpTotals() {
     document.getElementById('bpTotal').textContent = '$' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 
-let _submitBuyPlanBusy = false;
 async function submitBuyPlan() {
-    if (_submitBuyPlanBusy) return;
     if (!crmQuote) return;
-    _submitBuyPlanBusy = true;
     const checks = document.querySelectorAll('.bp-check:checked');
     const selectedIndices = Array.from(checks).map(c => parseInt(c.dataset.idx));
     if (!selectedIndices.length) { showToast('Select at least one item', 'error'); return; }
@@ -1394,30 +1386,33 @@ async function submitBuyPlan() {
     if (!offerIds.length) { showToast('No offer IDs found', 'error'); return; }
 
     const salespersonNotes = document.getElementById('bpSalespersonNotes')?.value?.trim() || '';
+    var btn = document.querySelector('#buyPlanModal .btn-success');
 
-    try {
-        const res = await apiFetch('/api/quotes/' + crmQuote.id + '/buy-plan', {
-            method: 'POST', body: {
-                offer_ids: offerIds,
-                plan_qtys: planQtys,
-                salesperson_notes: salespersonNotes
-            }
-        });
-        showToast('Buy plan submitted for approval!', 'success');
-        closeModal('buyPlanModal');
-        notifyStatusChange(res);
-        loadQuote();
-    } catch (e) {
-        console.error('submitBuyPlan:', e);
-        showToast('Failed to submit buy plan', 'error');
-    } finally { _submitBuyPlanBusy = false; }
+    await guardBtn(btn, 'Submitting…', async () => {
+        try {
+            const res = await apiFetch('/api/quotes/' + crmQuote.id + '/buy-plan', {
+                method: 'POST', body: {
+                    offer_ids: offerIds,
+                    plan_qtys: planQtys,
+                    salesperson_notes: salespersonNotes
+                }
+            });
+            showToast('Buy plan submitted for approval!', 'success');
+            closeModal('buyPlanModal');
+            notifyStatusChange(res);
+            loadQuote();
+        } catch (e) {
+            logCatchError('submitBuyPlan', e);
+            showToast('Failed to submit buy plan', 'error');
+        }
+    });
 }
 
 async function loadBuyPlan() {
     if (!crmQuote) return;
     try {
         _currentBuyPlan = await apiFetch('/api/buy-plans/for-quote/' + crmQuote.id);
-    } catch (e) { _currentBuyPlan = null; }
+    } catch (e) { logCatchError('loadBuyPlan', e); showToast('Failed to load buy plan', 'error'); _currentBuyPlan = null; }
     renderBuyPlanStatus();
 }
 
@@ -1951,7 +1946,7 @@ async function reopenQuote(revise) {
 // ── Pricing History ────────────────────────────────────────────────────
 
 async function openPricingHistory(mpn) {
-    document.getElementById('phModal').classList.add('open');
+    openModal('phModal');
     document.getElementById('phMpn').textContent = mpn;
     document.getElementById('phContent').innerHTML = '<p class="empty">Loading...</p>';
     try {
@@ -1967,7 +1962,7 @@ async function openPricingHistory(mpn) {
         html += '</tbody></table>';
         html += '<div class="ph-summary">Avg: $' + Number(data.avg_price||0).toFixed(4) + ' · Margin: ' + Number(data.avg_margin||0).toFixed(1) + '%' + (data.price_range ? ' · Range: $'+Number(data.price_range[0]).toFixed(4)+' – $'+Number(data.price_range[1]).toFixed(4) : '') + '</div>';
         document.getElementById('phContent').innerHTML = html;
-    } catch (e) { console.error('openPricingHistory:', e); document.getElementById('phContent').innerHTML = '<p class="empty">Error loading pricing</p>'; }
+    } catch (e) { logCatchError('pricingHistory', e); document.getElementById('phContent').innerHTML = '<p class="empty">Error loading pricing</p>'; }
 }
 
 // ── Clone Requisition ──────────────────────────────────────────────────
@@ -1987,13 +1982,13 @@ async function loadUserOptions(selectId) {
     try {
         if (!_userListCache) {
             try { _userListCache = await apiFetch('/api/users/list'); }
-            catch (e) { console.warn('Failed to load user list:', e); _userListCache = []; }
+            catch (e) { logCatchError('loadUserOptions', e); _userListCache = []; }
         }
         const sel = document.getElementById(selectId);
         if (!sel) return;
         sel.innerHTML = '<option value="">— None —</option>' +
             _userListCache.map(u => '<option value="' + u.id + '">' + esc(u.name) + ' (' + u.role + ')</option>').join('');
-    } catch (e) { console.error('loadUserOptions:', e); }
+    } catch (e) { logCatchError('loadUserOptions', e); }
 }
 
 // ── Customer site typeahead for req creation ──────────────────────────
@@ -2071,7 +2066,7 @@ async function loadNrContacts(siteId) {
                 `<option value="${c.siteId}" ${c.siteId === siteId ? 'selected' : ''}>${esc(c.name)}${c.email ? ' (' + esc(c.email) + ')' : ''} — ${esc(c.siteName)}</option>`
             ).join('');
         field.style.display = '';
-    } catch (e) { field.style.display = 'none'; }
+    } catch (e) { logCatchError('loadNrContacts', e); field.style.display = 'none'; }
 }
 
 // Close typeahead on outside click
@@ -2099,8 +2094,7 @@ function openSuggestedContacts(type, id, domain, name) {
     document.getElementById('scTitleFilter').value = '';
     document.getElementById('scResults').innerHTML = '<p class="empty">Click Search to find contacts at ' + esc(domain) + '</p>';
     document.getElementById('scAddBtn').style.display = 'none';
-    document.getElementById('suggestedContactsModal').classList.add('open');
-    setTimeout(() => document.getElementById('scTitleFilter').focus(), 100);
+    openModal('suggestedContactsModal', 'scTitleFilter');
 }
 
 async function searchSuggestedContacts() {
@@ -2569,8 +2563,7 @@ function openAddSiteContact(siteId) {
     document.getElementById('siteContactModalTitle').textContent = 'Add Contact';
     ['scFullName','scTitle','scEmail','scPhone','scNotes'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('scPrimary').checked = false;
-    document.getElementById('siteContactModal').classList.add('open');
-    setTimeout(() => document.getElementById('scFullName').focus(), 100);
+    openModal('siteContactModal', 'scFullName');
 }
 
 async function openEditSiteContact(siteId, contactId) {
@@ -2587,9 +2580,8 @@ async function openEditSiteContact(siteId, contactId) {
         document.getElementById('scPhone').value = c.phone || '';
         document.getElementById('scNotes').value = c.notes || '';
         document.getElementById('scPrimary').checked = !!c.is_primary;
-        document.getElementById('siteContactModal').classList.add('open');
-        setTimeout(() => document.getElementById('scFullName').focus(), 100);
-    } catch (e) { console.error('openEditSiteContact:', e); showToast('Error loading contact', 'error'); }
+        openModal('siteContactModal', 'scFullName');
+    } catch (e) { logCatchError('openEditSiteContact', e); showToast('Error loading contact', 'error'); }
 }
 
 async function saveSiteContact() {
@@ -2656,7 +2648,7 @@ async function loadCompanyActivityStatus(companyId) {
         const daysText = d.days_since_activity != null ? ' (' + d.days_since_activity + 'd)' : '';
         el.innerHTML = `<span class="badge" style="background:color-mix(in srgb,${colors[d.status]} 15%,transparent);color:${colors[d.status]};font-size:9px;padding:1px 6px;border-radius:8px">${labels[d.status]}${daysText}</span>`;
         el.dataset.loaded = '1';
-    } catch(e) { console.error('loadActivityStatus:', e); }
+    } catch(e) { logCatchError('companyActivityStatus', e); showToast('Failed to load activity status', 'error'); }
 }
 
 async function loadCompanyActivities(companyId) {
@@ -2686,7 +2678,7 @@ async function loadCompanyActivities(companyId) {
                 <span class="act-row-meta">${typeof fmtRelative === 'function' ? fmtRelative(a.created_at) : (a.created_at || '').slice(0, 10)}</span>
             </div>`;
         }).join('');
-    } catch(e) { console.error('loadCompanyActivities:', e); el.innerHTML = '<p class="empty" style="font-size:11px">Error</p>'; }
+    } catch(e) { logCatchError('companyActivities', e); el.innerHTML = '<p class="empty" style="font-size:11px">Error</p>'; }
 }
 
 function openLogCallModal(companyId, companyName) {
@@ -2694,8 +2686,7 @@ function openLogCallModal(companyId, companyName) {
     document.getElementById('lcCompanyName').textContent = companyName;
     ['lcPhone','lcContactName','lcDuration','lcNotes'].forEach(id => document.getElementById(id).value = '');
     document.getElementById('lcDirection').value = 'outbound';
-    document.getElementById('logCallModal').classList.add('open');
-    setTimeout(() => document.getElementById('lcPhone').focus(), 100);
+    openModal('logCallModal', 'lcPhone');
 }
 
 async function saveLogCall() {
@@ -2725,8 +2716,7 @@ function openLogNoteModal(companyId, companyName) {
     document.getElementById('lnCompanyId').value = companyId;
     document.getElementById('lnCompanyName').textContent = companyName;
     ['lnContactName','lnNotes'].forEach(id => document.getElementById(id).value = '');
-    document.getElementById('logNoteModal').classList.add('open');
-    setTimeout(() => document.getElementById('lnNotes').focus(), 100);
+    openModal('logNoteModal', 'lnNotes');
 }
 
 async function saveLogNote() {
@@ -2853,7 +2843,7 @@ async function openProactiveSendModal(siteId) {
     // Load contacts
     try {
         _proactiveSiteContacts = await apiFetch('/api/proactive/contacts/' + siteId);
-    } catch (e) { _proactiveSiteContacts = []; }
+    } catch (e) { logCatchError('proactiveContacts', e); _proactiveSiteContacts = []; }
 
     // Find group for company name
     const group = _proactiveMatches.find(g => g.customer_site_id === siteId);
@@ -2899,7 +2889,7 @@ async function openProactiveSendModal(siteId) {
     }).join('');
     updateProactivePreview();
 
-    document.getElementById('proactiveSendModal').classList.add('open');
+    openModal('proactiveSendModal');
 }
 
 function updateProactivePreview() {
@@ -2922,35 +2912,34 @@ function updateProactivePreview() {
     if (previewEl) previewEl.innerHTML = `Revenue: <strong>$${totalSell.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong> · Margin: <strong>${totalMargin}%</strong> · Profit: <strong>$${(totalSell - totalCost).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</strong>`;
 }
 
-let _sendProactiveBusy = false;
 async function sendProactiveOffer() {
-    if (_sendProactiveBusy) return;
     const contactIds = Array.from(document.querySelectorAll('.ps-contact:checked')).map(c => parseInt(c.value));
     if (!contactIds.length) { showToast('Select at least one contact', 'error'); return; }
-    _sendProactiveBusy = true;
+    var btn = document.getElementById('psmSendBtn');
 
     const sellPrices = {};
     document.querySelectorAll('.ps-sell').forEach(input => {
         sellPrices[input.dataset.id] = parseFloat(input.value) || 0;
     });
 
-    try {
-        await apiFetch('/api/proactive/send', {
-            method: 'POST',
-            body: {
-                match_ids: _proactiveSendMatchIds,
-                contact_ids: contactIds,
-                sell_prices: sellPrices,
-                subject: document.getElementById('psSubject').value.trim(),
-                notes: document.getElementById('psNotes').value.trim() || null,
-            }
-        });
-        showToast('Proactive offer sent!', 'success');
-        closeModal('proactiveSendModal');
-        loadProactiveMatches();
-        if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
-    } catch (e) { showToast('Failed to send', 'error'); }
-    finally { _sendProactiveBusy = false; }
+    await guardBtn(btn, 'Sending…', async () => {
+        try {
+            await apiFetch('/api/proactive/send', {
+                method: 'POST',
+                body: {
+                    match_ids: _proactiveSendMatchIds,
+                    contact_ids: contactIds,
+                    sell_prices: sellPrices,
+                    subject: document.getElementById('psSubject').value.trim(),
+                    notes: document.getElementById('psNotes').value.trim() || null,
+                }
+            });
+            showToast('Proactive offer sent!', 'success');
+            closeModal('proactiveSendModal');
+            loadProactiveMatches();
+            if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
+        } catch (e) { showToast('Failed to send', 'error'); }
+    });
 }
 
 async function loadProactiveSent() {
@@ -4500,7 +4489,7 @@ async function refreshEnrichmentBadge() {
         } else if (badge) {
             badge.style.display = 'none';
         }
-    } catch (e) { /* ignore */ }
+    } catch (e) { logCatchError('backfillPoll', e); }
 }
 
 // deepEnrichVendor and deepEnrichCompany replaced by unifiedEnrichVendor/unifiedEnrichCompany above
