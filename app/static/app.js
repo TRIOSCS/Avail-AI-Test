@@ -1093,7 +1093,7 @@ function _updateToolbarStats() {
         pill('red', nRed, 'Past Due') +
         pill('orange', nOrange, 'Due Today') +
         pill('yellow', nYellow, 'Coming Due') +
-        `<div class="ts-pill ts-grey${qf ? '' : ' active'}" onclick="setToolbarQuickFilter('')"><span class="ts-n">${all.length}</span> Clear</div>`;
+        `<div class="ts-pill ts-grey${qf ? '' : ' active'}" onclick="setToolbarQuickFilter('')"><span class="ts-n">${all.length}</span> All</div>`;
 }
 
 function _renderReqRow(r) {
@@ -1326,18 +1326,25 @@ function buildFilterGroups() {
     // Left column: Quick Filters (always visible)
     let left = _filterGroupHtml('Quick Filters', [
         {value:'my_accounts', label:'My Accounts'},
-        {value:'no_offers', label:'No Offers Yet'}
+        {value:'has_review', label:'Needs Review'},
+        {value:'high_value', label:'High Value'},
+        {value:'has_quote', label:'Has Quote'}
     ]);
 
-    // Right column: Sales Person + Customer (collapsible)
+    // Right column: Sales Person (collapsible) with Customer nested inside
     let right = '';
     const salesPeople = [...new Set(_reqListData.map(r => r.created_by_name).filter(Boolean))].sort();
-    if (salesPeople.length) {
-        right += _collapsibleGroupHtml('Sales Person', salesPeople.map(n => ({value:'sales_'+n, label:n})));
-    }
     const customers = [...new Set(_reqListData.map(r => r.customer_display).filter(Boolean))].sort();
-    if (customers.length) {
-        right += _collapsibleGroupHtml('Customer', customers.map(c => ({value:'cust_'+c, label:c})));
+    if (salesPeople.length) {
+        let spItems = salesPeople.map(n => `<label><input type="checkbox" value="sales_${n}" onchange="countActiveFilters()"> ${esc(n)}</label>`).join('');
+        // Nest Customer as sub-section inside Sales Person
+        if (customers.length) {
+            spItems += `<div class="filter-group" style="margin-top:6px;padding-left:4px">
+                <div class="filter-group-title collapsible" style="font-size:11px" onclick="toggleFilterSection(this)">Customer</div>
+                <div class="filter-group-body">${customers.map(c => `<label><input type="checkbox" value="cust_${c}" onchange="countActiveFilters()"> ${esc(c)}</label>`).join('')}</div>
+            </div>`;
+        }
+        right += `<div class="filter-group"><div class="filter-group-title collapsible" onclick="toggleFilterSection(this)">Sales Person</div><div class="filter-group-body">${spItems}</div></div>`;
     }
 
     container.innerHTML = `<div class="filter-cols"><div class="filter-col">${left}</div><div class="filter-col">${right}</div></div>`;
@@ -1404,9 +1411,17 @@ function applyDropdownFilters(data) {
     if (!Object.keys(_activeFilters).length && !_toolbarQuickFilter) return data;
     let filtered = data;
 
-    // No offers yet
-    if (_activeFilters['no_offers']) {
-        filtered = filtered.filter(r => !r.reply_count);
+    // Needs Review — requisitions with vendor responses needing human review
+    if (_activeFilters['has_review']) {
+        filtered = filtered.filter(r => r.needs_review_count > 0);
+    }
+    // High Value — total target value > $10k
+    if (_activeFilters['high_value']) {
+        filtered = filtered.filter(r => r.total_target_value > 10000);
+    }
+    // Has Quote — status is quoting or quoted
+    if (_activeFilters['has_quote']) {
+        filtered = filtered.filter(r => r.status === 'quoting' || r.status === 'quoted');
     }
     // Sales person
     const salesFilters = Object.keys(_activeFilters).filter(k => k.startsWith('sales_'));
@@ -4644,6 +4659,36 @@ function toggleNotifications() {
     if (opening) loadNotifications();
 }
 
+function _notifBadgeColor(type) {
+    switch (type) {
+        case 'vendor_reply_review': return '#3b82f6';
+        case 'competitive_quote': case 'buyplan_approved': case 'buyplan_completed': return '#22c55e';
+        case 'buyplan_rejected': return '#ef4444';
+        case 'ownership_warning': case 'buyplan_pending': case 'buyplan_cancelled': return '#f59e0b';
+        case 'proactive_match': return '#a855f7';
+        default: return '#6b7280';
+    }
+}
+function _notifLabel(type) {
+    switch (type) {
+        case 'ownership_warning': return 'Ownership';
+        case 'vendor_reply_review': return 'Review';
+        case 'competitive_quote': return 'Competitive';
+        case 'proactive_match': return 'Proactive';
+        case 'buyplan_pending': return 'Buy Plan';
+        case 'buyplan_approved': return 'Approved';
+        case 'buyplan_rejected': return 'Rejected';
+        case 'buyplan_completed': return 'Completed';
+        case 'buyplan_cancelled': return 'Cancelled';
+        default: return type;
+    }
+}
+function _notifClickAction(n) {
+    if (n.requisition_id) return `markNotifRead(${n.id});loadRequisition(${n.requisition_id})`;
+    if (n.company_id) return `markNotifRead(${n.id});goToCompany(${n.company_id})`;
+    return `markNotifRead(${n.id})`;
+}
+
 async function loadNotifications() {
     const el = document.getElementById('notifList');
     if (!el) return;
@@ -4651,14 +4696,34 @@ async function loadNotifications() {
         const data = await apiFetch('/api/sales/notifications');
         const items = Array.isArray(data) ? data : (data.notifications || []);
         if (!items.length) { el.innerHTML = '<p class="empty" style="font-size:12px">No notifications</p>'; return; }
-        el.innerHTML = items.map(n => `<div style="padding:6px 0;border-bottom:1px solid var(--card2);font-size:12px;cursor:pointer" onclick="${n.company_id ? 'goToCompany('+n.company_id+')' : ''}">
-            <div style="font-weight:600">${esc(n.subject || n.type || 'Notification')}</div>
-            <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10px">
-                <span>${esc(n.company_name || '')}</span>
-                <span>${n.created_at ? fmtDateTime(n.created_at) : ''}</span>
-            </div>
-        </div>`).join('');
+        const header = `<div style="display:flex;justify-content:flex-end;padding:4px 0;border-bottom:1px solid var(--card2)">
+            <button onclick="markAllNotifsRead()" style="font-size:11px;color:var(--teal);background:none;border:none;cursor:pointer;padding:2px 6px">Mark all read</button>
+        </div>`;
+        el.innerHTML = header + items.map(n => {
+            const color = _notifBadgeColor(n.type);
+            return `<div style="padding:6px 0;border-bottom:1px solid var(--card2);font-size:12px;cursor:pointer" onclick="${_notifClickAction(n)}">
+                <div style="display:flex;align-items:center;gap:6px">
+                    <span style="font-size:9px;font-weight:700;text-transform:uppercase;padding:1px 5px;border-radius:3px;color:#fff;background:${color}">${_notifLabel(n.type)}</span>
+                    <span style="font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(n.subject || 'Notification')}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10px;margin-top:2px">
+                    <span>${esc(n.company_name || '')}</span>
+                    <span>${n.created_at ? fmtDateTime(n.created_at) : ''}</span>
+                </div>
+            </div>`;
+        }).join('');
     } catch { el.innerHTML = '<p class="empty" style="font-size:12px">Failed to load</p>'; }
+}
+
+async function markNotifRead(id) {
+    try { await apiFetch(`/api/sales/notifications/${id}/read`, {method:'POST'}); } catch {}
+    loadNotificationBadge();
+}
+
+async function markAllNotifsRead() {
+    try { await apiFetch('/api/sales/notifications/read-all', {method:'POST'}); } catch {}
+    loadNotifications();
+    loadNotificationBadge();
 }
 
 async function loadNotificationBadge() {

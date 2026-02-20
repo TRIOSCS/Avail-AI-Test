@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from .config import settings
 from .services.credential_service import get_credential_cached
-from .models import Contact, VendorResponse, ProcessedMessage, PendingBatch
+from .models import ActivityLog, Contact, Requisition, VendorResponse, ProcessedMessage, PendingBatch
 
 log = logging.getLogger(__name__)
 
@@ -757,14 +757,14 @@ async def _parse_sequential_fallback(
             try:
                 parsed = await parse_response_ai(vr.body, vr.subject)
                 if parsed:
-                    _apply_parsed_result(vr, parsed)
+                    _apply_parsed_result(vr, parsed, db)
             except Exception as e:
                 log.warning(f"Sequential AI parse failed for VR {vr.id}: {e}")
 
     await asyncio.gather(*[_parse_one(vr) for vr in pending])
 
 
-def _apply_parsed_result(vr: VendorResponse, parsed: dict) -> None:
+def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -> None:
     """Apply AI-parsed data to a VendorResponse record."""
     vr.parsed_data = parsed
     vr.confidence = parsed.get("confidence", 0)
@@ -773,6 +773,26 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict) -> None:
     vr.classification = classification["type"]
     vr.needs_action = classification["needs_action"]
     vr.action_hint = classification["action_hint"]
+
+    # Create notification for vendor replies needing review (confidence 0.5–0.8)
+    if db and vr.needs_action and 0.5 <= vr.confidence <= 0.8:
+        try:
+            owner_id = vr.scanned_by_user_id
+            if vr.requisition_id:
+                req = db.get(Requisition, vr.requisition_id)
+                if req and req.created_by:
+                    owner_id = req.created_by
+            if owner_id:
+                db.add(ActivityLog(
+                    user_id=owner_id,
+                    activity_type="vendor_reply_review",
+                    channel="system",
+                    requisition_id=vr.requisition_id,
+                    contact_name=vr.vendor_name,
+                    subject=f"Review needed: {vr.vendor_name or 'Unknown'} reply — {vr.action_hint or 'check response'}",
+                ))
+        except Exception as e:
+            log.warning(f"Failed to create vendor_reply_review activity: {e}")
 
 
 async def process_batch_results(db: Session) -> int:
@@ -847,7 +867,7 @@ async def process_batch_results(db: Session) -> int:
                     "parts": parsed_data.get("parts", []),
                     "confidence": parsed_data.get("confidence", 0),
                 }
-                _apply_parsed_result(vr, legacy_parsed)
+                _apply_parsed_result(vr, legacy_parsed, db)
                 applied += 1
 
         pb.status = "completed"

@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
 from ..models import (
+    ActivityLog,
     BuyPlan,
     CustomerSite,
     Offer,
@@ -124,6 +125,16 @@ def scan_new_offers_for_matches(db: Session) -> dict:
                     mpn=offer_mpn,
                 )
             )
+            # In-app notification for salesperson
+            if sales_id:
+                db.add(ActivityLog(
+                    user_id=sales_id,
+                    activity_type="proactive_match",
+                    channel="system",
+                    requisition_id=requisition.id,
+                    contact_name=offer.vendor_name,
+                    subject=f"Proactive match: {offer_mpn} available — {offer.vendor_name or 'Unknown'}",
+                ))
             matches_created += 1
 
     if matches_created:

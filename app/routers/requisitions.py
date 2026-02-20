@@ -58,6 +58,7 @@ from ..models import (
     User,
     VendorResponse,
 )
+from sqlalchemy import select
 
 
 
@@ -74,8 +75,6 @@ async def list_requisitions(
     db: Session = Depends(get_db),
 ):
     # Single query with subquery counts — avoids N+1 lazy loads
-    from sqlalchemy import select
-
     req_count_sq = (
         select(sqlfunc.count(Requirement.id))
         .where(Requirement.requisition_id == Requisition.id)
@@ -153,6 +152,29 @@ async def list_requisitions(
         .scalar_subquery()
         .label("sourced_count")
     )
+    # Count vendor responses needing human review (needs_action=True)
+    needs_review_sq = (
+        select(sqlfunc.count(VendorResponse.id))
+        .where(
+            VendorResponse.requisition_id == Requisition.id,
+            VendorResponse.needs_action.is_(True),
+        )
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("needs_review_count")
+    )
+    # Sum of target_price * target_qty across requirements (for high-value filter)
+    total_target_value_sq = (
+        select(
+            sqlfunc.coalesce(
+                sqlfunc.sum(Requirement.target_price * Requirement.target_qty), 0
+            )
+        )
+        .where(Requirement.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("total_target_value")
+    )
     query = db.query(
         Requisition,
         req_count_sq,
@@ -163,6 +185,8 @@ async def list_requisitions(
         latest_offer_at_sq,
         sourced_count_sq,
         rfq_sent_count_sq,
+        needs_review_sq,
+        total_target_value_sq,
     )
     # Sales sees own reqs only; all other roles see everything
     if user.role == "sales":
@@ -197,7 +221,7 @@ async def list_requisitions(
     rows = query.order_by(Requisition.created_at.desc()).offset(offset).limit(limit).all()
     # Pre-load creator names (all roles see all reqs now)
     creator_names = {}
-    creator_ids = {r.created_by for r, _, _, _, _, _, _, _, _ in rows if r.created_by}
+    creator_ids = {r.created_by for r, _, _, _, _, _, _, _, _, _, _ in rows if r.created_by}
     if creator_ids:
         creators = (
             db.query(User.id, User.name, User.email)
@@ -238,8 +262,10 @@ async def list_requisitions(
                 "rfq_sent_count": rfq_sent or 0,
                 "cloned_from_id": r.cloned_from_id,
                 "deadline": r.deadline,
+                "needs_review_count": needs_rev or 0,
+                "total_target_value": float(ttv or 0),
             }
-            for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt, rfq_sent in rows
+            for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt, rfq_sent, needs_rev, ttv in rows
         ],
         "total": total,
         "limit": limit,

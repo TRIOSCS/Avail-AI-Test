@@ -618,6 +618,19 @@ async def manager_digest(
     return get_manager_digest(db)
 
 
+_NOTIFICATION_TYPES = (
+    "ownership_warning",
+    "buyplan_pending",
+    "buyplan_approved",
+    "buyplan_rejected",
+    "buyplan_completed",
+    "buyplan_cancelled",
+    "vendor_reply_review",
+    "competitive_quote",
+    "proactive_match",
+)
+
+
 @router.get("/api/sales/notifications")
 async def sales_notifications(
     user: User = Depends(require_user), db: Session = Depends(get_db)
@@ -627,25 +640,62 @@ async def sales_notifications(
         db.query(ActivityLog)
         .filter(
             ActivityLog.user_id == user.id,
-            ActivityLog.activity_type == "ownership_warning",
-            ActivityLog.created_at >= datetime.now(timezone.utc) - timedelta(days=7),
+            ActivityLog.activity_type.in_(_NOTIFICATION_TYPES),
+            ActivityLog.dismissed_at.is_(None),
+            ActivityLog.created_at >= datetime.now(timezone.utc) - timedelta(days=14),
         )
         .order_by(ActivityLog.created_at.desc())
-        .limit(20)
+        .limit(30)
         .all()
     )
 
     return [
         {
             "id": n.id,
-            "type": "ownership_warning",
+            "type": n.activity_type,
             "company_id": n.company_id,
             "company_name": n.contact_name,
+            "requisition_id": n.requisition_id,
             "subject": n.subject,
+            "notes": n.notes,
             "created_at": n.created_at.isoformat() if n.created_at else None,
         }
         for n in notifications
     ]
+
+
+@router.post("/api/sales/notifications/{notif_id}/read")
+async def mark_notification_read(
+    notif_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a single notification as read."""
+    notif = db.get(ActivityLog, notif_id)
+    if not notif or notif.user_id != user.id:
+        raise HTTPException(404, "Notification not found")
+    notif.dismissed_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/api/sales/notifications/read-all")
+async def mark_all_notifications_read(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark all notifications as read for the current user."""
+    db.query(ActivityLog).filter(
+        ActivityLog.user_id == user.id,
+        ActivityLog.activity_type.in_(_NOTIFICATION_TYPES),
+        ActivityLog.dismissed_at.is_(None),
+        ActivityLog.created_at >= datetime.now(timezone.utc) - timedelta(days=14),
+    ).update(
+        {"dismissed_at": datetime.now(timezone.utc)},
+        synchronize_session="fetch",
+    )
+    db.commit()
+    return {"ok": True}
 
 
 # ═══════════════════════════════════════════════════════════════════════

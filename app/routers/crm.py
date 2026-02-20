@@ -30,6 +30,7 @@ from ..services.credential_service import get_credential_cached
 from ..database import get_db
 from ..dependencies import is_admin as _is_admin, require_admin, require_buyer, require_user
 from ..models import (
+    ActivityLog,
     BuyPlan,
     Company,
     CustomerSite,
@@ -1137,6 +1138,7 @@ async def create_offer(
                 .scalar()
             )
             if best_price and float(offer.unit_price) < float(best_price) * 0.8:
+                pct = round((1 - float(offer.unit_price) / float(best_price)) * 100)
                 from ..services.teams import send_competitive_quote_alert
                 asyncio.create_task(send_competitive_quote_alert(
                     offer_id=offer.id,
@@ -1146,6 +1148,17 @@ async def create_offer(
                     best_price=float(best_price),
                     requisition_id=req_id,
                 ))
+                # In-app notification for requisition owner
+                if req.created_by:
+                    db.add(ActivityLog(
+                        user_id=req.created_by,
+                        activity_type="competitive_quote",
+                        channel="system",
+                        requisition_id=req_id,
+                        contact_name=offer.vendor_name,
+                        subject=f"Competitive quote: {offer.vendor_name} — {offer.mpn} at ${offer.unit_price} ({pct}% below best)",
+                    ))
+                    db.commit()
     except Exception:
         logger.debug("Activity event creation failed", exc_info=True)
 
