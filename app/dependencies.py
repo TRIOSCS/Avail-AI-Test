@@ -122,20 +122,14 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
     if not user:
         raise HTTPException(401, "Not authenticated — please log in")
 
-    # Try DB-stored token first, fall back to session
-    token = user.access_token or request.session.get("access_token")
+    token = user.access_token
     if not token:
         raise HTTPException(401, "No access token — please log in")
 
-    # Check if token needs refresh
+    # Check if token needs refresh (15-min buffer)
     needs_refresh = False
     if user.token_expires_at:
         if datetime.now(timezone.utc) > user.token_expires_at - timedelta(minutes=15):
-            needs_refresh = True
-    else:
-        # Legacy: no expiry tracked, check session timestamp
-        issued_at = request.session.get("token_issued_at", 0)
-        if datetime.now(timezone.utc).timestamp() - issued_at > 2700:  # 45 minutes
             needs_refresh = True
 
     if needs_refresh:
@@ -144,7 +138,6 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
 
             result = await refresh_user_token(user, db)
             if result:
-                request.session["access_token"] = result
                 return result
         user.m365_connected = False
         db.commit()

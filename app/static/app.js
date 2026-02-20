@@ -319,6 +319,10 @@ function showView(viewId) {
         const el = document.getElementById(id);
         if (el) el.style.display = id === viewId ? '' : 'none';
     }
+    // Hide entire toparea on views that don't need it (settings, etc.)
+    const toparea = document.querySelector('.toparea');
+    const hideToparea = ['view-settings'].includes(viewId);
+    if (toparea) toparea.style.display = hideToparea ? 'none' : '';
     // v7: show pills/search/filters only on list view; hide on other views
     const topcontrols = document.getElementById('topcontrols');
     if (topcontrols) {
@@ -423,6 +427,9 @@ function showDetail(id, name, tab) {
         chip.className = 'status-chip status-' + reqInfo.status;
         chip.textContent = _statusLabels[reqInfo.status] || reqInfo.status;
     }
+    // Reset tab caches so stale data doesn't show when switching RFQs
+    if (typeof _emailThreadsLoaded !== 'undefined') _emailThreadsLoaded = null;
+    if (typeof _emailThreadsData !== 'undefined') _emailThreadsData = [];
     // Restore cached results or load saved sightings from DB
     if (searchResultsCache[id]) {
         searchResults = searchResultsCache[id];
@@ -441,13 +448,14 @@ function showDetail(id, name, tab) {
             })
             .catch(() => {});  // Silent — empty Sources tab is fine
     }
-    loadRequirements();
-    loadActivity();
     // Set initial new-offers state from list data before loadOffers runs
     if (reqInfo && typeof _hasNewOffers !== 'undefined') {
         _hasNewOffers = reqInfo.has_new_offers || false;
         if (typeof _latestOfferAt !== 'undefined') _latestOfferAt = reqInfo.latest_offer_at || null;
     }
+    // Load all tab data in parallel for faster detail view
+    loadRequirements();
+    loadActivity();
     if (typeof loadOffers === 'function') loadOffers();
     if (typeof loadQuote === 'function') loadQuote();
     // Restore last active tab or default to requirements
@@ -1636,9 +1644,11 @@ let selectedRequirements = new Set(); // Track selected requirements for partial
 
 async function loadRequirements() {
     if (!currentReqId) return;
-    delete _ddReqCache[currentReqId];
-    try { reqData = await apiFetch(`/api/requisitions/${currentReqId}/requirements`); }
+    const reqId = currentReqId;
+    delete _ddReqCache[reqId];
+    try { reqData = await apiFetch(`/api/requisitions/${reqId}/requirements`); }
     catch(e) { console.error('loadRequirements:', e); return; }
+    if (currentReqId !== reqId) return; // RFQ changed while loading
     window._currentRequirements = reqData;  // expose for AI Smart RFQ
     // Auto-select all requirements
     selectedRequirements = new Set(reqData.map(r => r.id));
@@ -2409,10 +2419,14 @@ async function openBatchRfqModal(prebuiltGroups) {
     // Run lookups for vendors without emails (3-tier: cache → scrape → AI)
     const needsLookup = rfqVendorData.filter(v => v.lookup_status === 'pending');
     if (needsLookup.length) {
+        // Prevent backdrop click from closing modal during lookup
+        modal.dataset.loading = '1';
         document.getElementById('rfqPrepareStatus').textContent = `Finding contacts for ${needsLookup.length} vendor(s)…`;
-        for (const v of needsLookup) {
-            v.lookup_status = 'loading';
-            renderRfqVendors();
+        needsLookup.forEach(v => { v.lookup_status = 'loading'; });
+        _renderRfqPrepareProgress();
+        // Look up all vendors in parallel instead of one-at-a-time
+        let done = 0;
+        await Promise.all(needsLookup.map(async (v) => {
             try {
                 const data = await apiFetch('/api/vendor-contact', {
                     method: 'POST', body: { vendor_name: v.vendor_name }
@@ -2427,14 +2441,26 @@ async function openBatchRfqModal(prebuiltGroups) {
             } catch {
                 v.lookup_status = 'no_email';
             }
-            renderRfqVendors();
-        }
+            done++;
+            document.getElementById('rfqPrepareStatus').textContent = `Finding contacts… ${done}/${needsLookup.length} done`;
+            _renderRfqPrepareProgress();
+        }));
+        delete modal.dataset.loading;
     }
 
     document.getElementById('rfqPrepare').style.display = 'none';
     document.getElementById('rfqReady').style.display = '';
     renderRfqVendors();
     renderRfqMessage();
+}
+
+function _renderRfqPrepareProgress() {
+    const el = document.getElementById('rfqPrepareVendors');
+    if (!el) return;
+    el.innerHTML = rfqVendorData.filter(v => v.lookup_status !== 'ready' || v.needs_lookup).map(v => {
+        const icon = v.lookup_status === 'loading' ? '⏳' : v.lookup_status === 'ready' ? '✅' : v.lookup_status === 'no_email' ? '❌' : '⏳';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px">${icon} <strong>${esc(v.display_name || v.vendor_name)}</strong></div>`;
+    }).join('');
 }
 
 function renderRfqVendors() {
@@ -3826,12 +3852,13 @@ function setActStat(type, el) {
 
 async function loadActivity() {
     if (!currentReqId) return;
+    const reqId = currentReqId;
     try {
-        activityData = await apiFetch(`/api/requisitions/${currentReqId}/activity`);
+        activityData = await apiFetch(`/api/requisitions/${reqId}/activity`);
     } catch {
         // Fallback to old endpoint
         let contacts;
-        try { contacts = await apiFetch(`/api/requisitions/${currentReqId}/contacts`); }
+        try { contacts = await apiFetch(`/api/requisitions/${reqId}/contacts`); }
         catch { return; }
         // Convert to vendor-grouped format
         const vmap = {};
@@ -3845,6 +3872,7 @@ async function loadActivity() {
         }
         activityData = { vendors: Object.values(vmap), summary: { sent: Object.keys(vmap).length, replied: 0, awaiting: Object.keys(vmap).length } };
     }
+    if (currentReqId !== reqId) return; // RFQ changed while loading
     renderActivityCards();
 }
 
@@ -4320,28 +4348,33 @@ let _emailThreadsData = [];
 
 async function loadEmailThreads() {
     if (!currentReqId) return;
-    // Get the first requirement ID for this requisition
+    const reqId = currentReqId;
     const el = document.getElementById('emailsContent');
     if (!el) return;
 
     // Avoid reloading if already loaded for this req
-    if (_emailThreadsLoaded === currentReqId && _emailThreadsData.length > 0) return;
+    if (_emailThreadsLoaded === reqId && _emailThreadsData.length > 0) return;
 
     el.innerHTML = '<div class="spinner-row"><div class="spinner"></div> Loading email threads...</div>';
 
     try {
-        // Get requirements for this requisition to find requirement IDs
-        const reqs = await apiFetch(`/api/requisitions/${currentReqId}/requirements`);
+        // Use cached requirements if available, otherwise fetch
+        const reqs = reqData.length ? reqData : await apiFetch(`/api/requisitions/${reqId}/requirements`);
+        if (currentReqId !== reqId) return;
         if (!reqs || !reqs.length) {
             el.innerHTML = '<p class="empty">No requirements — add parts first to see related emails</p>';
             return;
         }
 
-        // Fetch threads for each requirement and merge
-        const allThreads = new Map(); // conversation_id → thread
-        for (const req of reqs) {
-            try {
-                const data = await apiFetch(`/api/requirements/${req.id}/emails`);
+        // Fetch threads for all requirements in parallel
+        const allThreads = new Map();
+        const results = await Promise.allSettled(
+            reqs.map(req => apiFetch(`/api/requirements/${req.id}/emails`))
+        );
+        if (currentReqId !== reqId) return;
+        for (const result of results) {
+            if (result.status === 'fulfilled') {
+                const data = result.value;
                 if (data.error) {
                     el.innerHTML = `<p class="empty" style="color:var(--red)">${esc(data.error)}</p>`;
                     return;
@@ -4351,11 +4384,9 @@ async function loadEmailThreads() {
                         allThreads.set(t.conversation_id, t);
                     }
                 }
-            } catch (e) {
-                if (e.status === 401) {
-                    el.innerHTML = '<p class="empty" style="color:var(--red)">Could not load emails — M365 connection may need refresh</p>';
-                    return;
-                }
+            } else if (result.reason && result.reason.status === 401) {
+                el.innerHTML = '<p class="empty" style="color:var(--red)">Could not load emails — M365 connection may need refresh</p>';
+                return;
             }
         }
 

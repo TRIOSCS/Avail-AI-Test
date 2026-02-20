@@ -94,8 +94,7 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
     if not access_token:
         log.error("Azure token response missing access_token")
         return RedirectResponse("/")
-    request.session["access_token"] = access_token
-    request.session["token_issued_at"] = datetime.now(timezone.utc).timestamp()
+
 
     # Calculate token expiry
     expires_in = tokens.get("expires_in", 3600)

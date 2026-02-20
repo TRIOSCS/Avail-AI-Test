@@ -500,8 +500,10 @@ let _offerSort = 'newest';
 
 async function loadOffers() {
     if (!currentReqId) return;
+    const reqId = currentReqId;
     try {
-        const data = await apiFetch('/api/requisitions/' + currentReqId + '/offers');
+        const data = await apiFetch('/api/requisitions/' + reqId + '/offers');
+        if (currentReqId !== reqId) return;
         _hasNewOffers = data.has_new_offers || false;
         _latestOfferAt = data.latest_offer_at || null;
         crmOffers = data.groups || [];
@@ -957,8 +959,10 @@ async function updateOffer() {
 
 async function loadQuote() {
     if (!currentReqId) return;
+    const reqId = currentReqId;
     try {
-        crmQuote = await apiFetch('/api/requisitions/' + currentReqId + '/quote');
+        crmQuote = await apiFetch('/api/requisitions/' + reqId + '/quote');
+        if (currentReqId !== reqId) return;
         renderQuote();
         updateQuoteTabBadge();
         if (crmQuote && crmQuote.status === 'won') loadBuyPlan();
@@ -3520,8 +3524,8 @@ function _renderSourceCards() {
     if (!container) return;
 
     let filtered = _sourcesData;
-    if (_sourcesFilter === 'active') {
-        filtered = filtered.filter(s => s.status === 'live');
+    if (_sourcesFilter !== 'all') {
+        filtered = filtered.filter(s => s.status === _sourcesFilter);
     }
     if (_sourcesQuery) {
         const q = _sourcesQuery.toLowerCase();
@@ -3647,24 +3651,14 @@ async function loadSettingsSources() {
         const total = sources.length;
 
         el.innerHTML = `
-            <div style="margin-bottom:16px;padding:12px 16px;background:var(--bg);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2)">
-                <span>🟢 ${counts.live} Live</span>
-                <span style="color:var(--muted)">·</span>
-                <span>🟡 ${counts.pending} Pending</span>
-                <span style="color:var(--muted)">·</span>
-                <span>🔴 ${counts.error} Error</span>
-                <span style="color:var(--muted)">·</span>
-                <span>⚫ ${counts.disabled} Disabled</span>
-                <span style="color:var(--muted)">·</span>
-                <span style="font-weight:600">${total} total</span>
-            </div>
-            <div class="s-row" style="gap:12px;margin-bottom:16px;flex-wrap:wrap">
-                <div style="display:flex;gap:4px" id="sourcesToggle">
-                    <span id="srcPillAll" class="s-pill on" onclick="setSourcesFilter('all')">All</span>
-                    <span id="srcPillActive" class="s-pill" onclick="setSourcesFilter('active')">Active</span>
-                </div>
+            <div style="margin-bottom:16px;padding:12px 16px;background:var(--bg);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--text2)">
+                <span class="src-status-pill${_sourcesFilter === 'all' ? ' on' : ''}" onclick="setSourcesFilter('all')" style="cursor:pointer;font-weight:600">${total} Total</span>
+                <span class="src-status-pill${_sourcesFilter === 'live' ? ' on' : ''}" onclick="setSourcesFilter('live')" style="cursor:pointer">🟢 ${counts.live} Live</span>
+                <span class="src-status-pill${_sourcesFilter === 'pending' ? ' on' : ''}" onclick="setSourcesFilter('pending')" style="cursor:pointer">🟡 ${counts.pending} Pending</span>
+                <span class="src-status-pill${_sourcesFilter === 'error' ? ' on' : ''}" onclick="setSourcesFilter('error')" style="cursor:pointer">🔴 ${counts.error} Error</span>
+                <span class="src-status-pill${_sourcesFilter === 'disabled' ? ' on' : ''}" onclick="setSourcesFilter('disabled')" style="cursor:pointer">⚫ ${counts.disabled} Disabled</span>
                 <input class="req-search" id="sourcesSearchInput" type="text" placeholder="Search sources…"
-                       style="flex:1;min-width:180px" oninput="onSourcesSearch(this.value)" aria-label="Search sources">
+                       style="flex:1;min-width:160px;margin-left:auto" oninput="onSourcesSearch(this.value)" value="${_sourcesQuery}" aria-label="Search sources">
             </div>
             <div id="sourcesCardsContainer"></div>`;
 
@@ -3676,12 +3670,9 @@ async function loadSettingsSources() {
 
 function setSourcesFilter(mode) {
     _sourcesFilter = mode;
-    const allPill = document.getElementById('srcPillAll');
-    const activePill = document.getElementById('srcPillActive');
-    if (allPill && activePill) {
-        allPill.className = 's-pill' + (mode === 'all' ? ' on' : '');
-        activePill.className = 's-pill' + (mode === 'active' ? ' on' : '');
-    }
+    document.querySelectorAll('.src-status-pill').forEach(p => p.classList.remove('on'));
+    const clicked = event && event.target.closest('.src-status-pill');
+    if (clicked) clicked.classList.add('on');
     _renderSourceCards();
 }
 
