@@ -1074,14 +1074,17 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             effortBadge = ` <span class="effort-wrap"><span class="effort-dot" style="background:${dotColor}"></span><span style="font-size:9px;color:var(--muted);margin-left:2px">${Math.round(rs.score)}</span>${_buildEffortTip(rs.score, rs.color, rs.signals)}</span>`;
         }
         html += `<div style="margin-bottom:10px">
-            <div style="font-size:11px;font-weight:700;color:var(--text2);margin-bottom:4px">${esc(label)}${effortBadge} <span style="font-weight:400;color:var(--muted)">(${sightings.length} source${sightings.length !== 1 ? 's' : ''})</span></div>`;
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
+                <span style="font-size:11px;font-weight:700;color:var(--text2)">${esc(label)}${effortBadge} <span style="font-weight:400;color:var(--muted)">(${sightings.length} source${sightings.length !== 1 ? 's' : ''})</span></span>
+                <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px" onclick="event.stopPropagation();ddResearchPart(${reqId},${rId})" title="Re-search this part">\u21bb Search</button>
+            </div>`;
         if (!sightings.length) {
             html += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">No sources found</div></div>';
             continue;
         }
         const visible = showAll ? sightings : sightings.slice(0, DD_LIMIT);
         html += `<table class="dtbl"><thead><tr>
-            <th style="width:24px"></th><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Score</th><th>Condition</th>
+            <th style="width:24px"></th><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Score</th><th>Condition</th><th>Date</th>
         </tr></thead><tbody>`;
         for (const s of visible) {
             const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
@@ -1093,6 +1096,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             const scoreVal = s.score != null ? parseFloat(s.score).toFixed(1) : '\u2014';
             const safeVName = (s.vendor_name||'').replace(/'/g, "\\'");
             const needsEmail = !hasEmail ? ` <a onclick="event.stopPropagation();ddPromptVendorEmail(${reqId},${s.id},'${safeVName}')" style="color:var(--red);font-size:10px;cursor:pointer;font-weight:600">needs email</a>` : '';
+            const sAge = s.created_at ? fmtRelative(s.created_at) : '\u2014';
             html += `<tr style="${dimStyle}">
                 <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
                 <td>${esc(s.vendor_name || '\u2014')}${needsEmail}</td>
@@ -1102,6 +1106,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
                 <td style="font-size:10px">${esc(s.source_type || '\u2014')}</td>
                 <td class="mono">${scoreVal}</td>
                 <td style="font-size:10px">${esc(s.condition || '\u2014')}</td>
+                <td style="font-size:10px;color:var(--muted)">${sAge}</td>
             </tr>`;
         }
         html += '</tbody></table>';
@@ -1179,6 +1184,52 @@ function ddSendBulkRfq(reqId) {
     if (!vendorGroups.length) { showToast('No valid vendors selected', 'error'); return; }
     currentReqId = reqId;
     openBatchRfqModal(vendorGroups);
+}
+
+// ── Re-search parts from sourcing drill-down ────────────────────────────
+async function ddResearchPart(reqId, requirementId) {
+    showToast('Searching\u2026', 'info');
+    try {
+        const body = { requirement_ids: [requirementId] };
+        await apiFetch(`/api/requisitions/${reqId}/search`, { method: 'POST', body });
+        // Invalidate caches and re-render
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].sightings;
+        delete _ddSightingsCache[reqId];
+        delete _ddScoreCache[reqId];
+        const reqInfo = _reqListData.find(r => r.id === reqId);
+        if (reqInfo) reqInfo.last_searched_at = new Date().toISOString();
+        // Re-load sightings and re-render
+        const data = await apiFetch(`/api/requisitions/${reqId}/sightings`);
+        _ddSightingsCache[reqId] = data;
+        if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
+        _renderSourcingDrillDown(reqId);
+        showToast('Search complete', 'success');
+    } catch(e) { showToast('Search failed: ' + (e.message || e), 'error'); }
+}
+
+async function ddResearchAll(reqId) {
+    const btn = event ? event.target : null;
+    if (btn) { btn.disabled = true; btn.textContent = 'Searching\u2026'; }
+    try {
+        const reqs = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`);
+        _ddReqCache[reqId] = reqs;
+        if (!reqs.length) { showToast('No parts to search', 'warn'); return; }
+        const body = { requirement_ids: reqs.map(r => r.id) };
+        await apiFetch(`/api/requisitions/${reqId}/search`, { method: 'POST', body });
+        // Invalidate and re-load
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].sightings;
+        delete _ddSightingsCache[reqId];
+        delete _ddScoreCache[reqId];
+        const reqInfo = _reqListData.find(r => r.id === reqId);
+        if (reqInfo) reqInfo.last_searched_at = new Date().toISOString();
+        const data = await apiFetch(`/api/requisitions/${reqId}/sightings`);
+        _ddSightingsCache[reqId] = data;
+        if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
+        _renderSourcingDrillDown(reqId);
+        renderReqList();
+        showToast('All parts re-searched', 'success');
+    } catch(e) { showToast('Search failed: ' + (e.message || e), 'error'); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = '\u21bb Re-search All'; } }
 }
 
 // ── Log Offer Modal ─────────────────────────────────────────────────────
@@ -1613,7 +1664,10 @@ function _renderReqRow(r) {
     if (v === 'sourcing') {
         ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
-            <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Send Bulk RFQ (0)</button>
+            <div style="display:flex;gap:6px">
+                <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Re-search all parts">&#x21bb; Re-search All</button>
+                <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Send Bulk RFQ (0)</button>
+            </div>
         </div>`;
     } else if (v === 'archive') {
         ddHeader = `<div style="margin-bottom:2px"><span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span></div>`;
