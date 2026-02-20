@@ -1106,7 +1106,7 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 
 /* Top area — logo left, controls right, all on grey */
 .toparea{display:flex;align-items:center;gap:12px;padding:2px 16px;position:relative;z-index:200;transition:margin-left .3s}
-.toparea img{height:84px;width:calc(var(--sbw) - 16px);object-fit:contain;object-position:left center;flex-shrink:0}
+.toparea img{height:84px;width:calc(var(--sbw) - 16px);object-fit:contain;object-position:left center;flex-shrink:0;mix-blend-mode:multiply}
 .topcontrols{display:flex;align-items:center;gap:8px;flex:1;flex-wrap:wrap;justify-content:space-between}
 
 /* Sidebar rail — blue tab centered on page with chevron */
