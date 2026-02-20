@@ -1,6 +1,8 @@
 """Admin service — user management, system config, health."""
 
 import logging
+import os
+import time
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -87,7 +89,36 @@ def update_user(db: Session, user_id: int, updates: dict, admin_user: User) -> d
     }
 
 
-# ── System Config ────────────────────────────────────────────────────
+# ── System Config (with in-memory cache) ────────────────────────────
+
+_config_cache: dict[str, str] = {}
+_config_cache_ts: float = 0
+_CONFIG_CACHE_TTL = 0 if os.environ.get("TESTING") else 300  # 5 minutes (disabled in tests)
+
+
+def _load_config_cache(db: Session) -> dict[str, str]:
+    """Load all config into memory cache."""
+    global _config_cache, _config_cache_ts
+    rows = db.query(SystemConfig).all()
+    _config_cache = {r.key: r.value for r in rows}
+    _config_cache_ts = time.time()
+    return _config_cache
+
+
+def get_config_value(db: Session, key: str) -> str | None:
+    """Get a single config value with in-memory caching (5-min TTL)."""
+    global _config_cache, _config_cache_ts
+    if time.time() - _config_cache_ts > _CONFIG_CACHE_TTL:
+        _load_config_cache(db)
+    return _config_cache.get(key)
+
+
+def get_config_values(db: Session, keys: list[str]) -> dict[str, str]:
+    """Get multiple config values with in-memory caching."""
+    global _config_cache, _config_cache_ts
+    if time.time() - _config_cache_ts > _CONFIG_CACHE_TTL:
+        _load_config_cache(db)
+    return {k: _config_cache[k] for k in keys if k in _config_cache}
 
 
 def get_all_config(db: Session) -> list[dict]:
@@ -115,6 +146,9 @@ def set_config_value(db: Session, key: str, value: str, admin_email: str) -> dic
     row.updated_by = admin_email
     row.updated_at = datetime.now(timezone.utc)
     db.commit()
+    # Invalidate in-memory cache so next read picks up the change
+    global _config_cache_ts
+    _config_cache_ts = 0
     log.info(f"Config {key} changed: {old_value} -> {value} by {admin_email}")
     return {"key": row.key, "value": row.value, "updated_by": row.updated_by}
 
@@ -140,9 +174,8 @@ def get_scoring_weights(db: Session) -> dict:
         "weight_source_credibility": settings.weight_source_credibility,
         "weight_price": settings.weight_price,
     }
-    # Query DB for weight keys
-    rows = db.query(SystemConfig).filter(SystemConfig.key.in_(weight_keys)).all()
-    db_map = {r.key: r.value for r in rows}
+    # Use cached config instead of direct DB query
+    db_map = get_config_values(db, weight_keys)
 
     result = {}
     for key in weight_keys:
