@@ -82,13 +82,24 @@ async function apiFetch(url, opts = {}) {
         opts.headers = {'Content-Type': 'application/json', ...(opts.headers || {})};
         opts.body = JSON.stringify(opts.body);
     }
-    const res = await fetch(url, opts);
-    if (!res.ok) {
-        const msg = await res.text().catch(() => res.statusText);
-        throw Object.assign(new Error(msg), {status: res.status});
+    const method = (opts.method || 'GET').toUpperCase();
+    const maxRetries = method === 'GET' ? 2 : 0;
+    let lastErr;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        if (attempt > 0) {
+            await new Promise(r => setTimeout(r, Math.pow(2, attempt - 1) * 1000));
+        }
+        const res = await fetch(url, opts);
+        if (!res.ok) {
+            const msg = await res.text().catch(() => res.statusText);
+            lastErr = Object.assign(new Error(msg), {status: res.status});
+            if (res.status >= 500 && attempt < maxRetries) continue;
+            throw lastErr;
+        }
+        const ct = res.headers.get('content-type') || '';
+        return ct.includes('json') ? res.json() : res.text();
     }
-    const ct = res.headers.get('content-type') || '';
-    return ct.includes('json') ? res.json() : res.text();
+    throw lastErr;
 }
 
 function debounce(fn, ms = 300) {
@@ -4953,5 +4964,13 @@ document.addEventListener('keydown', function(e) {
         e.preventDefault();
         const sb = document.getElementById('mainSearch');
         if (sb) sb.focus();
+    }
+});
+
+// Global handler for unhandled promise rejections
+window.addEventListener('unhandledrejection', function(event) {
+    console.error('Unhandled promise rejection:', event.reason);
+    if (typeof showToast === 'function') {
+        showToast('Something went wrong — please try again', 'error');
     }
 });

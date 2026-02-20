@@ -23,7 +23,9 @@ Job overview:
 
 import asyncio
 import base64
+import uuid
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -31,6 +33,23 @@ from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
 from .http_client import http
+
+
+def _traced_job(func):
+    """Wrap scheduler jobs with a unique trace_id for log correlation."""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        trace_id = str(uuid.uuid4())[:8]
+        with logger.contextualize(trace_id=trace_id, job=func.__name__):
+            logger.debug("Job started")
+            try:
+                return await func(*args, **kwargs)
+            except Exception:
+                logger.exception("Job failed")
+                raise
+            finally:
+                logger.debug("Job finished")
+    return wrapper
 
 # Global scheduler instance
 scheduler = AsyncIOScheduler(
@@ -206,6 +225,7 @@ def configure_scheduler():
 # ── Individual Job Functions ───────────────────────────────────────────
 
 
+@_traced_job
 async def _job_auto_archive():
     """Auto-archive stale requisitions (no activity for 30 days)."""
     from .database import SessionLocal
@@ -234,6 +254,7 @@ async def _job_auto_archive():
         db.close()
 
 
+@_traced_job
 async def _job_token_refresh():
     """Refresh tokens for all users with refresh tokens."""
     from .database import SessionLocal
@@ -270,6 +291,7 @@ async def _job_token_refresh():
         db.close()
 
 
+@_traced_job
 async def _job_inbox_scan():
     """Scan inboxes for all connected users."""
     from .config import settings
@@ -321,6 +343,7 @@ async def _job_inbox_scan():
         db.close()
 
 
+@_traced_job
 async def _job_batch_results():
     """Process pending AI batch results."""
     from .database import SessionLocal
@@ -341,6 +364,7 @@ async def _job_batch_results():
         db.close()
 
 
+@_traced_job
 async def _job_contacts_sync():
     """Sync Outlook contacts for all connected users."""
     from .database import SessionLocal
@@ -372,6 +396,7 @@ async def _job_contacts_sync():
         db.close()
 
 
+@_traced_job
 async def _job_engagement_scoring():
     """Compute engagement scores for all vendors with outreach data."""
     from .database import SessionLocal
@@ -404,6 +429,7 @@ async def _job_engagement_scoring():
         db.close()
 
 
+@_traced_job
 async def _job_webhook_subscriptions():
     """Manage Graph webhook subscriptions."""
     from .database import SessionLocal
@@ -423,6 +449,7 @@ async def _job_webhook_subscriptions():
         db.close()
 
 
+@_traced_job
 async def _job_ownership_sweep():
     """Run customer ownership sweep."""
     from .database import SessionLocal
@@ -438,6 +465,7 @@ async def _job_ownership_sweep():
         db.close()
 
 
+@_traced_job
 async def _job_po_verification():
     """Verify PO sent status for pending buy plans."""
     from .database import SessionLocal
@@ -466,6 +494,7 @@ async def _job_po_verification():
         db.close()
 
 
+@_traced_job
 async def _job_stock_autocomplete():
     """Auto-complete stock sales at configured hour."""
     from .database import SessionLocal
@@ -483,6 +512,7 @@ async def _job_stock_autocomplete():
         db.close()
 
 
+@_traced_job
 async def _job_proactive_matching():
     """Scan new offers for proactive matching."""
     from .database import SessionLocal
@@ -502,6 +532,7 @@ async def _job_proactive_matching():
         db.close()
 
 
+@_traced_job
 async def _job_performance_tracking():
     """Compute vendor scorecards and buyer leaderboard."""
     from .database import SessionLocal
@@ -536,6 +567,7 @@ async def _job_performance_tracking():
         db.close()
 
 
+@_traced_job
 async def _job_deep_email_mining():
     """Deep email mining scan for all connected users."""
     from .database import SessionLocal
@@ -603,6 +635,7 @@ async def _job_deep_email_mining():
         db.close()
 
 
+@_traced_job
 async def _job_deep_enrichment():
     """Deep enrichment sweep for vendors and companies."""
     from .config import settings
@@ -697,6 +730,7 @@ async def _job_deep_enrichment():
         db.close()
 
 
+@_traced_job
 async def _job_cache_cleanup():
     """Clean up expired cache entries."""
     try:

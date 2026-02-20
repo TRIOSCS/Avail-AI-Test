@@ -76,10 +76,12 @@ async def lifespan(app):
     scheduler.start()
     logger.info("APScheduler started")
     yield
-    scheduler.shutdown(wait=False)
+    logger.info("Shutting down scheduler (waiting for running jobs)...")
+    scheduler.shutdown(wait=True)
     from .http_client import close_clients
 
     await close_clients()
+    logger.info("Shutdown complete")
 
 
 app = FastAPI(title="AVAIL — Opportunity Management", lifespan=lifespan)
@@ -93,6 +95,32 @@ if settings.rate_limit_enabled:
     from slowapi.errors import RateLimitExceeded
 
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+from fastapi.responses import JSONResponse
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Catch unhandled exceptions — return structured JSON, log with context."""
+    req_id = getattr(request.state, "request_id", "unknown")
+    logger.error(
+        "Unhandled {exc_type}: {exc_msg}",
+        exc_type=type(exc).__name__,
+        exc_msg=str(exc)[:500],
+        method=request.method,
+        path=request.url.path,
+        request_id=req_id,
+        exc_info=exc,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "Internal server error",
+            "type": type(exc).__name__,
+            "request_id": req_id,
+        },
+    )
+
 
 app.add_middleware(
     SessionMiddleware,
@@ -156,6 +184,12 @@ async def request_id_middleware(request: Request, call_next):
 
         duration_ms = round((time.perf_counter() - start) * 1000, 1)
         response.headers["X-Request-ID"] = req_id
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        if settings.app_url.startswith("https"):
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
         # Skip noisy paths (static files, health checks)
         path = request.url.path
@@ -187,6 +221,40 @@ async def api_version_middleware(request: Request, call_next):
 
 
 # ── Health Check ──────────────────────────────────────────────────────
+BACKUP_TIMESTAMP_FILE = "/app/uploads/.last_backup"
+BACKUP_MAX_AGE_HOURS = 25  # Backups older than this are "stale"
+
+
+def _check_backup_freshness() -> str:
+    """Check if the last backup timestamp is recent enough.
+
+    Returns "ok", "stale", or "unknown".
+    """
+    from datetime import datetime, timedelta, timezone
+    from pathlib import Path
+
+    ts_path = Path(BACKUP_TIMESTAMP_FILE)
+    if not ts_path.exists():
+        return "unknown"
+
+    try:
+        raw = ts_path.read_text().strip()
+        # Parse ISO 8601 timestamp written by backup.sh (date -Iseconds)
+        # Handle timezone offset formats: +00:00, +0000, Z
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        backup_time = datetime.fromisoformat(raw)
+        # If naive (no timezone), assume UTC
+        if backup_time.tzinfo is None:
+            backup_time = backup_time.replace(tzinfo=timezone.utc)
+        age = datetime.now(timezone.utc) - backup_time
+        if age < timedelta(hours=BACKUP_MAX_AGE_HOURS):
+            return "ok"
+        return "stale"
+    except (ValueError, OSError):
+        return "unknown"
+
+
 @app.get("/health")
 async def health(request: Request, db: Session = Depends(get_db)):
     from sqlalchemy import text
@@ -215,6 +283,9 @@ async def health(request: Request, db: Session = Depends(get_db)):
     connector_status = getattr(request.app.state, "connector_status", {})
     connectors_enabled = sum(1 for v in connector_status.values() if v)
 
+    # Backup freshness (informational — does not affect overall status)
+    backup_status = _check_backup_freshness()
+
     # "degraded" only when a required service is actively failing
     degraded = not db_ok or redis_status == "error" or scheduler_status == "error"
     status = "degraded" if degraded else "ok"
@@ -228,6 +299,7 @@ async def health(request: Request, db: Session = Depends(get_db)):
             "redis": redis_status,
             "scheduler": scheduler_status,
             "connectors_enabled": connectors_enabled,
+            "backup": backup_status,
         },
         status_code=200 if status == "ok" else 503,
     )
