@@ -35,8 +35,6 @@ def run_buyplan_bg(coro_factory, plan_id: int, **kwargs):
     Replaces the repeated inline async-def + create_task pattern throughout
     crm.py.  ``coro_factory`` is an async callable ``(plan, db, **kw)``.
     """
-    import asyncio
-
     async def _run():
         from ..database import SessionLocal
 

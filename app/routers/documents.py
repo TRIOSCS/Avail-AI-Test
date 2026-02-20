@@ -25,7 +25,7 @@ async def download_rfq_pdf(
     from ..services.document_service import generate_rfq_summary_pdf
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         pdf_bytes = await loop.run_in_executor(
             None, generate_rfq_summary_pdf, requisition_id, db
         )
@@ -52,7 +52,7 @@ async def download_quote_pdf(
     from ..services.document_service import generate_quote_report_pdf
 
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         pdf_bytes = await loop.run_in_executor(
             None, generate_quote_report_pdf, quote_id, db
         )

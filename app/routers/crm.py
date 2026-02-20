@@ -17,6 +17,7 @@ Depends on: models, dependencies, vendor_utils, config, enrichment_service,
             acctivate_sync
 """
 
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -340,7 +341,6 @@ async def create_company(
         or get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
         or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
     ):
-        import asyncio
         from ..enrichment_service import enrich_entity, apply_enrichment_to_company
 
         async def _enrich_company_bg(cid, d, n):
@@ -426,13 +426,11 @@ async def update_site(
 async def get_site(
     site_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
-    import asyncio
-
     site = db.get(CustomerSite, site_id)
     if not site:
         raise HTTPException(404)
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _q_reqs():
         return db.query(Requisition).filter(
@@ -807,10 +805,9 @@ async def acctivate_run_sync(
         raise HTTPException(403, "Admin only")
     if not settings.acctivate_host:
         raise HTTPException(400, "ACCTIVATE_HOST not configured")
-    import asyncio
     from ..acctivate_sync import run_sync
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(None, run_sync, db)
     return result
 
@@ -1080,7 +1077,6 @@ async def create_offer(
             or get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
             or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
         ):
-            import asyncio
             from ..routers.vendors import _background_enrich_vendor
 
             asyncio.create_task(
@@ -1129,7 +1125,6 @@ async def create_offer(
             )
             if best_price and float(offer.unit_price) < float(best_price) * 0.8:
                 from ..services.teams import send_competitive_quote_alert
-                import asyncio
                 asyncio.create_task(send_competitive_quote_alert(
                     offer_id=offer.id,
                     mpn=offer.mpn,

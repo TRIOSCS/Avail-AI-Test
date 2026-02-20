@@ -1,10 +1,5 @@
 /* AVAIL v1.2.0 — CRM, offers, quotes, target pricing */
 
-// API versioning: all new fetch() calls should use api('/endpoint') instead of '/api/endpoint'.
-// Old /api/ paths keep working via middleware rewrite.
-const API_BASE = '/api/v1';
-function api(path) { return API_BASE + path; }
-
 let currentReqId = null;
 let currentReqName = '';
 let searchResults = {};
@@ -94,6 +89,8 @@ function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
     const input = document.getElementById(inputId);
     const list  = document.getElementById(listId);
     if (!input || !list) return;
+    if (input.dataset.autocompleteInit) return;
+    input.dataset.autocompleteInit = '1';
     const minLen = opts.minLen || 2;
     const filterType = opts.types || 'all';
     const websiteId = opts.websiteId || null;

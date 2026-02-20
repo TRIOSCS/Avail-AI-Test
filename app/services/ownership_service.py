@@ -15,6 +15,7 @@ Usage:
     check_and_claim_open_account(company_id, user_id, db)
 """
 
+import asyncio
 import html
 import logging
 from datetime import datetime, timezone, timedelta
@@ -525,7 +526,6 @@ async def send_manager_digest_email(db: Session):
     html_body = "\n".join(lines)
 
     # Send to all admins in parallel
-    import asyncio
     from app.scheduler import get_valid_token
     from app.utils.graph_client import GraphClient
 

@@ -536,7 +536,7 @@ async def _job_performance_tracking():
             compute_buyer_leaderboard,
         )
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         vs_result = await loop.run_in_executor(None, compute_all_vendor_scorecards, db)
         log.info(
             f"Vendor scorecards: {vs_result['updated']} updated, "

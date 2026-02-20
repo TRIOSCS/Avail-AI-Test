@@ -1,5 +1,6 @@
 """Admin API — User management, system config, health, data import, Teams."""
 
+import asyncio
 import csv
 import io
 import logging
@@ -250,10 +251,9 @@ async def api_vendor_dedup_suggestions(
     db: Session = Depends(get_db),
 ):
     """Find potential duplicate vendor cards using fuzzy name matching."""
-    import asyncio
     from ..vendor_utils import find_vendor_dedup_candidates
 
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     candidates = await loop.run_in_executor(
         None, find_vendor_dedup_candidates, db, max(70, min(threshold, 100)), min(limit, 200)
     )
@@ -557,8 +557,6 @@ async def api_list_teams_channels(
     teams_list = teams_result.get("value", [])
 
     # Fetch channels for all teams in parallel
-    import asyncio
-
     async def _fetch_channels(team):
         channels_result = await gc.get_json(
             f"/teams/{team['id']}/channels",

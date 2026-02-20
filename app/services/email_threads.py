@@ -360,8 +360,6 @@ async def fetch_threads_for_requirement(
                 vendor_domains.add(card.domain.lower())
 
     # Search by vendor domains in parallel (limit to avoid excessive API calls)
-    import asyncio
-
     search_domains = [d for d in list(vendor_domains)[:5] if d not in _TRIOSCS_DOMAINS]
 
     async def _search_domain(domain):

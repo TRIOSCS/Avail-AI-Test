@@ -14,6 +14,7 @@ Called by: main.py (router mount)
 Depends on: models, email_service, vendor_utils, engagement_scoring
 """
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -154,9 +155,7 @@ async def get_activity(
     req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     """Combined activity view: contacts + responses + tracking, grouped by vendor."""
-    import asyncio
-
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
 
     def _q_contacts():
         from sqlalchemy.orm import joinedload

@@ -603,8 +603,7 @@ async def scrape_website_contacts(url: str) -> dict:
     emails: set[str] = set()
     phones: set[str] = set()
 
-    import asyncio
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     if await loop.run_in_executor(None, is_private_url, url):
         log.warning(f"SSRF blocked: {url}")
         return {"emails": [], "phones": []}
@@ -616,9 +615,8 @@ async def scrape_website_contacts(url: str) -> dict:
     }
 
     # Fetch all pages concurrently instead of sequentially
-    import asyncio as _asyncio
     tasks = [http_redirect.get(page_url, headers=headers, timeout=10) for page_url in pages_to_try]
-    results = await _asyncio.gather(*tasks, return_exceptions=True)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
     for resp in results:
         if isinstance(resp, Exception):

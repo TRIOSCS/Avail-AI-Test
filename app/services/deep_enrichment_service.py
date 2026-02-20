@@ -381,7 +381,7 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
         nonlocal _specialty_result
         try:
             from .specialty_detector import analyze_vendor_specialties
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             _specialty_result = await loop.run_in_executor(
                 None, analyze_vendor_specialties, vendor_card_id, db
             )

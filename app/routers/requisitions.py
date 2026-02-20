@@ -447,7 +447,6 @@ async def add_requirements(
             qty = r.target_qty or 0
             if qty * price >= cfg.teams_hot_threshold:
                 customer = req.customer_site.company.name if req.customer_site and req.customer_site.company else (req.customer_name or "")
-                import asyncio
                 asyncio.create_task(send_hot_requirement_alert(
                     requirement_id=r.id,
                     mpn=r.primary_mpn,
@@ -647,7 +646,6 @@ async def search_all(
     ]
 
     # Search all requirements in parallel
-    import asyncio
     search_tasks = [search_requirement(r, db) for r in reqs_to_search]
     search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
 

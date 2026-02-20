@@ -19,10 +19,12 @@ Usage:
     # Nightly cron — expire stale assignments
     expire_stale_assignments(db)
 
+
     # Also: expire stale offers (14-day TTL)
     expire_stale_offers(db)
 """
 
+import asyncio
 import html
 import logging
 from datetime import datetime, timezone, timedelta
@@ -255,7 +257,6 @@ async def rank_buyers_with_availability(
         return ranked
 
     try:
-        import asyncio
         from app.services.calendar import is_buyer_available
         check_date = date.today()
 
@@ -681,7 +682,6 @@ async def notify_routing_assignment(
     )
 
     # Send notifications to all buyers in parallel
-    import asyncio
     send_results = []
 
     async def _send_to_buyer(buyer_id, score, rank):
