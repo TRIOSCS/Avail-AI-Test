@@ -68,6 +68,10 @@ async def lifespan(app):
 
     run_startup_migrations()
     _seed_api_sources()
+    from .connector_status import log_connector_status
+    _connector_status = log_connector_status()
+    app.state.connector_status = _connector_status
+
     from .scheduler import scheduler, configure_scheduler
 
     configure_scheduler()
@@ -183,7 +187,7 @@ async def api_version_middleware(request: Request, call_next):
 
 # ── Health Check ──────────────────────────────────────────────────────
 @app.get("/health")
-async def health(db: Session = Depends(get_db)):
+async def health(request: Request, db: Session = Depends(get_db)):
     from sqlalchemy import text
     from .cache.intel_cache import _get_redis
     from . import scheduler as sched_mod
@@ -205,6 +209,10 @@ async def health(db: Session = Depends(get_db)):
     scheduler_running = getattr(sched_mod.scheduler, "running", False)
     scheduler_status = "ok" if scheduler_running else "off"
 
+    # Connector status from startup scan
+    connector_status = getattr(request.app.state, "connector_status", {})
+    connectors_enabled = sum(1 for v in connector_status.values() if v)
+
     # "degraded" only when a required service is actively failing
     degraded = not db_ok or redis_status == "error" or scheduler_status == "error"
     status = "degraded" if degraded else "ok"
@@ -217,6 +225,7 @@ async def health(db: Session = Depends(get_db)):
             "db": "ok" if db_ok else "error",
             "redis": redis_status,
             "scheduler": scheduler_status,
+            "connectors_enabled": connectors_enabled,
         },
         status_code=200 if status == "ok" else 503,
     )
