@@ -80,6 +80,7 @@ class Offer(Base):
         Index("ix_offers_entered_by", "entered_by_id"),
         Index("ix_offers_req_status", "requisition_id", "status"),
         Index("ix_offers_entered_created", "entered_by_id", "created_at"),
+        Index("ix_offers_req_created", "requisition_id", "created_at"),
     )
 
 

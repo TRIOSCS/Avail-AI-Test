@@ -721,13 +721,6 @@ function updateBuildQuoteBtn() {
 let _odCurrentPath = '';
 let _odTargetOfferId = null;
 
-function openOneDrivePicker(offerId) {
-    _odTargetOfferId = offerId || null;
-    _odCurrentPath = '';
-    openModal('oneDriveModal');
-    browseOneDrive('');
-}
-
 async function browseOneDrive(path) {
     _odCurrentPath = path;
     const el = document.getElementById('odFileList');
@@ -2531,11 +2524,6 @@ function filterSiteContacts(input, siteId) {
 
 // ── Company Activity Tracking ─────────────────────────────────────────
 
-function toggleCompanyCard(cardEl, companyId) {
-    // Legacy compat — redirect to drill-down toggle
-    toggleCustDrill(companyId);
-}
-
 async function loadCompanyActivityStatus(companyId) {
     const el = document.getElementById('actHealth-' + companyId);
     if (!el || el.dataset.loaded) return;
@@ -2577,14 +2565,6 @@ async function loadCompanyActivities(companyId) {
             </div>`;
         }).join('');
     } catch(e) { logCatchError('companyActivities', e); el.innerHTML = '<p class="empty" style="font-size:11px">Error</p>'; }
-}
-
-function openLogCallModal(companyId, companyName) {
-    document.getElementById('lcCompanyId').value = companyId;
-    document.getElementById('lcCompanyName').textContent = companyName;
-    ['lcPhone','lcContactName','lcDuration','lcNotes'].forEach(id => document.getElementById(id).value = '');
-    document.getElementById('lcDirection').value = 'outbound';
-    openModal('logCallModal', 'lcPhone');
 }
 
 async function saveLogCall() {
@@ -4125,10 +4105,6 @@ async function testTeamsPost() {
 
 let _eqSelectedIds = new Set();
 let _bfPollInterval = null;
-
-function showEnrichment() {
-    openSettingsTab('enrichment');
-}
 
 function switchEnrichTab(tab, btn) {
     document.querySelectorAll('#enrichTabs .tab').forEach(t => t.classList.remove('on'));

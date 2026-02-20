@@ -276,9 +276,6 @@ class NexarConnector(BaseConnector):
         return results
 
 
-OctopartConnector = NexarConnector
-
-
 class BrokerBinConnector(BaseConnector):
     """BrokerBin REST API v2.
 

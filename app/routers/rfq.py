@@ -444,11 +444,18 @@ async def rfq_prepare(
         for p in c.parts_included or []:
             exhaustion[vk].add(p.upper())
 
+    # Batch-fetch all vendor cards in one query instead of N individual queries
+    vendor_norms = {normalize_vendor_name(v.vendor_name): v.vendor_name for v in vendors[:50]}
+    cards_by_norm = {
+        c.normalized_name: c
+        for c in db.query(VendorCard).filter(VendorCard.normalized_name.in_(vendor_norms.keys())).all()
+    }
+
     results = []
     for v in vendors[:50]:
         vendor_name = v.vendor_name
         norm = normalize_vendor_name(vendor_name)
-        card = db.query(VendorCard).filter_by(normalized_name=norm).first()
+        card = cards_by_norm.get(norm)
         already_asked = sorted(exhaustion.get(norm, set()))
 
         base = {
@@ -585,7 +592,8 @@ async def send_follow_up(
         parts_str = ", ".join(contact.parts_included or ["your parts"])
         body = f"Hi, following up on our RFQ below regarding {parts_str}. Please advise on availability and pricing at your earliest convenience. Thank you."
 
-    from ..email_service import GRAPH, _build_html_body, _graph_post
+    from ..email_service import _build_html_body
+    from ..utils.graph_client import GraphClient
 
     html_body = _build_html_body(body)
 
@@ -604,10 +612,8 @@ async def send_follow_up(
         "saveToSentItems": "true",
     }
 
-    resp = await _graph_post(http, f"{GRAPH}/me/sendMail", token, payload)
-
-    if resp.status_code not in (200, 202):
-        raise HTTPException(502, f"Failed to send follow-up: {resp.status_code}")
+    gc = GraphClient(token)
+    await gc.post_json("/me/sendMail", payload)
 
     # Update contact status
     contact.status = "sent"  # Reset to sent — new follow-up cycle

@@ -114,49 +114,6 @@ async def search_contacts(
         return []
 
 
-async def enrich_single_contact(email: str) -> dict | None:
-    """Enrich a single contact by email address.
-
-    Returns enriched data or None.
-    """
-    api_key = getattr(settings, "apollo_api_key", "")
-    if not api_key or not email:
-        return None
-
-    try:
-        resp = await http.post(
-            f"{APOLLO_BASE}/people/match",
-            json={
-                "api_key": api_key,
-                "email": email,
-            },
-            headers={"Content-Type": "application/json"},
-            timeout=20,
-        )
-
-        if resp.status_code != 200:
-            return None
-
-        person = resp.json().get("person")
-        if not person:
-            return None
-
-        return {
-            "full_name": _full_name(person),
-            "title": person.get("title"),
-            "email": person.get("email"),
-            "email_status": person.get("email_status"),
-            "phone": _best_phone(person),
-            "linkedin_url": person.get("linkedin_url"),
-            "company_name": person.get("organization", {}).get("name"),
-            "source": "apollo",
-        }
-
-    except Exception as e:
-        log.warning(f"Apollo enrich error: {e}")
-        return None
-
-
 def _full_name(person: dict) -> str:
     """Extract full name from Apollo person record."""
     first = (person.get("first_name") or "").strip()

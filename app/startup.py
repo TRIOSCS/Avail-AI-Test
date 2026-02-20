@@ -39,6 +39,7 @@ def run_startup_migrations() -> None:
         _seed_system_config(conn)
         _seed_site_contacts(conn)
         _add_check_constraints(conn)
+        _create_perf_indexes(conn)
 
     _backfill_normalized_mpn()
     log.info("Startup migrations complete")
@@ -284,3 +285,14 @@ def _add_check_constraints(conn) -> None:
                 END IF;
             END $$;
         """)
+
+
+# ── Performance indexes (idempotent) ─────────────────────────────────
+
+
+def _create_perf_indexes(conn) -> None:
+    """Create functional/composite indexes for hot query paths."""
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_sightings_vendor_lower
+        ON sightings (LOWER(TRIM(vendor_name)))
+    """)

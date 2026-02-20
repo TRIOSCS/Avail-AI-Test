@@ -16,50 +16,6 @@ ROCKETREACH_BASE = "https://api.rocketreach.co/api/v2"
 _semaphore = asyncio.Semaphore(3)
 
 
-async def lookup_contact(name: str, company: str) -> dict | None:
-    """Look up a single contact by name and company.
-
-    Returns: {
-        full_name, title, email, phone, linkedin_url,
-        company_name, source: "rocketreach", confidence
-    } or None.
-    """
-    api_key = settings.rocketreach_api_key
-    if not api_key or not name:
-        return None
-
-    async with _semaphore:
-        try:
-            resp = await http.get(
-                f"{ROCKETREACH_BASE}/lookupProfile",
-                params={"name": name, "current_employer": company},
-                headers={"Api-Key": api_key},
-                timeout=20,
-            )
-            if resp.status_code != 200:
-                log.warning("RocketReach lookup failed: %s %s", resp.status_code, resp.text[:200])
-                return None
-
-            data = resp.json()
-            if data.get("status") == "complete":
-                emails = data.get("emails", [])
-                phones = data.get("phones", [])
-                return {
-                    "full_name": data.get("name"),
-                    "title": data.get("current_title"),
-                    "email": emails[0].get("email") if emails else None,
-                    "phone": phones[0].get("number") if phones else None,
-                    "linkedin_url": data.get("linkedin_url"),
-                    "company_name": data.get("current_employer"),
-                    "source": "rocketreach",
-                    "confidence": 0.8 if emails else 0.5,
-                }
-            return None
-        except Exception as e:
-            log.warning("RocketReach lookup error: %s", e)
-            return None
-
-
 async def search_company_contacts(
     company: str,
     domain: str | None = None,

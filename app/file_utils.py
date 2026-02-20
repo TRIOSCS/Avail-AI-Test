@@ -197,14 +197,3 @@ def normalize_stock_row(r: dict) -> dict | None:
         "lead_time": lead_time,
         "currency": currency,
     }
-
-
-def parse_num(val) -> float | None:
-    """Parse a string like '$1,234.56' into a float."""
-    if not val:
-        return None
-    val = str(val).replace(",", "").replace("$", "").strip()
-    try:
-        return float(val)
-    except (ValueError, TypeError):
-        return None

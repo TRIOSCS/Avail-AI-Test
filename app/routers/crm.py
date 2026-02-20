@@ -421,7 +421,11 @@ async def update_site(
 async def get_site(
     site_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
-    site = db.get(CustomerSite, site_id)
+    site = db.get(
+        CustomerSite,
+        site_id,
+        options=[joinedload(CustomerSite.company), joinedload(CustomerSite.owner)],
+    )
     if not site:
         raise HTTPException(404)
 
@@ -1428,7 +1432,7 @@ async def create_quote(
     offer_ids = payload.offer_ids
     line_items = payload.line_items
     if offer_ids and not line_items:
-        offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
+        offers = db.query(Offer).options(joinedload(Offer.requirement)).filter(Offer.id.in_(offer_ids)).all()
         quoted_prices = _preload_last_quoted_prices(db)
         line_items = []
         for o in offers:

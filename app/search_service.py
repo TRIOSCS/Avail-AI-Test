@@ -83,16 +83,19 @@ def get_all_pns(req: Requirement) -> list[str]:
     return pns
 
 
-async def search_requirement(req: Requirement, db: Session) -> list[dict]:
-    """Search APIs, upsert material cards, merge history."""
+async def search_requirement(req: Requirement, db: Session) -> dict:
+    """Search APIs, upsert material cards, merge history.
+
+    Returns {"sightings": [...], "source_stats": [...]}.
+    """
     pns = get_all_pns(req)
     if not pns:
-        return []
+        return {"sightings": [], "source_stats": []}
 
     now = datetime.now(timezone.utc)
 
     # 1. Fetch + dedupe (parallel across all connectors)
-    fresh = await _fetch_fresh(pns, db)
+    fresh, source_stats = await _fetch_fresh(pns, db)
 
     # 2. Score + save
     sightings = _save_sightings(fresh, req, db)
@@ -122,19 +125,26 @@ async def search_requirement(req: Requirement, db: Session) -> list[dict]:
         results.append(_history_to_result(h, now))
 
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
-    return results
+    return {"sightings": results, "source_stats": source_stats}
 
 
 # ── Private helpers ──────────────────────────────────────────────────────
 
 
-async def _fetch_fresh(pns: list[str], db: Session) -> list[dict]:
+async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[dict]]:
+    """Returns (results, source_stats) where source_stats is a list of
+    {"source": name, "results": count, "ms": elapsed, "error": str|None, "status": "ok"|"error"|"skipped"|"disabled"}.
+    """
     # Check which sources are disabled by the user
     disabled_sources = set()
     for src in db.query(ApiSource).filter_by(status="disabled").all():
         disabled_sources.add(src.name)
 
     connectors = []
+    source_stats_map: dict[str, dict] = {}  # track per-connector status
+
+    # All known connector source names
+    ALL_SOURCES = list(_CONNECTOR_SOURCE_MAP.values())
 
     # Tier 1: Direct APIs (skip disabled). DB credentials first, env var fallback.
     from .services.credential_service import get_credential
@@ -142,49 +152,63 @@ async def _fetch_fresh(pns: list[str], db: Session) -> list[dict]:
     def _cred(source_name, var_name):
         return get_credential(db, source_name, var_name)
 
+    def _add_or_skip(source_name, has_creds, connector_factory):
+        if source_name in disabled_sources:
+            source_stats_map[source_name] = {
+                "source": source_name, "results": 0, "ms": 0,
+                "error": None, "status": "disabled",
+            }
+        elif not has_creds:
+            source_stats_map[source_name] = {
+                "source": source_name, "results": 0, "ms": 0,
+                "error": "No API key configured", "status": "skipped",
+            }
+        else:
+            connectors.append(connector_factory())
+
     nexar_id = _cred("nexar", "NEXAR_CLIENT_ID")
     nexar_sec = _cred("nexar", "NEXAR_CLIENT_SECRET")
-    if "nexar" not in disabled_sources and nexar_id and nexar_sec:
-        connectors.append(NexarConnector(nexar_id, nexar_sec))
+    _add_or_skip("nexar", nexar_id and nexar_sec,
+                 lambda: NexarConnector(nexar_id, nexar_sec))
 
     bb_key = _cred("brokerbin", "BROKERBIN_API_KEY")
     bb_sec = _cred("brokerbin", "BROKERBIN_API_SECRET")
-    if "brokerbin" not in disabled_sources and bb_key:
-        connectors.append(BrokerBinConnector(bb_key, bb_sec))
+    _add_or_skip("brokerbin", bb_key,
+                 lambda: BrokerBinConnector(bb_key, bb_sec))
 
     ebay_id = _cred("ebay", "EBAY_CLIENT_ID")
     ebay_sec = _cred("ebay", "EBAY_CLIENT_SECRET")
-    if "ebay" not in disabled_sources and ebay_id and ebay_sec:
-        connectors.append(EbayConnector(ebay_id, ebay_sec))
+    _add_or_skip("ebay", ebay_id and ebay_sec,
+                 lambda: EbayConnector(ebay_id, ebay_sec))
 
     dk_id = _cred("digikey", "DIGIKEY_CLIENT_ID")
     dk_sec = _cred("digikey", "DIGIKEY_CLIENT_SECRET")
-    if "digikey" not in disabled_sources and dk_id and dk_sec:
-        connectors.append(DigiKeyConnector(dk_id, dk_sec))
+    _add_or_skip("digikey", dk_id and dk_sec,
+                 lambda: DigiKeyConnector(dk_id, dk_sec))
 
     mouser_key = _cred("mouser", "MOUSER_API_KEY")
-    if "mouser" not in disabled_sources and mouser_key:
-        connectors.append(MouserConnector(mouser_key))
+    _add_or_skip("mouser", mouser_key,
+                 lambda: MouserConnector(mouser_key))
 
     oem_key = _cred("oemsecrets", "OEMSECRETS_API_KEY")
-    if "oemsecrets" not in disabled_sources and oem_key:
-        connectors.append(OEMSecretsConnector(oem_key))
+    _add_or_skip("oemsecrets", oem_key,
+                 lambda: OEMSecretsConnector(oem_key))
 
     src_key = _cred("sourcengine", "SOURCENGINE_API_KEY")
-    if "sourcengine" not in disabled_sources and src_key:
-        connectors.append(SourcengineConnector(src_key))
+    _add_or_skip("sourcengine", src_key,
+                 lambda: SourcengineConnector(src_key))
 
     e14_key = _cred("element14", "ELEMENT14_API_KEY")
-    if "element14" not in disabled_sources and e14_key:
-        connectors.append(Element14Connector(e14_key))
+    _add_or_skip("element14", e14_key,
+                 lambda: Element14Connector(e14_key))
 
     tme_token = _cred("tme", "TME_API_TOKEN")
     tme_secret = _cred("tme", "TME_API_SECRET")
-    if "tme" not in disabled_sources and tme_token and tme_secret:
-        connectors.append(TMEConnector(tme_token, tme_secret))
+    _add_or_skip("tme", tme_token and tme_secret,
+                 lambda: TMEConnector(tme_token, tme_secret))
 
     if not connectors:
-        return []
+        return [], list(source_stats_map.values())
 
     # Run ALL connectors × ALL part numbers in parallel.
     # IMPORTANT: Stats are collected in a plain list (not written to DB) during
@@ -281,7 +305,29 @@ async def _fetch_fresh(pns: list[str], db: Session) -> list[dict]:
         r for r in out if r.get("vendor_name", "").strip().lower() not in JUNK_VENDORS
     ]
 
-    return out
+    # Build source_stats from stats_updates (connectors that actually ran)
+    # Aggregate per source (a connector may run for multiple PNs)
+    agg: dict[str, dict] = {}
+    for source_name, hit_count, elapsed_ms, error in stats_updates:
+        if source_name in agg:
+            agg[source_name]["results"] += hit_count
+            agg[source_name]["ms"] = max(agg[source_name]["ms"], elapsed_ms)
+            if error and not agg[source_name]["error"]:
+                agg[source_name]["error"] = error
+                agg[source_name]["status"] = "error"
+        else:
+            agg[source_name] = {
+                "source": source_name,
+                "results": hit_count,
+                "ms": elapsed_ms,
+                "error": error,
+                "status": "error" if error else "ok",
+            }
+    # Merge with skipped/disabled entries
+    for name, entry in agg.items():
+        source_stats_map[name] = entry
+
+    return out, list(source_stats_map.values())
 
 
 def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Sighting]:

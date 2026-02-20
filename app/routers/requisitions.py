@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, Upl
 from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_user
@@ -29,6 +29,7 @@ from ..rate_limit import limiter
 from ..models import (
     ActivityLog,
     Contact,
+    CustomerSite,
     Offer,
     ProactiveMatch,
     Quote,
@@ -316,6 +317,8 @@ async def list_requisitions(
         proactive_match_count_sq,
         call_count_sq,
         email_activity_count_sq,
+    ).options(
+        joinedload(Requisition.customer_site).joinedload(CustomerSite.company),
     )
     # Sales sees own reqs only; all other roles see everything
     if user.role == "sales":
@@ -836,12 +839,29 @@ async def search_all(
     search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
 
     results = {}
-    for r, sightings in zip(reqs_to_search, search_results):
-        if isinstance(sightings, Exception):
-            logger.error(f"Search failed for requirement {r.id}: {sightings}")
+    merged_source_stats: dict[str, dict] = {}
+    for r, search_result in zip(reqs_to_search, search_results):
+        if isinstance(search_result, Exception):
+            logger.error(f"Search failed for requirement {r.id}: {search_result}")
             sightings = []
+            req_stats = []
+        else:
+            sightings = search_result["sightings"]
+            req_stats = search_result["source_stats"]
         label = r.primary_mpn or f"Req #{r.id}"
         results[str(r.id)] = {"label": label, "sightings": sightings}
+        # Merge source_stats across requirements (same connectors run for each)
+        for stat in req_stats:
+            name = stat["source"]
+            if name not in merged_source_stats:
+                merged_source_stats[name] = dict(stat)
+            else:
+                existing = merged_source_stats[name]
+                existing["results"] += stat["results"]
+                existing["ms"] = max(existing["ms"], stat["ms"])
+                if stat["error"] and not existing["error"]:
+                    existing["error"] = stat["error"]
+                    existing["status"] = stat["status"]
 
     # Stamp last searched time (resets 30-day auto-archive clock)
     req.last_searched_at = datetime.now(timezone.utc)
@@ -853,6 +873,7 @@ async def search_all(
     # Enrich with vendor card ratings (no contact lookup — that happens at RFQ time)
     _enrich_with_vendor_cards(results, db)
 
+    results["source_stats"] = list(merged_source_stats.values())
     return results
 
 
@@ -868,14 +889,16 @@ async def search_one(
     req = get_req_for_user(db, user, r.requisition_id)
     if not req:
         raise HTTPException(403, "Access denied")
-    sightings = await search_requirement(r, db)
+    search_result = await search_requirement(r, db)
+    sightings = search_result["sightings"]
+    source_stats = search_result["source_stats"]
     # Wrap in same structure as search_all so enrichment works
     results = {
         str(r.id): {"label": r.primary_mpn or f"Req #{r.id}", "sightings": sightings}
     }
     _enrich_with_vendor_cards(results, db)
 
-    return {"sightings": results[str(r.id)]["sightings"]}
+    return {"sightings": results[str(r.id)]["sightings"], "source_stats": source_stats}
 
 
 # ── Saved sightings (no re-search) ──────────────────────────────────────

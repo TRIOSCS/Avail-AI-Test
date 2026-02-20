@@ -60,8 +60,6 @@ class MouserConnector(BaseConnector):
             desc = part.get("Description", "")
             url = part.get("ProductDetailUrl", "")
             avail = part.get("Availability", "")
-            part.get("ImagePath", "")
-
             # Parse availability string like "In Stock" or "3,500 In Stock"
             qty = None
             if avail:

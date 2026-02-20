@@ -15,7 +15,7 @@
 })();
 
 // ── Early stubs (available before full init for onclick handlers) ──────
-function setNav(btn) {}
+
 function toggleMobileSidebar() {
     var sb = document.getElementById('sidebar');
     var ov = document.getElementById('sidebarOverlay');
@@ -508,16 +508,7 @@ let _serverSearchActive = false; // True when server-side search returned filter
 let _currentMainView = 'rfq';  // 'rfq' | 'sourcing' | 'archive'
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
 
-function setReqListSort(val) {
-    _reqListSort = val;
-    renderReqList();
-}
 
-function toggleMyReqs(btn) {
-    _myReqsOnly = !_myReqsOnly;
-    btn.classList.toggle('on', _myReqsOnly);
-    renderReqList();
-}
 
 const debouncedReqListSearch = debounce(() => {
     const q = (document.getElementById('reqListFilter')?.value || '').trim();
@@ -526,11 +517,6 @@ const debouncedReqListSearch = debounce(() => {
     else renderReqList();  // Short input: client-side only
 }, 300);
 
-function submitReqListSearch() {
-    const q = (document.getElementById('reqListFilter')?.value || '').trim();
-    if (q) loadRequisitions(q);
-    else loadRequisitions();
-}
 
 async function loadRequisitions(query = '') {
     try {
@@ -1738,21 +1724,6 @@ function _renderDetailDeadline(el, deadline) {
     }
 }
 
-function editDetailDeadline() {
-    const el = document.getElementById('detailDeadline');
-    if (!el || el.querySelector('input')) return;
-    const r = _reqListData.find(x => x.id === currentReqId);
-    const cur = r?.deadline || '';
-    const isAsap = cur === 'ASAP';
-    el.innerHTML = `<div style="display:inline-flex;align-items:center;gap:6px">
-        <input type="date" value="${isAsap ? '' : cur}" style="font-size:12px;padding:4px 6px;border:1px solid var(--border);border-radius:6px"
-            onchange="saveDeadline(${currentReqId},this.value,false)">
-        <button class="btn btn-sm" style="font-size:11px;padding:2px 8px" onclick="saveDeadline(${currentReqId},'ASAP',true)"${isAsap ? ' disabled' : ''}>ASAP</button>
-        ${cur ? `<button class="btn btn-sm" style="font-size:11px;padding:2px 8px;color:var(--red)" onclick="saveDeadline(${currentReqId},null,false)">Clear</button>` : ''}
-        <button class="btn btn-ghost btn-sm" style="font-size:11px;padding:2px 8px" onclick="_renderDetailDeadline(document.getElementById('detailDeadline'),${cur ? `'${cur}'` : 'null'})">Cancel</button>
-    </div>`;
-    el.querySelector('input[type=date]')?.focus();
-}
 
 // ── v7 Filter Panel (unified) ───────────────────────────────────────────
 let _activeFilters = {};
@@ -1822,11 +1793,6 @@ function _filterGroupHtml(title, items) {
     }</div>`;
 }
 
-function _collapsibleGroupHtml(title, items) {
-    return `<div class="filter-group"><div class="filter-group-title collapsible" onclick="toggleFilterSection(this)">${title}</div><div class="filter-group-body">${
-        items.map(i => `<label><input type="checkbox" value="${i.value}" onchange="countActiveFilters()"> ${esc(i.label)}</label>`).join('')
-    }</div></div>`;
-}
 
 function countActiveFilters() {
     const panel = document.getElementById('mainFilterPanel');
@@ -2247,20 +2213,8 @@ function toggleReqSelection(reqId, checked) {
     updateSearchAllBar();
 }
 
-function toggleAllReqSelection(checked) {
-    if (checked) reqData.forEach(r => selectedRequirements.add(r.id));
-    else selectedRequirements.clear();
-    renderRequirementsTable();
-    updateSearchAllBar();
-}
 
 let reqFilterType = 'all';
-function setReqFilter(type, btn) {
-    reqFilterType = type;
-    document.querySelectorAll('[data-req-filter]').forEach(b => b.classList.remove('on'));
-    btn.classList.add('on');
-    renderRequirementsTable();
-}
 
 function editReqCell(td, reqId, field) {
     if (td.querySelector('input, select')) return; // Already editing
@@ -2322,35 +2276,6 @@ function editReqCell(td, reqId, field) {
     });
 }
 
-function editReqName(h2) {
-    if (h2.querySelector('input')) return;
-    const current = currentReqName || h2.textContent;
-    const input = document.createElement('input');
-    input.className = 'req-edit-input';
-    input.value = current;
-    input.style.cssText = 'font-size:18px;font-weight:700;width:300px';
-    h2.textContent = '';
-    h2.appendChild(input);
-    input.focus();
-    input.select();
-    let _cancelled = false;
-    const save = async () => {
-        if (_cancelled) return;
-        const val = input.value.trim();
-        if (!val || val === current) { h2.textContent = current; return; }
-        try {
-            await apiFetch(`/api/requisitions/${currentReqId}`, { method: 'PUT', body: { name: val } });
-            currentReqName = val;
-            h2.textContent = val;
-            loadRequisitions();
-        } catch(e) { h2.textContent = current; showToast('Failed to rename', 'error'); }
-    };
-    input.addEventListener('blur', save);
-    input.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-        if (e.key === 'Escape') { _cancelled = true; h2.textContent = current; }
-    });
-}
 
 async function addReq() {
     if (!currentReqId) return;
@@ -2385,10 +2310,6 @@ async function deleteReq(id) {
     loadRequirements();
 }
 
-function toggleUpload() {
-    const el = document.getElementById('uploadArea');
-    el.style.display = el.style.display === 'none' ? '' : 'none';
-}
 
 function showFileReady(inputId, readyId, nameId) {
     const file = document.getElementById(inputId).files[0];
@@ -2474,9 +2395,6 @@ async function inlineSourceAll(reqId) {
     }
 }
 
-function submitOrSearch() {
-    searchAll();
-}
 
 async function searchAll() {
     if (!currentReqId) return;
@@ -2488,6 +2406,8 @@ async function searchAll() {
             const body = { requirement_ids: [...selectedRequirements] };
             const results = await apiFetch(`/api/requisitions/${reqIdAtStart}/search`, { method: 'POST', body });
             if (currentReqId !== reqIdAtStart) return;  // User navigated away
+            window._lastSourceStats = results.source_stats || [];
+            delete results.source_stats;
             searchResults = results;
             searchResultsCache[currentReqId] = searchResults;
             _rebuildSightingIndex();
@@ -2537,17 +2457,7 @@ function updateRequirementCounts() {
 let srcFilterType = 'all';
 let _srcSort = 'default';
 
-function setSrcFilter(type, btn) {
-    srcFilterType = type;
-    document.querySelectorAll('[data-src-filter]').forEach(b => b.classList.remove('on'));
-    btn.classList.add('on');
-    renderSources();
-}
 
-function setSrcSort(val) {
-    _srcSort = val;
-    renderSources();
-}
 
 function renderSources() {
     const el = document.getElementById('sourceResults');
@@ -2575,6 +2485,43 @@ function renderSources() {
     const isFiltering = !!(q || srcFilterType !== 'all');
 
     let html = '';
+
+    // Connector status banner
+    const _ss = window._lastSourceStats || [];
+    if (_ss.length) {
+        const okList = _ss.filter(s => s.status === 'ok');
+        const errList = _ss.filter(s => s.status === 'error');
+        const skipList = _ss.filter(s => s.status === 'skipped');
+        const disabledList = _ss.filter(s => s.status === 'disabled');
+        const summaryParts = [];
+        if (okList.length) summaryParts.push(`<span style="color:var(--green)">${okList.length} ok</span>`);
+        if (errList.length) summaryParts.push(`<span style="color:var(--red)">${errList.length} failed</span>`);
+        if (skipList.length) summaryParts.push(`<span style="color:var(--muted)">${skipList.length} no key</span>`);
+        if (disabledList.length) summaryParts.push(`<span style="color:var(--muted)">${disabledList.length} off</span>`);
+        let detailHtml = '';
+        for (const s of okList) {
+            const ms = s.ms >= 1000 ? (s.ms / 1000).toFixed(1) + 's' : s.ms + 'ms';
+            detailHtml += `<span class="badge" style="background:#dcfce7;color:#166534">${esc(s.source)} ${s.results} (${ms})</span> `;
+        }
+        for (const s of errList) {
+            const errMsg = s.error ? ': ' + esc(s.error.length > 50 ? s.error.slice(0, 50) + '\u2026' : s.error) : '';
+            detailHtml += `<span class="badge" style="background:#fee2e2;color:#991b1b">${esc(s.source)}${errMsg}</span> `;
+        }
+        for (const s of skipList) {
+            detailHtml += `<span class="badge" style="background:var(--bg2);color:var(--muted)">${esc(s.source)} (no key)</span> `;
+        }
+        for (const s of disabledList) {
+            detailHtml += `<span class="badge" style="background:var(--bg2);color:var(--muted)">${esc(s.source)} (off)</span> `;
+        }
+        html += `<div class="source-status-banner" style="margin-bottom:10px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:11px;background:var(--bg1)">
+            <div style="display:flex;align-items:center;gap:6px;cursor:pointer" onclick="this.parentElement.classList.toggle('ss-expanded')">
+                <span style="font-weight:600">Sources:</span> ${summaryParts.join(' · ')}
+                <span style="margin-left:auto;color:var(--muted);font-size:10px" class="ss-toggle-hint">details</span>
+            </div>
+            <div class="ss-detail" style="display:none;margin-top:6px;flex-wrap:wrap;gap:4px">${detailHtml}</div>
+        </div>`;
+    }
+
     for (const reqId of keys) {
         const group = searchResults[reqId];
         const sightings = group.sightings || [];
@@ -2813,17 +2760,7 @@ function toggleGroup(reqId) {
     renderSources();
 }
 
-function expandAllGroups() {
-    for (const reqId of Object.keys(searchResults)) {
-        expandedGroups.add(reqId);
-    }
-    renderSources();
-}
 
-function collapseAllGroups() {
-    expandedGroups.clear();
-    renderSources();
-}
 
 function expandMatchingGroups() {
     const q = (document.getElementById('srcFilter')?.value || '').trim().toUpperCase();
@@ -2858,25 +2795,7 @@ function toggleSighting(key) {
     updateBatchCount();
 }
 
-function selectAllSightings() {
-    for (const reqId of Object.keys(searchResults)) {
-        const sightings = searchResults[reqId].sightings || [];
-        for (let i = 0; i < sightings.length; i++) {
-            const vn = (sightings[i].vendor_name || '').trim().toLowerCase();
-            if (!sightings[i].is_unavailable && vn && vn !== 'no seller listed') {
-                selectedSightings.add(`${reqId}:${i}`);
-            }
-        }
-    }
-    renderSources();
-    updateBatchCount();
-}
 
-function clearSelection() {
-    selectedSightings.clear();
-    renderSources();
-    updateBatchCount();
-}
 
 async function markUnavailable(sightingId, unavail) {
     try {
@@ -3778,15 +3697,6 @@ async function loadVendorActivityStatus(cardId) {
     } catch(e) { logCatchError('vendorActivityStatus', e); }
 }
 
-function openVendorLogCallModal(cardId, vendorName, reqId) {
-    document.getElementById('vlcCardId').value = cardId;
-    document.getElementById('vlcVendorName').textContent = vendorName;
-    ['vlcPhone','vlcContactName','vlcDuration','vlcNotes'].forEach(id => document.getElementById(id).value = '');
-    document.getElementById('vlcDirection').value = 'outbound';
-    window._vlcReqId = reqId || null;
-    openModal('vendorLogCallModal');
-    setTimeout(() => document.getElementById('vlcPhone').focus(), 100);
-}
 
 function autoLogEmail(email, contactName) {
     apiFetch('/api/activities/email', {
@@ -4384,28 +4294,7 @@ let activityData = { vendors: [], summary: { sent: 0, replied: 0, opened: 0, awa
 let actFilterType = 'all';
 let actStatFilter = null; // null = all, 'replied', 'opened', 'awaiting'
 
-function setActFilter(type, btn) {
-    actFilterType = type;
-    document.querySelectorAll('[data-act-filter]').forEach(b => b.classList.remove('on'));
-    btn.classList.add('on');
-    renderActivityCards();
-}
 
-function setActStat(type, el) {
-    // Sent and Replied tiles open detail modals
-    if (type === 'all') { openSentEmailsModal(); return; }
-    if (type === 'replied') { openRepliedEmailsModal(); return; }
-    // Toggle — click same stat again to clear
-    if (actStatFilter === type) {
-        actStatFilter = null;
-        document.querySelectorAll('.act-stat').forEach(s => s.classList.remove('on'));
-    } else {
-        actStatFilter = type;
-        document.querySelectorAll('.act-stat').forEach(s => s.classList.remove('on'));
-        el.classList.add('on');
-    }
-    renderActivityCards();
-}
 
 async function loadActivity() {
     if (!currentReqId) return;

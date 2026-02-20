@@ -9,15 +9,6 @@ from .sources import BaseConnector
 
 log = logging.getLogger(__name__)
 
-# eBay category IDs for electronic components
-EBAY_CATEGORIES = {
-    "semiconductors": "180021",
-    "active_components": "58058",
-    "passive_components": "163843",
-    "electronic_components": "175673",
-}
-
-
 class EbayConnector(BaseConnector):
     """eBay Browse API — OAuth client credentials flow."""
 
