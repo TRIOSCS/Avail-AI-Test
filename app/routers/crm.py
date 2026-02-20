@@ -297,6 +297,34 @@ async def list_companies(
     return result
 
 
+@router.get("/api/companies/typeahead")
+async def companies_typeahead(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lightweight endpoint returning all active companies + site IDs for the
+    requisition creation typeahead. No limit, minimal payload."""
+    companies = (
+        db.query(Company)
+        .filter(Company.is_active == True)  # noqa: E712
+        .options(selectinload(Company.sites))
+        .order_by(Company.name)
+        .all()
+    )
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "sites": [
+                {"id": s.id, "site_name": s.site_name}
+                for s in c.sites
+                if s.is_active
+            ],
+        }
+        for c in companies
+    ]
+
+
 @router.get("/api/companies/check-duplicate")
 async def check_company_duplicate(
     name: str,

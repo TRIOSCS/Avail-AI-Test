@@ -1911,7 +1911,7 @@ async function loadUserOptions(selectId) {
 let _siteListCache = null;
 async function loadSiteOptions() {
     try {
-        const companies = await apiFetch('/api/companies');
+        const companies = await apiFetch('/api/companies/typeahead');
         _siteListCache = [];
         companies.forEach(c => {
             const sites = c.sites || [];
