@@ -89,7 +89,11 @@ async def list_contacts(
 
 
 # ── Batch RFQ ────────────────────────────────────────────────────────────
+from ..rate_limit import limiter
+
+
 @router.post("/api/requisitions/{req_id}/rfq")
+@limiter.limit("5/minute")
 async def send_rfq(
     req_id: int,
     payload: BatchRfqSend,

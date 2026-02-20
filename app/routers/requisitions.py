@@ -620,7 +620,11 @@ async def update_requirement(
 
 
 # ── Search ───────────────────────────────────────────────────────────────
+from ..rate_limit import limiter
+
+
 @router.post("/api/requisitions/{req_id}/search")
+@limiter.limit("20/minute")
 async def search_all(
     req_id: int,
     request: Request,
@@ -671,8 +675,9 @@ async def search_all(
 
 
 @router.post("/api/requirements/{item_id}/search")
+@limiter.limit("20/minute")
 async def search_one(
-    item_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+    item_id: int, request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     r = db.get(Requirement, item_id)
     if not r:

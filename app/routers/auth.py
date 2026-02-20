@@ -67,7 +67,11 @@ async def login():
     )
 
 
+from ..rate_limit import limiter
+
+
 @router.get("/auth/callback")
+@limiter.limit("10/minute")
 async def callback(request: Request, code: str = "", db: Session = Depends(get_db)):
     if not code:
         return RedirectResponse("/")

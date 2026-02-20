@@ -98,7 +98,11 @@ def _build_vendor_history(vendor_name: str, db: Session) -> dict:
 # ── Feature 1: Contact Enrichment ────────────────────────────────────────
 
 
+from ..rate_limit import limiter
+
+
 @router.post("/api/ai/find-contacts")
+@limiter.limit("10/minute")
 async def ai_find_contacts(
     payload: ProspectFinderRequest,
     request: Request,
@@ -266,8 +270,10 @@ async def delete_prospect_contact(
 
 
 @router.post("/api/ai/parse-response/{response_id}")
+@limiter.limit("10/minute")
 async def ai_parse_response(
     response_id: int,
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -396,7 +402,9 @@ async def save_parsed_offers(
 
 
 @router.get("/api/ai/company-intel")
+@limiter.limit("10/minute")
 async def get_company_intel(
+    request: Request,
     company_name: str = "",
     domain: str = "",
     user: User = Depends(require_user),
@@ -421,8 +429,10 @@ async def get_company_intel(
 
 
 @router.post("/api/ai/draft-rfq")
+@limiter.limit("10/minute")
 async def ai_draft_rfq(
     payload: RfqDraftRequest,
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):

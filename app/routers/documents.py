@@ -3,21 +3,24 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import require_user
 from ..models import User
+from ..rate_limit import limiter
 
 router = APIRouter(tags=["documents"])
 log = logging.getLogger(__name__)
 
 
 @router.get("/api/requisitions/{requisition_id}/pdf")
+@limiter.limit("10/minute")
 async def download_rfq_pdf(
     requisition_id: int,
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -43,8 +46,10 @@ async def download_rfq_pdf(
 
 
 @router.get("/api/quotes/{quote_id}/pdf")
+@limiter.limit("10/minute")
 async def download_quote_pdf(
     quote_id: int,
+    request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):

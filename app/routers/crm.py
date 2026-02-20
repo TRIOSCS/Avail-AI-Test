@@ -865,7 +865,11 @@ async def list_users_simple(
 # ── Customer Import ──────────────────────────────────────────────────────
 
 
+from ..rate_limit import limiter
+
+
 @router.post("/api/customers/import")
+@limiter.limit("5/minute")
 async def import_customers(
     request: Request,
     user: User = Depends(require_admin),

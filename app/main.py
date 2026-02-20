@@ -87,13 +87,13 @@ async def lifespan(app):
 app = FastAPI(title="AVAIL — Opportunity Management", lifespan=lifespan)
 
 # Rate limiting (slowapi)
+from .rate_limit import limiter
+
+app.state.limiter = limiter
 if settings.rate_limit_enabled:
-    from slowapi import Limiter, _rate_limit_exceeded_handler
-    from slowapi.util import get_remote_address
+    from slowapi import _rate_limit_exceeded_handler
     from slowapi.errors import RateLimitExceeded
 
-    limiter = Limiter(key_func=get_remote_address, default_limits=[settings.rate_limit_default])
-    app.state.limiter = limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 app.add_middleware(
