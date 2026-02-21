@@ -471,11 +471,6 @@ function applyRoleGating() {
             if (sw) { sw.style.maxWidth = '560px'; }
         }
     }
-    // "Archive Others" button: visible to admin/manager
-    const archOthersBtn = document.getElementById('archiveOthersBtn');
-    if (archOthersBtn) {
-        if (window.__isAdmin || window.userRole === 'manager') archOthersBtn.style.display = '';
-    }
     // Settings nav visible to admin and dev_assistant
     const navSettings = document.getElementById('navSettings');
     if (navSettings && (window.__isAdmin || window.__isDevAssistant)) navSettings.style.display = '';
@@ -2208,15 +2203,6 @@ function toggleMyAccounts(btn) {
     if (_myReqsOnly) _activeFilters['my_accounts'] = true;
     else delete _activeFilters['my_accounts'];
     renderReqList();
-}
-
-async function bulkArchiveOthers(btn) {
-    if (!confirm('Archive all RFQs not created by you? This moves them to the Archive tab.')) return;
-    await guardBtn(btn, 'Archiving…', async () => {
-        const resp = await apiFetch('/api/requisitions/bulk-archive', { method: 'PUT' });
-        showToast(`Archived ${resp.archived_count} RFQ${resp.archived_count !== 1 ? 's' : ''}`);
-        loadRequisitions();
-    });
 }
 
 function clearAllFilters() {
