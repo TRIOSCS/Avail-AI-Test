@@ -1897,8 +1897,7 @@ function _updateToolbarStats() {
 
     el.innerHTML =
         pill('green', 'green', nGreen, 'Offers') +
-        pill('yellow', 'yellow', nYellow, 'Bid Due') +
-        `<button type="button" class="tb-action${qf ? '' : ' active'}" onclick="setToolbarQuickFilter('')"><span class="tb-dot dot-blue"></span><span class="tb-count">${all.length}</span> All</button>`;
+        pill('yellow', 'yellow', nYellow, 'Bid Due');
 }
 
 function _renderReqRow(r) {
