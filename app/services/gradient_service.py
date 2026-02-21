@@ -256,9 +256,22 @@ def _safe_json_parse(text: str) -> dict | list | None:
         start = cleaned.find(start_char)
         end = cleaned.rfind(end_char)
         if start != -1 and end > start:
+            chunk = cleaned[start : end + 1]
             try:
-                return json.loads(cleaned[start : end + 1])
+                return json.loads(chunk)
             except json.JSONDecodeError:
+                pass
+            # LLMs sometimes emit literal newlines inside JSON strings —
+            # escape them and retry
+            try:
+                import re
+                fixed = re.sub(
+                    r'("(?:[^"\\]|\\.)*")',
+                    lambda m: m.group(0).replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t"),
+                    chunk,
+                )
+                return json.loads(fixed)
+            except (json.JSONDecodeError, Exception):
                 continue
 
     logger.debug("JSON parse failed: {}...", text[:100])
