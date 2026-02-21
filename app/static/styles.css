@@ -1304,6 +1304,12 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .dd-det-chip { font-size: 10px; padding: 1px 7px; background: var(--bg, #f3f4f6); border: 1px solid var(--border); border-radius: 10px; white-space: nowrap; }
 .dd-det-notes { font-size: 10px; color: var(--muted); margin-top: 3px; font-style: italic; }
 
+/* Search overlay */
+.dd-search-overlay { display:flex; align-items:center; justify-content:center; gap:8px; position:absolute; inset:0; background:rgba(255,255,255,.85); z-index:5; font-size:13px; font-weight:600; color:var(--blue); border-radius:6px; }
+@media (prefers-color-scheme: dark) { .dd-search-overlay { background:rgba(30,30,30,.85); } }
+.dd-search-spinner { display:inline-block; width:16px; height:16px; border:3px solid var(--border); border-top-color:var(--blue); border-radius:50%; animation:dd-spin .7s linear infinite; }
+@keyframes dd-spin { to { transform:rotate(360deg); } }
+
 /* Activity thread — email-readable drill-down */
 .act-vendor-card { margin-bottom:10px; padding:8px 10px; background:var(--bg,rgba(255,255,255,.02)); border-radius:6px; border:1px solid var(--border); }
 .act-thread { margin-top:6px; }

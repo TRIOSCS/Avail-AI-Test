@@ -142,6 +142,14 @@ async function guardBtn(btn, loadingText, action) {
     finally { btn.disabled = false; btn.textContent = orig; }
 }
 
+function _timeAgo(iso) {
+    if (!iso) return '';
+    const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+}
 function fmtDate(iso) {
     if (!iso) return '';
     return new Date(iso).toLocaleDateString();
@@ -1367,8 +1375,27 @@ function ddSendBulkRfq(reqId) {
 }
 
 // ── Re-search parts from sourcing drill-down ────────────────────────────
+
+function _ddSearchOverlay(reqId, show, text) {
+    const dd = (document.getElementById('d-' + reqId) || {}).querySelector?.('.dd-panel');
+    if (!dd) return;
+    let ov = dd.querySelector('.dd-search-overlay');
+    if (show) {
+        if (!ov) {
+            ov = document.createElement('div');
+            ov.className = 'dd-search-overlay';
+            dd.style.position = 'relative';
+            dd.appendChild(ov);
+        }
+        ov.innerHTML = `<span class="dd-search-spinner"></span> ${esc(text || 'Searching\u2026')}`;
+        ov.style.display = 'flex';
+    } else if (ov) {
+        ov.style.display = 'none';
+    }
+}
+
 async function ddResearchPart(reqId, requirementId) {
-    showToast('Searching\u2026', 'info');
+    _ddSearchOverlay(reqId, true, 'Searching part\u2026');
     try {
         const body = { requirement_ids: [requirementId] };
         await apiFetch(`/api/requisitions/${reqId}/search`, { method: 'POST', body });
@@ -1382,14 +1409,19 @@ async function ddResearchPart(reqId, requirementId) {
         const data = await apiFetch(`/api/requisitions/${reqId}/sightings`);
         _ddSightingsCache[reqId] = data;
         if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
+        _ddSearchOverlay(reqId, false);
         _renderSourcingDrillDown(reqId);
         showToast('Search complete', 'success');
-    } catch(e) { showToast('Search failed: ' + (e.message || e), 'error'); }
+    } catch(e) {
+        _ddSearchOverlay(reqId, false);
+        showToast('Search failed: ' + (e.message || e), 'error');
+    }
 }
 
 async function ddResearchAll(reqId) {
-    const btn = event ? event.target : null;
-    if (btn) { btn.disabled = true; btn.textContent = 'Searching\u2026'; }
+    const btn = event ? event.target.closest('button') : null;
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="dd-search-spinner" style="width:12px;height:12px;border-width:2px"></span> Searching\u2026'; }
+    _ddSearchOverlay(reqId, true, 'Searching all parts\u2026');
     try {
         const reqs = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`);
         _ddReqCache[reqId] = reqs;
@@ -1405,11 +1437,16 @@ async function ddResearchAll(reqId) {
         const data = await apiFetch(`/api/requisitions/${reqId}/sightings`);
         _ddSightingsCache[reqId] = data;
         if (!_ddSelectedSightings[reqId]) _ddSelectedSightings[reqId] = new Set();
+        _ddSearchOverlay(reqId, false);
         _renderSourcingDrillDown(reqId);
         renderReqList();
         showToast('All parts re-searched', 'success');
-    } catch(e) { showToast('Search failed: ' + (e.message || e), 'error'); }
-    finally { if (btn) { btn.disabled = false; btn.textContent = '\u21bb Re-search All'; } }
+    } catch(e) {
+        _ddSearchOverlay(reqId, false);
+        showToast('Search failed: ' + (e.message || e), 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '&#x1f50d; Search All'; }
+    }
 }
 
 // ── Log Offer Modal ─────────────────────────────────────────────────────
@@ -1842,10 +1879,11 @@ function _renderReqRow(r) {
     // Build drill-down header: action buttons vary by tab
     let ddHeader;
     if (v === 'sourcing') {
+        const lastSearch = r.last_searched_at ? _timeAgo(r.last_searched_at) : 'never';
         ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
-            <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
+            <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''} <span style="font-weight:400;font-size:10px;color:var(--muted)">searched ${lastSearch}</span></span>
             <div style="display:flex;gap:6px">
-                <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Re-search all parts">&#x21bb; Re-search All</button>
+                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs">&#x1f50d; Search All</button>
                 <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Send Bulk RFQ (0)</button>
             </div>
         </div>`;
