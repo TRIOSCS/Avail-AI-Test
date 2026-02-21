@@ -1290,6 +1290,20 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .dd-tab.on { color: var(--teal); border-bottom-color: var(--teal); }
 .dd-panel { min-height: 40px; }
 
+/* Details tab */
+.dd-details { font-size: 12px; }
+.dd-det-header { display: flex; flex-wrap: wrap; gap: 6px 20px; padding: 6px 10px; background: var(--blue-lt); border-radius: 6px; margin-bottom: 10px; }
+.dd-det-row { display: flex; gap: 6px; align-items: baseline; }
+.dd-det-label { font-size: 10px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .3px; white-space: nowrap; }
+.dd-det-val { font-weight: 500; }
+.dd-det-parts { }
+.dd-det-part { padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px; margin-bottom: 4px; }
+.dd-det-mpn { font-size: 13px; font-weight: 600; }
+.dd-det-subs { font-size: 11px; font-weight: 400; color: var(--muted); }
+.dd-det-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.dd-det-chip { font-size: 10px; padding: 1px 7px; background: var(--bg, #f3f4f6); border: 1px solid var(--border); border-radius: 10px; white-space: nowrap; }
+.dd-det-notes { font-size: 10px; color: var(--muted); margin-top: 3px; font-style: italic; }
+
 /* Activity thread — email-readable drill-down */
 .act-vendor-card { margin-bottom:10px; padding:8px 10px; background:var(--bg,rgba(255,255,255,.02)); border-radius:6px; border:1px solid var(--border); }
 .act-thread { margin-top:6px; }

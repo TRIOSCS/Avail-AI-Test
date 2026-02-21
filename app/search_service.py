@@ -366,6 +366,10 @@ def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Si
         clean_date_code = normalize_date_code(r.get("date_code"))
         clean_lead_time_days = normalize_lead_time(r.get("lead_time"))
 
+        # Normalize confidence to 0-1 range (connectors use 1-5 integer scale)
+        raw_conf = r.get("confidence", 0) or 0
+        norm_conf = raw_conf / 5.0 if raw_conf > 1 else raw_conf
+
         s = Sighting(
             requirement_id=req.id,
             vendor_name=clean_vendor,
@@ -379,7 +383,7 @@ def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Si
             moq=r.get("moq"),
             source_type=r.get("source_type"),
             is_authorized=r.get("is_authorized", False),
-            confidence=r.get("confidence", 0),
+            confidence=norm_conf,
             condition=clean_condition,
             packaging=clean_packaging,
             date_code=clean_date_code,

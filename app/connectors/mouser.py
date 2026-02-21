@@ -41,10 +41,12 @@ class MouserConnector(BaseConnector):
         r.raise_for_status()
         data = r.json()
 
-        # Log Mouser API errors (returned in body even on 200)
+        # Mouser returns errors in body even on HTTP 200
         errors = data.get("Errors") or []
         if errors:
+            msg = errors[0].get("Message", "Unknown Mouser API error")
             log.warning(f"Mouser API errors for {part_number}: {errors}")
+            raise RuntimeError(f"Mouser API: {msg}")
 
         return self._parse(data, part_number)
 

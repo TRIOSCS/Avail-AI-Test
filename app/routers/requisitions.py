@@ -575,6 +575,7 @@ async def list_requirements(
                 "target_price": float(r.target_price) if r.target_price else None,
                 "substitutes": r.substitutes or [],
                 "sighting_count": vendor_counts.get(r.id, 0),
+                "brand": r.brand or "",
                 "firmware": r.firmware or "",
                 "date_codes": r.date_codes or "",
                 "hardware_codes": r.hardware_codes or "",

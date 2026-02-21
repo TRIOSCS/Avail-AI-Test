@@ -631,7 +631,7 @@ const _ddTabCache = {};   // reqId → { sightings: data, activity: data, offers
 const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
-    if (mainView === 'sourcing') return ['sightings', 'activity', 'offers'];
+    if (mainView === 'sourcing') return ['details', 'sightings', 'activity', 'offers'];
     if (mainView === 'archive') return ['parts'];
     return ['parts', 'offers', 'quotes']; // rfq tab
 }
@@ -641,7 +641,7 @@ function _ddDefaultTab(mainView) {
 }
 
 function _ddTabLabel(tab) {
-    const map = {sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes'};
+    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes'};
     return map[tab] || tab;
 }
 
@@ -682,6 +682,7 @@ async function _loadDdSubTab(reqId, tabName, panel) {
     try {
         let data;
         switch (tabName) {
+            case 'details':
             case 'parts':
                 data = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`);
                 _ddReqCache[reqId] = data;
@@ -710,6 +711,7 @@ async function _loadDdSubTab(reqId, tabName, panel) {
 
 function _renderDdTab(reqId, tabName, data, panel) {
     switch (tabName) {
+        case 'details': _renderDdDetails(reqId, panel); break;
         case 'parts': _renderDrillDownTable(reqId, panel); break;
         case 'sightings': _renderSourcingDrillDown(reqId, panel); break;
         case 'activity': _renderDdActivity(reqId, data, panel); break;
@@ -984,6 +986,55 @@ async function toggleDrillDown(reqId) {
     const panel = drow.querySelector('.dd-panel');
     if (!panel) return;
     await _loadDdSubTab(reqId, defaultTab, panel);
+}
+
+function _renderDdDetails(reqId, targetPanel) {
+    const dd = targetPanel || (document.getElementById('d-' + reqId) || {}).querySelector?.('.dd-panel');
+    if (!dd) return;
+    const reqs = _ddReqCache[reqId] || [];
+    const meta = _reqListData.find(r => r.id === reqId) || {};
+
+    let html = '<div class="dd-details">';
+
+    // Requisition header
+    html += '<div class="dd-det-header">';
+    html += `<div class="dd-det-row"><span class="dd-det-label">Customer</span><span class="dd-det-val">${esc(meta.customer_display || '—')}</span></div>`;
+    html += `<div class="dd-det-row"><span class="dd-det-label">RFQ</span><span class="dd-det-val">${esc(meta.name || '')}</span></div>`;
+    if (meta.deadline) html += `<div class="dd-det-row"><span class="dd-det-label">Need By</span><span class="dd-det-val">${meta.deadline === 'ASAP' ? '<b style="color:var(--red)">ASAP</b>' : esc(meta.deadline)}</span></div>`;
+    if (meta.created_by_name) html += `<div class="dd-det-row"><span class="dd-det-label">Created By</span><span class="dd-det-val">${esc(meta.created_by_name)}</span></div>`;
+    if (meta.created_at) html += `<div class="dd-det-row"><span class="dd-det-label">Created</span><span class="dd-det-val">${new Date(meta.created_at).toLocaleDateString()}</span></div>`;
+    html += '</div>';
+
+    // Parts table
+    if (!reqs.length) {
+        html += '<p style="font-size:11px;color:var(--muted)">No parts</p>';
+    } else {
+        html += `<div class="dd-det-parts"><div class="dd-det-row" style="margin-bottom:4px"><span class="dd-det-label">${reqs.length} Part${reqs.length > 1 ? 's' : ''}</span></div>`;
+        for (const r of reqs) {
+            const subs = (r.substitutes || []).filter(s => s);
+            html += '<div class="dd-det-part">';
+            html += `<div class="dd-det-mpn"><span class="mono">${esc(r.primary_mpn || '—')}</span>`;
+            if (subs.length) html += ` <span class="dd-det-subs">+ ${subs.map(s => '<span class="mono">' + esc(s) + '</span>').join(', ')}</span>`;
+            html += '</div>';
+            // Detail chips
+            const chips = [];
+            if (r.brand) chips.push(`<span class="dd-det-chip">${esc(r.brand)}</span>`);
+            if (r.target_qty) chips.push(`<span class="dd-det-chip">Qty: <b>${Number(r.target_qty).toLocaleString()}</b></span>`);
+            if (r.target_price != null) chips.push(`<span class="dd-det-chip">Target: <b>$${parseFloat(r.target_price).toFixed(2)}</b></span>`);
+            if (r.date_codes) chips.push(`<span class="dd-det-chip">DC: ${esc(r.date_codes)}</span>`);
+            if (r.condition) chips.push(`<span class="dd-det-chip">Cond: ${esc(r.condition)}</span>`);
+            if (r.firmware) chips.push(`<span class="dd-det-chip">FW: ${esc(r.firmware)}</span>`);
+            if (r.hardware_codes) chips.push(`<span class="dd-det-chip">HW: ${esc(r.hardware_codes)}</span>`);
+            if (r.packaging) chips.push(`<span class="dd-det-chip">Pkg: ${esc(r.packaging)}</span>`);
+            if (chips.length) html += `<div class="dd-det-chips">${chips.join('')}</div>`;
+            if (r.notes) html += `<div class="dd-det-notes">${esc(r.notes)}</div>`;
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+
+    html += '</div>';
+    dd.innerHTML = html;
 }
 
 function _renderDrillDownTable(rfqId, targetPanel) {
@@ -1675,7 +1726,7 @@ function _renderReqRow(r) {
     }
 
     // Name cell — shared across all tabs (no summary div — info goes in dedicated columns)
-    const nameCell = `<td>${r.company_id ? `<b class="cust-link" onclick="event.stopPropagation();goToCompany(${r.company_id})">${esc(cust)}</b>` : `<b>${esc(cust)}</b>`}${dot} <span style="font-size:10px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
+    const nameCell = `<td><b class="cust-link" onclick="event.stopPropagation();toggleDrillDown(${r.id})">${esc(cust)}</b>${dot} <span style="font-size:10px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
 
     // Last Searched — relative timestamp
     let searched = '';

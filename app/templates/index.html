@@ -37,7 +37,7 @@
             <button type="button" class="fp" data-view="archive" onclick="setMainView('archive',this)">Archive</button>
         </div>
         <div class="search-wrap">
-            <input type="text" class="sbox" id="mainSearch" placeholder="&#x1f50d;  Search customer, part, RFQ&hellip;" aria-label="Search requisitions" oninput="debouncedMainSearch()">
+            <input type="text" class="sbox" id="mainSearch" placeholder="&#x1f50d;  Search customer, part, RFQ&hellip;" aria-label="Search requisitions" oninput="debouncedMainSearch(this.value)">
             <kbd class="search-hint">/</kbd>
         </div>
         <div class="fpills fpills-sm" id="statusToggle" style="display:none">

@@ -16,17 +16,19 @@ class BaseConnector(ABC):
         self.max_retries = max_retries
 
     async def search(self, part_number: str) -> list[dict]:
+        last_err = None
         for attempt in range(self.max_retries + 1):
             try:
                 return await self._do_search(part_number)
             except Exception as e:
+                last_err = e
                 if attempt < self.max_retries:
                     await asyncio.sleep(2**attempt)
                 else:
                     log.warning(
                         f"{self.__class__.__name__} failed for {part_number}: {e}"
                     )
-        return []
+        raise last_err  # propagate so caller can track the error
 
     @abstractmethod
     async def _do_search(self, part_number: str) -> list[dict]:
@@ -59,14 +61,16 @@ class NexarConnector(BaseConnector):
       }
     }"""
 
-    # Fallback query when API key lacks 'sellers' access
-    BASIC_QUERY = """
+    # Fallback query when role blocks 'sellers' — gets aggregate availability/pricing
+    AGGREGATE_QUERY = """
     query ($mpn: String!) {
       supSearchMpn(q: $mpn, limit: 20) {
         results { part {
           mpn
           manufacturer { name }
           shortDescription
+          totalAvail
+          medianPrice1000 { price currency }
         }}
       }
     }"""
@@ -132,14 +136,14 @@ class NexarConnector(BaseConnector):
         if errors:
             msg = errors[0].get("message", "")
             log.warning(f"Nexar query error for {part_number}: {msg[:120]}")
-            # Fall back to basic query if sellers field is not authorized
+            # Fall back to aggregate query if sellers field is not authorized
             if "not authorized" in msg.lower() and "sellers" in msg.lower():
-                log.info(f"Nexar: retrying {part_number} with basic query (no sellers)")
-                data = await self._run_query(self.BASIC_QUERY, part_number)
+                log.info(f"Nexar: retrying {part_number} with aggregate query (totalAvail + medianPrice)")
+                data = await self._run_query(self.AGGREGATE_QUERY, part_number)
                 results_data = (
                     (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
                 )
-                return self._parse_basic(results_data, part_number) if results_data else []
+                return self._parse_aggregate(results_data, part_number) if results_data else []
 
         results_data = (
             (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
@@ -247,8 +251,8 @@ class NexarConnector(BaseConnector):
         log.info(f"Nexar: {pn} -> {len(results)} seller results")
         return results
 
-    def _parse_basic(self, results_data: list, pn: str) -> list[dict]:
-        """Parse basic Nexar results (no seller data)."""
+    def _parse_aggregate(self, results_data: list, pn: str) -> list[dict]:
+        """Parse Nexar aggregate results (totalAvail + medianPrice, no per-seller breakdown)."""
         results = []
         octopart_url = f"https://octopart.com/search?q={quote_plus(pn)}"
 
@@ -256,23 +260,29 @@ class NexarConnector(BaseConnector):
             part = hit.get("part") or {}
             mpn = part.get("mpn", pn)
             mfr = (part.get("manufacturer") or {}).get("name", "")
-            desc = part.get("shortDescription", "")
+            total_avail = part.get("totalAvail")
+            median_price = part.get("medianPrice1000") or {}
+            price = median_price.get("price")
+            currency = median_price.get("currency", "USD")
+
+            if not total_avail and not price:
+                continue  # Skip parts with no useful data
 
             results.append({
-                "vendor_name": "Octopart (reference)",
+                "vendor_name": "Octopart (aggregate)",
                 "manufacturer": mfr,
                 "mpn_matched": mpn,
-                "qty_available": None,
-                "unit_price": None,
-                "currency": "USD",
+                "qty_available": int(total_avail) if total_avail else None,
+                "unit_price": round(float(price), 4) if price else None,
+                "currency": currency,
                 "source_type": "octopart",
-                "is_authorized": False,
-                "confidence": 2,
+                "is_authorized": True,
+                "confidence": 4 if total_avail and price else 3,
                 "octopart_url": octopart_url,
-                "description": desc,
+                "click_url": octopart_url,
             })
 
-        log.info(f"Nexar: {pn} -> {len(results)} basic results (no seller data)")
+        log.info(f"Nexar: {pn} -> {len(results)} aggregate results (totalAvail + medianPrice)")
         return results
 
 
