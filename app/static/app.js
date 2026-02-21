@@ -437,9 +437,17 @@ function applyRoleGating() {
         enrichNav.style.display = '';
         refreshEnrichmentBadge();
     }
-    // "My Accounts" pill: hide for sales (they already only see their own)
+    // "My Accounts" pill: only visible for admin, manager, trader
     const myAccountsBtn = document.getElementById('myAccountsBtn');
-    if (window.userRole === 'sales' && myAccountsBtn) myAccountsBtn.style.display = 'none';
+    if (myAccountsBtn) {
+        const canSeeMyAccounts = window.__isAdmin || ['manager','trader','admin'].includes(window.userRole);
+        if (!canSeeMyAccounts) {
+            myAccountsBtn.style.display = 'none';
+            // Expand search bar into the freed space
+            const sw = document.querySelector('.topcontrols .search-wrap');
+            if (sw) { sw.style.maxWidth = '560px'; }
+        }
+    }
     // Settings nav visible to admin and dev_assistant
     const navSettings = document.getElementById('navSettings');
     if (navSettings && (window.__isAdmin || window.__isDevAssistant)) navSettings.style.display = '';
