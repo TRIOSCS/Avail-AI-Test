@@ -46,14 +46,7 @@
             <button type="button" class="fp fp-sm" data-sf="draft" onclick="setStatusFilter('draft',this)">Draft</button>
             <button type="button" class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
         </div>
-        <div class="filter-wrap">
-            <button type="button" class="fp filter-trigger" onclick="toggleFilter('mainFilterPanel')">
-                &#x25BE; Filters <span class="filter-badge" id="filterBadge" style="margin-left:2px">0</span>
-            </button>
-            <div id="mainFilterPanel" class="filter-dropdown">
-                <div id="filterGroups"></div>
-            </div>
-        </div>
+        <button type="button" class="fp fp-accent" id="myAccountsBtn" onclick="toggleMyAccounts(this)">My Accounts</button>
         <div class="toolbar-stats u-ml-auto" id="toolbarStats"></div>
         <button type="button" class="btn btn-primary" onclick="openNewReqModal()">+ New RFQ</button>
         <div class="filter-wrap">

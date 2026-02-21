@@ -1082,6 +1082,9 @@ body.on-settings .toparea{margin-left:0 !important}
 /* Smaller variant pills for status toggle */
 .fpills-sm{padding:2px;border-radius:6px}
 .fp-sm{padding:3px 10px;font-size:11px;border-radius:4px}
+.fp-accent{background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--muted);padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;transition:.15s;font-family:inherit}
+.fp-accent:hover{color:var(--text);border-color:var(--teal)}
+.fp-accent.on{background:var(--orange,#e67e22);color:#fff;border-color:var(--orange,#e67e22)}
 
 /* Toolbar buttons */
 .tb-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:var(--white);color:var(--text2);font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s;white-space:nowrap}

@@ -437,13 +437,9 @@ function applyRoleGating() {
         enrichNav.style.display = '';
         refreshEnrichmentBadge();
     }
-    // "My Reqs" toggle: hide for sales (they already only see their own)
-    const myReqsBtn = document.getElementById('myReqsBtn');
-    const myReqsDiv = document.getElementById('myReqsDivider');
-    if (window.userRole === 'sales') {
-        if (myReqsBtn) myReqsBtn.style.display = 'none';
-        if (myReqsDiv) myReqsDiv.style.display = 'none';
-    }
+    // "My Accounts" pill: hide for sales (they already only see their own)
+    const myAccountsBtn = document.getElementById('myAccountsBtn');
+    if (window.userRole === 'sales' && myAccountsBtn) myAccountsBtn.style.display = 'none';
     // Settings nav visible to admin and dev_assistant
     const navSettings = document.getElementById('navSettings');
     if (navSettings && (window.__isAdmin || window.__isDevAssistant)) navSettings.style.display = '';
@@ -2145,100 +2141,24 @@ function _renderDetailDeadline(el, deadline) {
 }
 
 
-// ── v7 Filter Panel (unified) ───────────────────────────────────────────
+// ── v7 My Accounts Toggle ───────────────────────────────────────────────
 let _activeFilters = {};
 let _toolbarQuickFilter = '';
 
-function toggleFilter(panelId) {
-    const el = document.getElementById(panelId);
-    if (!el) return;
-    const opening = !el.classList.contains('open');
-    el.classList.toggle('open');
-    if (opening) {
-        buildFilterGroups();
-        setTimeout(() => {
-            function _closeFilter(e) {
-                if (!el.contains(e.target) && !e.target.closest('.filter-trigger')) {
-                    el.classList.remove('open');
-                    document.removeEventListener('click', _closeFilter, true);
-                }
-            }
-            document.addEventListener('click', _closeFilter, true);
-        }, 0);
-    }
-}
-
-function toggleFilterSection(titleEl) {
-    titleEl.classList.toggle('open');
-    const body = titleEl.nextElementSibling;
-    if (body) body.classList.toggle('open');
-}
-
-function buildFilterGroups() {
-    const container = document.getElementById('filterGroups');
-    if (!container) return;
-
-    const items = [
-        {value:'my_accounts', label:'My Accounts'},
-        {value:'has_review', label:'Needs Review'},
-        {value:'high_value', label:'High Value'},
-        {value:'has_quote', label:'Has Quote'},
-    ];
-
-    // Add sales people as filter items
-    const salesPeople = [...new Set(_reqListData.map(r => r.created_by_name).filter(Boolean))].sort();
-    if (salesPeople.length > 1) {
-        items.push({sep: true});
-        for (const n of salesPeople) items.push({value: 'sales_' + n, label: n});
-    }
-
-    let html = items.map(i => {
-        if (i.sep) return '<div class="fd-sep"></div>';
-        const on = _activeFilters[i.value] ? ' on' : '';
-        return `<button type="button" class="fd-item${on}" data-val="${i.value}" onclick="toggleFilterItem(this)"><span class="fd-check">&#x2713;</span>${esc(i.label)}</button>`;
-    }).join('');
-
-    const hasActive = Object.keys(_activeFilters).length > 0;
-    if (hasActive) html += '<div class="fd-sep"></div><button type="button" class="fd-clear" onclick="clearAllFilters()">Clear all</button>';
-
-    container.innerHTML = html;
-}
-
-function toggleFilterItem(btn) {
-    const val = btn.dataset.val;
-    if (_activeFilters[val]) { delete _activeFilters[val]; btn.classList.remove('on'); }
-    else { _activeFilters[val] = true; btn.classList.add('on'); }
-    if (val === 'my_accounts') _myReqsOnly = !!_activeFilters[val];
-    countActiveFilters();
+function toggleMyAccounts(btn) {
+    _myReqsOnly = !_myReqsOnly;
+    btn.classList.toggle('on', _myReqsOnly);
+    if (_myReqsOnly) _activeFilters['my_accounts'] = true;
+    else delete _activeFilters['my_accounts'];
     renderReqList();
-}
-
-
-function countActiveFilters() {
-    const n = Object.keys(_activeFilters).length;
-    const btn = document.querySelector('.filter-trigger');
-    const badge = document.getElementById('filterBadge');
-    if (badge) { badge.textContent = n; badge.style.display = n > 0 ? 'inline-flex' : 'none'; }
-    if (btn) btn.classList.toggle('has-active', n > 0);
 }
 
 function clearAllFilters() {
     _activeFilters = {};
     _myReqsOnly = false;
     _toolbarQuickFilter = '';
-    countActiveFilters();
-    renderReqList();
-}
-
-function applyFilters() {
-    const panel = document.getElementById('mainFilterPanel');
-    if (!panel) return;
-    _activeFilters = {};
-    panel.querySelectorAll('input[type=checkbox]:checked').forEach(cb => {
-        _activeFilters[cb.value] = true;
-    });
-    _myReqsOnly = !!_activeFilters['my_accounts'];
-    panel.classList.remove('open');
+    const btn = document.getElementById('myAccountsBtn');
+    if (btn) btn.classList.remove('on');
     renderReqList();
 }
 
@@ -2297,7 +2217,8 @@ function setMainView(view, btn) {
     _activeFilters = {};
     _myReqsOnly = false;
     _toolbarQuickFilter = '';
-    countActiveFilters();
+    const maBtn = document.getElementById('myAccountsBtn');
+    if (maBtn) maBtn.classList.remove('on');
     // Hide status toggle — tabs are now locked to their status
     const stEl = document.getElementById('statusToggle');
     if (stEl) stEl.style.display = 'none';
