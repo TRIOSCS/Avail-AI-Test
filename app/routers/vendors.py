@@ -1237,6 +1237,17 @@ def material_card_to_dict(card: MaterialCard, db: Session) -> dict:
         ],
         "sightings": sightings_list,
         "offers": offers_list,
+        # Enrichment fields
+        "lifecycle_status": card.lifecycle_status,
+        "package_type": card.package_type,
+        "category": card.category,
+        "rohs_status": card.rohs_status,
+        "pin_count": card.pin_count,
+        "datasheet_url": card.datasheet_url,
+        "cross_references": card.cross_references or [],
+        "specs_summary": card.specs_summary,
+        "enrichment_source": card.enrichment_source,
+        "enriched_at": card.enriched_at.isoformat() if card.enriched_at else None,
         "created_at": card.created_at.isoformat() if card.created_at else None,
         "updated_at": card.updated_at.isoformat() if card.updated_at else None,
     }
@@ -1330,8 +1341,50 @@ async def update_material(
         card.description = data.description
     if data.display_mpn is not None and data.display_mpn.strip():
         card.display_mpn = data.display_mpn.strip()
+    # Enrichment fields
+    for field in (
+        "lifecycle_status", "package_type", "category", "rohs_status",
+        "pin_count", "datasheet_url", "cross_references", "specs_summary",
+    ):
+        val = getattr(data, field, None)
+        if val is not None:
+            setattr(card, field, val)
+            if not card.enrichment_source:
+                card.enrichment_source = "manual"
     db.commit()
     return material_card_to_dict(card, db)
+
+
+@router.post("/api/materials/{card_id}/enrich")
+async def enrich_material(
+    card_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Apply AI-generated enrichment data to a material card."""
+    from datetime import datetime, timezone
+
+    card = db.get(MaterialCard, card_id)
+    if not card:
+        raise HTTPException(404, "Material not found")
+    body = await request.json()
+    enrichment_fields = (
+        "lifecycle_status", "package_type", "category", "rohs_status",
+        "pin_count", "datasheet_url", "cross_references", "specs_summary",
+        "manufacturer", "description",
+    )
+    updated = []
+    for field in enrichment_fields:
+        val = body.get(field)
+        if val is not None:
+            setattr(card, field, val)
+            updated.append(field)
+    if updated:
+        card.enrichment_source = body.get("source", "gradient_agent")
+        card.enriched_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"ok": True, "updated_fields": updated, "card_id": card_id}
 
 
 @router.delete("/api/materials/{card_id}")

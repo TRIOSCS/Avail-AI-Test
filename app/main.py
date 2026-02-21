@@ -195,6 +195,7 @@ if not os.environ.get("TESTING"):
     app.add_middleware(
         CSRFMiddleware,
         secret=settings.secret_key,
+        sensitive_cookies={"session"},  # Only enforce CSRF when session cookie is present
         exempt_urls=[
             re.compile(r"/auth/.*"),
             re.compile(r"/health"),

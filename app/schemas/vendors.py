@@ -148,3 +148,11 @@ class MaterialCardUpdate(BaseModel):
     manufacturer: str | None = None
     description: str | None = None
     display_mpn: str | None = None
+    lifecycle_status: str | None = None
+    package_type: str | None = None
+    category: str | None = None
+    rohs_status: str | None = None
+    pin_count: int | None = None
+    datasheet_url: str | None = None
+    cross_references: list[dict] | None = None
+    specs_summary: str | None = None

@@ -32,6 +32,19 @@ class MaterialCard(Base):
     search_count = Column(Integer, default=0)
     last_searched_at = Column(DateTime)
     search_vector = Column(TSVECTOR)
+
+    # Enrichment fields (populated by AI agent)
+    lifecycle_status = Column(String(50))  # active, nrfnd, eol, obsolete, ltb
+    package_type = Column(String(100))  # QFP-64, BGA-256, 0603, etc.
+    category = Column(String(255))  # Microcontroller, Capacitor, Connector, etc.
+    rohs_status = Column(String(50))  # compliant, non-compliant, exempt
+    pin_count = Column(Integer)
+    datasheet_url = Column(String(1000))
+    cross_references = Column(JSON, default=list)  # [{mpn, manufacturer}]
+    specs_summary = Column(Text)  # Key electrical specs in plain text
+    enrichment_source = Column(String(50))  # "gradient_agent", "manual", etc.
+    enriched_at = Column(DateTime)
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,
