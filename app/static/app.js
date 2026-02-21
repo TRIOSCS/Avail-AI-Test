@@ -1892,12 +1892,9 @@ function _updateToolbarStats() {
     }
 
     const qf = _toolbarQuickFilter;
-    const pill = (dotColor, key, count, label) =>
-        `<button type="button" class="tb-action${qf === key ? ' active' : ''}" onclick="setToolbarQuickFilter('${key}')"><span class="tb-dot dot-${dotColor}"></span><span class="tb-count">${count}</span> ${label}</button>`;
-
     el.innerHTML =
-        pill('green', 'green', nGreen, 'Offers') +
-        pill('yellow', 'yellow', nYellow, 'Bid Due');
+        `<span class="tb-stat${qf === 'green' ? ' active' : ''}" onclick="setToolbarQuickFilter('green')"><span class="tb-dot tb-dot-green"></span><span class="tb-ct">${nGreen}</span> Offers</span>` +
+        `<span class="tb-stat${qf === 'yellow' ? ' active' : ''}" onclick="setToolbarQuickFilter('yellow')"><span class="tb-dot tb-dot-amber"></span><span class="tb-ct">${nYellow}</span> Due</span>`;
 }
 
 function _renderReqRow(r) {
