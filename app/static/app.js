@@ -5503,8 +5503,19 @@ function _notifLabel(type) {
     }
 }
 function _notifClickAction(n) {
-    if (n.requisition_id) return `markNotifRead(${n.id});document.getElementById('notifPanel').classList.remove('open');toggleDrillDown(${n.requisition_id})`;
-    if (n.company_id) return `markNotifRead(${n.id});document.getElementById('notifPanel').classList.remove('open');goToCompany(${n.company_id})`;
+    const close = `markNotifRead(${n.id});document.getElementById('notifPanel').classList.remove('open');`;
+    // Buy plan notifications → open buy plan detail
+    if (n.type && n.type.startsWith('buyplan_') && n.requisition_id)
+        return close + `showBuyPlans();setTimeout(()=>openBuyPlanDetail(${n.requisition_id}),300)`;
+    // Vendor-related → open vendor popup
+    if (n.vendor_card_id)
+        return close + `openVendorPopup(${n.vendor_card_id})`;
+    // Requisition-related → expand drill-down
+    if (n.requisition_id)
+        return close + `toggleDrillDown(${n.requisition_id})`;
+    // Company-related → go to company
+    if (n.company_id)
+        return close + `goToCompany(${n.company_id})`;
     return `markNotifRead(${n.id})`;
 }
 
@@ -5521,7 +5532,7 @@ async function loadNotifications() {
         el.innerHTML = header + items.map(n => {
             const color = _notifBadgeColor(n.type);
             const notesHtml = n.notes ? `<div class="notif-item-notes">${esc(n.notes)}</div>` : '';
-            const hasLink = n.requisition_id || n.company_id;
+            const hasLink = n.requisition_id || n.company_id || n.vendor_card_id;
             return `<div class="notif-item" onclick="${_notifClickAction(n)}">
                 <div class="notif-item-body">
                     <div class="notif-item-top">

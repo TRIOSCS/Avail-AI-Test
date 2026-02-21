@@ -588,6 +588,7 @@ async def sales_notifications(
             "company_id": n.company_id,
             "company_name": n.contact_name,
             "requisition_id": n.requisition_id,
+            "vendor_card_id": n.vendor_card_id,
             "subject": n.subject,
             "notes": n.notes,
             "created_at": n.created_at.isoformat() if n.created_at else None,
