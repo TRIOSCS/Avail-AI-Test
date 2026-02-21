@@ -83,6 +83,7 @@ let _vendorListData = [];   // cached vendor list for client-side filtering
 let _vendorTierFilter = 'all';  // all|proven|developing|caution|new
 let expandedGroups = new Set();  // reqIds that are expanded (default: all collapsed)
 let _ddReqCache = {};  // drill-down requirements cache: rfqId → [requirements]
+let _addRowActive = {};  // rfqId → true when inline add row is visible
 let _ddSightingsCache = {};      // reqId -> sightings API response
 let _ddSelectedSightings = {};   // reqId -> Set of sighting IDs
 const CONDITION_OPTIONS = ['New', 'ETN', 'Factory Refurbished', 'Pulls'];
@@ -796,6 +797,7 @@ function _renderDdTabPills(reqId) {
 
 async function _switchDdTab(reqId, tabName) {
     _ddActiveTab[reqId] = tabName;
+    delete _addRowActive[reqId];
     const drow = document.getElementById('d-' + reqId);
     if (!drow) return;
     // Update pill state
@@ -1114,7 +1116,7 @@ async function toggleDrillDown(reqId) {
     } else {
         try { _pushNav('view-list'); _lastPushedHash = '#rfqs'; } catch(e) {}
     }
-    if (!opening) return;
+    if (!opening) { delete _addRowActive[reqId]; return; }
 
     // Load default sub-tab
     const defaultTab = _ddActiveTab[reqId] || _ddDefaultTab(_currentMainView);
@@ -1207,7 +1209,14 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     const dd = targetPanel || (document.getElementById('d-' + rfqId) || {}).querySelector?.('.dd-panel');
     if (!dd) return;
     const reqs = _ddReqCache[rfqId] || [];
-    if (!reqs.length) { dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">No parts yet</span>'; return; }
+    if (!reqs.length && !_addRowActive[rfqId]) { dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">No parts yet</span>'; return; }
+    if (!reqs.length && _addRowActive[rfqId]) {
+        dd.innerHTML = `<table class="dtbl"><thead><tr>
+            <th>MPN</th><th>Qty</th><th>Target $</th><th>Subs</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th><th>Pkg</th><th>Notes</th><th>Vendors</th><th style="width:24px"></th>
+        </tr></thead><tbody></tbody></table>`;
+        _appendAddRow(rfqId, dd);
+        return;
+    }
     const DD_LIMIT = 100;
     const showAll = dd.dataset.showAll === '1';
     const visible = showAll ? reqs : reqs.slice(0, DD_LIMIT);
@@ -1237,6 +1246,7 @@ function _renderDrillDownTable(rfqId, targetPanel) {
         html += `<a onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderDrillDownTable(${rfqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin-top:4px">Show all ${reqs.length} parts\u2026</a>`;
     }
     dd.innerHTML = html;
+    if (_addRowActive[rfqId]) _appendAddRow(rfqId, dd);
 }
 
 function editDrillCell(td, rfqId, reqId, field) {
@@ -1303,39 +1313,132 @@ function editDrillCell(td, rfqId, reqId, field) {
     });
 }
 
-async function addDrillRow(rfqId) {
-    const mpn = prompt('Part number (MPN):');
-    if (!mpn || !mpn.trim()) return;
-    try {
-        await apiFetch(`/api/requisitions/${rfqId}/requirements`, {
-            method: 'POST', body: { primary_mpn: mpn.trim(), target_qty: 1 }
+function addDrillRow(rfqId) {
+    if (_addRowActive[rfqId]) {
+        const dd = document.getElementById('d-' + rfqId)?.querySelector('.dd-panel');
+        const mpnInput = dd?.querySelector('.add-row-mpn');
+        if (mpnInput) { mpnInput.focus(); mpnInput.select(); }
+        return;
+    }
+    _addRowActive[rfqId] = true;
+    _renderDrillDownTable(rfqId);
+}
+
+function _appendAddRow(rfqId, dd) {
+    const tbody = dd.querySelector('.dtbl tbody');
+    if (!tbody) return;
+
+    const tr = document.createElement('tr');
+    tr.className = 'add-row';
+    tr.addEventListener('click', e => e.stopPropagation());
+
+    // MPN (required)
+    let td = document.createElement('td');
+    td.className = 'mono';
+    const inMpn = document.createElement('input');
+    inMpn.type = 'text'; inMpn.className = 'add-row-mpn'; inMpn.placeholder = 'MPN *';
+    td.appendChild(inMpn); tr.appendChild(td);
+
+    // Qty
+    td = document.createElement('td');
+    td.className = 'mono';
+    const inQty = document.createElement('input');
+    inQty.type = 'number'; inQty.className = 'add-row-qty'; inQty.min = '1'; inQty.value = '1'; inQty.style.width = '50px';
+    td.appendChild(inQty); tr.appendChild(td);
+
+    // Target $
+    td = document.createElement('td');
+    td.className = 'mono';
+    const inPrice = document.createElement('input');
+    inPrice.type = 'number'; inPrice.className = 'add-row-price'; inPrice.step = '0.01'; inPrice.min = '0'; inPrice.placeholder = '0.00'; inPrice.style.width = '60px';
+    td.appendChild(inPrice); tr.appendChild(td);
+
+    // Subs, Condition, Date Codes, FW, HW, Pkg, Notes — placeholder dashes
+    for (let i = 0; i < 7; i++) {
+        td = document.createElement('td');
+        td.style.cssText = 'color:var(--muted);font-size:10px';
+        td.textContent = '\u2014';
+        tr.appendChild(td);
+    }
+
+    // Vendors — blank
+    td = document.createElement('td');
+    td.className = 'mono';
+    tr.appendChild(td);
+
+    // Cancel button
+    td = document.createElement('td');
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-sm';
+    cancelBtn.textContent = '\u2715';
+    cancelBtn.title = 'Cancel';
+    cancelBtn.style.cssText = 'font-size:10px;padding:1px 5px;color:var(--muted)';
+    cancelBtn.addEventListener('click', () => _cancelAddRow(rfqId));
+    td.appendChild(cancelBtn); tr.appendChild(td);
+
+    tbody.appendChild(tr);
+
+    // Keyboard handling
+    [inMpn, inQty, inPrice].forEach(inp => {
+        inp.addEventListener('keydown', e => {
+            if (e.key === 'Enter') { e.preventDefault(); _saveAddRow(rfqId); }
+            if (e.key === 'Escape') { e.preventDefault(); _cancelAddRow(rfqId); }
         });
-        // Clear all caches for this RFQ so fresh data is used everywhere
+    });
+
+    setTimeout(() => inMpn.focus(), 0);
+}
+
+async function _saveAddRow(rfqId) {
+    const dd = document.getElementById('d-' + rfqId)?.querySelector('.dd-panel');
+    if (!dd) return;
+    const mpnInput = dd.querySelector('.add-row-mpn');
+    const qtyInput = dd.querySelector('.add-row-qty');
+    const priceInput = dd.querySelector('.add-row-price');
+    if (!mpnInput) return;
+
+    const mpn = mpnInput.value.trim();
+    if (!mpn) {
+        mpnInput.style.borderColor = 'var(--red)';
+        mpnInput.focus();
+        showToast('MPN is required', 'warn');
+        return;
+    }
+
+    const body = { primary_mpn: mpn, target_qty: parseInt(qtyInput?.value) || 1 };
+    const priceVal = priceInput?.value.trim();
+    if (priceVal) body.target_price = parseFloat(priceVal);
+
+    // Disable inputs during save
+    dd.querySelectorAll('.add-row input').forEach(inp => inp.disabled = true);
+
+    try {
+        await apiFetch(`/api/requisitions/${rfqId}/requirements`, { method: 'POST', body });
+        delete _addRowActive[rfqId];
         delete _ddReqCache[rfqId];
         if (_ddTabCache[rfqId]) { delete _ddTabCache[rfqId].parts; delete _ddTabCache[rfqId].details; }
-        // Update the count in the list data
         const rfq = _reqListData.find(r => r.id === rfqId);
         if (rfq) rfq.requirement_count = (rfq.requirement_count || 0) + 1;
-        // Re-fetch and render immediately
         _ddReqCache[rfqId] = await apiFetch(`/api/requisitions/${rfqId}/requirements`);
         if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = _ddReqCache[rfqId]; _ddTabCache[rfqId].details = _ddReqCache[rfqId]; }
         _renderDrillDownTable(rfqId);
-        showToast('Part added — click cells to edit qty, price, etc.');
-        // Update header count
+        showToast('Part added \u2014 click cells to edit details');
         const drow = document.getElementById('d-' + rfqId);
         if (drow) {
             const hdr = drow.querySelector('span[style*="font-weight:700"]');
             const total = _ddReqCache[rfqId].length;
             if (hdr) hdr.textContent = `${total} part${total !== 1 ? 's' : ''}`;
         }
-        // Also update the row's parts count cell in the main list
-        const row = document.querySelector(`.req-row[onclick*="toggleDrillDown(${rfqId})"]`);
-        if (row) {
-            const cells = row.querySelectorAll('td');
-            // The "Parts" column varies by view but renderReqList handles it —
-            // update the in-memory data so next render shows correct count
-        }
-    } catch(e) { showToast('Failed to add part', 'error'); }
+    } catch(e) {
+        showToast('Failed to add part', 'error');
+        dd.querySelectorAll('.add-row input').forEach(inp => inp.disabled = false);
+        mpnInput.focus();
+    }
+}
+
+function _cancelAddRow(rfqId) {
+    delete _addRowActive[rfqId];
+    _renderDrillDownTable(rfqId);
 }
 
 async function deleteDrillRow(rfqId, reqId) {
