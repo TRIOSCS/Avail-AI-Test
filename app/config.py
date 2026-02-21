@@ -69,13 +69,6 @@ class Settings:
     anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
     anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
 
-    # Acctivate SQL Server (read-only)
-    acctivate_host: str = os.getenv("ACCTIVATE_HOST", "")
-    acctivate_port: int = int(os.getenv("ACCTIVATE_PORT", "1433"))
-    acctivate_user: str = os.getenv("ACCTIVATE_USER", "")
-    acctivate_password: str = os.getenv("ACCTIVATE_PASSWORD", "")
-    acctivate_database: str = os.getenv("ACCTIVATE_DATABASE", "")
-
     # Enrichment APIs
     clay_api_key: str = os.getenv("CLAY_API_KEY", "")
     explorium_api_key: str = os.getenv("EXPLORIUM_API_KEY", "")

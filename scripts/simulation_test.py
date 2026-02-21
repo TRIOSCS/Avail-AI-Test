@@ -625,7 +625,7 @@ def test_model_field_coverage(pass_num):
     for f in ["total_outreach", "total_responses", "total_wins", "ghost_rate",
               "response_velocity_hours", "last_contact_at", "relationship_months",
               "engagement_score", "engagement_computed_at",
-              "cancellation_rate", "rma_rate", "acctivate_vendor_id",
+              "cancellation_rate", "rma_rate",
               "linkedin_url", "employee_size", "hq_city", "industry"]:
         assert_in(f, vc_cols, f"VendorCard missing {f}")
 

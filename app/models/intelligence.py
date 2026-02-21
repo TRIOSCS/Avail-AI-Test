@@ -62,10 +62,6 @@ class MaterialVendorHistory(Base):
     last_manufacturer = Column(String(255))
     vendor_sku = Column(String(255))
 
-    # Acctivate transaction truth
-    acctivate_last_price = Column(Float)
-    acctivate_last_date = Column(Date)
-    acctivate_rma_rate = Column(Float)
     source = Column(String(50), default="api_sighting")
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

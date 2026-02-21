@@ -3,18 +3,16 @@ routers/crm.py — CRM Routes (Companies, Sites, Offers, Quotes, Dashboard)
 
 Customer relationship management endpoints: company/site hierarchy, vendor
 offers against requirements, customer-facing quotes with margin calc, pricing
-history, enrichment, Acctivate ERP sync, and customer import.
+history, enrichment, and customer import.
 
 Business Rules:
 - Companies → CustomerSites parent/child hierarchy
 - Offers are vendor quotes against requirements
 - Quotes are customer-facing, built from selected offers
-- After quote "won" → handoff to Acctivate/QuickBooks
 - Quote numbers: Q-YYYY-NNNN (auto-incrementing per year)
 
 Called by: main.py (router mount)
-Depends on: models, dependencies, vendor_utils, config, enrichment_service,
-            acctivate_sync
+Depends on: models, dependencies, vendor_utils, config, enrichment_service
 """
 
 import asyncio
@@ -862,45 +860,6 @@ async def add_suggested_to_site(
         site.contact_linkedin = c.linkedin_url
     db.commit()
     return {"ok": True}
-
-
-# ── Acctivate Sync ───────────────────────────────────────────────────────
-
-
-@router.post("/api/admin/acctivate/discover")
-async def acctivate_discover_schema(
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Run schema discovery against Acctivate SQL Server."""
-    if not _is_admin(user):
-        raise HTTPException(403, "Admin only")
-    if not settings.acctivate_host:
-        raise HTTPException(400, "ACCTIVATE_HOST not configured")
-    from ..acctivate_sync import discover_schema
-
-    try:
-        result = discover_schema()
-        return {"ok": True, "schema": result}
-    except Exception as e:
-        raise HTTPException(500, f"Discovery failed: {e}")
-
-
-@router.post("/api/admin/acctivate/sync")
-async def acctivate_run_sync(
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Manually trigger an Acctivate sync run."""
-    if not _is_admin(user):
-        raise HTTPException(403, "Admin only")
-    if not settings.acctivate_host:
-        raise HTTPException(400, "ACCTIVATE_HOST not configured")
-    from ..acctivate_sync import run_sync
-
-    loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, run_sync, db)
-    return result
 
 
 @router.get("/api/admin/sync-logs")

@@ -51,14 +51,8 @@ class VendorCard(Base):
     last_enriched_at = Column(DateTime)
     enrichment_source = Column(String(50))
 
-    # Acctivate sync fields — behavioral truth
-    acctivate_vendor_id = Column(String(255), index=True)
     cancellation_rate = Column(Float)
     rma_rate = Column(Float)
-    acctivate_total_orders = Column(Integer)
-    acctivate_total_units = Column(Integer)
-    acctivate_last_order_date = Column(Date)
-    last_synced_at = Column(DateTime)
 
     # Engagement scoring (Email Mining v2 Upgrade 4)
     total_outreach = Column(Integer, default=0)

@@ -100,8 +100,6 @@ def _get_connector_for_source(name: str, db: Session = None):
 
     if name == "anthropic_ai":
         return _AnthropicTestConnector()
-    if name == "acctivate_erp":
-        return _AcctivateTestConnector()
     if name == "teams_notifications":
         return _TeamsTestConnector()
     if name == "apollo_enrichment":
@@ -156,32 +154,6 @@ class _AnthropicTestConnector:
             raise ValueError(f"Anthropic API returned {resp.status_code}: {resp.text[:200]}")
         model = resp.json().get("model", "unknown")
         return [{"vendor_name": "Anthropic AI", "mpn_matched": f"Connected — model: {model}", "status": "ok"}]
-
-
-class _AcctivateTestConnector:
-    """Test Acctivate SQL Server connection with SELECT 1."""
-
-    async def search(self, mpn: str) -> list[dict]:
-        import pymssql  # type: ignore
-
-        host = get_credential_cached("acctivate_erp", "ACCTIVATE_HOST")
-        port = int(get_credential_cached("acctivate_erp", "ACCTIVATE_PORT") or 1433)
-        user = get_credential_cached("acctivate_erp", "ACCTIVATE_USER")
-        password = get_credential_cached("acctivate_erp", "ACCTIVATE_PASSWORD")
-        database = get_credential_cached("acctivate_erp", "ACCTIVATE_DATABASE")
-        if not host or not user:
-            raise ValueError("Acctivate credentials not configured")
-        conn = pymssql.connect(
-            server=host, port=port, user=user, password=password,
-            database=database or "", login_timeout=10, timeout=10,
-        )
-        try:
-            cur = conn.cursor()
-            cur.execute("SELECT 1")
-            cur.fetchone()
-        finally:
-            conn.close()
-        return [{"vendor_name": "Acctivate ERP", "mpn_matched": f"Connected to {database}", "status": "ok"}]
 
 
 class _TeamsTestConnector:

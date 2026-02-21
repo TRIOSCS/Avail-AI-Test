@@ -54,8 +54,8 @@ from .enrichment import (  # noqa: F401
 # Email Pipeline
 from .pipeline import ColumnMappingCache, PendingBatch, ProcessedMessage, SyncState  # noqa: F401
 
-# Sync (Acctivate)
-from .sync import InventorySnapshot, SyncLog  # noqa: F401
+# Sync
+from .sync import SyncLog  # noqa: F401
 
 # System Config
 from .config import ApiSource, GraphSubscription, SystemConfig  # noqa: F401

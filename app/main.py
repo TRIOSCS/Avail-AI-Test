@@ -475,16 +475,6 @@ def _seed_api_sources():
                 "setup_notes": "Sign up at console.anthropic.com → API Keys → Create Key. Model defaults to claude-sonnet-4-20250514 (configurable via ANTHROPIC_MODEL).",
             },
             {
-                "name": "acctivate_erp",
-                "display_name": "Acctivate ERP",
-                "category": "platform",
-                "source_type": "erp",
-                "description": "Acctivate inventory/ERP system — syncs on-hand stock, purchase orders, and customer data for internal inventory visibility.",
-                "signup_url": "https://www.acctivate.com",
-                "env_vars": ["ACCTIVATE_HOST", "ACCTIVATE_PORT", "ACCTIVATE_USER", "ACCTIVATE_PASSWORD", "ACCTIVATE_DATABASE"],
-                "setup_notes": "Get SQL Server connection details from IT. Host = server IP/hostname, Port = 1433 (default). User needs read access to inventory and customer tables.",
-            },
-            {
                 "name": "teams_notifications",
                 "display_name": "Teams Notifications",
                 "category": "platform",

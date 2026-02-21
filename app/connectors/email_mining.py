@@ -9,7 +9,6 @@ Scans the user's Microsoft 365 inbox/sent via Graph API for:
 Hardening:
   H1: Immutable IDs (via GraphClient)
   H2: ProcessedMessage dedup — skip messages already processed
-  H5: defusedxml — safe XML parsing for .xlsx files
   H6: Retry with exponential backoff (via GraphClient)
   H8: Delta Query — incremental sync instead of full inbox scan
 

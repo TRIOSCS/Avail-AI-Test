@@ -5,12 +5,10 @@ psycopg2-binary==2.9.11
 python-multipart==0.0.22
 httpx==0.28.1
 openpyxl==3.1.5
-itsdangerous==2.2.0
 jinja2==3.1.6
 # Email Mining v2 hardening
 filetype>=1.2.0
 charset-normalizer>=3.3.0
-defusedxml>=0.7.1
 # Credential encryption
 cryptography>=42.0.0
 # Observability

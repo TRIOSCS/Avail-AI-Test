@@ -209,7 +209,6 @@ def _merge_vendor_cards(db: Session, winner: VendorCard, loser: VendorCard):
     for field in [
         "website", "linkedin_url", "legal_name", "employee_size",
         "hq_city", "hq_state", "hq_country", "industry",
-        "acctivate_vendor_id",
     ]:
         if not getattr(winner, field) and getattr(loser, field):
             setattr(winner, field, getattr(loser, field))

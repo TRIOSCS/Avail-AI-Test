@@ -1,25 +1,10 @@
-"""Sync models — Acctivate inventory snapshots and sync logs."""
+"""Sync models — sync log tracking."""
 
 from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, Float, Index, Integer, JSON, String
 
 from .base import Base
-
-
-class InventorySnapshot(Base):
-    """Current inventory from Acctivate — refreshed daily."""
-
-    __tablename__ = "inventory_snapshots"
-    id = Column(Integer, primary_key=True)
-    product_id = Column(String(255), nullable=False, index=True)
-    warehouse_id = Column(String(100))
-    qty_on_hand = Column(Integer, default=0)
-    synced_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-    __table_args__ = (
-        Index("ix_inv_product_warehouse", "product_id", "warehouse_id", unique=True),
-    )
 
 
 class SyncLog(Base):
