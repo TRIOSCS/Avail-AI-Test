@@ -32,10 +32,11 @@ from app.config import settings
 
 API_URL = "https://inference.do-ai.run/v1/chat/completions"
 
-# Model tiers — Anthropic models on DigitalOcean Gradient
+# Model tiers — use configured model from env, fall back to Anthropic names
+_configured = getattr(settings, "do_gradient_model", None)
 MODELS = {
-    "default": "anthropic-claude-sonnet-4-5",
-    "strong": "anthropic-claude-opus-4-6",
+    "default": _configured or "anthropic-claude-4.5-sonnet",
+    "strong": "anthropic-claude-opus-4.6",
 }
 
 # HTTP status codes worth retrying
@@ -236,11 +237,13 @@ def _safe_json_parse(text: str) -> dict | list | None:
 
     cleaned = text.strip()
 
-    # Strip markdown code fences
+    # Strip markdown code fences (only the outermost opening/closing)
     if cleaned.startswith("```"):
-        lines = cleaned.split("\n")
-        lines = [line for line in lines if not line.strip().startswith("```")]
-        cleaned = "\n".join(lines).strip()
+        first_newline = cleaned.find("\n")
+        if first_newline != -1:
+            cleaned = cleaned[first_newline + 1:]
+        if cleaned.rstrip().endswith("```"):
+            cleaned = cleaned.rstrip()[:-3].rstrip()
 
     # Direct parse
     try:

@@ -37,7 +37,7 @@ app/static/crm.js (CRM, quotes, activity, settings). Single template: app/templa
 - Backend: app/routers/ for HTTP endpoints, app/services/ for business logic, app/models/ for ORM
 - Tests: pytest with in-memory SQLite, run with TESTING=1
 
-Return ONLY valid JSON with exactly two keys:
+Return ONLY valid JSON (no markdown fences, no extra text) with exactly two keys:
 - "title": a short (max 80 chars) summary of the issue suitable for a ticket title
 - "prompt": a multi-line Claude Code prompt (200-500 words) that includes:
   1. What the user reported (in their words, summarized)
