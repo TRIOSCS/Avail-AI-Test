@@ -658,10 +658,12 @@ function renderOffers() {
                 <span>${lastQ}</span>
                 <button class="btn btn-ghost btn-sm" onclick="openPricingHistory('${escAttr(group.mpn)}')">📊</button>
             </div>
+            <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
             <table class="tbl offer-table">
                 <thead><tr><th style="width:30px"></th><th>Vendor</th><th>Price</th><th>Avail</th><th>Lead</th><th>Cond</th><th>DC</th><th>MOQ</th><th>By</th><th style="width:40px"></th></tr></thead>
                 <tbody>${offersHtml}</tbody>
             </table>
+            </div>
         </div>`;
     }).join('');
     el.innerHTML = filterBar + groupsHtml;
@@ -992,10 +994,12 @@ function renderQuote() {
             </div>
         </div>
     </div>
+    <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
     <table class="tbl quote-table" style="font-size:11px">
         <thead><tr><th>MPN</th><th>Mfr</th><th>Qty</th><th>Cost</th><th>Target</th><th>Sell</th><th>Margin</th><th>Lead</th><th>Cond</th><th>DC</th><th>FW</th><th>HW</th></tr></thead>
         <tbody>${lines}</tbody>
     </table>
+    </div>
     <div class="quote-markup">
         Quick Markup: <input type="number" id="quickMarkup" value="20" style="width:50px" min="0" max="100">%
         <button class="btn btn-ghost btn-sm" onclick="applyMarkup()">Apply to All</button>
@@ -1212,10 +1216,12 @@ async function loadQuoteHistory() {
         el.innerHTML = `
         <div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
             <div style="font-weight:600;font-size:12px;margin-bottom:6px">Quote History (${quotes.length} revisions)</div>
+            <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
             <table class="tbl" style="font-size:11px">
                 <thead><tr><th>Quote #</th><th>Date</th><th>Total</th><th>Margin</th><th>Status</th><th></th></tr></thead>
                 <tbody>${rows}</tbody>
             </table>
+            </div>
         </div>`;
     } catch (e) { logCatchError('loadQuoteHistory', e); showToast('Failed to load quote history', 'error'); }
 }
@@ -1504,10 +1510,12 @@ function renderBuyPlanStatus(targetId) {
             ${contextHtml}
             ${marginHtml}
             ${notesHtml}
+            <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
             <table class="tbl" style="margin-bottom:0">
                 <thead><tr><th>MPN</th><th>Vendor</th><th>Plan Qty</th><th>Cost</th><th>Lead</th>${hidePoCol ? '' : '<th>PO</th>'}</tr></thead>
                 <tbody>${itemsHtml}</tbody>
             </table>
+            </div>
             ${actionsHtml}
         </div>`;
 }
@@ -1529,9 +1537,29 @@ async function approveBuyPlan() {
 }
 
 function openRejectBuyPlanModal() {
-    const reason = prompt('Rejection reason:');
-    if (reason === null) return;
-    rejectBuyPlan(reason);
+    // Show inline reject form instead of prompt()
+    const container = document.getElementById('bpRejectForm');
+    if (container) {
+        container.style.display = '';
+        var inp = container.querySelector('textarea');
+        if (inp) { inp.value = ''; inp.focus(); }
+        return;
+    }
+    // Fallback: create the form dynamically
+    const section = document.querySelector('#buyPlanSection .card') || document.getElementById('buyPlanSection');
+    if (!section) return;
+    const form = document.createElement('div');
+    form.id = 'bpRejectForm';
+    form.style.cssText = 'margin-top:12px;padding:10px;border:1px solid var(--red);border-radius:8px;background:var(--red-light,#fef2f2)';
+    form.innerHTML = `
+        <div style="font-weight:600;font-size:12px;margin-bottom:6px;color:var(--red)">Reject Buy Plan</div>
+        <textarea placeholder="Reason for rejection..." style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;min-height:40px;margin-bottom:8px"></textarea>
+        <div style="display:flex;gap:8px">
+            <button class="btn btn-danger btn-sm" onclick="rejectBuyPlan(this.closest('#bpRejectForm').querySelector('textarea').value)">Confirm Reject</button>
+            <button class="btn btn-ghost btn-sm" onclick="this.closest('#bpRejectForm').style.display='none'">Cancel</button>
+        </div>`;
+    section.appendChild(form);
+    form.querySelector('textarea').focus();
 }
 
 async function rejectBuyPlan(reason) {
@@ -1786,10 +1814,12 @@ async function checkTokenApproval() {
                     <div><strong>Items:</strong> ${(bp.line_items||[]).length} line items</div>
                 </div>
                 ${bp.salesperson_notes ? '<div style="background:#f0f9ff;padding:8px 10px;border-left:3px solid #2563eb;border-radius:4px;margin-bottom:12px;font-size:12px"><strong>Salesperson:</strong> '+esc(bp.salesperson_notes)+'</div>' : ''}
+                <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
                 <table class="tbl" style="margin-bottom:12px">
                     <thead><tr><th>MPN</th><th>Vendor</th><th>Plan Qty</th><th>Cost</th><th>Lead</th></tr></thead>
                     <tbody>${(bp.line_items||[]).map(li => '<tr><td>'+esc(li.mpn)+'</td><td>'+esc(li.vendor_name)+'</td><td>'+(li.plan_qty||li.qty||0)+'</td><td>$'+(Number(li.cost_price||0).toFixed(4))+'</td><td>'+esc(li.lead_time||'\u2014')+'</td></tr>').join('')}</tbody>
                 </table>
+                </div>
                 ${bp.status === 'pending_approval' ? `
                 <div style="margin-top:16px">
                     <div class="field" style="margin-bottom:8px">

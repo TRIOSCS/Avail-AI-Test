@@ -1361,9 +1361,75 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .act-body.act-body-open { display:block; }
 .act-body-text { white-space:pre-wrap; word-break:break-word; }
 
+/* Skip-to-content link — only visible on focus */
+.skip-link{position:absolute;top:-100px;left:12px;background:var(--blue);color:#fff;padding:8px 16px;border-radius:0 0 6px 6px;z-index:9999;font-size:13px;font-weight:600;text-decoration:none;transition:top .15s}
+.skip-link:focus{top:0}
+
 /* Source status banner (search results) */
 .source-status-banner .ss-detail{display:none;flex-wrap:wrap;gap:4px}
 .source-status-banner.ss-expanded .ss-detail{display:flex}
 .source-status-banner.ss-expanded .ss-toggle-hint::after{content:' \25bc'}
 .source-status-banner:not(.ss-expanded) .ss-toggle-hint::after{content:' \25b6'}
+
+/* ── Mobile deep fixes ──────────────────────────── */
+@media(max-width:768px){
+    /* Drill-down sub-tabs — horizontal scroll like main tabs */
+    .dd-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;scrollbar-width:none}
+    .dd-tabs::-webkit-scrollbar{display:none}
+    .dd-tab{white-space:nowrap;flex-shrink:0;padding:8px 14px;font-size:12px;min-height:36px}
+
+    /* Drill-down inner tables — scroll via panel wrapper */
+    .dtbl{font-size:11px}
+    .dtbl th,.dtbl td{padding:4px 6px;white-space:nowrap}
+
+    /* Drill-down cell — more breathing room */
+    .drow>td{padding:8px 6px 12px}
+
+    /* Expand arrow — larger touch target */
+    .ea{width:34px;height:34px;font-size:12px}
+
+    /* Quote table — wrap in scrollable parent (crm.js quote-wrap div) */
+    .quote-table th,.quote-table td{padding:4px 6px;white-space:nowrap}
+    .quote-sell-input{width:70px;font-size:14px;min-height:36px}
+    .quote-cell-input{font-size:12px;min-height:30px}
+    .quote-markup input{font-size:14px;min-height:36px}
+
+    /* Quote header — stack on narrow */
+    .quote-header{flex-direction:column;gap:8px;padding:10px 12px}
+
+    /* Proactive offer cards */
+    .proactive-match{flex-direction:column;gap:4px;align-items:flex-start}
+    .proactive-match .pm-mpn{min-width:auto}
+    .proactive-match .pm-vendor{min-width:auto}
+
+    /* Buy plan approve/reject actions */
+    .proactive-actions{flex-wrap:wrap}
+
+    /* Activity thread on mobile */
+    .act-vendor-card{padding:6px 8px}
+    .act-msg{padding:6px 8px}
+    .act-body{max-height:200px;font-size:12px}
+
+    /* Email thread body — prevent horizontal overflow */
+    .act-body-text{word-break:break-word;overflow-wrap:break-word}
+
+    /* Toast — full width on mobile */
+    #toastContainer{left:12px;right:12px;top:auto;bottom:calc(12px + env(safe-area-inset-bottom))}
+
+    /* Fix: tables inside drill-down need wrapper-level scroll */
+    .dd-panel{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+    /* Offer group header — stack */
+    .offer-group-header{flex-direction:column;gap:4px;align-items:flex-start}
+
+    /* Parse preview panel — tighter on mobile */
+    .parse-preview{padding:10px}
+    .parse-parts-table{font-size:10px}
+    .parse-actions{flex-wrap:wrap;justify-content:stretch}
+    .parse-actions .btn{flex:1;text-align:center}
+
+    /* Intel card — compact */
+    .intel-card summary{padding:8px 10px;font-size:11px}
+    .intel-body{padding:8px 10px}
+}
 

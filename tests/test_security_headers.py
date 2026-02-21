@@ -86,3 +86,14 @@ def test_global_exception_handler_format(client):
     handlers = app.exception_handlers
     # Verify a catch-all Exception handler is registered
     assert Exception in handlers
+
+
+def test_error_response_format(client):
+    """HTTP errors return structured JSON with error, status_code, and request_id."""
+    resp = client.get("/api/requisitions/999999/requirements")
+    assert resp.status_code == 404
+    data = resp.json()
+    assert "error" in data
+    assert "status_code" in data
+    assert data["status_code"] == 404
+    assert "request_id" in data

@@ -93,6 +93,12 @@ async function apiFetch(url, opts = {}) {
         if (!res.ok) {
             const msg = await res.text().catch(() => res.statusText);
             lastErr = Object.assign(new Error(msg), {status: res.status});
+            // Session expired — redirect to login
+            if (res.status === 401) {
+                showToast('Session expired — redirecting to login…', 'error');
+                setTimeout(() => { window.location.href = '/login'; }, 1500);
+                throw lastErr;
+            }
             if (res.status >= 500 && attempt < maxRetries) continue;
             throw lastErr;
         }
@@ -127,10 +133,25 @@ function escAttr(s) {
 }
 function logCatchError(ctx, err) { if (err) console.warn('[' + ctx + ']', err); }
 
+var _modalStack = [];
 function openModal(id, focusId) {
     var el = document.getElementById(id);
-    if (el) el.classList.add('open');
+    if (!el) return;
+    el.classList.add('open');
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    // Auto-set aria-labelledby from h2 inside modal
+    var h2 = el.querySelector('.modal > h2');
+    if (h2) {
+        if (!h2.id) h2.id = id + '-title';
+        el.setAttribute('aria-labelledby', h2.id);
+    }
+    _modalStack.push({id: id, returnFocus: document.activeElement});
     if (focusId) setTimeout(function() { var f = document.getElementById(focusId); if (f) f.focus(); }, 100);
+    else setTimeout(function() {
+        var first = el.querySelector('input:not([type=hidden]),select,textarea,button:not(.close-btn)');
+        if (first) first.focus();
+    }, 100);
 }
 
 async function guardBtn(btn, loadingText, action) {
@@ -580,17 +601,27 @@ function showMaterials() {
 function openNewReqModal() {
     openModal('newReqModal', 'nrName');
 }
-function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+function closeModal(id) {
+    var el = document.getElementById(id);
+    if (el) el.classList.remove('open');
+    var entry = _modalStack.pop();
+    if (entry && entry.returnFocus && entry.returnFocus.focus) {
+        try { entry.returnFocus.focus(); } catch(e) {}
+    }
+}
 
 function showToast(msg, type = 'info') {
     let container = document.getElementById('toastContainer');
     if (!container) {
         container = document.createElement('div');
         container.id = 'toastContainer';
+        container.setAttribute('aria-live', 'polite');
+        container.setAttribute('role', 'status');
         container.style.cssText = 'position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:8px';
         document.body.appendChild(container);
     }
     const toast = document.createElement('div');
+    toast.setAttribute('role', type === 'error' ? 'alert' : 'status');
     const colors = { info: 'var(--teal)', success: 'var(--green)', error: 'var(--red)', warn: 'var(--amber)' };
     toast.style.cssText = `background:var(--bg2);border-left:4px solid ${colors[type]||colors.info};color:var(--text);padding:10px 16px;border-radius:6px;font-size:13px;box-shadow:0 4px 12px rgba(0,0,0,.25);max-width:340px;opacity:0;transition:opacity .2s`;
     toast.textContent = msg;
@@ -1445,8 +1476,27 @@ function _updateDdBulkButton(reqId) {
     btn.textContent = `Send Bulk RFQ (${count})`;
 }
 
-async function ddPromptVendorEmail(reqId, sightingId, vendorName) {
-    const email = prompt(`Enter email for ${vendorName}:`);
+function ddPromptVendorEmail(reqId, sightingId, vendorName) {
+    // Show inline email input instead of prompt()
+    const row = document.querySelector(`input[onclick*="ddToggleSighting(${reqId},${sightingId})"]`);
+    const cell = row ? row.closest('tr')?.querySelector('td:nth-child(2)') : null;
+    if (!cell) { _ddPromptFallback(reqId, sightingId, vendorName); return; }
+    const existing = cell.querySelector('.dd-email-inline');
+    if (existing) { existing.querySelector('input').focus(); return; }
+    const wrap = document.createElement('span');
+    wrap.className = 'dd-email-inline';
+    wrap.style.cssText = 'display:inline-flex;gap:4px;margin-left:6px;align-items:center';
+    wrap.innerHTML = `<input type="email" placeholder="email@vendor.com" style="width:140px;padding:2px 6px;border:1px solid var(--teal);border-radius:3px;font-size:11px">
+        <button class="btn btn-sm" style="padding:1px 6px;font-size:10px" onclick="event.stopPropagation();_ddSaveEmail(${reqId},${sightingId},'${vendorName.replace(/'/g,"\\'")}',this.previousElementSibling.value)">Save</button>`;
+    cell.appendChild(wrap);
+    const inp = wrap.querySelector('input');
+    inp.focus();
+    inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); _ddSaveEmail(reqId, sightingId, vendorName, inp.value); }
+        if (e.key === 'Escape') { wrap.remove(); }
+    });
+}
+async function _ddSaveEmail(reqId, sightingId, vendorName, email) {
     if (!email || !email.trim()) return;
     const trimmed = email.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) { showToast('Invalid email address', 'error'); return; }
@@ -1455,7 +1505,6 @@ async function ddPromptVendorEmail(reqId, sightingId, vendorName) {
             method: 'POST', body: { vendor_name: vendorName, email: trimmed }
         });
         showToast(`Email added for ${vendorName}`, 'success');
-        // Update cached sighting so re-render picks it up
         const data = _ddSightingsCache[reqId] || {};
         for (const [rId, group] of Object.entries(data)) {
             for (const s of (group.sightings || [])) {
@@ -1466,6 +1515,10 @@ async function ddPromptVendorEmail(reqId, sightingId, vendorName) {
     } catch(e) {
         showToast('Failed to save email', 'error');
     }
+}
+function _ddPromptFallback(reqId, sightingId, vendorName) {
+    const email = prompt(`Enter email for ${vendorName}:`);
+    if (email) _ddSaveEmail(reqId, sightingId, vendorName, email);
 }
 
 function ddSendBulkRfq(reqId) {
@@ -3571,8 +3624,16 @@ async function sendBatchRfq() {
             const data = await apiFetch(`/api/requisitions/${currentReqId}/rfq`, {
                 method: 'POST', body: { groups: payload }
             });
-            const sent = (data.results || []).filter(r => r.status === 'sent').length;
-            showToast(`${sent} of ${payload.length} emails sent successfully`, 'success');
+            const results = data.results || [];
+            const sent = results.filter(r => r.status === 'sent').length;
+            const failed = results.filter(r => r.status !== 'sent');
+            if (failed.length > 0 && sent > 0) {
+                showToast(`${sent} of ${payload.length} sent. ${failed.length} failed: ${failed.map(f => f.vendor_name || 'unknown').join(', ')}`, 'warn');
+            } else if (failed.length > 0 && sent === 0) {
+                showToast(`All ${failed.length} emails failed to send`, 'error');
+            } else {
+                showToast(`${sent} of ${payload.length} emails sent successfully`, 'success');
+            }
             closeModal('rfqModal');
             selectedSightings.clear();
             // Clear sourcing drill-down state so next expand re-fetches fresh data
@@ -5549,12 +5610,48 @@ if (document.readyState === 'loading') {
 
 // "/" keyboard shortcut to focus search bar
 document.addEventListener('keydown', function(e) {
+    // Escape — close topmost modal
+    if (e.key === 'Escape') {
+        // Check AI panel first
+        var aiPanel = document.querySelector('.ai-panel-bg');
+        if (aiPanel) { aiPanel.remove(); return; }
+        // Close topmost modal from stack
+        if (_modalStack.length > 0) {
+            var top = _modalStack[_modalStack.length - 1];
+            closeModal(top.id);
+            return;
+        }
+        // Fallback: close any open modal
+        var openModals = document.querySelectorAll('.modal-bg.open');
+        if (openModals.length) {
+            openModals[openModals.length - 1].classList.remove('open');
+            return;
+        }
+    }
+    // / — focus search
     if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
         const tag = document.activeElement?.tagName;
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
         e.preventDefault();
         const sb = document.getElementById('mainSearch');
         if (sb) sb.focus();
+    }
+    // Tab — focus trap inside open modals
+    if (e.key === 'Tab' && _modalStack.length > 0) {
+        var topModal = document.getElementById(_modalStack[_modalStack.length - 1].id);
+        if (!topModal || !topModal.classList.contains('open')) return;
+        var focusable = topModal.querySelectorAll('input:not([type=hidden]),select,textarea,button,[tabindex]:not([tabindex="-1"]),a[href]');
+        if (focusable.length === 0) return;
+        var first = focusable[0], last = focusable[focusable.length - 1];
+        if (e.shiftKey) {
+            if (document.activeElement === first || !topModal.contains(document.activeElement)) {
+                e.preventDefault(); last.focus();
+            }
+        } else {
+            if (document.activeElement === last || !topModal.contains(document.activeElement)) {
+                e.preventDefault(); first.focus();
+            }
+        }
     }
 });
 
@@ -5565,3 +5662,24 @@ window.addEventListener('unhandledrejection', function(event) {
         showToast('Something went wrong — please try again', 'error');
     }
 });
+
+// ── Network offline/online detection ────────────────────────────────
+(function() {
+    var _offlineBanner = null;
+    function showOffline() {
+        if (_offlineBanner) return;
+        _offlineBanner = document.createElement('div');
+        _offlineBanner.id = 'offlineBanner';
+        _offlineBanner.setAttribute('role', 'alert');
+        _offlineBanner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#ef4444;color:#fff;text-align:center;padding:8px 16px;font-size:13px;font-weight:600;z-index:10000';
+        _offlineBanner.textContent = 'You are offline — changes will not be saved until connection is restored';
+        document.body.appendChild(_offlineBanner);
+    }
+    function hideOffline() {
+        if (_offlineBanner) { _offlineBanner.remove(); _offlineBanner = null; }
+        showToast('Back online', 'success');
+    }
+    window.addEventListener('offline', showOffline);
+    window.addEventListener('online', hideOffline);
+    if (!navigator.onLine) showOffline();
+})();
