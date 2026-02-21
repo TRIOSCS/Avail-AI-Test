@@ -2,7 +2,7 @@
 
 import os
 
-APP_VERSION = "2.7.0"
+APP_VERSION = "2.7.1"
 
 
 class Settings:
@@ -69,6 +69,9 @@ class Settings:
     # AI parsing
     anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
     anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+
+    # Agent service-to-service auth
+    agent_api_key: str = os.getenv("AGENT_API_KEY", "")
 
     # Enrichment APIs
     clay_api_key: str = os.getenv("CLAY_API_KEY", "")
