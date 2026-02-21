@@ -5,15 +5,17 @@ from datetime import date, datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from ..cache.decorators import cached_endpoint, invalidate_prefix
 from ..database import get_db
 from ..dependencies import is_admin as _is_admin
 from ..dependencies import require_user
 from ..models import User
+from ..schemas.responses import BuyerLeaderboardResponse, VendorScorecardListResponse
 
 router = APIRouter(tags=["performance"])
 
 
-@router.get("/api/performance/vendors")
+@router.get("/api/performance/vendors", response_model=VendorScorecardListResponse, response_model_exclude_none=True)
 def list_vendor_scorecards(
     sort_by: str = Query("composite_score"),
     order: str = Query("desc"),
@@ -25,7 +27,11 @@ def list_vendor_scorecards(
 ):
     from ..services.performance_service import get_vendor_scorecard_list
 
-    return get_vendor_scorecard_list(db, sort_by, order, limit, offset, search)
+    @cached_endpoint(prefix="perf_vendors", ttl_hours=4, key_params=["sort_by", "order", "limit", "offset", "search"])
+    def _fetch(sort_by, order, limit, offset, search, db):
+        return get_vendor_scorecard_list(db, sort_by, order, limit, offset, search)
+
+    return _fetch(sort_by=sort_by, order=order, limit=limit, offset=offset, search=search, db=db)
 
 
 @router.get("/api/performance/vendors/{vendor_card_id}")
@@ -36,7 +42,11 @@ def get_vendor_scorecard(
 ):
     from ..services.performance_service import get_vendor_scorecard_detail
 
-    result = get_vendor_scorecard_detail(db, vendor_card_id)
+    @cached_endpoint(prefix="perf_vendor_detail", ttl_hours=4, key_params=["vendor_card_id"])
+    def _fetch(vendor_card_id, db):
+        return get_vendor_scorecard_detail(db, vendor_card_id)
+
+    result = _fetch(vendor_card_id=vendor_card_id, db=db)
     if not result:
         raise HTTPException(404, "Vendor not found")
     return result
@@ -52,10 +62,12 @@ def refresh_vendor_scorecards(
     from ..services.performance_service import compute_all_vendor_scorecards
 
     result = compute_all_vendor_scorecards(db)
+    invalidate_prefix("perf_vendors")
+    invalidate_prefix("perf_vendor_detail")
     return {"status": "ok", **result}
 
 
-@router.get("/api/performance/buyers")
+@router.get("/api/performance/buyers", response_model=BuyerLeaderboardResponse, response_model_exclude_none=True)
 def list_buyer_leaderboard(
     month: str = Query(None, description="YYYY-MM format"),
     user: User = Depends(require_user),
@@ -70,7 +82,12 @@ def list_buyer_leaderboard(
             raise HTTPException(400, "Invalid month format — use YYYY-MM")
     else:
         m = date.today().replace(day=1)
-    return {"month": m.isoformat(), "entries": get_buyer_leaderboard(db, m)}
+
+    @cached_endpoint(prefix="perf_buyers", ttl_hours=4, key_params=["month"])
+    def _fetch(month, db):
+        return {"month": month.isoformat(), "entries": get_buyer_leaderboard(db, month)}
+
+    return _fetch(month=m, db=db)
 
 
 @router.get("/api/performance/buyers/months")
@@ -112,4 +129,5 @@ def refresh_buyer_leaderboard(
 
     m = date.today().replace(day=1)
     result = compute_buyer_leaderboard(db, m)
+    invalidate_prefix("perf_buyers")
     return {"status": "ok", **result}

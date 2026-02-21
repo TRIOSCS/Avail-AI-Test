@@ -11,6 +11,7 @@ Depends on: models, dependencies, services/proactive_service
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from ..cache.decorators import cached_endpoint
 from ..database import get_db
 from ..dependencies import require_user
 from ..models import ProactiveMatch, SiteContact, User
@@ -148,7 +149,12 @@ async def proactive_scorecard(
         salesperson_id = user.id  # Non-admin can only see own
     if not is_admin and not salesperson_id:
         salesperson_id = user.id
-    return get_scorecard(db, salesperson_id)
+
+    @cached_endpoint(prefix="proactive_scorecard", ttl_hours=1, key_params=["salesperson_id"])
+    def _fetch(salesperson_id, db):
+        return get_scorecard(db, salesperson_id)
+
+    return _fetch(salesperson_id=salesperson_id, db=db)
 
 
 @router.get("/api/proactive/contacts/{site_id}")

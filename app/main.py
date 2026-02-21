@@ -84,7 +84,30 @@ async def lifespan(app):
     logger.info("Shutdown complete")
 
 
-app = FastAPI(title="AVAIL — Opportunity Management", lifespan=lifespan)
+OPENAPI_TAGS = [
+    {"name": "auth", "description": "Azure AD OAuth2 login, logout, and token management"},
+    {"name": "requisitions", "description": "Requisitions, requirements, search, and sightings"},
+    {"name": "vendors", "description": "Vendor cards, contacts, reviews, and material cards"},
+    {"name": "rfq", "description": "RFQ email workflows — send, track, and parse responses"},
+    {"name": "crm", "description": "Companies, sites, contacts, offers, quotes, and buy plans"},
+    {"name": "sources", "description": "API source configuration and connector status"},
+    {"name": "ai", "description": "AI chat, response re-parsing, and prospect contacts"},
+    {"name": "v13", "description": "Activity logging, webhooks, ownership, and sales dashboard"},
+    {"name": "proactive", "description": "Proactive offer matching, sending, and scorecard"},
+    {"name": "performance", "description": "Vendor scorecards and buyer leaderboard"},
+    {"name": "admin", "description": "User management, system config, and diagnostics"},
+    {"name": "emails", "description": "Email mining, inbox scan, and thread views"},
+    {"name": "enrichment", "description": "Contact and company enrichment queue and backfills"},
+    {"name": "documents", "description": "Document generation and templates"},
+]
+
+app = FastAPI(
+    title="AVAIL — Opportunity Management",
+    description="Electronic component sourcing engine with vendor intelligence, RFQ automation, and CRM.",
+    version=APP_VERSION,
+    openapi_tags=OPENAPI_TAGS,
+    lifespan=lifespan,
+)
 
 # Rate limiting (slowapi)
 from .rate_limit import limiter
@@ -96,7 +119,39 @@ if settings.rate_limit_enabled:
 
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Return structured JSON for all HTTP errors."""
+    req_id = getattr(request.state, "request_id", "unknown")
+    detail = exc.detail if isinstance(exc.detail, str) else str(exc.detail) if exc.detail else "Error"
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": detail,
+            "status_code": exc.status_code,
+            "request_id": req_id,
+        },
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return structured JSON for request validation errors."""
+    req_id = getattr(request.state, "request_id", "unknown")
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "Validation error",
+            "status_code": 422,
+            "request_id": req_id,
+            "detail": exc.errors(),
+        },
+    )
 
 
 @app.exception_handler(Exception)
@@ -116,6 +171,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={
             "error": "Internal server error",
+            "status_code": 500,
             "type": type(exc).__name__,
             "request_id": req_id,
         },

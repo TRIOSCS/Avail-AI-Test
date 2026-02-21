@@ -71,7 +71,9 @@ from ..schemas.crm import (
     SiteContactUpdate,
     SiteCreate,
     SiteUpdate,
+    CustomerImportRow,
 )
+from ..schemas.responses import OfferListResponse, QuoteDetailResponse
 from ..services.credential_service import get_credential_cached
 from ..utils.normalization import (
     normalize_condition,
@@ -200,6 +202,7 @@ async def list_companies(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    """List active companies with sites and open requisition counts."""
     query = (
         db.query(Company)
         .filter(Company.is_active == True)  # noqa: E712
@@ -464,7 +467,7 @@ async def update_company(
 ):
     company = db.get(Company, company_id)
     if not company:
-        raise HTTPException(404)
+        raise HTTPException(404, "Company not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(company, field, value)
     db.commit()
@@ -499,7 +502,7 @@ async def update_site(
 ):
     site = db.get(CustomerSite, site_id)
     if not site:
-        raise HTTPException(404)
+        raise HTTPException(404, "Site not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(site, field, value)
     db.commit()
@@ -516,7 +519,7 @@ async def get_site(
         options=[joinedload(CustomerSite.company), joinedload(CustomerSite.owner)],
     )
     if not site:
-        raise HTTPException(404)
+        raise HTTPException(404, "Site not found")
 
     loop = asyncio.get_running_loop()
 
@@ -595,7 +598,7 @@ async def list_site_contacts(
 ):
     site = db.get(CustomerSite, site_id)
     if not site:
-        raise HTTPException(404)
+        raise HTTPException(404, "Site not found")
     contacts = (
         db.query(SiteContact)
         .filter(
@@ -649,7 +652,7 @@ async def update_site_contact(
 ):
     contact = db.get(SiteContact, contact_id)
     if not contact or contact.customer_site_id != site_id:
-        raise HTTPException(404)
+        raise HTTPException(404, "Contact not found")
     updates = payload.model_dump(exclude_unset=True)
     if updates.get("is_primary"):
         db.query(SiteContact).filter(
@@ -672,7 +675,7 @@ async def delete_site_contact(
 ):
     contact = db.get(SiteContact, contact_id)
     if not contact or contact.customer_site_id != site_id:
-        raise HTTPException(404)
+        raise HTTPException(404, "Contact not found")
     db.delete(contact)
     db.commit()
     return {"ok": True}
@@ -957,23 +960,18 @@ async def list_users_simple(
 @limiter.limit("5/minute")
 async def import_customers(
     request: Request,
+    data: list[CustomerImportRow],
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    data = await request.json()
-    if not isinstance(data, list):
-        raise HTTPException(400, "Expected JSON array")
     users_map = {u.email.lower(): u for u in db.query(User).all()}
     created_companies = 0
     created_sites = 0
     errors = []
     for i, row in enumerate(data):
         try:
-            company_name = (row.get("company_name") or "").strip()
-            site_name = (row.get("site_name") or "HQ").strip()
-            if not company_name:
-                errors.append(f"Row {i + 1}: missing company_name")
-                continue
+            company_name = row.company_name
+            site_name = row.site_name
             company = (
                 db.query(Company)
                 .filter(
@@ -998,7 +996,7 @@ async def import_customers(
                 site = CustomerSite(company_id=company.id, site_name=site_name)
                 db.add(site)
                 created_sites += 1
-            owner_email = (row.get("owner_email") or "").strip().lower()
+            owner_email = (row.owner_email or "").strip().lower()
             if owner_email and owner_email in users_map:
                 site.owner_id = users_map[owner_email].id
             for field in [
@@ -1014,12 +1012,11 @@ async def import_customers(
                 "country",
                 "notes",
             ]:
-                val = row.get(field)
+                val = getattr(row, field, None)
                 if val:
                     setattr(site, field, val.strip() if isinstance(val, str) else val)
-            addr = row.get("address")
-            if addr:
-                site.address_line1 = addr.strip()
+            if row.address:
+                site.address_line1 = row.address.strip()
         except Exception as e:
             errors.append(f"Row {i + 1}: {str(e)}")
     db.commit()
@@ -1033,15 +1030,16 @@ async def import_customers(
 # ── Offers ───────────────────────────────────────────────────────────────
 
 
-@router.get("/api/requisitions/{req_id}/offers")
+@router.get("/api/requisitions/{req_id}/offers", response_model=OfferListResponse, response_model_exclude_none=True)
 async def list_offers(
     req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
+    """List offers for a requisition grouped by requirement."""
     from ..dependencies import get_req_for_user
 
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
     offers = (
         db.query(Offer)
         .filter(Offer.requisition_id == req_id)
@@ -1139,7 +1137,7 @@ async def create_offer(
 
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
     norm_name = normalize_vendor_name(payload.vendor_name)
     card = db.query(VendorCard).filter(VendorCard.normalized_name == norm_name).first()
     if not card:
@@ -1255,7 +1253,7 @@ async def update_offer(
 ):
     offer = db.get(Offer, offer_id)
     if not offer:
-        raise HTTPException(404)
+        raise HTTPException(404, "Offer not found")
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(offer, field, value)
     db.commit()
@@ -1268,7 +1266,7 @@ async def delete_offer(
 ):
     offer = db.get(Offer, offer_id)
     if not offer:
-        raise HTTPException(404)
+        raise HTTPException(404, "Offer not found")
     db.delete(offer)
     db.commit()
     return {"ok": True}
@@ -1287,7 +1285,7 @@ async def upload_offer_attachment(
     """Upload a file to OneDrive and attach it to an offer."""
     offer = db.get(Offer, offer_id)
     if not offer:
-        raise HTTPException(404)
+        raise HTTPException(404, "Offer not found")
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(400, "File too large (max 10 MB)")
@@ -1346,7 +1344,7 @@ async def attach_from_onedrive(
     """Attach an existing OneDrive file to an offer by item ID."""
     offer = db.get(Offer, offer_id)
     if not offer:
-        raise HTTPException(404)
+        raise HTTPException(404, "Offer not found")
     item_id = body.item_id
     from ..utils.graph_client import GraphClient
 
@@ -1383,7 +1381,7 @@ async def delete_offer_attachment(
 ):
     att = db.get(OfferAttachment, att_id)
     if not att:
-        raise HTTPException(404)
+        raise HTTPException(404, "Attachment not found")
     # Delete from OneDrive if we have the item ID
     if att.onedrive_item_id and user.access_token:
         from ..utils.graph_client import GraphClient
@@ -1451,7 +1449,7 @@ async def browse_onedrive(
 # ── Quotes ───────────────────────────────────────────────────────────────
 
 
-@router.get("/api/requisitions/{req_id}/quote")
+@router.get("/api/requisitions/{req_id}/quote", response_model=QuoteDetailResponse, response_model_exclude_none=True)
 async def get_quote(
     req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
@@ -1459,7 +1457,7 @@ async def get_quote(
 
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
     quote = (
         db.query(Quote)
         .options(
@@ -1487,7 +1485,7 @@ async def list_quotes(
 
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
     quotes = (
         db.query(Quote)
         .options(
@@ -1513,7 +1511,7 @@ async def create_quote(
 
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
     if not req.customer_site_id:
         raise HTTPException(
             400, "Requisition must be linked to a customer site before quoting"
@@ -1600,7 +1598,7 @@ async def update_quote(
 ):
     quote = db.get(Quote, quote_id)
     if not quote:
-        raise HTTPException(404)
+        raise HTTPException(404, "Quote not found")
     updates = payload.model_dump(exclude_unset=True)
     if "line_items" in updates:
         quote.line_items = updates.pop("line_items")
@@ -1648,7 +1646,7 @@ async def send_quote(
 
     quote = db.get(Quote, quote_id)
     if not quote:
-        raise HTTPException(404)
+        raise HTTPException(404, "Quote not found")
 
     # Allow caller to override recipient email/name
     override_email = ((body.to_email if body else None) or "").strip()
@@ -1863,7 +1861,7 @@ async def quote_result(
 ):
     quote = db.get(Quote, quote_id)
     if not quote:
-        raise HTTPException(404)
+        raise HTTPException(404, "Quote not found")
     quote.result = payload.result
     quote.result_reason = payload.reason
     quote.result_notes = payload.notes
@@ -1889,7 +1887,7 @@ async def revise_quote(
 ):
     old = db.get(Quote, quote_id)
     if not old:
-        raise HTTPException(404)
+        raise HTTPException(404, "Quote not found")
     old.status = "revised"
     old_number = old.quote_number
     old.quote_number = f"{old_number}-R{old.revision}"
@@ -1919,7 +1917,7 @@ async def reopen_quote(
 ):
     quote = db.get(Quote, quote_id)
     if not quote:
-        raise HTTPException(404)
+        raise HTTPException(404, "Quote not found")
     req = db.get(Requisition, quote.requisition_id)
     if req:
         req.status = "reopened"
@@ -2030,7 +2028,7 @@ async def submit_buy_plan(
     """Submit a buy plan when marking a quote as Won."""
     quote = db.get(Quote, quote_id)
     if not quote:
-        raise HTTPException(404)
+        raise HTTPException(404, "Quote not found")
     offer_ids = body.offer_ids
     if not offer_ids:
         raise HTTPException(400, "At least one offer must be selected")
@@ -2263,7 +2261,7 @@ async def get_buy_plan(
 ):
     plan = db.get(BuyPlan, plan_id)
     if not plan:
-        raise HTTPException(404)
+        raise HTTPException(404, "Buy plan not found")
     if not _is_admin(user) and user.role not in ("manager", "buyer"):
         if plan.submitted_by_id != user.id:
             raise HTTPException(403, "You can only view your own buy plans")
@@ -2283,7 +2281,7 @@ async def approve_buy_plan(
         raise HTTPException(403, "Manager or admin approval required")
     plan = db.get(BuyPlan, plan_id)
     if not plan:
-        raise HTTPException(404)
+        raise HTTPException(404, "Buy plan not found")
     if plan.status != "pending_approval":
         raise HTTPException(400, f"Cannot approve plan in status: {plan.status}")
 
@@ -2343,7 +2341,7 @@ async def reject_buy_plan(
         raise HTTPException(403, "Manager or admin rejection required")
     plan = db.get(BuyPlan, plan_id)
     if not plan:
-        raise HTTPException(404)
+        raise HTTPException(404, "Buy plan not found")
     if plan.status != "pending_approval":
         raise HTTPException(400, f"Cannot reject plan in status: {plan.status}")
 
@@ -2377,7 +2375,7 @@ async def enter_po_number(
     """Buyer enters PO number for a line item."""
     plan = db.get(BuyPlan, plan_id)
     if not plan:
-        raise HTTPException(404)
+        raise HTTPException(404, "Buy plan not found")
     if plan.status not in ("approved", "po_entered"):
         raise HTTPException(400, f"Cannot enter PO for plan in status: {plan.status}")
 
@@ -2419,7 +2417,7 @@ async def check_po_verification(
     """Check PO verification status — re-scan if needed."""
     plan = db.get(BuyPlan, plan_id)
     if not plan:
-        raise HTTPException(404)
+        raise HTTPException(404, "Buy plan not found")
 
     from ..services.buyplan_service import verify_po_sent
 
@@ -2443,7 +2441,7 @@ async def complete_buy_plan(
         raise HTTPException(403, "Admin or manager required")
     plan = db.get(BuyPlan, plan_id)
     if not plan:
-        raise HTTPException(404)
+        raise HTTPException(404, "Buy plan not found")
     allowed = ["po_confirmed"]
     if plan.is_stock_sale:
         allowed.append("approved")
@@ -2483,7 +2481,7 @@ async def cancel_buy_plan(
     Admin/manager can cancel from pending_approval or approved (before POs)."""
     plan = db.get(BuyPlan, plan_id)
     if not plan:
-        raise HTTPException(404)
+        raise HTTPException(404, "Buy plan not found")
 
     is_mgr = _is_admin(user) or user.role == "manager"
     is_submitter = plan.submitted_by_id == user.id
@@ -2559,7 +2557,7 @@ async def resubmit_buy_plan(
     """Resubmit a rejected or cancelled buy plan as a new plan."""
     plan = db.get(BuyPlan, plan_id)
     if not plan:
-        raise HTTPException(404)
+        raise HTTPException(404, "Buy plan not found")
     if not _is_admin(user) and user.role != "manager":
         if plan.submitted_by_id != user.id:
             raise HTTPException(403, "Only the original submitter, admin, or manager can resubmit")
@@ -2651,7 +2649,7 @@ async def bulk_po_entry(
     """Bulk add/edit/clear PO numbers for line items."""
     plan = db.get(BuyPlan, plan_id)
     if not plan:
-        raise HTTPException(404)
+        raise HTTPException(404, "Buy plan not found")
     if plan.status not in ("approved", "po_entered"):
         raise HTTPException(
             400, f"Cannot modify POs for plan in status: {plan.status}"
@@ -2813,7 +2811,7 @@ async def clone_requisition(
 
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
     new_req = Requisition(
         name=f"{req.name} (clone)",
         customer_name=req.customer_name,

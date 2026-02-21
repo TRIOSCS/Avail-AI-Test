@@ -273,7 +273,7 @@ class TestDeepEmailScan:
             f"/api/enrichment/deep-email-scan/{admin_user.id}"
         )
         assert resp.status_code == 400
-        assert "M365" in resp.json()["detail"]
+        assert "M365" in resp.json()["error"]
 
 
 # ── Website Scraping Tests ───────────────────────────────────────────

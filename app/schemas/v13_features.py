@@ -88,3 +88,19 @@ class StrategicToggle(BaseModel):
     """Toggle a company's strategic account flag."""
 
     is_strategic: bool | None = None  # None = flip current value
+
+
+# ── Webhook & Email Schemas ─────────────────────────────────────────
+
+
+class GraphWebhookPayload(BaseModel, extra="allow"):
+    """Microsoft Graph webhook notification payload."""
+
+    value: list[dict] = []
+
+
+class EmailClickLog(BaseModel):
+    """Auto-log when a mailto: link is clicked."""
+
+    email: str
+    contact_name: str | None = None

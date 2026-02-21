@@ -27,7 +27,7 @@ def test_rfq_pdf_not_found(mock_gen, client):
     """Invalid requisition ID -> 404."""
     resp = client.get("/api/requisitions/99999/pdf")
     assert resp.status_code == 404
-    assert "not found" in resp.json()["detail"].lower()
+    assert "not found" in resp.json()["error"].lower()
 
 
 @patch("app.services.document_service.generate_rfq_summary_pdf", side_effect=RuntimeError("render failed"))
@@ -35,7 +35,7 @@ def test_rfq_pdf_generation_error(mock_gen, client):
     """Service throws RuntimeError -> 500."""
     resp = client.get("/api/requisitions/1/pdf")
     assert resp.status_code == 500
-    assert "PDF generation failed" in resp.json()["detail"]
+    assert "PDF generation failed" in resp.json()["error"]
 
 
 # ── Quote PDF ────────────────────────────────────────────────────────

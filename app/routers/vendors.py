@@ -28,6 +28,7 @@ from sqlalchemy import text as sqltext
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
+from ..cache.decorators import cached_endpoint
 from ..services.vendor_analysis_service import _analyze_vendor_materials
 
 from ..database import get_db
@@ -47,6 +48,7 @@ from ..models import (
     VendorResponse,
     VendorReview,
 )
+from ..schemas.responses import VendorDetailResponse, VendorEmailMetricsResponse, VendorListResponse, VendorPartsSummaryResponse
 from ..schemas.vendors import (
     MaterialCardUpdate,
     VendorBlacklistToggle,
@@ -265,7 +267,7 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
 # ── Vendor Cards CRUD ────────────────────────────────────────────────────
 
 
-@router.get("/api/vendors")
+@router.get("/api/vendors", response_model=VendorListResponse, response_model_exclude_none=True)
 async def list_vendors(
     q: str = Query("", description="Vendor name search filter"),
     limit: int = Query(200, ge=1, le=1000),
@@ -273,6 +275,7 @@ async def list_vendors(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    """List vendor cards with search, pagination, and engagement scores."""
     q = q.strip().lower()
     query = db.query(VendorCard).order_by(VendorCard.display_name)
     if q:
@@ -376,10 +379,11 @@ async def autocomplete_names(
     return results[:limit]
 
 
-@router.get("/api/vendors/{card_id}")
+@router.get("/api/vendors/{card_id}", response_model=VendorDetailResponse, response_model_exclude_none=True)
 async def get_vendor(
     card_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
+    """Get vendor card detail with reviews, contacts, and engagement metrics."""
     card = db.get(VendorCard, card_id)
     if not card:
         raise HTTPException(404, "Vendor not found")
@@ -979,7 +983,7 @@ async def delete_vendor_contact(
 # ── Vendor Email Metrics ────────────────────────────────────────────────
 
 
-@router.get("/api/vendors/{card_id}/email-metrics")
+@router.get("/api/vendors/{card_id}/email-metrics", response_model=VendorEmailMetricsResponse, response_model_exclude_none=True)
 async def vendor_email_metrics(
     card_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
@@ -988,61 +992,64 @@ async def vendor_email_metrics(
     if not card:
         raise HTTPException(404, "Vendor card not found")
 
-    contacts = (
-        db.query(Contact)
-        .filter(
-            Contact.vendor_name == card.display_name,
-            Contact.contact_type == "email",
+    @cached_endpoint(prefix="vendor_email_metrics", ttl_hours=2, key_params=["card_id"])
+    def _fetch(card_id, db, display_name):
+        contacts = (
+            db.query(Contact)
+            .filter(
+                Contact.vendor_name == display_name,
+                Contact.contact_type == "email",
+            )
+            .all()
         )
-        .all()
-    )
 
-    responses = (
-        db.query(VendorResponse)
-        .filter(
-            VendorResponse.vendor_name == card.display_name,
+        responses = (
+            db.query(VendorResponse)
+            .filter(
+                VendorResponse.vendor_name == display_name,
+            )
+            .all()
         )
-        .all()
-    )
 
-    total_sent = len(contacts)
-    total_replied = len(
-        [c for c in contacts if c.status in ("responded", "quoted", "declined")]
-    )
-    total_quoted = len([c for c in contacts if c.status == "quoted"])
+        total_sent = len(contacts)
+        total_replied = len(
+            [c for c in contacts if c.status in ("responded", "quoted", "declined")]
+        )
+        total_quoted = len([c for c in contacts if c.status == "quoted"])
 
-    # Response time calculation — dict lookup instead of nested loop
-    contact_by_id = {c.id: c for c in contacts}
-    response_hours: list[float] = []
-    for vr in responses:
-        if vr.contact_id and vr.received_at:
-            matching_contact = contact_by_id.get(vr.contact_id)
-            if matching_contact and matching_contact.created_at:
-                delta = vr.received_at - matching_contact.created_at
-                response_hours.append(delta.total_seconds() / 3600)
+        contact_by_id = {c.id: c for c in contacts}
+        response_hours: list[float] = []
+        for vr in responses:
+            if vr.contact_id and vr.received_at:
+                matching_contact = contact_by_id.get(vr.contact_id)
+                if matching_contact and matching_contact.created_at:
+                    delta = vr.received_at - matching_contact.created_at
+                    response_hours.append(delta.total_seconds() / 3600)
 
-    avg_response_hours = (
-        round(sum(response_hours) / len(response_hours), 1) if response_hours else None
-    )
-    last_contacted = max((c.created_at for c in contacts), default=None)
-    last_reply = max(
-        (vr.received_at for vr in responses if vr.received_at), default=None
-    )
+        avg_response_hours = (
+            round(sum(response_hours) / len(response_hours), 1) if response_hours else None
+        )
+        last_contacted = max((c.created_at for c in contacts), default=None)
+        last_reply = max(
+            (vr.received_at for vr in responses if vr.received_at), default=None
+        )
 
-    return {
-        "vendor_name": card.display_name,
-        "total_rfqs_sent": total_sent,
-        "total_replies": total_replied,
-        "total_quotes": total_quoted,
-        "response_rate": round(total_replied / total_sent * 100)
-        if total_sent
-        else None,
-        "quote_rate": round(total_quoted / total_sent * 100) if total_sent else None,
-        "avg_response_hours": avg_response_hours,
-        "last_contacted": last_contacted.isoformat() if last_contacted else None,
-        "last_reply": last_reply.isoformat() if last_reply else None,
-        "active_rfqs": len([c for c in contacts if c.status in ("sent", "opened")]),
-    }
+        return {
+            "vendor_name": display_name,
+            "total_rfqs_sent": total_sent,
+            "total_replies": total_replied,
+            "total_quotes": total_quoted,
+            "response_rate": round(total_replied / total_sent * 100)
+            if total_sent
+            else None,
+            "quote_rate": round(total_quoted / total_sent * 100) if total_sent else None,
+            "avg_response_hours": avg_response_hours,
+            "last_contacted": last_contacted.isoformat() if last_contacted else None,
+            "last_reply": last_reply.isoformat() if last_reply else None,
+            "active_rfqs": len([c for c in contacts if c.status in ("sent", "opened")]),
+        }
+
+    return _fetch(card_id=card_id, db=db, display_name=card.display_name)
 
 
 # ── Add Email to Vendor Card ───────────────────────────────────────────
@@ -1589,7 +1596,7 @@ async def get_vendor_confirmed_offers(
 # ── Parts Sightings Summary ─────────────────────────────────────────────
 
 
-@router.get("/api/vendors/{card_id}/parts-summary")
+@router.get("/api/vendors/{card_id}/parts-summary", response_model=VendorPartsSummaryResponse, response_model_exclude_none=True)
 async def get_vendor_parts_summary(
     card_id: int,
     q: str = Query("", description="MPN search filter"),
@@ -1603,7 +1610,18 @@ async def get_vendor_parts_summary(
     if not card:
         raise HTTPException(404, "Vendor not found")
 
-    norm = card.normalized_name
+    # Check cache first
+    from ..cache.decorators import cached_endpoint
+
+    @cached_endpoint(prefix="vendor_parts_summary", ttl_hours=2, key_params=["card_id", "q", "limit", "offset"])
+    def _fetch_parts(card_id, q, limit, offset, db, norm, display_name):
+        return _vendor_parts_summary_query(db, norm, display_name, q, limit, offset)
+
+    return _fetch_parts(card_id=card_id, q=q, limit=limit, offset=offset, db=db, norm=card.normalized_name, display_name=card.display_name)
+
+
+def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
+    """Execute the parts summary query (extracted for caching)."""
     q = q.strip().lower()
 
     # Combine sightings and material_vendor_history into a unified parts summary
@@ -1673,7 +1691,7 @@ async def get_vendor_parts_summary(
     )
 
     return {
-        "vendor_name": card.display_name,
+        "vendor_name": display_name,
         "total": total,
         "items": [
             {

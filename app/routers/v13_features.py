@@ -26,6 +26,8 @@ from ..schemas.v13_features import (
     ActivityAttributeRequest,
     CompanyCallLog,
     CompanyNoteLog,
+    EmailClickLog,
+    GraphWebhookPayload,
     PhoneCallLog,
     StrategicToggle,
     VendorCallLog,
@@ -41,7 +43,10 @@ router = APIRouter(tags=["v13"])
 
 
 @router.post("/api/webhooks/graph")
-async def graph_webhook(request: Request, db: Session = Depends(get_db)):
+async def graph_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+):
     """Microsoft Graph webhook endpoint.
 
     Handles validation handshake and notification payloads.
@@ -51,14 +56,16 @@ async def graph_webhook(request: Request, db: Session = Depends(get_db)):
         return PlainTextResponse(content=validation_token, status_code=200)
 
     try:
-        payload = await request.json()
+        raw = await request.json()
     except (ValueError, UnicodeDecodeError):
         raise HTTPException(400, "Invalid JSON payload")
+
+    payload = GraphWebhookPayload.model_validate(raw)
 
     from app.services.webhook_service import handle_notification
 
     try:
-        await handle_notification(payload, db)
+        await handle_notification(payload.model_dump(), db)
     except Exception:
         logger.exception("Webhook notification processing failed")
         raise HTTPException(502, "Notification processing failed")
@@ -183,18 +190,14 @@ async def get_user_activities(
 
 @router.post("/api/activities/email")
 async def log_email_click(
-    request: Request,
+    body: EmailClickLog,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Auto-log when a mailto: link is clicked anywhere in the app."""
     from app.services.activity_service import log_email_activity
 
-    try:
-        body = await request.json()
-    except (ValueError, UnicodeDecodeError):
-        body = {}
-    email = (body.get("email") or "").strip()
+    email = body.email.strip()
     if not email:
         return {"status": "skipped", "message": "No email provided"}
     record = log_email_activity(
@@ -203,7 +206,7 @@ async def log_email_click(
         email_addr=email,
         subject=None,
         external_id=None,
-        contact_name=body.get("contact_name"),
+        contact_name=body.contact_name,
         db=db,
     )
     db.commit()

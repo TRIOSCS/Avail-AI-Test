@@ -45,8 +45,10 @@ from ..schemas.requisitions import (
     RequisitionCreate,
     RequisitionOut,
     RequisitionUpdate,
+    SearchOptions,
     SightingUnavailableIn,
 )
+from ..schemas.responses import RequisitionListResponse
 from ..search_service import (
     _get_material_history,
     _history_to_result,
@@ -81,7 +83,7 @@ def _compute_sourcing_score(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt
     )
 
 
-@router.get("/api/requisitions")
+@router.get("/api/requisitions", response_model=RequisitionListResponse, response_model_exclude_none=True)
 async def list_requisitions(
     q: str = "",
     status: str = "",
@@ -90,6 +92,7 @@ async def list_requisitions(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    """List requisitions with filtering, search, and sourcing scores."""
     # Single query with subquery counts — avoids N+1 lazy loads
     req_count_sq = (
         select(sqlfunc.count(Requirement.id))
@@ -458,7 +461,7 @@ async def toggle_archive(
 ):
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
     if req.status in ("archived", "won", "lost"):
         req.status = "active"
     else:
@@ -474,7 +477,7 @@ async def clone_requisition(
     """Clone an archived (or any) requisition into a new draft with all its requirements."""
     src = get_req_for_user(db, user, req_id)
     if not src:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
     clone = Requisition(
         name=f"{src.name} (copy)",
         customer_site_id=src.customer_site_id,
@@ -524,7 +527,7 @@ async def update_requisition(
 ):
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
     if body.name is not None:
         req.name = body.name.strip() or req.name
     if body.customer_site_id is not None:
@@ -540,9 +543,10 @@ async def update_requisition(
 async def list_requirements(
     req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
+    """List requirements for a requisition with sighting counts."""
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
 
     # Single query: get vendor counts per requirement via SQL (avoids loading all sightings)
     vendor_counts = {}
@@ -596,7 +600,7 @@ async def add_requirements(
 ):
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
     raw = await request.json()
     items = raw if isinstance(raw, list) else [raw]
     created = []
@@ -657,7 +661,7 @@ async def upload_requirements(
 ):
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
     content = await file.read()
     if len(content) > 10_000_000:
         raise HTTPException(413, "File too large — 10MB maximum")
@@ -751,10 +755,10 @@ async def delete_requirement(
 ):
     r = db.get(Requirement, item_id)
     if not r:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requirement not found")
     req = get_req_for_user(db, user, r.requisition_id)
     if not req:
-        raise HTTPException(403)
+        raise HTTPException(403, "Not authorized for this requisition")
     db.delete(r)
     db.commit()
     return {"ok": True}
@@ -769,10 +773,10 @@ async def update_requirement(
 ):
     r = db.get(Requirement, item_id)
     if not r:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requirement not found")
     req = get_req_for_user(db, user, r.requisition_id)
     if not req:
-        raise HTTPException(403)
+        raise HTTPException(403, "Not authorized for this requisition")
     if data.primary_mpn is not None:
         r.primary_mpn = normalize_mpn(data.primary_mpn) or data.primary_mpn.strip()
         r.normalized_mpn = normalize_mpn_key(data.primary_mpn)
@@ -815,20 +819,16 @@ async def update_requirement(
 async def search_all(
     req_id: int,
     request: Request,
+    body: SearchOptions | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
 
     # Optional: only search specific requirements
-    requirement_ids = None
-    try:
-        body = await request.json()
-        requirement_ids = body.get("requirement_ids")
-    except (ValueError, UnicodeDecodeError):
-        logger.debug("JSON body parse failed, searching all requirements", exc_info=True)
+    requirement_ids = body.requirement_ids if body else None
 
     # Filter requirements to search
     reqs_to_search = [
@@ -886,7 +886,7 @@ async def search_one(
 ):
     r = db.get(Requirement, item_id)
     if not r:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requirement not found")
     # Verify the user has access to the parent requisition
     req = get_req_for_user(db, user, r.requisition_id)
     if not req:
@@ -913,7 +913,7 @@ async def get_saved_sightings(
     """Return previously saved sightings from DB without triggering a new search."""
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
     now = datetime.now(timezone.utc)
     results: dict = {}
     # Batch-fetch all sightings for this requisition's requirements in one query
@@ -964,7 +964,7 @@ async def mark_unavailable(
 ):
     s = db.get(Sighting, sighting_id)
     if not s:
-        raise HTTPException(404)
+        raise HTTPException(404, "Sighting not found")
     # Verify sighting belongs to a valid requisition
     req_check = (
         db.query(Requisition)
@@ -991,7 +991,7 @@ async def import_stock_list(
     """Import a vendor stock list CSV/Excel as sightings for matching requirements."""
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
 
     form = await request.form()
     file = form.get("file")

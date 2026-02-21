@@ -26,6 +26,7 @@ from ..schemas.enrichment import (
     BackfillRequest,
     BulkApproveRequest,
 )
+from ..schemas.responses import EnrichmentQueueResponse
 
 router = APIRouter(tags=["enrichment"])
 
@@ -33,7 +34,7 @@ router = APIRouter(tags=["enrichment"])
 # ── Queue endpoints ──────────────────────────────────────────────────
 
 
-@router.get("/api/enrichment/queue")
+@router.get("/api/enrichment/queue", response_model=EnrichmentQueueResponse, response_model_exclude_none=True)
 def api_list_queue(
     status: str = Query("pending", pattern="^(pending|approved|rejected|auto_applied|all)$"),
     entity_type: str = Query(None),

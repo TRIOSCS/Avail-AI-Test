@@ -424,7 +424,7 @@ async def rfq_prepare(
     """Return vendor card data + exhaustion info for selected vendors before RFQ send."""
     req = get_req_for_user(db, user, req_id)
     if not req:
-        raise HTTPException(404)
+        raise HTTPException(404, "Requisition not found")
     vendors = payload.vendors
 
     # All MPNs on this requisition + substitutes map

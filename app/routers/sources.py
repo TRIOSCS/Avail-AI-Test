@@ -36,6 +36,7 @@ from ..models import (
     VendorCard,
     VendorResponse,
 )
+from ..schemas.responses import SourceListResponse
 from ..schemas.sources import MiningOptions, SourceStatusToggle
 from ..services.credential_service import get_credential_cached
 from ..vendor_utils import normalize_vendor_name
@@ -384,7 +385,7 @@ def _create_sightings_from_attachment(
 # ══════════════════════════════════════════════════════════════════════
 
 
-@router.get("/api/sources")
+@router.get("/api/sources", response_model=SourceListResponse, response_model_exclude_none=True)
 async def list_api_sources(
     user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
@@ -445,7 +446,7 @@ async def test_api_source(
     """Test a specific API source with a known part number."""
     src = db.get(ApiSource, source_id)
     if not src:
-        raise HTTPException(404)
+        raise HTTPException(404, "API source not found")
 
     test_mpn = "LM358N"
     start = time.time()
@@ -492,7 +493,7 @@ async def toggle_api_source(
     """Enable or disable a source (admin + dev_assistant)."""
     src = db.get(ApiSource, source_id)
     if not src:
-        raise HTTPException(404)
+        raise HTTPException(404, "API source not found")
     src.status = payload.status
     db.commit()
     return {"ok": True, "status": src.status}

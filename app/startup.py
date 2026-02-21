@@ -325,3 +325,28 @@ def _create_perf_indexes(conn) -> None:
         CREATE INDEX IF NOT EXISTS ix_requirements_mpn_trgm
         ON requirements USING gin (primary_mpn gin_trgm_ops)
     """)
+    # Phase 1: Additional performance indexes for hot query paths
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_vendor_cards_blacklisted
+        ON vendor_cards (is_blacklisted) WHERE is_blacklisted = TRUE
+    """)
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_requirements_primary_mpn
+        ON requirements (LOWER(primary_mpn))
+    """)
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_sightings_mpn_matched
+        ON sightings (mpn_matched) WHERE mpn_matched IS NOT NULL
+    """)
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_offers_vendor_card
+        ON offers (vendor_card_id) WHERE vendor_card_id IS NOT NULL
+    """)
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_contacts_vendor_name
+        ON contacts (vendor_name) WHERE vendor_name IS NOT NULL
+    """)
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_vendor_responses_vendor_name
+        ON vendor_responses (vendor_name) WHERE vendor_name IS NOT NULL
+    """)

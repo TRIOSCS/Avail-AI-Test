@@ -159,14 +159,14 @@ def test_cannot_deactivate_self(admin_client, admin_user):
     resp = admin_client.put(f"/api/admin/users/{admin_user.id}",
                             json={"is_active": False})
     assert resp.status_code == 400
-    assert "yourself" in resp.json()["detail"].lower()
+    assert "yourself" in resp.json()["error"].lower()
 
 
 def test_cannot_change_own_role(admin_client, admin_user):
     resp = admin_client.put(f"/api/admin/users/{admin_user.id}",
                             json={"role": "buyer"})
     assert resp.status_code == 400
-    assert "own role" in resp.json()["detail"].lower()
+    assert "own role" in resp.json()["error"].lower()
 
 
 def test_deactivate_other_user(admin_client, db_session, test_user):

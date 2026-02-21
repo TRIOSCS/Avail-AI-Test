@@ -232,7 +232,7 @@ async def save_prospect_contact(
     """Save a prospect contact (mark as kept by user)."""
     pc = db.query(ProspectContact).filter(ProspectContact.id == contact_id).first()
     if not pc:
-        raise HTTPException(404)
+        raise HTTPException(404, "Prospect contact not found")
     pc.is_saved = True
     pc.saved_by_id = user.id
     if payload and payload.notes:
@@ -261,7 +261,7 @@ async def delete_prospect_contact(
     """Delete a prospect contact."""
     pc = db.query(ProspectContact).filter(ProspectContact.id == contact_id).first()
     if not pc:
-        raise HTTPException(404)
+        raise HTTPException(404, "Prospect contact not found")
     db.delete(pc)
     db.commit()
     return {"ok": True}
@@ -284,7 +284,7 @@ async def ai_parse_response(
 
     vr = db.query(VendorResponse).filter(VendorResponse.id == response_id).first()
     if not vr:
-        raise HTTPException(404)
+        raise HTTPException(404, "Vendor response not found")
 
     rfq_context = None
     if vr.requisition_id:

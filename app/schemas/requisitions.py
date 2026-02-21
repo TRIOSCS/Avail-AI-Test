@@ -124,3 +124,7 @@ class RequirementOut(BaseModel):
 
 class SightingUnavailableIn(BaseModel):
     unavailable: bool = True
+
+
+class SearchOptions(BaseModel):
+    requirement_ids: list[int] | None = None
