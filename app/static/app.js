@@ -726,6 +726,10 @@ async function loadRequisitions(query = '', append = false) {
             _reqListData = _reqListData.concat(items);
         } else {
             _reqListData = items;
+            // Fresh data from server — clear drill-down caches
+            _ddReqCache = {};
+            _ddSightingsCache = {};
+            _ddSelectedSightings = {};
         }
         _archiveHasMore = _currentMainView === 'archive' && items.length >= limit;
         _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
@@ -2025,15 +2029,14 @@ async function submitLogOffer() {
 function renderReqList() {
     // Remember which drill-downs were open so we can restore them after re-render
     const _openDrillIds = [...document.querySelectorAll('.drow.open')].map(r => parseInt(r.id.replace('d-', ''))).filter(Boolean);
-    _ddReqCache = {};
-    _ddSightingsCache = {};
-    _ddSelectedSightings = {};
     const el = document.getElementById('reqList');
     let data = _reqListData;
     // When server search is active, skip status/text filters (server already filtered)
     if (!_serverSearchActive) {
         if (_reqStatusFilter === 'all') {
-            data = data.filter(r => !['archived', 'won', 'lost', 'closed'].includes(r.status));
+            const hide = ['archived', 'won', 'lost', 'closed'];
+            if (_currentMainView === 'sourcing') hide.push('draft');
+            data = data.filter(r => !hide.includes(r.status));
         } else if (_reqStatusFilter === 'archive') {
             // Backend already returned only archived/won/lost
         } else if (_reqStatusFilter === 'quoted') {
