@@ -1170,6 +1170,8 @@ async def create_offer(
         firmware=payload.firmware,
         hardware_code=payload.hardware_code,
         moq=payload.moq,
+        warranty=payload.warranty,
+        country_of_origin=payload.country_of_origin,
         source=payload.source,
         vendor_response_id=payload.vendor_response_id,
         entered_by_id=user.id,
