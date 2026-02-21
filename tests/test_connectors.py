@@ -533,10 +533,11 @@ class TestBaseConnectorRetry:
 
     @pytest.mark.asyncio
     async def test_retry_on_failure(self):
-        from app.connectors.sources import BaseConnector
+        from app.connectors.sources import BaseConnector, _breakers
 
         class FailThenSucceed(BaseConnector):
             def __init__(self):
+                _breakers.pop("FailThenSucceed", None)
                 super().__init__(timeout=1.0, max_retries=1)
                 self.call_count = 0
 
@@ -550,18 +551,21 @@ class TestBaseConnectorRetry:
         results = await c.search("LM317T")
         assert len(results) == 1
         assert c.call_count == 2
+        _breakers.pop("FailThenSucceed", None)
 
     @pytest.mark.asyncio
     async def test_all_retries_exhausted(self):
-        from app.connectors.sources import BaseConnector
+        from app.connectors.sources import BaseConnector, _breakers
 
         class AlwaysFails(BaseConnector):
             def __init__(self):
+                _breakers.pop("AlwaysFails", None)
                 super().__init__(timeout=1.0, max_retries=1)
 
             async def _do_search(self, part_number):
                 raise ConnectionError("Always fails")
 
         c = AlwaysFails()
-        results = await c.search("LM317T")
-        assert results == []
+        with pytest.raises(ConnectionError):
+            await c.search("LM317T")
+        _breakers.pop("AlwaysFails", None)

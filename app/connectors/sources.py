@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from abc import ABC, abstractmethod
 from urllib.parse import quote_plus
 
@@ -10,17 +11,69 @@ from ..utils import safe_float, safe_int
 log = logging.getLogger(__name__)
 
 
+# ── Async-compatible circuit breaker ─────────────────────────────────
+# Opens after `fail_max` consecutive failures, resets after `reset_timeout` seconds.
+
+class CircuitBreaker:
+    """Lightweight async-friendly circuit breaker."""
+
+    def __init__(self, name: str, fail_max: int = 5, reset_timeout: float = 60):
+        self.name = name
+        self.fail_max = fail_max
+        self.reset_timeout = reset_timeout
+        self._fail_count = 0
+        self._opened_at: float | None = None
+
+    @property
+    def current_state(self) -> str:
+        if self._opened_at is not None:
+            if time.monotonic() - self._opened_at >= self.reset_timeout:
+                return "half_open"
+            return "open"
+        return "closed"
+
+    def record_success(self):
+        self._fail_count = 0
+        self._opened_at = None
+
+    def record_failure(self):
+        self._fail_count += 1
+        if self._fail_count >= self.fail_max:
+            self._opened_at = time.monotonic()
+
+
+_breakers: dict[str, CircuitBreaker] = {}
+
+
+def get_breaker(name: str) -> CircuitBreaker:
+    """Get or create a circuit breaker for the named connector."""
+    if name not in _breakers:
+        _breakers[name] = CircuitBreaker(name=name)
+    return _breakers[name]
+
+
 class BaseConnector(ABC):
     def __init__(self, timeout: float = 20.0, max_retries: int = 2):
         self.timeout = timeout
         self.max_retries = max_retries
+        self._breaker = get_breaker(self.__class__.__name__)
 
     async def search(self, part_number: str) -> list[dict]:
+        # Short-circuit if the breaker is open (service is known-down)
+        if self._breaker.current_state == "open":
+            log.warning(
+                f"{self.__class__.__name__} circuit breaker OPEN — skipping {part_number}"
+            )
+            return []
+
         last_err = None
         for attempt in range(self.max_retries + 1):
             try:
-                return await self._do_search(part_number)
+                result = await self._do_search(part_number)
+                self._breaker.record_success()
+                return result
             except Exception as e:
+                self._breaker.record_failure()
                 last_err = e
                 if attempt < self.max_retries:
                     await asyncio.sleep(2**attempt)
