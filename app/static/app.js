@@ -265,7 +265,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     initNameAutocomplete('stockVendorName', 'stockVendorNameList', null, { types: 'vendor', websiteId: 'stockVendorWebsite' });
     // Route based on URL hash (supports bookmarks + page refresh)
     const initHash = location.hash.replace('#', '');
-    const initView = _hashToView[initHash];
+    var initDrillId = null;
+    var initBaseHash = initHash;
+    if (initHash.startsWith('rfqs/')) {
+        initDrillId = parseInt(initHash.split('/')[1]);
+        initBaseHash = 'rfqs';
+    }
+    const initView = _hashToView[initBaseHash];
     if (initView && initView !== 'view-list') {
         _navFromPopstate = true;
         const initRoutes = {
@@ -284,16 +290,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         _navFromPopstate = false;
     }
     await loadRequisitions();
-    // Restore last viewed requisition on page reload
+    // Restore drill-down from URL hash (e.g. #rfqs/123) or localStorage fallback
     if (!initView || initView === 'view-list') {
-        try {
-            const lastId = parseInt(localStorage.getItem('lastReqId'));
-            const lastName = localStorage.getItem('lastReqName') || '';
-            if (lastId) {
-                const found = _reqListData.find(r => r.id === lastId);
-                if (found) setTimeout(() => toggleDrillDown(lastId), 300);
-            }
-        } catch(e) { logCatchError('restoreLastReq', e); }
+        var restoreId = initDrillId;
+        if (!restoreId) {
+            try {
+                const lastId = parseInt(localStorage.getItem('lastReqId'));
+                if (lastId) restoreId = lastId;
+            } catch(e) {}
+        }
+        if (restoreId) {
+            const found = _reqListData.find(r => r.id === restoreId);
+            if (found) setTimeout(() => toggleDrillDown(restoreId), 300);
+        }
     }
     checkM365Status();
     const dz = document.getElementById('dropZone');
@@ -435,15 +444,17 @@ const _hashToView = Object.fromEntries(Object.entries(_viewToHash).map(([k,v])=>
 let _navFromPopstate = false;
 
 let _lastPushedHash = '';
-function _pushNav(viewId) {
+function _pushNav(viewId, reqId) {
     if (_navFromPopstate) return;
-    const hash = '#' + (_viewToHash[viewId] || 'rfqs');
+    var hashStr = _viewToHash[viewId] || 'rfqs';
+    if (reqId && viewId === 'view-list') hashStr = 'rfqs/' + reqId;
+    var hash = '#' + hashStr;
     if (hash === _lastPushedHash) return;
     _lastPushedHash = hash;
     if (!location.hash || location.hash === '#') {
-        history.replaceState({view: viewId}, '', hash);
+        history.replaceState({view: viewId, reqId: reqId || null}, '', hash);
     } else {
-        history.pushState({view: viewId}, '', hash);
+        history.pushState({view: viewId, reqId: reqId || null}, '', hash);
     }
 }
 
@@ -451,11 +462,25 @@ window.addEventListener('popstate', (e) => {
     const hash = location.hash.replace('#','');
     // Skip approve-token hashes (handled by crm.js)
     if (hash.startsWith('approve-token/')) return;
-    const viewId = _hashToView[hash] || 'view-list';
+    // Parse drill-down hash: rfqs/123
+    var drillId = null;
+    var baseHash = hash;
+    if (hash.startsWith('rfqs/')) {
+        drillId = parseInt(hash.split('/')[1]);
+        baseHash = 'rfqs';
+    }
+    const viewId = _hashToView[baseHash] || 'view-list';
     _navFromPopstate = true;
+    // Close any open modals first
+    document.querySelectorAll('.modal-bg.open').forEach(m => m.classList.remove('open'));
     // Route to the correct view
     const routes = {
-        'view-list': () => { showList(); setMainPill('rfq'); },
+        'view-list': () => {
+            showView('view-list');
+            setMainPill('rfq');
+            _collapseAllDrillDowns();
+            if (drillId) setTimeout(() => toggleDrillDown(drillId), 100);
+        },
         'view-vendors': () => showVendors(),
         'view-materials': () => showMaterials(),
         'view-customers': () => showCustomers(),
@@ -472,11 +497,23 @@ window.addEventListener('popstate', (e) => {
     _navFromPopstate = false;
 });
 
+const _viewScrollPos = {};  // viewId → scrollTop
+let _currentViewId = 'view-list';
+
 function showView(viewId) {
+    // Save scroll position for the view we're leaving
+    var scroller = document.querySelector('.main-scroll');
+    if (scroller && _currentViewId) _viewScrollPos[_currentViewId] = scroller.scrollTop;
+    _currentViewId = viewId;
     try { _pushNav(viewId); } catch(e) { console.warn('pushNav:', e); }
     for (const id of ALL_VIEWS) {
         const el = document.getElementById(id);
         if (el) el.style.display = id === viewId ? '' : 'none';
+    }
+    // Restore scroll position for the view we're entering
+    if (scroller) {
+        var saved = _viewScrollPos[viewId];
+        scroller.scrollTop = saved || 0;
     }
     // Clean up background polling when navigating away from settings/enrichment
     if (typeof _bfPollInterval !== 'undefined' && _bfPollInterval) {
@@ -981,6 +1018,12 @@ async function toggleDrillDown(reqId) {
     drow.classList.toggle('open');
     if (arrow) arrow.classList.toggle('open');
     _updateDrillToggleLabel();
+    // Update URL hash to reflect drill-down state
+    if (opening) {
+        try { _pushNav('view-list', reqId); } catch(e) {}
+    } else {
+        try { _pushNav('view-list'); _lastPushedHash = '#rfqs'; } catch(e) {}
+    }
     if (!opening) return;
 
     // Load default sub-tab
@@ -2251,6 +2294,15 @@ function _updateDrillToggleLabel() {
     el.textContent = anyOpen ? '\u25bc Collapse' : '\u25b6 Expand';
 }
 
+function _collapseAllDrillDowns() {
+    document.querySelectorAll('.drow.open').forEach(row => {
+        row.classList.remove('open');
+        var a = document.getElementById('a-' + row.id.replace('d-',''));
+        if (a) a.classList.remove('open');
+    });
+    _updateDrillToggleLabel();
+}
+
 
 // ── v7 Main Search ──────────────────────────────────────────────────────
 const debouncedMainSearch = debounce(function(val) {
@@ -2277,6 +2329,10 @@ function sidebarNav(page, el) {
     const sb = document.getElementById('sidebar');
     if (sb && sb.classList.contains('mobile-open')) toggleMobileSidebar();
     document.body.classList.remove('sb-open');
+    // Clean up UI state before switching views
+    _collapseAllDrillDowns();
+    var np = document.getElementById('notifPanel');
+    if (np) np.classList.remove('open');
     const routes = {
         reqs: () => { showList(); setMainPill('rfq'); },
         customers: () => showCustomers(),
@@ -5350,7 +5406,19 @@ function toggleNotifications() {
     if (!panel) return;
     const opening = !panel.classList.contains('open');
     panel.classList.toggle('open');
-    if (opening) loadNotifications();
+    if (opening) {
+        loadNotifications();
+        // Close on click outside
+        setTimeout(() => {
+            function _closeNotif(e) {
+                if (!panel.contains(e.target) && !e.target.closest('.notif-btn')) {
+                    panel.classList.remove('open');
+                    document.removeEventListener('click', _closeNotif, true);
+                }
+            }
+            document.addEventListener('click', _closeNotif, true);
+        }, 0);
+    }
 }
 
 function _notifBadgeColor(type) {
