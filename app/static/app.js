@@ -668,6 +668,7 @@ const debouncedReqListSearch = debounce(() => {
 
 
 let _reqAbort = null;  // AbortController for in-flight requisition searches
+let _reqSearchSeq = 0; // Sequence counter to discard stale responses
 
 let _archiveHasMore = false;
 let _archivePageSize = 200;
@@ -677,6 +678,7 @@ async function loadRequisitions(query = '', append = false) {
     if (_reqAbort) { try { _reqAbort.abort(); } catch(e){} }
     _reqAbort = new AbortController();
     const signal = _reqAbort.signal;
+    const thisSeq = ++_reqSearchSeq;
     try {
         const status = _currentMainView === 'archive' ? '&status=archive' : '';
         const offset = append ? _reqListData.length : 0;
@@ -685,7 +687,11 @@ async function loadRequisitions(query = '', append = false) {
             ? `/api/requisitions?q=${encodeURIComponent(query)}${status}`
             : `/api/requisitions?limit=${limit}&offset=${offset}${status}`;
         _serverSearchActive = !!query;
+        // Show loading indicator on search inputs
+        document.querySelectorAll('#mainSearch, #mobileMainSearch').forEach(el => el.classList.add('searching'));
         const resp = await apiFetch(url, { signal });
+        // Discard stale response if a newer request was fired
+        if (thisSeq !== _reqSearchSeq) return;
         const items = resp.requisitions || resp;
         if (append) {
             _reqListData = _reqListData.concat(items);
@@ -698,6 +704,10 @@ async function loadRequisitions(query = '', append = false) {
     } catch (e) {
         if (e.name === 'AbortError') return;
         logCatchError('loadRequisitions', e); showToast('Failed to load requisitions', 'error');
+    } finally {
+        if (thisSeq === _reqSearchSeq) {
+            document.querySelectorAll('#mainSearch, #mobileMainSearch').forEach(el => el.classList.remove('searching'));
+        }
     }
 }
 
@@ -2392,7 +2402,7 @@ const debouncedMainSearch = debounce(function(val) {
     const q = (ds?.value || '').trim();
     if (q.length >= 2) loadRequisitions(q);
     else if (q.length === 0) loadRequisitions();
-}, 350);
+}, 300);
 
 // ── v7 Sidebar Navigation ───────────────────────────────────────────────
 function toggleSidebar() {

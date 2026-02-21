@@ -27,6 +27,8 @@ class Requisition(Base):
         Index("ix_requisitions_created_by", "created_by"),
         Index("ix_requisitions_site", "customer_site_id"),
         Index("ix_requisitions_created_at", "created_at"),
+        Index("ix_requisitions_name", "name"),
+        Index("ix_requisitions_customer_name", "customer_name"),
     )
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
@@ -84,7 +86,10 @@ class Requirement(Base):
         "Offer", back_populates="requirement", cascade="all, delete-orphan"
     )
 
-    __table_args__ = (Index("ix_req_requisition", "requisition_id"),)
+    __table_args__ = (
+        Index("ix_req_requisition", "requisition_id"),
+        Index("ix_req_primary_mpn", "primary_mpn"),
+    )
 
 
 class Sighting(Base):
