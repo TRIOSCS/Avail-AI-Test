@@ -1082,7 +1082,7 @@ body.on-settings .toparea{margin-left:0 !important}
 /* Smaller variant pills for status toggle */
 .fpills-sm{padding:2px;border-radius:6px}
 .fp-sm{padding:3px 10px;font-size:11px;border-radius:4px}
-/* Unified toolbar action button */
+/* Unified toolbar action button — all buttons identical at rest */
 .tb-action{padding:5px 14px;border-radius:8px;border:1px solid var(--border);background:var(--white);color:var(--text2);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;transition:.15s;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;position:relative}
 .tb-action:hover{border-color:var(--teal);color:var(--teal)}
 .tb-action.on{background:var(--teal);color:#fff;border-color:var(--teal)}
@@ -1090,12 +1090,11 @@ body.on-settings .toparea{margin-left:0 !important}
 .tb-action.tb-primary{background:var(--blue);color:#fff;border-color:var(--blue);box-shadow:0 1px 3px rgba(74,111,165,.25)}
 .tb-action.tb-primary:hover{background:var(--blue-dk);border-color:var(--blue-dk);box-shadow:0 3px 8px rgba(74,111,165,.3)}
 .tb-action .tb-count{font-family:'JetBrains Mono',monospace;font-weight:800;font-size:11px}
-.tb-action.tb-stat-green{color:#0b7a50}.tb-action.tb-stat-green:hover{border-color:#0b7a50}
-.tb-action.tb-stat-green.active{border-color:#0b7a50;background:#d4f5e6}
-.tb-action.tb-stat-yellow{color:#946b00}.tb-action.tb-stat-yellow:hover{border-color:#946b00}
-.tb-action.tb-stat-yellow.active{border-color:#946b00;background:#fff3c4}
-.tb-action.tb-stat-all{color:var(--blue)}.tb-action.tb-stat-all:hover{border-color:var(--blue)}
-.tb-action.tb-stat-all.active{border-color:var(--blue);background:#dce6f2}
+/* Stat dot — small colored circle before the count */
+.tb-action .tb-dot{width:6px;height:6px;border-radius:50%;flex-shrink:0}
+.tb-dot.dot-green{background:var(--green)}.tb-dot.dot-yellow{background:var(--amber)}.tb-dot.dot-blue{background:var(--blue)}
+/* Active/selected stat — subtle fill */
+.tb-action.active{border-color:var(--teal);background:var(--teal-light);color:var(--teal)}
 .tb-action .notif-badge{position:absolute;top:-6px;right:-6px;background:var(--red);color:#fff;font-size:9px;font-weight:800;width:18px;height:18px;border-radius:50%;display:none;align-items:center;justify-content:center}
 
 /* Toolbar buttons */

@@ -1892,13 +1892,13 @@ function _updateToolbarStats() {
     }
 
     const qf = _toolbarQuickFilter;
-    const pill = (statClass, key, count, label) =>
-        `<button type="button" class="tb-action ${statClass}${qf === key ? ' active' : ''}" onclick="setToolbarQuickFilter('${key}')"><span class="tb-count">${count}</span> ${label}</button>`;
+    const pill = (dotColor, key, count, label) =>
+        `<button type="button" class="tb-action${qf === key ? ' active' : ''}" onclick="setToolbarQuickFilter('${key}')"><span class="tb-dot dot-${dotColor}"></span><span class="tb-count">${count}</span> ${label}</button>`;
 
     el.innerHTML =
-        pill('tb-stat-green', 'green', nGreen, 'Offers') +
-        pill('tb-stat-yellow', 'yellow', nYellow, 'Bid Due') +
-        `<button type="button" class="tb-action tb-stat-all${qf ? '' : ' active'}" onclick="setToolbarQuickFilter('')"><span class="tb-count">${all.length}</span> All</button>`;
+        pill('green', 'green', nGreen, 'Offers') +
+        pill('yellow', 'yellow', nYellow, 'Bid Due') +
+        `<button type="button" class="tb-action${qf ? '' : ' active'}" onclick="setToolbarQuickFilter('')"><span class="tb-dot dot-blue"></span><span class="tb-count">${all.length}</span> All</button>`;
 }
 
 function _renderReqRow(r) {
