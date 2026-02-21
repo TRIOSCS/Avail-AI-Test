@@ -1436,7 +1436,7 @@ async def browse_onedrive(
 # ── Quotes ───────────────────────────────────────────────────────────────
 
 
-@router.get("/api/requisitions/{req_id}/quote", response_model=QuoteDetailResponse, response_model_exclude_none=True)
+@router.get("/api/requisitions/{req_id}/quote", response_model=QuoteDetailResponse | None, response_model_exclude_none=True)
 async def get_quote(
     req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
