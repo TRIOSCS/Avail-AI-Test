@@ -836,3 +836,6 @@ app.include_router(enrichment_router)
 from .routers.documents import router as documents_router
 
 app.include_router(documents_router)
+from .routers.error_reports import router as error_reports_router
+
+app.include_router(error_reports_router)

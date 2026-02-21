@@ -59,3 +59,6 @@ from .sync import SyncLog  # noqa: F401
 
 # System Config
 from .config import ApiSource, GraphSubscription, SystemConfig  # noqa: F401
+
+# Error Reports / Trouble Tickets
+from .error_report import ErrorReport  # noqa: F401

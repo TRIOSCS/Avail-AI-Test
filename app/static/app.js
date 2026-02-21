@@ -14,6 +14,29 @@
     }
 })();
 
+// ── Error Buffer — captures last 20 console errors for bug reports ──────
+(function() {
+    var buf = [];
+    window.__errorBuffer = buf;
+    var MAX = 20;
+    function push(entry) {
+        buf.push(entry);
+        if (buf.length > MAX) buf.shift();
+    }
+    window.onerror = function(msg, src, line, col) {
+        push({msg: String(msg), src: src, line: line, col: col, ts: Date.now()});
+    };
+    var origWarn = console.warn, origErr = console.error;
+    console.warn = function() {
+        push({msg: '[warn] ' + Array.prototype.join.call(arguments, ' '), ts: Date.now()});
+        origWarn.apply(console, arguments);
+    };
+    console.error = function() {
+        push({msg: '[error] ' + Array.prototype.join.call(arguments, ' '), ts: Date.now()});
+        origErr.apply(console, arguments);
+    };
+})();
+
 // ── Early stubs (available before full init for onclick handlers) ──────
 
 function toggleMobileSidebar() {
@@ -447,6 +470,11 @@ function applyRoleGating() {
             const sw = document.querySelector('.topcontrols .search-wrap');
             if (sw) { sw.style.maxWidth = '560px'; }
         }
+    }
+    // "Archive Others" button: visible to admin/manager
+    const archOthersBtn = document.getElementById('archiveOthersBtn');
+    if (archOthersBtn) {
+        if (window.__isAdmin || window.userRole === 'manager') archOthersBtn.style.display = '';
     }
     // Settings nav visible to admin and dev_assistant
     const navSettings = document.getElementById('navSettings');
@@ -1287,19 +1315,30 @@ async function addDrillRow(rfqId) {
         await apiFetch(`/api/requisitions/${rfqId}/requirements`, {
             method: 'POST', body: { primary_mpn: mpn.trim(), target_qty: 1 }
         });
+        // Clear all caches for this RFQ so fresh data is used everywhere
         delete _ddReqCache[rfqId];
+        if (_ddTabCache[rfqId]) { delete _ddTabCache[rfqId].parts; delete _ddTabCache[rfqId].details; }
         // Update the count in the list data
         const rfq = _reqListData.find(r => r.id === rfqId);
         if (rfq) rfq.requirement_count = (rfq.requirement_count || 0) + 1;
-        // Re-fetch and render
+        // Re-fetch and render immediately
         _ddReqCache[rfqId] = await apiFetch(`/api/requisitions/${rfqId}/requirements`);
+        if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = _ddReqCache[rfqId]; _ddTabCache[rfqId].details = _ddReqCache[rfqId]; }
         _renderDrillDownTable(rfqId);
+        showToast('Part added — click cells to edit qty, price, etc.');
         // Update header count
         const drow = document.getElementById('d-' + rfqId);
         if (drow) {
             const hdr = drow.querySelector('span[style*="font-weight:700"]');
             const total = _ddReqCache[rfqId].length;
             if (hdr) hdr.textContent = `${total} part${total !== 1 ? 's' : ''}`;
+        }
+        // Also update the row's parts count cell in the main list
+        const row = document.querySelector(`.req-row[onclick*="toggleDrillDown(${rfqId})"]`);
+        if (row) {
+            const cells = row.querySelectorAll('td');
+            // The "Parts" column varies by view but renderReqList handles it —
+            // update the in-memory data so next render shows correct count
         }
     } catch(e) { showToast('Failed to add part', 'error'); }
 }
@@ -1313,6 +1352,8 @@ async function deleteDrillRow(rfqId, reqId) {
             const idx = reqs.findIndex(x => x.id === reqId);
             if (idx >= 0) reqs.splice(idx, 1);
         }
+        // Sync tab cache
+        if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = reqs; _ddTabCache[rfqId].details = reqs; }
         // Update the count in the list data
         const rfq = _reqListData.find(r => r.id === rfqId);
         if (rfq && rfq.requirement_count > 0) rfq.requirement_count--;
@@ -2169,6 +2210,15 @@ function toggleMyAccounts(btn) {
     renderReqList();
 }
 
+async function bulkArchiveOthers(btn) {
+    if (!confirm('Archive all RFQs not created by you? This moves them to the Archive tab.')) return;
+    await guardBtn(btn, 'Archiving…', async () => {
+        const resp = await apiFetch('/api/requisitions/bulk-archive', { method: 'PUT' });
+        showToast(`Archived ${resp.archived_count} RFQ${resp.archived_count !== 1 ? 's' : ''}`);
+        loadRequisitions();
+    });
+}
+
 function clearAllFilters() {
     _activeFilters = {};
     _myReqsOnly = false;
@@ -2497,12 +2547,12 @@ async function toggleArchive(id) {
 
 async function archiveFromList(reqId) {
     try {
-        await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
-        showToast('Archived');
-        // Remove from in-memory list and re-render without a full reload
-        // so drill-downs and search state are preserved
+        const resp = await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
+        const wasRestored = resp.status === 'active';
+        showToast(wasRestored ? 'Restored to active' : 'Archived');
+        // Remove from in-memory list and DOM immediately
         _reqListData = _reqListData.filter(r => r.id !== reqId);
-        // Close the drill-down row for the archived item
+        // Close the drill-down row for the item
         const drow = document.getElementById('d-' + reqId);
         if (drow) drow.remove();
         const arow = document.getElementById('a-' + reqId);
@@ -2511,6 +2561,8 @@ async function archiveFromList(reqId) {
         const row = document.querySelector(`.req-row[onclick*="toggleDrillDown(${reqId})"]`);
         if (row) row.remove();
         _updateToolbarStats();
+        // Re-render to update count and empty state
+        renderReqList();
     } catch (e) { showToast('Failed to archive', 'error'); }
 }
 
@@ -5664,3 +5716,83 @@ window.addEventListener('unhandledrejection', function(event) {
     window.addEventListener('online', hideOffline);
     if (!navigator.onLine) showOffline();
 })();
+
+// ── Bug Report — screenshot paste/drop + submission ─────────────────
+var _bugScreenshotB64 = null;
+
+function _gatherBugContext() {
+    var activeView = '';
+    try {
+        var onPill = document.querySelector('#mainPills .fp.on');
+        if (onPill) activeView = onPill.dataset.view || onPill.textContent.trim();
+        var activeSidebar = document.querySelector('.sidebar-nav button.active');
+        if (activeSidebar) activeView = activeSidebar.textContent.trim().replace(/^[\s\S]/, '').trim() + '/' + activeView;
+    } catch(e) {}
+    return {
+        current_url: location.href,
+        current_view: activeView,
+        browser_info: navigator.userAgent,
+        screen_size: screen.width + 'x' + screen.height,
+        console_errors: JSON.stringify(window.__errorBuffer || []),
+        page_state: JSON.stringify({
+            activeView: activeView,
+            timestamp: new Date().toISOString(),
+        }),
+    };
+}
+
+function _handleBugScreenshot(file) {
+    if (!file || !file.type.startsWith('image/')) return;
+    if (file.size > 2 * 1024 * 1024) { showToast('Image too large (max 2 MB)', 'error'); return; }
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        _bugScreenshotB64 = e.target.result;
+        var preview = document.getElementById('bugScreenshotPreview');
+        if (preview) { preview.src = _bugScreenshotB64; preview.style.display = 'block'; }
+        var zone = document.getElementById('bugDropZone');
+        if (zone) zone.classList.add('has-file');
+    };
+    reader.readAsDataURL(file);
+}
+
+// Paste listener — only active when bug modal is open
+document.addEventListener('paste', function(e) {
+    var modal = document.getElementById('bugReportModal');
+    if (!modal || !modal.classList.contains('open')) return;
+    var items = (e.clipboardData || {}).items || [];
+    for (var i = 0; i < items.length; i++) {
+        if (items[i].type.indexOf('image') !== -1) {
+            e.preventDefault();
+            _handleBugScreenshot(items[i].getAsFile());
+            return;
+        }
+    }
+});
+
+function clearBugScreenshot() {
+    _bugScreenshotB64 = null;
+    var preview = document.getElementById('bugScreenshotPreview');
+    if (preview) { preview.src = ''; preview.style.display = 'none'; }
+    var zone = document.getElementById('bugDropZone');
+    if (zone) zone.classList.remove('has-file');
+}
+
+async function submitBugReport(btn) {
+    var title = (document.getElementById('bugTitle') || {}).value || '';
+    if (!title.trim()) { showToast('Title is required', 'error'); return; }
+    await guardBtn(btn, 'Submitting…', async function() {
+        var ctx = _gatherBugContext();
+        var payload = Object.assign({
+            title: title.trim(),
+            description: (document.getElementById('bugDescription') || {}).value || '',
+            screenshot_b64: _bugScreenshotB64 || null,
+        }, ctx);
+        await apiFetch('/api/error-reports', { method: 'POST', body: payload });
+        showToast('Bug report submitted — thank you!', 'success');
+        closeModal('bugReportModal');
+        // Reset form
+        var t = document.getElementById('bugTitle'); if (t) t.value = '';
+        var d = document.getElementById('bugDescription'); if (d) d.value = '';
+        clearBugScreenshot();
+    });
+}

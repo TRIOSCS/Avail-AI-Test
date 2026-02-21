@@ -48,6 +48,7 @@
         </div>
         <div class="tb-group">
             <button type="button" class="tb-action tb-accent-orange" id="myAccountsBtn" onclick="toggleMyAccounts(this)">My Accounts</button>
+            <button type="button" class="tb-action" id="archiveOthersBtn" onclick="bulkArchiveOthers(this)" title="Archive all RFQs not created by you" style="display:none;font-size:10px">Archive Others</button>
             <div class="toolbar-stats" id="toolbarStats"></div>
             <span class="tb-sep"></span>
             <button type="button" class="tb-action tb-primary" onclick="openNewReqModal()">+ New RFQ</button>
@@ -303,7 +304,7 @@
             </div>
         </div>
         <div class="field" style="margin-top:10px">
-            <label>Need By</label>
+            <label>Bid Due</label>
             <div class="u-flex u-items-center u-gap-md">
                 <input type="date" id="nrDeadline" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--white);color:var(--text)">
                 <label style="display:flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;white-space:nowrap"><input type="checkbox" id="nrAsap" onchange="if(this.checked)document.getElementById('nrDeadline').value=''"> ASAP</label>
@@ -807,6 +808,7 @@
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('unmatched',this)">Unmatched Queue</button>
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('teams',this)">Teams Integration</button>
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('import',this)">Import</button>
+            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('tickets',this)">Trouble Tickets</button>
         </div>
 
         <div id="settings-users" class="settings-panel">
@@ -948,6 +950,22 @@
             </div>
         </div>
 
+        <div id="settings-tickets" class="settings-panel" style="display:none">
+            <div class="s-row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+                <select id="ticketStatusFilter" onchange="loadTroubleTickets()" class="s-select" style="padding:6px 10px">
+                    <option value="">All</option>
+                    <option value="open" selected>Open</option>
+                    <option value="in_progress">In Progress</option>
+                    <option value="resolved">Resolved</option>
+                    <option value="closed">Closed</option>
+                </select>
+                <button type="button" class="btn btn-sm" onclick="exportTicketsXlsx()">Export Excel</button>
+                <span id="ticketCount" class="s-hint u-ml-auto"></span>
+            </div>
+            <div id="ticketList"><p class="empty">Loading...</p></div>
+            <div id="ticketDetail" style="display:none"></div>
+        </div>
+
         <div id="settings-create-user" class="settings-panel" style="display:none">
             <div class="card s-card">
                 <h3>Create New User</h3>
@@ -970,6 +988,34 @@
     </div><!-- end view-settings -->
     </div><!-- end main-scroll -->
 </main><!-- end main -->
+
+<!-- Fixed bug report button — visible on all pages -->
+<a class="bug-link" onclick="openModal('bugReportModal')">Report a bug</a>
+
+<!-- Bug Report Modal -->
+<div id="bugReportModal" class="modal-bg" onclick="if(event.target===this)closeModal('bugReportModal')">
+    <div class="modal" style="max-width:520px">
+        <h2>Report a Bug</h2>
+        <div class="field"><label for="bugTitle">Title <span style="color:var(--red)">*</span></label><input id="bugTitle" placeholder="Brief description of the issue" maxlength="255"></div>
+        <div class="field" style="margin-top:10px"><label for="bugDescription">Details</label><textarea id="bugDescription" rows="4" placeholder="Steps to reproduce, what you expected vs what happened…" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;font-family:inherit"></textarea></div>
+        <div class="field" style="margin-top:10px">
+            <label>Screenshot <span style="color:var(--muted);font-weight:400;font-size:11px">(paste or drag image)</span></label>
+            <div class="bug-drop-zone" id="bugDropZone"
+                 ondragover="event.preventDefault();this.classList.add('drag-over')"
+                 ondragleave="this.classList.remove('drag-over')"
+                 ondrop="event.preventDefault();this.classList.remove('drag-over');_handleBugScreenshot((event.dataTransfer.files||[])[0])">
+                <span class="bug-drop-text">Drop image here or Ctrl+V to paste</span>
+                <img id="bugScreenshotPreview" style="display:none;max-width:100%;max-height:200px;border-radius:4px;margin-top:8px">
+                <a onclick="clearBugScreenshot()" class="bug-clear-screenshot" style="display:none">Remove</a>
+            </div>
+        </div>
+        <p style="font-size:11px;color:var(--muted);margin-top:8px">Browser info, URL, and console errors are captured automatically.</p>
+        <div class="mactions">
+            <button type="button" class="btn btn-ghost" onclick="closeModal('bugReportModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="submitBugReport(this)">Submit Report</button>
+        </div>
+    </div>
+</div>
 
 <script type="application/json" id="app-config">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isDevAssistant":{{ "true" if is_dev_assistant else "false" }}}</script>
 <script defer src="/static/app.js?v={{ app_version }}"></script>

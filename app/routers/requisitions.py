@@ -475,6 +475,22 @@ async def toggle_archive(
     return {"ok": True, "status": req.status}
 
 
+@router.put("/api/requisitions/bulk-archive")
+async def bulk_archive(
+    user: User = Depends(require_user), db: Session = Depends(get_db)
+):
+    """Archive all active requisitions NOT created by the current user."""
+    from ..dependencies import user_reqs_query
+
+    q = db.query(Requisition).filter(
+        Requisition.created_by != user.id,
+        Requisition.status.notin_(["archived", "won", "lost", "closed"]),
+    )
+    count = q.update({"status": "archived"}, synchronize_session="fetch")
+    db.commit()
+    return {"ok": True, "archived_count": count}
+
+
 @router.post("/api/requisitions/{req_id}/clone")
 async def clone_requisition(
     req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)

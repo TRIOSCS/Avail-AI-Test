@@ -3537,6 +3537,7 @@ function switchSettingsTab(name, btn) {
     else if (name === 'unmatched') loadUnmatchedQueue();
     else if (name === 'teams') loadTeamsConfig();
     else if (name === 'enrichment') { loadEnrichmentQueue(); loadEnrichmentStats(); }
+    else if (name === 'tickets') loadTroubleTickets();
 }
 
 // Keep backward compat for dropdown links
@@ -4737,4 +4738,119 @@ async function triggerDeepScan(userId) {
     } catch (e) {
         showToast('Deep scan failed: ' + (e.message || e), 'error');
     }
+}
+
+// ── Trouble Tickets (Settings Tab) ──────────────────────────────────
+
+async function loadTroubleTickets() {
+    const list = document.getElementById('ticketList');
+    const detail = document.getElementById('ticketDetail');
+    if (!list) return;
+    list.style.display = '';
+    if (detail) detail.style.display = 'none';
+    const status = (document.getElementById('ticketStatusFilter') || {}).value || '';
+    const url = '/api/error-reports' + (status ? '?status=' + status : '');
+    try {
+        const data = await apiFetch(url);
+        const countEl = document.getElementById('ticketCount');
+        if (countEl) countEl.textContent = data.length + ' ticket' + (data.length !== 1 ? 's' : '');
+        if (!data.length) {
+            list.innerHTML = '<p class="empty">No trouble tickets found</p>';
+            return;
+        }
+        const statusBadge = (s) => {
+            const colors = {open:'red',in_progress:'amber',resolved:'green',closed:'muted'};
+            return `<span class="badge" style="background:var(--${colors[s]||'muted'}-light,var(--bg));color:var(--${colors[s]||'muted'});font-size:10px;padding:2px 8px;border-radius:4px">${s.replace('_',' ')}</span>`;
+        };
+        let html = '<table class="tbl"><thead><tr><th>#</th><th>Title</th><th>Reporter</th><th>Status</th><th>Screenshot</th><th>Created</th><th></th></tr></thead><tbody>';
+        data.forEach(r => {
+            const created = r.created_at ? new Date(r.created_at).toLocaleDateString() : '';
+            html += `<tr>
+                <td>${r.id}</td>
+                <td>${esc(r.title)}</td>
+                <td class="text-xs">${esc(r.reporter_name || r.reporter_email || '')}</td>
+                <td>${statusBadge(r.status)}</td>
+                <td class="text-center">${r.has_screenshot ? '📷' : ''}</td>
+                <td class="text-xs-muted">${created}</td>
+                <td><button type="button" class="btn btn-sm" onclick="viewTicketDetail(${r.id})">View</button></td>
+            </tr>`;
+        });
+        html += '</tbody></table>';
+        list.innerHTML = html;
+    } catch (e) {
+        list.innerHTML = '<p class="empty" style="color:var(--red)">Failed to load tickets</p>';
+    }
+}
+
+async function viewTicketDetail(id) {
+    const list = document.getElementById('ticketList');
+    const detail = document.getElementById('ticketDetail');
+    if (!detail) return;
+    if (list) list.style.display = 'none';
+    detail.style.display = '';
+    detail.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        const r = await apiFetch('/api/error-reports/' + id);
+        let consoleHtml = '';
+        if (r.console_errors) {
+            try {
+                const errs = JSON.parse(r.console_errors);
+                if (errs.length) {
+                    consoleHtml = '<div style="margin-top:12px"><strong style="font-size:12px">Console Errors</strong><pre style="background:var(--bg);padding:8px;border-radius:6px;font-size:11px;max-height:200px;overflow:auto;margin-top:4px">' + esc(errs.map(e => e.msg).join('\n')) + '</pre></div>';
+                }
+            } catch(e) {}
+        }
+        let screenshotHtml = '';
+        if (r.screenshot_b64) {
+            screenshotHtml = '<div style="margin-top:12px"><strong style="font-size:12px">Screenshot</strong><br><img src="' + escAttr(r.screenshot_b64) + '" style="max-width:100%;max-height:400px;border:1px solid var(--border);border-radius:6px;margin-top:4px"></div>';
+        }
+        const statusOpts = ['open','in_progress','resolved','closed'].map(s =>
+            `<option value="${s}" ${s===r.status?'selected':''}>${s.replace('_',' ')}</option>`
+        ).join('');
+        detail.innerHTML = `
+            <button type="button" class="btn btn-ghost btn-sm" onclick="loadTroubleTickets()" style="margin-bottom:12px">&larr; Back to list</button>
+            <div class="card s-card">
+                <h3>#${r.id} — ${esc(r.title)}</h3>
+                <div class="s-row" style="gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text2);margin-bottom:8px">
+                    <span>Reporter: <strong>${esc(r.reporter_name || r.reporter_email || 'Unknown')}</strong></span>
+                    <span>Created: ${r.created_at ? new Date(r.created_at).toLocaleString() : 'N/A'}</span>
+                    ${r.resolved_at ? '<span>Resolved: ' + new Date(r.resolved_at).toLocaleString() + ' by ' + esc(r.resolved_by_email || '') + '</span>' : ''}
+                </div>
+                ${r.description ? '<div style="margin-top:8px;font-size:13px;white-space:pre-wrap">' + esc(r.description) + '</div>' : ''}
+                <div style="margin-top:12px;font-size:11px;color:var(--muted)">
+                    <div>URL: ${esc(r.current_url || 'N/A')}</div>
+                    <div>View: ${esc(r.current_view || 'N/A')} | Browser: ${esc(r.browser_info || 'N/A')} | Screen: ${esc(r.screen_size || 'N/A')}</div>
+                </div>
+                ${consoleHtml}
+                ${screenshotHtml}
+                <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
+                    <div class="s-row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
+                        <div class="field" style="flex:0 0 auto"><label style="font-size:11px">Status</label><select id="ticketStatusSelect" class="s-select" style="padding:6px 10px">${statusOpts}</select></div>
+                        <div class="field" style="flex:1"><label style="font-size:11px">Admin Notes</label><textarea id="ticketAdminNotes" rows="2" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;font-family:inherit">${esc(r.admin_notes || '')}</textarea></div>
+                        <button type="button" class="btn btn-primary btn-sm" onclick="updateTicketStatus(${r.id}, this)">Update</button>
+                    </div>
+                </div>
+            </div>`;
+    } catch (e) {
+        detail.innerHTML = '<p class="empty" style="color:var(--red)">Failed to load ticket</p>';
+    }
+}
+
+async function updateTicketStatus(id, btn) {
+    await guardBtn(btn, 'Saving…', async () => {
+        const status = (document.getElementById('ticketStatusSelect') || {}).value;
+        const notes = (document.getElementById('ticketAdminNotes') || {}).value;
+        await apiFetch('/api/error-reports/' + id + '/status', {
+            method: 'PUT',
+            body: { status: status, admin_notes: notes },
+        });
+        showToast('Ticket updated', 'success');
+        viewTicketDetail(id);
+    });
+}
+
+function exportTicketsXlsx() {
+    const status = (document.getElementById('ticketStatusFilter') || {}).value || '';
+    const url = '/api/error-reports/export/xlsx' + (status ? '?status=' + status : '');
+    window.open(url, '_blank');
 }
