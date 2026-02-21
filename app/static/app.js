@@ -1106,7 +1106,7 @@ function _renderDdDetails(reqId, targetPanel) {
             <div class="det-ctx-name">${esc(meta.name || 'Untitled RFQ')}</div>
         </div>
         <div class="det-ctx-meta">
-            <div class="det-kv"><span class="det-k">Need By</span><span class="det-v ${dlClass}">${dlText}</span></div>
+            <div class="det-kv"><span class="det-k">Bid Due</span><span class="det-v ${dlClass}">${dlText}</span></div>
             <div class="det-kv"><span class="det-k">Created</span><span class="det-v">${meta.created_at ? new Date(meta.created_at).toLocaleDateString() : '—'}</span></div>
             <div class="det-kv"><span class="det-k">By</span><span class="det-v">${esc(meta.created_by_name || '—')}</span></div>
             <div class="det-kv"><span class="det-k">Parts</span><span class="det-v">${reqs.length}</span></div>
@@ -1775,7 +1775,7 @@ function renderReqList() {
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">RFQ ${sa('name')}</th>
             <th onclick="sortReqList('score')"${thClass('score')} title="Sourcing effort score">Sourcing ${sa('score')}</th>
-            <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By ${sa('deadline')}</th>
+            <th onclick="sortReqList('deadline')"${thClass('deadline')}>Bid Due ${sa('deadline')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('sourced')"${thClass('sourced')}>Sourced ${sa('sourced')}</th>
@@ -1807,7 +1807,7 @@ function renderReqList() {
             <th>Offers</th>
             <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
-            <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By ${sa('deadline')}</th>
+            <th onclick="sortReqList('deadline')"${thClass('deadline')}>Bid Due ${sa('deadline')}</th>
             <th style="width:60px"></th>
         </tr></thead>`;
     }
@@ -1902,7 +1902,7 @@ function _renderReqRow(r) {
         age = days === 0 ? 'Today' : days === 1 ? '1d' : days + 'd';
     }
 
-    // Need By — v7 deadline alert system
+    // Bid Due — v7 deadline alert system
     let dl = '', dlClass = '';
     if (r.deadline === 'ASAP') {
         dl = '<span class="dl dl-asap">ASAP</span>';
@@ -1953,7 +1953,7 @@ function _renderReqRow(r) {
     let dataCells, actions, colspan;
 
     if (v === 'sourcing') {
-        // Sourcing: Score, Need By, Offers, Parts, Sourced, RFQs Sent, Resp %, Searched, Age, Status
+        // Sourcing: Score, Bid Due, Offers, Parts, Sourced, RFQs Sent, Resp %, Searched, Age, Status
         const sent = r.rfq_sent_count || 0;
         const respPct = sent > 0 ? Math.round((offers / sent) * 100) + '%' : '\u2014';
 
@@ -2000,7 +2000,7 @@ function _renderReqRow(r) {
         actions = `<td style="white-space:nowrap"><button class="btn btn-sm" onclick="event.stopPropagation();archiveFromList(${r.id})" title="Restore from archive">&#x21a9; Restore</button> <button class="btn btn-sm" onclick="event.stopPropagation();cloneFromList(${r.id})" title="Clone as new draft">&#x1f4cb; Clone</button> <button class="btn btn-sm" onclick="event.stopPropagation();requoteFromList(${r.id})" title="Re-quote this RFQ">&#x1f4dd; Re-quote</button></td>`;
         colspan = 9;
     } else {
-        // RFQ: Parts, Quote, Sourcing, Offers, Sales, Age, Need By
+        // RFQ: Parts, Quote, Sourcing, Offers, Sales, Age, Bid Due
         // Quote status cell
         let qCell = '<span style="color:var(--muted)">\u2014</span>';
         if (r.quote_status === 'won') qCell = `<span style="color:var(--green);font-weight:600">Won${r.quote_won_value ? ' ' + fmtDollars(r.quote_won_value) : ''}</span>`;
@@ -2142,7 +2142,18 @@ function toggleFilter(panelId) {
     if (!el) return;
     const opening = !el.classList.contains('open');
     el.classList.toggle('open');
-    if (opening) buildFilterGroups();
+    if (opening) {
+        buildFilterGroups();
+        setTimeout(() => {
+            function _closeFilter(e) {
+                if (!el.contains(e.target) && !e.target.closest('.filter-trigger')) {
+                    el.classList.remove('open');
+                    document.removeEventListener('click', _closeFilter, true);
+                }
+            }
+            document.addEventListener('click', _closeFilter, true);
+        }, 0);
+    }
 }
 
 function toggleFilterSection(titleEl) {
@@ -2155,66 +2166,51 @@ function buildFilterGroups() {
     const container = document.getElementById('filterGroups');
     if (!container) return;
 
-    // Left column: Quick Filters (always visible)
-    let left = _filterGroupHtml('Quick Filters', [
+    const items = [
         {value:'my_accounts', label:'My Accounts'},
         {value:'has_review', label:'Needs Review'},
         {value:'high_value', label:'High Value'},
-        {value:'has_quote', label:'Has Quote'}
-    ]);
+        {value:'has_quote', label:'Has Quote'},
+    ];
 
-    // Right column: Sales Person (collapsible) with Customer nested inside
-    let right = '';
+    // Add sales people as filter items
     const salesPeople = [...new Set(_reqListData.map(r => r.created_by_name).filter(Boolean))].sort();
-    const customers = [...new Set(_reqListData.map(r => r.customer_display).filter(Boolean))].sort();
-    if (salesPeople.length) {
-        let spItems = salesPeople.map(n => `<label><input type="checkbox" value="sales_${n}" onchange="countActiveFilters()"> ${esc(n)}</label>`).join('');
-        // Nest Customer as sub-section inside Sales Person
-        if (customers.length) {
-            spItems += `<div class="filter-group" style="margin-top:6px;padding-left:4px">
-                <div class="filter-group-title collapsible" style="font-size:11px" onclick="toggleFilterSection(this)">Customer</div>
-                <div class="filter-group-body">${customers.map(c => `<label><input type="checkbox" value="cust_${c}" onchange="countActiveFilters()"> ${esc(c)}</label>`).join('')}</div>
-            </div>`;
-        }
-        right += `<div class="filter-group"><div class="filter-group-title collapsible" onclick="toggleFilterSection(this)">Sales Person</div><div class="filter-group-body">${spItems}</div></div>`;
+    if (salesPeople.length > 1) {
+        items.push({sep: true});
+        for (const n of salesPeople) items.push({value: 'sales_' + n, label: n});
     }
 
-    container.innerHTML = `<div class="filter-cols"><div class="filter-col">${left}</div><div class="filter-col">${right}</div></div>`;
+    let html = items.map(i => {
+        if (i.sep) return '<div class="fd-sep"></div>';
+        const on = _activeFilters[i.value] ? ' on' : '';
+        return `<button type="button" class="fd-item${on}" data-val="${i.value}" onclick="toggleFilterItem(this)"><span class="fd-check">&#x2713;</span>${esc(i.label)}</button>`;
+    }).join('');
 
-    // Restore checked state
-    container.querySelectorAll('input[type=checkbox]').forEach(cb => {
-        cb.checked = !!(_activeFilters[cb.value]);
-    });
-    // Auto-expand sections that have active filters
-    container.querySelectorAll('.filter-group-title.collapsible').forEach(t => {
-        const body = t.nextElementSibling;
-        if (body && body.querySelector('input:checked')) {
-            t.classList.add('open');
-            body.classList.add('open');
-        }
-    });
+    const hasActive = Object.keys(_activeFilters).length > 0;
+    if (hasActive) html += '<div class="fd-sep"></div><button type="button" class="fd-clear" onclick="clearAllFilters()">Clear all</button>';
+
+    container.innerHTML = html;
 }
 
-function _filterGroupHtml(title, items) {
-    return `<div class="filter-group"><div class="filter-group-title">${title}</div>${
-        items.map(i => `<label><input type="checkbox" value="${i.value}" onchange="countActiveFilters()"> ${esc(i.label)}</label>`).join('')
-    }</div>`;
+function toggleFilterItem(btn) {
+    const val = btn.dataset.val;
+    if (_activeFilters[val]) { delete _activeFilters[val]; btn.classList.remove('on'); }
+    else { _activeFilters[val] = true; btn.classList.add('on'); }
+    if (val === 'my_accounts') _myReqsOnly = !!_activeFilters[val];
+    countActiveFilters();
+    renderReqList();
 }
 
 
 function countActiveFilters() {
-    const panel = document.getElementById('mainFilterPanel');
-    if (!panel) return;
-    const n = panel.querySelectorAll('input[type=checkbox]:checked').length;
-    const btn = document.querySelector('.filter-btn');
+    const n = Object.keys(_activeFilters).length;
+    const btn = document.querySelector('.filter-trigger');
     const badge = document.getElementById('filterBadge');
-    if (badge) { badge.textContent = n; badge.style.display = n > 0 ? 'flex' : 'none'; }
+    if (badge) { badge.textContent = n; badge.style.display = n > 0 ? 'inline-flex' : 'none'; }
     if (btn) btn.classList.toggle('has-active', n > 0);
 }
 
 function clearAllFilters() {
-    const panel = document.getElementById('mainFilterPanel');
-    if (panel) panel.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = false; });
     _activeFilters = {};
     _myReqsOnly = false;
     _toolbarQuickFilter = '';

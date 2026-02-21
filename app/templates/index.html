@@ -46,15 +46,11 @@
             <button type="button" class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
         </div>
         <div class="filter-wrap">
-            <button type="button" class="filter-btn" onclick="toggleFilter('mainFilterPanel')">
-                Filters <span class="filter-badge" id="filterBadge">0</span>
+            <button type="button" class="fp filter-trigger" onclick="toggleFilter('mainFilterPanel')">
+                &#x25BE; Filters <span class="filter-badge" id="filterBadge" style="margin-left:2px">0</span>
             </button>
-            <div id="mainFilterPanel" class="filter-panel">
+            <div id="mainFilterPanel" class="filter-dropdown">
                 <div id="filterGroups"></div>
-                <div class="filter-actions">
-                    <button type="button" class="fa-clear" onclick="clearAllFilters()">Clear</button>
-                    <button type="button" class="fa-apply" onclick="applyFilters()">Apply</button>
-                </div>
             </div>
         </div>
         <div class="toolbar-stats u-ml-auto" id="toolbarStats"></div>
