@@ -97,8 +97,12 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     # 1. Fetch + dedupe (parallel across all connectors)
     fresh, source_stats = await _fetch_fresh(pns, db)
 
-    # 2. Score + save
-    sightings = _save_sightings(fresh, req, db)
+    # 2. Score + save — only replace sightings from connectors that succeeded
+    succeeded_sources = {
+        stat["source"] for stat in source_stats
+        if stat["status"] == "ok" and not stat.get("error")
+    }
+    sightings = _save_sightings(fresh, req, db, succeeded_sources)
     log.info(f"Req {req.id} ({pns[0]}): {len(sightings)} fresh sightings")
 
     # 3. Material card upsert (errors won't break search)
@@ -331,13 +335,29 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     return out, list(source_stats_map.values())
 
 
-def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Sighting]:
+def _save_sightings(
+    fresh: list[dict], req: Requirement, db: Session,
+    succeeded_sources: set[str] | None = None,
+) -> list[Sighting]:
     from .services.admin_service import get_scoring_weights
 
     weights = get_scoring_weights(db)
 
-    # Delete previous sightings for this requirement to prevent duplicates on re-search
-    db.query(Sighting).filter_by(requirement_id=req.id).delete()
+    # Connector-aware delete: only remove sightings from sources that returned
+    # results.  Sightings from failed/timed-out connectors are preserved.
+    # Map nexar → {nexar, octopart} since Octopart results come via NexarConnector
+    _SOURCE_ALIASES = {"nexar": {"nexar", "octopart"}}
+    expanded: set[str] = set()
+    if succeeded_sources:
+        for s in succeeded_sources:
+            expanded.update(_SOURCE_ALIASES.get(s, {s}))
+        db.query(Sighting).filter(
+            Sighting.requirement_id == req.id,
+            Sighting.source_type.in_(expanded),
+        ).delete(synchronize_session="fetch")
+    else:
+        # Fallback: no source info → wipe all (legacy behaviour)
+        db.query(Sighting).filter_by(requirement_id=req.id).delete()
     db.flush()
 
     sightings = []
@@ -397,6 +417,21 @@ def _save_sightings(fresh: list[dict], req: Requirement, db: Session) -> list[Si
         db.add(s)
         sightings.append(s)
     db.commit()
+
+    # Dedup: if a vendor+MPN exists in both old (preserved) and fresh, keep fresh
+    if succeeded_sources and expanded:
+        fresh_keys = {
+            (s.vendor_name.lower(), (s.mpn_matched or "").lower())
+            for s in sightings
+        }
+        old = db.query(Sighting).filter(
+            Sighting.requirement_id == req.id,
+            ~Sighting.source_type.in_(expanded),
+        ).all()
+        for o in old:
+            if (o.vendor_name.lower(), (o.mpn_matched or "").lower()) in fresh_keys:
+                db.delete(o)
+        db.commit()
 
     # Propagate vendor emails from search results to VendorContact records
     _propagate_vendor_emails(sightings, db)

@@ -730,6 +730,7 @@ async function loadRequisitions(query = '', append = false) {
             _ddReqCache = {};
             _ddSightingsCache = {};
             _ddSelectedSightings = {};
+            _ddTierState = {};
         }
         _archiveHasMore = _currentMainView === 'archive' && items.length >= limit;
         _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
@@ -1674,6 +1675,79 @@ function _buildEffortTip(score, color, signals) {
 // Cache for per-requirement sourcing scores
 const _ddScoreCache = {};
 
+// ── Tier helpers ─────────────────────────────────────────────────────────
+function _sightingTier(score) {
+    const s = parseFloat(score) || 0;
+    return s >= 66 ? 'top' : s >= 33 ? 'good' : 'other';
+}
+
+const _TIER_CONFIG = {
+    top:   { label: 'Top Sources',   color: 'var(--green)', bg: 'var(--green-light)', defaultOpen: true },
+    good:  { label: 'Good Sources',  color: 'var(--amber)', bg: 'var(--amber-light)', defaultOpen: true },
+    other: { label: 'Other Sources', color: 'var(--muted)', bg: 'var(--card2)',        defaultOpen: false },
+};
+
+let _ddTierState = {};  // `${reqId}-${rId}-${tier}` → bool
+
+function ddToggleTier(reqId, rId, tier) {
+    const key = `${reqId}-${rId}-${tier}`;
+    const cur = _ddTierState[key];
+    _ddTierState[key] = cur !== undefined ? !cur : !_TIER_CONFIG[tier].defaultOpen;
+    _renderSourcingDrillDown(reqId);
+}
+
+function _ddVendorBadges(s) {
+    const vc = s.vendor_card || {};
+    let html = '';
+    // Score ring
+    if (vc.engagement_score != null) {
+        const es = Math.round(vc.engagement_score);
+        const esColor = es >= 70 ? 'var(--green)' : es >= 40 ? 'var(--amber)' : 'var(--red)';
+        const esBg = es >= 70 ? 'var(--green-light)' : es >= 40 ? 'var(--amber-light)' : 'var(--red-light)';
+        html += `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;border:2px solid ${esColor};background:${esBg};font-size:7px;font-weight:700;color:${esColor};margin-left:3px;cursor:default;vertical-align:middle" title="Engagement: ${es}/100">${es}</span>`;
+    }
+    // Star rating
+    if (vc.avg_rating != null) {
+        html += `<span style="font-size:10px;margin-left:2px;vertical-align:middle"><span class="stars">★</span>${vc.avg_rating}</span>`;
+    }
+    // Auth badge
+    if (s.is_authorized) {
+        html += ' <span class="badge b-auth" style="font-size:8px;padding:0 4px;vertical-align:middle">Auth</span>';
+    }
+    return html;
+}
+
+function _ddRenderTierRows(sightings, reqId, sel) {
+    let html = '';
+    for (const s of sightings) {
+        const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
+        const checked = sel.has(s.id) ? 'checked' : '';
+        const dimStyle = !hasEmail ? 'opacity:.5' : '';
+        const disabledAttr = !hasEmail ? 'disabled title="No vendor email"' : '';
+        const price = s.unit_price != null ? '$' + parseFloat(s.unit_price).toFixed(2) : '\u2014';
+        const qty = s.qty_available != null ? Number(s.qty_available).toLocaleString() : '\u2014';
+        const scoreVal = s.score != null ? parseFloat(s.score).toFixed(1) : '\u2014';
+        const safeVName = (s.vendor_name||'').replace(/'/g, "\\'");
+        const needsEmail = !hasEmail ? ` <a onclick="event.stopPropagation();ddPromptVendorEmail(${reqId},${s.id},'${safeVName}')" style="color:var(--red);font-size:10px;cursor:pointer;font-weight:600">needs email</a>` : '';
+        const sourceUrl = s.click_url || s.octopart_url || s.vendor_url || '';
+        const srcIcon = sourceUrl ? `<a href="${escAttr(sourceUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="View listing" style="color:var(--blue);font-size:12px;margin-right:4px;text-decoration:none">&#x1f517;</a>` : '';
+        const sAge = s.created_at ? fmtRelative(s.created_at) : '\u2014';
+        const badges = _ddVendorBadges(s);
+        html += `<tr style="${dimStyle}">
+            <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
+            <td>${srcIcon}${esc(s.vendor_name || '\u2014')}${badges}${needsEmail}</td>
+            <td class="mono">${esc(s.mpn_matched || '\u2014')}</td>
+            <td class="mono">${qty}</td>
+            <td class="mono" style="color:${s.unit_price ? 'var(--teal)' : 'var(--muted)'}">${price}</td>
+            <td style="font-size:10px">${esc(s.source_type || '\u2014')}</td>
+            <td class="mono">${scoreVal}</td>
+            <td style="font-size:10px">${esc(s.condition || '\u2014')}</td>
+            <td style="font-size:10px;color:var(--muted)">${sAge}</td>
+        </tr>`;
+    }
+    return html;
+}
+
 function _renderSourcingDrillDown(reqId, targetPanel) {
     const dd = targetPanel || (document.getElementById('d-' + reqId) || {}).querySelector?.('.dd-panel');
     if (!dd) return;
@@ -1743,38 +1817,41 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             html += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">No vendor listings yet — try searching</div></div>';
             continue;
         }
-        const visible = showAll ? sightings : sightings.slice(0, DD_LIMIT);
-        html += `<table class="dtbl"><thead><tr>
-            <th style="width:24px"></th><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th title="Sighting confidence score">Confidence</th><th>Condition</th><th>Date</th>
-        </tr></thead><tbody>`;
-        for (const s of visible) {
-            const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
-            const checked = sel.has(s.id) ? 'checked' : '';
-            const dimStyle = !hasEmail ? 'opacity:.5' : '';
-            const disabledAttr = !hasEmail ? 'disabled title="No vendor email"' : '';
-            const price = s.unit_price != null ? '$' + parseFloat(s.unit_price).toFixed(2) : '\u2014';
-            const qty = s.qty_available != null ? Number(s.qty_available).toLocaleString() : '\u2014';
-            const scoreVal = s.score != null ? parseFloat(s.score).toFixed(1) : '\u2014';
-            const safeVName = (s.vendor_name||'').replace(/'/g, "\\'");
-            const needsEmail = !hasEmail ? ` <a onclick="event.stopPropagation();ddPromptVendorEmail(${reqId},${s.id},'${safeVName}')" style="color:var(--red);font-size:10px;cursor:pointer;font-weight:600">needs email</a>` : '';
-            const sourceUrl = s.click_url || s.octopart_url || s.vendor_url || '';
-            const srcIcon = sourceUrl ? `<a href="${escAttr(sourceUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="View listing" style="color:var(--blue);font-size:12px;margin-right:4px;text-decoration:none">&#x1f517;</a>` : '';
-            const sAge = s.created_at ? fmtRelative(s.created_at) : '\u2014';
-            html += `<tr style="${dimStyle}">
-                <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
-                <td>${srcIcon}${esc(s.vendor_name || '\u2014')}${needsEmail}</td>
-                <td class="mono">${esc(s.mpn_matched || '\u2014')}</td>
-                <td class="mono">${qty}</td>
-                <td class="mono" style="color:${s.unit_price ? 'var(--teal)' : 'var(--muted)'}">${price}</td>
-                <td style="font-size:10px">${esc(s.source_type || '\u2014')}</td>
-                <td class="mono">${scoreVal}</td>
-                <td style="font-size:10px">${esc(s.condition || '\u2014')}</td>
-                <td style="font-size:10px;color:var(--muted)">${sAge}</td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
-        if (!showAll && sightings.length > DD_LIMIT) {
-            html += `<a onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin-top:4px">Show all ${sightings.length} sources\u2026</a>`;
+
+        // Split sightings into tiers by score
+        const tiers = { top: [], good: [], other: [] };
+        for (const s of sightings) tiers[_sightingTier(s.score)].push(s);
+
+        const TIER_ORDER = ['top', 'good', 'other'];
+        for (const tier of TIER_ORDER) {
+            const items = tiers[tier];
+            if (!items.length) continue;
+            const cfg = _TIER_CONFIG[tier];
+            const stateKey = `${reqId}-${rId}-${tier}`;
+            const isOpen = _ddTierState[stateKey] !== undefined ? _ddTierState[stateKey] : cfg.defaultOpen;
+            const arrow = isOpen ? '\u25bc' : '\u25b6';
+            const visible = showAll ? items : items.slice(0, DD_LIMIT);
+
+            html += `<div style="margin-bottom:6px;border-left:3px solid ${cfg.color};border-radius:2px">
+                <div onclick="event.stopPropagation();ddToggleTier(${reqId},${rId},'${tier}')" style="cursor:pointer;padding:3px 8px;background:${cfg.bg};display:flex;align-items:center;gap:6px;user-select:none">
+                    <span style="font-size:10px;color:${cfg.color}">${arrow}</span>
+                    <span style="font-size:11px;font-weight:600;color:${cfg.color}">${cfg.label}</span>
+                    <span style="font-size:10px;color:var(--muted)">(${items.length})</span>
+                </div>`;
+
+            if (!isOpen) {
+                html += `<div onclick="event.stopPropagation();ddToggleTier(${reqId},${rId},'${tier}')" style="padding:4px 12px;font-size:11px;color:var(--muted);cursor:pointer">${items.length} source${items.length !== 1 ? 's' : ''} — click to expand</div>`;
+            } else {
+                html += `<table class="dtbl" style="margin:0"><thead><tr>
+                    <th style="width:24px"></th><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th title="Sighting confidence score">Score</th><th>Condition</th><th>Date</th>
+                </tr></thead><tbody>`;
+                html += _ddRenderTierRows(visible, reqId, sel);
+                html += '</tbody></table>';
+                if (!showAll && items.length > DD_LIMIT) {
+                    html += `<a onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin:2px 0 0 12px">Show all ${items.length} sources\u2026</a>`;
+                }
+            }
+            html += '</div>';
         }
         html += '</div>';
     }
@@ -1900,6 +1977,8 @@ async function ddResearchPart(reqId, requirementId) {
         if (_ddTabCache[reqId]) delete _ddTabCache[reqId].sightings;
         delete _ddSightingsCache[reqId];
         delete _ddScoreCache[reqId];
+        // Clear tier expand/collapse state for this requisition
+        for (const k of Object.keys(_ddTierState)) { if (k.startsWith(reqId + '-')) delete _ddTierState[k]; }
         const reqInfo = _reqListData.find(r => r.id === reqId);
         if (reqInfo) reqInfo.last_searched_at = new Date().toISOString();
         // Re-load sightings and re-render
@@ -1929,6 +2008,8 @@ async function ddResearchAll(reqId) {
         if (_ddTabCache[reqId]) delete _ddTabCache[reqId].sightings;
         delete _ddSightingsCache[reqId];
         delete _ddScoreCache[reqId];
+        // Clear tier expand/collapse state for this requisition
+        for (const k of Object.keys(_ddTierState)) { if (k.startsWith(reqId + '-')) delete _ddTierState[k]; }
         const reqInfo = _reqListData.find(r => r.id === reqId);
         if (reqInfo) reqInfo.last_searched_at = new Date().toISOString();
         const data = await apiFetch(`/api/requisitions/${reqId}/sightings`);
