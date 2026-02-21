@@ -18,6 +18,12 @@ log = logging.getLogger("avail.graph")
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
+
+class GraphSyncStateExpired(Exception):
+    """Raised when Graph API returns 410 — the delta token is stale and must be discarded."""
+    pass
+
+
 # H1: Immutable IDs — prevents ID changes when messages are moved between folders
 IMMUTABLE_ID_HEADER = {"Prefer": 'IdType="ImmutableId"'}
 
@@ -160,6 +166,11 @@ class GraphClient:
                     )
                     await asyncio.sleep(wait)
                     continue
+
+                # 410 Gone — delta token expired, caller must discard and re-sync
+                if resp.status_code == 410:
+                    log.warning(f"Graph 410 SyncStateNotFound — delta token expired")
+                    raise GraphSyncStateExpired(resp.text[:300])
 
                 # Client error (400, 401, 403, 404) — don't retry
                 log.error(f"Graph {resp.status_code}: {resp.text[:300]}")

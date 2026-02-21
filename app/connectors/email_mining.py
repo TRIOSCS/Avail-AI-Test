@@ -20,6 +20,8 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
+from app.utils.graph_client import GraphSyncStateExpired
+
 log = logging.getLogger(__name__)
 
 # Common stock list file extensions
@@ -163,6 +165,25 @@ class EmailMiner:
             )
         self.db.flush()
 
+    def _clear_delta_token(self, folder: str):
+        """Discard a stale delta token so the next scan does a full re-sync."""
+        if not self.db or not self.user_id:
+            return
+        from app.models import SyncState
+
+        sync = (
+            self.db.query(SyncState)
+            .filter(
+                SyncState.user_id == self.user_id,
+                SyncState.folder == folder,
+            )
+            .first()
+        )
+        if sync:
+            sync.delta_token = None
+            self.db.flush()
+            log.info(f"Cleared stale delta token for {folder} (user {self.user_id})")
+
     # ══════════════════════════════════════════════════════════════════
     #  Inbound: Vendor Contact Mining
     # ══════════════════════════════════════════════════════════════════
@@ -203,6 +224,11 @@ class EmailMiner:
                 if new_token:
                     self._save_delta_token("inbox_mining", new_token)
                 log.info(f"Delta scan (mining): {len(messages)} changes")
+            except GraphSyncStateExpired:
+                log.warning("Delta token expired for inbox mining — clearing and falling back")
+                self._clear_delta_token("inbox_mining")
+                messages = []
+                used_delta = False
             except Exception as e:
                 log.warning(
                     f"Delta query failed for mining, falling back to search: {e}"
@@ -426,6 +452,11 @@ class EmailMiner:
                 if new_token:
                     self._save_delta_token("sent_items", new_token)
                 log.info(f"Delta scan (sent): {len(messages)} changes")
+            except GraphSyncStateExpired:
+                log.warning("Delta token expired for sent items — clearing and falling back")
+                self._clear_delta_token("sent_items")
+                messages = []
+                used_delta = False
             except Exception as e:
                 log.warning(f"Delta query failed for SentItems, falling back: {e}")
                 messages = []

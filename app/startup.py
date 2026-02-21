@@ -33,6 +33,7 @@ def run_startup_migrations() -> None:
     log.info("ORM schema sync complete (create_all checkfirst=True)")
 
     with engine.connect() as conn:
+        _add_missing_columns(conn)
         _enable_pg_stat_statements(conn)
         _create_fts_triggers(conn)
         _backfill_fts(conn)
@@ -43,6 +44,20 @@ def run_startup_migrations() -> None:
 
     _backfill_normalized_mpn()
     log.info("Startup migrations complete")
+
+
+def _add_missing_columns(conn) -> None:
+    """Add columns that exist in ORM models but not yet in the DB.
+
+    create_all(checkfirst=True) only creates missing tables, not missing
+    columns on existing tables.  This bridges the gap without a full Alembic
+    migration.
+    """
+    stmts = [
+        "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMP",
+    ]
+    for stmt in stmts:
+        _exec(conn, stmt)
 
 
 def _exec(conn, stmt: str, params: dict | None = None) -> None:
