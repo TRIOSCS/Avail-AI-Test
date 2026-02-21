@@ -43,6 +43,7 @@ from ..models import (
     User,
     VendorCard,
     VendorContact,
+    VendorReview,
 )
 from ..schemas.crm import (
     AddContactsToVendor,
@@ -999,9 +1000,12 @@ async def list_offers(
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
+    query = db.query(Offer).filter(Offer.requisition_id == req_id)
+    # Hide draft/pending_review offers from buyers — only sales/admin/manager see them
+    if user.role == "buyer":
+        query = query.filter(Offer.status != "pending_review")
     offers = (
-        db.query(Offer)
-        .filter(Offer.requisition_id == req_id)
+        query
         .options(
             joinedload(Offer.entered_by),
             selectinload(Offer.attachments),
@@ -1022,6 +1026,24 @@ async def list_offers(
     if offers and user.id == req.created_by:
         req.offers_viewed_at = datetime.now(timezone.utc)
         db.commit()
+    # Batch-fetch vendor ratings for all vendor_card_ids
+    card_ids = {o.vendor_card_id for o in offers if o.vendor_card_id}
+    rating_map: dict[int, dict] = {}
+    if card_ids:
+        rating_rows = (
+            db.query(
+                VendorReview.vendor_card_id,
+                sqlfunc.avg(VendorReview.rating),
+                sqlfunc.count(VendorReview.id),
+            )
+            .filter(VendorReview.vendor_card_id.in_(card_ids))
+            .group_by(VendorReview.vendor_card_id)
+            .all()
+        )
+        rating_map = {
+            r[0]: {"avg": round(float(r[1]), 1), "count": r[2]} for r in rating_rows
+        }
+
     groups: dict[int, list] = {}
     for o in offers:
         key = o.requirement_id or 0
@@ -1054,12 +1076,16 @@ async def list_offers(
                 "firmware": o.firmware,
                 "hardware_code": o.hardware_code,
                 "moq": o.moq,
+                "warranty": o.warranty,
+                "country_of_origin": o.country_of_origin,
                 "source": o.source,
                 "status": o.status,
                 "notes": o.notes,
                 "entered_by": o.entered_by.name if o.entered_by else None,
                 "created_at": o.created_at.isoformat() if o.created_at else None,
                 "attachments": atts,
+                "avg_rating": rating_map.get(o.vendor_card_id, {}).get("avg"),
+                "review_count": rating_map.get(o.vendor_card_id, {}).get("count", 0),
             }
         )
     # Preload quoted prices ONCE instead of per-requirement DB call

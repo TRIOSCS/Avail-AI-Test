@@ -84,6 +84,7 @@ let _vendorTierFilter = 'all';  // all|proven|developing|caution|new
 let expandedGroups = new Set();  // reqIds that are expanded (default: all collapsed)
 let _ddReqCache = {};  // drill-down requirements cache: rfqId → [requirements]
 let _addRowActive = {};  // rfqId → true when inline add row is visible
+let _ddActFilter = {};   // rfqId → 'all'|'email'|'phone'|'notes' for activity filter
 let _ddSightingsCache = {};      // reqId -> sightings API response
 let _ddSelectedSightings = {};   // reqId -> Set of sighting IDs
 const CONDITION_OPTIONS = ['New', 'ETN', 'Factory Refurbished', 'Pulls'];
@@ -859,24 +860,37 @@ function _renderDdActivity(reqId, data, panel) {
     const vendors = data.vendors || [];
     if (!vendors.length) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No activity yet</span>'; return; }
     // Summary stats
-    let totalContacts = 0, totalReplies = 0, totalCalls = 0, totalEmails = 0;
+    let totalContacts = 0, totalReplies = 0, totalCalls = 0, totalEmails = 0, totalNotes = 0;
     for (const v of vendors) {
         totalContacts += (v.contacts || []).length;
         totalReplies += (v.responses || []).length;
         for (const a of (v.activities || [])) {
             if (a.channel === 'phone') totalCalls++;
-            if (a.channel === 'email') totalEmails++;
+            else if (a.activity_type === 'note') totalNotes++;
+            else if (a.channel === 'email') totalEmails++;
         }
     }
-    let html = `<div style="display:flex;gap:16px;margin-bottom:8px;font-size:11px">
+    const af = _ddActFilter[reqId] || 'all';
+    let html = `<div style="display:flex;gap:16px;margin-bottom:8px;font-size:11px;align-items:center;flex-wrap:wrap">
         <span><b>${totalContacts}</b> RFQs sent</span>
         <span><b>${totalReplies}</b> replies</span>
         <span><b>${totalCalls}</b> calls</span>
-        <span><b>${totalEmails}</b> emails</span>
+        <span><b>${totalNotes}</b> notes</span>
+        <div class="fpills fpills-sm" style="margin-left:auto">
+            <button class="fp fp-sm${af==='all'?' on':''}" onclick="event.stopPropagation();_ddActFilter[${reqId}]='all';_renderDdActivity(${reqId},_ddTabCache[${reqId}]?.activity,this.closest('.dd-panel'))">All</button>
+            <button class="fp fp-sm${af==='email'?' on':''}" onclick="event.stopPropagation();_ddActFilter[${reqId}]='email';_renderDdActivity(${reqId},_ddTabCache[${reqId}]?.activity,this.closest('.dd-panel'))">✉ Email</button>
+            <button class="fp fp-sm${af==='phone'?' on':''}" onclick="event.stopPropagation();_ddActFilter[${reqId}]='phone';_renderDdActivity(${reqId},_ddTabCache[${reqId}]?.activity,this.closest('.dd-panel'))">📞 Phone</button>
+            <button class="fp fp-sm${af==='notes'?' on':''}" onclick="event.stopPropagation();_ddActFilter[${reqId}]='notes';_renderDdActivity(${reqId},_ddTabCache[${reqId}]?.activity,this.closest('.dd-panel'))">📝 Notes</button>
+        </div>
     </div>`;
+    // Apply filter
+    let filteredVendors = vendors;
+    if (af === 'email') filteredVendors = vendors.filter(v => (v.contacts||[]).some(c => c.contact_type === 'email') || (v.responses||[]).length);
+    else if (af === 'phone') filteredVendors = vendors.filter(v => (v.activities||[]).some(a => a.channel === 'phone'));
+    else if (af === 'notes') filteredVendors = vendors.filter(v => (v.activities||[]).some(a => a.activity_type === 'note'));
     let msgIdx = 0;
     html += '<div style="max-height:500px;overflow-y:auto">';
-    for (const v of vendors) {
+    for (const v of filteredVendors) {
         const contacts = v.contacts || [];
         const responses = v.responses || [];
         const activities = v.activities || [];
@@ -1205,6 +1219,13 @@ function _renderDdDetails(reqId, targetPanel) {
     dd.innerHTML = html;
 }
 
+function _reqBadge(r) {
+    if (r.offer_count > 0) return '<span class="req-badge req-badge-offers">OFFERS</span>';
+    if (r.contact_count > 0 && r.hours_since_activity != null && r.hours_since_activity < 48) return '<span class="req-badge req-badge-searching">SEARCHING</span>';
+    if (r.contact_count > 0) return '<span class="req-badge req-badge-stalled">STALLED</span>';
+    return '<span class="req-badge req-badge-norfq">NO RFQ</span>';
+}
+
 function _renderDrillDownTable(rfqId, targetPanel) {
     const dd = targetPanel || (document.getElementById('d-' + rfqId) || {}).querySelector?.('.dd-panel');
     if (!dd) return;
@@ -1212,7 +1233,7 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     if (!reqs.length && !_addRowActive[rfqId]) { dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">No parts yet</span>'; return; }
     if (!reqs.length && _addRowActive[rfqId]) {
         dd.innerHTML = `<table class="dtbl"><thead><tr>
-            <th>MPN</th><th>Qty</th><th>Target $</th><th>Subs</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th><th>Pkg</th><th>Notes</th><th>Vendors</th><th style="width:24px"></th>
+            <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th>Subs</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th><th>Pkg</th><th>Notes</th><th>Vendors</th><th style="width:24px"></th>
         </tr></thead><tbody></tbody></table>`;
         _appendAddRow(rfqId, dd);
         return;
@@ -1221,12 +1242,13 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     const showAll = dd.dataset.showAll === '1';
     const visible = showAll ? reqs : reqs.slice(0, DD_LIMIT);
     let html = `<table class="dtbl"><thead><tr>
-        <th>MPN</th><th>Qty</th><th>Target $</th><th>Subs</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th><th>Pkg</th><th>Notes</th><th>Vendors</th><th style="width:24px"></th>
+        <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th>Subs</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th><th>Pkg</th><th>Notes</th><th>Vendors</th><th style="width:24px"></th>
     </tr></thead><tbody>`;
     for (const r of visible) {
         const subsText = (r.substitutes || []).length ? r.substitutes.join(', ') : '—';
         const notesTrunc = (r.notes || '').length > 30 ? r.notes.substring(0, 30) + '\u2026' : (r.notes || '—');
         html += `<tr>
+            <td style="padding:2px 4px">${_reqBadge(r)}</td>
             <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'primary_mpn')">${esc(r.primary_mpn || '—')}</td>
             <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'target_qty')">${r.target_qty || 0}</td>
             <td class="mono dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'target_price')" style="color:${r.target_price ? 'var(--teal)' : 'var(--muted)'}">${r.target_price != null ? '$' + parseFloat(r.target_price).toFixed(2) : '—'}</td>
@@ -1332,8 +1354,12 @@ function _appendAddRow(rfqId, dd) {
     tr.className = 'add-row';
     tr.addEventListener('click', e => e.stopPropagation());
 
-    // MPN (required)
+    // Badge (empty for add row)
     let td = document.createElement('td');
+    tr.appendChild(td);
+
+    // MPN (required)
+    td = document.createElement('td');
     td.className = 'mono';
     const inMpn = document.createElement('input');
     inMpn.type = 'text'; inMpn.className = 'add-row-mpn'; inMpn.placeholder = 'MPN *';
@@ -1794,6 +1820,8 @@ async function openLogOfferFromList(reqId) {
     document.getElementById('loDc').value = '';
     document.getElementById('loPkg').value = '';
     document.getElementById('loMfr').value = '';
+    document.getElementById('loWarranty').value = '';
+    document.getElementById('loCOO').value = '';
     document.getElementById('loNotes').value = '';
     openModal('logOfferModal', 'loVendor');
 }
@@ -1825,6 +1853,8 @@ async function submitLogOffer() {
             date_code: document.getElementById('loDc').value.trim() || null,
             packaging: document.getElementById('loPkg').value.trim() || null,
             manufacturer: document.getElementById('loMfr').value.trim() || null,
+            warranty: document.getElementById('loWarranty').value.trim() || null,
+            country_of_origin: document.getElementById('loCOO').value.trim() || null,
             notes: document.getElementById('loNotes').value.trim() || null,
             source: 'manual',
             status: 'active',
@@ -5014,6 +5044,21 @@ function renderActivityCards() {
             if (lines.length) quoteHtml = `<div class="act-card-quote">${lines.join('')}</div>`;
         }
 
+        // Email body preview — latest reply snippet, click to expand
+        let emailPreviewHtml = '';
+        if (v.responses && v.responses.length) {
+            const latestReply = v.responses[v.responses.length - 1];
+            const rawBody = (latestReply.body || '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+            if (rawBody) {
+                const preview = rawBody.length > 150 ? rawBody.substring(0, 150) + '\u2026' : rawBody;
+                emailPreviewHtml = `<div class="act-card-email-preview" onclick="event.stopPropagation();this.classList.toggle('expanded')">
+                    <span class="act-card-email-label">Latest reply: </span>
+                    <span class="act-card-email-short">${esc(preview)}</span>
+                    <span class="act-card-email-full" style="display:none">${esc(rawBody)}</span>
+                </div>`;
+            }
+        }
+
         const threadBtn = `<button class="btn btn-ghost btn-sm" onclick="viewThread('${escAttr(v.vendor_name)}')">View Thread</button>`;
 
         // Place Call / Note buttons (only when vendor_card_id is known)
@@ -5047,6 +5092,7 @@ function renderActivityCards() {
             </div>
             ${metaHtml}
             ${quoteHtml}
+            ${emailPreviewHtml}
             <div class="act-card-actions">${followUpBtn}${logBtns}${threadBtn}</div>
         </div>`;
     }).join('');

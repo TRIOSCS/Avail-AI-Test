@@ -154,6 +154,11 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 .add-row input{background:var(--input);border:1px solid var(--border);border-radius:5px;padding:6px 8px;font-size:12px;color:var(--text);width:100%;font-family:'JetBrains Mono',monospace}
 .add-row input:focus{outline:none;border-color:var(--teal);background:var(--white)}
 .add-row input::placeholder{font-family:'DM Sans',sans-serif;color:var(--muted);font-style:italic}
+.req-badge{font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
+.req-badge-offers{background:#dcfce7;color:#166534}
+.req-badge-searching{background:#fef9c3;color:#854d0e}
+.req-badge-stalled{background:#fee2e2;color:#991b1b}
+.req-badge-norfq{background:var(--bg);color:var(--muted)}
 
 /* Sightings */
 .sight-group{margin-bottom:10px}
@@ -247,6 +252,10 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 .act-card-quote-line{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
 .act-card-quote-mpn{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:13px;color:var(--green)}
 .act-card-quote-val{font-size:11px;color:var(--text2)}
+.act-card-email-preview{font-size:11px;color:var(--text2);margin-top:4px;padding:4px 8px;background:var(--bg);border-radius:6px;cursor:pointer;line-height:1.4}
+.act-card-email-preview .act-card-email-label{color:var(--teal);font-weight:600;font-size:10px}
+.act-card-email-preview.expanded .act-card-email-short{display:none}
+.act-card-email-preview.expanded .act-card-email-full{display:block!important}
 .act-card-actions{display:flex;gap:6px;margin-top:8px;justify-content:flex-end;flex-wrap:wrap}
 .act-badge-classification{font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;background:#f0e6ff;color:#7b4fb0;text-transform:uppercase;letter-spacing:.3px}
 .act-action-hint{font-size:10px;color:var(--teal);font-weight:600;padding:2px 6px}

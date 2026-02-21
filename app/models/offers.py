@@ -47,6 +47,8 @@ class Offer(Base):
     hardware_code = Column(String(100))
     moq = Column(Integer)
     valid_until = Column(Date)
+    warranty = Column(String(100))
+    country_of_origin = Column(String(100))
 
     source = Column(String(50), default="manual")
     vendor_response_id = Column(Integer, ForeignKey("vendor_responses.id"))

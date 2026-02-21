@@ -571,6 +571,7 @@ async def list_requirements(
 
     # Single query: get vendor counts per requirement via SQL (avoids loading all sightings)
     vendor_counts = {}
+    offer_counts = {}
     if req.requirements:
         req_ids = [r.id for r in req.requirements]
         rows = (
@@ -590,6 +591,37 @@ async def list_requirements(
         for rid, cnt in rows:
             vendor_counts[rid] = cnt
 
+        # Offer counts per requirement (for status badges)
+        offer_rows = (
+            db.query(Offer.requirement_id, sqlfunc.count(Offer.id))
+            .filter(
+                Offer.requirement_id.in_(req_ids),
+                Offer.status.in_(["active", "won"]),
+            )
+            .group_by(Offer.requirement_id)
+            .all()
+        )
+        for rid, cnt in offer_rows:
+            offer_counts[rid] = cnt
+
+    # Requisition-level contact count and last activity timestamp
+    contact_count = (
+        db.query(sqlfunc.count(Contact.id))
+        .filter(Contact.requisition_id == req_id)
+        .scalar()
+    ) or 0
+    last_activity_row = (
+        db.query(sqlfunc.max(Contact.created_at))
+        .filter(Contact.requisition_id == req_id)
+        .scalar()
+    )
+    hours_since = None
+    if last_activity_row:
+        from datetime import datetime, timezone
+
+        delta = datetime.now(timezone.utc) - last_activity_row.replace(tzinfo=timezone.utc)
+        hours_since = delta.total_seconds() / 3600
+
     results = []
     for r in req.requirements:
         results.append(
@@ -600,6 +632,9 @@ async def list_requirements(
                 "target_price": float(r.target_price) if r.target_price else None,
                 "substitutes": r.substitutes or [],
                 "sighting_count": vendor_counts.get(r.id, 0),
+                "offer_count": offer_counts.get(r.id, 0),
+                "contact_count": contact_count,
+                "hours_since_activity": round(hours_since, 1) if hours_since is not None else None,
                 "brand": r.brand or "",
                 "firmware": r.firmware or "",
                 "date_codes": r.date_codes or "",

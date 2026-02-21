@@ -10,6 +10,12 @@ services:
       postgres
       -c shared_preload_libraries=pg_stat_statements
       -c pg_stat_statements.track=all
+      -c shared_buffers=1GB
+      -c effective_cache_size=4GB
+      -c work_mem=16MB
+      -c maintenance_work_mem=256MB
+      -c random_page_cost=1.1
+      -c checkpoint_completion_target=0.9
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-availai}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-availai}

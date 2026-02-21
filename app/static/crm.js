@@ -645,10 +645,13 @@ function renderOffers() {
                 <td>${esc(o.condition || '—')}</td>
                 <td>${esc(o.date_code || '—')}</td>
                 <td>${o.moq ? o.moq.toLocaleString() : '—'}</td>
+                <td style="font-size:10px">${esc(o.warranty || '—')}</td>
+                <td style="font-size:10px">${esc(o.country_of_origin || '—')}</td>
+                <td style="font-size:10px;white-space:nowrap">${o.avg_rating != null ? '<span style="color:var(--amber)">★</span> ' + o.avg_rating + ' <span style="color:var(--muted)">(' + o.review_count + ')</span>' : '—'}</td>
                 <td>${enteredStr}</td>
                 <td>${isRef ? '<span class="offer-ref-badge">ref</span>' : '<button class="btn btn-ghost btn-sm" onclick="openEditOffer('+o.id+')" title="Edit offer" style="padding:2px 6px;font-size:10px">✎</button><button class="btn btn-danger btn-sm" onclick="deleteOffer('+o.id+')" title="Remove offer" style="padding:2px 6px;font-size:10px">✕</button>'}</td>
             </tr>`;
-        }).join('') : '<tr><td colspan="10" class="empty" style="padding:8px">No offers for this part</td></tr>';
+        }).join('') : '<tr><td colspan="13" class="empty" style="padding:8px">No offers for this part</td></tr>';
         return `
         <div class="offer-group">
             <div class="offer-group-header">
@@ -660,7 +663,7 @@ function renderOffers() {
             </div>
             <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
             <table class="tbl offer-table">
-                <thead><tr><th style="width:30px"></th><th>Vendor</th><th>Price</th><th>Avail</th><th>Lead</th><th>Cond</th><th>DC</th><th>MOQ</th><th>By</th><th style="width:40px"></th></tr></thead>
+                <thead><tr><th style="width:30px"></th><th>Vendor</th><th>Price</th><th>Avail</th><th>Lead</th><th>Cond</th><th>DC</th><th>MOQ</th><th>Warranty</th><th>COO</th><th>Rating</th><th>By</th><th style="width:40px"></th></tr></thead>
                 <tbody>${offersHtml}</tbody>
             </table>
             </div>
@@ -851,6 +854,8 @@ function openEditOffer(offerId) {
     document.getElementById('eoHardware').value = offer.hardware_code || '';
     document.getElementById('eoPackaging').value = offer.packaging || '';
     document.getElementById('eoMoq').value = offer.moq || '';
+    document.getElementById('eoWarranty').value = offer.warranty || '';
+    document.getElementById('eoCOO').value = offer.country_of_origin || '';
     document.getElementById('eoNotes').value = offer.notes || '';
     document.getElementById('eoStatus').value = offer.status || 'active';
     openModal('editOfferModal');
@@ -869,6 +874,8 @@ async function updateOffer() {
         hardware_code: document.getElementById('eoHardware').value.trim() || null,
         packaging: document.getElementById('eoPackaging').value.trim() || null,
         moq: parseInt(document.getElementById('eoMoq').value) || null,
+        warranty: document.getElementById('eoWarranty').value.trim() || null,
+        country_of_origin: document.getElementById('eoCOO').value.trim() || null,
         notes: document.getElementById('eoNotes').value.trim() || null,
         status: document.getElementById('eoStatus').value,
     };

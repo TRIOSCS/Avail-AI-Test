@@ -290,6 +290,8 @@ class OfferCreate(BaseModel):
     firmware: str | None = None
     hardware_code: str | None = None
     moq: int | None = None
+    warranty: str | None = None
+    country_of_origin: str | None = None
     source: str = "manual"
     vendor_response_id: int | None = None
     notes: str | None = None
@@ -345,6 +347,8 @@ class OfferUpdate(BaseModel):
     firmware: str | None = None
     hardware_code: str | None = None
     moq: int | None = None
+    warranty: str | None = None
+    country_of_origin: str | None = None
     notes: str | None = None
     status: Literal["active", "expired", "won", "lost", "pending_review"] | None = None
 
