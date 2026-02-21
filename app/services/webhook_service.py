@@ -14,8 +14,10 @@ Usage:
     await renew_expiring_subscriptions(db)
 """
 
+import hmac
 import logging
 import secrets
+import time
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
@@ -28,6 +30,10 @@ log = logging.getLogger("avail.webhook")
 # Graph webhook subscriptions for mail expire after max 3 days (4230 min)
 SUBSCRIPTION_LIFETIME_HOURS = 70  # ~3 days, renew before expiry
 RENEW_BUFFER_HOURS = 6  # renew when less than 6h remaining
+
+# Replay protection: reject duplicate notifications within this window
+REPLAY_WINDOW_SECONDS = 300  # 5 minutes
+_seen_notifications: dict[str, float] = {}  # key -> timestamp
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -186,12 +192,87 @@ async def ensure_all_users_subscribed(db: Session):
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  NOTIFICATION VALIDATION
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def _prune_replay_cache():
+    """Remove expired entries from the replay-protection cache."""
+    cutoff = time.monotonic() - REPLAY_WINDOW_SECONDS
+    expired = [k for k, ts in _seen_notifications.items() if ts < cutoff]
+    for k in expired:
+        del _seen_notifications[k]
+
+
+def validate_notifications(payload: dict, db: Session) -> list[dict]:
+    """Validate incoming Graph webhook notifications.
+
+    For each notification in the payload:
+    - Reject unknown subscriptions
+    - Timing-safe clientState comparison (prevents timing attacks)
+    - Replay protection (reject duplicate sub+resource within 5min window)
+
+    Returns a list of validated notification dicts, each enriched with
+    ``_subscription`` and ``_user`` keys.
+    """
+    notifications = payload.get("value", [])
+    if not notifications:
+        return []
+
+    _prune_replay_cache()
+    now = time.monotonic()
+    validated = []
+
+    for notif in notifications:
+        sub_id = notif.get("subscriptionId")
+        client_state = notif.get("clientState", "")
+
+        # Look up subscription
+        sub = (
+            db.query(GraphSubscription)
+            .filter(GraphSubscription.subscription_id == sub_id)
+            .first()
+        )
+        if not sub:
+            log.warning(f"Unknown subscription {sub_id}, ignoring")
+            continue
+
+        # Timing-safe clientState comparison
+        if sub.client_state:
+            if not hmac.compare_digest(sub.client_state, client_state or ""):
+                log.warning(f"Client state mismatch for {sub_id}, ignoring")
+                continue
+
+        # Replay protection
+        resource = notif.get("resource", "")
+        replay_key = f"{sub_id}:{resource}"
+        if replay_key in _seen_notifications:
+            log.warning(f"Replay detected for {replay_key}, ignoring")
+            continue
+        _seen_notifications[replay_key] = now
+
+        user = db.get(User, sub.user_id)
+        if not user:
+            continue
+
+        notif["_subscription"] = sub
+        notif["_user"] = user
+        validated.append(notif)
+
+    return validated
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  NOTIFICATION HANDLER
 # ═══════════════════════════════════════════════════════════════════════
 
 
-async def handle_notification(payload: dict, db: Session):
+async def handle_notification(payload: dict, db: Session, validated: list[dict] | None = None):
     """Process a Graph webhook notification payload.
+
+    When *validated* is provided (from ``validate_notifications``), skip
+    the per-notification validation loop and process the pre-validated
+    list directly.  Falls back to inline validation for backward compat.
 
     Graph sends a list of notifications. For each, we fetch the message
     from Graph, log it as an activity, and trigger inbox poll for RFQ
@@ -202,37 +283,50 @@ async def handle_notification(payload: dict, db: Session):
     from app.services.activity_service import log_email_activity
     from app.utils.graph_client import GraphClient
 
-    notifications = payload.get("value", [])
-    if not notifications:
+    # Use pre-validated list when available; otherwise fall back to
+    # inline validation for backward compatibility with existing callers.
+    if validated is not None:
+        items = validated
+    else:
+        notifications = payload.get("value", [])
+        if not notifications:
+            return
+
+        items = []
+        for notif in notifications:
+            client_state = notif.get("clientState")
+            sub_id = notif.get("subscriptionId")
+
+            sub = (
+                db.query(GraphSubscription)
+                .filter(GraphSubscription.subscription_id == sub_id)
+                .first()
+            )
+            if not sub:
+                log.warning(f"Unknown subscription {sub_id}, ignoring")
+                continue
+            if sub.client_state and sub.client_state != client_state:
+                log.warning(f"Client state mismatch for {sub_id}, ignoring")
+                continue
+
+            user = db.get(User, sub.user_id)
+            if not user:
+                continue
+
+            notif["_subscription"] = sub
+            notif["_user"] = user
+            items.append(notif)
+
+    if not items:
         return
 
     # Track users who received inbound messages so we can poll their inbox
     users_with_inbound = {}  # user_id -> (user, token)
 
-    for notif in notifications:
-        # Validate client_state
-        client_state = notif.get("clientState")
-        sub_id = notif.get("subscriptionId")
-
-        sub = (
-            db.query(GraphSubscription)
-            .filter(GraphSubscription.subscription_id == sub_id)
-            .first()
-        )
-        if not sub:
-            log.warning(f"Unknown subscription {sub_id}, ignoring")
-            continue
-        if sub.client_state and sub.client_state != client_state:
-            log.warning(f"Client state mismatch for {sub_id}, ignoring")
-            continue
-
-        user = db.get(User, sub.user_id)
-        if not user:
-            continue
+    for notif in items:
+        user = notif["_user"]
 
         resource = notif.get("resource", "")
-        # resource looks like: "Users('abc')/Messages('msgid')"
-        # We need to fetch the full message to get sender/recipients/subject
         change_type = notif.get("changeType")
         if change_type != "created":
             continue
@@ -243,7 +337,6 @@ async def handle_notification(payload: dict, db: Session):
 
         gc = GraphClient(token)
         try:
-            # Fetch the message details
             msg = await gc.get_json(
                 f"/{resource}",
                 params={
@@ -260,16 +353,12 @@ async def handle_notification(payload: dict, db: Session):
         message_id = msg.get("id")
         subject = msg.get("subject", "")
 
-        # Determine direction: sent by user or received
         from_addr = _extract_email(msg.get("from"))
-
         user_email = user.email.lower()
 
         if from_addr and from_addr.lower() == user_email:
-            # Outbound — skip logging to avoid noise during active sourcing
             continue
         else:
-            # Inbound — log for the sender
             from_name = _extract_name(msg.get("from"))
             if from_addr:
                 log_email_activity(
@@ -281,7 +370,6 @@ async def handle_notification(payload: dict, db: Session):
                     contact_name=from_name,
                     db=db,
                 )
-                # Track this user for RFQ reply matching
                 if user.id not in users_with_inbound:
                     users_with_inbound[user.id] = (user, token)
 

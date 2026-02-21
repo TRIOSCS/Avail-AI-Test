@@ -28,9 +28,12 @@ from sqlalchemy.orm import Session
 from app.models import GraphSubscription, User
 from app.services.webhook_service import (
     RENEW_BUFFER_HOURS,
+    REPLAY_WINDOW_SECONDS,
     SUBSCRIPTION_LIFETIME_HOURS,
     _extract_email,
     _extract_name,
+    _seen_notifications,
+    validate_notifications,
 )
 
 # ── Patch targets ────────────────────────────────────────────────────
@@ -981,6 +984,99 @@ class TestEnsureAllUsersSubscribed:
         with patch("app.services.webhook_service.create_mail_subscription", new_callable=AsyncMock) as mock_create:
             _run(ensure_all_users_subscribed(db_session))
             mock_create.assert_not_called()
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  validate_notifications()
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestValidateNotifications:
+    """Tests for validate_notifications() — timing-safe comparison + replay protection."""
+
+    def setup_method(self):
+        """Clear the replay cache before each test."""
+        _seen_notifications.clear()
+
+    def test_validate_unknown_subscription(self, db_session, test_user):
+        """Notifications with unknown subscription IDs are filtered out."""
+        payload = {"value": [_make_notification(sub_id="nonexistent-sub")]}
+        result = validate_notifications(payload, db_session)
+        assert result == []
+
+    def test_validate_client_state_mismatch(self, db_session, test_user):
+        """Notifications with wrong clientState are rejected."""
+        _make_subscription(db_session, test_user, sub_id="sub-val-1", client_state="correct-secret")
+        payload = {"value": [_make_notification(sub_id="sub-val-1", client_state="wrong-secret")]}
+        result = validate_notifications(payload, db_session)
+        assert result == []
+
+    def test_validate_client_state_match(self, db_session, test_user):
+        """Notifications with matching clientState are accepted."""
+        _make_subscription(db_session, test_user, sub_id="sub-val-2", client_state="my-secret")
+        payload = {"value": [_make_notification(sub_id="sub-val-2", client_state="my-secret")]}
+        result = validate_notifications(payload, db_session)
+        assert len(result) == 1
+        assert result[0]["_user"].id == test_user.id
+        assert result[0]["_subscription"].subscription_id == "sub-val-2"
+
+    def test_validate_replay_protection(self, db_session, test_user):
+        """Duplicate notifications (same sub+resource) within window are rejected."""
+        _make_subscription(db_session, test_user, sub_id="sub-val-3", client_state="secret")
+        notif = _make_notification(sub_id="sub-val-3", client_state="secret",
+                                   resource="Users('abc')/Messages('msg-dup')")
+
+        # First call should accept
+        result1 = validate_notifications({"value": [notif.copy()]}, db_session)
+        assert len(result1) == 1
+
+        # Second call with same sub+resource should reject (replay)
+        result2 = validate_notifications({"value": [notif.copy()]}, db_session)
+        assert result2 == []
+
+    def test_validate_replay_expired(self, db_session, test_user):
+        """After the replay window expires, the same notification is accepted again."""
+        import time
+
+        _make_subscription(db_session, test_user, sub_id="sub-val-4", client_state="secret")
+        notif = _make_notification(sub_id="sub-val-4", client_state="secret",
+                                   resource="Users('abc')/Messages('msg-replay')")
+
+        # First call
+        result1 = validate_notifications({"value": [notif.copy()]}, db_session)
+        assert len(result1) == 1
+
+        # Manually expire the cache entry by back-dating the timestamp
+        replay_key = "sub-val-4:Users('abc')/Messages('msg-replay')"
+        _seen_notifications[replay_key] = time.monotonic() - REPLAY_WINDOW_SECONDS - 1
+
+        # Should be accepted again after expiry
+        result2 = validate_notifications({"value": [notif.copy()]}, db_session)
+        assert len(result2) == 1
+
+    def test_validate_timing_safe(self, db_session, test_user):
+        """Verify that hmac.compare_digest is used for clientState comparison."""
+        import hmac as hmac_mod
+
+        _make_subscription(db_session, test_user, sub_id="sub-val-5", client_state="timed-secret")
+        payload = {"value": [_make_notification(sub_id="sub-val-5", client_state="timed-secret")]}
+
+        with patch.object(hmac_mod, "compare_digest", wraps=hmac_mod.compare_digest) as mock_cmp:
+            result = validate_notifications(payload, db_session)
+            assert len(result) == 1
+            mock_cmp.assert_called_once_with("timed-secret", "timed-secret")
+
+    def test_validate_empty_payload(self, db_session):
+        """Empty payload returns empty list."""
+        assert validate_notifications({}, db_session) == []
+        assert validate_notifications({"value": []}, db_session) == []
+
+    def test_validate_null_client_state_accepts_any(self, db_session, test_user):
+        """Subscription with client_state=None accepts any clientState."""
+        _make_subscription(db_session, test_user, sub_id="sub-val-6", client_state=None)
+        payload = {"value": [_make_notification(sub_id="sub-val-6", client_state="anything")]}
+        result = validate_notifications(payload, db_session)
+        assert len(result) == 1
 
 
 # ══════════════════════════════════════════════════════════════════════

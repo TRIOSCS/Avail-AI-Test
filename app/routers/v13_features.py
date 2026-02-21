@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
+from ..rate_limit import limiter
 from ..dependencies import is_admin as _is_admin
 from ..dependencies import require_admin, require_user
 from ..models import ActivityLog, Company, User, VendorCard
@@ -43,6 +44,7 @@ router = APIRouter(tags=["v13"])
 
 
 @router.post("/api/webhooks/graph")
+@limiter.limit("60/minute")
 async def graph_webhook(
     request: Request,
     db: Session = Depends(get_db),
@@ -62,10 +64,15 @@ async def graph_webhook(
 
     payload = GraphWebhookPayload.model_validate(raw)
 
-    from app.services.webhook_service import handle_notification
+    from app.services.webhook_service import handle_notification, validate_notifications
+
+    payload_dict = payload.model_dump()
+    validated = validate_notifications(payload_dict, db)
+    if not validated:
+        raise HTTPException(403, "No valid notifications")
 
     try:
-        await handle_notification(payload.model_dump(), db)
+        await handle_notification(payload_dict, db, validated=validated)
     except Exception:
         logger.exception("Webhook notification processing failed")
         raise HTTPException(502, "Notification processing failed")

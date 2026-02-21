@@ -6,12 +6,13 @@ import io
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..rate_limit import limiter
 from ..dependencies import require_admin, require_settings_access
 from ..models import (
     ApiSource,
@@ -59,12 +60,15 @@ class ConfigUpdateRequest(BaseModel):
 
 
 @router.get("/api/admin/users")
-def api_list_users(user: User = Depends(require_admin), db: Session = Depends(get_db)):
+@limiter.limit("30/minute")
+def api_list_users(request: Request, user: User = Depends(require_admin), db: Session = Depends(get_db)):
     return list_users(db)
 
 
 @router.post("/api/admin/users")
+@limiter.limit("5/minute")
 def api_create_user(
+    request: Request,
     body: CreateUserRequest,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -90,8 +94,10 @@ def api_create_user(
 
 
 @router.put("/api/admin/users/{user_id}")
+@limiter.limit("10/minute")
 def api_update_user(
     user_id: int,
+    request: Request,
     body: UserUpdateRequest,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -103,8 +109,10 @@ def api_update_user(
 
 
 @router.delete("/api/admin/users/{user_id}")
+@limiter.limit("5/minute")
 def api_delete_user(
     user_id: int,
+    request: Request,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -122,7 +130,9 @@ def api_delete_user(
 
 
 @router.get("/api/admin/config")
+@limiter.limit("30/minute")
 def api_get_config(
+    request: Request,
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
@@ -130,8 +140,10 @@ def api_get_config(
 
 
 @router.put("/api/admin/config/{key}")
+@limiter.limit("10/minute")
 def api_set_config(
     key: str,
+    request: Request,
     body: ConfigUpdateRequest,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -146,7 +158,9 @@ def api_set_config(
 
 
 @router.get("/api/admin/health")
+@limiter.limit("30/minute")
 def api_health(
+    request: Request,
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
@@ -157,8 +171,10 @@ def api_health(
 
 
 @router.get("/api/admin/sources/{source_id}/credentials")
+@limiter.limit("30/minute")
 def api_get_credentials(
     source_id: int,
+    request: Request,
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
@@ -192,8 +208,10 @@ def api_get_credentials(
 
 
 @router.put("/api/admin/sources/{source_id}/credentials")
+@limiter.limit("10/minute")
 def api_set_credentials(
     source_id: int,
+    request: Request,
     body: dict,
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
@@ -222,9 +240,11 @@ def api_set_credentials(
 
 
 @router.delete("/api/admin/sources/{source_id}/credentials/{var_name}")
+@limiter.limit("5/minute")
 def api_delete_credential(
     source_id: int,
     var_name: str,
+    request: Request,
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
@@ -252,7 +272,9 @@ def api_delete_credential(
 
 
 @router.get("/api/admin/vendor-dedup-suggestions")
+@limiter.limit("30/minute")
 async def api_vendor_dedup_suggestions(
+    request: Request,
     threshold: int = 85,
     limit: int = 50,
     user: User = Depends(require_admin),
@@ -272,7 +294,9 @@ async def api_vendor_dedup_suggestions(
 
 
 @router.post("/api/admin/import/customers")
+@limiter.limit("2/minute")
 async def import_customers(
+    request: Request,
     file: UploadFile = File(...),
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -381,7 +405,9 @@ async def import_customers(
 
 
 @router.post("/api/admin/import/vendors")
+@limiter.limit("2/minute")
 async def import_vendors(
+    request: Request,
     file: UploadFile = File(...),
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -477,7 +503,9 @@ class TeamsConfigRequest(BaseModel):
 
 
 @router.get("/api/admin/teams/config")
+@limiter.limit("30/minute")
 def api_get_teams_config(
+    request: Request,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -524,7 +552,9 @@ def api_get_teams_config(
 
 
 @router.post("/api/admin/teams/config")
+@limiter.limit("10/minute")
 def api_set_teams_config(
+    request: Request,
     body: TeamsConfigRequest,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
@@ -543,7 +573,9 @@ def api_set_teams_config(
 
 
 @router.get("/api/admin/teams/channels")
+@limiter.limit("30/minute")
 async def api_list_teams_channels(
+    request: Request,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
@@ -595,7 +627,9 @@ async def api_list_teams_channels(
 
 
 @router.post("/api/admin/teams/test")
+@limiter.limit("3/minute")
 async def api_test_teams_post(
+    request: Request,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
