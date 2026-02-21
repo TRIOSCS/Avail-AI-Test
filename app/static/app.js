@@ -2483,24 +2483,25 @@ function editReqName(reqId, span) {
     inp.placeholder = 'RFQ name';
     inp.style.cssText = 'font-size:10px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;width:120px';
     inp.onclick = e => e.stopPropagation();
-    let _saved = false;
+    let _done = false;
     const save = async () => {
-        if (_saved) return;
-        _saved = true;
+        if (_done) return;
+        _done = true;
         const val = inp.value.trim();
-        if (val === cur) { renderReqList(); return; }
-        try {
-            await apiFetch(`/api/requisitions/${reqId}`, { method: 'PUT', body: { name: val } });
-            const rx = _reqListData.find(x => x.id === reqId);
-            if (rx) rx.name = val;
-            showToast(val ? `Name set to "${val}"` : 'Name cleared', 'success');
-        } catch (e) { showToast('Failed to update name', 'error'); }
+        if (val !== cur) {
+            try {
+                await apiFetch(`/api/requisitions/${reqId}`, { method: 'PUT', body: { name: val } });
+                const rx = _reqListData.find(x => x.id === reqId);
+                if (rx) rx.name = val;
+                showToast(val ? `Name set to "${val}"` : 'Name cleared', 'success');
+            } catch (e) { showToast('Failed to update name', 'error'); }
+        }
         renderReqList();
     };
-    inp.addEventListener('blur', () => { if (!_saved) renderReqList(); });
+    inp.addEventListener('blur', () => { setTimeout(save, 0); });
     inp.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); save(); }
-        if (e.key === 'Escape') { e.preventDefault(); _saved = true; renderReqList(); }
+        if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); _done = true; renderReqList(); }
     });
     span.textContent = '';
     span.appendChild(inp);
