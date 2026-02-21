@@ -1888,7 +1888,7 @@ function _updateToolbarStats() {
         if (isAsap) continue;
         const d = new Date(dl); d.setHours(0,0,0,0);
         const diff = Math.round((d - now) / 86400000);
-        if (diff === 0) nYellow++;
+        if (diff <= 3) nYellow++;  // overdue + today + next 3 days
     }
 
     const qf = _toolbarQuickFilter;
@@ -2206,7 +2206,7 @@ function applyDropdownFilters(data) {
             const diff = d ? Math.round((d - now) / 86400000) : null;
             switch (_toolbarQuickFilter) {
                 case 'green': return r.reply_count > 0;
-                case 'yellow': return diff === 0;
+                case 'yellow': return diff !== null && diff <= 3;
                 default: return true;
             }
         });
