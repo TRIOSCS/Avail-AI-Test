@@ -638,21 +638,34 @@ const debouncedReqListSearch = debounce(() => {
 
 let _reqAbort = null;  // AbortController for in-flight requisition searches
 
-async function loadRequisitions(query = '') {
+let _archiveHasMore = false;
+let _archivePageSize = 200;
+
+async function loadRequisitions(query = '', append = false) {
     // Cancel any in-flight request
     if (_reqAbort) { try { _reqAbort.abort(); } catch(e){} }
     _reqAbort = new AbortController();
     const signal = _reqAbort.signal;
     try {
         const status = _currentMainView === 'archive' ? '&status=archive' : '';
-        const url = query ? `/api/requisitions?q=${encodeURIComponent(query)}${status}` : `/api/requisitions?limit=200${status}`;
+        const offset = append ? _reqListData.length : 0;
+        const limit = _currentMainView === 'archive' ? _archivePageSize : 200;
+        const url = query
+            ? `/api/requisitions?q=${encodeURIComponent(query)}${status}`
+            : `/api/requisitions?limit=${limit}&offset=${offset}${status}`;
         _serverSearchActive = !!query;
         const resp = await apiFetch(url, { signal });
-        _reqListData = resp.requisitions || resp;
+        const items = resp.requisitions || resp;
+        if (append) {
+            _reqListData = _reqListData.concat(items);
+        } else {
+            _reqListData = items;
+        }
+        _archiveHasMore = _currentMainView === 'archive' && items.length >= limit;
         _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
         renderReqList();
     } catch (e) {
-        if (e.name === 'AbortError') return;  // superseded by newer search
+        if (e.name === 'AbortError') return;
         logCatchError('loadRequisitions', e); showToast('Failed to load requisitions', 'error');
     }
 }
@@ -1769,7 +1782,11 @@ function renderReqList() {
     } else {
         rowsHtml = data.map(r => _renderReqRow(r)).join('');
     }
-    el.innerHTML = `<table class="tbl">${thead}<tbody>${rowsHtml}</tbody></table>`;
+    var loadMoreHtml = '';
+    if (_currentMainView === 'archive' && _archiveHasMore) {
+        loadMoreHtml = `<div style="text-align:center;padding:16px"><button class="btn btn-ghost" onclick="loadRequisitions('',true)">Load more archived RFQs…</button></div>`;
+    }
+    el.innerHTML = `<table class="tbl">${thead}<tbody>${rowsHtml}</tbody></table>${loadMoreHtml}`;
     _updateToolbarStats();
 }
 
