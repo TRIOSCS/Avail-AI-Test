@@ -1001,41 +1001,69 @@ function _renderDdDetails(reqId, targetPanel) {
 
     let html = '<div class="dd-details">';
 
-    // Requisition header
-    html += '<div class="dd-det-header">';
-    html += `<div class="dd-det-row"><span class="dd-det-label">Customer</span><span class="dd-det-val">${esc(meta.customer_display || '—')}</span></div>`;
-    html += `<div class="dd-det-row"><span class="dd-det-label">RFQ</span><span class="dd-det-val">${esc(meta.name || '')}</span></div>`;
-    if (meta.deadline) html += `<div class="dd-det-row"><span class="dd-det-label">Need By</span><span class="dd-det-val">${meta.deadline === 'ASAP' ? '<b style="color:var(--red)">ASAP</b>' : esc(meta.deadline)}</span></div>`;
-    if (meta.created_by_name) html += `<div class="dd-det-row"><span class="dd-det-label">Created By</span><span class="dd-det-val">${esc(meta.created_by_name)}</span></div>`;
-    if (meta.created_at) html += `<div class="dd-det-row"><span class="dd-det-label">Created</span><span class="dd-det-val">${new Date(meta.created_at).toLocaleDateString()}</span></div>`;
-    html += '</div>';
+    // ── RFQ context card ──
+    const dlClass = meta.deadline === 'ASAP' ? 'dd-dl-asap' : (meta.deadline ? '' : 'dd-dl-none');
+    const dlText = meta.deadline === 'ASAP' ? 'ASAP' : (meta.deadline || 'Not set');
+    html += `<div class="det-ctx">
+        <div class="det-ctx-main">
+            <div class="det-ctx-cust">${esc(meta.customer_display || '—')}</div>
+            <div class="det-ctx-name">${esc(meta.name || 'Untitled RFQ')}</div>
+        </div>
+        <div class="det-ctx-meta">
+            <div class="det-kv"><span class="det-k">Need By</span><span class="det-v ${dlClass}">${dlText}</span></div>
+            <div class="det-kv"><span class="det-k">Created</span><span class="det-v">${meta.created_at ? new Date(meta.created_at).toLocaleDateString() : '—'}</span></div>
+            <div class="det-kv"><span class="det-k">By</span><span class="det-v">${esc(meta.created_by_name || '—')}</span></div>
+            <div class="det-kv"><span class="det-k">Parts</span><span class="det-v">${reqs.length}</span></div>
+        </div>
+    </div>`;
 
-    // Parts table
+    // ── Parts ──
     if (!reqs.length) {
-        html += '<p style="font-size:11px;color:var(--muted)">No parts</p>';
+        html += '<p style="font-size:11px;color:var(--muted);margin-top:8px">No parts on this RFQ</p>';
     } else {
-        html += `<div class="dd-det-parts"><div class="dd-det-row" style="margin-bottom:4px"><span class="dd-det-label">${reqs.length} Part${reqs.length > 1 ? 's' : ''}</span></div>`;
         for (const r of reqs) {
             const subs = (r.substitutes || []).filter(s => s);
-            html += '<div class="dd-det-part">';
-            html += `<div class="dd-det-mpn"><span class="mono">${esc(r.primary_mpn || '—')}</span>`;
-            if (subs.length) html += ` <span class="dd-det-subs">+ ${subs.map(s => '<span class="mono">' + esc(s) + '</span>').join(', ')}</span>`;
+            html += '<div class="det-part">';
+
+            // Left: core need
+            html += '<div class="det-part-core">';
+            html += `<div class="det-part-mpn mono">${esc(r.primary_mpn || '—')}</div>`;
+            if (r.brand) html += `<div class="det-part-brand">${esc(r.brand)}</div>`;
+            if (subs.length) {
+                html += `<div class="det-part-subs"><span class="det-k">Substitutes</span>`;
+                for (const s of subs) html += `<span class="det-sub mono">${esc(s)}</span>`;
+                html += '</div>';
+            }
             html += '</div>';
-            // Detail chips
-            const chips = [];
-            if (r.brand) chips.push(`<span class="dd-det-chip">${esc(r.brand)}</span>`);
-            if (r.target_qty) chips.push(`<span class="dd-det-chip">Qty: <b>${Number(r.target_qty).toLocaleString()}</b></span>`);
-            if (r.target_price != null) chips.push(`<span class="dd-det-chip">Target: <b>$${parseFloat(r.target_price).toFixed(2)}</b></span>`);
-            if (r.date_codes) chips.push(`<span class="dd-det-chip">DC: ${esc(r.date_codes)}</span>`);
-            if (r.condition) chips.push(`<span class="dd-det-chip">Cond: ${esc(r.condition)}</span>`);
-            if (r.firmware) chips.push(`<span class="dd-det-chip">FW: ${esc(r.firmware)}</span>`);
-            if (r.hardware_codes) chips.push(`<span class="dd-det-chip">HW: ${esc(r.hardware_codes)}</span>`);
-            if (r.packaging) chips.push(`<span class="dd-det-chip">Pkg: ${esc(r.packaging)}</span>`);
-            if (chips.length) html += `<div class="dd-det-chips">${chips.join('')}</div>`;
-            if (r.notes) html += `<div class="dd-det-notes">${esc(r.notes)}</div>`;
+
+            // Right: requirements + specs
+            html += '<div class="det-part-info">';
+            // Primary requirements row
+            html += '<div class="det-req-row">';
+            html += `<div class="det-req"><span class="det-k">Qty Needed</span><span class="det-req-val">${r.target_qty ? Number(r.target_qty).toLocaleString() : '—'}</span></div>`;
+            html += `<div class="det-req"><span class="det-k">Target Price</span><span class="det-req-val ${r.target_price != null ? 'det-price' : ''}">${r.target_price != null ? '$' + parseFloat(r.target_price).toFixed(2) : '—'}</span></div>`;
+            html += `<div class="det-req"><span class="det-k">Condition</span><span class="det-req-val">${esc(r.condition || 'Any')}</span></div>`;
             html += '</div>';
+            // Specs row (only if any exist)
+            const specs = [];
+            if (r.date_codes) specs.push(['Date Codes', r.date_codes]);
+            if (r.packaging) specs.push(['Packaging', r.packaging]);
+            if (r.firmware) specs.push(['Firmware', r.firmware]);
+            if (r.hardware_codes) specs.push(['HW Codes', r.hardware_codes]);
+            if (specs.length) {
+                html += '<div class="det-spec-row">';
+                for (const [label, val] of specs) {
+                    html += `<div class="det-spec"><span class="det-k">${label}</span><span class="det-spec-val">${esc(val)}</span></div>`;
+                }
+                html += '</div>';
+            }
+            html += '</div>'; // end det-part-info
+
+            // Notes (full width)
+            if (r.notes) html += `<div class="det-part-notes">${esc(r.notes)}</div>`;
+
+            html += '</div>'; // end det-part
         }
-        html += '</div>';
     }
 
     html += '</div>';
