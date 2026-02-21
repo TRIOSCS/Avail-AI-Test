@@ -1269,7 +1269,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         }
         const visible = showAll ? sightings : sightings.slice(0, DD_LIMIT);
         html += `<table class="dtbl"><thead><tr>
-            <th style="width:24px"></th><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Score</th><th>Condition</th><th>Date</th>
+            <th style="width:24px"></th><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th title="Sighting confidence score">Confidence</th><th>Condition</th><th>Date</th>
         </tr></thead><tbody>`;
         for (const s of visible) {
             const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
@@ -1602,7 +1602,7 @@ function renderReqList() {
         thead = `<thead><tr>
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
             <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">RFQ ${sa('name')}</th>
-            <th onclick="sortReqList('score')"${thClass('score')} title="Sourcing score">Score ${sa('score')}</th>
+            <th onclick="sortReqList('score')"${thClass('score')} title="Sourcing effort score">Sourcing ${sa('score')}</th>
             <th onclick="sortReqList('deadline')"${thClass('deadline')}>Need By ${sa('deadline')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
