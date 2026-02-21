@@ -463,7 +463,7 @@ async def test_api_source(
         src.last_success = datetime.now(timezone.utc)
         src.last_error = None
         src.avg_response_ms = elapsed_ms
-    except (ValueError, ConnectionError, TimeoutError, OSError) as e:
+    except Exception as e:
         elapsed_ms = int((time.time() - start) * 1000)
         error = str(e)[:500]
         src.status = "error"
