@@ -31,8 +31,8 @@ class Element14Connector(BaseConnector):
             return []
 
         params = {
-            "term": f"mftrPart:{part_number}",
-            "storeInfo.id": "us.newark.com",
+            "term": f"manuPartNum:{part_number}",
+            "storeInfo.id": "www.newark.com",
             "resultsSettings.offset": "0",
             "resultsSettings.numberOfResults": "25",
             "resultsSettings.responseGroup": "large",

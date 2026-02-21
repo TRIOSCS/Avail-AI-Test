@@ -6,6 +6,8 @@ import time
 from abc import ABC, abstractmethod
 from urllib.parse import quote_plus
 
+import httpx
+
 from ..utils import safe_float, safe_int
 
 log = logging.getLogger(__name__)
@@ -72,6 +74,13 @@ class BaseConnector(ABC):
                 result = await self._do_search(part_number)
                 self._breaker.record_success()
                 return result
+            except (httpx.ConnectTimeout, httpx.ConnectError) as e:
+                # Server unreachable — no point retrying
+                self._breaker.record_failure()
+                log.warning(
+                    f"{self.__class__.__name__} failed for {part_number}: {type(e).__name__}"
+                )
+                raise
             except Exception as e:
                 self._breaker.record_failure()
                 last_err = e

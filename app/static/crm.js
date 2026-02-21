@@ -3543,28 +3543,48 @@ function switchSettingsTab(name, btn) {
 function showSettings(panel) { openSettingsTab(panel); }
 
 let _sourcesData = [];
-let _sourcesFilter = 'all';   // 'all' or 'active'
+let _sourcesFilter = 'all';
 let _sourcesQuery = '';
 let _sourcesSearchTimer = null;
+let _sourcesShowPlanned = false;
+
+function _isPlannedSource(s) {
+    // Sources with no env_vars are always "planned" regardless of status
+    return !(s.env_vars && s.env_vars.length);
+}
+
+function _statusBadge(status, isPlanned) {
+    if (isPlanned) return '<span class="s-badge s-badge-planned">Planned</span>';
+    const cls = status === 'live' ? 's-badge-live' : status === 'error' ? 's-badge-error' : status === 'disabled' ? 's-badge-disabled' : 's-badge-pending';
+    const label = status === 'live' ? 'Live' : status === 'error' ? 'Error' : status === 'disabled' ? 'Disabled' : 'Pending';
+    return `<span class="s-badge ${cls}">${label}</span>`;
+}
 
 function _renderSourceCards() {
     const container = document.getElementById('sourcesCardsContainer');
     if (!container) return;
 
-    let filtered = _sourcesData;
+    // Split configurable vs planned
+    let configurable = _sourcesData.filter(s => !_isPlannedSource(s));
+    let planned = _sourcesData.filter(s => _isPlannedSource(s));
+
+    // Apply status filter (only to configurable)
+    let filtered = configurable;
     if (_sourcesFilter !== 'all') {
         filtered = filtered.filter(s => s.status === _sourcesFilter);
     }
+    // Apply search across both lists
     if (_sourcesQuery) {
         const q = _sourcesQuery.toLowerCase();
-        filtered = filtered.filter(s =>
+        const matchFn = s =>
             (s.display_name || '').toLowerCase().includes(q) ||
             (s.description || '').toLowerCase().includes(q) ||
-            (s.source_type || '').toLowerCase().includes(q)
-        );
+            (s.source_type || '').toLowerCase().includes(q);
+        filtered = filtered.filter(matchFn);
+        planned = planned.filter(matchFn);
     }
 
-    if (!filtered.length) {
+    if (!filtered.length && !planned.length) {
         container.innerHTML = '<p class="empty">No matching sources</p>';
         return;
     }
@@ -3575,10 +3595,13 @@ function _renderSourceCards() {
         platform: 'Platform Services',
         enrichment: 'Enrichment APIs',
         email: 'Email Intelligence',
-        scraper: 'Scrapers (Pending)',
+        scraper: 'Web Scrapers',
         manual: 'Manual Import',
     };
 
+    const canToggle = window.__isAdmin || window.__isDevAssistant;
+
+    // --- Render configurable sources ---
     const grouped = {};
     for (const s of filtered) {
         const cat = s.category || 'api';
@@ -3590,75 +3613,131 @@ function _renderSourceCards() {
         grouped[cat].sort((a, b) => (order[a.status] || 9) - (order[b.status] || 9));
     }
 
-    const canToggle = window.__isAdmin || window.__isDevAssistant;
     let html = '';
     for (const cat of categoryOrder) {
         const group = grouped[cat];
         if (!group || !group.length) continue;
-        const label = categoryLabels[cat] || cat;
-        html += `<h3 class="s-cat-heading">${label}</h3>`;
+        html += `<h3 class="s-cat-heading">${categoryLabels[cat] || cat}</h3>`;
+        for (const s of group) html += _renderSourceCard(s, canToggle, false);
+    }
 
-        for (const s of group) {
-            const dot = s.status === 'live' ? '🟢' : s.status === 'pending' ? '🟡' : s.status === 'error' ? '🔴' : '⚫';
-            const envVars = s.env_vars || [];
-            const envStatus = s.env_status || {};
+    // --- Render planned sources (collapsible) ---
+    if (planned.length && (!_sourcesQuery || planned.length)) {
+        const plannedGrouped = {};
+        for (const s of planned) {
+            const cat = s.category || 'api';
+            if (!plannedGrouped[cat]) plannedGrouped[cat] = [];
+            plannedGrouped[cat].push(s);
+        }
+        html += `<div style="margin-top:24px;border-top:2px solid var(--border);padding-top:16px">
+            <div style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:12px" onclick="togglePlannedSources()">
+                <h3 style="margin:0;font-size:14px;color:var(--text2)">Planned / Coming Soon</h3>
+                <span class="s-badge s-badge-planned">${planned.length}</span>
+                <span id="plannedArrow" style="font-size:12px;color:var(--muted);transition:transform .2s">${_sourcesShowPlanned ? '▼' : '▶'}</span>
+            </div>
+            <div id="plannedSourcesContainer" style="display:${_sourcesShowPlanned ? 'block' : 'none'}">`;
+        for (const cat of categoryOrder) {
+            const group = plannedGrouped[cat];
+            if (!group || !group.length) continue;
+            html += `<h3 class="s-cat-heading" style="opacity:.7">${categoryLabels[cat] || cat}</h3>`;
+            for (const s of group) html += _renderSourceCard(s, false, true);
+        }
+        html += '</div></div>';
+    }
 
-            let credsHtml = '';
-            for (const v of envVars) {
-                const isSet = envStatus[v];
-                const badge = isSet
-                    ? '<span style="color:var(--teal);font-size:11px;font-weight:600">Set</span>'
-                    : '<span style="color:var(--muted);font-size:11px">Not set</span>';
-                credsHtml += `
-                    <div class="s-cred-row" id="cred-row-${s.id}-${v}">
-                        <code>${v}</code>
-                        <span id="cred-status-${s.id}-${v}">${badge}</span>
-                        <div style="flex:1"></div>
-                        <button class="btn btn-ghost btn-sm" onclick="editCredential(${s.id},'${v}')">Edit</button>
-                    </div>
-                    <div id="cred-edit-${s.id}-${v}" style="display:none;padding:6px 0 10px">
-                        <div class="s-row">
-                            <input type="password" id="cred-input-${s.id}-${v}" placeholder="Enter value..." class="s-input" style="flex:1">
-                            <button class="btn btn-primary btn-sm" onclick="saveCredential(${s.id},'${v}')">Save</button>
-                            <button class="btn btn-ghost btn-sm" onclick="cancelCredEdit(${s.id},'${v}')">Cancel</button>
-                        </div>
-                    </div>`;
+    container.innerHTML = html;
+}
+
+function _renderSourceCard(s, canToggle, isPlanned) {
+    const envVars = s.env_vars || [];
+    const envStatus = s.env_status || {};
+    const credMasked = s.credentials_masked || {};
+
+    let credsHtml = '';
+    if (envVars.length && !isPlanned) {
+        for (const v of envVars) {
+            const isSet = envStatus[v];
+            const masked = credMasked[v] || '';
+            let badge;
+            if (isSet && masked) {
+                badge = `<span class="s-cred-masked">${masked}</span>`;
+            } else if (isSet) {
+                badge = '<span style="color:var(--teal);font-size:11px;font-weight:600">Configured</span>';
+            } else {
+                badge = '<span style="color:#d97706;font-size:11px">Not configured</span>';
             }
-
-            const statsHtml = s.total_searches
-                ? `<div class="s-hint" style="margin-top:8px">${s.total_searches} searches / ${s.total_results} results / ${s.avg_response_ms}ms avg</div>`
-                : '';
-            const errorHtml = s.last_error
-                ? `<div style="font-size:11px;color:var(--red);margin-top:4px">Last error: ${s.last_error}</div>`
-                : '';
-
-            const toggleHtml = canToggle && envVars.length
-                ? `<button class="btn btn-ghost btn-sm" onclick="toggleSourceStatus(${s.id},'${s.status}')"
-                          ${s.status === 'disabled' ? 'style="opacity:0.7"' : ''}>${s.status === 'disabled' ? 'Enable' : 'Disable'}</button>`
-                : '';
-
-            html += `<div class="card s-card" style="max-width:none">
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-                    <div>
-                        <strong style="font-size:14px">${s.display_name}</strong>
-                        <span class="s-hint" style="margin-left:8px">${s.source_type}</span>
-                    </div>
-                    <div class="s-row" style="gap:10px">
-                        <span class="s-hint">${dot} ${s.status}</span>
-                        ${toggleHtml}
-                        <button class="btn btn-ghost btn-sm" id="test-btn-${s.id}" onclick="testSourceCred(${s.id})">Test</button>
-                    </div>
+            credsHtml += `
+                <div class="s-cred-row" id="cred-row-${s.id}-${v}">
+                    <code>${v}</code>
+                    <span id="cred-status-${s.id}-${v}">${badge}</span>
+                    <div style="flex:1"></div>
+                    ${isSet ? `<button class="btn btn-ghost btn-sm" style="color:var(--red);font-size:10px" onclick="deleteCredential(${s.id},'${v}')" title="Remove credential">Remove</button>` : ''}
+                    <button class="btn btn-ghost btn-sm" onclick="editCredential(${s.id},'${v}')">${isSet ? 'Update' : 'Set'}</button>
                 </div>
-                <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${s.description || ''}</div>
-                ${s.setup_notes ? '<div class="s-hint" style="margin-bottom:8px;padding:6px 10px;background:var(--bg);border-radius:4px">' + s.setup_notes + '</div>' : ''}
-                ${s.signup_url ? '<a href="' + s.signup_url + '" target="_blank" style="font-size:11px;color:var(--teal);text-decoration:none">Get API credentials ↗</a>' : ''}
-                <div style="margin-top:10px">${credsHtml}</div>
-                <div id="test-result-${s.id}"></div>
-                ${statsHtml}${errorHtml}
-            </div>`;
+                <div id="cred-edit-${s.id}-${v}" style="display:none;padding:6px 0 10px">
+                    <div class="s-row">
+                        <input type="password" id="cred-input-${s.id}-${v}" placeholder="Enter value..." class="s-input" style="flex:1"
+                               onkeydown="if(event.key==='Enter')saveCredential(${s.id},'${v}')">
+                        <button class="btn btn-primary btn-sm" onclick="saveCredential(${s.id},'${v}')">Save</button>
+                        <button class="btn btn-ghost btn-sm" onclick="cancelCredEdit(${s.id},'${v}')">Cancel</button>
+                    </div>
+                </div>`;
         }
     }
-    container.innerHTML = html;
+
+    let statsHtml = '';
+    if (s.total_searches) {
+        statsHtml = `<div class="s-stats-row">
+            <span>${s.total_searches.toLocaleString()} searches</span>
+            <span>${(s.total_results || 0).toLocaleString()} results</span>
+            <span>${s.avg_response_ms || 0}ms avg</span>
+            ${s.last_success ? `<span>Last: ${new Date(s.last_success).toLocaleDateString()}</span>` : ''}
+        </div>`;
+    }
+
+    const errorHtml = s.last_error
+        ? `<div class="s-test-result s-test-err" style="margin-top:6px">Last error: ${s.last_error}</div>`
+        : '';
+
+    const toggleHtml = canToggle && envVars.length && !isPlanned
+        ? `<button class="btn btn-ghost btn-sm" onclick="toggleSourceStatus(${s.id},'${s.status}')"
+                  style="${s.status === 'disabled' ? 'opacity:0.7' : ''}">${s.status === 'disabled' ? 'Enable' : 'Disable'}</button>`
+        : '';
+
+    const testHtml = !isPlanned && (envVars.length || s.status === 'live')
+        ? `<button class="btn btn-ghost btn-sm" id="test-btn-${s.id}" onclick="testSourceCred(${s.id})">Test</button>`
+        : '';
+
+    const cardCls = isPlanned ? 'card s-card s-card-planned' : 'card s-card';
+
+    return `<div class="${cardCls}" style="max-width:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div style="display:flex;align-items:center;gap:10px">
+                <strong style="font-size:14px">${s.display_name}</strong>
+                ${_statusBadge(s.status, isPlanned)}
+                <span class="s-hint">${s.source_type}</span>
+            </div>
+            <div class="s-row" style="gap:8px">
+                ${toggleHtml}
+                ${testHtml}
+            </div>
+        </div>
+        <div style="font-size:12px;color:var(--text2);margin-bottom:10px">${s.description || ''}</div>
+        ${!isPlanned && s.setup_notes ? '<div class="s-hint" style="margin-bottom:8px;padding:6px 10px;background:var(--bg);border-radius:4px">' + s.setup_notes + '</div>' : ''}
+        ${isPlanned && s.setup_notes ? '<div class="s-hint" style="margin-bottom:4px">' + s.setup_notes + '</div>' : ''}
+        ${s.signup_url ? '<a href="' + s.signup_url + '" target="_blank" style="font-size:11px;color:var(--teal);text-decoration:none">' + (isPlanned ? 'More info' : 'Get API credentials') + ' ↗</a>' : ''}
+        ${credsHtml ? '<div style="margin-top:10px">' + credsHtml + '</div>' : ''}
+        <div id="test-result-${s.id}"></div>
+        ${statsHtml}${errorHtml}
+    </div>`;
+}
+
+function togglePlannedSources() {
+    _sourcesShowPlanned = !_sourcesShowPlanned;
+    const container = document.getElementById('plannedSourcesContainer');
+    const arrow = document.getElementById('plannedArrow');
+    if (container) container.style.display = _sourcesShowPlanned ? 'block' : 'none';
+    if (arrow) arrow.textContent = _sourcesShowPlanned ? '▼' : '▶';
 }
 
 async function loadSettingsSources() {
@@ -3670,21 +3749,27 @@ async function loadSettingsSources() {
         if (!sources.length) { el.innerHTML = '<p class="empty">No data sources configured</p>'; return; }
 
         _sourcesData = sources;
-        _sourcesFilter = 'all';
-        _sourcesQuery = '';
+        // Preserve filter unless first load
+        if (!el.querySelector('#sourcesCardsContainer')) {
+            _sourcesFilter = 'all';
+            _sourcesQuery = '';
+        }
 
-        // Compute summary counts (always from full data)
+        // Compute summary counts (only configurable sources)
+        const configurable = sources.filter(s => !_isPlannedSource(s));
         const counts = {live: 0, pending: 0, error: 0, disabled: 0};
-        for (const s of sources) counts[s.status] = (counts[s.status] || 0) + 1;
-        const total = sources.length;
+        for (const s of configurable) counts[s.status] = (counts[s.status] || 0) + 1;
+        const total = configurable.length;
+        const planned = sources.length - total;
 
         el.innerHTML = `
             <div style="margin-bottom:16px;padding:12px 16px;background:var(--bg);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--text2)">
-                <span class="src-status-pill${_sourcesFilter === 'all' ? ' on' : ''}" onclick="setSourcesFilter('all')" style="cursor:pointer;font-weight:600">${total} Total</span>
-                <span class="src-status-pill${_sourcesFilter === 'live' ? ' on' : ''}" onclick="setSourcesFilter('live')" style="cursor:pointer">🟢 ${counts.live} Live</span>
-                <span class="src-status-pill${_sourcesFilter === 'pending' ? ' on' : ''}" onclick="setSourcesFilter('pending')" style="cursor:pointer">🟡 ${counts.pending} Pending</span>
-                <span class="src-status-pill${_sourcesFilter === 'error' ? ' on' : ''}" onclick="setSourcesFilter('error')" style="cursor:pointer">🔴 ${counts.error} Error</span>
-                <span class="src-status-pill${_sourcesFilter === 'disabled' ? ' on' : ''}" onclick="setSourcesFilter('disabled')" style="cursor:pointer">⚫ ${counts.disabled} Disabled</span>
+                <span class="src-status-pill${_sourcesFilter === 'all' ? ' on' : ''}" onclick="setSourcesFilter('all')" style="cursor:pointer;font-weight:600">${total} Configurable</span>
+                <span class="src-status-pill${_sourcesFilter === 'live' ? ' on' : ''}" onclick="setSourcesFilter('live')" style="cursor:pointer">${counts.live} Live</span>
+                <span class="src-status-pill${_sourcesFilter === 'pending' ? ' on' : ''}" onclick="setSourcesFilter('pending')" style="cursor:pointer">${counts.pending} Pending</span>
+                ${counts.error ? `<span class="src-status-pill${_sourcesFilter === 'error' ? ' on' : ''}" onclick="setSourcesFilter('error')" style="cursor:pointer;color:var(--red)">${counts.error} Error</span>` : ''}
+                ${counts.disabled ? `<span class="src-status-pill${_sourcesFilter === 'disabled' ? ' on' : ''}" onclick="setSourcesFilter('disabled')" style="cursor:pointer">${counts.disabled} Disabled</span>` : ''}
+                <span style="color:var(--muted);font-size:11px">${planned} planned</span>
                 <input class="req-search" id="sourcesSearchInput" type="text" placeholder="Search sources…"
                        style="flex:1;min-width:160px;margin-left:auto" oninput="onSourcesSearch(this.value)" value="${_sourcesQuery}" aria-label="Search sources">
             </div>
@@ -3742,31 +3827,51 @@ async function saveCredential(sourceId, varName) {
     }
 }
 
+async function deleteCredential(sourceId, varName) {
+    if (!confirm(`Remove ${varName}? The source may stop working.`)) return;
+    try {
+        await apiFetch(`/api/admin/sources/${sourceId}/credentials/${varName}`, {
+            method: 'DELETE',
+        });
+        showToast('Credential removed', 'success');
+        loadSettingsSources();
+    } catch (e) {
+        showToast('Failed to remove credential: ' + (e.message || e), 'error');
+    }
+}
+
 async function testSourceCred(sourceId) {
     const btn = document.getElementById(`test-btn-${sourceId}`);
     const resultEl = document.getElementById(`test-result-${sourceId}`);
+    if (!btn || !resultEl) return;
     btn.disabled = true;
     btn.textContent = 'Testing...';
-    resultEl.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:6px 0">Running test...</div>';
+    resultEl.innerHTML = '<div class="s-test-result" style="background:var(--bg);color:var(--muted);border:1px solid var(--border)">Running connection test...</div>';
     try {
         const data = await apiFetch(`/api/sources/${sourceId}/test`, {method: 'POST'});
         if (data.status === 'ok') {
-            resultEl.innerHTML = `<div style="font-size:11px;color:var(--teal);padding:6px 0">Test passed — ${data.results_count} results in ${data.elapsed_ms}ms</div>`;
+            resultEl.innerHTML = `<div class="s-test-result s-test-ok">Test passed — ${data.results_count} result(s) in ${data.elapsed_ms}ms</div>`;
         } else if (data.status === 'no_results') {
-            resultEl.innerHTML = '<div style="font-size:11px;color:var(--amber);padding:6px 0">Connected but no results for test MPN</div>';
+            resultEl.innerHTML = '<div class="s-test-result s-test-warn">Connected successfully, but no results for test MPN (LM358N)</div>';
         } else {
-            resultEl.innerHTML = `<div style="font-size:11px;color:var(--red);padding:6px 0">Test failed: ${data.error || 'Unknown error'}</div>`;
+            resultEl.innerHTML = `<div class="s-test-result s-test-err">Test failed: ${data.error || 'Unknown error'}</div>`;
         }
-        loadSettingsSources();
+        // Update local data without full rebuild (preserves test result)
+        const src = _sourcesData.find(s => s.id === sourceId);
+        if (src) {
+            src.status = data.status === 'ok' ? 'live' : data.status === 'no_results' ? 'live' : 'error';
+            if (data.error) src.last_error = data.error;
+            else src.last_error = null;
+        }
     } catch (e) {
-        resultEl.innerHTML = `<div style="font-size:11px;color:var(--red);padding:6px 0">Test error: ${e.message || e}</div>`;
+        resultEl.innerHTML = `<div class="s-test-result s-test-err">Test error: ${e.message || e}</div>`;
     }
     btn.disabled = false;
     btn.textContent = 'Test';
 }
 
 async function toggleSourceStatus(sourceId, currentStatus) {
-    const newStatus = currentStatus === 'disabled' ? 'pending' : 'disabled';
+    const newStatus = currentStatus === 'disabled' ? 'live' : 'disabled';
     try {
         await apiFetch(`/api/sources/${sourceId}/toggle`, {
             method: 'PUT',

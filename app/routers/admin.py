@@ -229,12 +229,20 @@ def api_delete_credential(
     db: Session = Depends(get_db),
 ):
     """Remove a single credential from a source."""
+    from ..services.credential_service import credential_is_set
+
     src = db.get(ApiSource, source_id)
     if not src:
         raise HTTPException(404, "Source not found")
     creds = dict(src.credentials or {})
     removed = creds.pop(var_name, None)
     src.credentials = creds
+    # Recheck status — if credentials are now incomplete, downgrade to pending
+    env_vars = src.env_vars or []
+    if env_vars and src.status == "live":
+        all_set = all(credential_is_set(db, src.name, v) for v in env_vars)
+        if not all_set:
+            src.status = "pending"
     db.commit()
     logger.info(f"Credential {var_name} removed from {src.name} by {user.email}")
     return {"status": "removed" if removed else "not_found"}

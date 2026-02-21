@@ -392,7 +392,7 @@ async def list_api_sources(
     """Return all API sources grouped by status."""
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
 
-    from ..services.credential_service import credential_is_set
+    from ..services.credential_service import credential_is_set, get_credential, mask_value
 
     for src in sources:
         env_vars = src.env_vars or []
@@ -408,8 +408,13 @@ async def list_api_sources(
     result = []
     for src in sources:
         env_status = {}
+        credentials_masked = {}
         for v in src.env_vars or []:
-            env_status[v] = credential_is_set(db, src.name, v)
+            is_set = credential_is_set(db, src.name, v)
+            env_status[v] = is_set
+            if is_set:
+                plain = get_credential(db, src.name, v)
+                credentials_masked[v] = mask_value(plain) if plain else ""
 
         result.append(
             {
@@ -424,6 +429,7 @@ async def list_api_sources(
                 "signup_url": src.signup_url,
                 "env_vars": src.env_vars or [],
                 "env_status": env_status,
+                "credentials_masked": credentials_masked,
                 "last_success": src.last_success.isoformat()
                 if src.last_success
                 else None,
@@ -453,6 +459,8 @@ async def test_api_source(
     results = []
     error = None
 
+    has_env_vars = bool(src.env_vars and len(src.env_vars))
+
     try:
         connector = _get_connector_for_source(src.name, db)
         if not connector:
@@ -460,15 +468,18 @@ async def test_api_source(
         results = await connector.search(test_mpn)
         elapsed_ms = int((time.time() - start) * 1000)
 
-        src.status = "live"
-        src.last_success = datetime.now(timezone.utc)
-        src.last_error = None
-        src.avg_response_ms = elapsed_ms
+        if has_env_vars:
+            src.status = "live"
+            src.last_success = datetime.now(timezone.utc)
+            src.last_error = None
+            src.avg_response_ms = elapsed_ms
     except Exception as e:
         elapsed_ms = int((time.time() - start) * 1000)
         error = str(e)[:500]
-        src.status = "error"
-        src.last_error = error
+        # Only mark as error if source is configurable (has env_vars)
+        if has_env_vars:
+            src.status = "error"
+            src.last_error = error
 
     db.commit()
 
@@ -491,10 +502,20 @@ async def toggle_api_source(
     db: Session = Depends(get_db),
 ):
     """Enable or disable a source (admin + dev_assistant)."""
+    from ..services.credential_service import credential_is_set
+
     src = db.get(ApiSource, source_id)
     if not src:
         raise HTTPException(404, "API source not found")
-    src.status = payload.status
+    new_status = payload.status
+    # When enabling, auto-detect correct status based on credentials
+    if new_status != "disabled":
+        env_vars = src.env_vars or []
+        if env_vars and all(credential_is_set(db, src.name, v) for v in env_vars):
+            new_status = "live"
+        else:
+            new_status = "pending"
+    src.status = new_status
     db.commit()
     return {"ok": True, "status": src.status}
 
