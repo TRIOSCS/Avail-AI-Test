@@ -168,8 +168,9 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
 
     nexar_id = _cred("nexar", "NEXAR_CLIENT_ID")
     nexar_sec = _cred("nexar", "NEXAR_CLIENT_SECRET")
-    _add_or_skip("nexar", nexar_id and nexar_sec,
-                 lambda: NexarConnector(nexar_id, nexar_sec))
+    octopart_key = _cred("nexar", "OCTOPART_API_KEY")
+    _add_or_skip("nexar", nexar_id and nexar_sec or octopart_key,
+                 lambda: NexarConnector(nexar_id, nexar_sec, octopart_key))
 
     bb_key = _cred("brokerbin", "BROKERBIN_API_KEY")
     bb_sec = _cred("brokerbin", "BROKERBIN_API_SECRET")

@@ -36,6 +36,7 @@ class Settings:
     # Nexar (Octopart) API
     nexar_client_id: str = os.getenv("NEXAR_CLIENT_ID", "")
     nexar_client_secret: str = os.getenv("NEXAR_CLIENT_SECRET", "")
+    octopart_api_key: str = os.getenv("OCTOPART_API_KEY", "")
 
     # BrokerBin API
     brokerbin_api_key: str = os.getenv("BROKERBIN_API_KEY", "")

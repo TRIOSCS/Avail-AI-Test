@@ -98,10 +98,11 @@ class BaseConnector(ABC):
 
 
 class NexarConnector(BaseConnector):
-    """Nexar/Octopart GraphQL API — full seller data."""
+    """Nexar/Octopart API — full seller data via GraphQL or REST v4."""
 
     TOKEN_URL = "https://identity.nexar.com/connect/token"
     API_URL = "https://api.nexar.com/graphql"
+    REST_SEARCH_URL = "https://octopart.com/api/v4/rest/parts/search"
 
     FULL_QUERY = """
     query ($mpn: String!) {
@@ -144,10 +145,11 @@ class NexarConnector(BaseConnector):
       }
     }"""
 
-    def __init__(self, client_id: str, client_secret: str):
+    def __init__(self, client_id: str, client_secret: str, octopart_api_key: str = ""):
         super().__init__()
         self.client_id = client_id
         self.client_secret = client_secret
+        self.octopart_api_key = octopart_api_key
         self._token = None
 
     async def _get_token(self) -> str:
@@ -196,10 +198,119 @@ class NexarConnector(BaseConnector):
         r.raise_for_status()
         return r.json()
 
+    async def _rest_search(self, part_number: str) -> list[dict] | None:
+        """Try Octopart REST v4 /parts/search — returns full seller data.
+
+        Returns None if the REST API key is missing or the endpoint fails,
+        so the caller can fall back to the aggregate GraphQL query.
+        """
+        if not self.octopart_api_key:
+            return None
+
+        from ..http_client import http
+
+        try:
+            r = await http.get(
+                self.REST_SEARCH_URL,
+                params={"q": part_number, "apikey": self.octopart_api_key, "limit": 20},
+                timeout=self.timeout,
+            )
+            if r.status_code != 200:
+                log.warning(f"Nexar REST v4: HTTP {r.status_code} for {part_number}")
+                return None
+
+            data = r.json()
+
+            # REST v4 wraps errors in an "error" key (string or dict)
+            if "error" in data:
+                err = data["error"]
+                err_str = err if isinstance(err, str) else str(err)
+                if "not found" in err_str or "no token" in err_str:
+                    log.warning(f"Nexar REST v4: auth error for {part_number}: {err_str[:120]}")
+                    return None
+                log.warning(f"Nexar REST v4: error for {part_number}: {err_str[:120]}")
+                return None
+
+            return self._parse_rest_v4(data, part_number)
+        except Exception as e:
+            log.warning(f"Nexar REST v4 failed for {part_number}: {e}")
+            return None
+
+    def _parse_rest_v4(self, data: dict, pn: str) -> list[dict]:
+        """Parse Octopart REST v4 /parts/search response (v3-style JSON)."""
+        results = []
+        seen = set()
+        search_url = f"https://octopart.com/search?q={quote_plus(pn)}"
+
+        for hit in data.get("results", []):
+            item = hit.get("item") or hit  # v4 nests under "item"
+            mpn = item.get("mpn", pn)
+            mfr = (item.get("manufacturer") or item.get("brand") or {}).get("name", "")
+            octopart_url = item.get("octopart_url", search_url)
+
+            for seller in item.get("offer_sellers", item.get("sellers", [])):
+                company = seller.get("seller") or seller.get("company") or {}
+                name = company.get("name", "")
+                if not name:
+                    continue
+                auth = seller.get("is_authorized", False)
+                homepage = company.get("homepage_url", "")
+
+                for offer in seller.get("offers", []):
+                    qty = offer.get("in_stock_quantity") or offer.get("inventory_level")
+                    sku = offer.get("sku", "")
+                    click_url = offer.get("product_url") or offer.get("click_url", "")
+
+                    price, currency = None, "USD"
+                    prices = offer.get("prices") or []
+                    if isinstance(prices, list) and prices:
+                        best = min(prices, key=lambda p: p.get("quantity", 999999))
+                        price = best.get("price")
+                        currency = best.get("currency", "USD")
+                    elif isinstance(prices, dict):
+                        for curr_prices in prices.values():
+                            if curr_prices:
+                                price = curr_prices[0][1] if len(curr_prices[0]) > 1 else None
+                                break
+
+                    key = f"{name}_{mpn}_{sku}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    results.append({
+                        "vendor_name": name,
+                        "manufacturer": mfr,
+                        "mpn_matched": mpn,
+                        "qty_available": int(qty) if qty else None,
+                        "unit_price": round(float(price), 4) if price else None,
+                        "currency": currency,
+                        "source_type": "octopart",
+                        "is_authorized": auth,
+                        "confidence": 5 if auth and qty else 4 if qty else 3,
+                        "octopart_url": octopart_url,
+                        "click_url": click_url,
+                        "vendor_url": homepage,
+                        "vendor_sku": sku,
+                    })
+
+        log.info(f"Nexar REST v4: {pn} -> {len(results)} seller results")
+        return results
+
     async def _do_search(self, part_number: str) -> list[dict]:
+        if not self.client_id and not self.octopart_api_key:
+            return []
+
+        # Path 1: Try REST v4 /parts/search first (if API key configured)
+        # — uses a different auth path that may bypass GraphQL role restrictions
+        rest_results = await self._rest_search(part_number)
+        if rest_results is not None:
+            return rest_results
+
         if not self.client_id:
             return []
 
+        # Path 2: Try GraphQL full query with sellers
         data = await self._run_query(self.FULL_QUERY, part_number)
         errors = data.get("errors", [])
         if errors:
@@ -207,7 +318,7 @@ class NexarConnector(BaseConnector):
             log.warning(f"Nexar query error for {part_number}: {msg[:120]}")
             # Fall back to aggregate query if sellers field is not authorized
             if "not authorized" in msg.lower() and "sellers" in msg.lower():
-                log.info(f"Nexar: retrying {part_number} with aggregate query (totalAvail + medianPrice)")
+                log.info(f"Nexar: falling back to aggregate query for {part_number}")
                 data = await self._run_query(self.AGGREGATE_QUERY, part_number)
                 results_data = (
                     (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])

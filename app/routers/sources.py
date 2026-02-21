@@ -67,8 +67,9 @@ def _get_connector_for_source(name: str, db: Session = None):
 
     nexar_id = _cred("NEXAR_CLIENT_ID")
     nexar_sec = _cred("NEXAR_CLIENT_SECRET")
-    if name == "nexar" and nexar_id:
-        return NexarConnector(nexar_id, nexar_sec)
+    octopart_key = _cred("OCTOPART_API_KEY")
+    if name == "nexar" and (nexar_id or octopart_key):
+        return NexarConnector(nexar_id, nexar_sec, octopart_key)
 
     bb_key = _cred("BROKERBIN_API_KEY")
     bb_sec = _cred("BROKERBIN_API_SECRET")
