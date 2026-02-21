@@ -1277,8 +1277,13 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
     const showAll = dd.dataset.showAll === '1';
     let html = '';
     for (const [rId, group] of groups) {
-        const sightings = group.sightings || [];
+        const allSightings = group.sightings || [];
         const label = group.label || 'Unknown MPN';
+
+        // Separate aggregate (Octopart) from real vendor sightings
+        const aggregates = allSightings.filter(s => (s.source_type || '').toLowerCase() === 'octopart');
+        const sightings = allSightings.filter(s => (s.source_type || '').toLowerCase() !== 'octopart');
+
         // Per-requirement sourcing score dot with tooltip
         const rs = scoreMap[rId];
         let effortBadge = '';
@@ -1288,11 +1293,32 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         }
         html += `<div style="margin-bottom:10px">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-                <span style="font-size:11px;font-weight:700;color:var(--text2)">${esc(label)}${effortBadge} <span style="font-weight:400;color:var(--muted)">(${sightings.length} source${sightings.length !== 1 ? 's' : ''})</span></span>
+                <span style="font-size:11px;font-weight:700;color:var(--text2)">${esc(label)}${effortBadge} <span style="font-weight:400;color:var(--muted)">(${sightings.length} vendor${sightings.length !== 1 ? 's' : ''})</span></span>
                 <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px" onclick="event.stopPropagation();ddResearchPart(${reqId},${rId})" title="Re-search this part">\u21bb Search</button>
             </div>`;
-        if (!sightings.length) {
+
+        // Market summary banner from Octopart aggregate data
+        if (aggregates.length) {
+            const totalAvail = aggregates.reduce((sum, a) => sum + (a.qty_available || 0), 0);
+            const prices = aggregates.filter(a => a.unit_price).map(a => parseFloat(a.unit_price));
+            const minPrice = prices.length ? Math.min(...prices) : null;
+            const octoUrl = aggregates[0].click_url || aggregates[0].octopart_url || '';
+            html += `<div class="mkt-banner">
+                <span class="mkt-icon">&#x1f310;</span>
+                <span class="mkt-label">Market</span>
+                <span class="mkt-stat"><b>${totalAvail ? Number(totalAvail).toLocaleString() : '—'}</b> total available</span>
+                ${minPrice ? `<span class="mkt-stat">from <b style="color:var(--teal)">$${minPrice.toFixed(2)}</b></span>` : ''}
+                <span class="mkt-stat mkt-mpns">${aggregates.map(a => esc(a.mpn_matched || '')).filter(Boolean).join(', ')}</span>
+                ${octoUrl ? `<a href="${encodeURI(octoUrl)}" target="_blank" rel="noopener" class="mkt-link" onclick="event.stopPropagation()">View on Octopart &#x2197;</a>` : ''}
+            </div>`;
+        }
+
+        if (!sightings.length && !aggregates.length) {
             html += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">No sources found</div></div>';
+            continue;
+        }
+        if (!sightings.length) {
+            html += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">No vendor listings yet — try searching</div></div>';
             continue;
         }
         const visible = showAll ? sightings : sightings.slice(0, DD_LIMIT);

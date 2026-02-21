@@ -1332,6 +1332,16 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
     .det-part-core { margin-bottom:8px; }
 }
 
+/* Market summary banner (Octopart aggregate) */
+.mkt-banner { display:flex; align-items:center; gap:8px; padding:5px 10px; background:linear-gradient(90deg, #f0f7ff 0%, #f8fbff 100%); border:1px solid #d0e2f4; border-radius:6px; margin-bottom:6px; font-size:11px; flex-wrap:wrap; }
+.mkt-icon { font-size:13px; }
+.mkt-label { font-weight:700; color:var(--blue); font-size:10px; text-transform:uppercase; letter-spacing:.3px; }
+.mkt-stat { color:var(--text2); }
+.mkt-stat b { font-weight:700; }
+.mkt-mpns { font-size:10px; color:var(--muted); font-family:var(--mono); }
+.mkt-link { font-size:10px; color:var(--blue); text-decoration:none; margin-left:auto; font-weight:600; white-space:nowrap; }
+.mkt-link:hover { text-decoration:underline; }
+
 /* Search overlay */
 .dd-search-overlay { display:flex; align-items:center; justify-content:center; gap:8px; position:absolute; inset:0; background:rgba(255,255,255,.85); z-index:5; font-size:13px; font-weight:600; color:var(--blue); border-radius:6px; }
 @media (prefers-color-scheme: dark) { .dd-search-overlay { background:rgba(30,30,30,.85); } }
