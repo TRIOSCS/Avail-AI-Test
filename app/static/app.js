@@ -687,8 +687,8 @@ async function loadRequisitions(query = '', append = false) {
             ? `/api/requisitions?q=${encodeURIComponent(query)}${status}`
             : `/api/requisitions?limit=${limit}&offset=${offset}${status}`;
         _serverSearchActive = !!query;
-        // Show loading indicator on search inputs
-        document.querySelectorAll('#mainSearch, #mobileMainSearch').forEach(el => el.classList.add('searching'));
+        // Show spinner on search buttons
+        document.querySelectorAll('.search-btn').forEach(el => el.classList.add('loading'));
         const resp = await apiFetch(url, { signal });
         // Discard stale response if a newer request was fired
         if (thisSeq !== _reqSearchSeq) return;
@@ -706,7 +706,7 @@ async function loadRequisitions(query = '', append = false) {
         logCatchError('loadRequisitions', e); showToast('Failed to load requisitions', 'error');
     } finally {
         if (thisSeq === _reqSearchSeq) {
-            document.querySelectorAll('#mainSearch, #mobileMainSearch').forEach(el => el.classList.remove('searching'));
+            document.querySelectorAll('.search-btn').forEach(el => el.classList.remove('loading'));
         }
     }
 }
@@ -2403,6 +2403,14 @@ const debouncedMainSearch = debounce(function(val) {
     if (q.length >= 2) loadRequisitions(q);
     else if (q.length === 0) loadRequisitions();
 }, 300);
+
+function triggerMainSearch() {
+    var ds = document.getElementById('mainSearch');
+    var ms = document.getElementById('mobileMainSearch');
+    const q = (ds?.value || ms?.value || '').trim();
+    if (q.length >= 2) loadRequisitions(q);
+    else loadRequisitions();
+}
 
 // ── v7 Sidebar Navigation ───────────────────────────────────────────────
 function toggleSidebar() {
