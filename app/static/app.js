@@ -2678,11 +2678,11 @@ function setMainView(view, btn) {
     if (view === 'rfq') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
-        loadRequisitions();
+        if (_reqListData.length) renderReqList(); else loadRequisitions();
     } else if (view === 'sourcing') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
-        loadRequisitions();
+        if (_reqListData.length) renderReqList(); else loadRequisitions();
         loadFollowUpsPanel();
     } else if (view === 'archive') {
         _reqStatusFilter = 'archive';
