@@ -52,10 +52,12 @@ def _get_connector_for_source(name: str, db: Session = None):
     Checks DB credentials first, falls back to env vars."""
     from ..connectors.digikey import DigiKeyConnector
     from ..connectors.ebay import EbayConnector
+    from ..connectors.element14 import Element14Connector
     from ..connectors.mouser import MouserConnector
     from ..connectors.oemsecrets import OEMSecretsConnector
     from ..connectors.sourcengine import SourcengineConnector
     from ..connectors.sources import BrokerBinConnector, NexarConnector
+    from ..connectors.tme import TMEConnector
     from ..services.credential_service import get_credential
 
     def _cred(var_name):
@@ -94,6 +96,15 @@ def _get_connector_for_source(name: str, db: Session = None):
     src_key = _cred("SOURCENGINE_API_KEY")
     if name == "sourcengine" and src_key:
         return SourcengineConnector(src_key)
+
+    e14_key = _cred("ELEMENT14_API_KEY")
+    if name == "newark" and e14_key:
+        return Element14Connector(e14_key)
+
+    tme_token = _cred("TME_API_TOKEN")
+    tme_secret = _cred("TME_API_SECRET")
+    if name == "tme" and tme_token and tme_secret:
+        return TMEConnector(tme_token, tme_secret)
 
     if name == "email_mining" and settings.email_mining_enabled:
         return _EmailMiningTestConnector()
