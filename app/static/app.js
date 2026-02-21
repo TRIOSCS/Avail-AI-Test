@@ -2664,6 +2664,8 @@ function applyDropdownFilters(data) {
 // ── v7 Main View Switcher ───────────────────────────────────────────────
 function setMainView(view, btn) {
     _currentMainView = view;
+    // Reset per-RFQ active tab so each view opens its own default sub-tab
+    for (const k of Object.keys(_ddActiveTab)) delete _ddActiveTab[k];
     document.querySelectorAll('#mainPills .fp').forEach(b => b.classList.remove('on'));
     if (btn) btn.classList.add('on');
     _activeFilters = {};
