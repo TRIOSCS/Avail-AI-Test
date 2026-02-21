@@ -398,7 +398,7 @@ async def _job_contacts_sync():
 
 @_traced_job
 async def _job_engagement_scoring():
-    """Compute engagement scores for all vendors with outreach data."""
+    """Compute unified vendor scores for all vendors."""
     from .database import SessionLocal
     from .models import VendorCard
 
@@ -406,9 +406,9 @@ async def _job_engagement_scoring():
     try:
         now = datetime.now(timezone.utc)
         latest = (
-            db.query(VendorCard.engagement_computed_at)
-            .filter(VendorCard.engagement_computed_at.isnot(None))
-            .order_by(VendorCard.engagement_computed_at.desc())
+            db.query(VendorCard.vendor_score_computed_at)
+            .filter(VendorCard.vendor_score_computed_at.isnot(None))
+            .order_by(VendorCard.vendor_score_computed_at.desc())
             .first()
         )
 
@@ -421,9 +421,9 @@ async def _job_engagement_scoring():
                 should_compute = False
 
         if should_compute:
-            await _compute_engagement_scores_job(db)
+            await _compute_vendor_scores_job(db)
     except Exception as e:
-        logger.error(f"Engagement scoring error: {e}")
+        logger.error(f"Vendor scoring error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -1177,20 +1177,20 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
 # ── Upgrade 4: Engagement Score Computation ───────────────────────────
 
 
-async def _compute_engagement_scores_job(db):
-    """Recompute engagement scores for all vendors with outreach data.
+async def _compute_vendor_scores_job(db):
+    """Recompute unified vendor scores for all vendors.
 
-    Called once per day by the scheduler tick.
+    Called every 12h by the scheduler.
     """
-    from .services.engagement_scorer import compute_all_engagement_scores
+    from .services.vendor_score import compute_all_vendor_scores
 
     try:
-        result = await compute_all_engagement_scores(db)
+        result = await compute_all_vendor_scores(db)
         logger.info(
-            f"Engagement scoring complete: {result['updated']} updated, {result['skipped']} skipped"
+            f"Vendor scoring complete: {result['updated']} updated, {result['skipped']} skipped"
         )
     except Exception as e:
-        logger.error(f"Engagement scoring failed: {e}")
+        logger.error(f"Vendor scoring failed: {e}")
 
 
 # ── Contacts Sync (Outlook → VendorCards) ───────────────────────────────

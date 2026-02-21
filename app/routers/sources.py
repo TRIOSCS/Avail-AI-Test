@@ -660,10 +660,10 @@ async def email_mining_compute_engagement(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Manually trigger engagement score recomputation for all vendor cards."""
-    from ..services.engagement_scorer import compute_all_engagement_scores
+    """Manually trigger vendor score recomputation for all vendor cards."""
+    from ..services.vendor_score import compute_all_vendor_scores
 
-    result = await compute_all_engagement_scores(db)
+    result = await compute_all_vendor_scores(db)
     return {
         "updated": result.get("updated", 0),
         "skipped": result.get("skipped", 0),
@@ -676,44 +676,29 @@ async def vendor_engagement_detail(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Get detailed engagement breakdown for a specific vendor."""
-    from ..services.engagement_scorer import compute_engagement_score
+    """Get detailed vendor score breakdown for a specific vendor."""
+    from ..services.vendor_score import compute_single_vendor_score
 
     card = db.query(VendorCard).filter_by(id=vendor_id).first()
     if not card:
         raise HTTPException(404, "Vendor not found")
 
-    result = compute_engagement_score(
-        total_outreach=card.total_outreach or 0,
-        total_responses=card.total_responses or 0,
-        total_wins=card.total_wins or 0,
-        avg_velocity_hours=card.response_velocity_hours,
-        last_contact_at=card.last_contact_at,
-    )
+    result = compute_single_vendor_score(db, vendor_id)
 
     return {
         "vendor_id": card.id,
         "vendor_name": card.display_name,
-        "engagement_score": result["engagement_score"],
-        "metrics": {
-            "response_rate": result["response_rate"],
-            "ghost_rate": result["ghost_rate"],
-            "recency_score": result["recency_score"],
-            "velocity_score": result["velocity_score"],
-            "win_rate": result["win_rate"],
-        },
+        "vendor_score": result["vendor_score"],
+        "advancement_score": result["advancement_score"],
+        "is_new_vendor": result["is_new_vendor"],
+        "engagement_score": result["vendor_score"],
         "raw_counts": {
             "total_outreach": card.total_outreach or 0,
             "total_responses": card.total_responses or 0,
             "total_wins": card.total_wins or 0,
-            "response_velocity_hours": card.response_velocity_hours,
-            "relationship_months": card.relationship_months,
-            "last_contact_at": card.last_contact_at.isoformat()
-            if card.last_contact_at
-            else None,
         },
-        "computed_at": card.engagement_computed_at.isoformat()
-        if card.engagement_computed_at
+        "computed_at": card.vendor_score_computed_at.isoformat()
+        if card.vendor_score_computed_at
         else None,
     }
 

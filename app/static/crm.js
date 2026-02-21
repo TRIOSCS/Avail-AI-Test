@@ -1431,9 +1431,13 @@ function renderBuyPlanStatus(targetId) {
             }
             poCell = `<td>${poCell} ${verifyIcon}${poDetails}</td>`;
         }
+        const vsBadge = item.vendor_score != null
+            ? `<span class="badge ${item.vendor_score >= 66 ? 'b-proven' : item.vendor_score >= 33 ? 'b-developing' : 'b-caution'}">${Math.round(item.vendor_score)}</span>`
+            : '<span class="badge b-new">New</span>';
         return `<tr>
             <td>${esc(item.mpn)}</td>
             <td>${esc(item.vendor_name)}</td>
+            <td>${vsBadge}</td>
             <td>${planQty.toLocaleString()}</td>
             <td>$${Number(item.cost_price||0).toFixed(4)}</td>
             <td>${esc(item.lead_time||'\u2014')}</td>
@@ -1519,7 +1523,7 @@ function renderBuyPlanStatus(targetId) {
             ${notesHtml}
             <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
             <table class="tbl" style="margin-bottom:0">
-                <thead><tr><th>MPN</th><th>Vendor</th><th>Plan Qty</th><th>Cost</th><th>Lead</th>${hidePoCol ? '' : '<th>PO</th>'}</tr></thead>
+                <thead><tr><th>MPN</th><th>Vendor</th><th>V.Score</th><th>Plan Qty</th><th>Cost</th><th>Lead</th>${hidePoCol ? '' : '<th>PO</th>'}</tr></thead>
                 <tbody>${itemsHtml}</tbody>
             </table>
             </div>

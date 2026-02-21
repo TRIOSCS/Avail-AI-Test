@@ -65,6 +65,12 @@ class VendorCard(Base):
     engagement_score = Column(Float)
     engagement_computed_at = Column(DateTime)
 
+    # Unified vendor score (order advancement based)
+    vendor_score = Column(Float)              # 0-100 unified score, or None
+    advancement_score = Column(Float)         # 0-100 raw advancement component
+    is_new_vendor = Column(Boolean, default=True)
+    vendor_score_computed_at = Column(DateTime)
+
     # v1.3.0: Vendor scorecard fields
     avg_response_hours = Column(Float)
     overall_win_rate = Column(Float)

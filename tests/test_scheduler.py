@@ -252,9 +252,9 @@ def test_batch_results_calls_process(scheduler_db):
 
 
 def test_engagement_scoring_runs_when_stale(scheduler_db):
-    """Engagement scoring runs when no recent computation exists."""
+    """Vendor scoring runs when no recent computation exists."""
     with patch(
-        "app.scheduler._compute_engagement_scores_job", new_callable=AsyncMock
+        "app.scheduler._compute_vendor_scores_job", new_callable=AsyncMock
     ) as mock_compute:
         from app.scheduler import _job_engagement_scoring
         asyncio.get_event_loop().run_until_complete(_job_engagement_scoring())
@@ -262,19 +262,19 @@ def test_engagement_scoring_runs_when_stale(scheduler_db):
 
 
 def test_engagement_scoring_skips_when_recent(scheduler_db):
-    """Engagement scoring skips when computed recently."""
+    """Vendor scoring skips when computed recently."""
     card = VendorCard(
         normalized_name="test vendor",
         display_name="Test Vendor",
         emails=[],
         phones=[],
-        engagement_computed_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        vendor_score_computed_at=datetime.now(timezone.utc) - timedelta(hours=2),
     )
     scheduler_db.add(card)
     scheduler_db.commit()
 
     with patch(
-        "app.scheduler._compute_engagement_scores_job", new_callable=AsyncMock
+        "app.scheduler._compute_vendor_scores_job", new_callable=AsyncMock
     ) as mock_compute:
         from app.scheduler import _job_engagement_scoring
         asyncio.get_event_loop().run_until_complete(_job_engagement_scoring())
@@ -1213,34 +1213,34 @@ def test_deep_enrichment_error_handling(scheduler_db):
         asyncio.get_event_loop().run_until_complete(_job_deep_enrichment())
 
 
-# ── _compute_engagement_scores_job() ──────────────────────────────────
+# ── _compute_vendor_scores_job() ──────────────────────────────────
 
 
 def test_compute_engagement_scores_job_delegates(db_session):
-    """Engagement scores job delegates to compute_all_engagement_scores."""
+    """Vendor scores job delegates to compute_all_vendor_scores."""
     with patch(
-        "app.services.engagement_scorer.compute_all_engagement_scores",
+        "app.services.vendor_score.compute_all_vendor_scores",
         new_callable=AsyncMock,
     ) as mock_compute:
         mock_compute.return_value = {"updated": 10, "skipped": 2}
-        from app.scheduler import _compute_engagement_scores_job
+        from app.scheduler import _compute_vendor_scores_job
         asyncio.get_event_loop().run_until_complete(
-            _compute_engagement_scores_job(db_session)
+            _compute_vendor_scores_job(db_session)
         )
         mock_compute.assert_called_once_with(db_session)
 
 
 def test_compute_engagement_scores_job_handles_error(db_session):
-    """Engagement scores job handles errors without propagating."""
+    """Vendor scores job handles errors without propagating."""
     with patch(
-        "app.services.engagement_scorer.compute_all_engagement_scores",
+        "app.services.vendor_score.compute_all_vendor_scores",
         new_callable=AsyncMock,
         side_effect=Exception("Scorer crashed"),
     ):
-        from app.scheduler import _compute_engagement_scores_job
+        from app.scheduler import _compute_vendor_scores_job
         # Should not raise
         asyncio.get_event_loop().run_until_complete(
-            _compute_engagement_scores_job(db_session)
+            _compute_vendor_scores_job(db_session)
         )
 
 
@@ -1248,9 +1248,9 @@ def test_compute_engagement_scores_job_handles_error(db_session):
 
 
 def test_engagement_scoring_error_handling(scheduler_db):
-    """Engagement scoring handles errors gracefully."""
+    """Vendor scoring handles errors gracefully."""
     with patch(
-        "app.scheduler._compute_engagement_scores_job",
+        "app.scheduler._compute_vendor_scores_job",
         new_callable=AsyncMock,
         side_effect=Exception("DB error"),
     ):
@@ -1260,19 +1260,19 @@ def test_engagement_scoring_error_handling(scheduler_db):
 
 
 def test_engagement_scoring_runs_when_old_computation(scheduler_db):
-    """Engagement scoring runs when the last computation is >12h old."""
+    """Vendor scoring runs when the last computation is >12h old."""
     card = VendorCard(
         normalized_name="old score vendor",
         display_name="Old Score Vendor",
         emails=[],
         phones=[],
-        engagement_computed_at=datetime.now(timezone.utc) - timedelta(hours=20),
+        vendor_score_computed_at=datetime.now(timezone.utc) - timedelta(hours=20),
     )
     scheduler_db.add(card)
     scheduler_db.commit()
 
     with patch(
-        "app.scheduler._compute_engagement_scores_job", new_callable=AsyncMock
+        "app.scheduler._compute_vendor_scores_job", new_callable=AsyncMock
     ) as mock_compute:
         from app.scheduler import _job_engagement_scoring
         asyncio.get_event_loop().run_until_complete(_job_engagement_scoring())

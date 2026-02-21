@@ -29,6 +29,7 @@ def _make_vendor_card(**overrides) -> SimpleNamespace:
         linkedin_url=None, legal_name=None, industry="Semiconductors",
         employee_size="50-100", hq_city="Dallas", hq_state="TX", hq_country="US",
         last_enriched_at=None, enrichment_source=None,
+        vendor_score=72.5, advancement_score=72.5, is_new_vendor=False,
         engagement_score=72.5, total_outreach=20, total_responses=14,
         ghost_rate=0.3, response_velocity_hours=4.2,
         last_contact_at=datetime(2026, 1, 15, tzinfo=timezone.utc),

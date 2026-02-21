@@ -55,9 +55,23 @@ def _add_missing_columns(conn) -> None:
     """
     stmts = [
         "ALTER TABLE buy_plans ADD COLUMN IF NOT EXISTS token_expires_at TIMESTAMP",
+        # Unified vendor score columns
+        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS vendor_score FLOAT",
+        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS advancement_score FLOAT",
+        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS is_new_vendor BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS vendor_score_computed_at TIMESTAMP",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
+
+    # Backfill vendor_score from engagement_score as initial data
+    _exec(conn, """
+        UPDATE vendor_cards
+        SET vendor_score = engagement_score,
+            advancement_score = engagement_score,
+            is_new_vendor = CASE WHEN engagement_score IS NULL THEN TRUE ELSE FALSE END
+        WHERE vendor_score IS NULL AND engagement_score IS NOT NULL
+    """)
 
 
 def _exec(conn, stmt: str, params: dict | None = None) -> None:

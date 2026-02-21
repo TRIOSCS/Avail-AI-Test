@@ -450,7 +450,7 @@ def test_scan_outbound_no_m365(
 def test_compute_engagement(sources_client: TestClient):
     """POST /api/email-mining/compute-engagement triggers recomputation."""
     with patch(
-        "app.services.engagement_scorer.compute_all_engagement_scores",
+        "app.services.vendor_score.compute_all_vendor_scores",
         new_callable=AsyncMock,
         return_value={"updated": 5, "skipped": 0},
     ):
@@ -469,17 +469,16 @@ def test_vendor_engagement_detail(
     sources_client: TestClient,
     test_vendor_card: VendorCard,
 ):
-    """GET /api/vendors/{id}/engagement returns 200 with engagement data."""
+    """GET /api/vendors/{id}/engagement returns 200 with vendor score data."""
     resp = sources_client.get(f"/api/vendors/{test_vendor_card.id}/engagement")
     assert resp.status_code == 200
     data = resp.json()
     assert data["vendor_id"] == test_vendor_card.id
     assert data["vendor_name"] == "Arrow Electronics"
-    assert "engagement_score" in data
-    assert "metrics" in data
+    assert "vendor_score" in data
+    assert "advancement_score" in data
+    assert "is_new_vendor" in data
     assert "raw_counts" in data
-    assert "response_rate" in data["metrics"]
-    assert "ghost_rate" in data["metrics"]
 
 
 # ── 15. test_vendor_engagement_not_found ─────────────────────────────
@@ -498,7 +497,7 @@ def test_vendor_engagement_detail_with_data(
     sources_client: TestClient,
     db_session: Session,
 ):
-    """Vendor with engagement data returns computed score in response."""
+    """Vendor with data returns vendor score in response."""
     card = VendorCard(
         normalized_name="engaged vendor",
         display_name="Engaged Vendor",
@@ -510,6 +509,8 @@ def test_vendor_engagement_detail_with_data(
         response_velocity_hours=2.5,
         last_contact_at=datetime.now(timezone.utc),
         engagement_score=82.5,
+        vendor_score=82.5,
+        vendor_score_computed_at=datetime.now(timezone.utc),
         engagement_computed_at=datetime.now(timezone.utc),
         created_at=datetime.now(timezone.utc),
     )
@@ -521,11 +522,10 @@ def test_vendor_engagement_detail_with_data(
     assert resp.status_code == 200
     data = resp.json()
     assert data["vendor_id"] == card.id
-    assert data["engagement_score"] > 0
+    assert "vendor_score" in data
     assert data["raw_counts"]["total_outreach"] == 10
     assert data["raw_counts"]["total_responses"] == 7
     assert data["raw_counts"]["total_wins"] == 3
-    assert data["computed_at"] is not None
 
 
 # ══════════════════════════════════════════════════════════════════════

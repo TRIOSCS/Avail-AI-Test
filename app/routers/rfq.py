@@ -685,8 +685,12 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
             "card_id": card.id,
             "avg_rating": avg,
             "review_count": len(revs),
-            "engagement_score": round(card.engagement_score, 1)
-            if card.engagement_score
+            "vendor_score": round(card.vendor_score, 1)
+            if card.vendor_score is not None
+            else None,
+            "is_new_vendor": card.is_new_vendor if card.is_new_vendor is not None else True,
+            "engagement_score": round(card.vendor_score, 1)
+            if card.vendor_score is not None
             else None,
             "has_emails": bool(card.emails),
             "email_count": len(card.emails or []),
@@ -758,6 +762,8 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
         "card_id": None,
         "avg_rating": None,
         "review_count": 0,
+        "vendor_score": None,
+        "is_new_vendor": True,
         "engagement_score": None,
         "has_emails": False,
         "email_count": 0,

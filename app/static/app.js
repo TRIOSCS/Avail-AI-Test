@@ -1677,9 +1677,12 @@ function _buildEffortTip(score, color, signals) {
 const _ddScoreCache = {};
 
 // ── Tier helpers ─────────────────────────────────────────────────────────
-function _sightingTier(score) {
-    const s = parseFloat(score) || 0;
-    return s >= 66 ? 'top' : s >= 33 ? 'good' : 'other';
+function _sightingTier(s) {
+    if (s.is_authorized) return 'top';
+    const vc = s.vendor_card || {};
+    if (vc.is_new_vendor) return 'other';
+    const score = vc.vendor_score ?? s.score ?? 0;
+    return score >= 66 ? 'top' : score >= 33 ? 'good' : 'other';
 }
 
 const _TIER_CONFIG = {
@@ -1695,23 +1698,30 @@ function ddToggleTier(reqId, rId, tier) {
     _renderSourcingDrillDown(reqId);
 }
 
-function _ddVendorBadges(s) {
+function _ddVendorScoreRing(s) {
+    if (s.is_authorized) {
+        return `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;border:2px solid var(--green);background:var(--green-light);font-size:7px;font-weight:700;color:var(--green);margin-right:4px;cursor:default;vertical-align:middle" title="Authorized Distributor">\u2713</span>`;
+    }
+    const vc = s.vendor_card || {};
+    if (vc.is_new_vendor || vc.vendor_score == null) {
+        return `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;border:2px solid var(--muted);background:var(--card2);font-size:6px;font-weight:700;color:var(--muted);margin-right:4px;cursor:default;vertical-align:middle" title="New Vendor — no order history">NEW</span>`;
+    }
+    const vs = Math.round(vc.vendor_score);
+    const color = vs >= 66 ? 'var(--green)' : vs >= 33 ? 'var(--amber)' : 'var(--red)';
+    const bg = vs >= 66 ? 'var(--green-light)' : vs >= 33 ? 'var(--amber-light)' : 'var(--red-light)';
+    return `<span style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;border:2px solid ${color};background:${bg};font-size:7px;font-weight:700;color:${color};margin-right:4px;cursor:default;vertical-align:middle" title="Vendor Score: ${vs}/100">${vs}</span>`;
+}
+
+function _ddVendorLinkPill(s) {
+    const sourceUrl = s.click_url || s.octopart_url || s.vendor_url || '';
+    return sourceUrl ? `<a href="${escAttr(sourceUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="View listing" style="color:var(--blue);font-size:12px;margin-left:4px;text-decoration:none">&#x1f517;</a>` : '';
+}
+
+function _ddVendorInlineBadges(s) {
     const vc = s.vendor_card || {};
     let html = '';
-    // Score ring
-    if (vc.engagement_score != null) {
-        const es = Math.round(vc.engagement_score);
-        const esColor = es >= 70 ? 'var(--green)' : es >= 40 ? 'var(--amber)' : 'var(--red)';
-        const esBg = es >= 70 ? 'var(--green-light)' : es >= 40 ? 'var(--amber-light)' : 'var(--red-light)';
-        html += `<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;border:2px solid ${esColor};background:${esBg};font-size:7px;font-weight:700;color:${esColor};margin-left:3px;cursor:default;vertical-align:middle" title="Engagement: ${es}/100">${es}</span>`;
-    }
-    // Star rating
     if (vc.avg_rating != null) {
-        html += `<span style="font-size:10px;margin-left:2px;vertical-align:middle"><span class="stars">★</span>${vc.avg_rating}</span>`;
-    }
-    // Auth badge
-    if (s.is_authorized) {
-        html += ' <span class="badge b-auth" style="font-size:8px;padding:0 4px;vertical-align:middle">Auth</span>';
+        html += `<span style="font-size:10px;margin-left:2px;vertical-align:middle"><span class="stars">\u2605</span>${vc.avg_rating}</span>`;
     }
     return html;
 }
@@ -1725,21 +1735,19 @@ function _ddRenderTierRows(sightings, reqId, sel) {
         const disabledAttr = !hasEmail ? 'disabled title="No vendor email"' : '';
         const price = s.unit_price != null ? '$' + parseFloat(s.unit_price).toFixed(2) : '\u2014';
         const qty = s.qty_available != null ? Number(s.qty_available).toLocaleString() : '\u2014';
-        const scoreVal = s.score != null ? parseFloat(s.score).toFixed(1) : '\u2014';
         const safeVName = (s.vendor_name||'').replace(/'/g, "\\'");
         const needsEmail = !hasEmail ? ` <a onclick="event.stopPropagation();ddPromptVendorEmail(${reqId},${s.id},'${safeVName}')" style="color:var(--red);font-size:10px;cursor:pointer;font-weight:600">needs email</a>` : '';
-        const sourceUrl = s.click_url || s.octopart_url || s.vendor_url || '';
-        const srcIcon = sourceUrl ? `<a href="${escAttr(sourceUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="View listing" style="color:var(--blue);font-size:12px;margin-right:4px;text-decoration:none">&#x1f517;</a>` : '';
+        const ring = _ddVendorScoreRing(s);
+        const linkPill = _ddVendorLinkPill(s);
+        const inlineBadges = _ddVendorInlineBadges(s);
         const sAge = s.created_at ? fmtRelative(s.created_at) : '\u2014';
-        const badges = _ddVendorBadges(s);
         html += `<tr style="${dimStyle}">
             <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
-            <td>${srcIcon}${esc(s.vendor_name || '\u2014')}${badges}${needsEmail}</td>
+            <td>${ring}${esc(s.vendor_name || '\u2014')}${inlineBadges}${linkPill}${needsEmail}</td>
             <td class="mono">${esc(s.mpn_matched || '\u2014')}</td>
             <td class="mono">${qty}</td>
             <td class="mono" style="color:${s.unit_price ? 'var(--teal)' : 'var(--muted)'}">${price}</td>
             <td style="font-size:10px">${esc(s.source_type || '\u2014')}</td>
-            <td class="mono">${scoreVal}</td>
             <td style="font-size:10px">${esc(s.condition || '\u2014')}</td>
             <td style="font-size:10px;color:var(--muted)">${sAge}</td>
         </tr>`;
@@ -1819,7 +1827,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
 
         // Split sightings into tiers by score
         const tiers = { top: [], good: [], other: [] };
-        for (const s of sightings) tiers[_sightingTier(s.score)].push(s);
+        for (const s of sightings) tiers[_sightingTier(s)].push(s);
 
         const TIER_ORDER = ['top', 'good', 'other'];
         for (const tier of TIER_ORDER) {
@@ -1842,7 +1850,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
                 html += `<div onclick="event.stopPropagation();ddToggleTier(${reqId},${rId},'${tier}')" style="padding:4px 12px;font-size:11px;color:var(--muted);cursor:pointer">${items.length} source${items.length !== 1 ? 's' : ''} — click to expand</div>`;
             } else {
                 html += `<table class="dtbl" style="margin:0"><thead><tr>
-                    <th style="width:24px"></th><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th title="Sighting confidence score">Score</th><th>Condition</th><th>Date</th>
+                    <th style="width:24px"></th><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Condition</th><th>Age</th>
                 </tr></thead><tbody>`;
                 html += _ddRenderTierRows(visible, reqId, sel);
                 html += '</tbody></table>';
@@ -3531,8 +3539,8 @@ function renderSources() {
                     case 'qty-asc': return (sa.qty_available ?? 0) - (sb.qty_available ?? 0);
                     case 'vendor-az': return (sa.vendor_name || '').localeCompare(sb.vendor_name || '');
                     case 'engagement': {
-                        const ea = sa.vendor_card?.engagement_score ?? -1;
-                        const eb = sb.vendor_card?.engagement_score ?? -1;
+                        const ea = sa.vendor_card?.vendor_score ?? -1;
+                        const eb = sb.vendor_card?.vendor_score ?? -1;
                         return eb - ea;
                     }
                     default: return 0;
@@ -3604,17 +3612,21 @@ function renderSources() {
             let ratingHtml = '';
             if (vc.card_id) {
                 let scoreRing = '';
-                if (vc.engagement_score != null) {
-                    const es = Math.round(vc.engagement_score);
-                    const esColor = es >= 70 ? 'var(--green)' : es >= 40 ? 'var(--amber)' : 'var(--red)';
-                    const esBg = es >= 70 ? 'var(--green-light)' : es >= 40 ? 'var(--amber-light)' : 'var(--red-light)';
-                    scoreRing = `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:2px solid ${esColor};background:${esBg};font-size:8px;font-weight:700;color:${esColor};margin-right:3px;cursor:default" title="Engagement: ${es}/100&#10;Based on response rate, recency, velocity, and win rate">${es}</span>`;
+                if (s.is_authorized) {
+                    scoreRing = `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:2px solid var(--green);background:var(--green-light);font-size:8px;font-weight:700;color:var(--green);margin-right:3px;cursor:default" title="Authorized Distributor">\u2713</span>`;
+                } else if (vc.is_new_vendor || vc.vendor_score == null) {
+                    scoreRing = `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:2px solid var(--muted);background:var(--card2);font-size:7px;font-weight:700;color:var(--muted);margin-right:3px;cursor:default" title="New Vendor — no order history">NEW</span>`;
+                } else {
+                    const vs = Math.round(vc.vendor_score);
+                    const vsColor = vs >= 66 ? 'var(--green)' : vs >= 33 ? 'var(--amber)' : 'var(--red)';
+                    const vsBg = vs >= 66 ? 'var(--green-light)' : vs >= 33 ? 'var(--amber-light)' : 'var(--red-light)';
+                    scoreRing = `<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;border:2px solid ${vsColor};background:${vsBg};font-size:8px;font-weight:700;color:${vsColor};margin-right:3px;cursor:default" title="Vendor Score: ${vs}/100">${vs}</span>`;
                 }
-                const starStr = vc.avg_rating != null ? `<span class="stars" style="font-size:11px">★</span><span class="stars-num" style="font-size:10px">${vc.avg_rating}</span><span class="stars-count" style="font-size:9px;color:var(--muted)">(${vc.review_count})</span>` : '';
+                const starStr = vc.avg_rating != null ? `<span class="stars" style="font-size:11px">\u2605</span><span class="stars-num" style="font-size:10px">${vc.avg_rating}</span><span class="stars-count" style="font-size:9px;color:var(--muted)">(${vc.review_count})</span>` : '';
                 const cardPill = `<span class="badge" style="background:var(--bg2);cursor:pointer;font-size:9px;padding:1px 6px;margin-left:3px" onclick="event.stopPropagation();openVendorPopup(${vc.card_id})" title="Open vendor card">View</span>`;
                 ratingHtml = `<span class="sc-rating">${scoreRing}${starStr}${cardPill}</span>`;
             } else {
-                ratingHtml = '<span class="sc-rating sc-rating-new" title="New vendor">☆</span>';
+                ratingHtml = '<span class="sc-rating sc-rating-new" title="New vendor">\u2606</span>';
             }
 
             const octopartLink = s.octopart_url ? `<a href="${escAttr(s.octopart_url)}" target="_blank" class="btn-link">🔗 Octopart</a>` : '';
@@ -4201,22 +4213,28 @@ async function openVendorPopup(cardId) {
         <button class="btn-enrich" onclick="unifiedEnrichVendor(${card.id})">Enrich</button>
     </div>`;
 
-    // Engagement Score (from Email Mining v2)
-    if (card.engagement_score != null) {
-        const engScore = Math.round(card.engagement_score);
-        const engClass = engScore >= 70 ? 'eng-high' : engScore >= 40 ? 'eng-med' : 'eng-low';
-        const respRate = card.total_outreach > 0 ? Math.round((card.total_responses / card.total_outreach) * 100) : null;
+    // Vendor Score (order advancement based)
+    if (card.vendor_score != null) {
+        const vs = Math.round(card.vendor_score);
+        const vsClass = vs >= 66 ? 'eng-high' : vs >= 33 ? 'eng-med' : 'eng-low';
+        const advText = card.advancement_score != null ? `Advancement: ${Math.round(card.advancement_score)}` : '';
         html += `<div class="metrics-panel u-items-center">
-            <div class="engagement-ring ${engClass}">${engScore}</div>
+            <div class="engagement-ring ${vsClass}">${vs}</div>
             <div style="flex:1;font-size:11px">
-                <div style="font-weight:700;margin-bottom:2px">Engagement Score</div>
+                <div style="font-weight:700;margin-bottom:2px">Vendor Score</div>
                 <div style="color:var(--text2);display:flex;gap:10px;flex-wrap:wrap">
+                    ${advText ? `<span>${advText}</span>` : ''}
                     ${card.total_outreach != null ? `<span>Outreach: ${card.total_outreach}</span>` : ''}
                     ${card.total_responses != null ? `<span>Replies: ${card.total_responses}</span>` : ''}
-                    ${respRate != null ? `<span>Rate: ${respRate}%</span>` : ''}
-                    ${card.response_velocity_hours != null ? `<span>Avg: ${Math.round(card.response_velocity_hours)}h</span>` : ''}
-                    ${card.ghost_rate != null ? `<span>Ghost: ${Math.round(card.ghost_rate * 100)}%</span>` : ''}
                 </div>
+            </div>
+        </div>`;
+    } else if (card.is_new_vendor) {
+        html += `<div class="metrics-panel u-items-center">
+            <div class="engagement-ring eng-low" style="border-color:var(--muted);color:var(--muted)">--</div>
+            <div style="flex:1;font-size:11px">
+                <div style="font-weight:700;margin-bottom:2px">Vendor Score</div>
+                <div style="color:var(--muted)">New Vendor \u2014 No Order History</div>
             </div>
         </div>`;
     }
@@ -4897,10 +4915,12 @@ async function loadVendorList() {
     filterVendorList();
 }
 
-function vendorTier(score) {
-    if (score == null) return 'new';
-    if (score >= 70) return 'proven';
-    if (score >= 40) return 'developing';
+function vendorTier(c) {
+    const score = typeof c === 'object' ? c.vendor_score : c;
+    const isNew = typeof c === 'object' ? c.is_new_vendor : false;
+    if (isNew || score == null) return 'new';
+    if (score >= 66) return 'proven';
+    if (score >= 33) return 'developing';
     return 'caution';
 }
 
@@ -4920,7 +4940,7 @@ function filterVendorList() {
         filtered = filtered.filter(c => (c.display_name || '').toLowerCase().includes(lq));
     }
     if (_vendorTierFilter !== 'all') {
-        filtered = filtered.filter(c => vendorTier(c.engagement_score) === _vendorTierFilter);
+        filtered = filtered.filter(c => vendorTier(c) === _vendorTierFilter);
     }
     if (hideBL) filtered = filtered.filter(c => !c.is_blacklisted);
 
@@ -4930,8 +4950,8 @@ function filterVendorList() {
             let va, vb;
             switch (_vendorSortCol) {
                 case 'name': va = (a.display_name || ''); vb = (b.display_name || ''); break;
-                case 'tier': va = (a.engagement_score ?? -1); vb = (b.engagement_score ?? -1); break;
-                case 'score': va = (a.engagement_score ?? -1); vb = (b.engagement_score ?? -1); break;
+                case 'tier': va = (a.vendor_score ?? -1); vb = (b.vendor_score ?? -1); break;
+                case 'score': va = (a.vendor_score ?? -1); vb = (b.vendor_score ?? -1); break;
                 case 'rating': va = (a.avg_rating ?? -1); vb = (b.avg_rating ?? -1); break;
                 case 'sightings': va = (a.sighting_count || 0); vb = (b.sighting_count || 0); break;
                 case 'email': va = ((a.emails || [])[0] || ''); vb = ((b.emails || [])[0] || ''); break;
@@ -4970,11 +4990,11 @@ function filterVendorList() {
     </tr></thead><tbody>`;
 
     for (const c of filtered) {
-        const tier = vendorTier(c.engagement_score);
+        const tier = vendorTier(c);
         const bc = c.is_blacklisted ? 'b-bl' : (tierBadge[tier] || 'b-new');
         const tl = c.is_blacklisted ? 'Blacklisted' : (tierLabel[tier] || 'New');
         const primaryEmail = (c.emails || [])[0] || '';
-        const scoreText = c.engagement_score != null ? Math.round(c.engagement_score) : '\u2014';
+        const scoreText = c.vendor_score != null ? Math.round(c.vendor_score) : '\u2014';
         html += `<tr onclick="openVendorPopup(${c.id})">
             <td><b class="cust-link">${esc(c.display_name)}</b></td>
             <td><span class="badge ${bc}">${tl}</span></td>

@@ -29,6 +29,7 @@ from .models import (
     Sighting,
 )
 from .scoring import score_sighting
+from .vendor_utils import normalize_vendor_name
 from .utils.normalization import (
     detect_currency,
     normalize_condition,
@@ -339,9 +340,13 @@ def _save_sightings(
     fresh: list[dict], req: Requirement, db: Session,
     succeeded_sources: set[str] | None = None,
 ) -> list[Sighting]:
-    from .services.admin_service import get_scoring_weights
+    from .models import VendorCard
 
-    weights = get_scoring_weights(db)
+    # Build vendor-name → vendor_score lookup
+    vendor_cards = db.query(
+        VendorCard.normalized_name, VendorCard.vendor_score
+    ).all()
+    vendor_score_map = {vc.normalized_name: vc.vendor_score for vc in vendor_cards}
 
     # Connector-aware delete: only remove sightings from sources that returned
     # results.  Sightings from failed/timed-out connectors are preserved.
@@ -413,7 +418,8 @@ def _save_sightings(
             raw_data=r,
             created_at=datetime.now(timezone.utc),
         )
-        s.score = score_sighting(s, req.target_qty or 1, weights)
+        norm_name = normalize_vendor_name(clean_vendor)
+        s.score = score_sighting(vendor_score_map.get(norm_name), s.is_authorized)
         db.add(s)
         sightings.append(s)
     db.commit()

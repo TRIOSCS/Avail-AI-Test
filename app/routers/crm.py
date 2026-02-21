@@ -1940,7 +1940,7 @@ async def reopen_quote(
 # ── Buy Plans ────────────────────────────────────────────────────────────
 
 
-def _buyplan_to_dict(bp: BuyPlan) -> dict:
+def _buyplan_to_dict(bp: BuyPlan, db=None) -> dict:
     # Gather deal context from quote/requisition
     customer_name = ""
     quote_number = ""
@@ -1968,6 +1968,28 @@ def _buyplan_to_dict(bp: BuyPlan) -> dict:
         round((total_profit / total_revenue) * 100, 2) if total_revenue else 0
     )
 
+    # Enrich line items with vendor scores
+    enriched_items = list(bp.line_items or [])
+    if db and enriched_items:
+        vendor_names = {(item.get("vendor_name") or "").strip().lower() for item in enriched_items}
+        vendor_names.discard("")
+        if vendor_names:
+            cards = db.query(VendorCard).filter(
+                sqlfunc.lower(VendorCard.normalized_name).in_(vendor_names)
+            ).all()
+            score_map = {
+                c.normalized_name: {
+                    "vendor_score": c.vendor_score,
+                    "is_new_vendor": c.is_new_vendor if c.is_new_vendor is not None else True,
+                }
+                for c in cards
+            }
+            for item in enriched_items:
+                vname = (item.get("vendor_name") or "").strip().lower()
+                info = score_map.get(vname, {})
+                item["vendor_score"] = info.get("vendor_score")
+                item["is_new_vendor"] = info.get("is_new_vendor", True)
+
     return {
         "id": bp.id,
         "requisition_id": bp.requisition_id,
@@ -1977,7 +1999,7 @@ def _buyplan_to_dict(bp: BuyPlan) -> dict:
         "quote_subtotal": quote_subtotal,
         "customer_name": customer_name,
         "status": bp.status,
-        "line_items": bp.line_items or [],
+        "line_items": enriched_items,
         "is_stock_sale": bp.is_stock_sale or False,
         "total_cost": round(total_cost, 2),
         "total_revenue": round(total_revenue, 2),
@@ -2132,7 +2154,7 @@ async def list_buy_plans(
             query = query.filter(BuyPlan.submitted_by_id == user.id)
         # Buyers see all (they need to check which plans have their offers)
     plans = query.limit(200).all()
-    return [_buyplan_to_dict(p) for p in plans]
+    return [_buyplan_to_dict(p, db) for p in plans]
 
 
 @router.get("/api/buy-plans/token/{token}")
@@ -2146,7 +2168,7 @@ async def get_buyplan_by_token(
         raise HTTPException(404, "Invalid or expired token")
     if plan.token_expires_at and plan.token_expires_at < datetime.now(timezone.utc):
         raise HTTPException(410, "Token has expired")
-    return _buyplan_to_dict(plan)
+    return _buyplan_to_dict(plan, db)
 
 
 @router.put("/api/buy-plans/token/{token}/approve")
@@ -2252,7 +2274,7 @@ async def get_buy_plan(
     if not _is_admin(user) and user.role not in ("manager", "buyer"):
         if plan.submitted_by_id != user.id:
             raise HTTPException(403, "You can only view your own buy plans")
-    return _buyplan_to_dict(plan)
+    return _buyplan_to_dict(plan, db)
 
 
 @router.put("/api/buy-plans/{plan_id}/approve")
@@ -2730,7 +2752,7 @@ async def get_buyplan_for_quote(
     )
     if not plan:
         return None
-    return _buyplan_to_dict(plan)
+    return _buyplan_to_dict(plan, db)
 
 
 # ── Pricing History ──────────────────────────────────────────────────────
