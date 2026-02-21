@@ -141,6 +141,15 @@ async function guardBtn(btn, loadingText, action) {
     try { return await action(); }
     finally { btn.disabled = false; btn.textContent = orig; }
 }
+// Lightweight self-guard for async onclick handlers: call _selfGuard(ev) at top,
+// returns false if button already busy. Automatically re-enables when function returns.
+function _selfGuard(ev) {
+    var btn = ev && (ev.target?.closest('button') || ev.target?.closest('a'));
+    if (!btn) return {ok:true};
+    if (btn.dataset.busy) return {ok:false};
+    btn.dataset.busy = '1'; btn.style.opacity = '0.5'; btn.style.pointerEvents = 'none';
+    return {ok:true, done:()=>{ delete btn.dataset.busy; btn.style.opacity=''; btn.style.pointerEvents=''; }};
+}
 
 function _timeAgo(iso) {
     if (!iso) return '';
@@ -2365,12 +2374,14 @@ const searchRequisitions = debounce(query => loadRequisitions(query), 300);
 
 async function sendFollowUp(contactId, vendorName) {
     if (!confirm(`Send follow-up email to ${vendorName}?`)) return;
+    if (sendFollowUp._busy) return; sendFollowUp._busy = true;
     try {
         const data = await apiFetch(`/api/follow-ups/${contactId}/send`, { method: 'POST', body: {} });
         showToast(data.message || `Follow-up sent to ${vendorName}`, 'success');
         if (typeof loadActivity === 'function') loadActivity();
         loadFollowUpsPanel();
     } catch (e) { showToast('Failed to send follow-up', 'error'); }
+    finally { sendFollowUp._busy = false; }
 }
 
 // ── Follow-Ups Dashboard Panel ───────────────────────────────────────────
@@ -4117,6 +4128,8 @@ async function saveVendorLogCall() {
         await apiFetch('/api/vendors/' + cardId + '/activities/call', { method: 'POST', body: data });
         closeModal('vendorLogCallModal');
         showToast('Call logged', 'success');
+        // Invalidate activity cache for any open drill-down
+        if (currentReqId && _ddTabCache[currentReqId]) delete _ddTabCache[currentReqId].activity;
         if (window._vlcReqId) { loadActivity(); }
         else { loadVendorActivities(parseInt(cardId)); }
         loadVendorActivityStatus(parseInt(cardId));
@@ -4145,6 +4158,7 @@ async function saveVendorLogNote() {
         await apiFetch('/api/vendors/' + cardId + '/activities/note', { method: 'POST', body: data });
         closeModal('vendorLogNoteModal');
         showToast('Note added', 'success');
+        if (currentReqId && _ddTabCache[currentReqId]) delete _ddTabCache[currentReqId].activity;
         if (window._vlnReqId) { loadActivity(); }
         else { loadVendorActivities(parseInt(cardId)); }
         loadVendorActivityStatus(parseInt(cardId));
@@ -4307,11 +4321,16 @@ function sortVendorList(col) {
     filterVendorList();
 }
 
+let _vendorAbort = null;
 async function loadVendorList() {
+    if (_vendorAbort) { try { _vendorAbort.abort(); } catch(e){} }
+    _vendorAbort = new AbortController();
     const q = (document.getElementById('vendorSearch') || {}).value || '';
+    var vl = document.getElementById('vendorList');
+    if (vl && !_vendorListData.length) vl.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading vendors…</div>';
     let resp;
-    try { resp = await apiFetch(`/api/vendors?q=${encodeURIComponent(q)}`); }
-    catch (e) { logCatchError('loadVendorList', e); showToast('Failed to load vendors', 'error'); return; }
+    try { resp = await apiFetch(`/api/vendors?q=${encodeURIComponent(q)}`, {signal: _vendorAbort.signal}); }
+    catch (e) { if (e.name === 'AbortError') return; logCatchError('loadVendorList', e); showToast('Failed to load vendors', 'error'); return; }
     _vendorListData = resp.vendors || resp;
     filterVendorList();
 }
@@ -4430,11 +4449,16 @@ function sortMatList(col) {
     renderMaterialList();
 }
 
+let _materialAbort = null;
 async function loadMaterialList() {
+    if (_materialAbort) { try { _materialAbort.abort(); } catch(e){} }
+    _materialAbort = new AbortController();
     const q = (document.getElementById('materialSearch') || {}).value || '';
+    var ml = document.getElementById('materialList');
+    if (ml && !_materialListData.length) ml.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading materials…</div>';
     let resp;
-    try { resp = await apiFetch(`/api/materials?q=${encodeURIComponent(q)}`); }
-    catch (e) { logCatchError('loadMaterialList', e); showToast('Failed to load materials', 'error'); return; }
+    try { resp = await apiFetch(`/api/materials?q=${encodeURIComponent(q)}`, {signal: _materialAbort.signal}); }
+    catch (e) { if (e.name === 'AbortError') return; logCatchError('loadMaterialList', e); showToast('Failed to load materials', 'error'); return; }
     _materialListData = resp.materials || resp;
     renderMaterialList();
 }
@@ -5303,19 +5327,18 @@ async function sendEmailReply(conversationId, to, subject) {
     if (!bodyEl) return;
     const body = bodyEl.value.trim();
     if (!body) { showToast('Please type a reply', 'error'); return; }
-
+    if (sendEmailReply._busy) return; sendEmailReply._busy = true;
     try {
         await apiFetch('/api/emails/reply', {
             method: 'POST',
             body: { conversation_id: conversationId, to: to, subject: subject, body: body }
         });
         showToast('Reply sent', 'success');
-        // Refresh thread
         _emailThreadsLoaded = null;
         loadEmailThreads();
     } catch (e) {
         showToast('Failed to send reply: ' + e.message, 'error');
-    }
+    } finally { sendEmailReply._busy = false; }
 }
 
 // ── Vendor Popup Emails ──────────────────────────────────────────────

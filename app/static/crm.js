@@ -69,23 +69,23 @@ async function showCustomers() {
     await loadCustomers();
 }
 
-let _custLoadSeq = 0;
+let _custAbort = null;
 async function loadCustomers() {
-    const seq = ++_custLoadSeq;
+    if (_custAbort) { try { _custAbort.abort(); } catch(e){} }
+    _custAbort = new AbortController();
+    var cl = document.getElementById('custList');
+    if (cl && (!crmCustomers || !crmCustomers.length)) cl.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading companies…</div>';
     try {
         const filter = document.getElementById('custFilter')?.value || '';
-        const isManagerOrAdmin = window.__isAdmin || ['manager','trader'].includes(window.userRole);
         const isSalesOnly = window.userRole === 'sales';
         const myOnly = document.getElementById('custMyOnly')?.checked;
         let url = '/api/companies?search=' + encodeURIComponent(filter);
-        // Sales always sees only their accounts; managers/admins/traders can toggle
         if ((isSalesOnly || myOnly) && window.userId) url += '&owner_id=' + window.userId;
         if (_custUnassigned) url += '&unassigned=1';
-        const result = await apiFetch(url);
-        if (seq !== _custLoadSeq) return;  // Stale response — newer request in flight
+        const result = await apiFetch(url, {signal: _custAbort.signal});
         crmCustomers = result;
         renderCustomers();
-    } catch (e) { showToast('Failed to load customers', 'error'); console.error(e); }
+    } catch (e) { if (e.name === 'AbortError') return; showToast('Failed to load customers', 'error'); console.error(e); }
 }
 
 async function goToCompany(companyId) {
@@ -1071,6 +1071,7 @@ function applyMarkup() {
 
 async function saveQuoteDraft() {
     if (!crmQuote) return;
+    if (saveQuoteDraft._busy) return; saveQuoteDraft._busy = true;
     try {
         await apiFetch('/api/quotes/' + crmQuote.id, {
             method: 'PUT', body: {
@@ -1084,6 +1085,7 @@ async function saveQuoteDraft() {
         showToast('Draft saved', 'success');
         loadQuote();
     } catch (e) { console.error('saveQuoteDraft:', e); showToast('Error saving draft', 'error'); }
+    finally { saveQuoteDraft._busy = false; }
 }
 
 function copyQuoteTable() {
@@ -1232,11 +1234,8 @@ async function loadSpecificQuote(quoteId) {
 
 async function markQuoteResult(result) {
     if (!crmQuote) return;
-    if (result === 'won') {
-        // Open buy plan modal instead of simple confirm
-        openBuyPlanModal();
-        return;
-    }
+    if (result === 'won') { openBuyPlanModal(); return; }
+    if (markQuoteResult._busy) return; markQuoteResult._busy = true;
     try {
         const resultData = await apiFetch('/api/quotes/' + crmQuote.id + '/result', {
             method: 'POST', body: { result }
@@ -1245,6 +1244,7 @@ async function markQuoteResult(result) {
         notifyStatusChange(resultData);
         loadQuote();
     } catch (e) { console.error('markQuoteResult:', e); showToast('Error updating result', 'error'); }
+    finally { markQuoteResult._busy = false; }
 }
 
 function openLostModal() {
@@ -1516,6 +1516,7 @@ async function approveBuyPlan() {
     if (!_currentBuyPlan) return;
     const soNumber = document.getElementById('bpSalesOrderNumber')?.value?.trim() || '';
     if (!soNumber) { showToast('Acctivate Sales Order # is required', 'error'); return; }
+    if (approveBuyPlan._busy) return; approveBuyPlan._busy = true;
     const notes = document.getElementById('bpManagerNotes')?.value?.trim() || '';
     try {
         await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/approve', {
@@ -1524,6 +1525,7 @@ async function approveBuyPlan() {
         showToast('Buy plan approved — buyers notified', 'success');
         loadBuyPlan();
     } catch (e) { showToast('Failed to approve: ' + (e.message || e), 'error'); }
+    finally { approveBuyPlan._busy = false; }
 }
 
 function openRejectBuyPlanModal() {
@@ -1534,6 +1536,7 @@ function openRejectBuyPlanModal() {
 
 async function rejectBuyPlan(reason) {
     if (!_currentBuyPlan) return;
+    if (rejectBuyPlan._busy) return; rejectBuyPlan._busy = true;
     try {
         await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/reject', {
             method: 'PUT', body: { reason }
@@ -1541,10 +1544,12 @@ async function rejectBuyPlan(reason) {
         showToast('Buy plan rejected', 'info');
         loadBuyPlan();
     } catch (e) { showToast('Failed to reject', 'error'); }
+    finally { rejectBuyPlan._busy = false; }
 }
 
 async function saveBuyPlanPOs() {
     if (!_currentBuyPlan) return;
+    if (saveBuyPlanPOs._busy) return; saveBuyPlanPOs._busy = true;
     const inputs = document.querySelectorAll('.po-input');
     const entries = [];
     for (const input of inputs) {
@@ -1560,16 +1565,19 @@ async function saveBuyPlanPOs() {
         showToast(result.changes + ' PO number(s) updated', 'success');
         loadBuyPlan();
     } catch (e) { showToast('Failed to save POs: ' + (e.message || e), 'error'); }
+    finally { saveBuyPlanPOs._busy = false; }
 }
 
 async function completeBuyPlan() {
     if (!_currentBuyPlan) return;
     if (!confirm('Mark this buy plan as complete?')) return;
+    if (completeBuyPlan._busy) return; completeBuyPlan._busy = true;
     try {
         await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/complete', { method: 'PUT' });
         showToast('Buy plan marked complete', 'success');
         loadBuyPlan();
     } catch (e) { showToast('Failed to complete: ' + (e.message || e), 'error'); }
+    finally { completeBuyPlan._busy = false; }
 }
 
 async function cancelBuyPlan() {
@@ -1624,6 +1632,8 @@ async function showBuyPlans() {
 }
 
 async function loadBuyPlans() {
+    var bpl = document.getElementById('buyPlansList');
+    if (bpl && !_buyPlans.length) bpl.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading buy plans…</div>';
     try {
         let url = '/api/buy-plans';
         if (_bpFilter) url += '?status=' + encodeURIComponent(_bpFilter);
@@ -1866,12 +1876,14 @@ async function submitLost() {
 
 async function reviseQuote() {
     if (!crmQuote) return;
+    if (reviseQuote._busy) return; reviseQuote._busy = true;
     try {
         crmQuote = await apiFetch('/api/quotes/' + crmQuote.id + '/revise', { method: 'POST' });
         showToast('New revision created', 'success');
         renderQuote();
         updateQuoteTabBadge();
     } catch (e) { console.error('reviseQuote:', e); showToast('Error revising quote', 'error'); }
+    finally { reviseQuote._busy = false; }
 }
 
 async function reopenQuote(revise) {
@@ -2450,10 +2462,8 @@ function openParsePreviewModal(data, responseId) {
 
 async function saveParsedOffers(responseId) {
     const offers = window._pendingDraftOffers || [];
-    if (!currentReqId) {
-        showToast('No requisition selected', 'error');
-        return;
-    }
+    if (!currentReqId) { showToast('No requisition selected', 'error'); return; }
+    if (saveParsedOffers._busy) return; saveParsedOffers._busy = true;
     try {
         const data = await apiFetch('/api/ai/save-parsed-offers', {
             method: 'POST', body: { response_id: responseId, offers, requisition_id: currentReqId }
@@ -2463,7 +2473,7 @@ async function saveParsedOffers(responseId) {
         loadOffers();
     } catch (e) {
         showToast('Save error', 'error');
-    }
+    } finally { saveParsedOffers._busy = false; }
 }
 
 
@@ -2959,11 +2969,13 @@ function renderProactiveSent() {
 
 async function convertProactiveOffer(offerId) {
     if (!confirm('Convert this proactive offer to a Win? This will create a requisition, quote, and buy plan.')) return;
+    if (convertProactiveOffer._busy) return; convertProactiveOffer._busy = true;
     try {
         const result = await apiFetch('/api/proactive/convert/' + offerId, { method: 'POST' });
         showToast('Converted! Requisition #' + result.requisition_id + ' created with buy plan.', 'success');
         loadProactiveSent();
     } catch (e) { showToast('Conversion failed', 'error'); }
+    finally { convertProactiveOffer._busy = false; }
 }
 
 async function loadProactiveScorecard() {
