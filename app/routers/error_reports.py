@@ -15,6 +15,7 @@ from ..database import get_db
 from ..dependencies import require_admin, require_user
 from ..models import User
 from ..models.error_report import ErrorReport
+from ..services.ai_trouble_prompt import generate_trouble_prompt
 
 router = APIRouter(tags=["error-reports"])
 
@@ -25,7 +26,8 @@ MAX_SCREENSHOT_SIZE = 2 * 1024 * 1024  # 2 MB base64
 
 
 class ErrorReportCreate(BaseModel):
-    title: str = Field(..., min_length=1, max_length=255)
+    message: str = Field(..., min_length=1, max_length=5000)
+    title: Optional[str] = Field(None, max_length=255)
     description: Optional[str] = None
     screenshot_b64: Optional[str] = None
     current_url: Optional[str] = None
@@ -45,19 +47,23 @@ class StatusUpdate(BaseModel):
 
 
 @router.post("/api/error-reports")
-def create_error_report(
+async def create_error_report(
     body: ErrorReportCreate,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Submit a bug report (any authenticated user)."""
+    """Submit a trouble report (any authenticated user)."""
     if body.screenshot_b64 and len(body.screenshot_b64) > MAX_SCREENSHOT_SIZE:
         raise HTTPException(400, "Screenshot too large (max 2 MB)")
 
+    # Use message as description; truncate for initial title
+    message = body.message.strip()
+    initial_title = body.title.strip() if body.title else message[:255]
+
     report = ErrorReport(
         user_id=user.id,
-        title=body.title.strip(),
-        description=(body.description or "").strip() or None,
+        title=initial_title,
+        description=message,
         screenshot_b64=body.screenshot_b64 or None,
         current_url=body.current_url,
         current_view=body.current_view,
@@ -69,7 +75,29 @@ def create_error_report(
     db.add(report)
     db.commit()
     db.refresh(report)
-    logger.info("Bug report #{} created by {}", report.id, user.email)
+    logger.info("Trouble report #{} created by {}", report.id, user.email)
+
+    # Generate AI prompt in background — failure doesn't break submission
+    try:
+        result = await generate_trouble_prompt(
+            user_message=message,
+            current_url=body.current_url,
+            current_view=body.current_view,
+            browser_info=body.browser_info,
+            screen_size=body.screen_size,
+            console_errors=body.console_errors,
+            page_state=body.page_state,
+            has_screenshot=bool(body.screenshot_b64),
+            reporter_name=user.name or user.email,
+        )
+        if result:
+            report.title = result["title"]
+            report.ai_prompt = result["prompt"]
+            db.commit()
+            logger.info("AI prompt generated for report #{}", report.id)
+    except Exception as e:
+        logger.warning("AI prompt generation failed for report #{}: {}", report.id, e)
+
     return {"id": report.id, "status": "created"}
 
 
@@ -79,7 +107,7 @@ def list_error_reports(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """List bug reports (admin). Omits screenshot_b64 for performance."""
+    """List trouble reports (admin). Omits screenshot_b64 for performance."""
     q = db.query(ErrorReport)
     if status:
         q = q.filter(ErrorReport.status == status)
@@ -93,6 +121,7 @@ def list_error_reports(
             "reporter_email": r.reporter.email if r.reporter else None,
             "reporter_name": r.reporter.name if r.reporter else None,
             "has_screenshot": bool(r.screenshot_b64),
+            "has_ai_prompt": bool(r.ai_prompt),
             "current_url": r.current_url,
             "current_view": r.current_view,
             "created_at": r.created_at.isoformat() if r.created_at else None,
@@ -161,7 +190,7 @@ def get_error_report(
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
-    """Get full bug report detail including screenshot (admin)."""
+    """Get full trouble report detail including screenshot (admin)."""
     report = db.get(ErrorReport, report_id)
     if not report:
         raise HTTPException(404, "Report not found")
@@ -178,12 +207,45 @@ def get_error_report(
         "page_state": report.page_state,
         "status": report.status,
         "admin_notes": report.admin_notes,
+        "ai_prompt": report.ai_prompt,
         "reporter_email": report.reporter.email if report.reporter else None,
         "reporter_name": report.reporter.name if report.reporter else None,
         "resolved_at": report.resolved_at.isoformat() if report.resolved_at else None,
         "resolved_by_email": report.resolved_by.email if report.resolved_by else None,
         "created_at": report.created_at.isoformat() if report.created_at else None,
     }
+
+
+@router.post("/api/error-reports/{report_id}/regenerate-prompt")
+async def regenerate_prompt(
+    report_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Re-generate the AI prompt for an existing trouble report (admin)."""
+    report = db.get(ErrorReport, report_id)
+    if not report:
+        raise HTTPException(404, "Report not found")
+
+    result = await generate_trouble_prompt(
+        user_message=report.description or report.title,
+        current_url=report.current_url,
+        current_view=report.current_view,
+        browser_info=report.browser_info,
+        screen_size=report.screen_size,
+        console_errors=report.console_errors,
+        page_state=report.page_state,
+        has_screenshot=bool(report.screenshot_b64),
+        reporter_name=report.reporter.name if report.reporter else None,
+    )
+    if not result:
+        raise HTTPException(502, "AI prompt generation failed — try again later")
+
+    report.title = result["title"]
+    report.ai_prompt = result["prompt"]
+    db.commit()
+    logger.info("AI prompt regenerated for report #{} by {}", report_id, user.email)
+    return {"id": report.id, "ai_prompt": report.ai_prompt, "title": report.title}
 
 
 @router.put("/api/error-reports/{report_id}/status")

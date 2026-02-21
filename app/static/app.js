@@ -6221,8 +6221,9 @@ window.addEventListener('unhandledrejection', function(event) {
     if (!navigator.onLine) showOffline();
 })();
 
-// ── Bug Report — screenshot paste/drop + submission ─────────────────
-var _bugScreenshotB64 = null;
+// ── Trouble Chat — auto-screenshot + simple submission ──────────────
+var _troubleScreenshotB64 = null;
+var _troubleCapturing = false;
 
 function _gatherBugContext() {
     var activeView = '';
@@ -6245,58 +6246,75 @@ function _gatherBugContext() {
     };
 }
 
-function _handleBugScreenshot(file) {
-    if (!file || !file.type.startsWith('image/')) return;
-    if (file.size > 2 * 1024 * 1024) { showToast('Image too large (max 2 MB)', 'error'); return; }
-    var reader = new FileReader();
-    reader.onload = function(e) {
-        _bugScreenshotB64 = e.target.result;
-        var preview = document.getElementById('bugScreenshotPreview');
-        if (preview) { preview.src = _bugScreenshotB64; preview.style.display = 'block'; }
-        var zone = document.getElementById('bugDropZone');
-        if (zone) zone.classList.add('has-file');
-    };
-    reader.readAsDataURL(file);
+function openTroubleChat() {
+    _troubleScreenshotB64 = null;
+    _troubleCapturing = true;
+    var body = document.getElementById('troubleChatBody');
+    if (body) body.innerHTML = '';
+    var ta = document.getElementById('troubleMessage');
+    if (ta) ta.value = '';
+    openModal('troubleModal');
+    // Auto-capture screenshot in background
+    if (typeof html2canvas === 'function') {
+        var modal = document.getElementById('troubleModal');
+        html2canvas(document.body, {
+            scale: 0.75,
+            useCORS: true,
+            ignoreElements: function(el) { return el.id === 'troubleModal'; },
+        }).then(function(canvas) {
+            _troubleScreenshotB64 = canvas.toDataURL('image/jpeg', 0.6);
+            _troubleCapturing = false;
+        }).catch(function() {
+            _troubleCapturing = false;
+        });
+    } else {
+        _troubleCapturing = false;
+    }
+    setTimeout(function() { if (ta) ta.focus(); }, 100);
 }
 
-// Paste listener — only active when bug modal is open
-document.addEventListener('paste', function(e) {
-    var modal = document.getElementById('bugReportModal');
-    if (!modal || !modal.classList.contains('open')) return;
-    var items = (e.clipboardData || {}).items || [];
-    for (var i = 0; i < items.length; i++) {
-        if (items[i].type.indexOf('image') !== -1) {
-            e.preventDefault();
-            _handleBugScreenshot(items[i].getAsFile());
-            return;
+function closeTroubleChat() {
+    closeModal('troubleModal');
+    _troubleScreenshotB64 = null;
+    _troubleCapturing = false;
+}
+
+async function submitTrouble(btn) {
+    var ta = document.getElementById('troubleMessage');
+    var message = (ta ? ta.value : '').trim();
+    if (!message) { showToast('Please describe your issue', 'error'); return; }
+
+    // Wait for screenshot capture (max 3s)
+    if (_troubleCapturing) {
+        var waited = 0;
+        while (_troubleCapturing && waited < 3000) {
+            await new Promise(function(r) { setTimeout(r, 200); });
+            waited += 200;
         }
     }
-});
 
-function clearBugScreenshot() {
-    _bugScreenshotB64 = null;
-    var preview = document.getElementById('bugScreenshotPreview');
-    if (preview) { preview.src = ''; preview.style.display = 'none'; }
-    var zone = document.getElementById('bugDropZone');
-    if (zone) zone.classList.remove('has-file');
-}
+    await guardBtn(btn, 'Sending…', async function() {
+        // Show user message in chat body
+        var body = document.getElementById('troubleChatBody');
+        if (body) {
+            body.innerHTML = '<div style="background:var(--primary-light,#e8f0fe);padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:8px;max-width:90%;margin-left:auto">' + esc(message) + '</div>';
+        }
 
-async function submitBugReport(btn) {
-    var title = (document.getElementById('bugTitle') || {}).value || '';
-    if (!title.trim()) { showToast('Title is required', 'error'); return; }
-    await guardBtn(btn, 'Submitting…', async function() {
         var ctx = _gatherBugContext();
         var payload = Object.assign({
-            title: title.trim(),
-            description: (document.getElementById('bugDescription') || {}).value || '',
-            screenshot_b64: _bugScreenshotB64 || null,
+            message: message,
+            screenshot_b64: _troubleScreenshotB64 || null,
         }, ctx);
         await apiFetch('/api/error-reports', { method: 'POST', body: payload });
-        showToast('Bug report submitted — thank you!', 'success');
-        closeModal('bugReportModal');
-        // Reset form
-        var t = document.getElementById('bugTitle'); if (t) t.value = '';
-        var d = document.getElementById('bugDescription'); if (d) d.value = '';
-        clearBugScreenshot();
+
+        // Show confirmation
+        if (body) {
+            body.innerHTML += '<div style="background:var(--green-light,#e6f4ea);padding:8px 12px;border-radius:8px;font-size:12px;margin-bottom:8px;color:var(--green)">Got it — your report has been submitted. We\'ll look into it!</div>';
+        }
+        if (ta) ta.value = '';
+        _troubleScreenshotB64 = null;
+
+        // Auto-close after 2.5s
+        setTimeout(function() { closeTroubleChat(); }, 2500);
     });
 }

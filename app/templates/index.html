@@ -37,7 +37,7 @@
             <button type="button" class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)">Sourcing</button>
             <button type="button" class="fp" data-view="archive" onclick="setMainView('archive',this)">Archive</button>
         </div>
-        <a class="bug-link" onclick="openModal('bugReportModal')">Report a Bug</a>
+        <a class="bug-link" onclick="openTroubleChat()">Trouble</a>
         <div class="search-wrap">
             <input type="text" class="sbox" id="mainSearch" placeholder="&#x1f50d;  Search customer, part, RFQ&hellip;" aria-label="Search requisitions" oninput="debouncedMainSearch(this.value)" onkeydown="if(event.key==='Enter')triggerMainSearch()">
             <button type="button" class="search-btn" id="mainSearchBtn" onclick="triggerMainSearch()" title="Search"><svg class="search-icon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="spinner-icon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2" stroke-dasharray="32" stroke-dashoffset="10" stroke-linecap="round"/></svg></button>
@@ -999,27 +999,15 @@
     </div><!-- end main-scroll -->
 </main><!-- end main -->
 
-<!-- Bug Report Modal -->
-<div id="bugReportModal" class="modal-bg" onclick="if(event.target===this)closeModal('bugReportModal')">
-    <div class="modal" style="max-width:520px">
-        <h2>Report a Bug</h2>
-        <div class="field"><label for="bugTitle">Title <span style="color:var(--red)">*</span></label><input id="bugTitle" placeholder="Brief description of the issue" maxlength="255"></div>
-        <div class="field" style="margin-top:10px"><label for="bugDescription">Details</label><textarea id="bugDescription" rows="4" placeholder="Steps to reproduce, what you expected vs what happened…" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;font-family:inherit"></textarea></div>
-        <div class="field" style="margin-top:10px">
-            <label>Screenshot <span style="color:var(--muted);font-weight:400;font-size:11px">(paste or drag image)</span></label>
-            <div class="bug-drop-zone" id="bugDropZone"
-                 ondragover="event.preventDefault();this.classList.add('drag-over')"
-                 ondragleave="this.classList.remove('drag-over')"
-                 ondrop="event.preventDefault();this.classList.remove('drag-over');_handleBugScreenshot((event.dataTransfer.files||[])[0])">
-                <span class="bug-drop-text">Drop image here or Ctrl+V to paste</span>
-                <img id="bugScreenshotPreview" style="display:none;max-width:100%;max-height:200px;border-radius:4px;margin-top:8px">
-                <a onclick="clearBugScreenshot()" class="bug-clear-screenshot" style="display:none">Remove</a>
-            </div>
-        </div>
-        <p style="font-size:11px;color:var(--muted);margin-top:8px">Browser info, URL, and console errors are captured automatically.</p>
-        <div class="mactions">
-            <button type="button" class="btn btn-ghost" onclick="closeModal('bugReportModal')">Cancel</button>
-            <button type="button" class="btn btn-primary" onclick="submitBugReport(this)">Submit Report</button>
+<!-- Trouble Chat Modal -->
+<div id="troubleModal" class="modal-bg" onclick="if(event.target===this)closeTroubleChat()">
+    <div class="modal" style="max-width:440px;display:flex;flex-direction:column">
+        <h2 style="margin-bottom:8px">What's the trouble?</h2>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:12px">Describe your issue — a screenshot and context are captured automatically.</p>
+        <div id="troubleChatBody" style="flex:1;min-height:80px;max-height:200px;overflow-y:auto;margin-bottom:12px"></div>
+        <div style="display:flex;gap:8px;align-items:flex-end">
+            <textarea id="troubleMessage" rows="3" placeholder="Type your issue here…" style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical;font-family:inherit" onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submitTrouble(document.getElementById('troubleSendBtn'))}"></textarea>
+            <button type="button" class="btn btn-primary" id="troubleSendBtn" onclick="submitTrouble(this)" style="white-space:nowrap">Send</button>
         </div>
     </div>
 </div>
@@ -1040,6 +1028,7 @@
 </div>
 
 <script type="application/json" id="app-config">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isDevAssistant":{{ "true" if is_dev_assistant else "false" }}}</script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script defer src="/static/app.js?v={{ app_version }}"></script>
 <script defer src="/static/crm.js?v={{ app_version }}"></script>
 {% endif %}

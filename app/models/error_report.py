@@ -25,6 +25,9 @@ class ErrorReport(Base):
     console_errors = Column(Text)  # JSON string
     page_state = Column(Text)  # JSON string
 
+    # Gradient-generated Claude Code prompt
+    ai_prompt = Column(Text)
+
     # Status workflow: open → in_progress → resolved | closed
     status = Column(String(20), default="open", nullable=False)
     admin_notes = Column(Text)

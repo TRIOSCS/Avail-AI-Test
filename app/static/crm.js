@@ -4773,7 +4773,7 @@ async function loadTroubleTickets() {
             const colors = {open:'red',in_progress:'amber',resolved:'green',closed:'muted'};
             return `<span class="badge" style="background:var(--${colors[s]||'muted'}-light,var(--bg));color:var(--${colors[s]||'muted'});font-size:10px;padding:2px 8px;border-radius:4px">${s.replace('_',' ')}</span>`;
         };
-        let html = '<table class="tbl"><thead><tr><th>#</th><th>Title</th><th>Reporter</th><th>Status</th><th>Screenshot</th><th>Created</th><th></th></tr></thead><tbody>';
+        let html = '<table class="tbl"><thead><tr><th>#</th><th>Title</th><th>Reporter</th><th>Status</th><th>AI</th><th>Screenshot</th><th>Created</th><th></th></tr></thead><tbody>';
         data.forEach(r => {
             const created = r.created_at ? new Date(r.created_at).toLocaleDateString() : '';
             html += `<tr>
@@ -4781,6 +4781,7 @@ async function loadTroubleTickets() {
                 <td>${esc(r.title)}</td>
                 <td class="text-xs">${esc(r.reporter_name || r.reporter_email || '')}</td>
                 <td>${statusBadge(r.status)}</td>
+                <td class="text-center">${r.has_ai_prompt ? '<span title="AI prompt available" style="color:var(--green)">&#10003;</span>' : '<span style="color:var(--muted)">&mdash;</span>'}</td>
                 <td class="text-center">${r.has_screenshot ? '📷' : ''}</td>
                 <td class="text-xs-muted">${created}</td>
                 <td><button type="button" class="btn btn-sm" onclick="viewTicketDetail(${r.id})">View</button></td>
@@ -4833,6 +4834,21 @@ async function viewTicketDetail(id) {
                     <div>View: ${esc(r.current_view || 'N/A')} | Browser: ${esc(r.browser_info || 'N/A')} | Screen: ${esc(r.screen_size || 'N/A')}</div>
                 </div>
                 ${consoleHtml}
+                ${r.ai_prompt ? `
+                <div style="margin-top:12px">
+                    <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+                        <strong style="font-size:12px">AI Prompt</strong>
+                        <button type="button" class="btn btn-sm" onclick="copyPromptToClipboard(${r.id})" title="Copy to clipboard">Copy</button>
+                        <button type="button" class="btn btn-sm btn-ghost" onclick="regeneratePrompt(${r.id}, this)" title="Re-generate prompt">Regenerate</button>
+                    </div>
+                    <pre id="aiPrompt_${r.id}" style="background:var(--bg);padding:10px;border-radius:6px;font-size:11px;max-height:300px;overflow:auto;white-space:pre-wrap;word-wrap:break-word;border:1px solid var(--border)">${esc(r.ai_prompt)}</pre>
+                </div>` : `
+                <div style="margin-top:12px">
+                    <div style="display:flex;align-items:center;gap:8px">
+                        <span style="font-size:12px;color:var(--muted)">No AI prompt generated</span>
+                        <button type="button" class="btn btn-sm" onclick="regeneratePrompt(${r.id}, this)">Generate</button>
+                    </div>
+                </div>`}
                 ${screenshotHtml}
                 <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
                     <div class="s-row" style="gap:8px;align-items:flex-end;flex-wrap:wrap">
@@ -4864,4 +4880,42 @@ function exportTicketsXlsx() {
     const status = (document.getElementById('ticketStatusFilter') || {}).value || '';
     const url = '/api/error-reports/export/xlsx' + (status ? '?status=' + status : '');
     window.open(url, '_blank');
+}
+
+function copyPromptToClipboard(id) {
+    const pre = document.getElementById('aiPrompt_' + id);
+    if (!pre) return;
+    const text = pre.textContent || pre.innerText;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+            showToast('Prompt copied to clipboard', 'success');
+        }).catch(() => {
+            _fallbackCopyText(pre);
+        });
+    } else {
+        _fallbackCopyText(pre);
+    }
+}
+
+function _fallbackCopyText(el) {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    try {
+        document.execCommand('copy');
+        showToast('Prompt copied to clipboard', 'success');
+    } catch (e) {
+        showToast('Failed to copy — select and copy manually', 'error');
+    }
+    sel.removeAllRanges();
+}
+
+async function regeneratePrompt(id, btn) {
+    await guardBtn(btn, 'Generating…', async () => {
+        await apiFetch('/api/error-reports/' + id + '/regenerate-prompt', { method: 'POST' });
+        showToast('AI prompt regenerated', 'success');
+        viewTicketDetail(id);
+    });
 }

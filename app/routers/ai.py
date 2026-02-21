@@ -31,8 +31,12 @@ from ..models import (
     VendorResponse,
 )
 from ..schemas.ai import (
+    CompareQuotesRequest,
+    NormalizePartsRequest,
+    ParseEmailRequest,
     ProspectContactSave,
     ProspectFinderRequest,
+    RfqDraftEmailRequest,
     RfqDraftRequest,
     SaveDraftOffersRequest,
 )
@@ -267,7 +271,63 @@ async def delete_prospect_contact(
     return {"ok": True}
 
 
-# ── Feature 2: Parse Vendor Reply → Structured Offer ─────────────────────
+# ── Feature 2a: Parse RFQ Email (Gradient) ────────────────────────────────
+
+
+@router.post("/api/ai/parse-email")
+@limiter.limit("10/minute")
+async def ai_parse_email(
+    payload: ParseEmailRequest,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Parse a vendor email reply into structured quotes using Gradient AI."""
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features not enabled")
+
+    from app.services.ai_email_parser import parse_email, should_auto_apply, should_flag_review
+
+    result = await parse_email(
+        email_body=payload.email_body,
+        email_subject=payload.email_subject,
+        vendor_name=payload.vendor_name,
+    )
+
+    if not result:
+        return {"parsed": False, "quotes": [], "reason": "Parser returned no result"}
+
+    return {
+        "parsed": True,
+        "quotes": result.get("quotes", []),
+        "overall_confidence": result.get("overall_confidence", 0),
+        "email_type": result.get("email_type", "unclear"),
+        "vendor_notes": result.get("vendor_notes"),
+        "auto_apply": should_auto_apply(result),
+        "needs_review": should_flag_review(result),
+    }
+
+
+# ── Feature 2c: Part Number Normalization ──────────────────────────────
+
+
+@router.post("/api/ai/normalize-parts")
+@limiter.limit("10/minute")
+async def ai_normalize_parts(
+    payload: NormalizePartsRequest,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Normalize part numbers using AI — infer manufacturer, package, base part."""
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features not enabled")
+
+    from app.services.ai_part_normalizer import normalize_parts
+
+    results = await normalize_parts(payload.parts)
+    return {"parts": results, "count": len(results)}
+
+
+# ── Feature 2b: Parse Vendor Reply → Structured Offer (Anthropic) ────────
 
 
 @router.post("/api/ai/parse-response/{response_id}")
@@ -459,3 +519,59 @@ async def ai_draft_rfq(
     if not draft:
         return {"available": False, "reason": "Draft generation failed"}
     return {"available": True, "body": draft}
+
+
+@router.post("/api/ai/draft-rfq-email")
+@limiter.limit("10/minute")
+async def ai_draft_rfq_email(
+    payload: RfqDraftEmailRequest,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Generate a detailed RFQ email with subject and body using Gradient AI."""
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features not enabled")
+
+    from app.services.ai_email_drafter import draft_rfq_email
+
+    parts = [p.model_dump() for p in payload.parts]
+
+    result = await draft_rfq_email(
+        vendor_name=payload.vendor_name,
+        parts=parts,
+        buyer_name=payload.buyer_name,
+        vendor_contact_name=payload.vendor_contact_name,
+    )
+
+    if not result:
+        return {"available": False, "reason": "Draft generation failed"}
+    return {"available": True, "subject": result["subject"], "body": result["body"]}
+
+
+# ── Feature 5: Quote Comparison ─────────────────────────────────────────
+
+
+@router.post("/api/ai/compare-quotes")
+@limiter.limit("10/minute")
+async def ai_compare_quotes(
+    payload: CompareQuotesRequest,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Compare multiple vendor quotes and recommend the best option."""
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features not enabled")
+
+    from app.services.ai_quote_analyzer import compare_quotes
+
+    quotes = [q.model_dump() for q in payload.quotes]
+
+    result = await compare_quotes(
+        part_number=payload.part_number,
+        quotes=quotes,
+        required_qty=payload.required_qty,
+    )
+
+    if not result:
+        return {"available": False, "reason": "Comparison not available"}
+    return {"available": True, **result}
