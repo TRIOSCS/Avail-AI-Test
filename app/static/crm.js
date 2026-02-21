@@ -968,7 +968,14 @@ function renderQuote() {
         revised: '<p style="color:var(--muted)">Superseded by Rev ' + (q.revision + 1) + '</p>',
     };
 
+    const histBanner = crmQuote._isHistorical ? `
+    <div style="background:var(--amber,#f59e0b)15;border:1px solid var(--amber,#f59e0b);border-radius:8px;padding:8px 14px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between">
+        <span style="font-size:12px;color:var(--text2)">You are viewing a historical revision (Rev ${q.revision})</span>
+        <button class="btn btn-ghost btn-sm" onclick="loadQuote()" style="font-size:11px">← Return to active quote</button>
+    </div>` : '';
+
     el.innerHTML = `
+    ${histBanner}
     <div class="quote-header">
         <div style="display:flex;align-items:center;gap:12px">
             <img src="/static/trio_logo.png" alt="TRIO" style="height:60px">
@@ -1101,6 +1108,8 @@ function copyQuoteTable() {
     table += 'Terms: ' + terms + '\n';
     navigator.clipboard.writeText(table).then(() => {
         showToast('Quote table copied to clipboard', 'success');
+    }).catch(() => {
+        showToast('Clipboard access denied — copy manually', 'error');
     });
 }
 
@@ -1213,7 +1222,11 @@ async function loadSpecificQuote(quoteId) {
     try {
         const quotes = await apiFetch('/api/requisitions/' + currentReqId + '/quotes');
         const q = quotes.find(x => x.id === quoteId);
-        if (q) { crmQuote = q; renderQuote(); }
+        if (q) {
+            crmQuote = q;
+            crmQuote._isHistorical = true;
+            renderQuote();
+        }
     } catch (e) { logCatchError('loadSpecificQuote', e); showToast('Failed to load quote', 'error'); }
 }
 
@@ -1799,9 +1812,7 @@ async function tokenApprovePlan(token) {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ sales_order_number: soNumber, manager_notes: notes })
         }).then(r => { if (!r.ok) throw new Error('Approval failed'); return r.json(); });
-        showToast('Buy plan approved — buyers notified', 'success');
-        location.hash = '';
-        checkTokenApproval();
+        _showTokenResult('approved', 'Buy plan approved — buyers have been notified.');
     } catch (e) { showToast('Failed to approve: ' + (e.message || e), 'error'); }
 }
 
@@ -1814,9 +1825,26 @@ async function tokenRejectPlan(token) {
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({ reason })
         }).then(r => { if (!r.ok) throw new Error('Rejection failed'); return r.json(); });
-        showToast('Buy plan rejected', 'info');
-        location.hash = '';
+        _showTokenResult('rejected', 'Buy plan has been rejected.');
     } catch (e) { showToast('Failed to reject: ' + (e.message || e), 'error'); }
+}
+
+function _showTokenResult(status, message) {
+    const el = document.querySelector('.main') || document.getElementById('mainContent');
+    if (!el) return;
+    const color = status === 'approved' ? 'var(--green)' : 'var(--red)';
+    const icon = status === 'approved' ? '&#10003;' : '&#10007;';
+    el.innerHTML = `
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:300px;text-align:center;padding:40px">
+            <div style="width:64px;height:64px;border-radius:50%;background:${color}15;display:flex;align-items:center;justify-content:center;font-size:28px;color:${color};margin-bottom:16px">${icon}</div>
+            <h2 style="font-size:18px;margin:0 0 8px">${status === 'approved' ? 'Approved' : 'Rejected'}</h2>
+            <p style="color:var(--text2);font-size:13px;margin:0 0 24px">${esc(message)}</p>
+            <div style="display:flex;gap:12px">
+                <button class="btn btn-primary" onclick="location.hash='';showView('buyplans');loadBuyPlans()">Go to Buy Plans</button>
+                <button class="btn btn-ghost" onclick="location.hash='';showView('list');loadRequisitions()">Dashboard</button>
+            </div>
+        </div>`;
+    location.hash = '';
 }
 
 async function submitLost() {
@@ -2382,6 +2410,8 @@ function openParsePreviewModal(data, responseId) {
         </tr>
     `).join('');
 
+    window._pendingDraftOffers = data.draft_offers || [];
+
     const bg = document.createElement('div');
     bg.id = 'parseBg';
     bg.className = 'ai-panel-bg';
@@ -2408,7 +2438,7 @@ function openParsePreviewModal(data, responseId) {
             </table>` : '<p class="empty">No parts extracted</p>'}
             <div class="parse-actions">
                 ${(data.draft_offers || []).length > 0 ? `
-                    <button class="btn btn-primary" onclick="saveParsedOffers(${responseId}, ${escAttr(JSON.stringify(data.draft_offers))})">
+                    <button class="btn btn-primary" onclick="saveParsedOffers(${responseId})">
                         Save ${data.draft_offers.length} Offer(s)
                     </button>` : ''}
                 <button class="btn btn-ghost" onclick="document.getElementById('parseBg').remove()">Close</button>
@@ -2418,8 +2448,8 @@ function openParsePreviewModal(data, responseId) {
     document.body.appendChild(bg);
 }
 
-async function saveParsedOffers(responseId, offers) {
-    if (typeof offers === 'string') offers = JSON.parse(offers);
+async function saveParsedOffers(responseId) {
+    const offers = window._pendingDraftOffers || [];
     if (!currentReqId) {
         showToast('No requisition selected', 'error');
         return;
@@ -4009,16 +4039,58 @@ async function loadUnmatchedQueue() {
     }
 }
 
-async function promptAttributeActivity(activityId) {
-    const entityType = prompt('Attribute to "company" or "vendor"?');
-    if (!entityType || (entityType !== 'company' && entityType !== 'vendor')) return;
-    const entityId = prompt(`Enter ${entityType} ID:`);
-    if (!entityId || isNaN(parseInt(entityId))) return;
+function promptAttributeActivity(activityId) {
+    // Show inline attribution panel instead of raw prompt()
+    const row = document.getElementById('unmatched-' + activityId);
+    if (!row) return;
+    // Remove any existing attribution panels
+    document.querySelectorAll('.attr-panel').forEach(p => p.remove());
+    const panel = document.createElement('div');
+    panel.className = 'attr-panel';
+    panel.style.cssText = 'padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-top:8px';
+    panel.innerHTML = `
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+            <button class="btn btn-sm attr-type-btn on" data-type="company" onclick="this.parentNode.querySelectorAll('.attr-type-btn').forEach(b=>b.classList.remove('on'));this.classList.add('on');document.getElementById('attrSearch-${activityId}').placeholder='Search companies...';document.getElementById('attrSearch-${activityId}').value='';document.getElementById('attrResults-${activityId}').innerHTML=''">Company</button>
+            <button class="btn btn-sm attr-type-btn" data-type="vendor" onclick="this.parentNode.querySelectorAll('.attr-type-btn').forEach(b=>b.classList.remove('on'));this.classList.add('on');document.getElementById('attrSearch-${activityId}').placeholder='Search vendors...';document.getElementById('attrSearch-${activityId}').value='';document.getElementById('attrResults-${activityId}').innerHTML=''">Vendor</button>
+            <button class="btn btn-ghost btn-sm" onclick="this.closest('.attr-panel').remove()" style="margin-left:auto">Cancel</button>
+        </div>
+        <input id="attrSearch-${activityId}" placeholder="Search companies..." oninput="_attrSearch(${activityId},this.value)" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)">
+        <div id="attrResults-${activityId}" style="max-height:150px;overflow-y:auto;margin-top:4px"></div>
+    `;
+    row.appendChild(panel);
+    panel.querySelector('input').focus();
+}
+
+var _attrSearchDebounce = null;
+function _attrSearch(activityId, query) {
+    clearTimeout(_attrSearchDebounce);
+    if (query.length < 2) { document.getElementById('attrResults-' + activityId).innerHTML = ''; return; }
+    _attrSearchDebounce = setTimeout(async () => {
+        const typeBtn = document.querySelector('#unmatched-' + activityId + ' .attr-type-btn.on');
+        const entityType = typeBtn ? typeBtn.dataset.type : 'company';
+        const resultsEl = document.getElementById('attrResults-' + activityId);
+        try {
+            let items = [];
+            if (entityType === 'company') {
+                items = await apiFetch('/api/companies/typeahead?q=' + encodeURIComponent(query));
+                items = (items || []).slice(0, 8);
+            } else {
+                const resp = await apiFetch('/api/vendors?q=' + encodeURIComponent(query));
+                items = ((resp.vendors || resp) || []).slice(0, 8).map(v => ({id: v.id, name: v.display_name || v.name}));
+            }
+            if (!items.length) { resultsEl.innerHTML = '<div style="padding:6px;font-size:11px;color:var(--muted)">No results</div>'; return; }
+            resultsEl.innerHTML = items.map(i => `<div onclick="_attrSelect(${activityId},'${entityType}',${i.id})" style="padding:6px 8px;font-size:12px;cursor:pointer;border-radius:4px;hover:background:var(--card2)" onmouseover="this.style.background='var(--card2)'" onmouseout="this.style.background=''">${esc(i.name)}</div>`).join('');
+        } catch (e) { resultsEl.innerHTML = '<div style="padding:6px;font-size:11px;color:var(--red)">Search error</div>'; }
+    }, 250);
+}
+
+async function _attrSelect(activityId, entityType, entityId) {
     try {
-        await apiFetch(`/api/activities/${activityId}/attribute`, {
+        await apiFetch('/api/activities/' + activityId + '/attribute', {
             method: 'POST',
-            body: {entity_type: entityType, entity_id: parseInt(entityId)}
+            body: {entity_type: entityType, entity_id: entityId}
         });
+        showToast('Activity attributed', 'success');
         const row = document.getElementById('unmatched-' + activityId);
         if (row) row.remove();
     } catch (e) {
