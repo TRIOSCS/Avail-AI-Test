@@ -2271,8 +2271,10 @@ function _renderReqRow(r) {
         else if (h < 96) dot = ' <span class="new-offers-dot red" title="New offers"></span>';
     }
 
-    // Name cell — shared across all tabs (no summary div — info goes in dedicated columns)
-    const nameCell = `<td><b class="cust-link dd-edit" onclick="event.stopPropagation();editReqCustomer(${r.id},this)">${esc(cust)}</b>${dot} <span class="dd-edit" style="font-size:10px;color:var(--muted)" onclick="event.stopPropagation();editReqName(${r.id},this)">${esc(r.name || '')}</span></td>`;
+    // Name cell — editable on RFQ tab only, read-only on sourcing/archive
+    const nameCell = v === 'rfq'
+        ? `<td><b class="cust-link dd-edit" onclick="event.stopPropagation();editReqCustomer(${r.id},this)">${esc(cust)}</b>${dot} <span class="dd-edit" style="font-size:10px;color:var(--muted)" onclick="event.stopPropagation();editReqName(${r.id},this)">${esc(r.name || '')}</span></td>`
+        : `<td><b class="cust-link" onclick="event.stopPropagation();toggleDrillDown(${r.id})">${esc(cust)}</b>${dot} <span style="font-size:10px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
 
     // Last Searched — relative timestamp
     let searched = '';
@@ -2309,7 +2311,7 @@ function _renderReqRow(r) {
 
         dataCells = `
             ${effortCell}
-            <td class="dl-cell" onclick="event.stopPropagation();editDeadline(${r.id},this)" title="Click to edit deadline">${dl}</td>
+            <td class="dl-cell">${dl}</td>
             ${offersCell}
             <td class="mono">${total}</td>
             <td><div class="prog"><div class="prog-bar"><div class="prog-fill" style="width:${pct}%"></div></div><span class="prog-txt">${sourced}/${total}</span></div></td>
