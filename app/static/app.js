@@ -1431,10 +1431,12 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             const scoreVal = s.score != null ? parseFloat(s.score).toFixed(1) : '\u2014';
             const safeVName = (s.vendor_name||'').replace(/'/g, "\\'");
             const needsEmail = !hasEmail ? ` <a onclick="event.stopPropagation();ddPromptVendorEmail(${reqId},${s.id},'${safeVName}')" style="color:var(--red);font-size:10px;cursor:pointer;font-weight:600">needs email</a>` : '';
+            const sourceUrl = s.click_url || s.octopart_url || s.vendor_url || '';
+            const srcIcon = sourceUrl ? `<a href="${escAttr(sourceUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="View listing" style="color:var(--blue);font-size:12px;margin-right:4px;text-decoration:none">&#x1f517;</a>` : '';
             const sAge = s.created_at ? fmtRelative(s.created_at) : '\u2014';
             html += `<tr style="${dimStyle}">
                 <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
-                <td>${esc(s.vendor_name || '\u2014')}${needsEmail}</td>
+                <td>${srcIcon}${esc(s.vendor_name || '\u2014')}${needsEmail}</td>
                 <td class="mono">${esc(s.mpn_matched || '\u2014')}</td>
                 <td class="mono">${qty}</td>
                 <td class="mono" style="color:${s.unit_price ? 'var(--teal)' : 'var(--muted)'}">${price}</td>
