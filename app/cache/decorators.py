@@ -47,11 +47,14 @@ def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | N
             key_hash = hashlib.md5(key_str.encode(), usedforsecurity=False).hexdigest()[:12]
             cache_key = f"{prefix}:{key_hash}"
 
-            # Try cache hit
-            cached = get_cached(cache_key)
-            if cached is not None:
-                log.debug("Cache HIT: %s", cache_key)
-                return cached
+            # Try cache hit (never let cache errors crash the route)
+            try:
+                cached = get_cached(cache_key)
+                if cached is not None:
+                    log.debug("Cache HIT: %s", cache_key)
+                    return cached
+            except Exception as e:
+                log.warning("Cache read failed for %s: %s", cache_key, e)
 
             # Cache miss — call the real function
             log.debug("Cache MISS: %s", cache_key)
@@ -59,7 +62,10 @@ def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | N
 
             # Only cache dict/list results (not Response objects)
             if isinstance(result, (dict, list)):
-                set_cached(cache_key, result, ttl_days=max(1, int(ttl_days)) if ttl_days >= 1 else 1)
+                try:
+                    set_cached(cache_key, result, ttl_days=max(1, int(ttl_days)) if ttl_days >= 1 else 1)
+                except Exception as e:
+                    log.warning("Cache write failed for %s: %s", cache_key, e)
 
             return result
 

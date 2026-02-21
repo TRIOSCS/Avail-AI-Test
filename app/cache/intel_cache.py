@@ -153,20 +153,29 @@ def invalidate(cache_key: str) -> None:
 
 
 def cleanup_expired() -> int:
-    """Remove all expired cache entries. Returns count deleted.
+    """Remove expired cache entries in batches. Returns count deleted.
 
     Called periodically by the scheduler (e.g., daily).
+    Deletes in batches of 1000 to avoid locking the table.
     """
     count = 0
+    BATCH_SIZE = 1000
 
-    # PostgreSQL cleanup
+    # PostgreSQL cleanup — batched to avoid long table locks
     try:
         with SessionLocal() as db:
-            result = db.execute(
-                text("DELETE FROM intel_cache WHERE expires_at < NOW()")
-            )
-            db.commit()
-            count = result.rowcount
+            while True:
+                result = db.execute(
+                    text(
+                        "DELETE FROM intel_cache WHERE ctid IN "
+                        "(SELECT ctid FROM intel_cache WHERE expires_at < NOW() LIMIT :batch)"
+                    ),
+                    {"batch": BATCH_SIZE},
+                )
+                db.commit()
+                count += result.rowcount
+                if result.rowcount < BATCH_SIZE:
+                    break
             if count:
                 log.info("Cache cleanup: removed %d expired entries from PostgreSQL", count)
     except Exception as e:

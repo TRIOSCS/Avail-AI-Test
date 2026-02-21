@@ -298,6 +298,7 @@ async def _job_inbox_scan():
     from .database import SessionLocal
     from .models import User
 
+    # Use a short-lived session just to identify users that need scanning
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
@@ -308,39 +309,49 @@ async def _job_inbox_scan():
         for user in users:
             if not user.access_token or not user.m365_connected:
                 continue
-
             should_scan = False
             if not user.last_inbox_scan:
                 should_scan = True
             elif now - _utc(user.last_inbox_scan) > scan_interval:
                 should_scan = True
-
             if should_scan:
-                users_to_scan.append(user)
-
-        # Scan all users in parallel with concurrency limit
-        sem = asyncio.Semaphore(3)
-
-        async def _safe_scan(user):
-            async with sem:
-                try:
-                    await asyncio.wait_for(_scan_user_inbox(user, db), timeout=90)
-                except asyncio.TimeoutError:
-                    logger.error(f"Inbox scan TIMEOUT for {user.email} (90s) — skipping")
-                    user.m365_error_reason = "Inbox scan timed out"
-                    db.commit()
-                except Exception as e:
-                    logger.error(f"Inbox scan error for {user.email}: {e}")
-                    user.m365_error_reason = str(e)[:200]
-                    db.commit()
-                    db.rollback()
-
-        if users_to_scan:
-            await asyncio.gather(*[_safe_scan(u) for u in users_to_scan])
+                # Detach user data we need so we can close this session
+                users_to_scan.append(user.id)
     except Exception as e:
         logger.error(f"Inbox scan job error: {e}")
+        return
     finally:
         db.close()
+
+    # Scan each user with its own session (returned to pool after each scan)
+    sem = asyncio.Semaphore(3)
+
+    async def _safe_scan(user_id):
+        async with sem:
+            scan_db = SessionLocal()
+            try:
+                user = scan_db.get(User, user_id)
+                if not user:
+                    return
+                await asyncio.wait_for(_scan_user_inbox(user, scan_db), timeout=90)
+            except asyncio.TimeoutError:
+                logger.error(f"Inbox scan TIMEOUT for user {user_id} (90s) — skipping")
+                scan_db.rollback()
+                try:
+                    user = scan_db.get(User, user_id)
+                    if user:
+                        user.m365_error_reason = "Inbox scan timed out"
+                        scan_db.commit()
+                except Exception:
+                    scan_db.rollback()
+            except Exception as e:
+                logger.error(f"Inbox scan error for user {user_id}: {e}")
+                scan_db.rollback()
+            finally:
+                scan_db.close()
+
+    if users_to_scan:
+        await asyncio.gather(*[_safe_scan(uid) for uid in users_to_scan])
 
 
 @_traced_job
@@ -370,10 +381,12 @@ async def _job_contacts_sync():
     from .database import SessionLocal
     from .models import User
 
+    # Short-lived session to identify users needing sync
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
         users = db.query(User).filter(User.refresh_token.isnot(None)).all()
+        user_ids = []
         for user in users:
             if not user.access_token or not user.m365_connected:
                 continue
@@ -382,18 +395,30 @@ async def _job_contacts_sync():
                 should_sync = True
             elif now - _utc(user.last_contacts_sync) > timedelta(hours=24):
                 should_sync = True
-
             if should_sync:
-                try:
-                    await _sync_user_contacts(user, db)
-                except Exception as e:
-                    logger.warning(f"Contacts sync failed for {user.email}: {e}")
-                    db.rollback()
-                    continue
+                user_ids.append(user.id)
     except Exception as e:
         logger.error(f"Contacts sync job error: {e}")
+        return
     finally:
         db.close()
+
+    # Sync each user with its own session
+    for user_id in user_ids:
+        sync_db = SessionLocal()
+        try:
+            user = sync_db.get(User, user_id)
+            if not user:
+                continue
+            await asyncio.wait_for(_sync_user_contacts(user, sync_db), timeout=300)
+        except asyncio.TimeoutError:
+            logger.warning(f"Contacts sync timed out for user {user_id}")
+            sync_db.rollback()
+        except Exception as e:
+            logger.warning(f"Contacts sync failed for user {user_id}: {e}")
+            sync_db.rollback()
+        finally:
+            sync_db.close()
 
 
 @_traced_job
@@ -502,9 +527,16 @@ async def _job_stock_autocomplete():
     db = SessionLocal()
     try:
         from .services.buyplan_service import auto_complete_stock_sales
-        completed = auto_complete_stock_sales(db)
+        loop = asyncio.get_running_loop()
+        completed = await asyncio.wait_for(
+            loop.run_in_executor(None, auto_complete_stock_sales, db),
+            timeout=300,
+        )
         if completed:
             logger.info(f"Stock sale auto-complete: {completed} plan(s) completed")
+    except asyncio.TimeoutError:
+        logger.error("Stock sale auto-complete timed out after 300s")
+        db.rollback()
     except Exception as e:
         logger.error(f"Stock sale auto-complete error: {e}")
         db.rollback()
@@ -520,11 +552,18 @@ async def _job_proactive_matching():
     db = SessionLocal()
     try:
         from .services.proactive_service import scan_new_offers_for_matches
-        result = scan_new_offers_for_matches(db)
+        loop = asyncio.get_running_loop()
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, scan_new_offers_for_matches, db),
+            timeout=300,
+        )
         if result.get("matches_created"):
             logger.info(
                 f"Proactive matching: {result['matches_created']} new matches from {result['scanned']} offers"
             )
+    except asyncio.TimeoutError:
+        logger.error("Proactive matching timed out after 300s")
+        db.rollback()
     except Exception as e:
         logger.error(f"Proactive matching error: {e}")
         db.rollback()
@@ -546,20 +585,32 @@ async def _job_performance_tracking():
         )
 
         loop = asyncio.get_running_loop()
-        vs_result = await loop.run_in_executor(None, compute_all_vendor_scorecards, db)
+        vs_result = await asyncio.wait_for(
+            loop.run_in_executor(None, compute_all_vendor_scorecards, db),
+            timeout=600,
+        )
         logger.info(
             f"Vendor scorecards: {vs_result['updated']} updated, "
             f"{vs_result['skipped_cold_start']} cold-start"
         )
         current_month = now.date().replace(day=1)
-        bl_result = await loop.run_in_executor(None, compute_buyer_leaderboard, db, current_month)
+        bl_result = await asyncio.wait_for(
+            loop.run_in_executor(None, compute_buyer_leaderboard, db, current_month),
+            timeout=300,
+        )
         logger.info(
             f"Buyer leaderboard: {bl_result['entries']} entries for {current_month}"
         )
         # Recompute previous month during grace period (first 7 days)
         if now.day <= 7:
             prev_month = (current_month - timedelta(days=1)).replace(day=1)
-            await loop.run_in_executor(None, compute_buyer_leaderboard, db, prev_month)
+            await asyncio.wait_for(
+                loop.run_in_executor(None, compute_buyer_leaderboard, db, prev_month),
+                timeout=300,
+            )
+    except asyncio.TimeoutError:
+        logger.error("Performance tracking timed out")
+        db.rollback()
     except Exception as e:
         logger.error(f"Performance tracking error: {e}")
         db.rollback()

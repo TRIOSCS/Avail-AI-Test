@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import random
 import time
 from abc import ABC, abstractmethod
 from urllib.parse import quote_plus
@@ -85,7 +86,7 @@ class BaseConnector(ABC):
                 self._breaker.record_failure()
                 last_err = e
                 if attempt < self.max_retries:
-                    await asyncio.sleep(2**attempt)
+                    await asyncio.sleep(2**attempt + random.uniform(0, 1))
                 else:
                     log.warning(
                         f"{self.__class__.__name__} failed for {part_number}: {e}"

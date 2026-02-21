@@ -342,11 +342,19 @@ def _save_sightings(
 ) -> list[Sighting]:
     from .models import VendorCard
 
-    # Build vendor-name → vendor_score lookup
-    vendor_cards = db.query(
-        VendorCard.normalized_name, VendorCard.vendor_score
-    ).all()
-    vendor_score_map = {vc.normalized_name: vc.vendor_score for vc in vendor_cards}
+    # Build vendor-name → vendor_score lookup (only for vendors in results)
+    needed_names = {
+        normalize_vendor_name((r.get("vendor_name") or "").strip())
+        for r in fresh if r.get("vendor_name")
+    }
+    needed_names.discard("")
+    if needed_names:
+        vendor_cards = db.query(
+            VendorCard.normalized_name, VendorCard.vendor_score
+        ).filter(VendorCard.normalized_name.in_(needed_names)).all()
+        vendor_score_map = {vc.normalized_name: vc.vendor_score for vc in vendor_cards}
+    else:
+        vendor_score_map = {}
 
     # Connector-aware delete: only remove sightings from sources that returned
     # results.  Sightings from failed/timed-out connectors are preserved.
