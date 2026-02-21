@@ -32,12 +32,15 @@ from app.models import (
     Base,
     Company,
     CustomerSite,
+    MaterialCard,
     Offer,
+    ProactiveOffer,
     Quote,
     Requirement,
     Requisition,
     User,
     VendorCard,
+    VendorContact,
 )
 
 # ── Event loop isolation ─────────────────────────────────────────────
@@ -359,3 +362,69 @@ def test_offer(
     db_session.commit()
     db_session.refresh(o)
     return o
+
+
+@pytest.fixture()
+def test_vendor_contact(db_session: Session, test_vendor_card: VendorCard) -> VendorContact:
+    """A structured vendor contact linked to the test vendor card."""
+    vc = VendorContact(
+        vendor_card_id=test_vendor_card.id,
+        full_name="John Sales",
+        title="Sales Manager",
+        email="john@arrow.com",
+        phone="+1-555-0200",
+        source="manual",
+        is_verified=True,
+        confidence=90,
+    )
+    db_session.add(vc)
+    db_session.commit()
+    db_session.refresh(vc)
+    return vc
+
+
+@pytest.fixture()
+def test_material_card(db_session: Session) -> MaterialCard:
+    """A material card for a common electronic component."""
+    mc = MaterialCard(
+        normalized_mpn="lm317t",
+        display_mpn="LM317T",
+        manufacturer="Texas Instruments",
+        description="Adjustable Voltage Regulator",
+        search_count=10,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(mc)
+    db_session.commit()
+    db_session.refresh(mc)
+    return mc
+
+
+@pytest.fixture()
+def test_proactive_offer(
+    db_session: Session,
+    test_user: User,
+    test_customer_site: CustomerSite,
+) -> ProactiveOffer:
+    """A sent proactive offer for conversion tests."""
+    po = ProactiveOffer(
+        customer_site_id=test_customer_site.id,
+        salesperson_id=test_user.id,
+        line_items=[{
+            "mpn": "LM317T",
+            "vendor_name": "Arrow Electronics",
+            "qty": 1000,
+            "cost": 0.50,
+            "sell": 0.75,
+        }],
+        recipient_emails=["jane@acme-electronics.com"],
+        subject="Proactive Offer: LM317T",
+        status="sent",
+        total_sell=750.00,
+        total_cost=500.00,
+        sent_at=datetime.now(timezone.utc),
+    )
+    db_session.add(po)
+    db_session.commit()
+    db_session.refresh(po)
+    return po
