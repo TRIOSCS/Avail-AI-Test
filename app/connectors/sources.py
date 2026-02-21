@@ -124,15 +124,22 @@ class NexarConnector(BaseConnector):
     }"""
 
     # Fallback query when role blocks 'sellers' — gets aggregate availability/pricing
+    # plus direct Octopart URLs, descriptions, and category data
     AGGREGATE_QUERY = """
     query ($mpn: String!) {
       supSearchMpn(q: $mpn, limit: 20) {
+        hits
         results { part {
           mpn
+          genericMpn
           manufacturer { name }
           shortDescription
           totalAvail
+          avgAvail
           medianPrice1000 { price currency }
+          octopartUrl
+          manufacturerUrl
+          category { name }
         }}
       }
     }"""
@@ -314,18 +321,25 @@ class NexarConnector(BaseConnector):
         return results
 
     def _parse_aggregate(self, results_data: list, pn: str) -> list[dict]:
-        """Parse Nexar aggregate results (totalAvail + medianPrice, no per-seller breakdown)."""
+        """Parse Nexar aggregate results (totalAvail + medianPrice + direct URLs)."""
         results = []
-        octopart_url = f"https://octopart.com/search?q={quote_plus(pn)}"
+        search_url = f"https://octopart.com/search?q={quote_plus(pn)}"
 
         for hit in results_data:
             part = hit.get("part") or {}
             mpn = part.get("mpn", pn)
             mfr = (part.get("manufacturer") or {}).get("name", "")
             total_avail = part.get("totalAvail")
+            avg_avail = part.get("avgAvail")
             median_price = part.get("medianPrice1000") or {}
             price = median_price.get("price")
             currency = median_price.get("currency", "USD")
+            desc = part.get("shortDescription", "")
+            category = (part.get("category") or {}).get("name", "")
+
+            # Direct Octopart part page URL (shows all sellers/prices)
+            octopart_url = part.get("octopartUrl") or search_url
+            mfr_url = part.get("manufacturerUrl", "")
 
             if not total_avail and not price:
                 continue  # Skip parts with no useful data
@@ -342,6 +356,9 @@ class NexarConnector(BaseConnector):
                 "confidence": 4 if total_avail and price else 3,
                 "octopart_url": octopart_url,
                 "click_url": octopart_url,
+                "vendor_url": mfr_url,
+                "description": desc[:500] if desc else "",
+                "category": category,
             })
 
         log.info(f"Nexar: {pn} -> {len(results)} aggregate results (totalAvail + medianPrice)")
