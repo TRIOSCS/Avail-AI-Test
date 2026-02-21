@@ -1703,6 +1703,8 @@ async function submitLogOffer() {
 }
 
 function renderReqList() {
+    // Remember which drill-downs were open so we can restore them after re-render
+    const _openDrillIds = [...document.querySelectorAll('.drow.open')].map(r => parseInt(r.id.replace('d-', ''))).filter(Boolean);
     _ddReqCache = {};
     _ddSightingsCache = {};
     _ddSelectedSightings = {};
@@ -1849,6 +1851,13 @@ function renderReqList() {
     }
     el.innerHTML = `<table class="tbl">${thead}<tbody>${rowsHtml}</tbody></table>${loadMoreHtml}`;
     _updateToolbarStats();
+    // Restore previously open drill-downs
+    if (_openDrillIds.length) {
+        const stillPresent = _openDrillIds.filter(id => _reqListData.some(r => r.id === id));
+        if (stillPresent.length) {
+            setTimeout(() => { stillPresent.forEach(id => toggleDrillDown(id)); }, 50);
+        }
+    }
 }
 
 function setToolbarQuickFilter(key) {
@@ -1883,13 +1892,13 @@ function _updateToolbarStats() {
     }
 
     const qf = _toolbarQuickFilter;
-    const pill = (color, count, label) =>
-        `<div class="ts-pill ts-${color}${qf === color ? ' active' : ''}" onclick="setToolbarQuickFilter('${color}')"><span class="ts-n">${count}</span> ${label}</div>`;
+    const pill = (statClass, key, count, label) =>
+        `<button type="button" class="tb-action ${statClass}${qf === key ? ' active' : ''}" onclick="setToolbarQuickFilter('${key}')"><span class="tb-count">${count}</span> ${label}</button>`;
 
     el.innerHTML =
-        pill('green', nGreen, 'Offers') +
-        pill('yellow', nYellow, 'Bid Due') +
-        `<div class="ts-pill ts-grey${qf ? '' : ' active'}" onclick="setToolbarQuickFilter('')"><span class="ts-n">${all.length}</span> All</div>`;
+        pill('tb-stat-green', 'green', nGreen, 'Offers') +
+        pill('tb-stat-yellow', 'yellow', nYellow, 'Bid Due') +
+        `<button type="button" class="tb-action tb-stat-all${qf ? '' : ' active'}" onclick="setToolbarQuickFilter('')"><span class="tb-count">${all.length}</span> All</button>`;
 }
 
 function _renderReqRow(r) {
@@ -2483,7 +2492,18 @@ async function archiveFromList(reqId) {
     try {
         await apiFetch(`/api/requisitions/${reqId}/archive`, { method: 'PUT' });
         showToast('Archived');
-        loadRequisitions();
+        // Remove from in-memory list and re-render without a full reload
+        // so drill-downs and search state are preserved
+        _reqListData = _reqListData.filter(r => r.id !== reqId);
+        // Close the drill-down row for the archived item
+        const drow = document.getElementById('d-' + reqId);
+        if (drow) drow.remove();
+        const arow = document.getElementById('a-' + reqId);
+        if (arow) arow.remove();
+        // Remove from DOM directly instead of full renderReqList
+        const row = document.querySelector(`.req-row[onclick*="toggleDrillDown(${reqId})"]`);
+        if (row) row.remove();
+        _updateToolbarStats();
     } catch (e) { showToast('Failed to archive', 'error'); }
 }
 
@@ -5449,7 +5469,7 @@ function toggleNotifications() {
         // Close on click outside
         setTimeout(() => {
             function _closeNotif(e) {
-                if (!panel.contains(e.target) && !e.target.closest('.notif-btn')) {
+                if (!panel.contains(e.target) && !e.target.closest('.filter-wrap')) {
                     panel.classList.remove('open');
                     document.removeEventListener('click', _closeNotif, true);
                 }
@@ -5484,8 +5504,8 @@ function _notifLabel(type) {
     }
 }
 function _notifClickAction(n) {
-    if (n.requisition_id) return `markNotifRead(${n.id});loadRequisition(${n.requisition_id})`;
-    if (n.company_id) return `markNotifRead(${n.id});goToCompany(${n.company_id})`;
+    if (n.requisition_id) return `markNotifRead(${n.id});document.getElementById('notifPanel').classList.remove('open');toggleDrillDown(${n.requisition_id})`;
+    if (n.company_id) return `markNotifRead(${n.id});document.getElementById('notifPanel').classList.remove('open');goToCompany(${n.company_id})`;
     return `markNotifRead(${n.id})`;
 }
 
@@ -5501,15 +5521,21 @@ async function loadNotifications() {
         </div>`;
         el.innerHTML = header + items.map(n => {
             const color = _notifBadgeColor(n.type);
-            return `<div style="padding:6px 0;border-bottom:1px solid var(--card2);font-size:12px;cursor:pointer" onclick="${_notifClickAction(n)}">
-                <div style="display:flex;align-items:center;gap:6px">
-                    <span style="font-size:9px;font-weight:700;text-transform:uppercase;padding:1px 5px;border-radius:3px;color:#fff;background:${color}">${_notifLabel(n.type)}</span>
-                    <span style="font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(n.subject || 'Notification')}</span>
+            const notesHtml = n.notes ? `<div class="notif-item-notes">${esc(n.notes)}</div>` : '';
+            const hasLink = n.requisition_id || n.company_id;
+            return `<div class="notif-item" onclick="${_notifClickAction(n)}">
+                <div class="notif-item-body">
+                    <div class="notif-item-top">
+                        <span class="notif-item-badge" style="background:${color}">${_notifLabel(n.type)}</span>
+                        <span class="notif-item-subject">${esc(n.subject || 'Notification')}</span>
+                    </div>
+                    <div class="notif-item-meta">
+                        <span>${esc(n.company_name || '')}</span>
+                        <span>${n.created_at ? fmtDateTime(n.created_at) : ''}</span>
+                    </div>
+                    ${notesHtml}
                 </div>
-                <div style="display:flex;justify-content:space-between;color:var(--muted);font-size:10px;margin-top:2px">
-                    <span>${esc(n.company_name || '')}</span>
-                    <span>${n.created_at ? fmtDateTime(n.created_at) : ''}</span>
-                </div>
+                ${hasLink ? '<span class="notif-item-arrow">\u203a</span>' : ''}
             </div>`;
         }).join('');
     } catch { el.innerHTML = '<p class="empty" style="font-size:12px">Failed to load</p>'; }
