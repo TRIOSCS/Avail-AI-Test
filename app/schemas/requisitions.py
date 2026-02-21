@@ -83,6 +83,7 @@ class RequirementUpdate(BaseModel):
     packaging: str | None = None
     condition: str | None = None
     notes: str | None = None
+    sale_notes: str | None = None
 
     @field_validator("primary_mpn")
     @classmethod

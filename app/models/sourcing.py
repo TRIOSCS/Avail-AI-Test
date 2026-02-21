@@ -77,6 +77,7 @@ class Requirement(Base):
     hardware_codes = Column(String(100))
     packaging = Column(String(100))
     condition = Column(String(50))
+    sale_notes = Column(Text)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="requirements")

@@ -642,6 +642,7 @@ async def list_requirements(
                 "packaging": r.packaging or "",
                 "condition": r.condition or "",
                 "notes": r.notes or "",
+                "sale_notes": r.sale_notes or "",
             }
         )
     return results
@@ -863,6 +864,8 @@ async def update_requirement(
         r.condition = normalize_condition(data.condition) or data.condition.strip()
     if data.notes is not None:
         r.notes = data.notes.strip()
+    if data.sale_notes is not None:
+        r.sale_notes = data.sale_notes.strip()
     db.commit()
     return {"ok": True}
 

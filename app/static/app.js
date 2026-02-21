@@ -1233,7 +1233,7 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     if (!reqs.length && !_addRowActive[rfqId]) { dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">No parts yet</span>'; return; }
     if (!reqs.length && _addRowActive[rfqId]) {
         dd.innerHTML = `<table class="dtbl"><thead><tr>
-            <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th>Subs</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th><th>Pkg</th><th>Notes</th><th>Vendors</th><th style="width:24px"></th>
+            <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th>Subs</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th><th>Pkg</th><th>Notes</th><th>Sale Notes</th><th style="width:24px"></th>
         </tr></thead><tbody></tbody></table>`;
         _appendAddRow(rfqId, dd);
         return;
@@ -1242,7 +1242,7 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     const showAll = dd.dataset.showAll === '1';
     const visible = showAll ? reqs : reqs.slice(0, DD_LIMIT);
     let html = `<table class="dtbl"><thead><tr>
-        <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th>Subs</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th><th>Pkg</th><th>Notes</th><th>Vendors</th><th style="width:24px"></th>
+        <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th>Subs</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th><th>Pkg</th><th>Notes</th><th>Sale Notes</th><th style="width:24px"></th>
     </tr></thead><tbody>`;
     for (const r of visible) {
         const subsText = (r.substitutes || []).length ? r.substitutes.join(', ') : '—';
@@ -1259,7 +1259,7 @@ function _renderDrillDownTable(rfqId, targetPanel) {
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'hardware_codes')" style="font-size:10px">${esc(r.hardware_codes || '—')}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'packaging')" style="font-size:10px">${esc(r.packaging || '—')}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'notes')" title="${escAttr(r.notes || '')}" style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(notesTrunc)}</td>
-            <td class="mono">${r.sighting_count || 0}</td>
+            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'sale_notes')" title="${escAttr(r.sale_notes || '')}" style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((r.sale_notes || '').length > 30 ? r.sale_notes.substring(0, 30) + '\u2026' : (r.sale_notes || '\u2014'))}</td>
             <td><button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteDrillRow(${rfqId},${r.id})" title="Remove" style="font-size:10px;padding:1px 5px">\u2715</button></td>
         </tr>`;
     }
@@ -1288,7 +1288,7 @@ function editDrillCell(td, rfqId, reqId, field) {
         el = document.createElement('select');
         el.className = 'req-edit-input';
         el.innerHTML = '<option value="">—</option>' + CONDITION_OPTIONS.map(o => `<option value="${o}"${currentVal === o ? ' selected' : ''}>${o}</option>`).join('');
-    } else if (field === 'notes') {
+    } else if (field === 'notes' || field === 'sale_notes') {
         el = document.createElement('textarea');
         el.className = 'req-edit-input';
         el.value = currentVal;
@@ -1330,7 +1330,7 @@ function editDrillCell(td, rfqId, reqId, field) {
         el.addEventListener('change', () => el.blur());
     }
     el.addEventListener('keydown', e => {
-        if (e.key === 'Enter' && field !== 'notes') { e.preventDefault(); el.blur(); }
+        if (e.key === 'Enter' && field !== 'notes' && field !== 'sale_notes') { e.preventDefault(); el.blur(); }
         if (e.key === 'Escape') { e.preventDefault(); _cancelled = true; _renderDrillDownTable(rfqId); }
     });
 }
@@ -1379,18 +1379,13 @@ function _appendAddRow(rfqId, dd) {
     inPrice.type = 'number'; inPrice.className = 'add-row-price'; inPrice.step = '0.01'; inPrice.min = '0'; inPrice.placeholder = '0.00'; inPrice.style.width = '60px';
     td.appendChild(inPrice); tr.appendChild(td);
 
-    // Subs, Condition, Date Codes, FW, HW, Pkg, Notes — placeholder dashes
-    for (let i = 0; i < 7; i++) {
+    // Subs, Condition, Date Codes, FW, HW, Pkg, Notes, Sale Notes — placeholder dashes
+    for (let i = 0; i < 8; i++) {
         td = document.createElement('td');
         td.style.cssText = 'color:var(--muted);font-size:10px';
         td.textContent = '\u2014';
         tr.appendChild(td);
     }
-
-    // Vendors — blank
-    td = document.createElement('td');
-    td.className = 'mono';
-    tr.appendChild(td);
 
     // Cancel button
     td = document.createElement('td');
