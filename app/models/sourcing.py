@@ -70,6 +70,7 @@ class Requirement(Base):
     target_qty = Column(Integer, default=1)
     target_price = Column(Numeric(12, 4))
     substitutes = Column(JSON, default=list)
+    substitutes_text = Column(Text)  # Generated column for trigram search (DB-managed)
     notes = Column(Text)
     firmware = Column(String(100))
     date_codes = Column(String(100))

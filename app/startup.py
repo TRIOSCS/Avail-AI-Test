@@ -325,6 +325,16 @@ def _create_perf_indexes(conn) -> None:
         CREATE INDEX IF NOT EXISTS ix_requirements_mpn_trgm
         ON requirements USING gin (primary_mpn gin_trgm_ops)
     """)
+    # Generated column + trigram index for substitutes search
+    _exec(conn, """
+        ALTER TABLE requirements
+        ADD COLUMN IF NOT EXISTS substitutes_text TEXT
+        GENERATED ALWAYS AS (substitutes::text) STORED
+    """)
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_requirements_subs_trgm
+        ON requirements USING gin (substitutes_text gin_trgm_ops)
+    """)
     # Phase 1: Additional performance indexes for hot query paths
     _exec(conn, """
         CREATE INDEX IF NOT EXISTS ix_vendor_cards_blacklisted

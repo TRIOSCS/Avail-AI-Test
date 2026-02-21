@@ -329,15 +329,19 @@ async def list_requisitions(
 
     if q.strip():
         safe_q = q.strip().replace("%", r"\%").replace("_", r"\_")
-        from sqlalchemy import String, cast, exists, or_
+        from sqlalchemy import exists, or_
         # Search by req name, customer name, primary MPN, or substitutes
+        # Split into separate EXISTS so PostgreSQL can use trigram indexes
         mpn_match = exists(
             select(Requirement.id).where(
                 Requirement.requisition_id == Requisition.id,
-                or_(
-                    Requirement.primary_mpn.ilike(f"%{safe_q}%"),
-                    cast(Requirement.substitutes, String).ilike(f"%{safe_q}%"),
-                ),
+                Requirement.primary_mpn.ilike(f"%{safe_q}%"),
+            )
+        )
+        subs_match = exists(
+            select(Requirement.id).where(
+                Requirement.requisition_id == Requisition.id,
+                Requirement.substitutes_text.ilike(f"%{safe_q}%"),
             )
         )
         query = query.filter(
@@ -345,6 +349,7 @@ async def list_requisitions(
                 Requisition.name.ilike(f"%{safe_q}%"),
                 Requisition.customer_name.ilike(f"%{safe_q}%"),
                 mpn_match,
+                subs_match,
             )
         )
     elif status == "archive":
