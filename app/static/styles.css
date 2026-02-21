@@ -1488,12 +1488,11 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
     .intel-card summary{padding:8px 10px;font-size:11px}
     .intel-body{padding:8px 10px}
 
-    .bug-link{bottom:8px;right:8px;font-size:9px;padding:4px 8px}
 }
 
-/* Bug Report Link — fixed position, visible on all pages */
-.bug-link{position:fixed;bottom:14px;right:14px;z-index:9999;font-size:10px;color:var(--red);cursor:pointer;text-decoration:none;background:var(--white);padding:5px 10px;border-radius:6px;border:1px solid var(--red);opacity:.7;transition:opacity .2s;box-shadow:var(--shadow-sm)}
-.bug-link:hover{opacity:1;text-decoration:underline}
+/* Bug Report Link — inline next to pills */
+.bug-link{font-size:11px;font-weight:600;color:var(--red);cursor:pointer;text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid var(--red);transition:background .2s,color .2s;white-space:nowrap;line-height:1.4}
+.bug-link:hover{background:var(--red);color:#fff;text-decoration:none}
 
 /* Bug Report Drop Zone */
 .bug-drop-zone{border:2px dashed var(--border);border-radius:8px;padding:16px;text-align:center;cursor:pointer;transition:border-color .2s,background .2s;min-height:60px;display:flex;flex-direction:column;align-items:center;justify-content:center}
