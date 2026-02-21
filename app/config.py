@@ -2,7 +2,7 @@
 
 import os
 
-APP_VERSION = "2.5.3"
+APP_VERSION = "2.5.4"
 
 
 class Settings:
