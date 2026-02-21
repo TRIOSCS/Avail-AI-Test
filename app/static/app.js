@@ -87,6 +87,7 @@ let _addRowActive = {};  // rfqId → true when inline add row is visible
 let _ddActFilter = {};   // rfqId → 'all'|'email'|'phone'|'notes' for activity filter
 let _ddSightingsCache = {};      // reqId -> sightings API response
 let _ddSelectedSightings = {};   // reqId -> Set of sighting IDs
+var _ddTierState = {};           // tier expand/collapse state: `${reqId}-${rId}-${tier}` → bool
 const CONDITION_OPTIONS = ['New', 'ETN', 'Factory Refurbished', 'Pulls'];
 
 function _rebuildSightingIndex() {
@@ -1686,8 +1687,6 @@ const _TIER_CONFIG = {
     good:  { label: 'Good Sources',  color: 'var(--amber)', bg: 'var(--amber-light)', defaultOpen: true },
     other: { label: 'Other Sources', color: 'var(--muted)', bg: 'var(--card2)',        defaultOpen: false },
 };
-
-let _ddTierState = {};  // `${reqId}-${rId}-${tier}` → bool
 
 function ddToggleTier(reqId, rId, tier) {
     const key = `${reqId}-${rId}-${tier}`;
