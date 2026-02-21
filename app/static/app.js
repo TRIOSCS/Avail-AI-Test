@@ -1492,6 +1492,155 @@ async function deleteDrillRow(rfqId, reqId) {
     } catch(e) { showToast('Failed to remove part', 'error'); }
 }
 
+// ── Bulk Upload (CSV/Excel) ───────────────────────────────────────────────
+function ddUploadFile(rfqId) {
+    const inp = document.createElement('input');
+    inp.type = 'file';
+    inp.accept = '.csv,.xlsx,.xls';
+    inp.style.display = 'none';
+    inp.onchange = async () => {
+        const file = inp.files[0];
+        if (!file) return;
+        const form = new FormData();
+        form.append('file', file);
+        try {
+            const data = await apiFetch(`/api/requisitions/${rfqId}/upload`, { method: 'POST', body: form });
+            const added = data.added || data.count || 0;
+            delete _ddReqCache[rfqId];
+            if (_ddTabCache[rfqId]) { delete _ddTabCache[rfqId].parts; delete _ddTabCache[rfqId].details; }
+            _ddReqCache[rfqId] = await apiFetch(`/api/requisitions/${rfqId}/requirements`);
+            if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = _ddReqCache[rfqId]; _ddTabCache[rfqId].details = _ddReqCache[rfqId]; }
+            const rfq = _reqListData.find(r => r.id === rfqId);
+            if (rfq) rfq.requirement_count = _ddReqCache[rfqId].length;
+            _renderDrillDownTable(rfqId);
+            const drow = document.getElementById('d-' + rfqId);
+            if (drow) {
+                const hdr = drow.querySelector('span[style*="font-weight:700"]');
+                const total = _ddReqCache[rfqId].length;
+                if (hdr) hdr.textContent = `${total} part${total !== 1 ? 's' : ''}`;
+            }
+            showToast(`Added ${added} part${added !== 1 ? 's' : ''} from ${file.name}`, 'success');
+        } catch (e) {
+            showToast('Upload failed: ' + e.message, 'error');
+        }
+        inp.remove();
+    };
+    document.body.appendChild(inp);
+    inp.click();
+}
+
+// ── Bulk Paste from Spreadsheet ──────────────────────────────────────────
+function ddPasteRows(rfqId) {
+    document.getElementById('pasteTargetRfqId').value = rfqId;
+    document.getElementById('pasteTsvInput').value = '';
+    document.getElementById('pastePreview').textContent = '';
+    document.getElementById('pasteSubmitBtn').disabled = true;
+    document.getElementById('pastePartsModal').classList.add('open');
+    setTimeout(() => document.getElementById('pasteTsvInput').focus(), 100);
+}
+
+function _parseTsvInput(text) {
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    if (!lines.length) return [];
+
+    // Split each line by tab (or 2+ spaces as fallback)
+    const rows = lines.map(l => l.split(/\t/).map(c => c.trim()));
+    if (!rows.length) return [];
+
+    // Auto-detect header row
+    const first = rows[0].map(c => c.toLowerCase().replace(/[^a-z0-9]/g, ''));
+    const mpnAliases = ['mpn', 'partnumber', 'partno', 'pn', 'mfgpart', 'mfgpartnumber', 'part', 'mfpn'];
+    const qtyAliases = ['qty', 'quantity', 'targetqty', 'reqd', 'required', 'need'];
+    const priceAliases = ['price', 'targetprice', 'target', 'unitprice', 'unit'];
+
+    let mpnCol = -1, qtyCol = -1, priceCol = -1;
+    let dataStart = 0;
+
+    // Check if first row is a header
+    const hasHeader = first.some(c => mpnAliases.includes(c) || qtyAliases.includes(c));
+    if (hasHeader) {
+        first.forEach((c, i) => {
+            if (mpnCol < 0 && mpnAliases.includes(c)) mpnCol = i;
+            if (qtyCol < 0 && qtyAliases.includes(c)) qtyCol = i;
+            if (priceCol < 0 && priceAliases.includes(c)) priceCol = i;
+        });
+        dataStart = 1;
+    }
+
+    // Default column mapping: first col = MPN, second = qty, third = price
+    if (mpnCol < 0) mpnCol = 0;
+    if (qtyCol < 0 && rows[0].length > 1) qtyCol = 1;
+    if (priceCol < 0 && rows[0].length > 2) priceCol = 2;
+
+    const results = [];
+    for (let i = dataStart; i < rows.length; i++) {
+        const r = rows[i];
+        const mpn = (r[mpnCol] || '').trim();
+        if (!mpn) continue;
+        const obj = { primary_mpn: mpn };
+        if (qtyCol >= 0 && r[qtyCol]) {
+            const q = parseInt(r[qtyCol].replace(/[^0-9]/g, ''));
+            if (q > 0) obj.target_qty = q;
+        }
+        if (priceCol >= 0 && r[priceCol]) {
+            const p = parseFloat(r[priceCol].replace(/[^0-9.]/g, ''));
+            if (p > 0) obj.target_price = p;
+        }
+        results.push(obj);
+    }
+    return results;
+}
+
+function _previewPaste() {
+    const text = document.getElementById('pasteTsvInput').value;
+    const parts = _parseTsvInput(text);
+    const preview = document.getElementById('pastePreview');
+    const btn = document.getElementById('pasteSubmitBtn');
+    if (parts.length === 0) {
+        preview.textContent = 'No parts detected';
+        btn.disabled = true;
+    } else {
+        const sample = parts.slice(0, 3).map(p => p.primary_mpn).join(', ');
+        const more = parts.length > 3 ? ` and ${parts.length - 3} more` : '';
+        preview.innerHTML = `<b>${parts.length}</b> part${parts.length !== 1 ? 's' : ''} detected: ${esc(sample)}${more}`;
+        btn.disabled = false;
+    }
+}
+
+async function submitPastedRows() {
+    const rfqId = parseInt(document.getElementById('pasteTargetRfqId').value);
+    const text = document.getElementById('pasteTsvInput').value;
+    const parts = _parseTsvInput(text);
+    if (!parts.length || !rfqId) return;
+
+    const btn = document.getElementById('pasteSubmitBtn');
+    btn.disabled = true;
+    btn.textContent = 'Adding…';
+
+    try {
+        await apiFetch(`/api/requisitions/${rfqId}/requirements`, { method: 'POST', body: parts });
+        closeModal('pastePartsModal');
+        delete _ddReqCache[rfqId];
+        if (_ddTabCache[rfqId]) { delete _ddTabCache[rfqId].parts; delete _ddTabCache[rfqId].details; }
+        _ddReqCache[rfqId] = await apiFetch(`/api/requisitions/${rfqId}/requirements`);
+        if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = _ddReqCache[rfqId]; _ddTabCache[rfqId].details = _ddReqCache[rfqId]; }
+        const rfq = _reqListData.find(r => r.id === rfqId);
+        if (rfq) rfq.requirement_count = _ddReqCache[rfqId].length;
+        _renderDrillDownTable(rfqId);
+        const drow = document.getElementById('d-' + rfqId);
+        if (drow) {
+            const hdr = drow.querySelector('span[style*="font-weight:700"]');
+            const total = _ddReqCache[rfqId].length;
+            if (hdr) hdr.textContent = `${total} part${total !== 1 ? 's' : ''}`;
+        }
+        showToast(`Added ${parts.length} part${parts.length !== 1 ? 's' : ''}`, 'success');
+    } catch (e) {
+        showToast('Paste import failed: ' + e.message, 'error');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Add Parts';
+}
+
 // ── Sourcing Score Tooltip Builder ────────────────────────────────────────
 function _buildEffortTip(score, color, signals) {
     if (!signals) return '';
@@ -2126,7 +2275,7 @@ function _renderReqRow(r) {
     }
 
     // Name cell — shared across all tabs (no summary div — info goes in dedicated columns)
-    const nameCell = `<td><b class="cust-link" onclick="event.stopPropagation();toggleDrillDown(${r.id})">${esc(cust)}</b>${dot} <span style="font-size:10px;color:var(--muted)">${esc(r.name || '')}</span></td>`;
+    const nameCell = `<td><b class="cust-link dd-edit" onclick="event.stopPropagation();editReqCustomer(${r.id},this)">${esc(cust)}</b>${dot} <span class="dd-edit" style="font-size:10px;color:var(--muted)" onclick="event.stopPropagation();editReqName(${r.id},this)">${esc(r.name || '')}</span></td>`;
 
     // Last Searched — relative timestamp
     let searched = '';
@@ -2249,6 +2398,8 @@ function _renderReqRow(r) {
         ddHeader = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''} <span style="font-weight:400;font-size:10px;color:var(--muted)">searched ${lastSearch}</span></span>
             <div style="display:flex;gap:6px">
+                <button class="btn btn-sm" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1; Upload</button>
+                <button class="btn btn-sm" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb; Paste</button>
                 <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();ddResearchAll(${r.id})" title="Search all supplier APIs">&#x1f50d; Search All</button>
                 <button class="btn btn-primary btn-sm" id="bulkRfqBtn-${r.id}" style="display:none" onclick="event.stopPropagation();ddSendBulkRfq(${r.id})">Send Bulk RFQ (0)</button>
             </div>
@@ -2260,6 +2411,8 @@ function _renderReqRow(r) {
             <span style="font-size:12px;font-weight:700">${total} part${total !== 1 ? 's' : ''}</span>
             <div style="display:flex;gap:6px">
                 <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
+                <button class="btn btn-sm" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1; Upload</button>
+                <button class="btn btn-sm" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb; Paste</button>
                 <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="Select offers and build quote">+ Quote</button>
             </div>
         </div>`;
@@ -2325,6 +2478,117 @@ function _renderDetailDeadline(el, deadline) {
     }
 }
 
+// ── Inline RFQ Name Editor ───────────────────────────────────────────────
+function editReqName(reqId, span) {
+    if (span.querySelector('input')) return;
+    const r = _reqListData.find(x => x.id === reqId);
+    const cur = r?.name || '';
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = cur;
+    inp.placeholder = 'RFQ name';
+    inp.style.cssText = 'font-size:10px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;width:120px';
+    inp.onclick = e => e.stopPropagation();
+    const save = async () => {
+        const val = inp.value.trim();
+        if (val === cur) { renderReqList(); return; }
+        try {
+            await apiFetch(`/api/requisitions/${reqId}`, { method: 'PUT', body: { name: val } });
+            const rx = _reqListData.find(x => x.id === reqId);
+            if (rx) rx.name = val;
+            renderReqList();
+            showToast(val ? `Name set to "${val}"` : 'Name cleared', 'success');
+        } catch (e) { showToast('Failed to update name', 'error'); }
+    };
+    inp.addEventListener('blur', save);
+    inp.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); renderReqList(); }
+    });
+    span.textContent = '';
+    span.appendChild(inp);
+    inp.focus();
+    inp.select();
+}
+
+// ── Inline Customer Editor (Typeahead) ───────────────────────────────────
+function editReqCustomer(reqId, el) {
+    if (el.querySelector('input')) return;
+    const r = _reqListData.find(x => x.id === reqId);
+    const curLabel = r?.customer_site_name || '';
+
+    // Build wrapper
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'position:relative;display:inline-block';
+    wrap.onclick = e => e.stopPropagation();
+
+    const inp = document.createElement('input');
+    inp.type = 'text';
+    inp.value = curLabel;
+    inp.placeholder = 'Customer';
+    inp.style.cssText = 'font-size:12px;font-weight:700;padding:2px 4px;border:1px solid var(--border);border-radius:4px;width:180px';
+
+    const list = document.createElement('div');
+    list.className = 'site-typeahead-list show';
+    list.style.cssText = 'position:absolute;top:100%;left:0;z-index:999;min-width:220px;max-height:200px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);border-radius:6px;box-shadow:0 4px 12px rgba(0,0,0,.15)';
+
+    wrap.appendChild(inp);
+    wrap.appendChild(list);
+
+    let hlIdx = -1;
+
+    const ensureCache = async () => {
+        if (!_siteListCache) await loadSiteOptions();
+    };
+
+    const render = (q) => {
+        if (!_siteListCache) { list.innerHTML = '<div style="padding:6px 8px;font-size:11px;color:var(--muted)">Loading…</div>'; return; }
+        const lq = q.toLowerCase().trim();
+        const matches = lq ? _siteListCache.filter(s => s.label.toLowerCase().includes(lq)).slice(0, 6) : _siteListCache.slice(0, 6);
+        hlIdx = -1;
+        list.innerHTML = matches.map((s, i) =>
+            `<div class="site-typeahead-item" data-idx="${i}" data-site-id="${s.id || ''}" data-label="${escAttr(s.label)}" style="padding:4px 8px;font-size:11px;cursor:pointer">${esc(s.label)}</div>`
+        ).join('') || '<div style="padding:6px 8px;font-size:11px;color:var(--muted)">No matches</div>';
+        list.querySelectorAll('.site-typeahead-item').forEach(item => {
+            item.onmousedown = e => { e.preventDefault(); selectItem(item); };
+        });
+    };
+
+    const selectItem = async (item) => {
+        const siteId = item.dataset.siteId ? parseInt(item.dataset.siteId) : null;
+        const label = item.dataset.label;
+        if (!siteId) return;
+        try {
+            await apiFetch(`/api/requisitions/${reqId}`, { method: 'PUT', body: { customer_site_id: siteId } });
+            const rx = _reqListData.find(x => x.id === reqId);
+            if (rx) { rx.customer_site_id = siteId; rx.customer_site_name = label; }
+            renderReqList();
+            showToast(`Customer set to "${label}"`, 'success');
+        } catch (e) { showToast('Failed to update customer', 'error'); }
+    };
+
+    const highlight = (idx) => {
+        const items = list.querySelectorAll('.site-typeahead-item');
+        items.forEach((el, i) => el.style.background = i === idx ? 'var(--bg2,#f0f0f0)' : '');
+        hlIdx = idx;
+    };
+
+    inp.addEventListener('input', () => render(inp.value));
+    inp.addEventListener('blur', () => { setTimeout(() => renderReqList(), 150); });
+    inp.addEventListener('keydown', e => {
+        const items = list.querySelectorAll('.site-typeahead-item');
+        if (e.key === 'ArrowDown') { e.preventDefault(); highlight(Math.min(hlIdx + 1, items.length - 1)); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(Math.max(hlIdx - 1, 0)); }
+        else if (e.key === 'Enter') { e.preventDefault(); if (hlIdx >= 0 && items[hlIdx]) selectItem(items[hlIdx]); }
+        else if (e.key === 'Escape') { e.preventDefault(); renderReqList(); }
+    });
+
+    el.textContent = '';
+    el.appendChild(wrap);
+    ensureCache().then(() => render(inp.value));
+    inp.focus();
+    inp.select();
+}
 
 // ── v7 My Accounts Toggle ───────────────────────────────────────────────
 let _activeFilters = {};

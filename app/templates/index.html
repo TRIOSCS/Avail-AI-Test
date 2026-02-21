@@ -1024,6 +1024,21 @@
     </div>
 </div>
 
+<!-- Bulk Paste Modal -->
+<div id="pastePartsModal" class="modal-bg" onclick="if(event.target===this)closeModal('pastePartsModal')">
+    <div class="modal" style="max-width:600px">
+        <h2>Paste Parts from Spreadsheet</h2>
+        <p style="font-size:11px;color:var(--muted);margin-bottom:8px">Paste tab-separated rows from Excel or Google Sheets. Columns auto-detected: MPN, Qty, Target Price.</p>
+        <textarea id="pasteTsvInput" rows="10" placeholder="Paste rows here — e.g.&#10;MPN&#9;Qty&#9;Target Price&#10;LM358N&#9;100&#9;0.45&#10;NE555P&#9;500" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:monospace;resize:vertical" oninput="_previewPaste()"></textarea>
+        <div id="pastePreview" style="font-size:11px;color:var(--muted);margin-top:6px"></div>
+        <input type="hidden" id="pasteTargetRfqId">
+        <div class="mactions">
+            <button type="button" class="btn btn-ghost" onclick="closeModal('pastePartsModal')">Cancel</button>
+            <button type="button" class="btn btn-primary" id="pasteSubmitBtn" onclick="submitPastedRows()" disabled>Add Parts</button>
+        </div>
+    </div>
+</div>
+
 <script type="application/json" id="app-config">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isDevAssistant":{{ "true" if is_dev_assistant else "false" }}}</script>
 <script defer src="/static/app.js?v={{ app_version }}"></script>
 <script defer src="/static/crm.js?v={{ app_version }}"></script>
