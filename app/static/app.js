@@ -1881,7 +1881,7 @@ function _updateToolbarStats() {
 
     let nGreen = 0, nYellow = 0;
     for (const r of all) {
-        if (r.reply_count > 0) nGreen++;
+        if ((r.offer_count || 0) > 0 || (r.reply_count || 0) > 0) nGreen++;
         const dl = r.deadline;
         if (!dl) continue;
         const isAsap = String(dl).toUpperCase() === 'ASAP';
@@ -2029,12 +2029,15 @@ function _renderReqRow(r) {
             const barColor = _srcPct >= 80 ? 'var(--green)' : _srcPct >= 40 ? 'var(--amber)' : 'var(--red)';
             srcCell = `<div style="display:flex;align-items:center;gap:4px"><div style="flex:1;height:4px;background:var(--bg3,#e2e8f0);border-radius:2px;overflow:hidden;min-width:32px"><div style="height:100%;width:${_srcPct}%;background:${barColor};border-radius:2px"></div></div><span class="mono" style="font-size:10px">${sourced}/${total}</span></div>`;
         }
-        // Offers cell
+        // Offers cell — show confirmed offers, fall back to reply count
         let offCell = '<span style="color:var(--muted)">\u2014</span>';
         const _oCnt = r.offer_count || 0;
+        const _rCnt = r.reply_count || 0;
         if (_oCnt > 0) {
             offCell = `<b>${_oCnt}</b>`;
             if (r.best_offer_price) offCell += ` \u00b7 ${fmtDollars(r.best_offer_price)}`;
+        } else if (_rCnt > 0) {
+            offCell = `<span style="color:var(--amber)">${_rCnt} reply</span>`;
         }
 
         dataCells = `
@@ -2205,7 +2208,7 @@ function applyDropdownFilters(data) {
             if (d) d.setHours(0,0,0,0);
             const diff = d ? Math.round((d - now) / 86400000) : null;
             switch (_toolbarQuickFilter) {
-                case 'green': return r.reply_count > 0;
+                case 'green': return (r.offer_count || 0) > 0 || (r.reply_count || 0) > 0;
                 case 'yellow': return diff !== null && diff <= 3;
                 default: return true;
             }
