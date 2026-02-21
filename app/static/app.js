@@ -483,20 +483,17 @@ function showView(viewId) {
         clearInterval(_bfPollInterval);
         _bfPollInterval = null;
     }
-    // Hide entire toparea on views that don't need it (settings, etc.)
-    const toparea = document.querySelector('.toparea');
-    const hideToparea = ['view-settings'].includes(viewId);
-    if (toparea) toparea.style.display = hideToparea ? 'none' : '';
     // Toggle body class so CSS can adjust sidebar for settings view
-    document.body.classList.toggle('on-settings', hideToparea);
-    // v7: show pills/search/filters only on list view; hide on other views
+    const isSettings = viewId === 'view-settings';
+    document.body.classList.toggle('on-settings', isSettings);
+    // Hide topcontrols on settings; show pills/search/filters only on list view
     const topcontrols = document.getElementById('topcontrols');
     if (topcontrols) {
+        topcontrols.style.display = isSettings ? 'none' : '';
         const isListView = viewId === 'view-list';
         topcontrols.querySelectorAll('.fpills, .filter-wrap').forEach(el => {
             el.style.display = isListView ? '' : 'none';
         });
-        // Search box and +New button always visible
     }
 }
 

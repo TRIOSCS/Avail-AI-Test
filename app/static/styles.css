@@ -1054,9 +1054,8 @@ body.sb-open .sidebar{transform:translateX(0);border-right:1px solid var(--blue)
 body.sb-open .main{margin-left:var(--sbw)}
 /* Click-away overlay to close sidebar */
 /* sb-overlay removed — sidebar closes via JS on button click and rail toggle */
-/* Settings view — sidebar rail hidden on wide screens, sidebar starts at top */
+/* Settings view — sidebar starts at top, rail stays visible */
 body.on-settings .sidebar{top:0}
-body.on-settings .sb-rail{display:none}
 body.on-settings .toparea{margin-left:0 !important}
 
 /* Pills */

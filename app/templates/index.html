@@ -29,7 +29,7 @@
 {% else %}
 <!-- TOP AREA — logo on grey bg + controls inline to the right -->
 <div class="toparea">
-    <img src="/static/avail_logo.png" alt="AVAIL">
+    <img src="/static/avail_logo.png" alt="AVAIL" onclick="sidebarNav('reqs',document.getElementById('navReqs'))" style="cursor:pointer" title="Back to RFQs">
     <div class="topcontrols" id="topcontrols">
         <div class="fpills" id="mainPills">
             <button type="button" class="fp on" data-view="rfq" onclick="setMainView('rfq',this)">RFQ</button>
@@ -79,7 +79,7 @@
 <!-- Mobile top bar -->
 <div class="mobile-topbar">
     <button type="button" class="hamburger" onclick="toggleMobileSidebar()">&#9776;</button>
-    <img src="/static/avail_logo.png" alt="AVAIL" class="mobile-logo">
+    <img src="/static/avail_logo.png" alt="AVAIL" class="mobile-logo" onclick="sidebarNav('reqs',document.getElementById('navReqs'))" style="cursor:pointer">
     <input type="text" class="sbox mobile-search" id="mobileMainSearch"
            placeholder="&#x1f50d; Search…" aria-label="Search requisitions" oninput="debouncedMainSearch(this.value)">
     <button type="button" class="mobile-notif-btn" onclick="toggleNotifications()" title="Notifications">
