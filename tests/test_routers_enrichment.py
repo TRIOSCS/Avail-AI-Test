@@ -21,6 +21,7 @@ from app.models import (
     EnrichmentQueue,
     User,
 )
+from app.rate_limit import limiter
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -42,6 +43,7 @@ def admin_client(db_session: Session, admin_user: User) -> TestClient:
     app.dependency_overrides[require_user] = _override_admin
     app.dependency_overrides[require_admin] = _override_admin
 
+    limiter.reset()
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
