@@ -1349,18 +1349,153 @@ function ddToggleOfferDetail(rowEl, event, reqId, offerId) {
     rowEl.classList.toggle('ofr-open');
 }
 
-async function ddBuildQuote(reqId) {
+function ddBuildQuote(reqId) {
     const sel = _ddSelectedOffers[reqId];
     if (!sel || sel.size === 0) return;
+    // Gather selected offers from cache
+    const data = _ddTabCache[reqId]?.offers;
+    if (!data) return;
+    const groups = data.groups || data || [];
+    const offers = [];
+    for (const g of (Array.isArray(groups) ? groups : [])) {
+        for (const o of (g.offers || [])) {
+            if (sel.has(o.id || o.offer_id)) {
+                offers.push({...o, _targetPrice: g.target_price, _targetQty: g.target_qty, _lastQuoted: g.last_quoted});
+            }
+        }
+    }
+    if (!offers.length) return;
+
+    // Build modal
+    let linesHtml = '';
+    for (let i = 0; i < offers.length; i++) {
+        const o = offers[i];
+        const cost = o.unit_price != null ? parseFloat(o.unit_price) : 0;
+        const target = o._targetPrice != null ? '$' + Number(o._targetPrice).toFixed(4) : '\u2014';
+        linesHtml += `<tr>
+            <td class="mono" style="font-size:11px">${esc(o.mpn || o.offered_mpn || '')}</td>
+            <td style="font-size:11px">${esc(o.vendor_name || '')}</td>
+            <td class="mono">${(o.qty_available || 0).toLocaleString()}</td>
+            <td class="mono">$${cost.toFixed(4)}</td>
+            <td style="font-size:10px;color:var(--muted)">${target}</td>
+            <td><input type="number" step="0.0001" class="bq-sell" data-idx="${i}" data-cost="${cost}" value="${cost.toFixed(4)}" style="width:90px;padding:2px 4px;font-size:11px;font-family:'JetBrains Mono',monospace"></td>
+            <td class="bq-margin-cell" data-idx="${i}" style="font-weight:600">0.0%</td>
+        </tr>`;
+    }
+
+    const html = `
+    <div class="modal-bg open" id="ddBuildQuoteBg" onclick="if(event.target===this){this.remove()}">
+        <div class="modal modal-lg" onclick="event.stopPropagation()">
+            <h2>Build Quote \u2014 ${offers.length} line${offers.length !== 1 ? 's' : ''}</h2>
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+                <label style="font-size:12px;font-weight:600">Global Markup %</label>
+                <input type="number" id="bqGlobalMargin" value="0" step="1" style="width:70px;padding:4px 6px" oninput="ddApplyGlobalMarkup()">
+                <button class="btn btn-ghost btn-sm" onclick="ddApplyGlobalMarkup()">Apply</button>
+            </div>
+            <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+            <table class="dtbl" style="font-size:12px">
+                <thead><tr><th>MPN</th><th>Vendor</th><th>Qty</th><th>Buy $</th><th>Target</th><th>Sell $</th><th>Margin</th></tr></thead>
+                <tbody>${linesHtml}</tbody>
+                <tfoot><tr style="font-weight:700">
+                    <td colspan="3">Total</td>
+                    <td class="mono" id="bqTotalCost"></td>
+                    <td></td>
+                    <td class="mono" id="bqTotalSell" style="color:var(--teal)"></td>
+                    <td id="bqTotalMargin"></td>
+                </tr></tfoot>
+            </table>
+            </div>
+            <div class="mactions" style="margin-top:12px">
+                <button class="btn btn-ghost" onclick="document.getElementById('ddBuildQuoteBg').remove()">Cancel</button>
+                <button class="btn btn-primary" id="bqCreateBtn" onclick="ddConfirmBuildQuote(${reqId})">Create Quote</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+
+    // Wire up per-line sell price inputs
+    document.querySelectorAll('.bq-sell').forEach(inp => {
+        inp.addEventListener('input', () => {
+            const idx = inp.dataset.idx;
+            const cost = parseFloat(inp.dataset.cost) || 0;
+            const sell = parseFloat(inp.value) || 0;
+            const margin = sell > 0 ? ((sell - cost) / sell * 100) : 0;
+            const cell = document.querySelector(`.bq-margin-cell[data-idx="${idx}"]`);
+            if (cell) {
+                cell.textContent = margin.toFixed(1) + '%';
+                cell.style.color = margin >= 20 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)';
+            }
+            ddUpdateBqTotals();
+        });
+    });
+    ddUpdateBqTotals();
+}
+
+function ddApplyGlobalMarkup() {
+    const pct = parseFloat(document.getElementById('bqGlobalMargin')?.value) || 0;
+    document.querySelectorAll('.bq-sell').forEach(inp => {
+        const cost = parseFloat(inp.dataset.cost) || 0;
+        const sell = Math.round(cost * (1 + pct / 100) * 10000) / 10000;
+        inp.value = sell.toFixed(4);
+        inp.dispatchEvent(new Event('input'));
+    });
+}
+
+function ddUpdateBqTotals() {
+    let totalCost = 0, totalSell = 0;
+    document.querySelectorAll('.bq-sell').forEach(inp => {
+        const cost = parseFloat(inp.dataset.cost) || 0;
+        const sell = parseFloat(inp.value) || 0;
+        // Find qty from the same row (3rd cell)
+        const row = inp.closest('tr');
+        const qtyText = row?.children[2]?.textContent?.replace(/,/g, '') || '0';
+        const qty = parseInt(qtyText) || 0;
+        totalCost += cost * qty;
+        totalSell += sell * qty;
+    });
+    const margin = totalSell > 0 ? ((totalSell - totalCost) / totalSell * 100) : 0;
+    const costEl = document.getElementById('bqTotalCost');
+    const sellEl = document.getElementById('bqTotalSell');
+    const mEl = document.getElementById('bqTotalMargin');
+    if (costEl) costEl.textContent = '$' + totalCost.toFixed(2);
+    if (sellEl) sellEl.textContent = '$' + totalSell.toFixed(2);
+    if (mEl) {
+        mEl.textContent = margin.toFixed(1) + '%';
+        mEl.style.color = margin >= 20 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)';
+    }
+}
+
+async function ddConfirmBuildQuote(reqId) {
+    const btn = document.getElementById('bqCreateBtn');
+    if (!btn) return;
+    btn.disabled = true; btn.textContent = 'Creating\u2026';
+    const sel = _ddSelectedOffers[reqId];
     try {
-        await apiFetch('/api/requisitions/' + reqId + '/quote', {
+        // Create quote from offer IDs (backend generates line items at cost)
+        const quote = await apiFetch('/api/requisitions/' + reqId + '/quote', {
             method: 'POST', body: { offer_ids: Array.from(sel) }
         });
-        showToast('Quote built — switching to Quotes tab', 'success');
-        // Clear cache and switch to quotes tab
+        // Apply user's sell prices to line items
+        const sellInputs = document.querySelectorAll('.bq-sell');
+        const lines = quote.line_items || [];
+        sellInputs.forEach((inp, i) => {
+            if (lines[i]) {
+                const sell = parseFloat(inp.value) || 0;
+                const cost = lines[i].cost_price || 0;
+                lines[i].sell_price = sell;
+                lines[i].margin_pct = sell > 0 ? ((sell - cost) / sell * 100) : 0;
+            }
+        });
+        // Save updated sell prices
+        await apiFetch('/api/quotes/' + quote.id, {
+            method: 'PUT', body: { line_items: lines }
+        });
+        document.getElementById('ddBuildQuoteBg')?.remove();
+        showToast('Quote created \u2014 switching to Quotes tab', 'success');
         if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
         _switchDdTab(reqId, 'quotes');
     } catch (e) {
+        btn.disabled = false; btn.textContent = 'Create Quote';
         const msg = (e.message || '').toLowerCase();
         if (e.status === 400 && msg.includes('customer site')) {
             showToast('Link this requisition to a customer site first', 'error');
@@ -6784,9 +6919,10 @@ async function submitTrouble(btn) {
 Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
     addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies,
-    cloneFromList, closeModal, ddBuildQuote, ddDeleteOffer, ddEditOffer, ddPasteRows,
+    cloneFromList, closeModal, ddApplyGlobalMarkup, ddBuildQuote,
+    ddConfirmBuildQuote, ddDeleteOffer, ddEditOffer, ddPasteRows,
     ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddSaveEditOffer, ddSendBulkRfq,
-    ddToggleAllOffers, ddToggleOffer, ddToggleSighting, ddToggleTier,
+    ddToggleAllOffers, ddToggleGroupOffers, ddToggleOffer, ddToggleOfferDetail, ddToggleSighting, ddToggleTier,
     ddUploadFile, debounceOfferHistorySearch, debouncePartsSightingsSearch,
     deleteDrillRow, deleteMaterial, deleteReq, deleteVendor,
     deleteVendorContact, editDeadline, editDrillCell, editMaterialField,
