@@ -1339,20 +1339,26 @@ function ddBuildQuote(reqId) {
         const o = offers[i];
         const cost = o.unit_price != null ? parseFloat(o.unit_price) : 0;
         const target = o._targetPrice != null ? '$' + Number(o._targetPrice).toFixed(4) : '\u2014';
+        const inpStyle = 'width:60px;padding:2px 4px;font-size:10px';
         linesHtml += `<tr>
             <td class="mono" style="font-size:11px">${esc(o.mpn || o.offered_mpn || '')}</td>
-            <td style="font-size:11px">${esc(o.vendor_name || '')}</td>
+            <td style="font-size:10px">${esc(o.manufacturer || '\u2014')}</td>
+            <td style="font-size:10px">${esc(o.vendor_name || '')}</td>
             <td class="mono">${(o.qty_available || 0).toLocaleString()}</td>
             <td class="mono">$${cost.toFixed(4)}</td>
             <td style="font-size:10px;color:var(--muted)">${target}</td>
-            <td><input type="number" step="0.0001" class="bq-sell" data-idx="${i}" data-cost="${cost}" value="${cost.toFixed(4)}" style="width:90px;padding:2px 4px;font-size:11px;font-family:'JetBrains Mono',monospace"></td>
+            <td><input type="number" step="0.0001" class="bq-sell" data-idx="${i}" data-cost="${cost}" value="${cost.toFixed(4)}" style="width:85px;padding:2px 4px;font-size:11px;font-family:'JetBrains Mono',monospace"></td>
             <td class="bq-margin-cell" data-idx="${i}" style="font-weight:600">0.0%</td>
+            <td><input type="text" class="bq-lead" data-idx="${i}" value="${escAttr(o.lead_time || '')}" placeholder="\u2014" style="${inpStyle}"></td>
+            <td><input type="text" class="bq-cond" data-idx="${i}" value="${escAttr(o.condition || '')}" placeholder="\u2014" style="${inpStyle}"></td>
+            <td><input type="text" class="bq-dc" data-idx="${i}" value="${escAttr(o.date_code || '')}" placeholder="\u2014" style="${inpStyle}"></td>
+            <td><input type="text" class="bq-pkg" data-idx="${i}" value="${escAttr(o.packaging || '')}" placeholder="\u2014" style="${inpStyle}"></td>
         </tr>`;
     }
 
     const html = `
     <div class="modal-bg open" id="ddBuildQuoteBg" onclick="if(event.target===this){this.remove()}">
-        <div class="modal modal-lg" onclick="event.stopPropagation()">
+        <div class="modal modal-lg" onclick="event.stopPropagation()" style="max-width:1100px">
             <h2>Build Quote \u2014 ${offers.length} line${offers.length !== 1 ? 's' : ''}</h2>
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
                 <label style="font-size:12px;font-weight:600">Global Markup %</label>
@@ -1360,18 +1366,25 @@ function ddBuildQuote(reqId) {
                 <button class="btn btn-ghost btn-sm" onclick="ddApplyGlobalMarkup()">Apply</button>
             </div>
             <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-            <table class="dtbl" style="font-size:12px">
-                <thead><tr><th>MPN</th><th>Vendor</th><th>Qty</th><th>Buy $</th><th>Target</th><th>Sell $</th><th>Margin</th></tr></thead>
+            <table class="dtbl" style="font-size:11px">
+                <thead><tr><th>MPN</th><th>Mfr</th><th>Vendor</th><th>Qty</th><th>Cost</th><th>Target</th><th>Sell $</th><th>Margin</th><th>Lead</th><th>Cond</th><th>DC</th><th>Pkg</th></tr></thead>
                 <tbody>${linesHtml}</tbody>
                 <tfoot><tr style="font-weight:700">
-                    <td colspan="3">Total</td>
+                    <td colspan="4">Total</td>
                     <td class="mono" id="bqTotalCost"></td>
                     <td></td>
                     <td class="mono" id="bqTotalSell" style="color:var(--teal)"></td>
                     <td id="bqTotalMargin"></td>
+                    <td colspan="4"></td>
                 </tr></tfoot>
             </table>
             </div>
+            <div style="display:flex;gap:16px;margin-top:12px;flex-wrap:wrap;font-size:12px">
+                <label>Payment Terms <input id="bqTerms" value="Net 30" placeholder="Net 30" style="width:100px;padding:4px 6px"></label>
+                <label>Shipping <input id="bqShip" value="FOB Origin" placeholder="FOB Origin" style="width:100px;padding:4px 6px"></label>
+                <label>Valid <input id="bqValid" type="number" value="7" style="width:50px;padding:4px 6px"> days</label>
+            </div>
+            <div style="margin-top:8px"><label style="font-size:12px">Notes<br><textarea id="bqNotes" rows="2" style="width:100%;font-size:11px;padding:4px" placeholder="Special instructions, terms, etc."></textarea></label></div>
             <div class="mactions" style="margin-top:12px">
                 <button class="btn btn-ghost" onclick="document.getElementById('ddBuildQuoteBg').remove()">Cancel</button>
                 <button class="btn btn-primary" id="bqCreateBtn" onclick="ddConfirmBuildQuote(${reqId})">Create Quote</button>
@@ -1442,7 +1455,7 @@ async function ddConfirmBuildQuote(reqId) {
         const quote = await apiFetch('/api/requisitions/' + reqId + '/quote', {
             method: 'POST', body: { offer_ids: Array.from(sel) }
         });
-        // Apply user's sell prices to line items
+        // Apply user's sell prices + line details to line items
         const sellInputs = document.querySelectorAll('.bq-sell');
         const lines = quote.line_items || [];
         sellInputs.forEach((inp, i) => {
@@ -1451,11 +1464,25 @@ async function ddConfirmBuildQuote(reqId) {
                 const cost = lines[i].cost_price || 0;
                 lines[i].sell_price = sell;
                 lines[i].margin_pct = sell > 0 ? ((sell - cost) / sell * 100) : 0;
+                const lead = document.querySelector(`.bq-lead[data-idx="${i}"]`);
+                const cond = document.querySelector(`.bq-cond[data-idx="${i}"]`);
+                const dc = document.querySelector(`.bq-dc[data-idx="${i}"]`);
+                const pkg = document.querySelector(`.bq-pkg[data-idx="${i}"]`);
+                if (lead) lines[i].lead_time = lead.value;
+                if (cond) lines[i].condition = cond.value;
+                if (dc) lines[i].date_code = dc.value;
+                if (pkg) lines[i].packaging = pkg.value;
             }
         });
-        // Save updated sell prices
+        // Save line items + terms
         await apiFetch('/api/quotes/' + quote.id, {
-            method: 'PUT', body: { line_items: lines }
+            method: 'PUT', body: {
+                line_items: lines,
+                payment_terms: document.getElementById('bqTerms')?.value || '',
+                shipping_terms: document.getElementById('bqShip')?.value || '',
+                validity_days: parseInt(document.getElementById('bqValid')?.value) || 7,
+                notes: document.getElementById('bqNotes')?.value || '',
+            }
         });
         document.getElementById('ddBuildQuoteBg')?.remove();
         showToast('Quote created \u2014 switching to Quotes tab', 'success');
@@ -1584,23 +1611,35 @@ function _renderDdQuotes(reqId, data, panel) {
         return;
     }
     const q = data;
-    // Store in _ddQuoteData for in-memory editing
     _ddQuoteData[reqId] = JSON.parse(JSON.stringify(q));
     const lines = q.lines || q.line_items || [];
     const isDraft = !q.status || q.status === 'draft';
-    let html = '';
-
-    // Quote header
     const statusMap = {draft:'Draft',sent:'Sent',revised:'Revised',won:'Won',lost:'Lost'};
     const statusLabel = statusMap[q.status] || q.status || 'Draft';
-    const statusColor = q.status === 'won' ? 'var(--green)' : q.status === 'lost' ? 'var(--red)' : q.status === 'sent' ? 'var(--blue)' : 'var(--muted)';
-    html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span style="font-size:12px;font-weight:700">${esc(q.quote_number || '#Q-' + (q.id || q.quote_id || ''))} Rev ${q.revision || 1} · <span style="color:${statusColor};font-weight:600">${statusLabel}</span></span>
-        ${q.sent_at ? `<span style="font-size:10px;color:var(--muted)">Sent ${fmtRelative(q.sent_at)}</span>` : ''}
+    let html = '';
+
+    // ── Branded quote header ──
+    html += `<div class="quote-header" style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:10px">
+            <img src="/static/trio_logo.png" alt="TRIO" style="height:50px">
+            <div>
+                <div style="font-weight:700;font-size:12px">Trio Supply Chain Solutions</div>
+                <div style="font-size:10px;color:var(--muted)">info@trioscs.com</div>
+            </div>
+        </div>
+        <div style="text-align:right">
+            <div style="font-weight:700;font-size:12px">${esc(q.quote_number || 'Q-' + (q.id || ''))} Rev ${q.revision || 1} <span class="status-badge status-${q.status || 'draft'}" style="font-size:10px;padding:2px 6px;border-radius:4px">${statusLabel}</span></div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">${esc(q.customer_name || '')}</div>
+            <div style="font-size:10px;color:var(--muted)">${esc(q.contact_name || '')}${q.contact_email ? ' \u00b7 ' + esc(q.contact_email) : ''}</div>
+            ${q.sent_at ? `<div style="font-size:10px;color:var(--muted)">Sent ${fmtRelative(q.sent_at)}</div>` : ''}
+        </div>
     </div>`;
 
+    // ── Line items table ──
     if (lines.length) {
-        html += `<table class="dtbl" style="font-size:11px"><thead><tr><th>MPN</th><th>Mfr</th><th>Qty</th><th>Cost</th><th>Target</th><th>Sell $</th><th>Margin%</th></tr></thead><tbody>`;
+        html += `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+        <table class="tbl quote-table" style="font-size:11px;width:100%">
+            <thead><tr><th>MPN</th><th>Mfr</th><th>Qty</th><th>Cost</th><th>Target</th><th>Sell</th><th>Margin</th><th>Lead</th><th>Cond</th><th>DC</th><th>Pkg</th></tr></thead><tbody>`;
         let totalCost = 0, totalRev = 0;
         for (let i = 0; i < lines.length; i++) {
             const l = lines[i];
@@ -1612,21 +1651,39 @@ function _renderDdQuotes(reqId, data, panel) {
             const target = l.target_price != null ? '$' + Number(l.target_price).toFixed(4) : '\u2014';
             totalCost += cost * qty;
             totalRev += sell * qty;
+
+            const cellStyle = 'padding:2px 4px;font-size:10px;width:55px';
             const sellCell = isDraft
-                ? `<input type="number" step="0.0001" class="quote-sell-input ddq-sell" data-req="${reqId}" data-idx="${i}" value="${sell.toFixed(4)}" style="width:85px;padding:2px 4px;font-size:11px;font-family:'JetBrains Mono',monospace" onchange="ddUpdateQuoteLine(${reqId},${i},this.value)">`
+                ? `<input type="number" step="0.0001" class="quote-sell-input ddq-sell" data-req="${reqId}" data-idx="${i}" value="${sell.toFixed(4)}" style="width:80px;padding:2px 4px;font-size:10px;font-family:'JetBrains Mono',monospace" onchange="ddUpdateQuoteLine(${reqId},${i},this.value)">`
                 : `$${Number(sell).toFixed(4)}`;
+            const leadCell = isDraft
+                ? `<input type="text" class="ddq-field" data-req="${reqId}" data-idx="${i}" data-field="lead_time" value="${escAttr(l.lead_time||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'lead_time',this.value)" placeholder="\u2014" style="${cellStyle}">`
+                : esc(l.lead_time || '\u2014');
+            const condCell = isDraft
+                ? `<input type="text" class="ddq-field" data-req="${reqId}" data-idx="${i}" data-field="condition" value="${escAttr(l.condition||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'condition',this.value)" placeholder="\u2014" style="${cellStyle}">`
+                : esc(l.condition || '\u2014');
+            const dcCell = isDraft
+                ? `<input type="text" class="ddq-field" data-req="${reqId}" data-idx="${i}" data-field="date_code" value="${escAttr(l.date_code||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'date_code',this.value)" placeholder="\u2014" style="${cellStyle}">`
+                : esc(l.date_code || '\u2014');
+            const pkgCell = isDraft
+                ? `<input type="text" class="ddq-field" data-req="${reqId}" data-idx="${i}" data-field="packaging" value="${escAttr(l.packaging||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'packaging',this.value)" placeholder="\u2014" style="${cellStyle}">`
+                : esc(l.packaging || '\u2014');
+
             html += `<tr>
-                <td class="mono">${esc(l.mpn || l.offered_mpn || '')}</td>
+                <td class="mono">${esc(l.mpn || '')}</td>
                 <td style="font-size:10px">${esc(l.manufacturer || '\u2014')}</td>
                 <td class="mono">${qty.toLocaleString()}</td>
                 <td class="mono">$${Number(cost).toFixed(4)}</td>
                 <td style="font-size:10px;color:var(--muted)">${target}</td>
                 <td class="mono" style="color:var(--teal)">${sellCell}</td>
                 <td class="ddq-margin" data-req="${reqId}" data-idx="${i}" style="color:${marginColor};font-weight:600">${margin.toFixed(1)}%</td>
+                <td>${leadCell}</td>
+                <td>${condCell}</td>
+                <td>${dcCell}</td>
+                <td>${pkgCell}</td>
             </tr>`;
         }
-        const totalMargin = totalRev > 0 ? ((totalRev - totalCost) / totalRev * 100) : 0;
-        html += `</tbody></table>`;
+        html += `</tbody></table></div>`;
 
         // Quick markup (draft only)
         if (isDraft) {
@@ -1637,32 +1694,38 @@ function _renderDdQuotes(reqId, data, panel) {
         }
 
         // Totals bar
+        const totalMargin = totalRev > 0 ? ((totalRev - totalCost) / totalRev * 100) : 0;
         const gp = totalRev - totalCost;
-        html += `<div class="quote-totals" id="ddqTotals-${reqId}" style="display:flex;gap:16px;font-size:11px;padding:6px 0;border-top:1px solid var(--border)">
+        html += `<div class="quote-totals" id="ddqTotals-${reqId}" style="display:flex;gap:16px;font-size:11px;padding:8px 0;border-top:1px solid var(--border)">
             <div>Cost: <strong>$${Number(totalCost).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
             <div>Revenue: <strong>$${Number(totalRev).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
-            <div>Profit: <strong style="color:var(--green)">$${Number(gp).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+            <div>Gross Profit: <strong style="color:var(--green)">$${Number(gp).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
             <div>Margin: <strong>${totalMargin.toFixed(1)}%</strong></div>
         </div>`;
     }
 
-    // Terms (draft = editable, otherwise read-only)
+    // ── Terms ──
     if (isDraft) {
-        html += `<div class="quote-terms" style="display:flex;gap:12px;font-size:11px;margin:8px 0;flex-wrap:wrap">
-            <label>Payment <input id="ddqTerms-${reqId}" value="${escAttr(q.payment_terms||'')}" placeholder="Net 30" style="width:90px;padding:2px 4px"></label>
-            <label>Shipping <input id="ddqShip-${reqId}" value="${escAttr(q.shipping_terms||'')}" placeholder="FOB Origin" style="width:90px;padding:2px 4px"></label>
-            <label>Valid <input id="ddqValid-${reqId}" type="number" value="${q.validity_days||7}" style="width:45px;padding:2px 4px"> days</label>
+        html += `<div class="quote-terms" style="display:flex;gap:14px;font-size:11px;margin:8px 0;flex-wrap:wrap">
+            <label>Payment <input id="ddqTerms-${reqId}" value="${escAttr(q.payment_terms||'')}" placeholder="Net 30" style="width:100px;padding:2px 4px"></label>
+            <label>Shipping <input id="ddqShip-${reqId}" value="${escAttr(q.shipping_terms||'')}" placeholder="FOB Origin" style="width:100px;padding:2px 4px"></label>
+            <label>Valid <input id="ddqValid-${reqId}" type="number" value="${q.validity_days||7}" style="width:50px;padding:2px 4px"> days</label>
         </div>
         <div style="margin:4px 0"><label style="font-size:11px">Notes<br><textarea id="ddqNotes-${reqId}" rows="2" style="width:100%;font-size:11px;padding:4px">${esc(q.notes||'')}</textarea></label></div>`;
-    } else if (q.payment_terms || q.shipping_terms) {
-        html += `<div style="font-size:11px;color:var(--text2);margin:6px 0">Terms: ${esc(q.payment_terms||'')} · ${esc(q.shipping_terms||'')} · Valid ${q.validity_days||7} days</div>`;
+    } else {
+        const termParts = [];
+        if (q.payment_terms) termParts.push(esc(q.payment_terms));
+        if (q.shipping_terms) termParts.push(esc(q.shipping_terms));
+        termParts.push('Valid ' + (q.validity_days || 7) + ' days');
+        html += `<div style="font-size:11px;color:var(--text2);margin:8px 0;padding:6px 0;border-top:1px solid var(--border)"><strong>Terms:</strong> ${termParts.join(' \u00b7 ')}</div>`;
+        if (q.notes) html += `<div style="font-size:11px;color:var(--text2);background:var(--bg2);padding:6px 10px;border-radius:6px;margin-bottom:8px">${esc(q.notes)}</div>`;
     }
 
-    // Actions by status
+    // ── Actions by status ──
     const statusActions = {
         draft: `<button class="btn btn-ghost btn-sm" onclick="ddSaveQuoteDraft(${reqId})">Save Draft</button> <button class="btn btn-primary btn-sm" onclick="ddSendQuote(${reqId})">Send Quote</button>`,
         sent: `<button class="btn btn-success btn-sm" onclick="ddMarkQuoteResult(${reqId},'won')">Mark Won</button> <button class="btn btn-danger btn-sm" onclick="ddMarkQuoteResult(${reqId},'lost')">Mark Lost</button> <button class="btn btn-ghost btn-sm" onclick="ddReviseQuote(${reqId})">Revise</button>`,
-        won: `<span style="color:var(--green);font-weight:600;font-size:11px">Won</span>`,
+        won: `<span style="color:var(--green);font-weight:600;font-size:11px">Won${q.won_revenue ? ' \u2014 $' + Number(q.won_revenue).toLocaleString() : ''}</span>`,
         lost: `<span style="color:var(--red);font-weight:600;font-size:11px">Lost${q.result_reason ? ' \u2014 ' + esc(q.result_reason) : ''}</span> <button class="btn btn-ghost btn-sm" onclick="ddReviseQuote(${reqId})">Revise</button>`,
         revised: `<span style="font-size:11px;color:var(--muted)">Superseded by Rev ${(q.revision||0)+1}</span>`,
     };
@@ -1672,6 +1735,13 @@ function _renderDdQuotes(reqId, data, panel) {
 }
 
 // ── Drill-down quote editing helpers ──────────────────────────────────
+
+function ddUpdateQuoteField(reqId, idx, field, value) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    const lines = q.lines || q.line_items || [];
+    if (lines[idx]) lines[idx][field] = value;
+}
 
 function ddUpdateQuoteLine(reqId, idx, value) {
     const q = _ddQuoteData[reqId];
@@ -7113,7 +7183,7 @@ Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
     addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies,
     cloneFromList, closeModal, ddApplyGlobalMarkup, ddApplyQuoteMarkup, ddBuildQuote,
-    ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddEditOffer, ddMarkQuoteResult, ddPasteRows,
+    ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddEditOffer, ddMarkQuoteResult, ddPasteRows, ddUpdateQuoteField,
     ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddReviseQuote, ddSaveEditOffer, ddSaveQuoteDraft, ddSendBulkRfq, ddSendQuote,
     ddToggleAllOffers, ddToggleGroupOffers, ddToggleOffer, ddToggleSighting, ddToggleTier,
     ddUploadFile, debounceOfferHistorySearch, debouncePartsSightingsSearch,
