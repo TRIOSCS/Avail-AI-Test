@@ -868,7 +868,10 @@ function _renderDdTab(reqId, tabName, data, panel) {
 
 function _renderDdActivity(reqId, data, panel) {
     const vendors = data.vendors || [];
-    if (!vendors.length) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No activity yet</span>'; return; }
+    if (!vendors.length) {
+        panel.innerHTML = `<div style="display:flex;align-items:center;gap:12px"><span style="font-size:11px;color:var(--muted)">No activity yet</span><button class="btn btn-ghost btn-sm" style="font-size:10px" onclick="event.stopPropagation();checkForReplies(${reqId},this)">&#x21bb; Check for Replies</button></div>`;
+        return;
+    }
     // Summary stats
     let totalContacts = 0, totalReplies = 0, totalCalls = 0, totalEmails = 0, totalNotes = 0;
     for (const v of vendors) {
@@ -886,6 +889,7 @@ function _renderDdActivity(reqId, data, panel) {
         <span><b>${totalReplies}</b> replies</span>
         <span><b>${totalCalls}</b> calls</span>
         <span><b>${totalNotes}</b> notes</span>
+        <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();checkForReplies(${reqId},this)">&#x21bb; Check for Replies</button>
         <div class="fpills fpills-sm" style="margin-left:auto">
             <button class="fp fp-sm${af==='all'?' on':''}" onclick="event.stopPropagation();_ddActFilter[${reqId}]='all';_renderDdActivity(${reqId},_ddTabCache[${reqId}]?.activity,this.closest('.dd-panel'))">All</button>
             <button class="fp fp-sm${af==='email'?' on':''}" onclick="event.stopPropagation();_ddActFilter[${reqId}]='email';_renderDdActivity(${reqId},_ddTabCache[${reqId}]?.activity,this.closest('.dd-panel'))">✉ Email</button>
@@ -964,6 +968,25 @@ function _renderDdActivity(reqId, data, panel) {
     }
     html += '</div>';
     panel.innerHTML = html;
+}
+
+async function checkForReplies(reqId, btn) {
+    const origText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '&#x21bb; Checking\u2026';
+    try {
+        await apiFetch(`/api/requisitions/${reqId}/poll`, { method: 'POST' });
+        // Clear cached activity data so it re-fetches
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].activity;
+        const panel = btn.closest('.dd-panel');
+        if (panel) await _loadDdSubTab(reqId, 'activity', panel);
+        showToast('Inbox checked for replies', 'info');
+    } catch (e) {
+        showToast('Failed to check inbox: ' + (e.message || e), 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+    }
 }
 
 function _formatEmailBody(text) {
@@ -6326,7 +6349,7 @@ async function submitTrouble(btn) {
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
-    addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall,
+    addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies,
     cloneFromList, closeModal, ddBuildQuote, ddPasteRows,
     ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddSendBulkRfq,
     ddToggleAllOffers, ddToggleOffer, ddToggleSighting, ddToggleTier,
