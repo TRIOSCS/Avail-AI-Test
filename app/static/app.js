@@ -5457,8 +5457,9 @@ function renderRfqVendors() {
         }
 
         // Source indicator
-        const srcLabels = { cached: '💾 Cached', website_scrape: '🌐 Website', ai_lookup: '🤖 AI', apollo: '📇 Apollo', hunter: '📧 Hunter' };
-        const srcBadge = v.contact_source ? `<span class="rfq-src-badge">${srcLabels[v.contact_source] || v.contact_source}</span>` : '';
+        const srcLabels = { cached: '💾 Cached', website_scrape: '🌐 Website', ai_lookup: '🤖 AI', apollo: '📇 Apollo', hunter: '📧 Hunter', rocketreach: '🚀 RocketReach', clay: '🧱 Clay', explorium: '🔬 Explorium', ai: '🤖 AI', enrichment: '🔍 Auto' };
+        const srcKey = (v.contact_source || '').split('+')[0];
+        const srcBadge = v.contact_source ? `<span class="rfq-src-badge">${srcLabels[srcKey] || v.contact_source}</span>` : '';
 
         // Parts breakdown
         let partsHtml = '';
