@@ -3324,7 +3324,6 @@ function _renderReqRow(r) {
                 <button class="btn btn-sm" onclick="event.stopPropagation();addDrillRow(${r.id})" title="Add part">+ Add Part</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();ddUploadFile(${r.id})" title="Upload CSV/Excel">&#x1f4c1; Upload</button>
                 <button class="btn btn-sm" onclick="event.stopPropagation();ddPasteRows(${r.id})" title="Paste from spreadsheet">&#x1f4cb; Paste</button>
-                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation();expandToSubTab(${r.id},'offers')" title="Select offers and build quote">+ Quote</button>
             </div>
         </div>`;
     }
