@@ -38,6 +38,7 @@ jobs:
       - name: Run tests
         env:
           TESTING: "1"
+          PYTHONPATH: ${{ github.workspace }}
         run: pytest tests/ -v --tb=short --junitxml=test-results.xml
 
       - name: Upload test results
