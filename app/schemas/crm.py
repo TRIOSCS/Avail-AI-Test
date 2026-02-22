@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.utils.normalization import (
     normalize_condition,
@@ -384,6 +384,8 @@ class OfferOut(BaseModel):
 
 
 class QuoteLineItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     offer_id: int | None = None
     mpn: str = ""
     vendor_name: str = ""

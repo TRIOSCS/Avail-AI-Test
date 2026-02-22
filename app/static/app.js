@@ -1187,6 +1187,8 @@ function _formatEmailBody(text) {
 }
 
 let _ddSelectedOffers = {};   // reqId → Set of offer IDs
+let _ddQuoteData = {};        // reqId → quote object for in-memory editing
+let _ddBuildQuoteOffers = [];  // offers array used by Build Quote modal + AI analyze
 
 function _renderDdOffers(reqId, data, panel) {
     const groups = data.groups || data || [];
@@ -1365,6 +1367,7 @@ function ddBuildQuote(reqId) {
         }
     }
     if (!offers.length) return;
+    _ddBuildQuoteOffers = offers;  // store for AI analyze
 
     // Build modal
     let linesHtml = '';
@@ -1405,8 +1408,10 @@ function ddBuildQuote(reqId) {
                 </tr></tfoot>
             </table>
             </div>
+            <div id="bqAiResult"></div>
             <div class="mactions" style="margin-top:12px">
                 <button class="btn btn-ghost" onclick="document.getElementById('ddBuildQuoteBg').remove()">Cancel</button>
+                <button class="btn btn-ghost btn-sm" id="bqAiBtn" onclick="ddAiAnalyze(${reqId})">&#10024; AI Analyze</button>
                 <button class="btn btn-primary" id="bqCreateBtn" onclick="ddConfirmBuildQuote(${reqId})">Create Quote</button>
             </div>
         </div>
@@ -1503,6 +1508,62 @@ async function ddConfirmBuildQuote(reqId) {
             showToast('Error building quote: ' + (e.message || 'unknown'), 'error');
         }
     }
+}
+
+async function ddAiAnalyze(reqId) {
+    const btn = document.getElementById('bqAiBtn');
+    const container = document.getElementById('bqAiResult');
+    if (!container || !_ddBuildQuoteOffers.length) return;
+    if (btn) { btn.disabled = true; btn.textContent = 'Analyzing\u2026'; }
+    container.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px">Running AI analysis\u2026</div>';
+
+    // Group offers by MPN
+    const byMpn = {};
+    for (const o of _ddBuildQuoteOffers) {
+        const mpn = (o.mpn || o.offered_mpn || '').toUpperCase();
+        if (!byMpn[mpn]) byMpn[mpn] = [];
+        byMpn[mpn].push(o);
+    }
+
+    let html = '';
+    for (const [mpn, offers] of Object.entries(byMpn)) {
+        if (offers.length < 2) continue;
+        try {
+            const quotes = offers.map(o => ({
+                vendor_name: o.vendor_name || '',
+                unit_price: o.unit_price != null ? parseFloat(o.unit_price) : null,
+                quantity_available: o.qty_available || null,
+                lead_time_days: o.lead_time_days || null,
+                date_code: o.date_code || null,
+                condition: o.condition || null,
+            }));
+            const result = await apiFetch('/api/ai/compare-quotes', {
+                method: 'POST',
+                body: { part_number: mpn, quotes, required_qty: offers[0]._targetQty || null }
+            });
+            if (result.available) {
+                html += `<div style="background:var(--bg2);border-radius:8px;padding:10px;margin-bottom:8px;font-size:11px">
+                    <div style="font-weight:700;margin-bottom:4px">${esc(mpn)}</div>`;
+                if (result.recommendation) html += `<div style="margin-bottom:3px"><strong>Recommendation:</strong> ${esc(result.recommendation)}</div>`;
+                if (result.best_overall) html += `<div style="margin-bottom:3px"><strong>Best Overall:</strong> ${esc(result.best_overall.vendor || result.best_overall.vendor_name || '')} \u2014 ${esc(result.best_overall.reason || '')}</div>`;
+                if (result.risk_factors && result.risk_factors.length) {
+                    html += `<div style="color:var(--amber)"><strong>Risks:</strong> ${result.risk_factors.map(r => esc(typeof r === 'string' ? r : r.description || r.risk || JSON.stringify(r))).join('; ')}</div>`;
+                }
+                if (result.anomalies && result.anomalies.length) {
+                    html += `<div style="color:var(--red)"><strong>Anomalies:</strong> ${result.anomalies.map(a => esc(typeof a === 'string' ? a : a.description || JSON.stringify(a))).join('; ')}</div>`;
+                }
+                html += '</div>';
+            }
+        } catch (e) {
+            html += `<div style="font-size:11px;color:var(--red);padding:4px">${esc(mpn)}: Analysis unavailable</div>`;
+        }
+    }
+
+    if (!html) {
+        html = '<div style="font-size:11px;color:var(--muted);padding:8px">Need 2+ offers for the same MPN to compare.</div>';
+    }
+    container.innerHTML = html;
+    if (btn) { btn.disabled = false; btn.textContent = '\u2728 AI Analyze'; }
 }
 
 function ddEditOffer(reqId, offerId) {
@@ -1617,46 +1678,273 @@ function _renderDdQuotes(reqId, data, panel) {
         return;
     }
     const q = data;
+    // Store in _ddQuoteData for in-memory editing
+    _ddQuoteData[reqId] = JSON.parse(JSON.stringify(q));
     const lines = q.lines || q.line_items || [];
+    const isDraft = !q.status || q.status === 'draft';
     let html = '';
+
     // Quote header
     const statusMap = {draft:'Draft',sent:'Sent',revised:'Revised',won:'Won',lost:'Lost'};
     const statusLabel = statusMap[q.status] || q.status || 'Draft';
     const statusColor = q.status === 'won' ? 'var(--green)' : q.status === 'lost' ? 'var(--red)' : q.status === 'sent' ? 'var(--blue)' : 'var(--muted)';
     html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-        <span style="font-size:12px;font-weight:700">Quote #${q.id || q.quote_id || ''} <span style="color:${statusColor};font-weight:600">${statusLabel}</span></span>
+        <span style="font-size:12px;font-weight:700">${esc(q.quote_number || '#Q-' + (q.id || q.quote_id || ''))} Rev ${q.revision || 1} · <span style="color:${statusColor};font-weight:600">${statusLabel}</span></span>
         ${q.sent_at ? `<span style="font-size:10px;color:var(--muted)">Sent ${fmtRelative(q.sent_at)}</span>` : ''}
     </div>`;
+
     if (lines.length) {
-        html += `<table class="dtbl"><thead><tr><th>MPN</th><th>Qty</th><th>Buy $</th><th>Sell $</th><th>Margin</th><th>Vendor</th></tr></thead><tbody>`;
+        html += `<table class="dtbl" style="font-size:11px"><thead><tr><th>MPN</th><th>Mfr</th><th>Qty</th><th>Cost</th><th>Target</th><th>Sell $</th><th>Margin%</th></tr></thead><tbody>`;
         let totalCost = 0, totalRev = 0;
-        for (const l of lines) {
-            const buy = l.buy_price || l.unit_cost || 0;
+        for (let i = 0; i < lines.length; i++) {
+            const l = lines[i];
+            const cost = l.cost_price || l.unit_cost || 0;
             const sell = l.sell_price || l.unit_sell || 0;
-            const qty = l.quantity || 0;
-            const margin = sell > 0 ? Math.round(((sell - buy) / sell) * 100) : 0;
+            const qty = l.qty || 0;
+            const margin = l.margin_pct != null ? l.margin_pct : (sell > 0 ? ((sell - cost) / sell * 100) : 0);
             const marginColor = margin >= 20 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)';
-            totalCost += buy * qty;
+            const target = l.target_price != null ? '$' + Number(l.target_price).toFixed(4) : '\u2014';
+            totalCost += cost * qty;
             totalRev += sell * qty;
+            const sellCell = isDraft
+                ? `<input type="number" step="0.0001" class="quote-sell-input ddq-sell" data-req="${reqId}" data-idx="${i}" value="${sell.toFixed(4)}" style="width:85px;padding:2px 4px;font-size:11px;font-family:'JetBrains Mono',monospace" onchange="ddUpdateQuoteLine(${reqId},${i},this.value)">`
+                : `$${Number(sell).toFixed(4)}`;
             html += `<tr>
                 <td class="mono">${esc(l.mpn || l.offered_mpn || '')}</td>
-                <td class="mono">${qty}</td>
-                <td class="mono">$${parseFloat(buy).toFixed(2)}</td>
-                <td class="mono" style="color:var(--teal)">$${parseFloat(sell).toFixed(2)}</td>
-                <td style="color:${marginColor};font-weight:600">${margin}%</td>
-                <td>${esc(l.vendor_name || '')}</td>
+                <td style="font-size:10px">${esc(l.manufacturer || '\u2014')}</td>
+                <td class="mono">${qty.toLocaleString()}</td>
+                <td class="mono">$${Number(cost).toFixed(4)}</td>
+                <td style="font-size:10px;color:var(--muted)">${target}</td>
+                <td class="mono" style="color:var(--teal)">${sellCell}</td>
+                <td class="ddq-margin" data-req="${reqId}" data-idx="${i}" style="color:${marginColor};font-weight:600">${margin.toFixed(1)}%</td>
             </tr>`;
         }
-        const totalMargin = totalRev > 0 ? Math.round(((totalRev - totalCost) / totalRev) * 100) : 0;
-        html += `</tbody><tfoot><tr style="font-weight:700">
-            <td colspan="2">Total</td>
-            <td class="mono">$${totalCost.toFixed(2)}</td>
-            <td class="mono" style="color:var(--teal)">$${totalRev.toFixed(2)}</td>
-            <td>${totalMargin}%</td>
-            <td></td>
-        </tr></tfoot></table>`;
+        const totalMargin = totalRev > 0 ? ((totalRev - totalCost) / totalRev * 100) : 0;
+        html += `</tbody></table>`;
+
+        // Quick markup (draft only)
+        if (isDraft) {
+            html += `<div class="quote-markup" style="margin:8px 0;font-size:11px;display:flex;align-items:center;gap:8px">
+                Quick Markup: <input type="number" id="ddQuoteMarkup-${reqId}" value="20" style="width:50px;padding:2px 4px" min="0" max="100">%
+                <button class="btn btn-ghost btn-sm" onclick="ddApplyQuoteMarkup(${reqId})">Apply</button>
+            </div>`;
+        }
+
+        // Totals bar
+        const gp = totalRev - totalCost;
+        html += `<div class="quote-totals" id="ddqTotals-${reqId}" style="display:flex;gap:16px;font-size:11px;padding:6px 0;border-top:1px solid var(--border)">
+            <div>Cost: <strong>$${Number(totalCost).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+            <div>Revenue: <strong>$${Number(totalRev).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+            <div>Profit: <strong style="color:var(--green)">$${Number(gp).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+            <div>Margin: <strong>${totalMargin.toFixed(1)}%</strong></div>
+        </div>`;
     }
+
+    // Terms (draft = editable, otherwise read-only)
+    if (isDraft) {
+        html += `<div class="quote-terms" style="display:flex;gap:12px;font-size:11px;margin:8px 0;flex-wrap:wrap">
+            <label>Payment <input id="ddqTerms-${reqId}" value="${escAttr(q.payment_terms||'')}" placeholder="Net 30" style="width:90px;padding:2px 4px"></label>
+            <label>Shipping <input id="ddqShip-${reqId}" value="${escAttr(q.shipping_terms||'')}" placeholder="FOB Origin" style="width:90px;padding:2px 4px"></label>
+            <label>Valid <input id="ddqValid-${reqId}" type="number" value="${q.validity_days||7}" style="width:45px;padding:2px 4px"> days</label>
+        </div>
+        <div style="margin:4px 0"><label style="font-size:11px">Notes<br><textarea id="ddqNotes-${reqId}" rows="2" style="width:100%;font-size:11px;padding:4px">${esc(q.notes||'')}</textarea></label></div>`;
+    } else if (q.payment_terms || q.shipping_terms) {
+        html += `<div style="font-size:11px;color:var(--text2);margin:6px 0">Terms: ${esc(q.payment_terms||'')} · ${esc(q.shipping_terms||'')} · Valid ${q.validity_days||7} days</div>`;
+    }
+
+    // Actions by status
+    const statusActions = {
+        draft: `<button class="btn btn-ghost btn-sm" onclick="ddSaveQuoteDraft(${reqId})">Save Draft</button> <button class="btn btn-primary btn-sm" onclick="ddSendQuote(${reqId})">Send Quote</button>`,
+        sent: `<button class="btn btn-success btn-sm" onclick="ddMarkQuoteResult(${reqId},'won')">Mark Won</button> <button class="btn btn-danger btn-sm" onclick="ddMarkQuoteResult(${reqId},'lost')">Mark Lost</button> <button class="btn btn-ghost btn-sm" onclick="ddReviseQuote(${reqId})">Revise</button>`,
+        won: `<span style="color:var(--green);font-weight:600;font-size:11px">Won</span>`,
+        lost: `<span style="color:var(--red);font-weight:600;font-size:11px">Lost${q.result_reason ? ' \u2014 ' + esc(q.result_reason) : ''}</span> <button class="btn btn-ghost btn-sm" onclick="ddReviseQuote(${reqId})">Revise</button>`,
+        revised: `<span style="font-size:11px;color:var(--muted)">Superseded by Rev ${(q.revision||0)+1}</span>`,
+    };
+    html += `<div class="quote-actions" style="margin-top:8px;display:flex;gap:8px;align-items:center">${statusActions[q.status] || statusActions.draft}</div>`;
+
     panel.innerHTML = html;
+}
+
+// ── Drill-down quote editing helpers ──────────────────────────────────
+
+function ddUpdateQuoteLine(reqId, idx, value) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    const lines = q.lines || q.line_items || [];
+    const item = lines[idx];
+    if (!item) return;
+    item.sell_price = parseFloat(value) || 0;
+    const cost = item.cost_price || item.unit_cost || 0;
+    item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
+    // Update margin cell
+    const mCell = document.querySelector(`.ddq-margin[data-req="${reqId}"][data-idx="${idx}"]`);
+    if (mCell) {
+        mCell.textContent = item.margin_pct.toFixed(1) + '%';
+        mCell.style.color = item.margin_pct >= 20 ? 'var(--green)' : item.margin_pct >= 10 ? 'var(--amber)' : 'var(--red)';
+    }
+    _ddRefreshQuoteTotals(reqId);
+}
+
+function ddApplyQuoteMarkup(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    const pct = parseFloat(document.getElementById('ddQuoteMarkup-' + reqId)?.value) || 0;
+    const lines = q.lines || q.line_items || [];
+    lines.forEach((item, i) => {
+        const cost = item.cost_price || item.unit_cost || 0;
+        item.sell_price = Math.round(cost * (1 + pct / 100) * 10000) / 10000;
+        item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
+        const inp = document.querySelector(`.ddq-sell[data-req="${reqId}"][data-idx="${i}"]`);
+        if (inp) inp.value = item.sell_price.toFixed(4);
+        const mCell = document.querySelector(`.ddq-margin[data-req="${reqId}"][data-idx="${i}"]`);
+        if (mCell) {
+            mCell.textContent = item.margin_pct.toFixed(1) + '%';
+            mCell.style.color = item.margin_pct >= 20 ? 'var(--green)' : item.margin_pct >= 10 ? 'var(--amber)' : 'var(--red)';
+        }
+    });
+    _ddRefreshQuoteTotals(reqId);
+}
+
+function _ddRefreshQuoteTotals(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    const lines = q.lines || q.line_items || [];
+    let totalCost = 0, totalRev = 0;
+    for (const l of lines) {
+        const cost = l.cost_price || l.unit_cost || 0;
+        const sell = l.sell_price || l.unit_sell || 0;
+        const qty = l.qty || 0;
+        totalCost += cost * qty;
+        totalRev += sell * qty;
+    }
+    const gp = totalRev - totalCost;
+    const margin = totalRev > 0 ? ((totalRev - totalCost) / totalRev * 100) : 0;
+    const el = document.getElementById('ddqTotals-' + reqId);
+    if (el) {
+        el.innerHTML = `
+            <div>Cost: <strong>$${Number(totalCost).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+            <div>Revenue: <strong>$${Number(totalRev).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+            <div>Profit: <strong style="color:var(--green)">$${Number(gp).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+            <div>Margin: <strong>${margin.toFixed(1)}%</strong></div>`;
+    }
+}
+
+async function ddSaveQuoteDraft(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    if (ddSaveQuoteDraft._busy) return;
+    ddSaveQuoteDraft._busy = true;
+    try {
+        await apiFetch('/api/quotes/' + q.id, {
+            method: 'PUT', body: {
+                line_items: q.lines || q.line_items,
+                payment_terms: document.getElementById('ddqTerms-' + reqId)?.value || '',
+                shipping_terms: document.getElementById('ddqShip-' + reqId)?.value || '',
+                validity_days: parseInt(document.getElementById('ddqValid-' + reqId)?.value) || 7,
+                notes: document.getElementById('ddqNotes-' + reqId)?.value || '',
+            }
+        });
+        showToast('Draft saved', 'success');
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
+        const drow = document.getElementById('d-' + reqId);
+        if (drow) {
+            const panel = drow.querySelector('.dd-panel');
+            if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
+        }
+    } catch (e) {
+        showToast('Error saving draft: ' + (e.message || e), 'error');
+    } finally {
+        ddSaveQuoteDraft._busy = false;
+    }
+}
+
+function ddSendQuote(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    // Inline confirmation modal
+    const html = `<div class="modal-bg open" id="ddSendQuoteBg" onclick="if(event.target===this){this.remove()}">
+        <div class="modal" onclick="event.stopPropagation()" style="max-width:400px">
+            <h2 style="font-size:14px;margin-bottom:8px">Send Quote?</h2>
+            <p style="font-size:12px;color:var(--text2);margin-bottom:12px">This will save the current draft and email the quote to the customer contact.</p>
+            <div class="mactions">
+                <button class="btn btn-ghost" onclick="document.getElementById('ddSendQuoteBg').remove()">Cancel</button>
+                <button class="btn btn-primary" id="ddSendConfirmBtn-${reqId}" onclick="ddConfirmSendQuote(${reqId})">Send</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+async function ddConfirmSendQuote(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    const btn = document.getElementById('ddSendConfirmBtn-' + reqId);
+    if (btn) { btn.disabled = true; btn.textContent = 'Sending\u2026'; }
+    try {
+        // Save draft first
+        await apiFetch('/api/quotes/' + q.id, {
+            method: 'PUT', body: {
+                line_items: q.lines || q.line_items,
+                payment_terms: document.getElementById('ddqTerms-' + reqId)?.value || '',
+                shipping_terms: document.getElementById('ddqShip-' + reqId)?.value || '',
+                validity_days: parseInt(document.getElementById('ddqValid-' + reqId)?.value) || 7,
+                notes: document.getElementById('ddqNotes-' + reqId)?.value || '',
+            }
+        });
+        // Then send
+        await apiFetch('/api/quotes/' + q.id + '/send', { method: 'POST' });
+        document.getElementById('ddSendQuoteBg')?.remove();
+        showToast('Quote sent', 'success');
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
+        const drow = document.getElementById('d-' + reqId);
+        if (drow) {
+            const panel = drow.querySelector('.dd-panel');
+            if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
+        }
+    } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+        showToast('Failed to send: ' + (e.message || e), 'error');
+    }
+}
+
+async function ddMarkQuoteResult(reqId, result) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    let reason = '';
+    if (result === 'lost') {
+        reason = prompt('Reason for loss (optional):') || '';
+    }
+    try {
+        await apiFetch('/api/quotes/' + q.id + '/result', {
+            method: 'POST', body: { result, reason }
+        });
+        showToast('Quote marked as ' + result, 'success');
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
+        const drow = document.getElementById('d-' + reqId);
+        if (drow) {
+            const panel = drow.querySelector('.dd-panel');
+            if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
+        }
+    } catch (e) {
+        showToast('Error: ' + (e.message || e), 'error');
+    }
+}
+
+async function ddReviseQuote(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    try {
+        await apiFetch('/api/quotes/' + q.id + '/revise', { method: 'POST' });
+        showToast('New revision created', 'success');
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
+        const drow = document.getElementById('d-' + reqId);
+        if (drow) {
+            const panel = drow.querySelector('.dd-panel');
+            if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
+        }
+    } catch (e) {
+        showToast('Error revising: ' + (e.message || e), 'error');
+    }
 }
 
 export async function toggleDrillDown(reqId) {
@@ -6919,9 +7207,9 @@ async function submitTrouble(btn) {
 Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
     addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies,
-    cloneFromList, closeModal, ddApplyGlobalMarkup, ddBuildQuote,
-    ddConfirmBuildQuote, ddDeleteOffer, ddEditOffer, ddPasteRows,
-    ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddSaveEditOffer, ddSendBulkRfq,
+    cloneFromList, closeModal, ddAiAnalyze, ddApplyGlobalMarkup, ddApplyQuoteMarkup, ddBuildQuote,
+    ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddEditOffer, ddMarkQuoteResult, ddPasteRows,
+    ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddReviseQuote, ddSaveEditOffer, ddSaveQuoteDraft, ddSendBulkRfq, ddSendQuote,
     ddToggleAllOffers, ddToggleGroupOffers, ddToggleOffer, ddToggleOfferDetail, ddToggleSighting, ddToggleTier,
     ddUploadFile, debounceOfferHistorySearch, debouncePartsSightingsSearch,
     deleteDrillRow, deleteMaterial, deleteReq, deleteVendor,
@@ -6943,13 +7231,13 @@ Object.assign(window, {
     toggleVendorEmails, toggleVpThreadMessages, unifiedEnrichVendor,
     viewThread, vpSetRating, vpSubmitReview, vpToggleBlacklist,
     // Internal/underscore-prefixed functions used in inline handlers
-    _acceptParsedOffers, _appendAddRow, _autoPollReplies, _buildEffortTip, _cancelAddRow,
+    _acceptParsedOffers, _appendAddRow, _autoPollReplies, _buildEffortTip, _cancelAddRow, ddUpdateQuoteLine,
     _collapseAllDrillDowns, _ddDefaultTab, _ddPromptFallback,
     _ddRenderTierRows, _ddSaveEmail, _ddSearchOverlay, _ddSubTabs,
     _ddTabLabel, _ddVendorInlineBadges, _ddVendorLinkPill,
     _ddVendorScoreRing, _debouncedPartsSightingsSearch,
     _ensureEmailListModal, _formatEmailBody, _gatherBugContext,
-    _loadDdSubTab, _matSortArrow, _notifBadgeColor, _notifClickAction,
+    _ddRefreshQuoteTotals, _loadDdSubTab, _matSortArrow, _notifBadgeColor, _notifClickAction,
     _notifLabel, _parseTsvInput, _previewPaste, _pushNav,
     _rebuildSightingIndex, _renderDdActivity, _renderDdDetails, _renderParsedSummary,
     _renderDdOffers, _renderDdQuotes, _renderDdTab, _renderDdTabPills,
