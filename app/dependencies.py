@@ -51,9 +51,7 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = get_user(request, db)
     if not user:
         # Check for agent API key (service-to-service auth)
-        from .config import Settings
-
-        settings = Settings()
+        from .config import settings
         agent_key = request.headers.get("x-agent-key")
         if agent_key and settings.agent_api_key and agent_key == settings.agent_api_key:
             user = db.query(User).filter_by(email="agent@availai.local").first()

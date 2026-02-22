@@ -29,9 +29,6 @@ COPY app/ app/
 # Overlay Vite build output from stage 1
 COPY --from=builder /build/app/static/dist/ app/static/dist/
 
-# Copy migration scripts
-COPY migrate_*.py .
-
 # Copy entrypoint
 COPY docker-entrypoint.sh .
 RUN chmod +x docker-entrypoint.sh
