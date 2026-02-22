@@ -8,7 +8,6 @@ import json
 import os
 
 os.environ["TESTING"] = "1"
-os.environ["DO_GRADIENT_API_KEY"] = "test-key-for-testing"
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -25,6 +24,22 @@ from app.services.gradient_service import (
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _ensure_gradient_api_key():
+    """Ensure gradient_service sees a valid API key regardless of import order.
+
+    When the full test suite runs, gradient_service may be imported before
+    this file sets DO_GRADIENT_API_KEY, leaving settings.do_gradient_api_key
+    empty. This fixture patches it directly on the already-instantiated
+    settings object so _call_llm doesn't short-circuit.
+    """
+    from app.config import settings
+    original = settings.do_gradient_api_key
+    settings.do_gradient_api_key = "test-key-for-testing"
+    yield
+    settings.do_gradient_api_key = original
 
 
 def _mock_response(status_code=200, json_data=None, text=""):
