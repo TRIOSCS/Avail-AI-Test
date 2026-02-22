@@ -155,6 +155,16 @@ def quote_to_dict(q: Quote) -> dict:
             if q.customer_site and q.customer_site.company
             else ""
         ),
+        "company_domain": (
+            q.customer_site.company.domain
+            if q.customer_site and q.customer_site.company
+            else None
+        ),
+        "company_name_short": (
+            q.customer_site.company.name
+            if q.customer_site and q.customer_site.company
+            else None
+        ),
         "contact_name": q.customer_site.contact_name if q.customer_site else None,
         "contact_email": q.customer_site.contact_email if q.customer_site else None,
         "site_contacts": [
@@ -1586,6 +1596,8 @@ async def update_quote(
     quote = db.get(Quote, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
+    if quote.status not in ("draft", None):
+        raise HTTPException(400, "Only draft quotes can be edited")
     updates = payload.model_dump(exclude_unset=True)
     if "line_items" in updates:
         quote.line_items = updates.pop("line_items")

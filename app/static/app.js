@@ -1926,12 +1926,33 @@ async function ddSendQuote(reqId) {
             <h2 style="font-size:14px;margin-bottom:10px">Send Quote ${esc(q.quote_number || '')}</h2>
             <div style="display:flex;gap:16px;flex-wrap:wrap">
                 <!-- Left: send options -->
-                <div style="flex:0 0 280px;min-width:240px">
+                <div style="flex:0 0 300px;min-width:260px">
                     <div style="font-size:11px;color:var(--muted);margin-bottom:8px;padding:6px 8px;background:var(--bg2);border-radius:4px">
                         From: <strong>${esc(senderEmail)}</strong>
                     </div>
-                    ${contactOpts ? `<div style="margin-bottom:8px"><label style="font-size:11px;font-weight:600">Select Contact</label><select id="ddSendContact-${reqId}" style="width:100%;padding:5px;font-size:12px;margin-top:2px" onchange="const o=this.options[this.selectedIndex];document.getElementById('ddSendEmail-${reqId}').value=o.value;document.getElementById('ddSendName-${reqId}').value=o.dataset.name||'';ddRefreshPreview(${reqId})">
-                        <option value="">-- Choose recipient --</option>${contactOpts}</select></div>` : ''}
+                    <div style="margin-bottom:8px">
+                        <label style="font-size:11px;font-weight:600">Send To</label>
+                        <select id="ddSendContact-${reqId}" style="width:100%;padding:5px;font-size:12px;margin-top:2px" onchange="ddOnContactSelect(${reqId})">
+                            <option value="">-- Choose recipient --</option>
+                            ${contactOpts}
+                            <option value="__add_new__">+ Add New Contact\u2026</option>
+                        </select>
+                    </div>
+                    <!-- Add new contact form (hidden by default) -->
+                    <div id="ddNewContactForm-${reqId}" style="display:none;margin-bottom:8px;padding:8px;background:var(--bg2);border-radius:6px;border:1px solid var(--border)">
+                        <div style="font-size:11px;font-weight:600;margin-bottom:6px">New Contact</div>
+                        <div style="margin-bottom:4px"><input id="ddNewEmail-${reqId}" type="email" placeholder="Email *" style="width:100%;padding:4px;font-size:11px"></div>
+                        <div style="margin-bottom:4px"><input id="ddNewName-${reqId}" placeholder="Full name" style="width:100%;padding:4px;font-size:11px"></div>
+                        <div style="margin-bottom:4px"><input id="ddNewTitle-${reqId}" placeholder="Title (e.g. Purchasing Manager)" style="width:100%;padding:4px;font-size:11px"></div>
+                        <div style="margin-bottom:4px"><input id="ddNewPhone-${reqId}" placeholder="Phone" style="width:100%;padding:4px;font-size:11px"></div>
+                        <div style="display:flex;gap:6px;align-items:center">
+                            <button class="btn btn-primary btn-sm" onclick="ddAddNewContact(${reqId})" id="ddAddContactBtn-${reqId}">Add &amp; Select</button>
+                            <button class="btn btn-ghost btn-sm" onclick="ddFindContacts(${reqId})">Enrich</button>
+                            <span id="ddNewContactStatus-${reqId}" style="font-size:10px;color:var(--muted)"></span>
+                        </div>
+                        <!-- Enrichment results -->
+                        <div id="ddEnrichResults-${reqId}" style="display:none;margin-top:6px;max-height:120px;overflow-y:auto"></div>
+                    </div>
                     <div style="margin-bottom:6px"><label style="font-size:11px;font-weight:600">To (Email) *</label><input id="ddSendEmail-${reqId}" type="email" value="${escAttr(prefillEmail)}" placeholder="customer@example.com" style="width:100%;padding:5px;font-size:12px;margin-top:2px" required></div>
                     <div style="margin-bottom:12px"><label style="font-size:11px;font-weight:600">To (Name)</label><input id="ddSendName-${reqId}" value="${escAttr(prefillName)}" placeholder="Contact name" style="width:100%;padding:5px;font-size:12px;margin-top:2px" onblur="ddRefreshPreview(${reqId})"></div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -1941,7 +1962,7 @@ async function ddSendQuote(reqId) {
                     <p style="font-size:10px;color:var(--muted);margin-top:8px">Once sent, this quote will be locked and no longer editable.</p>
                 </div>
                 <!-- Right: email preview -->
-                <div id="ddSendPreview-${reqId}" style="flex:1;min-width:320px;border:1px solid var(--border);border-radius:6px;overflow:auto;max-height:520px;background:#f4f6f9;font-size:11px;color:var(--muted);display:flex;align-items:center;justify-content:center;padding:20px">
+                <div id="ddSendPreview-${reqId}" style="flex:1;min-width:320px;border:1px solid var(--border);border-radius:6px;overflow:auto;max-height:520px;background:var(--bg2);font-size:11px;color:var(--muted);display:flex;align-items:center;justify-content:center;padding:20px">
                     Loading preview\u2026
                 </div>
             </div>
@@ -1950,6 +1971,148 @@ async function ddSendQuote(reqId) {
     document.body.insertAdjacentHTML('beforeend', html);
     // Auto-load preview
     ddRefreshPreview(reqId);
+}
+
+function ddOnContactSelect(reqId) {
+    const sel = document.getElementById('ddSendContact-' + reqId);
+    if (!sel) return;
+    const val = sel.value;
+    const form = document.getElementById('ddNewContactForm-' + reqId);
+    if (val === '__add_new__') {
+        if (form) form.style.display = 'block';
+        document.getElementById('ddSendEmail-' + reqId).value = '';
+        document.getElementById('ddSendName-' + reqId).value = '';
+        document.getElementById('ddNewEmail-' + reqId)?.focus();
+        return;
+    }
+    if (form) form.style.display = 'none';
+    const opt = sel.options[sel.selectedIndex];
+    document.getElementById('ddSendEmail-' + reqId).value = opt.value;
+    document.getElementById('ddSendName-' + reqId).value = opt.dataset.name || '';
+    ddRefreshPreview(reqId);
+}
+
+async function ddAddNewContact(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q || !q.customer_site_id) return;
+    const email = (document.getElementById('ddNewEmail-' + reqId)?.value || '').trim().toLowerCase();
+    const name = (document.getElementById('ddNewName-' + reqId)?.value || '').trim();
+    const title = (document.getElementById('ddNewTitle-' + reqId)?.value || '').trim();
+    const phone = (document.getElementById('ddNewPhone-' + reqId)?.value || '').trim();
+    if (!email || !email.includes('@')) { showToast('Enter a valid email address', 'error'); return; }
+    const btn = document.getElementById('ddAddContactBtn-' + reqId);
+    const status = document.getElementById('ddNewContactStatus-' + reqId);
+    if (btn) { btn.disabled = true; btn.textContent = 'Adding\u2026'; }
+    try {
+        // Create site contact
+        await apiFetch('/api/sites/' + q.customer_site_id + '/contacts', {
+            method: 'POST', body: { full_name: name || email.split('@')[0], email, title, phone, is_primary: true }
+        });
+        // Add to the dropdown and select it
+        const sel = document.getElementById('ddSendContact-' + reqId);
+        if (sel) {
+            const opt = document.createElement('option');
+            opt.value = email;
+            opt.dataset.name = name;
+            opt.textContent = (name || email) + (title ? ' (' + title + ')' : '');
+            sel.insertBefore(opt, sel.querySelector('option[value="__add_new__"]'));
+            sel.value = email;
+        }
+        document.getElementById('ddSendEmail-' + reqId).value = email;
+        document.getElementById('ddSendName-' + reqId).value = name;
+        document.getElementById('ddNewContactForm-' + reqId).style.display = 'none';
+        // Also update the cached quote data
+        if (!q.site_contacts) q.site_contacts = [];
+        q.site_contacts.push({ email, full_name: name, title, is_primary: true });
+        showToast('Contact added: ' + (name || email), 'success');
+        ddRefreshPreview(reqId);
+        // Try to enrich in the background
+        ddEnrichNewContact(reqId, email, name);
+    } catch (e) {
+        showToast('Failed to add contact: ' + (e.message || e), 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Add & Select'; }
+    }
+}
+
+async function ddEnrichNewContact(reqId, email, name) {
+    // Extract domain from email and try enrichment
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    const domain = q.company_domain || email.split('@')[1];
+    if (!domain) return;
+    try {
+        const resp = await apiFetch('/api/suggested-contacts?domain=' + encodeURIComponent(domain) + '&name=' + encodeURIComponent(q.company_name_short || ''));
+        if (resp.contacts && resp.contacts.length) {
+            // Find matching contact by email
+            const match = resp.contacts.find(c => c.email?.toLowerCase() === email.toLowerCase());
+            if (match && q.customer_site_id) {
+                // Update the site contact with enriched data
+                await apiFetch('/api/suggested-contacts/add-to-site', {
+                    method: 'POST', body: {
+                        site_id: q.customer_site_id,
+                        contact: { full_name: match.full_name || name, email, phone: match.phone, title: match.title, linkedin_url: match.linkedin_url }
+                    }
+                });
+                // Update name in the send modal if enrichment found a better name
+                if (match.full_name && !name) {
+                    document.getElementById('ddSendName-' + reqId).value = match.full_name;
+                    const sel = document.getElementById('ddSendContact-' + reqId);
+                    if (sel) {
+                        for (const opt of sel.options) {
+                            if (opt.value === email) { opt.textContent = match.full_name + (match.title ? ' (' + match.title + ')' : ''); opt.dataset.name = match.full_name; break; }
+                        }
+                    }
+                    ddRefreshPreview(reqId);
+                }
+            }
+        }
+    } catch (e) { /* enrichment is best-effort */ }
+}
+
+async function ddFindContacts(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    const domain = q.company_domain || (document.getElementById('ddNewEmail-' + reqId)?.value || '').split('@')[1];
+    if (!domain) { showToast('No domain available \u2014 enter an email first', 'error'); return; }
+    const resultsEl = document.getElementById('ddEnrichResults-' + reqId);
+    const status = document.getElementById('ddNewContactStatus-' + reqId);
+    if (status) status.textContent = 'Searching\u2026';
+    if (resultsEl) { resultsEl.style.display = 'block'; resultsEl.innerHTML = '<div style="font-size:10px;color:var(--muted);padding:4px">Looking up contacts at ' + esc(domain) + '\u2026</div>'; }
+    try {
+        const resp = await apiFetch('/api/suggested-contacts?domain=' + encodeURIComponent(domain) + '&name=' + encodeURIComponent(q.company_name_short || ''));
+        if (status) status.textContent = '';
+        if (!resp.contacts || !resp.contacts.length) {
+            if (resultsEl) resultsEl.innerHTML = '<div style="font-size:10px;color:var(--muted);padding:4px">No contacts found at ' + esc(domain) + '</div>';
+            return;
+        }
+        let html = '';
+        for (const c of resp.contacts) {
+            html += `<div style="padding:4px 6px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-size:10px" onclick="ddPickEnrichedContact(${reqId},this)" data-email="${escAttr(c.email||'')}" data-name="${escAttr(c.full_name||'')}" data-title="${escAttr(c.title||'')}" data-phone="${escAttr(c.phone||'')}" data-linkedin="${escAttr(c.linkedin_url||'')}">
+                <div>
+                    <strong>${esc(c.full_name || c.email)}</strong>${c.title ? ' <span style="color:var(--muted)">' + esc(c.title) + '</span>' : ''}
+                    <div style="color:var(--muted)">${esc(c.email||'')}${c.phone ? ' \u00b7 ' + esc(c.phone) : ''}</div>
+                </div>
+                <span style="color:var(--teal);font-size:9px">${esc(c.source || '')}</span>
+            </div>`;
+        }
+        if (resultsEl) resultsEl.innerHTML = html;
+    } catch (e) {
+        if (status) status.textContent = '';
+        if (resultsEl) resultsEl.innerHTML = '<div style="font-size:10px;color:var(--red);padding:4px">' + esc(e.message || 'Enrichment failed') + '</div>';
+    }
+}
+
+function ddPickEnrichedContact(reqId, el) {
+    const email = el.dataset.email;
+    const name = el.dataset.name;
+    const title = el.dataset.title;
+    const phone = el.dataset.phone;
+    document.getElementById('ddNewEmail-' + reqId).value = email;
+    document.getElementById('ddNewName-' + reqId).value = name;
+    document.getElementById('ddNewTitle-' + reqId).value = title;
+    document.getElementById('ddNewPhone-' + reqId).value = phone;
+    document.getElementById('ddEnrichResults-' + reqId).style.display = 'none';
 }
 
 function ddRefreshPreview(reqId) {
@@ -7384,7 +7547,8 @@ Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
     addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies,
     cloneFromList, closeModal, ddApplyGlobalMarkup, ddApplyQuoteMarkup, ddBuildQuote,
-    ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddDeleteQuote, ddEditOffer, ddExpandQuote, ddMarkQuoteResult, ddPasteRows, ddRefreshPreview, ddUpdateQuoteField,
+    ddAddNewContact, ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddDeleteQuote, ddEditOffer, ddExpandQuote,
+    ddFindContacts, ddMarkQuoteResult, ddOnContactSelect, ddPasteRows, ddPickEnrichedContact, ddRefreshPreview, ddUpdateQuoteField,
     ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddReviseQuote, ddSaveEditOffer, ddSaveQuoteDraft, ddSendBulkRfq, ddSendQuote,
     ddToggleAllOffers, ddToggleGroupOffers, ddToggleOffer, ddToggleSighting, ddToggleTier,
     ddUploadFile, debounceOfferHistorySearch, debouncePartsSightingsSearch,
