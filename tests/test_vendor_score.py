@@ -10,10 +10,16 @@ Depends on: app/services/vendor_score.py, conftest.py
 
 from datetime import datetime, timezone
 
-from app.models import Offer, Requisition, User, VendorCard, VendorReview
+import pytest
+
+from app.models import (
+    BuyPlan, Company, CustomerSite, Offer, Quote, Requisition, User,
+    VendorCard, VendorReview,
+)
 from app.services.vendor_score import (
     MIN_OFFERS_FOR_SCORE,
     _calc_stage_points,
+    compute_all_vendor_scores,
     compute_single_vendor_score,
     compute_vendor_score,
 )
@@ -227,3 +233,200 @@ class TestComputeSingleVendorScore:
 
         # 5.0 rating → review_factor=100 vs neutral 50 → higher score
         assert result_with_review["vendor_score"] > result_no_review["vendor_score"]
+
+    def test_name_fallback_matching(self, db_session):
+        """Vendor with no vendor_card_id on offers still scores via name match."""
+        card = _make_vendor_card(db_session, "fallback vendor")
+
+        # Create offers WITHOUT vendor_card_id but with matching vendor_name
+        user = User(
+            email="fallback@test.com",
+            name="Fallback User",
+            role="buyer",
+            azure_id="az-fallback-001",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(user)
+        db_session.flush()
+
+        req = Requisition(
+            name="REQ-fallback",
+            customer_name="Test",
+            status="open",
+            created_by=user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+
+        for i in range(6):
+            o = Offer(
+                requisition_id=req.id,
+                vendor_card_id=None,  # No card link
+                vendor_name="fallback vendor",
+                mpn=f"FB-{i}",
+                qty_available=100,
+                unit_price=1.00,
+                entered_by_id=user.id,
+                status="active",
+                created_at=datetime.now(timezone.utc),
+            )
+            db_session.add(o)
+        db_session.commit()
+
+        result = compute_single_vendor_score(db_session, card.id)
+        assert result["vendor_score"] is not None
+        assert result["is_new_vendor"] is False
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  compute_all_vendor_scores — batch DB operation
+# ═══════════════════════════════════════════════════════════════════════
+
+
+_quote_counter = 0
+
+
+def _make_customer_site(db):
+    """Create a Company + CustomerSite for quote FK."""
+    co = Company(
+        name="Score Test Co",
+        is_active=True,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(co)
+    db.flush()
+    site = CustomerSite(company_id=co.id, site_name="HQ")
+    db.add(site)
+    db.flush()
+    return site
+
+
+def _make_quote(db, req_id, user_id, offer_ids, status="sent"):
+    """Create a Quote with line_items referencing offer_ids."""
+    global _quote_counter
+    _quote_counter += 1
+    site = _make_customer_site(db)
+    q = Quote(
+        requisition_id=req_id,
+        customer_site_id=site.id,
+        quote_number=f"Q-score-{_quote_counter}",
+        status=status,
+        line_items=[{"offer_id": oid} for oid in offer_ids],
+        subtotal=100.0,
+        total_cost=50.0,
+        total_margin_pct=50.0,
+        created_by_id=user_id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(q)
+    db.flush()
+    return q
+
+
+def _make_buy_plan(db, req_id, quote_id, offer_ids, status="approved"):
+    """Create a BuyPlan with line_items referencing offer_ids."""
+    bp = BuyPlan(
+        requisition_id=req_id,
+        quote_id=quote_id,
+        status=status,
+        line_items=[{"offer_id": oid} for oid in offer_ids],
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(bp)
+    db.flush()
+    return bp
+
+
+class TestComputeAllVendorScores:
+    @pytest.mark.asyncio
+    async def test_empty_db_returns_zero(self, db_session):
+        result = await compute_all_vendor_scores(db_session)
+        assert result["updated"] == 0
+
+    @pytest.mark.asyncio
+    async def test_vendor_above_threshold_scored(self, db_session):
+        card = _make_vendor_card(db_session, "batch vendor")
+        _make_offers(db_session, card.id, "batch vendor", 6)
+        db_session.commit()
+
+        result = await compute_all_vendor_scores(db_session)
+        assert result["updated"] == 1
+
+        db_session.refresh(card)
+        assert card.vendor_score is not None
+        assert card.vendor_score_computed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_cold_start_vendor_gets_none(self, db_session):
+        card = _make_vendor_card(db_session, "cold vendor")
+        _make_offers(db_session, card.id, "cold vendor", 3)
+        db_session.commit()
+
+        await compute_all_vendor_scores(db_session)
+        db_session.refresh(card)
+        assert card.vendor_score is None
+        assert card.is_new_vendor is True
+
+    @pytest.mark.asyncio
+    async def test_name_fallback_matching(self, db_session):
+        """Offers without vendor_card_id are matched by normalized name."""
+        card = _make_vendor_card(db_session, "name match vendor")
+
+        user = User(
+            email="nmv@test.com", name="NMV", role="buyer",
+            azure_id="az-nmv", created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(user)
+        db_session.flush()
+
+        req = Requisition(
+            name="REQ-nmv", customer_name="Test", status="open",
+            created_by=user.id, created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+
+        for i in range(6):
+            db_session.add(Offer(
+                requisition_id=req.id, vendor_card_id=None,
+                vendor_name="name match vendor", mpn=f"NMV-{i}",
+                qty_available=100, unit_price=1.00, entered_by_id=user.id,
+                status="active", created_at=datetime.now(timezone.utc),
+            ))
+        db_session.commit()
+
+        await compute_all_vendor_scores(db_session)
+        db_session.refresh(card)
+        assert card.vendor_score is not None
+
+    @pytest.mark.asyncio
+    async def test_engagement_score_backward_compat(self, db_session):
+        """engagement_score is kept in sync with vendor_score."""
+        card = _make_vendor_card(db_session, "compat vendor")
+        _make_offers(db_session, card.id, "compat vendor", 6)
+        db_session.commit()
+
+        await compute_all_vendor_scores(db_session)
+        db_session.refresh(card)
+        assert card.engagement_score == card.vendor_score
+
+    @pytest.mark.asyncio
+    async def test_quote_stage_increases_score(self, db_session):
+        """Offers used in quotes should score higher than base offers."""
+        card_base = _make_vendor_card(db_session, "base only")
+        offers_base = _make_offers(db_session, card_base.id, "base only", 6)
+
+        card_quoted = _make_vendor_card(db_session, "quoted vendor")
+        offers_quoted = _make_offers(db_session, card_quoted.id, "quoted vendor", 6)
+
+        # Create a quote using the quoted vendor's offers
+        offer_ids = [o.id for o in offers_quoted]
+        _make_quote(db_session, offers_quoted[0].requisition_id,
+                     offers_quoted[0].entered_by_id, offer_ids, status="sent")
+        db_session.commit()
+
+        await compute_all_vendor_scores(db_session)
+        db_session.refresh(card_base)
+        db_session.refresh(card_quoted)
+        assert card_quoted.vendor_score > card_base.vendor_score
