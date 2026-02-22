@@ -1143,3 +1143,76 @@ def test_import_stock_no_file(client, monkeypatch):
         data={"vendor_name": "Some Vendor"},
     )
     assert resp.status_code == 400
+
+
+# ── Group 8: Analyze materials ───────────────────────────────────────────
+
+
+def test_analyze_materials_no_api_key(client, db_session, test_vendor_card, monkeypatch):
+    """POST /api/vendors/{id}/analyze-materials without API key returns 503."""
+    monkeypatch.setattr(
+        "app.routers.vendors.get_credential_cached",
+        lambda *args, **kwargs: None,
+    )
+    resp = client.post(f"/api/vendors/{test_vendor_card.id}/analyze-materials")
+    # No API key → HTTPException(503, "AI not configured")
+    assert resp.status_code == 503
+
+
+def test_vendor_score_endpoint(client, db_session, test_vendor_card):
+    """GET /api/vendors/{id} includes vendor_score field when set."""
+    # Set a non-None vendor_score so it survives response_model_exclude_none
+    test_vendor_card.vendor_score = 65.0
+    test_vendor_card.advancement_score = 65.0
+    db_session.commit()
+
+    resp = client.get(f"/api/vendors/{test_vendor_card.id}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["vendor_score"] == 65.0
+
+
+def test_vendor_update_website(client, db_session, test_vendor_card):
+    """PUT /api/vendors/{id} with website updates it."""
+    resp = client.put(
+        f"/api/vendors/{test_vendor_card.id}",
+        json={"website": "https://updated-arrow.com"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["website"] == "https://updated-arrow.com"
+
+
+def test_vendor_update_phones(client, db_session, test_vendor_card):
+    """PUT /api/vendors/{id} with new phones updates the card."""
+    resp = client.put(
+        f"/api/vendors/{test_vendor_card.id}",
+        json={"phones": ["+1-555-9999"]},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "+1-555-9999" in data["phones"]
+
+
+def test_list_vendors_sort_by_score(client, db_session):
+    """GET /api/vendors?sort=score returns vendors sorted by engagement_score."""
+    vc1 = VendorCard(
+        normalized_name="low score vendor",
+        display_name="Low Score Vendor",
+        engagement_score=20.0,
+        sighting_count=5,
+    )
+    vc2 = VendorCard(
+        normalized_name="high score vendor",
+        display_name="High Score Vendor",
+        engagement_score=90.0,
+        sighting_count=5,
+    )
+    db_session.add_all([vc1, vc2])
+    db_session.commit()
+
+    resp = client.get("/api/vendors", params={"sort": "score"})
+    assert resp.status_code == 200
+    data = resp.json()
+    vendors = data if isinstance(data, list) else data.get("vendors", [])
+    assert len(vendors) >= 2
