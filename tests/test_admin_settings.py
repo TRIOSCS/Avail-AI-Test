@@ -88,9 +88,8 @@ def dev_client(db_session, dev_assistant_user):
 def seed_config(db_session):
     """Seed system_config with test data."""
     configs = [
-        SystemConfig(key="weight_recency", value="30", description="Test recency weight"),
-        SystemConfig(key="weight_quantity", value="20", description="Test quantity weight"),
         SystemConfig(key="email_mining_enabled", value="false", description="Test toggle"),
+        SystemConfig(key="inbox_scan_interval_min", value="30", description="Test interval"),
     ]
     for c in configs:
         db_session.add(c)
@@ -130,8 +129,8 @@ def test_require_settings_allows_dev_assistant(dev_client, seed_config):
 
 
 def test_dev_assistant_cannot_write_config(dev_client, seed_config):
-    resp = dev_client.put("/api/admin/config/weight_recency",
-                          json={"value": "50"})
+    resp = dev_client.put("/api/admin/config/email_mining_enabled",
+                          json={"value": "true"})
     assert resp.status_code == 403
 
 
@@ -183,34 +182,16 @@ def test_get_config(admin_client, seed_config):
     assert resp.status_code == 200
     data = resp.json()
     keys = [c["key"] for c in data]
-    assert "weight_recency" in keys
     assert "email_mining_enabled" in keys
+    assert "inbox_scan_interval_min" in keys
 
 
 def test_set_config(admin_client, db_session, seed_config, admin_user):
-    resp = admin_client.put("/api/admin/config/weight_recency",
-                            json={"value": "40"})
+    resp = admin_client.put("/api/admin/config/inbox_scan_interval_min",
+                            json={"value": "15"})
     assert resp.status_code == 200
-    assert resp.json()["value"] == "40"
+    assert resp.json()["value"] == "15"
     assert resp.json()["updated_by"] == admin_user.email
-
-
-# ── Scoring Weights Tests ────────────────────────────────────────────
-
-def test_scoring_weights_from_db(db_session, seed_config):
-    from app.services.admin_service import get_scoring_weights
-    weights = get_scoring_weights(db_session)
-    assert weights["recency"] == 30
-    assert weights["quantity"] == 20
-
-
-def test_scoring_weights_fallback(db_session):
-    """When DB has no config rows, falls back to env vars."""
-    from app.services.admin_service import get_scoring_weights
-    weights = get_scoring_weights(db_session)
-    # Should get env var defaults (30, 20, 20, 10, 10, 10)
-    assert weights["recency"] == 30
-    assert weights["price"] == 10
 
 
 # ── Health Endpoint Test ─────────────────────────────────────────────

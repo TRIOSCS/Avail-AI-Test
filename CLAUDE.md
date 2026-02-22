@@ -83,7 +83,6 @@ All config via `.env` (see `.env.example`). Key groups:
 - AI: `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`
 - Data sources: individual API keys for each connector
 - Feature flags: `EMAIL_MINING_ENABLED`, `ACTIVITY_TRACKING_ENABLED`, `CONTACTS_SYNC_ENABLED`
-- Scoring weights: `WEIGHT_RECENCY`, `WEIGHT_QUANTITY`, etc. (defaults in config.py)
 - DB: `DATABASE_URL=postgresql://availai:availai@db:5432/availai`
 
 ## Conventions

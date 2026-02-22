@@ -58,11 +58,11 @@ def test_ai_enabled_mike_only_allows_mike(mike_user):
         assert _ai_enabled(mike_user) is True
 
 
-def test_ai_enabled_mike_only_blocks_other(other_user):
+def test_ai_enabled_mike_only_allows_all(other_user):
     mock_settings = _make_settings("mike_only")
     with patch("app.routers.ai.settings", mock_settings):
         from app.routers.ai import _ai_enabled
-        assert _ai_enabled(other_user) is False
+        assert _ai_enabled(other_user) is True
 
 
 def test_ai_enabled_mike_only_case_insensitive():

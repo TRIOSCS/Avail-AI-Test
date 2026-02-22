@@ -170,14 +170,8 @@ def _backfill_fts(conn) -> None:
 
 
 def _seed_system_config(conn) -> None:
-    """Seed default scoring weights and feature flags (INSERT ON CONFLICT DO NOTHING)."""
+    """Seed default feature flags (INSERT ON CONFLICT DO NOTHING)."""
     seeds = [
-        ("weight_recency", "30", "Scoring weight for data recency (0-100)"),
-        ("weight_quantity", "20", "Scoring weight for quantity match (0-100)"),
-        ("weight_vendor_reliability", "20", "Scoring weight for vendor reliability (0-100)"),
-        ("weight_data_completeness", "10", "Scoring weight for data completeness (0-100)"),
-        ("weight_source_credibility", "10", "Scoring weight for source credibility (0-100)"),
-        ("weight_price", "10", "Scoring weight for price competitiveness (0-100)"),
         ("inbox_scan_interval_min", "30", "Minutes between inbox scan cycles"),
         ("email_mining_enabled", "false", "Enable email mining background job"),
         ("proactive_matching_enabled", "true", "Enable proactive offer matching"),

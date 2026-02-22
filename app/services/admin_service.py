@@ -153,42 +153,6 @@ def set_config_value(db: Session, key: str, value: str, admin_email: str) -> dic
     return {"key": row.key, "value": row.value, "updated_by": row.updated_by}
 
 
-# ── Scoring Weights ──────────────────────────────────────────────────
-
-
-def get_scoring_weights(db: Session) -> dict:
-    """Get scoring weights from DB, falling back to env vars."""
-    weight_keys = [
-        "weight_recency",
-        "weight_quantity",
-        "weight_vendor_reliability",
-        "weight_data_completeness",
-        "weight_source_credibility",
-        "weight_price",
-    ]
-    env_defaults = {
-        "weight_recency": settings.weight_recency,
-        "weight_quantity": settings.weight_quantity,
-        "weight_vendor_reliability": settings.weight_vendor_reliability,
-        "weight_data_completeness": settings.weight_data_completeness,
-        "weight_source_credibility": settings.weight_source_credibility,
-        "weight_price": settings.weight_price,
-    }
-    # Use cached config instead of direct DB query
-    db_map = get_config_values(db, weight_keys)
-
-    result = {}
-    for key in weight_keys:
-        short_key = key.replace("weight_", "")
-        if key in db_map:
-            try:
-                result[short_key] = int(db_map[key])
-            except (ValueError, TypeError):
-                result[short_key] = env_defaults[key]
-        else:
-            result[short_key] = env_defaults[key]
-    return result
-
 
 # ── System Health ────────────────────────────────────────────────────
 

@@ -14,7 +14,6 @@ from app.models import SystemConfig
 from app.services.admin_service import (
     VALID_ROLES,
     get_all_config,
-    get_scoring_weights,
     get_system_health,
     list_users,
     set_config_value,
@@ -123,28 +122,6 @@ class TestConfig:
 
 
 # ── Scoring Weights ─────────────────────────────────────────────────
-
-
-class TestScoringWeights:
-    def test_returns_all_weight_keys(self, db_session):
-        result = get_scoring_weights(db_session)
-        expected = {"recency", "quantity", "vendor_reliability", "data_completeness", "source_credibility", "price"}
-        assert set(result.keys()) == expected
-
-    def test_db_value_overrides_env(self, db_session):
-        _make_config(db_session, "weight_recency", "99")
-        db_session.commit()
-
-        result = get_scoring_weights(db_session)
-        assert result["recency"] == 99
-
-    def test_invalid_db_value_falls_back(self, db_session):
-        _make_config(db_session, "weight_recency", "not_a_number")
-        db_session.commit()
-
-        result = get_scoring_weights(db_session)
-        # Should fall back to env default, not crash
-        assert isinstance(result["recency"], (int, float))
 
 
 # ── System Health ───────────────────────────────────────────────────

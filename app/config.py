@@ -126,14 +126,6 @@ class Settings:
         os.getenv("CONTACTS_SYNC_ENABLED", "true").lower() == "true"
     )
 
-    # Scoring weights
-    weight_recency: int = int(os.getenv("WEIGHT_RECENCY", "30"))
-    weight_quantity: int = int(os.getenv("WEIGHT_QUANTITY", "20"))
-    weight_vendor_reliability: int = int(os.getenv("WEIGHT_VENDOR_RELIABILITY", "20"))
-    weight_data_completeness: int = int(os.getenv("WEIGHT_DATA_COMPLETENESS", "10"))
-    weight_source_credibility: int = int(os.getenv("WEIGHT_SOURCE_CREDIBILITY", "10"))
-    weight_price: int = int(os.getenv("WEIGHT_PRICE", "10"))
-
     # Admin
     admin_emails: list = [
         e.strip().lower()

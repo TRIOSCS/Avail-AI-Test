@@ -825,10 +825,6 @@ def test_config_defaults(pass_num):
     assert_true(hasattr(s, "ai_features_enabled"), "ai_features_enabled exists")
     assert_true(hasattr(s, "anthropic_api_key"), "anthropic_api_key exists")
 
-    # Scoring weights
-    assert_true(hasattr(s, "weight_price"), "weight_price exists")
-    assert_true(hasattr(s, "weight_quantity"), "weight_quantity exists")
-    assert_true(hasattr(s, "weight_vendor_reliability"), "weight_vendor_reliability exists")
 
 
 # ══════════════════════════════════════════════════════════════════════

@@ -3158,24 +3158,26 @@ function _ddVendorInlineBadges(s) {
 function _ddRenderTierRows(sightings, reqId, sel, groupLabel) {
     let html = '';
     for (const s of sightings) {
-        // Historical offer rows get different rendering
+        // Historical offer rows — rendered at same size as regular sightings
         if (s._historical) {
             const ho = s._ho;
             const hPrice = ho.unit_price != null ? '$' + parseFloat(ho.unit_price).toFixed(4) : '\u2014';
             const hSub = ho.is_substitute ? ' <span class="badge b-sub">SUB</span>' : '';
             const sAge = ho.created_at ? fmtRelative(ho.created_at) : '\u2014';
+            const hQty = ho.qty_available != null ? Number(ho.qty_available).toLocaleString() : '\u2014';
             const hoJson = esc(JSON.stringify(ho));
-            html += `<tr>
-                <td><span style="font-size:8px;padding:1px 4px;border-radius:3px;background:var(--blue-light,#e0f2fe);color:var(--blue,#0284c7);font-weight:700;letter-spacing:.3px">HIST</span></td>
-                <td>${esc(ho.vendor_name || '\u2014')}${hSub} <span style="font-size:9px;color:var(--muted)">RFQ-${ho.from_requisition_id || '\u2014'}</span></td>
+            const safeHVName = (ho.vendor_name||'').replace(/'/g, "\\'");
+            html += `<tr style="background:var(--blue-light,#f0f9ff)">
+                <td style="text-align:center"><span style="font-size:9px;padding:2px 5px;border-radius:3px;background:var(--blue,#0284c7);color:#fff;font-weight:700">HIST</span></td>
+                <td><a onclick="event.stopPropagation();openVendorPopup('${safeHVName}')" style="cursor:pointer;font-weight:600">${esc(ho.vendor_name || '\u2014')}</a>${hSub} <span style="color:var(--muted)">RFQ-${ho.from_requisition_id || '\u2014'}</span></td>
                 <td class="mono">${esc(ho.mpn || '\u2014')}</td>
-                <td class="mono">${ho.qty_available != null ? Number(ho.qty_available).toLocaleString() : '\u2014'}</td>
+                <td class="mono">${hQty}</td>
                 <td class="mono" style="color:var(--teal)">${hPrice}</td>
-                <td style="font-size:10px">historical</td>
-                <td style="font-size:10px">${esc(ho.condition || '\u2014')}</td>
-                <td style="font-size:10px;color:var(--muted)">${sAge}
-                    <button class="btn btn-ghost btn-sm" style="font-size:9px;padding:1px 4px;margin-left:4px" onclick="event.stopPropagation();ddReconfirmOffer(${ho.id},${reqId})" title="Mark as still valid">\u2713</button>
-                    <button class="btn btn-ghost btn-sm" style="font-size:9px;padding:1px 4px;color:var(--teal)" onclick='event.stopPropagation();ddLogFromHistorical(${reqId},${hoJson})' title="Log as new offer on this RFQ">+Log</button>
+                <td>${esc(ho.lead_time || '\u2014')}</td>
+                <td>${esc(ho.condition || '\u2014')}</td>
+                <td style="color:var(--muted)">${sAge}
+                    <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;margin-left:4px" onclick="event.stopPropagation();ddReconfirmOffer(${ho.id},${reqId})" title="Mark as still valid">\u2713 Reconfirm</button>
+                    <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;color:var(--teal)" onclick='event.stopPropagation();ddLogFromHistorical(${reqId},${hoJson})' title="Log as new offer on this RFQ">+ Log</button>
                 </td>
             </tr>`;
             continue;
