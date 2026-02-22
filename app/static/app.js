@@ -1209,7 +1209,7 @@ function _renderDdOffers(reqId, data, panel) {
         <span style="font-size:11px"><b>${allOffers.length}</b> offer${allOffers.length !== 1 ? 's' : ''}${sel.size > 0 ? ` &middot; <b>${sel.size}</b> selected` : ''}</span>
         <button class="btn btn-primary btn-sm" id="ddBuildQuoteBtn-${reqId}" ${sel.size === 0 ? 'disabled style="opacity:.5"' : ''} onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote (${sel.size})</button>
     </div>`;
-    html += `<table class="dtbl"><thead><tr><th style="width:28px"><input type="checkbox" onchange="ddToggleAllOffers(${reqId},this.checked)" ${sel.size === allOffers.length ? 'checked' : ''}></th><th>MPN</th><th>Vendor</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Cond</th><th>MOQ</th><th>Date Code</th><th>Source</th><th>Logged</th></tr></thead><tbody>`;
+    html += `<table class="dtbl"><thead><tr><th style="width:28px"><input type="checkbox" onchange="ddToggleAllOffers(${reqId},this.checked)" ${sel.size === allOffers.length ? 'checked' : ''}></th><th>MPN</th><th>Vendor</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Cond</th><th>MOQ</th><th>Date Code</th><th>Source</th><th>Logged</th><th></th></tr></thead><tbody>`;
     for (const o of allOffers) {
         const oid = o.id || o.offer_id;
         const checked = sel.has(oid) ? 'checked' : '';
@@ -1220,6 +1220,7 @@ function _renderDdOffers(reqId, data, panel) {
         const isSub = o._reqMpn && offeredMpn && offeredMpn.trim().toUpperCase() !== o._reqMpn.trim().toUpperCase();
         const subBadge = isSub ? ' <span class="badge b-sub">SUB</span>' : '';
         const rowBg = isSub ? 'background:rgba(14,116,144,.04);' : '';
+        const statusBadge = o.status === 'pending_review' ? ' <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">DRAFT</span>' : '';
         // Build detail chips for extra fields
         const details = [];
         if (o.manufacturer) details.push('Mfr: ' + esc(o.manufacturer));
@@ -1228,12 +1229,12 @@ function _renderDdOffers(reqId, data, panel) {
         if (o.hardware_code) details.push('HW: ' + esc(o.hardware_code));
         if (o.warranty) details.push('Warranty: ' + esc(o.warranty));
         if (o.country_of_origin) details.push('COO: ' + esc(o.country_of_origin));
-        const detailLine = details.length ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">' + details.join(' · ') + '</div>' : '';
+        const detailLine = details.length ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">' + details.join(' \u00b7 ') + '</div>' : '';
         const noteLine = o.notes ? '<div style="margin-top:3px;padding:3px 8px;border-radius:4px;background:rgba(59,130,246,.08);border-left:2px solid var(--blue);font-size:10px;color:var(--text);white-space:pre-wrap">' + esc(o.notes) + '</div>' : '';
         const enteredBy = o.entered_by ? '<div style="font-size:9px;color:var(--muted);margin-top:2px">by ' + esc(o.entered_by) + '</div>' : '';
         html += `<tr class="${checked ? 'selected' : ''}" style="${rowBg}" onclick="ddToggleOffer(${reqId},${oid},event)">
             <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
-            <td class="mono">${esc(offeredMpn)}${subBadge}</td>
+            <td class="mono">${esc(offeredMpn)}${subBadge}${statusBadge}</td>
             <td>${esc(o.vendor_name || '')}${detailLine}${noteLine}${enteredBy}</td>
             <td class="mono">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '\u2014')}</td>
             <td class="mono" style="color:var(--teal)">${price}</td>
@@ -1243,6 +1244,7 @@ function _renderDdOffers(reqId, data, panel) {
             <td style="font-size:10px">${esc(o.date_code || '\u2014')}</td>
             <td style="font-size:10px;color:var(--muted)">${esc(src)}</td>
             <td style="font-size:10px">${date}</td>
+            <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddEditOffer(${reqId},${oid})" title="Edit" style="padding:2px 6px;font-size:10px">\u270e</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddDeleteOffer(${reqId},${oid})" title="Delete" style="padding:2px 6px;font-size:10px;color:var(--red)">\u2715</button></td>
         </tr>`;
     }
     html += '</tbody></table>';
@@ -1302,6 +1304,112 @@ async function ddBuildQuote(reqId) {
         } else {
             showToast('Error building quote: ' + (e.message || 'unknown'), 'error');
         }
+    }
+}
+
+function ddEditOffer(reqId, offerId) {
+    // Find the offer data in cache
+    const data = _ddTabCache[reqId]?.offers;
+    if (!data) return;
+    let offer = null;
+    for (const g of (data.groups || data || [])) {
+        for (const o of (g.offers || [])) {
+            if ((o.id || o.offer_id) === offerId) { offer = o; break; }
+        }
+        if (offer) break;
+    }
+    if (!offer) return;
+    // Build inline edit form
+    const o = offer;
+    const formHtml = `
+    <div class="modal-bg open" id="ddEditOfferBg" onclick="if(event.target===this){this.remove()}">
+        <div class="modal modal-lg" onclick="event.stopPropagation()">
+            <h2>Edit Offer — ${esc(o.mpn || '')} from ${esc(o.vendor_name || '')}</h2>
+            <div class="lo-form">
+                <div class="field"><label>Vendor Name</label><input id="ddEoVendor" value="${escAttr(o.vendor_name || '')}"></div>
+                <div class="field"><label>MPN</label><input id="ddEoMpn" value="${escAttr(o.mpn || '')}"></div>
+                <div class="field"><label>Qty Available</label><input id="ddEoQty" type="number" value="${o.qty_available || ''}"></div>
+                <div class="field"><label>Unit Price ($)</label><input id="ddEoPrice" type="number" step="0.0001" value="${o.unit_price || ''}"></div>
+                <div class="field"><label>Lead Time</label><input id="ddEoLead" value="${escAttr(o.lead_time || '')}"></div>
+                <div class="field"><label>Condition</label>
+                    <select id="ddEoCond"><option value="new" ${o.condition==='new'?'selected':''}>New</option><option value="refurbished" ${o.condition==='refurbished'?'selected':''}>Refurbished</option><option value="used" ${o.condition==='used'?'selected':''}>Used</option></select>
+                </div>
+                <div class="field"><label>MOQ</label><input id="ddEoMoq" type="number" value="${o.moq || ''}"></div>
+                <div class="field"><label>Date Code</label><input id="ddEoDc" value="${escAttr(o.date_code || '')}"></div>
+                <div class="field"><label>Manufacturer</label><input id="ddEoMfr" value="${escAttr(o.manufacturer || '')}"></div>
+                <div class="field"><label>Packaging</label><input id="ddEoPkg" value="${escAttr(o.packaging || '')}"></div>
+                <div class="field"><label>Warranty</label><input id="ddEoWar" value="${escAttr(o.warranty || '')}"></div>
+                <div class="field"><label>Country of Origin</label><input id="ddEoCoo" value="${escAttr(o.country_of_origin || '')}"></div>
+                <div class="field field-full"><label>Notes</label><textarea id="ddEoNotes" rows="2" style="resize:vertical">${esc(o.notes || '')}</textarea></div>
+                <div class="field"><label>Status</label>
+                    <select id="ddEoStatus"><option value="active" ${o.status==='active'?'selected':''}>Active</option><option value="pending_review" ${o.status==='pending_review'?'selected':''}>Pending Review</option><option value="expired" ${o.status==='expired'?'selected':''}>Expired</option><option value="won" ${o.status==='won'?'selected':''}>Won</option><option value="lost" ${o.status==='lost'?'selected':''}>Lost</option></select>
+                </div>
+            </div>
+            <div class="mactions">
+                <button type="button" class="btn btn-ghost" onclick="document.getElementById('ddEditOfferBg').remove()">Cancel</button>
+                <button type="button" class="btn btn-primary" id="ddEoSaveBtn" onclick="ddSaveEditOffer(${reqId},${offerId})">Save Changes</button>
+            </div>
+        </div>
+    </div>`;
+    document.body.insertAdjacentHTML('beforeend', formHtml);
+    document.getElementById('ddEoVendor')?.focus();
+}
+
+async function ddSaveEditOffer(reqId, offerId) {
+    const btn = document.getElementById('ddEoSaveBtn');
+    btn.disabled = true; btn.textContent = 'Saving\u2026';
+    try {
+        const body = {
+            vendor_name: document.getElementById('ddEoVendor').value.trim() || undefined,
+            mpn: document.getElementById('ddEoMpn').value.trim() || undefined,
+            qty_available: parseInt(document.getElementById('ddEoQty').value) || null,
+            unit_price: parseFloat(document.getElementById('ddEoPrice').value) || null,
+            lead_time: document.getElementById('ddEoLead').value.trim() || null,
+            condition: document.getElementById('ddEoCond').value || null,
+            moq: parseInt(document.getElementById('ddEoMoq').value) || null,
+            date_code: document.getElementById('ddEoDc').value.trim() || null,
+            manufacturer: document.getElementById('ddEoMfr').value.trim() || null,
+            packaging: document.getElementById('ddEoPkg').value.trim() || null,
+            warranty: document.getElementById('ddEoWar').value.trim() || null,
+            country_of_origin: document.getElementById('ddEoCoo').value.trim() || null,
+            notes: document.getElementById('ddEoNotes').value.trim() || null,
+            status: document.getElementById('ddEoStatus').value,
+        };
+        await apiFetch(`/api/offers/${offerId}`, { method: 'PUT', body });
+        document.getElementById('ddEditOfferBg')?.remove();
+        showToast('Offer updated', 'success');
+        // Refresh offers tab
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].offers;
+        const drow = document.getElementById('d-' + reqId);
+        if (drow) {
+            const panel = drow.querySelector('.dd-panel');
+            if (panel) await _loadDdSubTab(reqId, 'offers', panel);
+        }
+    } catch (e) {
+        showToast('Failed to update: ' + (e.message || e), 'error');
+        btn.disabled = false; btn.textContent = 'Save Changes';
+    }
+}
+
+async function ddDeleteOffer(reqId, offerId) {
+    if (!confirm('Delete this offer?')) return;
+    try {
+        await apiFetch(`/api/offers/${offerId}`, { method: 'DELETE' });
+        showToast('Offer deleted', 'success');
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].offers;
+        const drow = document.getElementById('d-' + reqId);
+        if (drow) {
+            const panel = drow.querySelector('.dd-panel');
+            if (panel) await _loadDdSubTab(reqId, 'offers', panel);
+        }
+        // Update list count
+        const reqInfo = _reqListData.find(r => r.id === reqId);
+        if (reqInfo && reqInfo.offer_count > 0) {
+            reqInfo.offer_count--;
+            renderReqList();
+        }
+    } catch (e) {
+        showToast('Failed to delete: ' + (e.message || e), 'error');
     }
 }
 
@@ -6613,8 +6721,8 @@ async function submitTrouble(btn) {
 Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
     addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies,
-    cloneFromList, closeModal, ddBuildQuote, ddPasteRows,
-    ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddSendBulkRfq,
+    cloneFromList, closeModal, ddBuildQuote, ddDeleteOffer, ddEditOffer, ddPasteRows,
+    ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddSaveEditOffer, ddSendBulkRfq,
     ddToggleAllOffers, ddToggleOffer, ddToggleSighting, ddToggleTier,
     ddUploadFile, debounceOfferHistorySearch, debouncePartsSightingsSearch,
     deleteDrillRow, deleteMaterial, deleteReq, deleteVendor,
