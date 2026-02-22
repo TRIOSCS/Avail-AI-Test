@@ -1426,9 +1426,9 @@ function ddUpdateBqTotals() {
     document.querySelectorAll('.bq-sell').forEach(inp => {
         const cost = parseFloat(inp.dataset.cost) || 0;
         const sell = parseFloat(inp.value) || 0;
-        // Find qty from the same row (3rd cell)
+        // Find qty from the same row (4th cell — MPN, Mfr, Vendor, Qty)
         const row = inp.closest('tr');
-        const qtyText = row?.children[2]?.textContent?.replace(/,/g, '') || '0';
+        const qtyText = row?.children[3]?.textContent?.replace(/,/g, '') || '0';
         const qty = parseInt(qtyText) || 0;
         totalCost += cost * qty;
         totalSell += sell * qty;
