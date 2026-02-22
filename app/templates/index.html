@@ -346,6 +346,9 @@
                 <label>Message</label>
                 <textarea id="rfqBody" style="min-height:160px"></textarea>
             </div>
+            <div id="aiDraftWrap" style="display:none;margin-bottom:8px;text-align:right">
+                <button type="button" class="btn btn-sm" style="font-size:11px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="aiDraftRfq(this)">AI Draft</button>
+            </div>
             <div class="mactions">
                 <button type="button" class="btn btn-ghost" onclick="closeModal('rfqModal')">Cancel</button>
                 <button type="button" class="btn btn-success" id="rfqSendBtn" onclick="sendBatchRfq()">Send</button>

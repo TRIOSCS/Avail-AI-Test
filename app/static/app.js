@@ -37,6 +37,9 @@
     };
 })();
 
+// ── AI feature gate — only render AI buttons for admin users ──────────
+function _canAI() { return !!window.__isAdmin; }
+
 // ── Early stubs (available before full init for onclick handlers) ──────
 
 function toggleMobileSidebar() {
@@ -991,6 +994,8 @@ function _renderDdActivity(reqId, data, panel) {
                     // Show AI-parsed summary for replies
                     if (isReply && t.parsed_data) {
                         bodyHtml += _renderParsedSummary(t.parsed_data, reqId, t.response_id, t.vendor_name);
+                    } else if (isReply && !t.parsed_data && _canAI() && t.response_id) {
+                        bodyHtml += `<div style="margin-bottom:6px"><button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();aiParseReply(${reqId},${t.response_id},'${escAttr(t.vendor_name||'')}',this)">Parse with AI</button></div>`;
                     }
                     bodyHtml += `<div class="act-body-text">${_formatEmailBody(t.body)}</div>`;
                     html += `<div class="act-body" id="${mid}">${bodyHtml}</div>`;
@@ -1032,9 +1037,14 @@ function _renderParsedSummary(pd, reqId, responseId, vendorName) {
     const quotedParts = parts.filter(p => p.status === 'quoted' && p.unit_price != null);
     let html = '<div class="parsed-summary">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.4px">AI-Parsed Response</span>';
+    html += '<span style="display:flex;gap:4px">';
+    if (_canAI() && reqId && responseId) {
+        html += `<button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();aiParseReply(${reqId},${responseId},'${escAttr(vendorName||'')}',this)" title="Re-parse email with AI">Re-parse</button>`;
+    }
     if (quotedParts.length && reqId && responseId) {
         html += `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();_acceptParsedOffers(${reqId},${responseId},this)" title="Create draft offers from parsed data">Accept ${quotedParts.length} Offer${quotedParts.length > 1 ? 's' : ''}</button>`;
     }
+    html += '</span>';
     html += '</div>';
     if (parts.length) {
         html += '<table class="parsed-parts-tbl"><thead><tr><th>MPN</th><th>Status</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Condition</th><th>Date Code</th><th>MOQ</th><th>Notes</th></tr></thead><tbody>';
@@ -1215,7 +1225,12 @@ function _renderDdOffers(reqId, data, panel) {
     // Summary bar
     let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <span style="font-size:11px"><b>${totalOffers}</b> offer${totalOffers !== 1 ? 's' : ''}${sel.size > 0 ? ` &middot; <b>${sel.size}</b> selected` : ''}</span>
-        <button class="btn btn-primary btn-sm" id="ddBuildQuoteBtn-${reqId}" ${sel.size === 0 ? 'disabled style="opacity:.5"' : ''} onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote (${sel.size})</button>
+        <span style="display:flex;gap:6px">`;
+    if (_canAI() && sel.size >= 2) {
+        html += `<button class="btn btn-sm" style="font-size:11px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();ddAiCompare(${reqId},this)">AI Compare</button>`;
+    }
+    html += `<button class="btn btn-primary btn-sm" id="ddBuildQuoteBtn-${reqId}" ${sel.size === 0 ? 'disabled style="opacity:.5"' : ''} onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote (${sel.size})</button>
+        </span>
     </div>`;
 
     // Grouped layout
@@ -4635,6 +4650,18 @@ function renderRequirementsTable() {
 
     const countEl = document.getElementById('reqFilterCount');
     if (countEl) countEl.textContent = (q || pill !== 'all') ? `${filtered.length} of ${reqData.length}` : `${reqData.length} parts`;
+    // AI Normalize button in toolbar
+    const normWrap = document.getElementById('aiNormWrap');
+    if (normWrap) normWrap.remove();
+    if (_canAI() && reqData.length > 0) {
+        const filterBar = document.getElementById('reqFilterBar');
+        if (filterBar) {
+            const wrap = document.createElement('span');
+            wrap.id = 'aiNormWrap';
+            wrap.innerHTML = '<button class="btn btn-sm" style="font-size:11px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal);margin-left:8px" onclick="aiNormalizeParts(this)">AI Normalize</button>';
+            filterBar.appendChild(wrap);
+        }
+    }
     el.innerHTML = filtered.map(r => {
         const subsText = (r.substitutes || []).length ? r.substitutes.join(', ') : '—';
         const checked = selectedRequirements.has(r.id) ? 'checked' : '';
@@ -5569,6 +5596,9 @@ function renderRfqMessage() {
     } else {
         document.getElementById('rfqBody').value = '(No vendors with new parts to send)';
     }
+    // Show AI Draft button for admins
+    const aiWrap = document.getElementById('aiDraftWrap');
+    if (aiWrap) aiWrap.style.display = _canAI() ? '' : 'none';
 }
 
 
@@ -7846,6 +7876,212 @@ async function submitTrouble(btn) {
     });
 }
 
+// ── Gradient AI Feature Integrations ──────────────────────────────────
+
+// 1. Draft RFQ Email — AI-generate subject + body for the RFQ modal
+async function aiDraftRfq(btn) {
+    const sample = rfqVendorData.find(v => _vendorHasPartsToSend(v));
+    if (!sample) { showToast('No vendor with parts to draft for', 'error'); return; }
+    const parts = [...sample.new_listing, ...sample.new_other];
+    if (sample.include_repeats) parts.push(...sample.repeat_listing, ...sample.repeat_other);
+    if (!parts.length) { showToast('No parts to include in draft', 'error'); return; }
+    await guardBtn(btn, 'Drafting…', async () => {
+        const payload = {
+            vendor_name: sample.vendor_name,
+            buyer_name: window.__userName || 'Buyer',
+            parts: parts.map(mpn => ({
+                part_number: mpn,
+                quantity: reqData.find(r => r.primary_mpn === mpn)?.target_qty || 1,
+                target_price: reqData.find(r => r.primary_mpn === mpn)?.target_price || null,
+                condition_requirement: rfqCondition !== 'any' ? rfqCondition : null
+            }))
+        };
+        const data = await apiFetch('/api/ai/draft-rfq-email', { method: 'POST', body: payload });
+        if (data.subject) document.getElementById('rfqSubject').value = data.subject;
+        if (data.body) document.getElementById('rfqBody').value = data.body;
+        showToast('AI draft generated');
+    });
+}
+
+// 2. Compare Quotes — AI analysis of selected offers in the offers tab
+async function ddAiCompare(reqId, btn) {
+    const sel = _ddSelectedOffers[reqId];
+    if (!sel || sel.size < 2) { showToast('Select at least 2 offers to compare', 'error'); return; }
+    const cached = _ddTabCache[reqId]?.offers;
+    if (!cached) { showToast('Offers data not loaded', 'error'); return; }
+    const groups = cached.groups || cached || [];
+    // Gather selected offer objects
+    const selectedOffers = [];
+    let partNumber = '';
+    let requiredQty = null;
+    for (const g of groups) {
+        for (const o of (g.offers || [])) {
+            if (sel.has(o.id)) {
+                selectedOffers.push(o);
+                if (!partNumber) {
+                    partNumber = g.mpn || g.label || o.mpn || '';
+                    // Find target qty from reqData
+                    const req = reqData.find(r => r.primary_mpn === partNumber);
+                    if (req) requiredQty = req.target_qty;
+                }
+            }
+        }
+    }
+    if (selectedOffers.length < 2) { showToast('Need 2+ offers from loaded data', 'error'); return; }
+    await guardBtn(btn, 'Analyzing…', async () => {
+        const payload = {
+            part_number: partNumber,
+            quotes: selectedOffers.map(o => ({
+                vendor_name: o.vendor_name || o.vendor || '',
+                unit_price: o.unit_price,
+                quantity_available: o.quantity_available ?? o.qty_available ?? null,
+                lead_time_days: o.lead_time_days ?? null,
+                date_code: o.date_code || null,
+                condition: o.condition || null,
+                moq: o.moq ?? null
+            })),
+            required_qty: requiredQty
+        };
+        const data = await apiFetch('/api/ai/compare-quotes', { method: 'POST', body: payload });
+        if (!data.available) { showToast(data.reason || 'AI comparison unavailable', 'error'); return; }
+        const r = data.result || data;
+        // Build comparison modal
+        let html = '<div style="max-width:640px">';
+        html += '<h3 style="margin:0 0 12px;font-size:16px">AI Quote Comparison — ' + esc(partNumber) + '</h3>';
+        if (r.summary) html += '<p style="font-size:13px;color:var(--text2);margin-bottom:12px">' + esc(r.summary) + '</p>';
+        if (r.recommendation) html += '<div style="background:var(--teal)15;border:1px solid var(--teal);border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:13px"><b>Recommendation:</b> ' + esc(r.recommendation) + '</div>';
+        if (r.best_price) html += '<div style="font-size:12px;margin-bottom:4px"><b>Best Price:</b> ' + esc(r.best_price.vendor) + (r.best_price.unit_price != null ? ' ($' + Number(r.best_price.unit_price).toFixed(4) + ')' : '') + (r.best_price.reason ? ' — ' + esc(r.best_price.reason) : '') + '</div>';
+        if (r.fastest_delivery) html += '<div style="font-size:12px;margin-bottom:4px"><b>Fastest Delivery:</b> ' + esc(r.fastest_delivery.vendor) + (r.fastest_delivery.lead_time_days != null ? ' (' + r.fastest_delivery.lead_time_days + ' days)' : '') + (r.fastest_delivery.reason ? ' — ' + esc(r.fastest_delivery.reason) : '') + '</div>';
+        if (r.best_overall) html += '<div style="font-size:12px;margin-bottom:8px"><b>Best Overall:</b> ' + esc(r.best_overall.vendor) + (r.best_overall.reason ? ' — ' + esc(r.best_overall.reason) : '') + '</div>';
+        if (r.risk_factors && r.risk_factors.length) {
+            html += '<div style="margin-top:8px"><b style="font-size:12px;color:var(--amber)">Risk Factors:</b><ul style="margin:4px 0 0 16px;font-size:12px">';
+            for (const rf of r.risk_factors) html += '<li>' + esc(rf) + '</li>';
+            html += '</ul></div>';
+        }
+        if (r.anomalies && r.anomalies.length) {
+            html += '<div style="margin-top:8px"><b style="font-size:12px;color:var(--red)">Anomalies:</b><ul style="margin:4px 0 0 16px;font-size:12px">';
+            for (const a of r.anomalies) html += '<li>' + esc(a) + '</li>';
+            html += '</ul></div>';
+        }
+        html += '</div>';
+        // Show in a generic modal overlay
+        _showAiModal('AI Quote Comparison', html);
+    });
+}
+
+// 3. Normalize Parts — canonicalize MPNs for requirements table
+async function aiNormalizeParts(btn) {
+    const mpns = reqData.map(r => r.primary_mpn).filter(Boolean);
+    if (!mpns.length) { showToast('No parts to normalize', 'error'); return; }
+    await guardBtn(btn, 'Normalizing…', async () => {
+        const data = await apiFetch('/api/ai/normalize-parts', { method: 'POST', body: { parts: mpns } });
+        const changed = (data.parts || []).filter(p => p.original !== p.normalized);
+        if (!changed.length) { showToast('All parts already normalized'); return; }
+        // Build review modal
+        let html = '<div style="max-width:600px">';
+        html += '<h3 style="margin:0 0 12px;font-size:16px">Normalize Parts — ' + changed.length + ' change' + (changed.length !== 1 ? 's' : '') + '</h3>';
+        html += '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+        html += '<thead><tr><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Apply</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Original</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Normalized</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Manufacturer</th><th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Confidence</th></tr></thead><tbody>';
+        changed.forEach((p, i) => {
+            const pct = Math.round((p.confidence || 0) * 100);
+            html += `<tr><td style="padding:4px 8px"><input type="checkbox" checked data-ai-norm-idx="${i}"></td><td class="mono" style="padding:4px 8px">${esc(p.original)}</td><td class="mono" style="padding:4px 8px;color:var(--teal);font-weight:600">${esc(p.normalized)}</td><td style="padding:4px 8px">${esc(p.manufacturer || '—')}</td><td style="padding:4px 8px">${pct}%</td></tr>`;
+        });
+        html += '</tbody></table>';
+        html += '<div style="margin-top:12px;text-align:right"><button class="btn btn-primary btn-sm" onclick="_applyNormalized()">Apply Selected</button></div>';
+        html += '</div>';
+        window._aiNormData = changed;
+        _showAiModal('AI Normalize Parts', html);
+    });
+}
+
+async function _applyNormalized() {
+    const changed = window._aiNormData || [];
+    const checks = document.querySelectorAll('[data-ai-norm-idx]');
+    let applied = 0;
+    for (const cb of checks) {
+        if (!cb.checked) continue;
+        const idx = parseInt(cb.dataset.aiNormIdx);
+        const p = changed[idx];
+        if (!p) continue;
+        const req = reqData.find(r => r.primary_mpn === p.original);
+        if (!req) continue;
+        try {
+            await apiFetch(`/api/requirements/${req.id}`, { method: 'PATCH', body: { primary_mpn: p.normalized } });
+            req.primary_mpn = p.normalized;
+            applied++;
+        } catch(e) { /* skip failed */ }
+    }
+    closeModal('aiModal');
+    if (applied) {
+        renderRequirementsTable();
+        showToast(applied + ' part' + (applied !== 1 ? 's' : '') + ' normalized');
+    } else {
+        showToast('No changes applied', 'warn');
+    }
+}
+
+// 4. Re-parse Email — AI parse/re-parse vendor reply
+async function aiParseReply(reqId, responseId, vendorName, btn) {
+    // Find the response in activity cache
+    const actData = _ddTabCache[reqId]?.activity;
+    if (!actData) { showToast('Activity data not loaded', 'error'); return; }
+    let response = null;
+    for (const v of (actData.vendors || [])) {
+        for (const r of (v.responses || [])) {
+            if (r.id === responseId) { response = r; break; }
+        }
+        if (response) break;
+    }
+    if (!response) { showToast('Reply not found', 'error'); return; }
+    await guardBtn(btn, 'Parsing…', async () => {
+        const payload = {
+            email_body: response.body || '',
+            email_subject: response.subject || '',
+            vendor_name: vendorName || ''
+        };
+        const data = await apiFetch('/api/ai/parse-email', { method: 'POST', body: payload });
+        if (data.parsed && data.quotes && data.quotes.length) {
+            // Build parsed_data structure matching what _renderParsedSummary expects
+            response.parsed_data = {
+                parts: data.quotes.map(q => ({
+                    mpn: q.part_number || '',
+                    status: q.unit_price != null ? 'quoted' : 'no_stock',
+                    unit_price: q.unit_price,
+                    qty_available: q.quantity_available,
+                    lead_time: q.lead_time_text || (q.lead_time_days ? q.lead_time_days + ' days' : ''),
+                    condition: q.condition || '',
+                    date_code: q.date_code || '',
+                    moq: q.moq,
+                    notes: q.notes || '',
+                    currency: q.currency || 'USD'
+                })),
+                vendor_notes: data.vendor_notes || ''
+            };
+            // Re-render activity tab
+            const panel = document.getElementById('d-' + reqId)?.querySelector('.dd-panel');
+            if (panel) _renderDdActivity(reqId, actData, panel);
+            showToast('Email re-parsed — review results');
+        } else {
+            showToast('Could not parse any quotes from this email', 'warn');
+        }
+    });
+}
+
+// Shared AI modal helper
+function _showAiModal(title, contentHtml) {
+    let modal = document.getElementById('aiModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'aiModal';
+        modal.className = 'modal-bg';
+        modal.onclick = function(e) { if (e.target === modal) closeModal('aiModal'); };
+        modal.innerHTML = '<div class="modal" style="max-width:700px"><div id="aiModalContent"></div><div class="mactions"><button type="button" class="btn btn-ghost" onclick="closeModal(\'aiModal\')">Close</button></div></div>';
+        document.body.appendChild(modal);
+    }
+    document.getElementById('aiModalContent').innerHTML = contentHtml;
+    openModal('aiModal');
+}
+
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
@@ -7904,4 +8140,7 @@ Object.assign(window, {
     submitLogOffer, submitPastedRows, submitTrouble, toggleMobileSidebar,
     toggleMyAccounts, toggleNotifications, toggleSidebar, toggleStockImport,
     triggerMainSearch,
+    // AI feature functions
+    aiDraftRfq, ddAiCompare, aiNormalizeParts, aiParseReply,
+    _applyNormalized, _showAiModal, _canAI,
 });
