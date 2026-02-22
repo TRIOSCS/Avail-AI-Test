@@ -1876,7 +1876,8 @@ async function ddSaveQuoteDraft(reqId) {
                 notes: document.getElementById('ddqNotes-' + reqId)?.value || '',
             }
         });
-        showToast('Draft saved', 'success');
+        showToast('Draft saved — you can continue editing anytime', 'success');
+        // Collapse detail and refresh the list to show updated data
         if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
         const drow = document.getElementById('d-' + reqId);
         if (drow) {
@@ -1890,13 +1891,30 @@ async function ddSaveQuoteDraft(reqId) {
     }
 }
 
-function ddSendQuote(reqId) {
+async function ddSendQuote(reqId) {
     const q = _ddQuoteData[reqId];
     if (!q) return;
+
+    // Persist latest edits before opening the send dialog
+    try {
+        await apiFetch('/api/quotes/' + q.id, {
+            method: 'PUT', body: {
+                line_items: q.lines || q.line_items,
+                payment_terms: document.getElementById('ddqTerms-' + reqId)?.value || q.payment_terms || '',
+                shipping_terms: document.getElementById('ddqShip-' + reqId)?.value || q.shipping_terms || '',
+                validity_days: parseInt(document.getElementById('ddqValid-' + reqId)?.value) || q.validity_days || 7,
+                notes: document.getElementById('ddqNotes-' + reqId)?.value || q.notes || '',
+            }
+        });
+    } catch (e) {
+        showToast('Could not save quote: ' + (e.message || e), 'error');
+        return;
+    }
+
     const prefillEmail = q.contact_email || '';
     const prefillName = q.contact_name || '';
     const senderEmail = window.userEmail || 'your account';
-    // Build contact options from site_contacts if available
+    // Build contact options from site_contacts
     let contactOpts = '';
     if (q.site_contacts && q.site_contacts.length) {
         for (const c of q.site_contacts) {
@@ -1904,57 +1922,54 @@ function ddSendQuote(reqId) {
         }
     }
     const html = `<div class="modal-bg open" id="ddSendQuoteBg" onclick="if(event.target===this){this.remove()}">
-        <div class="modal" onclick="event.stopPropagation()" style="max-width:800px">
+        <div class="modal" onclick="event.stopPropagation()" style="max-width:860px">
             <h2 style="font-size:14px;margin-bottom:10px">Send Quote ${esc(q.quote_number || '')}</h2>
             <div style="display:flex;gap:16px;flex-wrap:wrap">
                 <!-- Left: send options -->
                 <div style="flex:0 0 280px;min-width:240px">
                     <div style="font-size:11px;color:var(--muted);margin-bottom:8px;padding:6px 8px;background:var(--bg2);border-radius:4px">
-                        Sending from: <strong>${esc(senderEmail)}</strong>
+                        From: <strong>${esc(senderEmail)}</strong>
                     </div>
-                    ${contactOpts ? `<div style="margin-bottom:8px"><label style="font-size:11px;font-weight:600">Select Contact</label><select id="ddSendContact-${reqId}" style="width:100%;padding:5px;font-size:12px;margin-top:2px" onchange="const o=this.options[this.selectedIndex];document.getElementById('ddSendEmail-${reqId}').value=o.value;document.getElementById('ddSendName-${reqId}').value=o.dataset.name||''">
+                    ${contactOpts ? `<div style="margin-bottom:8px"><label style="font-size:11px;font-weight:600">Select Contact</label><select id="ddSendContact-${reqId}" style="width:100%;padding:5px;font-size:12px;margin-top:2px" onchange="const o=this.options[this.selectedIndex];document.getElementById('ddSendEmail-${reqId}').value=o.value;document.getElementById('ddSendName-${reqId}').value=o.dataset.name||'';ddRefreshPreview(${reqId})">
                         <option value="">-- Choose recipient --</option>${contactOpts}</select></div>` : ''}
-                    <div style="margin-bottom:6px"><label style="font-size:11px;font-weight:600">Recipient Email *</label><input id="ddSendEmail-${reqId}" type="email" value="${escAttr(prefillEmail)}" placeholder="customer@example.com" style="width:100%;padding:5px;font-size:12px;margin-top:2px" required></div>
-                    <div style="margin-bottom:12px"><label style="font-size:11px;font-weight:600">Recipient Name</label><input id="ddSendName-${reqId}" value="${escAttr(prefillName)}" placeholder="Contact name" style="width:100%;padding:5px;font-size:12px;margin-top:2px"></div>
-                    <div class="mactions" style="justify-content:flex-start;gap:8px">
-                        <button class="btn btn-ghost btn-sm" onclick="ddPreviewQuote(${reqId})">Preview</button>
-                        <button class="btn btn-primary btn-sm" id="ddSendConfirmBtn-${reqId}" onclick="ddConfirmSendQuote(${reqId})">Send</button>
+                    <div style="margin-bottom:6px"><label style="font-size:11px;font-weight:600">To (Email) *</label><input id="ddSendEmail-${reqId}" type="email" value="${escAttr(prefillEmail)}" placeholder="customer@example.com" style="width:100%;padding:5px;font-size:12px;margin-top:2px" required></div>
+                    <div style="margin-bottom:12px"><label style="font-size:11px;font-weight:600">To (Name)</label><input id="ddSendName-${reqId}" value="${escAttr(prefillName)}" placeholder="Contact name" style="width:100%;padding:5px;font-size:12px;margin-top:2px" onblur="ddRefreshPreview(${reqId})"></div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                        <button class="btn btn-primary btn-sm" id="ddSendConfirmBtn-${reqId}" onclick="ddConfirmSendQuote(${reqId})">Send Quote</button>
                         <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ddSendQuoteBg').remove()">Cancel</button>
                     </div>
+                    <p style="font-size:10px;color:var(--muted);margin-top:8px">Once sent, this quote will be locked and no longer editable.</p>
                 </div>
-                <!-- Right: preview pane -->
-                <div id="ddSendPreview-${reqId}" style="flex:1;min-width:300px;border:1px solid var(--border);border-radius:6px;overflow:auto;max-height:500px;background:#f4f6f9;font-size:11px;color:var(--muted);display:flex;align-items:center;justify-content:center;padding:20px">
-                    Click "Preview" to see the email that will be sent to the customer.
+                <!-- Right: email preview -->
+                <div id="ddSendPreview-${reqId}" style="flex:1;min-width:320px;border:1px solid var(--border);border-radius:6px;overflow:auto;max-height:520px;background:#f4f6f9;font-size:11px;color:var(--muted);display:flex;align-items:center;justify-content:center;padding:20px">
+                    Loading preview\u2026
                 </div>
             </div>
         </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
+    // Auto-load preview
+    ddRefreshPreview(reqId);
 }
 
-async function ddPreviewQuote(reqId) {
+async function ddRefreshPreview(reqId) {
     const q = _ddQuoteData[reqId];
     if (!q) return;
     const previewEl = document.getElementById('ddSendPreview-' + reqId);
     if (!previewEl) return;
+    previewEl.style.display = 'flex';
+    previewEl.style.alignItems = 'center';
+    previewEl.style.justifyContent = 'center';
     previewEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading preview\u2026</span>';
     try {
-        // Save draft first so preview reflects latest data
-        await apiFetch('/api/quotes/' + q.id, {
-            method: 'PUT', body: {
-                line_items: q.lines || q.line_items,
-                payment_terms: document.getElementById('ddqTerms-' + reqId)?.value || '',
-                shipping_terms: document.getElementById('ddqShip-' + reqId)?.value || '',
-                validity_days: parseInt(document.getElementById('ddqValid-' + reqId)?.value) || 7,
-                notes: document.getElementById('ddqNotes-' + reqId)?.value || '',
-            }
-        });
         const toName = (document.getElementById('ddSendName-' + reqId)?.value || '').trim();
         const resp = await apiFetch('/api/quotes/' + q.id + '/preview', {
             method: 'POST', body: { to_name: toName }
         });
         if (resp.html) {
-            previewEl.innerHTML = `<iframe id="ddPreviewFrame-${reqId}" style="width:100%;height:100%;border:none;min-height:480px" sandbox="allow-same-origin"></iframe>`;
+            previewEl.style.display = 'block';
+            previewEl.style.padding = '0';
+            previewEl.innerHTML = `<iframe id="ddPreviewFrame-${reqId}" style="width:100%;border:none;min-height:500px" sandbox="allow-same-origin"></iframe>`;
             const frame = document.getElementById('ddPreviewFrame-' + reqId);
             const doc = frame.contentDocument || frame.contentWindow.document;
             doc.open(); doc.write(resp.html); doc.close();
@@ -1973,17 +1988,6 @@ async function ddConfirmSendQuote(reqId) {
     const btn = document.getElementById('ddSendConfirmBtn-' + reqId);
     if (btn) { btn.disabled = true; btn.textContent = 'Sending\u2026'; }
     try {
-        // Save draft first
-        await apiFetch('/api/quotes/' + q.id, {
-            method: 'PUT', body: {
-                line_items: q.lines || q.line_items,
-                payment_terms: document.getElementById('ddqTerms-' + reqId)?.value || '',
-                shipping_terms: document.getElementById('ddqShip-' + reqId)?.value || '',
-                validity_days: parseInt(document.getElementById('ddqValid-' + reqId)?.value) || 7,
-                notes: document.getElementById('ddqNotes-' + reqId)?.value || '',
-            }
-        });
-        // Then send with recipient override
         await apiFetch('/api/quotes/' + q.id + '/send', {
             method: 'POST', body: { to_email: toEmail, to_name: toName }
         });
@@ -1996,7 +2000,7 @@ async function ddConfirmSendQuote(reqId) {
             if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
         }
     } catch (e) {
-        if (btn) { btn.disabled = false; btn.textContent = 'Send'; }
+        if (btn) { btn.disabled = false; btn.textContent = 'Send Quote'; }
         showToast('Failed to send: ' + (e.message || e), 'error');
     }
 }
@@ -7301,7 +7305,7 @@ Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
     addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies,
     cloneFromList, closeModal, ddApplyGlobalMarkup, ddApplyQuoteMarkup, ddBuildQuote,
-    ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddEditOffer, ddExpandQuote, ddMarkQuoteResult, ddPasteRows, ddPreviewQuote, ddUpdateQuoteField,
+    ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddEditOffer, ddExpandQuote, ddMarkQuoteResult, ddPasteRows, ddRefreshPreview, ddUpdateQuoteField,
     ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddReviseQuote, ddSaveEditOffer, ddSaveQuoteDraft, ddSendBulkRfq, ddSendQuote,
     ddToggleAllOffers, ddToggleGroupOffers, ddToggleOffer, ddToggleSighting, ddToggleTier,
     ddUploadFile, debounceOfferHistorySearch, debouncePartsSightingsSearch,
