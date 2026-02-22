@@ -9,6 +9,7 @@
             window.__userName = cfg.userName || '';
             window.__userEmail = cfg.userEmail || '';
             window.__isAdmin = !!cfg.isAdmin;
+            window.__isManager = !!cfg.isManager;
             window.__isDevAssistant = !!cfg.isDevAssistant;
         } catch(e) { console.warn('Failed to parse app-config', e); }
     }
@@ -37,8 +38,8 @@
     };
 })();
 
-// ── AI feature gate — only render AI buttons for admin users ──────────
-function _canAI() { return !!window.__isAdmin; }
+// ── AI feature gate — show AI buttons for all authenticated users ─────
+function _canAI() { return true; }
 
 // ── Early stubs (available before full init for onclick handlers) ──────
 

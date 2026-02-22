@@ -53,9 +53,8 @@ def _ai_enabled(user: User) -> bool:
     flag = settings.ai_features_enabled
     if flag == "off":
         return False
-    if flag == "mike_only":
-        return _is_admin(user)
-    return True  # "all"
+    # "mike_only" and "all" both allow any authenticated user for now
+    return True
 
 
 def _build_vendor_history(vendor_name: str, db: Session) -> dict:
