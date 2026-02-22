@@ -1317,6 +1317,51 @@ function ddToggleHistory(hKey, reqId) {
     }
 }
 
+function ddToggleHistorySightings(hKey, reqId) {
+    _ddHistoryExpanded[hKey] = !_ddHistoryExpanded[hKey];
+    _renderSourcingDrillDown(reqId);
+}
+
+async function ddReconfirmOffer(offerId, reqId) {
+    try {
+        const res = await apiFetch(`/api/offers/${offerId}/reconfirm`, { method: 'PUT' });
+        showToast('Offer reconfirmed', 'success');
+        // Update row visually
+        const row = document.querySelector(`tr[data-ho-id="${offerId}"]`);
+        if (row) {
+            const btn = row.querySelector('button[title="Mark as still valid"]');
+            if (btn) { btn.textContent = '\u2713 ' + (res.reconfirm_count || 1) + 'x'; btn.style.color = 'var(--green)'; }
+        }
+    } catch (e) {
+        showToast('Failed to reconfirm: ' + (e.message || e), 'error');
+    }
+}
+
+async function ddLogFromHistorical(reqId, ho) {
+    await openLogOfferFromList(reqId);
+    // Pre-fill fields from historical offer after modal opens
+    setTimeout(() => {
+        if (ho.vendor_name) document.getElementById('loVendor').value = ho.vendor_name;
+        if (ho.qty_available) document.getElementById('loQty').value = ho.qty_available;
+        if (ho.unit_price) document.getElementById('loPrice').value = ho.unit_price;
+        if (ho.lead_time) document.getElementById('loLead').value = ho.lead_time;
+        if (ho.condition) document.getElementById('loCond').value = ho.condition;
+        if (ho.manufacturer) document.getElementById('loMfr').value = ho.manufacturer;
+        document.getElementById('loNotes').value = 'Logged from RFQ-' + (ho.from_requisition_id || '');
+        // Auto-select matching requirement by MPN
+        const sel = document.getElementById('loReqPart');
+        if (sel && ho.mpn) {
+            const hoMpn = ho.mpn.trim().toUpperCase();
+            for (const opt of sel.options) {
+                if ((opt.dataset.mpn || '').trim().toUpperCase() === hoMpn) {
+                    sel.value = opt.value;
+                    break;
+                }
+            }
+        }
+    }, 100);
+}
+
 function ddToggleOffer(reqId, offerId, event) {
     if (event) event.stopPropagation();
     if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
@@ -3215,6 +3260,47 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             }
             html += '</div>';
         }
+
+        // ── Historical Offers (cross-requisition) in sightings ──────
+        const histOffers = group.historical_offers || [];
+        if (histOffers.length) {
+            const hKey = `sightings-${reqId}-${rId}`;
+            const expanded = !!_ddHistoryExpanded[hKey];
+            const arrow = expanded ? '\u25BC' : '\u25B6';
+            html += `<div style="margin-top:4px;border-top:1px dashed var(--border);padding-top:4px">`;
+            html += `<div style="cursor:pointer;font-size:11px;color:var(--muted);user-select:none" onclick="event.stopPropagation();ddToggleHistorySightings('${hKey}',${reqId})">
+                ${arrow} \uD83D\uDCCB ${histOffers.length} historical offer${histOffers.length !== 1 ? 's' : ''}
+            </div>`;
+            if (expanded) {
+                html += `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:4px">`;
+                html += `<table class="dtbl"><thead><tr>
+                    <th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th>Date</th><th>Source Req</th><th>Actions</th>
+                </tr></thead><tbody>`;
+                for (const ho of histOffers) {
+                    const hPrice = ho.unit_price != null ? '$' + parseFloat(ho.unit_price).toFixed(4) : '\u2014';
+                    const hDate = ho.created_at ? new Date(ho.created_at).toLocaleDateString() : '\u2014';
+                    const hSub = ho.is_substitute ? ' <span class="badge b-sub">SUB</span>' : '';
+                    const hoJson = esc(JSON.stringify(ho));
+                    html += `<tr style="color:var(--muted)" data-ho-id="${ho.id}">
+                        <td>${esc(ho.vendor_name || '')}${hSub}</td>
+                        <td class="mono">${esc(ho.mpn || '\u2014')}</td>
+                        <td class="mono">${ho.qty_available != null ? Number(ho.qty_available).toLocaleString() : '\u2014'}</td>
+                        <td class="mono" style="color:var(--teal)">${hPrice}</td>
+                        <td>${esc(ho.lead_time || '\u2014')}</td>
+                        <td>${esc(ho.condition || '\u2014')}</td>
+                        <td style="font-size:10px">${hDate}</td>
+                        <td style="font-size:10px">RFQ-${ho.from_requisition_id || '\u2014'}</td>
+                        <td style="white-space:nowrap">
+                            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();ddReconfirmOffer(${ho.id},${reqId})" title="Mark as still valid">\u2713 Reconfirm</button>
+                            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;color:var(--teal)" onclick='event.stopPropagation();ddLogFromHistorical(${reqId},${hoJson})' title="Log as new offer on this RFQ">+ Log</button>
+                        </td>
+                    </tr>`;
+                }
+                html += '</tbody></table></div>';
+            }
+            html += '</div>';
+        }
+
         html += '</div>';
     }
     dd.innerHTML = html;
@@ -7769,7 +7855,9 @@ Object.assign(window, {
     ddFindContacts, ddMarkQuoteResult, ddOnContactSelect, ddOpenBuyPlanModal, ddPasteRows, ddPickEnrichedContact, ddRefreshPreview,
     ddSubmitBuyPlan, ddUpdateBpTotals, ddUpdateQuoteField,
     ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddReviseQuote, ddSaveEditOffer, ddSaveQuoteDraft, ddSendBulkRfq, ddSendQuote,
-    ddToggleAllOffers, ddToggleGroupOffers, ddToggleOffer, ddToggleSighting, ddToggleTier,
+    ddToggleAllOffers, ddToggleGroupOffers, ddToggleHistory, ddToggleHistorySightings,
+    ddToggleOffer, ddToggleSighting, ddToggleTier,
+    ddReconfirmOffer, ddLogFromHistorical,
     ddUploadFile, debounceOfferHistorySearch, debouncePartsSightingsSearch,
     deleteDrillRow, deleteMaterial, deleteReq, deleteVendor,
     deleteVendorContact, editDeadline, editDrillCell, editMaterialField,

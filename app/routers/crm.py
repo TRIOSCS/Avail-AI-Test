@@ -1335,6 +1335,26 @@ async def delete_offer(
     return {"ok": True}
 
 
+@router.put("/api/offers/{offer_id}/reconfirm")
+async def reconfirm_offer(
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a historical offer as reconfirmed (still valid)."""
+    offer = db.get(Offer, offer_id)
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    offer.reconfirmed_at = datetime.now(timezone.utc)
+    offer.reconfirm_count = (offer.reconfirm_count or 0) + 1
+    db.commit()
+    return {
+        "ok": True,
+        "reconfirmed_at": offer.reconfirmed_at.isoformat(),
+        "reconfirm_count": offer.reconfirm_count,
+    }
+
+
 # ── Offer Attachments (OneDrive) ─────────────────────────────────────────
 
 

@@ -999,6 +999,64 @@ async def get_saved_sightings(
     for s in all_sightings:
         sightings_by_req.setdefault(s.requirement_id, []).append(s)
 
+    # ── Cross-requisition historical offers ──────────────────────────
+    req_mpn_map: dict[int, set[str]] = {}
+    all_mpns: set[str] = set()
+    primary_mpns: set[str] = set()
+    for r in req.requirements:
+        mpns: set[str] = set()
+        p = (r.primary_mpn or "").upper().strip()
+        if p:
+            mpns.add(p)
+            primary_mpns.add(p)
+        for sub in r.substitutes or []:
+            s_norm = (sub if isinstance(sub, str) else "").upper().strip()
+            if s_norm:
+                mpns.add(s_norm)
+        req_mpn_map[r.id] = mpns
+        all_mpns |= mpns
+
+    hist_by_req: dict[int, list] = {}
+    if all_mpns:
+        hist_query = (
+            db.query(Offer)
+            .filter(
+                Offer.requisition_id != req_id,
+                sqlfunc.upper(Offer.mpn).in_(all_mpns),
+                Offer.status.in_(["active", "won"]),
+            )
+            .options(joinedload(Offer.entered_by))
+            .order_by(Offer.created_at.desc())
+            .limit(100)
+            .all()
+        )
+        for ho in hist_query:
+            ho_mpn = (ho.mpn or "").upper().strip()
+            for r in req.requirements:
+                if ho_mpn in req_mpn_map.get(r.id, set()):
+                    if r.id not in hist_by_req:
+                        hist_by_req[r.id] = []
+                    is_sub = ho_mpn != (r.primary_mpn or "").upper().strip()
+                    hist_by_req[r.id].append(
+                        {
+                            "id": ho.id,
+                            "vendor_name": ho.vendor_name,
+                            "mpn": ho.mpn,
+                            "manufacturer": ho.manufacturer,
+                            "qty_available": ho.qty_available,
+                            "unit_price": float(ho.unit_price) if ho.unit_price else None,
+                            "lead_time": ho.lead_time,
+                            "condition": ho.condition,
+                            "source": ho.source,
+                            "status": ho.status,
+                            "entered_by": ho.entered_by.name if ho.entered_by else None,
+                            "created_at": ho.created_at.isoformat() if ho.created_at else None,
+                            "from_requisition_id": ho.requisition_id,
+                            "is_substitute": is_sub,
+                        }
+                    )
+                    break
+
     for r in req.requirements:
         rows = sightings_by_req.get(r.id, [])
         label = r.primary_mpn or f"Req #{r.id}"
@@ -1017,10 +1075,15 @@ async def get_saved_sightings(
         for h in history:
             sighting_dicts.append(_history_to_result(h, now))
 
-        if not sighting_dicts:
+        hist_offers = hist_by_req.get(r.id, [])
+        if not sighting_dicts and not hist_offers:
             continue
         sighting_dicts.sort(key=lambda x: x.get("score", 0), reverse=True)
-        results[str(r.id)] = {"label": label, "sightings": sighting_dicts}
+        results[str(r.id)] = {
+            "label": label,
+            "sightings": sighting_dicts,
+            "historical_offers": hist_offers,
+        }
     _enrich_with_vendor_cards(results, db)
     return results
 
