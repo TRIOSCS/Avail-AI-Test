@@ -550,7 +550,7 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
     /* Main scroll padding */
     .main-scroll{padding:2px 10px}
     /* Notification panel responsive */
-    #notifPanel{width:calc(100vw - 24px);right:-12px}
+    .notif-panel-standalone{top:calc(92px + env(safe-area-inset-top));right:12px;left:12px;width:auto;max-height:calc(100vh - 110px)}
     /* Modal safe-area */
     .modal-bg{padding:0;align-items:flex-end}
     .modal{border-radius:14px 14px 0 0;max-height:90vh;padding-bottom:calc(16px + env(safe-area-inset-bottom))}
@@ -572,6 +572,9 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 .mobile-act-accent{background:var(--surface);color:var(--text2);border-color:var(--border)}
 .mobile-act-accent.on{background:var(--orange,#f59e0b);color:#fff;border-color:var(--orange,#f59e0b)}
 .mobile-act-trouble{background:#fef2f2;color:#dc2626;border-color:#fca5a5}
+.mobile-toolbar-stats{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.mobile-toolbar-stats .tb-stat{font-size:10px;padding:2px 6px;gap:3px}
+.mobile-toolbar-stats .tb-ct{font-size:10px}
 
 /* Extra small screens (phones in portrait) */
 @media(max-width:420px) and (hover:none),(max-width:420px) and (pointer:coarse){
@@ -1317,8 +1320,9 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .sbox-wide{width:320px}
 .sbox-med{width:220px}
 
-/* Notification panel base */
-#notifPanel{width:360px;max-height:400px;overflow-y:auto;right:0;left:auto}
+/* Notification panel — standalone fixed positioning */
+.notif-panel-standalone{display:none;position:fixed;top:52px;right:16px;width:360px;max-height:400px;overflow-y:auto;background:var(--white);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:12px;z-index:310}
+.notif-panel-standalone.open{display:block}
 
 /* View toggle */
 .view{display:none}.view.on{display:block}

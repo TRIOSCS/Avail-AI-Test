@@ -3840,8 +3840,6 @@ function toggleArchiveGroup(key) {
 }
 
 function _updateToolbarStats() {
-    const el = document.getElementById('toolbarStats');
-    if (!el) return;
     const all = _reqListData;
     const now = new Date(); now.setHours(0,0,0,0);
 
@@ -3858,9 +3856,13 @@ function _updateToolbarStats() {
     }
 
     const qf = _toolbarQuickFilter;
-    el.innerHTML =
+    const html =
         `<span class="tb-stat${qf === 'green' ? ' active' : ''}" onclick="setToolbarQuickFilter('green')"><span class="tb-dot tb-dot-green"></span><span class="tb-ct">${nGreen}</span> Offers</span>` +
         `<span class="tb-stat${qf === 'yellow' ? ' active' : ''}" onclick="setToolbarQuickFilter('yellow')"><span class="tb-dot tb-dot-amber"></span><span class="tb-ct">${nYellow}</span> Due</span>`;
+    const el = document.getElementById('toolbarStats');
+    if (el) el.innerHTML = html;
+    const mel = document.getElementById('mobileToolbarStats');
+    if (mel) mel.innerHTML = html;
 }
 
 function _renderReqRow(r) {
@@ -4427,11 +4429,11 @@ function _collapseAllDrillDowns() {
 const debouncedMainSearch = debounce(function(val) {
     var ds = document.getElementById('mainSearch');
     var ms = document.getElementById('mobileMainSearch');
-    if (typeof val === 'string') {
-        if (ds) ds.value = val;
-        if (ms) ms.value = val;
-    }
-    const q = (ds?.value || '').trim();
+    // Use the passed value; fall back to whichever input has content
+    var q = (typeof val === 'string' ? val : (ds?.value || ms?.value || '')).trim();
+    // Keep both inputs in sync
+    if (ds) ds.value = q;
+    if (ms) ms.value = q;
     if (q.length >= 2) loadRequisitions(q);
     else if (q.length === 0) loadRequisitions();
 }, 300);
@@ -4440,6 +4442,9 @@ function triggerMainSearch() {
     var ds = document.getElementById('mainSearch');
     var ms = document.getElementById('mobileMainSearch');
     const q = (ds?.value || ms?.value || '').trim();
+    // Keep both inputs in sync
+    if (ds) ds.value = q;
+    if (ms) ms.value = q;
     if (q.length >= 2) loadRequisitions(q);
     else loadRequisitions();
 }
@@ -7635,7 +7640,9 @@ function toggleNotifications() {
         // Close on click outside
         setTimeout(() => {
             function _closeNotif(e) {
-                if (!panel.contains(e.target) && !e.target.closest('.filter-wrap')) {
+                if (!panel.contains(e.target)
+                    && !e.target.closest('.filter-wrap')
+                    && !e.target.closest('.mobile-notif-btn')) {
                     panel.classList.remove('open');
                     document.removeEventListener('click', _closeNotif, true);
                 }
@@ -8171,7 +8178,7 @@ Object.assign(window, {
     editReqCell, editReqCustomer, editReqName, editVendorField, escAttr,
     expandMatchingGroups, expandToSubTab, inlineSourceAll,
     loadMoreOfferHistory, loadMorePartsSightings, loadRequisitions,
-    logCall, markAllNotifsRead, markUnavailable, openAddVendorContact,
+    logCall, markAllNotifsRead, markNotifRead, markUnavailable, openAddVendorContact,
     openEditVendorContact, openLogOfferFromList, openMaterialPopup,
     openMaterialPopupByMpn, openVendorLogNoteModal,
     openVendorPopup, placeVendorCall, renderReqList, requoteFromList,
