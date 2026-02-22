@@ -435,28 +435,59 @@ async def create_company(
         get_credential_cached("clay_enrichment", "CLAY_API_KEY")
         or get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
         or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
+        or getattr(settings, "apollo_api_key", "")
+        or getattr(settings, "hunter_api_key", "")
+        or getattr(settings, "do_gradient_api_key", "")
     ):
         from ..enrichment_service import apply_enrichment_to_company, enrich_entity
 
-        async def _enrich_company_bg(cid, d, n):
+        async def _enrich_company_bg(cid, sid, d, n):
             from ..database import SessionLocal
 
             try:
                 enrichment = await enrich_entity(d, n)
-                if not enrichment:
-                    return
                 s = SessionLocal()
                 try:
-                    c = s.get(Company, cid)
-                    if c:
-                        apply_enrichment_to_company(c, enrichment)
-                        s.commit()
+                    if enrichment:
+                        c = s.get(Company, cid)
+                        if c:
+                            apply_enrichment_to_company(c, enrichment)
+                            s.commit()
+
+                    # Auto-discover contacts and attach to default site
+                    from ..enrichment_service import find_suggested_contacts
+                    from ..models import SiteContact
+                    contacts = await find_suggested_contacts(d, n)
+                    if contacts:
+                        existing_emails = {
+                            sc.email.lower()
+                            for sc in s.query(SiteContact).filter(
+                                SiteContact.customer_site_id == sid,
+                                SiteContact.email.isnot(None),
+                            ).all()
+                        }
+                        added = 0
+                        for ct in contacts:
+                            email = (ct.get("email") or "").lower()
+                            if email and email not in existing_emails:
+                                s.add(SiteContact(
+                                    customer_site_id=sid,
+                                    full_name=ct.get("full_name"),
+                                    title=ct.get("title"),
+                                    email=email,
+                                    phone=ct.get("phone"),
+                                ))
+                                existing_emails.add(email)
+                                added += 1
+                        if added:
+                            s.commit()
+                            logger.info("Auto-discovered %d contacts for company %d", added, cid)
                 finally:
                     s.close()
             except Exception:
                 logger.exception("Background enrichment failed for company %d", cid)
 
-        asyncio.create_task(_enrich_company_bg(company.id, domain, company.name))
+        asyncio.create_task(_enrich_company_bg(company.id, default_site.id, domain, company.name))
         enrich_triggered = True
 
     return {

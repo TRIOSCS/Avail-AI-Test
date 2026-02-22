@@ -15,6 +15,7 @@ Depends on: models, email_service, vendor_utils, engagement_scoring
 """
 
 import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -41,6 +42,8 @@ from ..models import (
 )
 from ..schemas.rfq import BatchRfqSend, FollowUpEmail, PhoneCallLog, RfqPrepare
 from ..vendor_utils import normalize_vendor_name
+
+log = logging.getLogger("avail.rfq")
 
 router = APIRouter(tags=["rfq"])
 
@@ -475,6 +478,61 @@ async def rfq_prepare(
         else:
             base.update({"emails": [], "phones": [], "needs_lookup": True})
         results.append(base)
+
+    # ── Apollo auto-lookup for vendors that need contact info ──
+    from ..config import settings as app_settings
+    apollo_key = getattr(app_settings, "apollo_api_key", "")
+    needs_lookup_indices = [
+        i for i, r in enumerate(results) if r.get("needs_lookup")
+    ]
+    if apollo_key and needs_lookup_indices:
+        from ..connectors.apollo_client import search_contacts as apollo_search
+        from ..vendor_utils import merge_emails_into_card, merge_phones_into_card
+
+        async def _apollo_lookup(idx: int):
+            r = results[idx]
+            try:
+                contacts = await asyncio.wait_for(
+                    apollo_search(
+                        company_name=r["vendor_name"],
+                        domain=cards_by_norm.get(
+                            normalize_vendor_name(r["vendor_name"]),
+                            None,
+                        )
+                        and cards_by_norm[
+                            normalize_vendor_name(r["vendor_name"])
+                        ].domain
+                        or None,
+                        limit=3,
+                    ),
+                    timeout=10,
+                )
+                emails = [
+                    c["email"] for c in contacts
+                    if c.get("email") and c.get("email_status") != "unavailable"
+                ]
+                phones = [c["phone"] for c in contacts if c.get("phone")]
+                if emails:
+                    r["emails"] = emails
+                    r["phones"] = phones
+                    r["needs_lookup"] = False
+                    r["contact_source"] = "apollo"
+                    # Persist to VendorCard for future cache hits
+                    norm = normalize_vendor_name(r["vendor_name"])
+                    card = cards_by_norm.get(norm)
+                    if card:
+                        merge_emails_into_card(card, emails)
+                        if phones:
+                            merge_phones_into_card(card, phones)
+            except Exception as e:
+                log.debug("Apollo auto-lookup failed for %s: %s", r["vendor_name"], e)
+
+        await asyncio.gather(
+            *[_apollo_lookup(i) for i in needs_lookup_indices],
+            return_exceptions=True,
+        )
+        # Persist any card updates from successful lookups
+        db.commit()
 
     return {"vendors": results, "all_parts": all_parts, "subs_map": subs_map}
 

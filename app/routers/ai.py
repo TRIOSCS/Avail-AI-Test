@@ -190,6 +190,39 @@ async def ai_find_contacts(
     return {"contacts": merged, "total": len(merged), "saved_ids": saved_ids}
 
 
+@router.post("/api/ai/enrich-person")
+@limiter.limit("20/minute")
+async def ai_enrich_person(
+    payload: dict,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Enrich a person via Apollo people/match.
+
+    Accepts any combination of: first_name, last_name, name, email,
+    domain, organization_name, linkedin_url.
+    """
+    if not _ai_enabled(user):
+        raise HTTPException(403, "AI features not enabled")
+
+    from app.connectors.apollo_client import enrich_person
+
+    result = await enrich_person(
+        first_name=payload.get("first_name"),
+        last_name=payload.get("last_name"),
+        name=payload.get("name"),
+        email=payload.get("email"),
+        domain=payload.get("domain"),
+        organization_name=payload.get("organization_name"),
+        linkedin_url=payload.get("linkedin_url"),
+    )
+
+    if not result:
+        raise HTTPException(404, "No match found — try adding more details (name + domain, email, or LinkedIn URL)")
+
+    return result
+
+
 @router.get("/api/ai/prospect-contacts")
 async def list_prospect_contacts(
     entity_type: str = "",

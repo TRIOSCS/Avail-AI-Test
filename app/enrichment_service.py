@@ -437,6 +437,60 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
         return []
 
 
+# ── Provider: Gradient AI (LLM knowledge, no web search) ─────────────────
+
+GRADIENT_COMPANY_SYSTEM = (
+    "You are a B2B company research assistant for an electronic component broker. "
+    "Using your training knowledge, return firmographic data about the requested company as JSON. "
+    "Return ONLY a JSON object with these keys: "
+    '{"legal_name", "industry", "employee_size", "hq_city", "hq_state", "hq_country", '
+    '"website", "linkedin_url"}. '
+    "Use null for any field you are not confident about. Do not guess or fabricate data."
+)
+
+
+async def _gradient_find_company(domain: str, name: str = "") -> Optional[dict]:
+    """Look up a company using Gradient AI (LLM knowledge). Returns normalized company data."""
+    from .config import settings
+    if not getattr(settings, "do_gradient_api_key", ""):
+        return None
+    try:
+        from .services.gradient_service import gradient_json
+
+        prompt = (
+            f"What do you know about the company with domain '{domain}'"
+            f"{f' (also known as {name})' if name else ''}?\n\n"
+            f"Return their: legal name, industry, approximate employee count or range, "
+            f"headquarters city/state/country, website URL, and LinkedIn company page URL.\n\n"
+            f"Return ONLY valid JSON. Use null for unknown fields."
+        )
+        data = await gradient_json(
+            prompt,
+            system=GRADIENT_COMPANY_SYSTEM,
+            model_tier="default",
+            max_tokens=512,
+            temperature=0.1,
+            timeout=15,
+        )
+        if not data or not isinstance(data, dict):
+            return None
+        return {
+            "source": "gradient",
+            "legal_name": data.get("legal_name") or data.get("name"),
+            "domain": domain,
+            "linkedin_url": data.get("linkedin_url"),
+            "industry": data.get("industry"),
+            "employee_size": data.get("employee_size") or data.get("employees"),
+            "hq_city": data.get("hq_city") or data.get("city"),
+            "hq_state": data.get("hq_state") or data.get("state"),
+            "hq_country": data.get("hq_country") or data.get("country"),
+            "website": data.get("website"),
+        }
+    except Exception as e:
+        log.debug("Gradient company lookup error: %s", e)
+        return None
+
+
 # ── Provider: AI (Claude + Web Search) ───────────────────────────────────
 
 COMPANY_SEARCH_SYSTEM = (
@@ -540,9 +594,9 @@ async def _ai_find_contacts(
 async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
 
-    Phase 1: Clay, Explorium, Clearbit run concurrently.
-    Phase 2: AI fills remaining gaps (conditional — only if Phase 1 left holes).
-    Merge priority: Clay > Explorium > Clearbit > AI.
+    Phase 1: Clay, Apollo, Explorium, Clearbit, Gradient run concurrently.
+    Phase 2: AI + web search fills remaining gaps (conditional).
+    Merge priority: Clay > Apollo > Explorium > Clearbit > Gradient > AI.
     Results cached in IntelCache with 14-day TTL keyed by domain.
     """
     from .cache.intel_cache import get_cached, set_cached
@@ -574,7 +628,15 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
         "hq_city", "hq_state", "hq_country", "website", "linkedin_url",
     ]
 
-    # ── Phase 1: Clay + Explorium + Clearbit concurrently ──
+    # ── Phase 1: Clay + Apollo + Explorium + Clearbit concurrently ──
+    async def _safe_apollo_company(domain: str):
+        try:
+            from .connectors.apollo_client import enrich_company as apollo_enrich
+            return await apollo_enrich(domain)
+        except Exception as e:
+            log.debug("Apollo company enrichment skipped: %s", e)
+            return None
+
     async def _safe_clearbit(domain: str):
         try:
             from .connectors.clearbit_client import enrich_company as clearbit_enrich
@@ -583,19 +645,23 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
             log.debug("Clearbit enrichment skipped: %s", e)
             return None
 
-    clay_result, exp_result, cb_result = await asyncio.gather(
+    clay_result, apollo_result, exp_result, cb_result, grad_result = await asyncio.gather(
         _clay_find_company(domain),
+        _safe_apollo_company(domain),
         _explorium_find_company(domain, name),
         _safe_clearbit(domain),
+        _gradient_find_company(domain, name),
         return_exceptions=True,
     )
 
-    # Merge in priority order: Clay > Explorium > Clearbit
+    # Merge in priority order: Clay > Apollo > Explorium > Clearbit > Gradient
     sources = []
     for provider_data, provider_name in [
         (clay_result, "clay"),
+        (apollo_result, "apollo"),
         (exp_result, "explorium"),
         (cb_result, "clearbit"),
+        (grad_result, "gradient"),
     ]:
         if isinstance(provider_data, Exception) or not provider_data:
             continue
@@ -686,12 +752,40 @@ async def find_suggested_contacts(
             log.debug("RocketReach contacts skipped: %s", e)
             return []
 
-    # Run all 5 sources concurrently
+    async def _safe_apollo_contacts(domain: str) -> list[dict]:
+        try:
+            from .connectors.apollo_client import search_contacts as apollo_search
+            raw = await apollo_search(
+                company_name=name or domain,
+                domain=domain,
+                title_keywords=[title_filter] if title_filter else None,
+                limit=5,
+            )
+            return [
+                {
+                    "source": "apollo",
+                    "full_name": ac.get("full_name"),
+                    "title": ac.get("title"),
+                    "email": ac.get("email"),
+                    "phone": ac.get("phone"),
+                    "linkedin_url": ac.get("linkedin_url"),
+                    "location": ac.get("city"),
+                    "company": name or domain,
+                }
+                for ac in raw
+                if ac.get("full_name")
+            ]
+        except Exception as e:
+            log.debug("Apollo contacts skipped: %s", e)
+            return []
+
+    # Run all 6 sources concurrently
     results = await asyncio.gather(
         _clay_find_contacts(domain, title_filter),
         _explorium_find_contacts(domain, title_filter),
         _safe_hunter(domain),
         _safe_rocketreach(domain),
+        _safe_apollo_contacts(domain),
         _ai_find_contacts(domain, name, title_filter),
         return_exceptions=True,
     )

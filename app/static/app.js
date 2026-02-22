@@ -3105,25 +3105,32 @@ function _buildEffortTip(score, color, signals) {
 // Cache for per-requirement sourcing scores
 const _ddScoreCache = {};
 
-// ── Tier helpers ─────────────────────────────────────────────────────────
-function _sightingTier(s) {
-    if (s.is_authorized) return 'top';
-    const vc = s.vendor_card || {};
-    if (vc.is_new_vendor) return 'other';
-    const score = vc.vendor_score ?? s.score ?? 0;
-    return score >= 66 ? 'top' : score >= 33 ? 'good' : 'other';
+// ── Sighting filters ─────────────────────────────────────────────────────
+const _ddSightingFilters = {};
+const _ddFilterTimers = {};
+function _ddFilterSightings(reqId, field, value) {
+    if (!_ddSightingFilters[reqId]) _ddSightingFilters[reqId] = {};
+    _ddSightingFilters[reqId][field] = value;
+    clearTimeout(_ddFilterTimers[reqId]);
+    _ddFilterTimers[reqId] = setTimeout(() => {
+        _renderSourcingDrillDown(reqId);
+        // Restore focus to the input being typed in
+        const inp = document.querySelector(`[data-sfilter="${reqId}-${field}"]`);
+        if (inp) { inp.focus(); inp.selectionStart = inp.selectionEnd = inp.value.length; }
+    }, 200);
 }
-
-const _TIER_CONFIG = {
-    top:   { label: 'Top Sources',   color: 'var(--green)', bg: 'var(--green-light)', defaultOpen: true },
-    good:  { label: 'Good Sources',  color: 'var(--amber)', bg: 'var(--amber-light)', defaultOpen: true },
-    other: { label: 'Other Sources', color: 'var(--muted)', bg: 'var(--card2)',        defaultOpen: false },
-};
-
-function ddToggleTier(reqId, rId, tier) {
-    const key = `${reqId}-${rId}-${tier}`;
-    const cur = _ddTierState[key];
-    _ddTierState[key] = cur !== undefined ? !cur : !_TIER_CONFIG[tier].defaultOpen;
+function _ddApplyFilters(sightings, reqId) {
+    const f = _ddSightingFilters[reqId];
+    if (!f) return sightings;
+    return sightings.filter(s => {
+        if (f.vendor && !(s.vendor_name || '').toLowerCase().includes(f.vendor.toLowerCase())) return false;
+        if (f.source && !(s.source_type || '').toLowerCase().includes(f.source.toLowerCase())) return false;
+        if (f.condition && !(s.condition || '').toLowerCase().includes(f.condition.toLowerCase())) return false;
+        return true;
+    });
+}
+function _ddClearFilters(reqId) {
+    delete _ddSightingFilters[reqId];
     _renderSourcingDrillDown(reqId);
 }
 
@@ -3234,7 +3241,17 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
     const sel = _ddSelectedSightings[reqId] || new Set();
     const DD_LIMIT = 100;
     const showAll = dd.dataset.showAll === '1';
-    let html = '';
+    const f = _ddSightingFilters[reqId] || {};
+    const hasFilters = !!(f.vendor || f.source || f.condition);
+
+    // Filter bar
+    let html = `<div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
+        <input data-sfilter="${reqId}-vendor" placeholder="Filter vendor\u2026" value="${esc(f.vendor||'')}" oninput="_ddFilterSightings(${reqId},'vendor',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:130px;background:var(--card);color:var(--text)">
+        <input data-sfilter="${reqId}-source" placeholder="Filter source\u2026" value="${esc(f.source||'')}" oninput="_ddFilterSightings(${reqId},'source',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:110px;background:var(--card);color:var(--text)">
+        <input data-sfilter="${reqId}-condition" placeholder="Filter condition\u2026" value="${esc(f.condition||'')}" oninput="_ddFilterSightings(${reqId},'condition',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:110px;background:var(--card);color:var(--text)">
+        ${hasFilters ? `<a onclick="event.stopPropagation();_ddClearFilters(${reqId})" style="font-size:10px;color:var(--blue);cursor:pointer">\u2715 Clear</a>` : ''}
+    </div>`;
+
     for (const [rId, group] of groups) {
         const allSightings = group.sightings || [];
         const label = group.label || 'Unknown MPN';
@@ -3264,6 +3281,16 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             });
         }
 
+        // Apply filters
+        const filtered = _ddApplyFilters(sightings, reqId);
+
+        // Sort by score descending (best sources first)
+        filtered.sort((a, b) => {
+            const sa = a.vendor_card?.vendor_score ?? a.score ?? 0;
+            const sb = b.vendor_card?.vendor_score ?? b.score ?? 0;
+            return sb - sa;
+        });
+
         // Per-requirement sourcing score dot with tooltip
         const rs = scoreMap[rId];
         let effortBadge = '';
@@ -3271,55 +3298,30 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             const dotColor = rs.color === 'green' ? 'var(--green)' : rs.color === 'yellow' ? 'var(--amber)' : 'var(--red)';
             effortBadge = ` <span class="effort-wrap"><span class="effort-dot" style="background:${dotColor}"></span><span style="font-size:9px;color:var(--muted);margin-left:2px">${Math.round(rs.score)}</span>${_buildEffortTip(rs.score, rs.color, rs.signals)}</span>`;
         }
+        const filterNote = hasFilters ? ` <span style="font-size:10px;color:var(--blue)">(${filtered.length} of ${sightings.length} shown)</span>` : '';
         html += `<div style="margin-bottom:10px">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-                <span style="font-size:11px;font-weight:700;color:var(--text2)">${esc(label)}${effortBadge} <span style="font-weight:400;color:var(--muted)">(${sightings.length} vendor${sightings.length !== 1 ? 's' : ''})</span></span>
+                <span style="font-size:11px;font-weight:700;color:var(--text2)">${esc(label)}${effortBadge} <span style="font-weight:400;color:var(--muted)">(${sightings.length} source${sightings.length !== 1 ? 's' : ''})</span>${filterNote}</span>
                 <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px" onclick="event.stopPropagation();ddResearchPart(${reqId},${rId})" title="Re-search this part">\u21bb Search</button>
             </div>`;
 
-        if (!sightings.length && !aggregates.length) {
-            html += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">No sources found</div></div>';
+        if (!filtered.length && !aggregates.length) {
+            html += `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">${hasFilters ? 'No matches for current filters' : 'No sources found'}</div></div>`;
             continue;
         }
-        if (!sightings.length) {
-            html += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">No vendor listings yet — try searching</div></div>';
+        if (!filtered.length) {
+            html += `<div style="font-size:11px;color:var(--muted);margin-bottom:6px">${hasFilters ? 'No matches for current filters' : 'No vendor listings yet \u2014 try searching'}</div></div>`;
             continue;
         }
 
-        // Split sightings into tiers by score
-        const tiers = { top: [], good: [], other: [] };
-        for (const s of sightings) tiers[_sightingTier(s)].push(s);
-
-        const TIER_ORDER = ['top', 'good', 'other'];
-        for (const tier of TIER_ORDER) {
-            const items = tiers[tier];
-            if (!items.length) continue;
-            const cfg = _TIER_CONFIG[tier];
-            const stateKey = `${reqId}-${rId}-${tier}`;
-            const isOpen = _ddTierState[stateKey] !== undefined ? _ddTierState[stateKey] : cfg.defaultOpen;
-            const arrow = isOpen ? '\u25bc' : '\u25b6';
-            const visible = showAll ? items : items.slice(0, DD_LIMIT);
-
-            html += `<div style="margin-bottom:6px;border-left:3px solid ${cfg.color};border-radius:2px">
-                <div onclick="event.stopPropagation();ddToggleTier(${reqId},${rId},'${tier}')" style="cursor:pointer;padding:3px 8px;background:${cfg.bg};display:flex;align-items:center;gap:6px;user-select:none">
-                    <span style="font-size:10px;color:${cfg.color}">${arrow}</span>
-                    <span style="font-size:11px;font-weight:600;color:${cfg.color}">${cfg.label}</span>
-                    <span style="font-size:10px;color:var(--muted)">(${items.length})</span>
-                </div>`;
-
-            if (!isOpen) {
-                html += `<div onclick="event.stopPropagation();ddToggleTier(${reqId},${rId},'${tier}')" style="padding:4px 12px;font-size:11px;color:var(--muted);cursor:pointer">${items.length} source${items.length !== 1 ? 's' : ''} — click to expand</div>`;
-            } else {
-                html += `<table class="dtbl" style="margin:0"><thead><tr>
-                    <th style="width:24px"></th><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Condition</th><th>Age</th>
-                </tr></thead><tbody>`;
-                html += _ddRenderTierRows(visible, reqId, sel, label);
-                html += '</tbody></table>';
-                if (!showAll && items.length > DD_LIMIT) {
-                    html += `<a onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin:2px 0 0 12px">Show all ${items.length} sources\u2026</a>`;
-                }
-            }
-            html += '</div>';
+        const visible = showAll ? filtered : filtered.slice(0, DD_LIMIT);
+        html += `<table class="dtbl" style="margin:0"><thead><tr>
+            <th style="width:24px"></th><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Condition</th><th>Age</th>
+        </tr></thead><tbody>`;
+        html += _ddRenderTierRows(visible, reqId, sel, label);
+        html += '</tbody></table>';
+        if (!showAll && filtered.length > DD_LIMIT) {
+            html += `<a onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin:2px 0 0 12px">Show all ${filtered.length} sources\u2026</a>`;
         }
 
         html += '</div>';
@@ -5455,7 +5457,7 @@ function renderRfqVendors() {
         }
 
         // Source indicator
-        const srcLabels = { cached: '💾 Cached', website_scrape: '🌐 Website', ai_lookup: '🤖 AI' };
+        const srcLabels = { cached: '💾 Cached', website_scrape: '🌐 Website', ai_lookup: '🤖 AI', apollo: '📇 Apollo', hunter: '📧 Hunter' };
         const srcBadge = v.contact_source ? `<span class="rfq-src-badge">${srcLabels[v.contact_source] || v.contact_source}</span>` : '';
 
         // Parts breakdown
@@ -8122,7 +8124,8 @@ Object.assign(window, {
     ddSubmitBuyPlan, ddUpdateBpTotals, ddUpdateQuoteField,
     ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddReviseQuote, ddSaveEditOffer, ddSaveQuoteDraft, ddSendBulkRfq, ddSendQuote,
     ddToggleAllOffers, ddToggleGroupOffers, ddToggleHistory, ddToggleHistorySightings,
-    ddToggleOffer, ddToggleSighting, ddToggleTier,
+    ddToggleOffer, ddToggleSighting,
+    _ddFilterSightings, _ddClearFilters,
     ddReconfirmOffer, ddLogFromHistorical,
     ddUploadFile, debounceOfferHistorySearch, debouncePartsSightingsSearch,
     deleteDrillRow, deleteMaterial, deleteReq, deleteVendor,
