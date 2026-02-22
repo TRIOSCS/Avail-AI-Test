@@ -203,6 +203,11 @@ def _make_material_card(**overrides) -> SimpleNamespace:
         manufacturer="Texas Instruments", description="Dual Op-Amp",
         search_count=5,
         last_searched_at=datetime(2026, 1, 20, tzinfo=timezone.utc),
+        # Enrichment fields
+        lifecycle_status=None, package_type=None, category=None,
+        rohs_status=None, pin_count=None, datasheet_url=None,
+        cross_references=None, specs_summary=None,
+        enrichment_source=None, enriched_at=None,
         created_at=datetime(2025, 12, 1, tzinfo=timezone.utc),
         updated_at=datetime(2026, 1, 20, tzinfo=timezone.utc),
     )
