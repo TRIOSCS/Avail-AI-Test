@@ -1621,6 +1621,25 @@ async def update_quote(
     return quote_to_dict(quote)
 
 
+@router.post("/api/quotes/{quote_id}/preview")
+async def preview_quote_email(
+    quote_id: int,
+    body: QuoteSendOverride | None = None,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the HTML email preview without sending."""
+    quote = db.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    override_name = ((body.to_name if body else None) or "").strip()
+    site = db.get(CustomerSite, quote.customer_site_id)
+    to_name = override_name or (site.contact_name if site else "") or ""
+    company_name = site.company.name if site and site.company else ""
+    html = _build_quote_email_html(quote, to_name, company_name, user)
+    return {"html": html}
+
+
 @router.post("/api/quotes/{quote_id}/send")
 async def send_quote(
     quote_id: int,

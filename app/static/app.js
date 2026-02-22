@@ -859,7 +859,7 @@ async function _loadDdSubTab(reqId, tabName, panel) {
                 data = await apiFetch(`/api/requisitions/${reqId}/offers`);
                 break;
             case 'quotes':
-                data = await apiFetch(`/api/requisitions/${reqId}/quote`);
+                data = await apiFetch(`/api/requisitions/${reqId}/quotes`);
                 break;
         }
         _ddTabCache[reqId][tabName] = data;
@@ -1606,29 +1606,80 @@ async function ddDeleteOffer(reqId, offerId) {
 }
 
 function _renderDdQuotes(reqId, data, panel) {
-    if (!data || (!data.id && !data.quote_id && !(data.lines || []).length)) {
-        panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No quote prepared yet</span>';
+    // data is now an array of quotes (newest first from API)
+    const quotes = Array.isArray(data) ? data : (data && data.id ? [data] : []);
+    if (!quotes.length) {
+        panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No quotes yet — select offers and use Build Quote</span>';
         return;
     }
-    const q = data;
+
+    let html = '';
+    // ── Quotes list table ──
+    html += `<table class="tbl" style="font-size:11px;width:100%">
+        <thead><tr><th>Quote #</th><th>Rev</th><th>Customer</th><th>Lines</th><th>Subtotal</th><th>Margin</th><th>Status</th><th>Created</th></tr></thead><tbody>`;
+    for (const q of quotes) {
+        const lines = q.line_items || [];
+        const subtotal = q.subtotal || lines.reduce((s, l) => s + ((l.sell_price || l.unit_sell || 0) * (l.qty || 0)), 0);
+        const marginPct = q.total_margin_pct != null ? q.total_margin_pct : 0;
+        const statusMap = {draft:'Draft',sent:'Sent',revised:'Revised',won:'Won',lost:'Lost'};
+        const statusLabel = statusMap[q.status] || q.status || 'Draft';
+        html += `<tr style="cursor:pointer" onclick="ddExpandQuote(${reqId},${q.id})">
+            <td class="mono" style="font-weight:600">${esc(q.quote_number || 'Q-' + q.id)}</td>
+            <td>${q.revision || 1}</td>
+            <td style="font-size:10px">${esc(q.customer_name || '\u2014')}</td>
+            <td>${lines.length}</td>
+            <td class="mono">$${Number(subtotal).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+            <td style="color:${marginPct >= 20 ? 'var(--green)' : marginPct >= 10 ? 'var(--amber)' : 'var(--red)'};font-weight:600">${Number(marginPct).toFixed(1)}%</td>
+            <td><span class="status-badge status-${q.status || 'draft'}" style="font-size:10px;padding:2px 6px;border-radius:4px">${statusLabel}</span></td>
+            <td style="font-size:10px;color:var(--muted)">${q.created_at ? fmtRelative(q.created_at) : '\u2014'}</td>
+        </tr>
+        <tr id="ddqDetail-${q.id}" style="display:none"><td colspan="8" style="padding:0"></td></tr>`;
+    }
+    html += `</tbody></table>`;
+    panel.innerHTML = html;
+}
+
+// Expand/collapse a single quote detail row
+function ddExpandQuote(reqId, quoteId) {
+    const detailRow = document.getElementById('ddqDetail-' + quoteId);
+    if (!detailRow) return;
+    // Toggle: if already visible, collapse
+    if (detailRow.style.display !== 'none') {
+        detailRow.style.display = 'none';
+        return;
+    }
+    // Collapse any other expanded quote in this req
+    document.querySelectorAll(`[id^="ddqDetail-"]`).forEach(r => { if (r.id !== 'ddqDetail-' + quoteId) r.style.display = 'none'; });
+    detailRow.style.display = '';
+    const cell = detailRow.querySelector('td');
+    // Find quote data from cache
+    const allQuotes = _ddTabCache[reqId]?.quotes;
+    const qArr = Array.isArray(allQuotes) ? allQuotes : (allQuotes?.id ? [allQuotes] : []);
+    const q = qArr.find(x => x.id === quoteId);
+    if (!q) { cell.innerHTML = '<span style="color:var(--red);font-size:11px">Quote data not found</span>'; return; }
     _ddQuoteData[reqId] = JSON.parse(JSON.stringify(q));
+    _renderQuoteDetail(reqId, q, cell);
+}
+
+// Render full detail view for a single expanded quote
+function _renderQuoteDetail(reqId, q, container) {
     const lines = q.lines || q.line_items || [];
     const isDraft = !q.status || q.status === 'draft';
     const statusMap = {draft:'Draft',sent:'Sent',revised:'Revised',won:'Won',lost:'Lost'};
     const statusLabel = statusMap[q.status] || q.status || 'Draft';
-    let html = '';
+    let html = `<div style="padding:12px;border:1px solid var(--border);border-radius:6px;margin:4px 0;background:var(--bg1)">`;
 
     // ── Branded quote header ──
-    html += `<div class="quote-header" style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;padding-bottom:10px;border-bottom:2px solid var(--border)">
+    html += `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid var(--border)">
         <div style="display:flex;align-items:center;gap:10px">
-            <img src="/static/trio_logo.png" alt="TRIO" style="height:50px">
+            <img src="/static/trio_logo.png" alt="TRIO" style="height:40px">
             <div>
                 <div style="font-weight:700;font-size:12px">Trio Supply Chain Solutions</div>
                 <div style="font-size:10px;color:var(--muted)">info@trioscs.com</div>
             </div>
         </div>
         <div style="text-align:right">
-            <div style="font-weight:700;font-size:12px">${esc(q.quote_number || 'Q-' + (q.id || ''))} Rev ${q.revision || 1} <span class="status-badge status-${q.status || 'draft'}" style="font-size:10px;padding:2px 6px;border-radius:4px">${statusLabel}</span></div>
+            <div style="font-weight:700;font-size:12px">${esc(q.quote_number || 'Q-' + q.id)} Rev ${q.revision || 1} <span class="status-badge status-${q.status || 'draft'}" style="font-size:10px;padding:2px 6px;border-radius:4px">${statusLabel}</span></div>
             <div style="font-size:11px;color:var(--text2);margin-top:2px">${esc(q.customer_name || '')}</div>
             <div style="font-size:10px;color:var(--muted)">${esc(q.contact_name || '')}${q.contact_email ? ' \u00b7 ' + esc(q.contact_email) : ''}</div>
             ${q.sent_at ? `<div style="font-size:10px;color:var(--muted)">Sent ${fmtRelative(q.sent_at)}</div>` : ''}
@@ -1657,16 +1708,16 @@ function _renderDdQuotes(reqId, data, panel) {
                 ? `<input type="number" step="0.0001" class="quote-sell-input ddq-sell" data-req="${reqId}" data-idx="${i}" value="${sell.toFixed(4)}" style="width:80px;padding:2px 4px;font-size:10px;font-family:'JetBrains Mono',monospace" onchange="ddUpdateQuoteLine(${reqId},${i},this.value)">`
                 : `$${Number(sell).toFixed(4)}`;
             const leadCell = isDraft
-                ? `<input type="text" class="ddq-field" data-req="${reqId}" data-idx="${i}" data-field="lead_time" value="${escAttr(l.lead_time||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'lead_time',this.value)" placeholder="\u2014" style="${cellStyle}">`
+                ? `<input type="text" class="ddq-field" value="${escAttr(l.lead_time||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'lead_time',this.value)" placeholder="\u2014" style="${cellStyle}">`
                 : esc(l.lead_time || '\u2014');
             const condCell = isDraft
-                ? `<input type="text" class="ddq-field" data-req="${reqId}" data-idx="${i}" data-field="condition" value="${escAttr(l.condition||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'condition',this.value)" placeholder="\u2014" style="${cellStyle}">`
+                ? `<input type="text" class="ddq-field" value="${escAttr(l.condition||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'condition',this.value)" placeholder="\u2014" style="${cellStyle}">`
                 : esc(l.condition || '\u2014');
             const dcCell = isDraft
-                ? `<input type="text" class="ddq-field" data-req="${reqId}" data-idx="${i}" data-field="date_code" value="${escAttr(l.date_code||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'date_code',this.value)" placeholder="\u2014" style="${cellStyle}">`
+                ? `<input type="text" class="ddq-field" value="${escAttr(l.date_code||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'date_code',this.value)" placeholder="\u2014" style="${cellStyle}">`
                 : esc(l.date_code || '\u2014');
             const pkgCell = isDraft
-                ? `<input type="text" class="ddq-field" data-req="${reqId}" data-idx="${i}" data-field="packaging" value="${escAttr(l.packaging||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'packaging',this.value)" placeholder="\u2014" style="${cellStyle}">`
+                ? `<input type="text" class="ddq-field" value="${escAttr(l.packaging||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'packaging',this.value)" placeholder="\u2014" style="${cellStyle}">`
                 : esc(l.packaging || '\u2014');
 
             html += `<tr>
@@ -1687,7 +1738,7 @@ function _renderDdQuotes(reqId, data, panel) {
 
         // Quick margin (draft only)
         if (isDraft) {
-            html += `<div class="quote-markup" style="margin:8px 0;font-size:11px;display:flex;align-items:center;gap:8px">
+            html += `<div style="margin:8px 0;font-size:11px;display:flex;align-items:center;gap:8px">
                 Quick Margin: <input type="number" id="ddQuoteMarkup-${reqId}" value="20" style="width:50px;padding:2px 4px" min="0" max="99">%
                 <button class="btn btn-ghost btn-sm" onclick="ddApplyQuoteMarkup(${reqId})">Apply</button>
             </div>`;
@@ -1697,7 +1748,7 @@ function _renderDdQuotes(reqId, data, panel) {
         const totalMargin = totalRev > 0 ? ((totalRev - totalCost) / totalRev * 100) : 0;
         const gp = totalRev - totalCost;
         if (isDraft) {
-            html += `<div class="quote-totals" id="ddqTotals-${reqId}" style="display:flex;gap:16px;font-size:11px;padding:8px 0;border-top:1px solid var(--border)">
+            html += `<div id="ddqTotals-${reqId}" style="display:flex;gap:16px;font-size:11px;padding:8px 0;border-top:1px solid var(--border)">
                 <div>Cost: <strong>$${Number(totalCost).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
                 <div>Revenue: <strong>$${Number(totalRev).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
                 <div>Gross Profit: <strong style="color:var(--green)">$${Number(gp).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
@@ -1712,7 +1763,7 @@ function _renderDdQuotes(reqId, data, panel) {
 
     // ── Terms ──
     if (isDraft) {
-        html += `<div class="quote-terms" style="display:flex;gap:14px;font-size:11px;margin:8px 0;flex-wrap:wrap">
+        html += `<div style="display:flex;gap:14px;font-size:11px;margin:8px 0;flex-wrap:wrap">
             <label>Payment <input id="ddqTerms-${reqId}" value="${escAttr(q.payment_terms||'')}" placeholder="Net 30" style="width:100px;padding:2px 4px"></label>
             <label>Shipping <input id="ddqShip-${reqId}" value="${escAttr(q.shipping_terms||'')}" placeholder="FOB Origin" style="width:100px;padding:2px 4px"></label>
             <label>Valid <input id="ddqValid-${reqId}" type="number" value="${q.validity_days||7}" style="width:50px;padding:2px 4px"> days</label>
@@ -1735,9 +1786,10 @@ function _renderDdQuotes(reqId, data, panel) {
         lost: `<span style="color:var(--red);font-weight:600;font-size:11px">Lost${q.result_reason ? ' \u2014 ' + esc(q.result_reason) : ''}</span> <button class="btn btn-ghost btn-sm" onclick="ddReviseQuote(${reqId})">Revise</button>`,
         revised: `<span style="font-size:11px;color:var(--muted)">Superseded by Rev ${(q.revision||0)+1}</span>`,
     };
-    html += `<div class="quote-actions" style="margin-top:8px;display:flex;gap:8px;align-items:center">${statusActions[q.status] || statusActions.draft}</div>`;
+    html += `<div style="margin-top:8px;display:flex;gap:8px;align-items:center">${statusActions[q.status] || statusActions.draft}</div>`;
 
-    panel.innerHTML = html;
+    html += `</div>`;
+    container.innerHTML = html;
 }
 
 // ── Drill-down quote editing helpers ──────────────────────────────────
@@ -1777,16 +1829,11 @@ function ddApplyQuoteMarkup(reqId) {
         item.sell_price = pct >= 100 ? 0 : Math.round(cost / (1 - pct / 100) * 10000) / 10000;
         item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
     });
-    // Update the cached data and re-render the whole tab
-    const cached = _ddTabCache[reqId]?.quotes;
-    if (cached) {
-        const cl = cached.lines || cached.line_items || [];
-        cl.forEach((item, i) => { if (lines[i]) { item.sell_price = lines[i].sell_price; item.margin_pct = lines[i].margin_pct; } });
-    }
-    const drow = document.getElementById('d-' + reqId);
-    if (drow) {
-        const panel = drow.querySelector('.dd-panel');
-        if (panel) _renderDdQuotes(reqId, _ddQuoteData[reqId], panel);
+    // Re-render the expanded detail panel
+    const detailRow = document.getElementById('ddqDetail-' + q.id);
+    if (detailRow) {
+        const cell = detailRow.querySelector('td');
+        if (cell) _renderQuoteDetail(reqId, q, cell);
     }
 }
 
@@ -1846,23 +1893,83 @@ async function ddSaveQuoteDraft(reqId) {
 function ddSendQuote(reqId) {
     const q = _ddQuoteData[reqId];
     if (!q) return;
-    // Inline confirmation modal
+    const prefillEmail = q.contact_email || '';
+    const prefillName = q.contact_name || '';
+    const senderEmail = window.userEmail || 'your account';
+    // Build contact options from site_contacts if available
+    let contactOpts = '';
+    if (q.site_contacts && q.site_contacts.length) {
+        for (const c of q.site_contacts) {
+            if (c.email) contactOpts += `<option value="${escAttr(c.email)}" data-name="${escAttr(c.full_name||'')}">${esc(c.full_name || c.email)}${c.title ? ' (' + esc(c.title) + ')' : ''}</option>`;
+        }
+    }
     const html = `<div class="modal-bg open" id="ddSendQuoteBg" onclick="if(event.target===this){this.remove()}">
-        <div class="modal" onclick="event.stopPropagation()" style="max-width:400px">
-            <h2 style="font-size:14px;margin-bottom:8px">Send Quote?</h2>
-            <p style="font-size:12px;color:var(--text2);margin-bottom:12px">This will save the current draft and email the quote to the customer contact.</p>
-            <div class="mactions">
-                <button class="btn btn-ghost" onclick="document.getElementById('ddSendQuoteBg').remove()">Cancel</button>
-                <button class="btn btn-primary" id="ddSendConfirmBtn-${reqId}" onclick="ddConfirmSendQuote(${reqId})">Send</button>
+        <div class="modal" onclick="event.stopPropagation()" style="max-width:800px">
+            <h2 style="font-size:14px;margin-bottom:10px">Send Quote ${esc(q.quote_number || '')}</h2>
+            <div style="display:flex;gap:16px;flex-wrap:wrap">
+                <!-- Left: send options -->
+                <div style="flex:0 0 280px;min-width:240px">
+                    <div style="font-size:11px;color:var(--muted);margin-bottom:8px;padding:6px 8px;background:var(--bg2);border-radius:4px">
+                        Sending from: <strong>${esc(senderEmail)}</strong>
+                    </div>
+                    ${contactOpts ? `<div style="margin-bottom:8px"><label style="font-size:11px;font-weight:600">Select Contact</label><select id="ddSendContact-${reqId}" style="width:100%;padding:5px;font-size:12px;margin-top:2px" onchange="const o=this.options[this.selectedIndex];document.getElementById('ddSendEmail-${reqId}').value=o.value;document.getElementById('ddSendName-${reqId}').value=o.dataset.name||''">
+                        <option value="">-- Choose recipient --</option>${contactOpts}</select></div>` : ''}
+                    <div style="margin-bottom:6px"><label style="font-size:11px;font-weight:600">Recipient Email *</label><input id="ddSendEmail-${reqId}" type="email" value="${escAttr(prefillEmail)}" placeholder="customer@example.com" style="width:100%;padding:5px;font-size:12px;margin-top:2px" required></div>
+                    <div style="margin-bottom:12px"><label style="font-size:11px;font-weight:600">Recipient Name</label><input id="ddSendName-${reqId}" value="${escAttr(prefillName)}" placeholder="Contact name" style="width:100%;padding:5px;font-size:12px;margin-top:2px"></div>
+                    <div class="mactions" style="justify-content:flex-start;gap:8px">
+                        <button class="btn btn-ghost btn-sm" onclick="ddPreviewQuote(${reqId})">Preview</button>
+                        <button class="btn btn-primary btn-sm" id="ddSendConfirmBtn-${reqId}" onclick="ddConfirmSendQuote(${reqId})">Send</button>
+                        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ddSendQuoteBg').remove()">Cancel</button>
+                    </div>
+                </div>
+                <!-- Right: preview pane -->
+                <div id="ddSendPreview-${reqId}" style="flex:1;min-width:300px;border:1px solid var(--border);border-radius:6px;overflow:auto;max-height:500px;background:#f4f6f9;font-size:11px;color:var(--muted);display:flex;align-items:center;justify-content:center;padding:20px">
+                    Click "Preview" to see the email that will be sent to the customer.
+                </div>
             </div>
         </div>
     </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
 }
 
+async function ddPreviewQuote(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    const previewEl = document.getElementById('ddSendPreview-' + reqId);
+    if (!previewEl) return;
+    previewEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading preview\u2026</span>';
+    try {
+        // Save draft first so preview reflects latest data
+        await apiFetch('/api/quotes/' + q.id, {
+            method: 'PUT', body: {
+                line_items: q.lines || q.line_items,
+                payment_terms: document.getElementById('ddqTerms-' + reqId)?.value || '',
+                shipping_terms: document.getElementById('ddqShip-' + reqId)?.value || '',
+                validity_days: parseInt(document.getElementById('ddqValid-' + reqId)?.value) || 7,
+                notes: document.getElementById('ddqNotes-' + reqId)?.value || '',
+            }
+        });
+        const toName = (document.getElementById('ddSendName-' + reqId)?.value || '').trim();
+        const resp = await apiFetch('/api/quotes/' + q.id + '/preview', {
+            method: 'POST', body: { to_name: toName }
+        });
+        if (resp.html) {
+            previewEl.innerHTML = `<iframe id="ddPreviewFrame-${reqId}" style="width:100%;height:100%;border:none;min-height:480px" sandbox="allow-same-origin"></iframe>`;
+            const frame = document.getElementById('ddPreviewFrame-' + reqId);
+            const doc = frame.contentDocument || frame.contentWindow.document;
+            doc.open(); doc.write(resp.html); doc.close();
+        }
+    } catch (e) {
+        previewEl.innerHTML = `<span style="color:var(--red);font-size:11px">Preview failed: ${esc(e.message || 'unknown error')}</span>`;
+    }
+}
+
 async function ddConfirmSendQuote(reqId) {
     const q = _ddQuoteData[reqId];
     if (!q) return;
+    const toEmail = (document.getElementById('ddSendEmail-' + reqId)?.value || '').trim();
+    const toName = (document.getElementById('ddSendName-' + reqId)?.value || '').trim();
+    if (!toEmail) { showToast('Recipient email is required', 'error'); return; }
     const btn = document.getElementById('ddSendConfirmBtn-' + reqId);
     if (btn) { btn.disabled = true; btn.textContent = 'Sending\u2026'; }
     try {
@@ -1876,10 +1983,12 @@ async function ddConfirmSendQuote(reqId) {
                 notes: document.getElementById('ddqNotes-' + reqId)?.value || '',
             }
         });
-        // Then send
-        await apiFetch('/api/quotes/' + q.id + '/send', { method: 'POST' });
+        // Then send with recipient override
+        await apiFetch('/api/quotes/' + q.id + '/send', {
+            method: 'POST', body: { to_email: toEmail, to_name: toName }
+        });
         document.getElementById('ddSendQuoteBg')?.remove();
-        showToast('Quote sent', 'success');
+        showToast('Quote sent to ' + toEmail, 'success');
         if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
         const drow = document.getElementById('d-' + reqId);
         if (drow) {
@@ -7192,7 +7301,7 @@ Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
     addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies,
     cloneFromList, closeModal, ddApplyGlobalMarkup, ddApplyQuoteMarkup, ddBuildQuote,
-    ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddEditOffer, ddMarkQuoteResult, ddPasteRows, ddUpdateQuoteField,
+    ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddEditOffer, ddExpandQuote, ddMarkQuoteResult, ddPasteRows, ddPreviewQuote, ddUpdateQuoteField,
     ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddReviseQuote, ddSaveEditOffer, ddSaveQuoteDraft, ddSendBulkRfq, ddSendQuote,
     ddToggleAllOffers, ddToggleGroupOffers, ddToggleOffer, ddToggleSighting, ddToggleTier,
     ddUploadFile, debounceOfferHistorySearch, debouncePartsSightingsSearch,
