@@ -6,13 +6,13 @@ from app.utils.encrypted_type import EncryptedText, _get_fernet
 
 
 class TestGetFernet:
-    @patch("app.utils.encrypted_type.settings", MagicMock(secret_key="test-secret-key-12345"))
+    @patch("app.config.settings", MagicMock(secret_key="test-secret-key-12345"))
     def test_returns_fernet_instance(self):
         from cryptography.fernet import Fernet
         f = _get_fernet()
         assert isinstance(f, Fernet)
 
-    @patch("app.utils.encrypted_type.settings", MagicMock(secret_key="test-secret-key-12345"))
+    @patch("app.config.settings", MagicMock(secret_key="test-secret-key-12345"))
     def test_roundtrip(self):
         f = _get_fernet()
         original = "sensitive-token-value"

@@ -325,3 +325,137 @@ class TestQueryHelpers:
 
         activities = get_company_activities(co.id, db_session, limit=3)
         assert len(activities) == 3
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  days_since_last_vendor_activity
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestDaysSinceLastVendorActivity:
+    def test_with_recent_activity(self, db_session, test_user, test_vendor_card):
+        from app.services.activity_service import days_since_last_vendor_activity
+
+        activity = ActivityLog(
+            user_id=test_user.id, activity_type="email_sent",
+            channel="email", vendor_card_id=test_vendor_card.id,
+            created_at=datetime.now(timezone.utc) - timedelta(days=3),
+        )
+        db_session.add(activity)
+        db_session.commit()
+
+        days = days_since_last_vendor_activity(test_vendor_card.id, db_session)
+        assert days is not None
+        assert 2 <= days <= 4
+
+    def test_no_activity(self, db_session, test_vendor_card):
+        from app.services.activity_service import days_since_last_vendor_activity
+
+        days = days_since_last_vendor_activity(test_vendor_card.id, db_session)
+        assert days is None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _update_vendor_contact_stats and _increment_vendor_contact
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestVendorContactStats:
+    def test_update_vendor_contact_stats_with_contact(self, db_session, test_vendor_contact):
+        from app.services.activity_service import _update_vendor_contact_stats
+
+        initial_count = test_vendor_contact.interaction_count or 0
+        match = {
+            "type": "vendor",
+            "id": test_vendor_contact.vendor_card_id,
+            "vendor_contact_id": test_vendor_contact.id,
+        }
+        _update_vendor_contact_stats(match, db_session)
+        db_session.flush()
+        db_session.refresh(test_vendor_contact)
+        assert test_vendor_contact.interaction_count == initial_count + 1
+        assert test_vendor_contact.last_interaction_at is not None
+
+    def test_update_vendor_contact_stats_no_contact_id(self, db_session):
+        from app.services.activity_service import _update_vendor_contact_stats
+
+        # No vendor_contact_id in match -> should not raise
+        match = {"type": "vendor", "id": 1}
+        _update_vendor_contact_stats(match, db_session)
+
+    def test_increment_vendor_contact(self, db_session, test_vendor_contact):
+        from app.services.activity_service import _increment_vendor_contact
+
+        initial = test_vendor_contact.interaction_count or 0
+        _increment_vendor_contact(test_vendor_contact.id, db_session)
+        db_session.flush()
+        db_session.refresh(test_vendor_contact)
+        assert test_vendor_contact.interaction_count == initial + 1
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Vendor-specific manual logging
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestVendorManualLogging:
+    def test_log_vendor_call(self, db_session, test_user, test_vendor_card, test_vendor_contact):
+        from app.services.activity_service import log_vendor_call
+
+        record = log_vendor_call(
+            user_id=test_user.id,
+            vendor_card_id=test_vendor_card.id,
+            vendor_contact_id=test_vendor_contact.id,
+            direction="outbound",
+            phone="+1-555-0100",
+            duration_seconds=120,
+            contact_name="John Sales",
+            notes="Discussed pricing",
+            db=db_session,
+        )
+        assert record is not None
+        assert record.activity_type == "call_outbound"
+        assert record.vendor_card_id == test_vendor_card.id
+
+    def test_log_vendor_note(self, db_session, test_user, test_vendor_card, test_vendor_contact):
+        from app.services.activity_service import log_vendor_note
+
+        record = log_vendor_note(
+            user_id=test_user.id,
+            vendor_card_id=test_vendor_card.id,
+            vendor_contact_id=test_vendor_contact.id,
+            notes="Meeting scheduled",
+            contact_name="John Sales",
+            db=db_session,
+        )
+        assert record is not None
+        assert record.activity_type == "note"
+
+    def test_log_vendor_call_no_contact(self, db_session, test_user, test_vendor_card):
+        from app.services.activity_service import log_vendor_call
+
+        record = log_vendor_call(
+            user_id=test_user.id,
+            vendor_card_id=test_vendor_card.id,
+            vendor_contact_id=None,
+            direction="inbound",
+            phone="+1-555-0100",
+            duration_seconds=60,
+            contact_name="Unknown",
+            notes=None,
+            db=db_session,
+        )
+        assert record is not None
+
+    def test_log_vendor_note_no_contact(self, db_session, test_user, test_vendor_card):
+        from app.services.activity_service import log_vendor_note
+
+        record = log_vendor_note(
+            user_id=test_user.id,
+            vendor_card_id=test_vendor_card.id,
+            vendor_contact_id=None,
+            notes="General note",
+            contact_name=None,
+            db=db_session,
+        )
+        assert record is not None

@@ -327,6 +327,17 @@ class TestFuzzyMpnMatch:
         # MPNs shorter than 3 chars after normalize are rejected
         assert fuzzy_mpn_match("AB", "AB") is False
 
+    def test_one_prefix_of_other_short_suffix(self):
+        """Single-char suffix difference is not a fuzzy match."""
+        assert fuzzy_mpn_match("LM317T", "LM317TA") is False
+
+    def test_empty_string_a(self):
+        """Empty string MPN returns False."""
+        assert fuzzy_mpn_match("", "LM317T") is False
+
+    def test_empty_string_b(self):
+        assert fuzzy_mpn_match("LM317T", "") is False
+
 
 # ── normalize_condition ──────────────────────────────────────────────
 

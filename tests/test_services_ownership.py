@@ -467,3 +467,193 @@ class TestGetMyAccountsStatuses:
         result = get_my_accounts(sales.id, db_session)
         assert result[0]["status"] == "green"
         assert result[0]["is_strategic"] is True
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _send_warning_alert — internal paths
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestSendWarningAlert:
+    @pytest.mark.asyncio
+    async def test_no_owner_returns_early(self, db_session):
+        """When owner doesn't exist, _send_warning_alert returns without error."""
+        from app.services.ownership_service import _send_warning_alert
+
+        co = _make_company(db_session, owner_id=None)
+        db_session.commit()
+
+        # Should not raise (no owner -> early return)
+        await _send_warning_alert(co, 25, 30, db_session)
+
+    @pytest.mark.asyncio
+    async def test_no_token_skips_email(self, db_session):
+        """When get_valid_token returns None, email is skipped."""
+        from app.services.ownership_service import _send_warning_alert
+
+        sales = _make_sales_user(db_session, "notoken@t.com")
+        co = _make_company(db_session, owner_id=sales.id)
+        db_session.commit()
+
+        with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None), \
+             patch("app.utils.graph_client.GraphClient") as mock_gc_class:
+            await _send_warning_alert(co, 25, 30, db_session)
+            # GraphClient should never be instantiated
+            mock_gc_class.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_graph_error_caught(self, db_session):
+        """Graph API error during warning email is caught, not raised."""
+        from app.services.ownership_service import _send_warning_alert
+
+        sales = _make_sales_user(db_session, "grapherr@t.com")
+        co = _make_company(db_session, owner_id=sales.id)
+        db_session.commit()
+
+        with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"), \
+             patch("app.utils.graph_client.GraphClient") as mock_gc_class, \
+             patch("app.services.ownership_service.send_ownership_warning", new_callable=AsyncMock, side_effect=Exception("Teams error")) if False else patch("app.services.teams.send_ownership_warning", new_callable=AsyncMock, side_effect=Exception("Teams error")):
+            mock_gc = mock_gc_class.return_value
+            mock_gc.post_json = AsyncMock(side_effect=Exception("Graph error"))
+            # Should not raise
+            await _send_warning_alert(co, 25, 30, db_session)
+
+    @pytest.mark.asyncio
+    async def test_teams_error_caught(self, db_session):
+        """Teams notification error is caught in _send_warning_alert."""
+        from app.services.ownership_service import _send_warning_alert
+
+        sales = _make_sales_user(db_session, "teamserr@t.com")
+        co = _make_company(db_session, owner_id=sales.id)
+        db_session.commit()
+
+        with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"), \
+             patch("app.utils.graph_client.GraphClient") as mock_gc_class, \
+             patch("app.services.teams.send_ownership_warning", new_callable=AsyncMock, side_effect=Exception("Teams unavailable")):
+            mock_gc = mock_gc_class.return_value
+            mock_gc.post_json = AsyncMock()
+            # Should not raise
+            await _send_warning_alert(co, 25, 30, db_session)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  send_manager_digest_email — recently_cleared and team_activity paths
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestSendManagerDigestEmailPaths:
+    @pytest.mark.asyncio
+    async def test_recently_cleared_section(self, db_session):
+        """Digest includes recently cleared accounts."""
+        sales = _make_sales_user(db_session, "cleared@t.com")
+        admin = User(
+            email="digestadmin@trioscs.com", name="Digest Admin",
+            role="admin", azure_id="az-digestadmin",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(admin)
+        db_session.flush()
+        co = _make_company(
+            db_session, name="Cleared Co", owner_id=None,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
+        )
+        co.ownership_cleared_at = datetime.now(timezone.utc) - timedelta(days=1)
+        # Also add an at-risk account so the digest is not empty
+        _make_company(
+            db_session, name="Risk2", owner_id=sales.id,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=25),
+        )
+        db_session.commit()
+
+        with patch("app.services.ownership_service.settings") as mock_settings, \
+             patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"), \
+             patch("app.utils.graph_client.GraphClient") as mock_gc_class:
+            mock_settings.admin_emails = ["digestadmin@trioscs.com"]
+            mock_settings.customer_inactivity_days = 30
+            mock_settings.strategic_inactivity_days = 90
+            mock_gc = mock_gc_class.return_value
+            mock_gc.post_json = AsyncMock()
+
+            await send_manager_digest_email(db_session)
+
+        # Should have called post_json (sent email)
+        mock_gc.post_json.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_no_admin_in_db_skips(self, db_session):
+        """When admin email not found in DB, sending is skipped."""
+        sales = _make_sales_user(db_session, "noadmin@t.com")
+        _make_company(
+            db_session, name="Risk3", owner_id=sales.id,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=25),
+        )
+        db_session.commit()
+
+        with patch("app.services.ownership_service.settings") as mock_settings, \
+             patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"), \
+             patch("app.utils.graph_client.GraphClient") as mock_gc_class:
+            mock_settings.admin_emails = ["nonexistent@trioscs.com"]
+            mock_settings.customer_inactivity_days = 30
+            mock_settings.strategic_inactivity_days = 90
+            mock_gc = mock_gc_class.return_value
+            mock_gc.post_json = AsyncMock()
+
+            await send_manager_digest_email(db_session)
+
+        # No admin found -> post_json should not be called
+        mock_gc.post_json.assert_not_called()
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Sweep — no created_at fallback edge case
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestSweepNoCreatedAt:
+    @pytest.mark.asyncio
+    @patch("app.services.ownership_service._send_warning_alert", new_callable=AsyncMock)
+    async def test_no_activity_no_created_at_forces_clear(self, mock_alert, db_session):
+        """No last_activity_at AND no created_at -> days_inactive=999 -> cleared."""
+        sales = _make_sales_user(db_session, "nocreated@t.com")
+        co = _make_company(db_session, owner_id=sales.id, last_activity_at=None)
+        co.created_at = None
+        db_session.commit()
+
+        result = await run_ownership_sweep(db_session)
+        assert result["cleared"] >= 1
+        db_session.refresh(co)
+        assert co.account_owner_id is None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  check_and_claim_open_account — trader role
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestClaimTraderRole:
+    def test_trader_can_claim(self, db_session):
+        """Trader role should be able to claim open accounts."""
+        trader = User(
+            email="claimtrader@trioscs.com", name="Claim Trader",
+            role="trader", azure_id="az-claim-trader",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(trader)
+        db_session.flush()
+        co = _make_company(db_session)
+        db_session.commit()
+
+        result = check_and_claim_open_account(co.id, trader.id, db_session)
+        assert result is True
+
+    def test_nonexistent_company(self, db_session):
+        """Claiming a non-existent company returns False."""
+        sales = _make_sales_user(db_session, "nocompany@t.com")
+        db_session.commit()
+        assert check_and_claim_open_account(99999, sales.id, db_session) is False
+
+    def test_nonexistent_user(self, db_session):
+        """Claiming with a non-existent user returns False."""
+        co = _make_company(db_session)
+        db_session.commit()
+        assert check_and_claim_open_account(co.id, 99999, db_session) is False

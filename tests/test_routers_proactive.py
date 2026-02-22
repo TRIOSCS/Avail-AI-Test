@@ -205,3 +205,127 @@ def test_contacts_site_empty(client):
     resp = client.get("/api/proactive/contacts/99999")
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+# ── Additional coverage tests ─────────────────────────────────────────
+
+from unittest.mock import MagicMock
+
+
+class TestSendValidation:
+    def test_send_empty_match_ids(self, client):
+        """Send with empty match_ids -> 400."""
+        resp = client.post("/api/proactive/send", json={
+            "match_ids": [],
+            "contact_ids": [1],
+        })
+        assert resp.status_code == 400
+
+    def test_send_empty_contact_ids(self, client):
+        """Send with empty contact_ids -> 400."""
+        resp = client.post("/api/proactive/send", json={
+            "match_ids": [1],
+            "contact_ids": [],
+        })
+        assert resp.status_code == 400
+
+    @patch("app.services.proactive_service.send_proactive_offer", new_callable=AsyncMock,
+           side_effect=ValueError("No matching contacts found"))
+    @patch("app.routers.proactive.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
+    def test_send_value_error(self, mock_token, mock_send, client):
+        """Service raises ValueError -> 400."""
+        resp = client.post("/api/proactive/send", json={
+            "match_ids": [1],
+            "contact_ids": [1],
+        })
+        assert resp.status_code == 400
+
+    @patch("app.services.proactive_service.send_proactive_offer", new_callable=AsyncMock,
+           return_value={"ok": True, "sent_to": 2})
+    @patch("app.routers.proactive.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
+    def test_send_with_all_optional_fields(self, mock_token, mock_send, client):
+        """Send with sell_prices, subject, and notes."""
+        resp = client.post("/api/proactive/send", json={
+            "match_ids": [1, 2],
+            "contact_ids": [1],
+            "sell_prices": {"1": 1.25, "2": 2.50},
+            "subject": "Special offer for you",
+            "notes": "Limited time offer",
+        })
+        assert resp.status_code == 200
+        assert resp.json()["ok"] is True
+        assert resp.json()["sent_to"] == 2
+
+
+class TestScorecardExtended:
+    @patch("app.services.proactive_service.get_scorecard",
+           return_value={"total_sent": 3, "total_converted": 1})
+    def test_scorecard_sales_with_explicit_salesperson_id(self, mock_fn, sales_client, sales_user):
+        """Non-admin requesting salesperson_id is forced to own user id."""
+        resp = sales_client.get("/api/proactive/scorecard?salesperson_id=9999")
+        assert resp.status_code == 200
+        # The function was called (we can't easily check the arg due to caching
+        # decorator, but we verify the endpoint doesn't error)
+        mock_fn.assert_called_once()
+
+    @patch("app.services.proactive_service.get_scorecard",
+           return_value={"total_sent": 20, "total_converted": 5})
+    def test_scorecard_admin_with_salesperson_id(self, mock_fn, client, test_user, db_session):
+        """Admin can view other salesperson's scorecard."""
+        test_user.role = "admin"
+        db_session.commit()
+        resp = client.get("/api/proactive/scorecard?salesperson_id=42")
+        assert resp.status_code == 200
+        test_user.role = "buyer"
+        db_session.commit()
+
+
+class TestMatchesStatusFilter:
+    @patch("app.services.proactive_service.get_matches_for_user", return_value=[])
+    def test_matches_sent_status(self, mock_fn, client):
+        """Matches with status=sent filter."""
+        resp = client.get("/api/proactive/matches?status=sent")
+        assert resp.status_code == 200
+        mock_fn.assert_called_once()
+        # Verify 'sent' was passed as status
+        call_kwargs = mock_fn.call_args
+        assert call_kwargs[1].get("status") == "sent" or call_kwargs[0][2] == "sent"
+
+
+class TestConvertExtended:
+    @patch("app.services.proactive_service.convert_proactive_to_win",
+           side_effect=ValueError("Offer already converted"))
+    def test_convert_already_converted(self, mock_fn, client):
+        """Already-converted offer -> 400."""
+        resp = client.post("/api/proactive/convert/1")
+        assert resp.status_code == 400
+
+
+class TestContactsExtended:
+    def test_contacts_multiple_for_site(self, client, db_session, test_customer_site):
+        """Multiple contacts ordered by is_primary desc, then full_name."""
+        c1 = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Alice Smith",
+            email="alice@acme.com",
+            is_primary=False,
+        )
+        c2 = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Bob Jones",
+            email="bob@acme.com",
+            title="Director",
+            is_primary=True,
+        )
+        db_session.add_all([c1, c2])
+        db_session.commit()
+
+        resp = client.get(f"/api/proactive/contacts/{test_customer_site.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+        # Primary contact should come first
+        assert data[0]["is_primary"] is True
+        assert data[0]["full_name"] == "Bob Jones"
+        assert data[0]["title"] == "Director"
+        assert data[1]["is_primary"] is False

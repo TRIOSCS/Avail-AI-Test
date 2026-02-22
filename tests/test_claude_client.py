@@ -478,3 +478,229 @@ class TestClaudeBatchResults:
 
         result = await claude_batch_results("batch_abc123")
         assert result is None
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_results_fetch_error_returns_none(self, mock_http, mock_cred):
+        """When results_url returns non-200, returns None."""
+        status_resp = _mock_response(200, {
+            "processing_status": "ended",
+            "results_url": "https://api.anthropic.com/results/batch_err",
+            "request_counts": {"succeeded": 0},
+        })
+        results_resp = _mock_response(500, text="Error")
+        mock_http.get = AsyncMock(side_effect=[status_resp, results_resp])
+
+        result = await claude_batch_results("batch_err")
+        assert result is None
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_connection_error_returns_none(self, mock_http, mock_cred):
+        """Connection error during batch results check is handled."""
+        mock_http.get = AsyncMock(side_effect=ConnectionError("timeout"))
+
+        result = await claude_batch_results("batch_abc123")
+        assert result is None
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_succeeded_no_tool_use_returns_none_value(self, mock_http, mock_cred):
+        """Succeeded result without tool_use block has None value."""
+        import json
+        jsonl = json.dumps({
+            "custom_id": "r1",
+            "result": {
+                "type": "succeeded",
+                "message": {
+                    "content": [{"type": "text", "text": "No structured output"}]
+                },
+            },
+        })
+        status_resp = _mock_response(200, {
+            "processing_status": "ended",
+            "results_url": "https://api.anthropic.com/results/batch_no_tool",
+            "request_counts": {"succeeded": 1},
+        })
+        results_resp = _mock_response(200, text=jsonl)
+        mock_http.get = AsyncMock(side_effect=[status_resp, results_resp])
+
+        result = await claude_batch_results("batch_no_tool")
+        assert result == {"r1": None}
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_jsonl_parse_error_skipped(self, mock_http, mock_cred):
+        """Malformed JSONL lines are skipped."""
+        jsonl = "not valid json\n{malformed"
+        status_resp = _mock_response(200, {
+            "processing_status": "ended",
+            "results_url": "https://api.anthropic.com/results/batch_bad",
+            "request_counts": {"succeeded": 0},
+        })
+        results_resp = _mock_response(200, text=jsonl)
+        mock_http.get = AsyncMock(side_effect=[status_resp, results_resp])
+
+        result = await claude_batch_results("batch_bad")
+        assert result == {}
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_empty_lines_in_jsonl_skipped(self, mock_http, mock_cred):
+        """Empty lines in JSONL are skipped."""
+        import json
+        line = json.dumps({
+            "custom_id": "r1",
+            "result": {
+                "type": "succeeded",
+                "message": {
+                    "content": [{"type": "tool_use", "name": "structured_output", "input": {"ok": True}}]
+                },
+            },
+        })
+        jsonl = f"\n{line}\n\n"
+        status_resp = _mock_response(200, {
+            "processing_status": "ended",
+            "results_url": "https://api.anthropic.com/results/batch_x",
+            "request_counts": {"succeeded": 1},
+        })
+        results_resp = _mock_response(200, text=jsonl)
+        mock_http.get = AsyncMock(side_effect=[status_resp, results_resp])
+
+        result = await claude_batch_results("batch_x")
+        assert result == {"r1": {"ok": True}}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  claude_structured — additional coverage (thinking_budget, system blocks)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestClaudeStructuredAdditional:
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_thinking_budget_forces_smart_model(self, mock_http, mock_cred):
+        """When thinking_budget is set, uses SMART model regardless of model_tier."""
+        mock_http.post = AsyncMock(return_value=_mock_response(200, {
+            "content": [{"type": "tool_use", "name": "structured_output", "input": {"x": 1}}]
+        }))
+
+        await claude_structured(
+            "test", {"type": "object"}, model_tier="fast", thinking_budget=5000
+        )
+        body = mock_http.post.call_args.kwargs["json"]
+        assert body["model"] == MODELS["smart"]
+        assert "thinking" in body
+        assert body["thinking"]["budget_tokens"] == 5000
+        assert body["max_tokens"] >= 5000 + 1024
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_no_system_prompt_excluded(self, mock_http, mock_cred):
+        """When system is empty, no system key in body."""
+        mock_http.post = AsyncMock(return_value=_mock_response(200, {
+            "content": [{"type": "tool_use", "name": "structured_output", "input": {}}]
+        }))
+
+        await claude_structured("test", {"type": "object"}, system="")
+        body = mock_http.post.call_args.kwargs["json"]
+        assert "system" not in body
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_cache_system_false_no_cache_control(self, mock_http, mock_cred):
+        """When cache_system=False, system block has no cache_control."""
+        mock_http.post = AsyncMock(return_value=_mock_response(200, {
+            "content": [{"type": "tool_use", "name": "structured_output", "input": {}}]
+        }))
+
+        await claude_structured(
+            "test", {"type": "object"}, system="system prompt", cache_system=False
+        )
+        body = mock_http.post.call_args.kwargs["json"]
+        assert "system" in body
+        assert "cache_control" not in body["system"][0]
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_unknown_model_tier_defaults_fast(self, mock_http, mock_cred):
+        """Unknown model_tier falls back to 'fast'."""
+        mock_http.post = AsyncMock(return_value=_mock_response(200, {
+            "content": [{"type": "tool_use", "name": "structured_output", "input": {}}]
+        }))
+
+        await claude_structured("test", {"type": "object"}, model_tier="nonexistent")
+        body = mock_http.post.call_args.kwargs["json"]
+        assert body["model"] == MODELS["fast"]
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  claude_text — additional coverage (tools, system, model tiers)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestClaudeTextAdditional:
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_tools_included_in_body(self, mock_http, mock_cred):
+        """Tools parameter is passed to API body."""
+        mock_http.post = AsyncMock(return_value=_mock_response(200, {
+            "content": [{"type": "text", "text": "result"}]
+        }))
+
+        tools = [{"type": "web_search_20250305"}]
+        await claude_text("test", tools=tools)
+        body = mock_http.post.call_args.kwargs["json"]
+        assert body["tools"] == tools
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_api_error_returns_none(self, mock_http, mock_cred):
+        """API returning non-200 status returns None."""
+        mock_http.post = AsyncMock(return_value=_mock_response(500, text="Error"))
+
+        result = await claude_text("test")
+        assert result is None
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_connection_error_returns_none(self, mock_http, mock_cred):
+        """Network error is caught and returns None."""
+        mock_http.post = AsyncMock(side_effect=ConnectionError("timeout"))
+
+        result = await claude_text("test")
+        assert result is None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _headers — cache=True adds beta header
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestHeaders:
+    @patch("app.utils.claude_client.get_credential_cached", return_value="test-key")
+    def test_cache_true_adds_beta_header(self, mock_cred):
+        from app.utils.claude_client import _headers
+
+        h = _headers(cache=True)
+        assert "anthropic-beta" in h
+        assert "prompt-caching" in h["anthropic-beta"]
+
+    @patch("app.utils.claude_client.get_credential_cached", return_value="test-key")
+    def test_cache_false_no_beta_header(self, mock_cred):
+        from app.utils.claude_client import _headers
+
+        h = _headers(cache=False)
+        assert "anthropic-beta" not in h

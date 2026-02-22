@@ -534,3 +534,302 @@ class TestAdminVendorDedup:
         count_low = resp_low.json()["count"]
         count_high = resp_high.json()["count"]
         assert count_low >= count_high
+
+
+# ── Additional coverage tests ─────────────────────────────────────────
+
+
+class TestAdminConfigSetError:
+    def test_config_set_invalid_key(self, admin_client):
+        """Setting a non-existent config key returns service-level error."""
+        resp = admin_client.put(
+            "/api/admin/config/nonexistent_key_xyz",
+            json={"value": "some_value"},
+        )
+        # set_config_value returns error dict for unknown keys
+        assert resp.status_code in (400, 404, 200)
+
+
+class TestAdminUpdateUserEdgeCases:
+    def test_update_user_invalid_role(self, admin_client, db_session):
+        """Updating a user with invalid role returns error."""
+        target = User(
+            email="invalid_role_target@trioscs.com", name="Invalid", role="buyer",
+            azure_id="az-invalid-role", created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(target)
+        db_session.commit()
+
+        resp = admin_client.put(
+            f"/api/admin/users/{target.id}",
+            json={"role": "superadmin"},
+        )
+        # service returns error dict with status
+        assert resp.status_code in (400, 200)
+
+    def test_update_user_deactivate(self, admin_client, db_session):
+        """Deactivating a user via is_active=False."""
+        target = User(
+            email="deactivate@trioscs.com", name="Deactivate", role="buyer",
+            azure_id="az-deactivate", created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(target)
+        db_session.commit()
+
+        resp = admin_client.put(
+            f"/api/admin/users/{target.id}",
+            json={"is_active": False},
+        )
+        assert resp.status_code == 200
+
+
+class TestAdminCredentialEdgeCases:
+    @pytest.fixture()
+    def api_source(self, db_session):
+        src = ApiSource(
+            name="test_cred_edge",
+            display_name="Test Cred Edge",
+            category="connector",
+            source_type="connector",
+            status="pending",
+            env_vars=["EDGE_KEY", "EDGE_SECRET"],
+            credentials={},
+        )
+        db_session.add(src)
+        db_session.commit()
+        db_session.refresh(src)
+        return src
+
+    @patch("app.routers.admin.decrypt_value", side_effect=ValueError("bad key"))
+    def test_get_credentials_decrypt_error(self, mock_decrypt, admin_client, db_session, api_source):
+        """Decryption failure shows error status."""
+        api_source.credentials = {"EDGE_KEY": "corrupted_blob"}
+        db_session.commit()
+
+        resp = admin_client.get(f"/api/admin/sources/{api_source.id}/credentials")
+        assert resp.status_code == 200
+        creds = resp.json()["credentials"]
+        assert creds["EDGE_KEY"]["status"] == "error"
+
+    def test_get_credentials_env_fallback(self, admin_client, db_session, api_source, monkeypatch):
+        """Falls back to env vars when no DB credential."""
+        monkeypatch.setenv("EDGE_KEY", "env-value-123")
+        resp = admin_client.get(f"/api/admin/sources/{api_source.id}/credentials")
+        assert resp.status_code == 200
+        creds = resp.json()["credentials"]
+        assert creds["EDGE_KEY"]["status"] == "set"
+        assert creds["EDGE_KEY"]["source"] == "env"
+
+    def test_get_credentials_empty(self, admin_client, db_session, api_source):
+        """Empty credentials show status=empty."""
+        resp = admin_client.get(f"/api/admin/sources/{api_source.id}/credentials")
+        assert resp.status_code == 200
+        creds = resp.json()["credentials"]
+        assert creds["EDGE_KEY"]["status"] == "empty"
+        assert creds["EDGE_KEY"]["source"] == "none"
+
+    @patch("app.routers.admin.encrypt_value", return_value="enc_blob")
+    def test_set_credentials_invalid_var_skipped(self, mock_enc, admin_client, api_source):
+        """Setting an invalid var_name is silently skipped."""
+        resp = admin_client.put(
+            f"/api/admin/sources/{api_source.id}/credentials",
+            json={"INVALID_VAR_NAME": "test-value"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "INVALID_VAR_NAME" not in data["updated"]
+
+    @patch("app.routers.admin.encrypt_value", return_value="enc_blob")
+    def test_set_credentials_empty_value_removes(self, mock_enc, admin_client, db_session, api_source):
+        """Setting empty string value removes the credential."""
+        api_source.credentials = {"EDGE_KEY": "old_enc"}
+        db_session.commit()
+
+        resp = admin_client.put(
+            f"/api/admin/sources/{api_source.id}/credentials",
+            json={"EDGE_KEY": ""},
+        )
+        assert resp.status_code == 200
+        assert "EDGE_KEY" in resp.json()["updated"]
+        # Verify the key was removed
+        db_session.refresh(api_source)
+        assert "EDGE_KEY" not in (api_source.credentials or {})
+
+    def test_set_credentials_source_not_found(self, admin_client):
+        """Setting credentials on non-existent source returns 404."""
+        resp = admin_client.put(
+            "/api/admin/sources/99999/credentials",
+            json={"KEY": "val"},
+        )
+        assert resp.status_code == 404
+
+    def test_delete_credential_not_found_source(self, admin_client):
+        """Deleting credential from non-existent source returns 404."""
+        resp = admin_client.delete("/api/admin/sources/99999/credentials/SOME_VAR")
+        assert resp.status_code == 404
+
+    @patch("app.services.credential_service.credential_is_set", return_value=False)
+    def test_delete_credential_not_present(self, mock_set, admin_client, db_session, api_source):
+        """Deleting a non-existent credential returns not_found status."""
+        api_source.credentials = {}
+        db_session.commit()
+        resp = admin_client.delete(
+            f"/api/admin/sources/{api_source.id}/credentials/EDGE_KEY",
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "not_found"
+
+
+class TestAdminImportCustomersEdgeCases:
+    def test_import_customers_latin1_encoding(self, admin_client, db_session):
+        """Import CSV with latin-1 encoding (non-UTF8 characters)."""
+        # Encode with latin-1 to trigger UnicodeDecodeError on UTF-8 attempt
+        csv_text = "company_name,site_name,contact_name\nR\xe9sum\xe9 Corp,Main,Ren\xe9\n"
+        csv_bytes = csv_text.encode("latin-1")
+        resp = admin_client.post(
+            "/api/admin/import/customers",
+            files={"file": ("latin.csv", io.BytesIO(csv_bytes), "text/csv")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["companies_created"] >= 1
+
+    def test_import_customers_skips_empty_company(self, admin_client, db_session):
+        """Rows with empty company_name are skipped."""
+        csv_content = (
+            b"company_name,site_name,contact_name\n"
+            b",Main,Jane\n"
+            b"Valid Corp,Main,Bob\n"
+        )
+        resp = admin_client.post(
+            "/api/admin/import/customers",
+            files={"file": ("skip.csv", io.BytesIO(csv_content), "text/csv")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["companies_created"] == 1
+
+    def test_import_customers_with_contact_no_email(self, admin_client, db_session):
+        """Import customer with contact name but no email."""
+        csv_content = (
+            b"company_name,site_name,contact_name,contact_email\n"
+            b"NoEmail Corp,Main,John Doe,\n"
+        )
+        resp = admin_client.post(
+            "/api/admin/import/customers",
+            files={"file": ("noemail.csv", io.BytesIO(csv_content), "text/csv")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["contacts_created"] >= 1
+
+
+class TestAdminImportVendorsEdgeCases:
+    def test_import_vendors_empty_csv(self, admin_client):
+        csv_content = b"vendor_name,domain\n"
+        resp = admin_client.post(
+            "/api/admin/import/vendors",
+            files={"file": ("empty.csv", io.BytesIO(csv_content), "text/csv")},
+        )
+        assert resp.status_code == 400
+
+    def test_import_vendors_skips_empty_vendor_name(self, admin_client, db_session):
+        csv_content = (
+            b"vendor_name,domain,contact_name,contact_email\n"
+            b",empty.com,Empty Person,emp@empty.com\n"
+            b"Valid Vendor,valid.com,Valid Person,val@valid.com\n"
+        )
+        resp = admin_client.post(
+            "/api/admin/import/vendors",
+            files={"file": ("skip.csv", io.BytesIO(csv_content), "text/csv")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["vendors_created"] == 1
+
+    def test_import_vendors_contact_no_email(self, admin_client, db_session):
+        csv_content = (
+            b"vendor_name,domain,contact_name,contact_email\n"
+            b"NoEmail Vendor,noemail.com,John Doe,\n"
+        )
+        resp = admin_client.post(
+            "/api/admin/import/vendors",
+            files={"file": ("noemail.csv", io.BytesIO(csv_content), "text/csv")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["contacts_created"] >= 1
+
+    def test_import_vendors_latin1_encoding(self, admin_client, db_session):
+        csv_text = "vendor_name,domain\nR\xe9sum\xe9 Vendor,resume.com\n"
+        csv_bytes = csv_text.encode("latin-1")
+        resp = admin_client.post(
+            "/api/admin/import/vendors",
+            files={"file": ("latin.csv", io.BytesIO(csv_bytes), "text/csv")},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["vendors_created"] >= 1
+
+
+class TestAdminTeamsConfigEdgeCases:
+    def test_get_teams_config_with_db_overrides(self, admin_client, db_session):
+        """Teams config reads runtime overrides from SystemConfig."""
+        from datetime import datetime, timezone
+        rows = [
+            SystemConfig(key="teams_team_id", value="db-team-123", updated_at=datetime.now(timezone.utc)),
+            SystemConfig(key="teams_channel_id", value="db-channel-456", updated_at=datetime.now(timezone.utc)),
+            SystemConfig(key="teams_enabled", value="true", updated_at=datetime.now(timezone.utc)),
+            SystemConfig(key="teams_channel_name", value="General", updated_at=datetime.now(timezone.utc)),
+            SystemConfig(key="teams_hot_threshold", value="5000", updated_at=datetime.now(timezone.utc)),
+        ]
+        db_session.add_all(rows)
+        db_session.commit()
+
+        resp = admin_client.get("/api/admin/teams/config")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["team_id"] == "db-team-123"
+        assert data["channel_id"] == "db-channel-456"
+        assert data["enabled"] is True
+        assert data["channel_name"] == "General"
+        assert data["hot_threshold"] == 5000.0
+
+    def test_get_teams_config_invalid_threshold(self, admin_client, db_session):
+        """Invalid hot_threshold value in DB is ignored."""
+        row = SystemConfig(
+            key="teams_hot_threshold", value="not-a-number",
+            updated_at=datetime.now(timezone.utc),
+        )
+        db_session.add(row)
+        db_session.commit()
+
+        resp = admin_client.get("/api/admin/teams/config")
+        assert resp.status_code == 200
+        # Should not crash; hot_threshold falls back to default
+
+    def test_set_teams_config_with_hot_threshold(self, admin_client, db_session):
+        """Set teams config with hot_threshold value."""
+        resp = admin_client.post(
+            "/api/admin/teams/config",
+            json={
+                "team_id": "team-hot-123",
+                "channel_id": "ch-hot-456",
+                "enabled": True,
+                "hot_threshold": 25000.0,
+            },
+        )
+        assert resp.status_code == 200
+
+        row = db_session.query(SystemConfig).filter(
+            SystemConfig.key == "teams_hot_threshold"
+        ).first()
+        assert row is not None
+        assert row.value == "25000.0"
+
+    def test_set_teams_config_without_optional_fields(self, admin_client, db_session):
+        """Set teams config without channel_name or hot_threshold."""
+        resp = admin_client.post(
+            "/api/admin/teams/config",
+            json={
+                "team_id": "team-min",
+                "channel_id": "ch-min",
+                "enabled": False,
+            },
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "saved"

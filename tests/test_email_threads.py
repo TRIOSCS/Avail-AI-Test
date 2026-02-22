@@ -848,3 +848,337 @@ class TestFetchThreadsForRequirementTiers:
             )
 
         assert isinstance(threads, list)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _detect_needs_response edge cases
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestDetectNeedsResponseEdgeCases:
+    def test_invalid_date_format_returns_true(self):
+        """Invalid date string in receivedDateTime triggers needs_response=True."""
+        messages = [
+            {
+                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
+                "receivedDateTime": "not-a-valid-date",
+            }
+        ]
+        assert _detect_needs_response(messages) is True
+
+    def test_date_with_z_suffix(self):
+        """Date with Z suffix is correctly parsed (recent = no response needed)."""
+        now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        messages = [
+            {
+                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
+                "receivedDateTime": now_iso,
+            }
+        ]
+        assert _detect_needs_response(messages) is False
+
+    def test_vendor_message_23h_ago_no_response_needed(self):
+        """Message received 23h ago — within 24h window, no response needed."""
+        dt = (datetime.now(timezone.utc) - timedelta(hours=23)).isoformat()
+        messages = [
+            {
+                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
+                "receivedDateTime": dt,
+            }
+        ]
+        assert _detect_needs_response(messages) is False
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _extract_participants edge cases
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestExtractParticipantsEdgeCases:
+    def test_deduplicates_addresses(self):
+        from app.services.email_threads import _extract_participants
+
+        messages = [
+            {
+                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
+                "toRecipients": [{"emailAddress": {"address": "vendor@arrow.com"}}],
+            },
+            {
+                "from": {"emailAddress": {"address": "Vendor@Arrow.COM"}},
+                "toRecipients": [],
+            },
+        ]
+        result = _extract_participants(messages)
+        # Same email in different cases should be deduped
+        assert result.count("vendor@arrow.com") == 1
+
+    def test_trioscs_excluded(self):
+        from app.services.email_threads import _extract_participants
+
+        messages = [
+            {
+                "from": {"emailAddress": {"address": "buyer@trioscs.com"}},
+                "toRecipients": [
+                    {"emailAddress": {"address": "vendor@arrow.com"}},
+                    {"emailAddress": {"address": "manager@trioscs.com"}},
+                ],
+            },
+        ]
+        result = _extract_participants(messages)
+        assert "vendor@arrow.com" in result
+        assert "buyer@trioscs.com" not in result
+        assert "manager@trioscs.com" not in result
+
+    def test_empty_address_fields(self):
+        from app.services.email_threads import _extract_participants
+
+        messages = [
+            {
+                "from": {"emailAddress": {"address": ""}},
+                "toRecipients": [{"emailAddress": {"address": ""}}],
+            },
+            {
+                "from": {},
+                "toRecipients": [{"emailAddress": {}}],
+            },
+        ]
+        result = _extract_participants(messages)
+        assert result == []
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _message_to_dict edge cases
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestMessageToDict:
+    def test_full_message(self):
+        from app.services.email_threads import _message_to_dict
+
+        msg = {
+            "id": "msg-123",
+            "from": {"emailAddress": {"address": "vendor@arrow.com", "name": "Arrow Sales"}},
+            "toRecipients": [
+                {"emailAddress": {"address": "buyer@trioscs.com"}},
+                {"emailAddress": {"address": ""}},
+            ],
+            "subject": "RFQ Reply",
+            "bodyPreview": "We have stock",
+            "receivedDateTime": "2025-01-15T10:00:00Z",
+        }
+        result = _message_to_dict(msg)
+        assert result["id"] == "msg-123"
+        assert result["from_name"] == "Arrow Sales"
+        assert result["from_email"] == "vendor@arrow.com"
+        assert result["subject"] == "RFQ Reply"
+        assert result["direction"] == "received"
+        # Empty addresses are filtered out
+        assert len(result["to"]) == 1
+        assert result["to"][0] == "buyer@trioscs.com"
+
+    def test_minimal_message(self):
+        from app.services.email_threads import _message_to_dict
+
+        msg = {}
+        result = _message_to_dict(msg)
+        assert result["id"] == ""
+        assert result["from_name"] == ""
+        assert result["from_email"] == ""
+        assert result["to"] == []
+        assert result["subject"] == ""
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  fetch_threads_for_vendor — additional edge cases
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestFetchThreadsForVendorEdgeCases:
+    @pytest.mark.asyncio
+    async def test_vendor_not_found(self, db_session, test_user):
+        """Non-existent vendor returns empty list."""
+        clear_cache()
+        result = await fetch_threads_for_vendor(
+            99999, "fake-token", db_session, user_id=test_user.id
+        )
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_vendor_no_domains(self, db_session, test_user):
+        """Vendor with no domains returns empty list."""
+        clear_cache()
+        card = VendorCard(
+            normalized_name="no domains vendor",
+            display_name="No Domains Vendor",
+            domain=None,
+            domain_aliases=None,
+            emails=None,
+        )
+        db_session.add(card)
+        db_session.commit()
+
+        result = await fetch_threads_for_vendor(
+            card.id, "fake-token", db_session, user_id=test_user.id
+        )
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_vendor_with_domains_fetches_threads(self, db_session, test_user):
+        """Vendor with domain fetches email threads from Graph."""
+        clear_cache()
+        card = VendorCard(
+            normalized_name="arrow electronics",
+            display_name="Arrow Electronics",
+            domain="arrow.com",
+        )
+        db_session.add(card)
+        db_session.commit()
+
+        mock_msgs = [
+            {
+                "id": "msg-v1",
+                "subject": "RFQ for LM317T",
+                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
+                "toRecipients": [{"emailAddress": {"address": "buyer@trioscs.com"}}],
+                "bodyPreview": "Here is our quote",
+                "receivedDateTime": "2025-01-15T10:00:00Z",
+                "conversationId": "conv-vendor-1",
+            }
+        ]
+
+        with patch("app.services.email_threads.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.get_all_pages = AsyncMock(return_value=mock_msgs)
+
+            result = await fetch_threads_for_vendor(
+                card.id, "fake-token", db_session, user_id=test_user.id
+            )
+
+        assert len(result) == 1
+        assert result[0]["conversation_id"] == "conv-vendor-1"
+        assert result[0]["matched_via"] == "vendor_domain"
+
+    @pytest.mark.asyncio
+    async def test_vendor_cache_hit(self, db_session, test_user):
+        """Second call for same vendor returns cached result."""
+        clear_cache()
+        card = VendorCard(
+            normalized_name="cached vendor",
+            display_name="Cached Vendor",
+            domain="cached.com",
+        )
+        db_session.add(card)
+        db_session.commit()
+
+        mock_msgs = [
+            {
+                "id": "msg-c1",
+                "subject": "Quote",
+                "from": {"emailAddress": {"address": "rep@cached.com"}},
+                "toRecipients": [{"emailAddress": {"address": "buyer@trioscs.com"}}],
+                "bodyPreview": "Cached test",
+                "receivedDateTime": "2025-01-15T10:00:00Z",
+                "conversationId": "conv-cached-1",
+            }
+        ]
+
+        with patch("app.services.email_threads.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.get_all_pages = AsyncMock(return_value=mock_msgs)
+
+            result1 = await fetch_threads_for_vendor(
+                card.id, "fake-token", db_session, user_id=test_user.id
+            )
+            # Second call should use cache
+            result2 = await fetch_threads_for_vendor(
+                card.id, "fake-token", db_session, user_id=test_user.id
+            )
+
+        assert result1 == result2
+        # Graph API should only be called once (second call is cached)
+        assert instance.get_all_pages.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_vendor_domains_from_contacts_and_emails(self, db_session, test_user):
+        """Domains collected from vendor contacts and vendor.emails list."""
+        clear_cache()
+        card = VendorCard(
+            normalized_name="multi domain vendor",
+            display_name="Multi Domain",
+            domain=None,
+            emails=["sales@domainA.com", "support@domainB.com"],
+        )
+        db_session.add(card)
+        db_session.flush()
+
+        vc = VendorContact(
+            vendor_card_id=card.id,
+            email="rep@domainC.com",
+            full_name="Rep",
+            source="manual",
+        )
+        db_session.add(vc)
+        db_session.commit()
+
+        with patch("app.services.email_threads.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.get_all_pages = AsyncMock(return_value=[])
+
+            result = await fetch_threads_for_vendor(
+                card.id, "fake-token", db_session, user_id=test_user.id
+            )
+
+        assert result == []
+        # At least 3 domain searches should have been made (domainA, domainB, domainC)
+        assert instance.get_all_pages.call_count >= 3
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  fetch_thread_messages — additional edge cases
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestFetchThreadMessagesEdgeCases:
+    @pytest.mark.asyncio
+    async def test_fetch_messages_success(self):
+        """Fetches and converts messages, filtering internal ones."""
+        mock_msgs = [
+            {
+                "id": "msg-1",
+                "subject": "RFQ",
+                "from": {"emailAddress": {"address": "vendor@arrow.com", "name": "Vendor"}},
+                "toRecipients": [{"emailAddress": {"address": "buyer@trioscs.com"}}],
+                "bodyPreview": "Quote attached",
+                "receivedDateTime": "2025-01-15T10:00:00Z",
+            },
+            {
+                "id": "msg-2",
+                "subject": "Internal FYI",
+                "from": {"emailAddress": {"address": "manager@trioscs.com"}},
+                "toRecipients": [{"emailAddress": {"address": "buyer@trioscs.com"}}],
+                "bodyPreview": "Internal note",
+                "receivedDateTime": "2025-01-15T11:00:00Z",
+            },
+        ]
+
+        with patch("app.services.email_threads.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.get_all_pages = AsyncMock(return_value=mock_msgs)
+
+            result = await fetch_thread_messages("conv-123", "fake-token")
+
+        # Internal message (msg-2) should be filtered out
+        assert len(result) == 1
+        assert result[0]["from_email"] == "vendor@arrow.com"
+        assert result[0]["direction"] == "received"
+
+    @pytest.mark.asyncio
+    async def test_fetch_messages_graph_error(self):
+        """Graph error returns empty list."""
+        with patch("app.services.email_threads.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.get_all_pages = AsyncMock(side_effect=Exception("Graph down"))
+
+            result = await fetch_thread_messages("conv-err", "fake-token")
+
+        assert result == []

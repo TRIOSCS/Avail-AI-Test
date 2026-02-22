@@ -377,3 +377,102 @@ def test_normalize_parts_endpoint_ai_disabled(client):
             json={"parts": ["LM358DR"]},
         )
     assert resp.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _call_normalizer — dict-with-key response formats
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestCallNormalizerResponseFormats:
+    """Tests for _call_normalizer handling various response formats."""
+
+    @pytest.mark.asyncio
+    async def test_dict_with_results_key(self):
+        """Response as dict with 'results' key extracts the list."""
+        from app.services.ai_part_normalizer import _call_normalizer
+
+        mock_response = {
+            "results": [
+                {"original": "LM317T", "normalized": "LM317T", "confidence": 0.95}
+            ]
+        }
+        with patch(
+            "app.services.ai_part_normalizer.gradient_json",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await _call_normalizer(["LM317T"])
+
+        assert result is not None
+        assert len(result) == 1
+        assert result[0]["normalized"] == "LM317T"
+
+    @pytest.mark.asyncio
+    async def test_dict_with_normalized_key(self):
+        """Response as dict with 'normalized' key extracts the list."""
+        from app.services.ai_part_normalizer import _call_normalizer
+
+        mock_response = {
+            "normalized": [
+                {"original": "LM358DR", "normalized": "LM358DR", "confidence": 0.9}
+            ]
+        }
+        with patch(
+            "app.services.ai_part_normalizer.gradient_json",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await _call_normalizer(["LM358DR"])
+
+        assert result is not None
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_dict_with_parts_key(self):
+        """Response as dict with 'parts' key extracts the list."""
+        from app.services.ai_part_normalizer import _call_normalizer
+
+        mock_response = {
+            "parts": [
+                {"original": "NE555P", "normalized": "NE555P", "confidence": 0.85}
+            ]
+        }
+        with patch(
+            "app.services.ai_part_normalizer.gradient_json",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await _call_normalizer(["NE555P"])
+
+        assert result is not None
+        assert len(result) == 1
+
+    @pytest.mark.asyncio
+    async def test_unexpected_format_returns_none(self):
+        """Dict without recognized keys returns None and logs warning."""
+        from app.services.ai_part_normalizer import _call_normalizer
+
+        mock_response = {"unexpected_key": "data"}
+        with patch(
+            "app.services.ai_part_normalizer.gradient_json",
+            new_callable=AsyncMock,
+            return_value=mock_response,
+        ):
+            result = await _call_normalizer(["SOME-PART"])
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_string_response_returns_none(self):
+        """Non-dict, non-list response returns None."""
+        from app.services.ai_part_normalizer import _call_normalizer
+
+        with patch(
+            "app.services.ai_part_normalizer.gradient_json",
+            new_callable=AsyncMock,
+            return_value="just a string",
+        ):
+            result = await _call_normalizer(["SOME-PART"])
+
+        assert result is None

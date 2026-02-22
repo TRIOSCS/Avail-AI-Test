@@ -272,3 +272,210 @@ class TestParseVendorResponse:
             )
 
         assert result["parts"][0]["mpn_matches_rfq"] is True
+
+    @pytest.mark.asyncio
+    async def test_rfq_context_as_list(self):
+        """rfq_context as a list builds multi-part context string."""
+        from app.services.response_parser import parse_vendor_response
+
+        mock_result = {
+            "overall_sentiment": "positive",
+            "overall_classification": "quote_provided",
+            "confidence": 0.9,
+            "parts": [{"mpn": "LM317T", "status": "quoted", "unit_price": 0.5}],
+        }
+
+        with patch(
+            "app.services.response_parser.claude_structured",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ) as mock_claude:
+            result = await parse_vendor_response(
+                email_body="Quote attached",
+                email_subject="RE: RFQ",
+                vendor_name="Arrow",
+                rfq_context=[
+                    {"mpn": "LM317T", "qty": 500},
+                    {"mpn": "LM7805", "qty": 1000},
+                ],
+            )
+
+        # Verify the prompt contains parts list from rfq_context
+        prompt_arg = mock_claude.call_args[1]["prompt"]
+        assert "LM317T" in prompt_arg
+        assert "LM7805" in prompt_arg
+        assert result is not None
+
+    @pytest.mark.asyncio
+    async def test_extended_thinking_retry_upgrades_confidence(self):
+        """Ambiguous confidence triggers retry with smart model; higher confidence wins."""
+        from app.services.response_parser import parse_vendor_response
+
+        first_result = {
+            "overall_sentiment": "neutral",
+            "overall_classification": "clarification_needed",
+            "confidence": 0.65,  # In review band [0.5, 0.8)
+            "parts": [{"mpn": "LM317T", "status": "follow_up"}],
+        }
+        retry_result = {
+            "overall_sentiment": "positive",
+            "overall_classification": "quote_provided",
+            "confidence": 0.88,  # Higher confidence
+            "parts": [{"mpn": "LM317T", "status": "quoted", "unit_price": 0.75}],
+        }
+
+        call_count = 0
+
+        async def mock_claude_structured(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return first_result
+            return retry_result
+
+        with patch(
+            "app.services.response_parser.claude_structured",
+            side_effect=mock_claude_structured,
+        ):
+            result = await parse_vendor_response(
+                email_body="We can offer LM317T",
+                email_subject="RE: RFQ",
+                vendor_name="Arrow",
+            )
+
+        assert call_count == 2  # First call + retry
+        assert result["confidence"] == 0.88  # Retry result used
+        assert result["overall_classification"] == "quote_provided"
+
+    @pytest.mark.asyncio
+    async def test_extended_thinking_retry_keeps_original_if_no_improvement(self):
+        """Retry that doesn't improve confidence keeps original result."""
+        from app.services.response_parser import parse_vendor_response
+
+        first_result = {
+            "overall_sentiment": "neutral",
+            "overall_classification": "clarification_needed",
+            "confidence": 0.65,
+            "parts": [{"mpn": "X", "status": "follow_up"}],
+        }
+        retry_result = {
+            "overall_sentiment": "neutral",
+            "overall_classification": "clarification_needed",
+            "confidence": 0.55,  # Lower confidence than first
+            "parts": [{"mpn": "X", "status": "follow_up"}],
+        }
+
+        call_count = 0
+
+        async def mock_claude_structured(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return first_result
+            return retry_result
+
+        with patch(
+            "app.services.response_parser.claude_structured",
+            side_effect=mock_claude_structured,
+        ):
+            result = await parse_vendor_response(
+                email_body="Unclear response",
+                email_subject="RE: RFQ",
+                vendor_name="Vendor",
+            )
+
+        assert call_count == 2
+        assert result["confidence"] == 0.65  # Original kept
+
+    @pytest.mark.asyncio
+    async def test_extended_thinking_retry_returns_none(self):
+        """Retry returning None keeps original result."""
+        from app.services.response_parser import parse_vendor_response
+
+        first_result = {
+            "overall_sentiment": "neutral",
+            "overall_classification": "clarification_needed",
+            "confidence": 0.6,
+            "parts": [],
+        }
+
+        call_count = 0
+
+        async def mock_claude_structured(**kwargs):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return first_result
+            return None  # Retry fails
+
+        with patch(
+            "app.services.response_parser.claude_structured",
+            side_effect=mock_claude_structured,
+        ):
+            result = await parse_vendor_response(
+                email_body="Hmm",
+                email_subject="RE: RFQ",
+                vendor_name="V",
+            )
+
+        assert result["confidence"] == 0.6
+
+
+# ── Normalization edge cases ──────────────────────────────────────
+
+
+class TestNormalizeParsedPartsEdgeCases:
+    def test_parts_as_json_string(self):
+        """Claude batch API sometimes returns parts as a JSON string."""
+        result = {"parts": '[{"mpn": "LM317T", "status": "quoted", "unit_price": 0.5}]'}
+        _normalize_parsed_parts(result)
+        assert isinstance(result["parts"], list)
+        assert len(result["parts"]) == 1
+        assert result["parts"][0]["mpn"] == "LM317T"
+
+    def test_parts_as_invalid_json_string(self):
+        """Invalid JSON string in parts -> parts set to empty list."""
+        result = {"parts": "not valid json at all"}
+        _normalize_parsed_parts(result)
+        assert result["parts"] == []
+
+    def test_non_dict_items_skipped(self):
+        """Non-dict items in parts list are skipped without error."""
+        result = {
+            "parts": [
+                {"mpn": "LM317T", "status": "quoted", "unit_price": 0.5},
+                "not a dict",
+                42,
+                None,
+                {"mpn": "LM7805", "status": "quoted"},
+            ]
+        }
+        _normalize_parsed_parts(result)
+        # Should process the 2 dicts and skip the 3 non-dicts
+        assert result["parts"][0]["currency"] == "USD"
+        assert result["parts"][-1]["currency"] == "USD"
+
+    def test_all_normalization_fields(self):
+        """Exercise all normalization branches: lead_time, condition, date_code, moq, packaging, currency."""
+        result = {
+            "parts": [
+                {
+                    "mpn": "LM317T",
+                    "status": "quoted",
+                    "unit_price": 1.0,
+                    "qty_available": 5000,
+                    "lead_time": "2 weeks",
+                    "condition": "New",
+                    "date_code": "2525",
+                    "moq": 100,
+                    "packaging": "Reel",
+                    "currency": "EUR",
+                }
+            ]
+        }
+        _normalize_parsed_parts(result)
+        part = result["parts"][0]
+        assert "lead_time_days" in part
+        assert "condition_normalized" in part
+        assert "packaging_normalized" in part
+        assert part["currency"] == "EUR"

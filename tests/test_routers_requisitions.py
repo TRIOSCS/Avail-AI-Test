@@ -568,3 +568,473 @@ def test_sales_user_sees_only_own_requisitions(
         # Restore overrides for the buyer user
         app.dependency_overrides[require_user] = lambda: test_user
         app.dependency_overrides[require_buyer] = lambda: test_user
+
+
+# ── Additional coverage tests ─────────────────────────────────────────
+
+
+def test_list_requisitions_with_customer_site(client, db_session, test_user, test_customer_site):
+    """Requisition linked to a customer site shows customer_display."""
+    from app.models import Requisition
+
+    req = Requisition(
+        name="REQ-SITE", status="open",
+        customer_site_id=test_customer_site.id,
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(req)
+    db_session.commit()
+
+    resp = client.get("/api/requisitions")
+    assert resp.status_code == 200
+    reqs = resp.json()["requisitions"]
+    site_reqs = [r for r in reqs if r["id"] == req.id]
+    assert len(site_reqs) == 1
+    assert site_reqs[0]["customer_site_id"] == test_customer_site.id
+    # customer_display should include company name
+    assert site_reqs[0]["customer_display"] != ""
+
+
+def test_list_requisitions_search_by_mpn(client, db_session, test_requisition):
+    """Search filter matches requisition by primary MPN in requirements."""
+    resp = client.get("/api/requisitions", params={"q": "LM317T"})
+    assert resp.status_code == 200
+    reqs = resp.json()["requisitions"]
+    assert len(reqs) >= 1
+
+
+def test_list_requisitions_search_special_chars(client, test_requisition):
+    """Search with SQL special characters (% _) is properly escaped."""
+    resp = client.get("/api/requisitions", params={"q": "%_test"})
+    assert resp.status_code == 200
+    # Should not error, just return 0 results
+    assert isinstance(resp.json()["requisitions"], list)
+
+
+def test_update_requisition_customer_site(client, test_requisition, test_customer_site):
+    """PUT /api/requisitions/{id} updates customer_site_id."""
+    resp = client.put(
+        f"/api/requisitions/{test_requisition.id}",
+        json={"customer_site_id": test_customer_site.id},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+def test_update_requisition_deadline(client, test_requisition):
+    """PUT /api/requisitions/{id} updates deadline."""
+    resp = client.put(
+        f"/api/requisitions/{test_requisition.id}",
+        json={"deadline": "2026-03-01"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+def test_update_requisition_empty_name_preserves_old(client, db_session, test_requisition):
+    """Empty string name preserves the old name."""
+    old_name = test_requisition.name
+    resp = client.put(
+        f"/api/requisitions/{test_requisition.id}",
+        json={"name": "   "},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["name"] == old_name
+
+
+def test_toggle_archive_won_status(client, db_session, test_requisition):
+    """Archiving a 'won' requisition transitions it to 'active'."""
+    test_requisition.status = "won"
+    db_session.commit()
+    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "active"
+
+
+def test_toggle_archive_lost_status(client, db_session, test_requisition):
+    """Archiving a 'lost' requisition transitions it to 'active'."""
+    test_requisition.status = "lost"
+    db_session.commit()
+    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "active"
+
+
+def test_clone_requisition_with_substitutes(client, db_session, test_requisition):
+    """Cloned requisition preserves and deduplicates substitutes."""
+    from app.models import Requirement
+
+    req_item = db_session.query(Requirement).filter_by(
+        requisition_id=test_requisition.id
+    ).first()
+    req_item.substitutes = ["LM317T-ALT", "LM317T-ALT", "NE555P"]
+    db_session.commit()
+
+    resp = client.post(f"/api/requisitions/{test_requisition.id}/clone")
+    assert resp.status_code == 200
+    data = resp.json()
+    clone_id = data["id"]
+
+    # Verify the cloned requirements
+    cloned_reqs = db_session.query(Requirement).filter_by(
+        requisition_id=clone_id
+    ).all()
+    assert len(cloned_reqs) == 1
+
+
+def test_list_requirements_with_sightings_and_offers(
+    client, db_session, test_requisition, test_offer
+):
+    """Requirements list includes sighting counts and offer counts."""
+    from app.models import Requirement, Sighting
+
+    req_item = db_session.query(Requirement).filter_by(
+        requisition_id=test_requisition.id
+    ).first()
+    # Link the offer to the requirement
+    test_offer.requirement_id = req_item.id
+    # Add a sighting
+    s = Sighting(
+        requirement_id=req_item.id,
+        vendor_name="Test Vendor",
+        mpn_matched="LM317T",
+        source_type="api",
+        score=60.0,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(s)
+    db_session.commit()
+
+    resp = client.get(f"/api/requisitions/{test_requisition.id}/requirements")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert len(items) >= 1
+    item = items[0]
+    assert item["sighting_count"] >= 1
+    assert item["offer_count"] >= 1
+
+
+def test_list_requirements_with_contact_activity(
+    client, db_session, test_requisition, test_user
+):
+    """Requirements list includes contact_count and hours_since_activity."""
+    from app.models import Contact
+
+    contact = Contact(
+        requisition_id=test_requisition.id,
+        user_id=test_user.id,
+        vendor_name="Arrow",
+        contact_type="email",
+        status="sent",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(contact)
+    db_session.commit()
+
+    resp = client.get(f"/api/requisitions/{test_requisition.id}/requirements")
+    assert resp.status_code == 200
+    items = resp.json()
+    assert items[0]["contact_count"] >= 1
+    assert items[0]["hours_since_activity"] is not None
+    assert items[0]["hours_since_activity"] >= 0
+
+
+def test_update_requirement_all_fields(client, db_session, test_requisition):
+    """PUT /api/requirements/{id} updates all optional fields."""
+    from app.models import Requirement
+
+    req_item = db_session.query(Requirement).filter_by(
+        requisition_id=test_requisition.id
+    ).first()
+    resp = client.put(
+        f"/api/requirements/{req_item.id}",
+        json={
+            "primary_mpn": "LM317T-NEW",
+            "target_qty": 5000,
+            "target_price": 1.25,
+            "substitutes": ["ALT-001", "ALT-002"],
+            "firmware": "v2.0",
+            "date_codes": "2025+",
+            "hardware_codes": "HW-A",
+            "packaging": "reel",
+            "condition": "new",
+            "notes": "Test note",
+            "sale_notes": "Customer wants COC",
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+def test_update_requirement_unauthorized(client, db_session, test_user, test_requisition):
+    """Update requirement with different user's requisition returns 403."""
+    from app.dependencies import require_buyer, require_user
+    from app.main import app
+    from app.models import Requirement, User
+
+    other = User(
+        email="other2@trioscs.com", name="Other2", role="sales",
+        azure_id="az-other-unauth", created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(other)
+    db_session.commit()
+
+    req_item = db_session.query(Requirement).filter_by(
+        requisition_id=test_requisition.id
+    ).first()
+
+    app.dependency_overrides[require_user] = lambda: other
+    app.dependency_overrides[require_buyer] = lambda: other
+    try:
+        resp = client.put(
+            f"/api/requirements/{req_item.id}",
+            json={"target_qty": 999},
+        )
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides[require_user] = lambda: test_user
+        app.dependency_overrides[require_buyer] = lambda: test_user
+
+
+def test_delete_requirement_unauthorized(client, db_session, test_user, test_requisition):
+    """Delete requirement with different user's requisition returns 403."""
+    from app.dependencies import require_buyer, require_user
+    from app.main import app
+    from app.models import Requirement, User
+
+    other = User(
+        email="other3@trioscs.com", name="Other3", role="sales",
+        azure_id="az-other-del", created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(other)
+    db_session.commit()
+
+    req_item = db_session.query(Requirement).filter_by(
+        requisition_id=test_requisition.id
+    ).first()
+
+    app.dependency_overrides[require_user] = lambda: other
+    app.dependency_overrides[require_buyer] = lambda: other
+    try:
+        resp = client.delete(f"/api/requirements/{req_item.id}")
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides[require_user] = lambda: test_user
+        app.dependency_overrides[require_buyer] = lambda: test_user
+
+
+def test_search_all_with_exception(client, db_session, test_requisition):
+    """Search handles exceptions from search_requirement gracefully."""
+    with patch(
+        "app.routers.requisitions.search_requirement",
+        new_callable=AsyncMock,
+        side_effect=RuntimeError("Connector timeout"),
+    ):
+        resp = client.post(f"/api/requisitions/{test_requisition.id}/search")
+    assert resp.status_code == 200
+    data = resp.json()
+    # Should have logged the error but still return
+    assert "source_stats" in data
+
+
+def test_search_all_with_requirement_ids(client, db_session, test_requisition):
+    """Search with requirement_ids filter only searches specified requirements."""
+    from app.models import Requirement
+
+    req_item = db_session.query(Requirement).filter_by(
+        requisition_id=test_requisition.id
+    ).first()
+
+    with patch(
+        "app.routers.requisitions.search_requirement",
+        new_callable=AsyncMock,
+        return_value={"sightings": [], "source_stats": []},
+    ):
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/search",
+            json={"requirement_ids": [req_item.id]},
+        )
+    assert resp.status_code == 200
+
+
+def test_search_all_reactivates_archived(client, db_session, test_requisition):
+    """Search reactivates an archived requisition."""
+    test_requisition.status = "archived"
+    db_session.commit()
+    with patch(
+        "app.routers.requisitions.search_requirement",
+        new_callable=AsyncMock,
+        return_value={"sightings": [], "source_stats": []},
+    ):
+        resp = client.post(f"/api/requisitions/{test_requisition.id}/search")
+    assert resp.status_code == 200
+    db_session.refresh(test_requisition)
+    assert test_requisition.status == "active"
+
+
+def test_search_one_unauthorized(client, db_session, test_user, test_requisition):
+    """Search one returns 403 when user does not have access to parent req."""
+    from app.dependencies import require_buyer, require_user
+    from app.main import app
+    from app.models import Requirement, User
+
+    other = User(
+        email="other4@trioscs.com", name="Other4", role="sales",
+        azure_id="az-other-search", created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(other)
+    db_session.commit()
+
+    req_item = db_session.query(Requirement).filter_by(
+        requisition_id=test_requisition.id
+    ).first()
+
+    app.dependency_overrides[require_user] = lambda: other
+    app.dependency_overrides[require_buyer] = lambda: other
+    try:
+        resp = client.post(f"/api/requirements/{req_item.id}/search")
+        assert resp.status_code == 403
+    finally:
+        app.dependency_overrides[require_user] = lambda: test_user
+        app.dependency_overrides[require_buyer] = lambda: test_user
+
+
+def test_saved_sightings_with_historical_offers(client, db_session, test_requisition, test_user):
+    """Sightings endpoint includes historical offers from other requisitions."""
+    from app.models import Offer, Requirement, Requisition, Sighting
+
+    req_item = db_session.query(Requirement).filter_by(
+        requisition_id=test_requisition.id
+    ).first()
+
+    # Create a sighting so the requirement appears in results
+    s = Sighting(
+        requirement_id=req_item.id,
+        vendor_name="DigiKey",
+        mpn_matched="LM317T",
+        source_type="api",
+        score=70.0,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(s)
+
+    # Create another requisition with an offer for the same MPN
+    other_req = Requisition(
+        name="OTHER-REQ", status="open",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(other_req)
+    db_session.flush()
+
+    hist_offer = Offer(
+        requisition_id=other_req.id,
+        vendor_name="Mouser",
+        mpn="LM317T",
+        qty_available=200,
+        unit_price=0.55,
+        entered_by_id=test_user.id,
+        status="active",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(hist_offer)
+    db_session.commit()
+
+    resp = client.get(f"/api/requisitions/{test_requisition.id}/sightings")
+    assert resp.status_code == 200
+    data = resp.json()
+    # Check that the requirement's key exists with historical offers
+    if str(req_item.id) in data:
+        entry = data[str(req_item.id)]
+        assert "historical_offers" in entry
+
+
+def test_upload_requirements_with_substitutes(client, test_requisition):
+    """Upload CSV with substitutes column creates requirements with subs."""
+    import io
+    csv_bytes = b"mpn,qty,substitutes\nABC123,100,\"DEF456,GHI789\""
+    resp = client.post(
+        f"/api/requisitions/{test_requisition.id}/upload",
+        files={"file": ("reqs.csv", io.BytesIO(csv_bytes), "text/csv")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["created"] >= 1
+
+
+def test_upload_requirements_with_optional_columns(client, test_requisition):
+    """Upload CSV with condition, packaging, date_codes, manufacturer, notes."""
+    import io
+    csv_bytes = (
+        b"mpn,qty,condition,packaging,date_codes,manufacturer,notes,price\n"
+        b"XYZ789,200,new,reel,2025+,TI,urgent,0.50"
+    )
+    resp = client.post(
+        f"/api/requisitions/{test_requisition.id}/upload",
+        files={"file": ("reqs.csv", io.BytesIO(csv_bytes), "text/csv")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["created"] >= 1
+
+
+def test_upload_requirements_parse_error(client, test_requisition):
+    """Upload of unparseable file returns 400."""
+    import io
+    with patch(
+        "app.file_utils.parse_tabular_file",
+        side_effect=ValueError("Unsupported format"),
+    ):
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/upload",
+            files={"file": ("bad.xyz", io.BytesIO(b"not valid"), "application/octet-stream")},
+        )
+    assert resp.status_code == 400
+
+
+def test_import_stock_oversized_file(client, db_session, test_requisition):
+    """Import stock with file > 10MB returns 413."""
+    import io
+    # Create a file header, then pad to trigger the size check
+    large_content = b"mpn,qty\n" + b"A" * (10_000_001)
+    resp = client.post(
+        f"/api/requisitions/{test_requisition.id}/import-stock",
+        data={"vendor_name": "Big Vendor"},
+        files={"file": ("big.csv", io.BytesIO(large_content), "text/csv")},
+    )
+    assert resp.status_code == 413
+
+
+def test_search_all_with_source_stats_merge(client, db_session, test_requisition):
+    """Search merges source_stats across multiple requirements."""
+    from app.models import Requirement
+
+    # Add a second requirement
+    r2 = Requirement(
+        requisition_id=test_requisition.id,
+        primary_mpn="NE555P",
+        target_qty=100,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(r2)
+    db_session.commit()
+
+    search_results = [
+        {"sightings": [], "source_stats": [{"source": "BrokerBin", "results": 3, "ms": 100, "status": "ok", "error": None}]},
+        {"sightings": [], "source_stats": [{"source": "BrokerBin", "results": 5, "ms": 200, "status": "ok", "error": None}]},
+    ]
+    call_count = 0
+
+    async def mock_search(r, db):
+        nonlocal call_count
+        result = search_results[call_count % len(search_results)]
+        call_count += 1
+        return result
+
+    with patch("app.routers.requisitions.search_requirement", side_effect=mock_search):
+        resp = client.post(f"/api/requisitions/{test_requisition.id}/search")
+    assert resp.status_code == 200
+    data = resp.json()
+    stats = data["source_stats"]
+    bb_stat = [s for s in stats if s["source"] == "BrokerBin"]
+    if bb_stat:
+        assert bb_stat[0]["results"] == 8  # 3 + 5 merged

@@ -601,3 +601,92 @@ def test_parse_email_endpoint_failure(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["parsed"] is False
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _normalize_quotes — edge cases for uncovered lines
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestNormalizeQuotesEdgeCases:
+    """Tests for _normalize_quotes edge cases not covered by existing tests."""
+
+    def test_quotes_as_json_string(self):
+        """Quotes as a JSON string should be parsed."""
+        from app.services.ai_email_parser import _normalize_quotes
+        import json
+
+        quotes_list = [{"part_number": "LM317T", "unit_price": "1.50"}]
+        result = {"quotes": json.dumps(quotes_list)}
+        _normalize_quotes(result)
+        assert isinstance(result["quotes"], list)
+        assert len(result["quotes"]) == 1
+
+    def test_quotes_as_invalid_json_string(self):
+        """Quotes as an invalid JSON string results in empty list."""
+        from app.services.ai_email_parser import _normalize_quotes
+
+        result = {"quotes": "not valid json"}
+        _normalize_quotes(result)
+        assert result["quotes"] == []
+
+    def test_non_dict_items_skipped(self):
+        """Non-dict items in quotes list are skipped."""
+        from app.services.ai_email_parser import _normalize_quotes
+
+        result = {"quotes": ["not a dict", 42, None, {"part_number": "X"}]}
+        _normalize_quotes(result)
+        # Non-dicts should be skipped; dict item should be processed
+        assert len(result["quotes"]) == 4  # Items remain, non-dicts just skipped
+
+    def test_lead_time_days_integer_validation(self):
+        """lead_time_days as non-integer string gets set to None."""
+        from app.services.ai_email_parser import _normalize_quotes
+
+        result = {"quotes": [{"lead_time_days": "not-a-number"}]}
+        _normalize_quotes(result)
+        assert result["quotes"][0]["lead_time_days"] is None
+
+    def test_lead_time_days_valid_integer(self):
+        """lead_time_days as valid integer string is converted."""
+        from app.services.ai_email_parser import _normalize_quotes
+
+        result = {"quotes": [{"lead_time_days": "14"}]}
+        _normalize_quotes(result)
+        assert result["quotes"][0]["lead_time_days"] == 14
+
+    def test_confidence_invalid_value(self):
+        """Non-numeric confidence gets fallback to 0.5."""
+        from app.services.ai_email_parser import _normalize_quotes
+
+        result = {"quotes": [{"confidence": "high"}]}
+        _normalize_quotes(result)
+        assert result["quotes"][0]["confidence"] == 0.5
+
+    def test_confidence_clamped(self):
+        """Confidence > 1.0 is clamped to 1.0; < 0.0 is clamped to 0.0."""
+        from app.services.ai_email_parser import _normalize_quotes
+
+        result = {"quotes": [
+            {"confidence": 1.5},
+            {"confidence": -0.5},
+        ]}
+        _normalize_quotes(result)
+        assert result["quotes"][0]["confidence"] == 1.0
+        assert result["quotes"][1]["confidence"] == 0.0
+
+    def test_currency_detected(self):
+        """Currency field is normalized."""
+        from app.services.ai_email_parser import _normalize_quotes
+
+        result = {"quotes": [{"currency": "EUR"}]}
+        _normalize_quotes(result)
+        assert result["quotes"][0]["currency"] == "EUR"
+
+    def test_no_currency_defaults_to_usd(self):
+        """Missing currency defaults to USD."""
+        from app.services.ai_email_parser import _normalize_quotes
+
+        result = {"quotes": [{"part_number": "X"}]}
+        _normalize_quotes(result)
+        assert result["quotes"][0]["currency"] == "USD"

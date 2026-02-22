@@ -727,3 +727,1568 @@ def test_create_sightings_price_parsing():
     # Verify the Sighting was added — check the args passed to db.add
     added_sighting = db.add.call_args[0][0]
     assert added_sighting.unit_price == 1.50
+
+
+# ══════════════════════════════════════════════════════════════════════
+# NEW TESTS — Connector factory (all branches)
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_get_connector_nexar_with_octopart_key():
+    """Nexar source returns NexarConnector when OCTOPART_API_KEY is set."""
+    with patch("app.services.credential_service.get_credential", return_value="key123"):
+        with patch("app.connectors.sources.NexarConnector"):
+            result = _get_connector_for_source("nexar", db=MagicMock())
+            assert result is not None
+
+
+def test_get_connector_nexar_with_client_id():
+    """Nexar source returns NexarConnector when NEXAR_CLIENT_ID is set."""
+    creds = {
+        "NEXAR_CLIENT_ID": "nid",
+        "NEXAR_CLIENT_SECRET": "nsec",
+        "OCTOPART_API_KEY": None,
+    }
+
+    def fake_cred(db, name, var):
+        return creds.get(var)
+
+    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
+        with patch("app.connectors.sources.NexarConnector"):
+            result = _get_connector_for_source("nexar", db=MagicMock())
+            assert result is not None
+
+
+def test_get_connector_brokerbin():
+    """BrokerBin source returns BrokerBinConnector when key is set."""
+    creds = {
+        "NEXAR_CLIENT_ID": None,
+        "NEXAR_CLIENT_SECRET": None,
+        "OCTOPART_API_KEY": None,
+        "BROKERBIN_API_KEY": "bb_key",
+        "BROKERBIN_API_SECRET": "bb_sec",
+    }
+
+    def fake_cred(db, name, var):
+        return creds.get(var)
+
+    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
+        with patch("app.connectors.sources.BrokerBinConnector"):
+            result = _get_connector_for_source("brokerbin", db=MagicMock())
+            assert result is not None
+
+
+def test_get_connector_ebay():
+    """eBay source returns EbayConnector when key is set."""
+    creds = {
+        "NEXAR_CLIENT_ID": None,
+        "NEXAR_CLIENT_SECRET": None,
+        "OCTOPART_API_KEY": None,
+        "BROKERBIN_API_KEY": None,
+        "BROKERBIN_API_SECRET": None,
+        "EBAY_CLIENT_ID": "ebay_id",
+        "EBAY_CLIENT_SECRET": "ebay_sec",
+    }
+
+    def fake_cred(db, name, var):
+        return creds.get(var)
+
+    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
+        with patch("app.connectors.ebay.EbayConnector"):
+            result = _get_connector_for_source("ebay", db=MagicMock())
+            assert result is not None
+
+
+def test_get_connector_digikey():
+    """DigiKey source returns DigiKeyConnector when key is set."""
+    creds = {
+        "NEXAR_CLIENT_ID": None,
+        "NEXAR_CLIENT_SECRET": None,
+        "OCTOPART_API_KEY": None,
+        "BROKERBIN_API_KEY": None,
+        "BROKERBIN_API_SECRET": None,
+        "EBAY_CLIENT_ID": None,
+        "EBAY_CLIENT_SECRET": None,
+        "DIGIKEY_CLIENT_ID": "dk_id",
+        "DIGIKEY_CLIENT_SECRET": "dk_sec",
+    }
+
+    def fake_cred(db, name, var):
+        return creds.get(var)
+
+    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
+        with patch("app.connectors.digikey.DigiKeyConnector"):
+            result = _get_connector_for_source("digikey", db=MagicMock())
+            assert result is not None
+
+
+def test_get_connector_mouser():
+    """Mouser source returns MouserConnector when key is set."""
+    creds = {
+        "NEXAR_CLIENT_ID": None,
+        "NEXAR_CLIENT_SECRET": None,
+        "OCTOPART_API_KEY": None,
+        "BROKERBIN_API_KEY": None,
+        "BROKERBIN_API_SECRET": None,
+        "EBAY_CLIENT_ID": None,
+        "EBAY_CLIENT_SECRET": None,
+        "DIGIKEY_CLIENT_ID": None,
+        "DIGIKEY_CLIENT_SECRET": None,
+        "MOUSER_API_KEY": "mouser_key",
+    }
+
+    def fake_cred(db, name, var):
+        return creds.get(var)
+
+    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
+        with patch("app.connectors.mouser.MouserConnector"):
+            result = _get_connector_for_source("mouser", db=MagicMock())
+            assert result is not None
+
+
+def test_get_connector_oemsecrets():
+    """OEMSecrets source returns OEMSecretsConnector when key is set."""
+    creds = {
+        "NEXAR_CLIENT_ID": None, "NEXAR_CLIENT_SECRET": None,
+        "OCTOPART_API_KEY": None, "BROKERBIN_API_KEY": None,
+        "BROKERBIN_API_SECRET": None, "EBAY_CLIENT_ID": None,
+        "EBAY_CLIENT_SECRET": None, "DIGIKEY_CLIENT_ID": None,
+        "DIGIKEY_CLIENT_SECRET": None, "MOUSER_API_KEY": None,
+        "OEMSECRETS_API_KEY": "oem_key",
+    }
+
+    def fake_cred(db, name, var):
+        return creds.get(var)
+
+    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
+        with patch("app.connectors.oemsecrets.OEMSecretsConnector"):
+            result = _get_connector_for_source("oemsecrets", db=MagicMock())
+            assert result is not None
+
+
+def test_get_connector_sourcengine():
+    """Sourcengine source returns SourcengineConnector when key is set."""
+    creds = {
+        "NEXAR_CLIENT_ID": None, "NEXAR_CLIENT_SECRET": None,
+        "OCTOPART_API_KEY": None, "BROKERBIN_API_KEY": None,
+        "BROKERBIN_API_SECRET": None, "EBAY_CLIENT_ID": None,
+        "EBAY_CLIENT_SECRET": None, "DIGIKEY_CLIENT_ID": None,
+        "DIGIKEY_CLIENT_SECRET": None, "MOUSER_API_KEY": None,
+        "OEMSECRETS_API_KEY": None, "SOURCENGINE_API_KEY": "src_key",
+    }
+
+    def fake_cred(db, name, var):
+        return creds.get(var)
+
+    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
+        with patch("app.connectors.sourcengine.SourcengineConnector"):
+            result = _get_connector_for_source("sourcengine", db=MagicMock())
+            assert result is not None
+
+
+def test_get_connector_newark():
+    """Newark source returns Element14Connector when key is set."""
+    creds = {
+        "NEXAR_CLIENT_ID": None, "NEXAR_CLIENT_SECRET": None,
+        "OCTOPART_API_KEY": None, "BROKERBIN_API_KEY": None,
+        "BROKERBIN_API_SECRET": None, "EBAY_CLIENT_ID": None,
+        "EBAY_CLIENT_SECRET": None, "DIGIKEY_CLIENT_ID": None,
+        "DIGIKEY_CLIENT_SECRET": None, "MOUSER_API_KEY": None,
+        "OEMSECRETS_API_KEY": None, "SOURCENGINE_API_KEY": None,
+        "ELEMENT14_API_KEY": "e14_key",
+    }
+
+    def fake_cred(db, name, var):
+        return creds.get(var)
+
+    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
+        with patch("app.connectors.element14.Element14Connector"):
+            result = _get_connector_for_source("newark", db=MagicMock())
+            assert result is not None
+
+
+def test_get_connector_tme():
+    """TME source returns TMEConnector when both token and secret are set."""
+    creds = {
+        "NEXAR_CLIENT_ID": None, "NEXAR_CLIENT_SECRET": None,
+        "OCTOPART_API_KEY": None, "BROKERBIN_API_KEY": None,
+        "BROKERBIN_API_SECRET": None, "EBAY_CLIENT_ID": None,
+        "EBAY_CLIENT_SECRET": None, "DIGIKEY_CLIENT_ID": None,
+        "DIGIKEY_CLIENT_SECRET": None, "MOUSER_API_KEY": None,
+        "OEMSECRETS_API_KEY": None, "SOURCENGINE_API_KEY": None,
+        "ELEMENT14_API_KEY": None,
+        "TME_API_TOKEN": "tme_tok", "TME_API_SECRET": "tme_sec",
+    }
+
+    def fake_cred(db, name, var):
+        return creds.get(var)
+
+    with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
+        with patch("app.connectors.tme.TMEConnector"):
+            result = _get_connector_for_source("tme", db=MagicMock())
+            assert result is not None
+
+
+def test_get_connector_tme_missing_secret():
+    """TME source returns None if only token is set (secret missing)."""
+    creds = {
+        "NEXAR_CLIENT_ID": None, "NEXAR_CLIENT_SECRET": None,
+        "OCTOPART_API_KEY": None, "BROKERBIN_API_KEY": None,
+        "BROKERBIN_API_SECRET": None, "EBAY_CLIENT_ID": None,
+        "EBAY_CLIENT_SECRET": None, "DIGIKEY_CLIENT_ID": None,
+        "DIGIKEY_CLIENT_SECRET": None, "MOUSER_API_KEY": None,
+        "OEMSECRETS_API_KEY": None, "SOURCENGINE_API_KEY": None,
+        "ELEMENT14_API_KEY": None,
+        "TME_API_TOKEN": "tme_tok", "TME_API_SECRET": None,
+    }
+
+    def fake_cred(db, name, var):
+        return creds.get(var)
+
+    mock_settings = SimpleNamespace(email_mining_enabled=False, azure_tenant_id=None)
+    with patch("app.services.credential_service.get_credential", side_effect=fake_cred), \
+         patch("app.routers.sources.settings", mock_settings):
+        result = _get_connector_for_source("tme", db=MagicMock())
+        assert result is None
+
+
+def test_get_connector_anthropic_ai():
+    """Anthropic AI returns _AnthropicTestConnector (no env_vars needed)."""
+    from app.routers.sources import _AnthropicTestConnector
+    result = _get_connector_for_source("anthropic_ai")
+    assert isinstance(result, _AnthropicTestConnector)
+
+
+def test_get_connector_teams_notifications():
+    """Teams returns _TeamsTestConnector."""
+    from app.routers.sources import _TeamsTestConnector
+    result = _get_connector_for_source("teams_notifications")
+    assert isinstance(result, _TeamsTestConnector)
+
+
+def test_get_connector_apollo_enrichment():
+    """Apollo returns _ApolloTestConnector."""
+    from app.routers.sources import _ApolloTestConnector
+    result = _get_connector_for_source("apollo_enrichment")
+    assert isinstance(result, _ApolloTestConnector)
+
+
+def test_get_connector_clay_enrichment():
+    """Clay returns _ClayTestConnector."""
+    from app.routers.sources import _ClayTestConnector
+    result = _get_connector_for_source("clay_enrichment")
+    assert isinstance(result, _ClayTestConnector)
+
+
+def test_get_connector_explorium_enrichment():
+    """Explorium returns _ExploriumTestConnector."""
+    from app.routers.sources import _ExploriumTestConnector
+    result = _get_connector_for_source("explorium_enrichment")
+    assert isinstance(result, _ExploriumTestConnector)
+
+
+def test_get_connector_azure_oauth():
+    """Azure OAuth returns _AzureOAuthTestConnector."""
+    from app.routers.sources import _AzureOAuthTestConnector
+    result = _get_connector_for_source("azure_oauth")
+    assert isinstance(result, _AzureOAuthTestConnector)
+
+
+def test_get_connector_no_db_env_fallback(monkeypatch):
+    """_cred falls back to os.getenv when db is None."""
+    monkeypatch.setenv("NEXAR_CLIENT_ID", "env_nexar_id")
+    monkeypatch.setenv("NEXAR_CLIENT_SECRET", "env_nexar_sec")
+    monkeypatch.setenv("OCTOPART_API_KEY", "")
+    with patch("app.connectors.sources.NexarConnector") as MockNexar:
+        result = _get_connector_for_source("nexar", db=None)
+        assert result is not None
+
+
+# ══════════════════════════════════════════════════════════════════════
+# NEW TESTS — Test connector search methods
+# ══════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.asyncio
+async def test_anthropic_test_connector_search_success():
+    """_AnthropicTestConnector succeeds when API returns 200."""
+    from app.routers.sources import _AnthropicTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"model": "claude-haiku-4-5-20251001"}
+
+    with patch("app.routers.sources.get_credential_cached", return_value="sk-test-key"), \
+         patch("app.routers.sources._AnthropicTestConnector.__init__", return_value=None):
+        connector = _AnthropicTestConnector()
+        with patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+            results = await connector.search("LM358N")
+    assert len(results) == 1
+    assert "Connected" in results[0]["mpn_matched"]
+
+
+@pytest.mark.asyncio
+async def test_anthropic_test_connector_no_key():
+    """_AnthropicTestConnector raises if no API key."""
+    from app.routers.sources import _AnthropicTestConnector
+
+    connector = _AnthropicTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value=None):
+        with pytest.raises(ValueError, match="ANTHROPIC_API_KEY not configured"):
+            await connector.search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_anthropic_test_connector_api_error():
+    """_AnthropicTestConnector raises on non-200 response."""
+    from app.routers.sources import _AnthropicTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 401
+    mock_resp.text = "Invalid API key"
+
+    connector = _AnthropicTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value="sk-test-key"), \
+         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+        with pytest.raises(ValueError, match="Anthropic API returned 401"):
+            await connector.search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_teams_test_connector_success():
+    """_TeamsTestConnector succeeds with 200 response."""
+    from app.routers.sources import _TeamsTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+
+    connector = _TeamsTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value="https://webhook.example.com"), \
+         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+        results = await connector.search("LM358N")
+    assert len(results) == 1
+    assert results[0]["mpn_matched"] == "Message posted"
+
+
+@pytest.mark.asyncio
+async def test_teams_test_connector_no_webhook():
+    """_TeamsTestConnector raises if no webhook URL."""
+    from app.routers.sources import _TeamsTestConnector
+
+    connector = _TeamsTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value=None):
+        with pytest.raises(ValueError, match="TEAMS_WEBHOOK_URL not configured"):
+            await connector.search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_teams_test_connector_api_error():
+    """_TeamsTestConnector raises on non-200/202 response."""
+    from app.routers.sources import _TeamsTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 500
+    mock_resp.text = "Internal error"
+
+    connector = _TeamsTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value="https://webhook.example.com"), \
+         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+        with pytest.raises(ValueError, match="Teams webhook returned 500"):
+            await connector.search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_teams_test_connector_202_accepted():
+    """_TeamsTestConnector succeeds with 202 response (accepted)."""
+    from app.routers.sources import _TeamsTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 202
+
+    connector = _TeamsTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value="https://webhook.example.com"), \
+         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+        results = await connector.search("LM358N")
+    assert len(results) == 1
+    assert results[0]["status"] == "ok"
+
+
+@pytest.mark.asyncio
+async def test_apollo_test_connector_success():
+    """_ApolloTestConnector succeeds when API returns 200."""
+    from app.routers.sources import _ApolloTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"people": [{"name": "Test"}]}
+
+    connector = _ApolloTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value="apollo_key"), \
+         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+        results = await connector.search("LM358N")
+    assert len(results) == 1
+    assert "1 result" in results[0]["mpn_matched"]
+
+
+@pytest.mark.asyncio
+async def test_apollo_test_connector_no_key():
+    """_ApolloTestConnector raises if no API key."""
+    from app.routers.sources import _ApolloTestConnector
+
+    connector = _ApolloTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value=None):
+        with pytest.raises(ValueError, match="APOLLO_API_KEY not configured"):
+            await connector.search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_apollo_test_connector_api_error():
+    """_ApolloTestConnector raises on non-200 response."""
+    from app.routers.sources import _ApolloTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 403
+    mock_resp.text = "Forbidden"
+
+    connector = _ApolloTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value="apollo_key"), \
+         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+        with pytest.raises(ValueError, match="Apollo API returned 403"):
+            await connector.search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_clay_test_connector_success():
+    """_ClayTestConnector succeeds when API returns 200."""
+    from app.routers.sources import _ClayTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"name": "Anthropic"}
+
+    connector = _ClayTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value="clay_key"), \
+         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+        results = await connector.search("LM358N")
+    assert len(results) == 1
+    assert "Anthropic" in results[0]["mpn_matched"]
+
+
+@pytest.mark.asyncio
+async def test_clay_test_connector_no_key():
+    """_ClayTestConnector raises if no API key."""
+    from app.routers.sources import _ClayTestConnector
+
+    connector = _ClayTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value=None):
+        with pytest.raises(ValueError, match="CLAY_API_KEY not configured"):
+            await connector.search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_clay_test_connector_api_error():
+    """_ClayTestConnector raises on non-200 response."""
+    from app.routers.sources import _ClayTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 401
+    mock_resp.text = "Unauthorized"
+
+    connector = _ClayTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value="clay_key"), \
+         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+        with pytest.raises(ValueError, match="Clay API returned 401"):
+            await connector.search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_explorium_test_connector_success():
+    """_ExploriumTestConnector succeeds when API returns 200."""
+    from app.routers.sources import _ExploriumTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"firmo_name": "Anthropic Inc"}
+
+    connector = _ExploriumTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value="explorium_key"), \
+         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+        results = await connector.search("LM358N")
+    assert len(results) == 1
+    assert "Anthropic" in results[0]["mpn_matched"]
+
+
+@pytest.mark.asyncio
+async def test_explorium_test_connector_fallback_name():
+    """_ExploriumTestConnector falls back to 'name' when 'firmo_name' missing."""
+    from app.routers.sources import _ExploriumTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"name": "Some Corp"}
+
+    connector = _ExploriumTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value="explorium_key"), \
+         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+        results = await connector.search("LM358N")
+    assert "Some Corp" in results[0]["mpn_matched"]
+
+
+@pytest.mark.asyncio
+async def test_explorium_test_connector_no_name():
+    """_ExploriumTestConnector falls back to 'matched' when both name keys missing."""
+    from app.routers.sources import _ExploriumTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {}
+
+    connector = _ExploriumTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value="explorium_key"), \
+         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+        results = await connector.search("LM358N")
+    assert "matched" in results[0]["mpn_matched"]
+
+
+@pytest.mark.asyncio
+async def test_explorium_test_connector_no_key():
+    """_ExploriumTestConnector raises if no API key."""
+    from app.routers.sources import _ExploriumTestConnector
+
+    connector = _ExploriumTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value=None):
+        with pytest.raises(ValueError, match="EXPLORIUM_API_KEY not configured"):
+            await connector.search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_explorium_test_connector_api_error():
+    """_ExploriumTestConnector raises on non-200 response."""
+    from app.routers.sources import _ExploriumTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 500
+    mock_resp.text = "Server error"
+
+    connector = _ExploriumTestConnector()
+    with patch("app.routers.sources.get_credential_cached", return_value="explorium_key"), \
+         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
+        with pytest.raises(ValueError, match="Explorium API returned 500"):
+            await connector.search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_azure_oauth_test_connector_success():
+    """_AzureOAuthTestConnector succeeds with valid tenant."""
+    from app.routers.sources import _AzureOAuthTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"issuer": "https://login.microsoftonline.com/test-tenant-id/v2.0"}
+
+    connector = _AzureOAuthTestConnector()
+    mock_settings = SimpleNamespace(azure_tenant_id="test-tenant-id")
+    with patch("app.routers.sources.settings", mock_settings), \
+         patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp):
+        results = await connector.search("LM358N")
+    assert len(results) == 1
+    assert results[0]["mpn_matched"] == "Tenant verified"
+
+
+@pytest.mark.asyncio
+async def test_azure_oauth_test_connector_no_tenant():
+    """_AzureOAuthTestConnector raises if no tenant ID configured."""
+    from app.routers.sources import _AzureOAuthTestConnector
+
+    connector = _AzureOAuthTestConnector()
+    mock_settings = SimpleNamespace(azure_tenant_id=None)
+    with patch("app.routers.sources.settings", mock_settings):
+        with pytest.raises(ValueError, match="AZURE_TENANT_ID not configured"):
+            await connector.search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_azure_oauth_test_connector_api_error():
+    """_AzureOAuthTestConnector raises on non-200 response."""
+    from app.routers.sources import _AzureOAuthTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 404
+
+    connector = _AzureOAuthTestConnector()
+    mock_settings = SimpleNamespace(azure_tenant_id="bad-tenant")
+    with patch("app.routers.sources.settings", mock_settings), \
+         patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp):
+        with pytest.raises(ValueError, match="Azure OpenID discovery returned 404"):
+            await connector.search("LM358N")
+
+
+@pytest.mark.asyncio
+async def test_azure_oauth_test_connector_tenant_mismatch():
+    """_AzureOAuthTestConnector raises when issuer doesn't match tenant."""
+    from app.routers.sources import _AzureOAuthTestConnector
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"issuer": "https://login.microsoftonline.com/other-tenant/v2.0"}
+
+    connector = _AzureOAuthTestConnector()
+    mock_settings = SimpleNamespace(azure_tenant_id="my-tenant-id")
+    with patch("app.routers.sources.settings", mock_settings), \
+         patch("app.http_client.http.get", new_callable=AsyncMock, return_value=mock_resp):
+        with pytest.raises(ValueError, match="Tenant mismatch"):
+            await connector.search("LM358N")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# NEW TESTS — Source Management edge cases
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_list_sources_auto_status_live_to_pending(sources_client: TestClient, db_session: Session):
+    """Source with status=live but no credentials set auto-detects to pending."""
+    src = ApiSource(
+        name="auto_detect_test",
+        display_name="Auto Detect",
+        category="market_data",
+        source_type="api",
+        status="live",
+        env_vars=["SOME_API_KEY"],
+    )
+    db_session.add(src)
+    db_session.commit()
+
+    with patch("app.services.credential_service.credential_is_set", return_value=False):
+        resp = sources_client.get("/api/sources")
+    assert resp.status_code == 200
+    sources = resp.json()["sources"]
+    found = next((s for s in sources if s["name"] == "auto_detect_test"), None)
+    assert found is not None
+
+
+def test_list_sources_no_env_vars_source(sources_client: TestClient, db_session: Session):
+    """Source with no env_vars still appears in list with empty env_status."""
+    src = ApiSource(
+        name="no_vars_source",
+        display_name="No Vars",
+        category="intelligence",
+        source_type="api",
+        status="live",
+        env_vars=[],
+    )
+    db_session.add(src)
+    db_session.commit()
+
+    resp = sources_client.get("/api/sources")
+    assert resp.status_code == 200
+    sources = resp.json()["sources"]
+    found = next((s for s in sources if s["name"] == "no_vars_source"), None)
+    assert found is not None
+    assert found["env_vars"] == []
+    assert found["env_status"] == {}
+
+
+def test_list_sources_with_last_success(sources_client: TestClient, db_session: Session):
+    """Source with last_success returns isoformat timestamp."""
+    src = ApiSource(
+        name="with_success",
+        display_name="With Success",
+        category="market_data",
+        source_type="api",
+        status="live",
+        env_vars=[],
+        last_success=datetime(2026, 2, 10, 12, 0, 0, tzinfo=timezone.utc),
+        total_searches=10,
+        total_results=50,
+        avg_response_ms=150,
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    db_session.add(src)
+    db_session.commit()
+
+    resp = sources_client.get("/api/sources")
+    assert resp.status_code == 200
+    sources = resp.json()["sources"]
+    found = next((s for s in sources if s["name"] == "with_success"), None)
+    assert found is not None
+    assert found["last_success"] is not None
+    assert found["total_searches"] == 10
+    assert found["total_results"] == 50
+    assert found["avg_response_ms"] == 150
+    assert found["created_at"] is not None
+
+
+def test_test_source_no_connector(sources_client: TestClient, _api_source: ApiSource):
+    """POST /api/sources/{id}/test with no connector returns error status."""
+    with patch("app.routers.sources._get_connector_for_source", return_value=None):
+        resp = sources_client.post(f"/api/sources/{_api_source.id}/test")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "error"
+    assert "No connector available" in data["error"]
+
+
+def test_test_source_no_results(sources_client: TestClient, _api_source: ApiSource):
+    """POST /api/sources/{id}/test with connector returning empty list returns no_results."""
+    mock_connector = MagicMock()
+    mock_connector.search = AsyncMock(return_value=[])
+
+    with patch("app.routers.sources._get_connector_for_source", return_value=mock_connector):
+        resp = sources_client.post(f"/api/sources/{_api_source.id}/test")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "no_results"
+    assert data["results_count"] == 0
+    assert data["error"] is None
+
+
+def test_test_source_no_env_vars(sources_client: TestClient, db_session: Session):
+    """POST /api/sources/{id}/test for source with no env_vars does not change status on error."""
+    src = ApiSource(
+        name="no_env_src",
+        display_name="No Env",
+        category="intelligence",
+        source_type="api",
+        status="live",
+        env_vars=[],
+    )
+    db_session.add(src)
+    db_session.commit()
+    db_session.refresh(src)
+
+    mock_connector = MagicMock()
+    mock_connector.search = AsyncMock(side_effect=ValueError("Test error"))
+
+    with patch("app.routers.sources._get_connector_for_source", return_value=mock_connector):
+        resp = sources_client.post(f"/api/sources/{src.id}/test")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "error"
+    # Source status should NOT be updated because no env_vars
+    db_session.refresh(src)
+    assert src.status == "live"
+
+
+def test_test_source_success_no_env_vars(sources_client: TestClient, db_session: Session):
+    """POST /api/sources/{id}/test for source with no env_vars does not change status on success."""
+    src = ApiSource(
+        name="no_env_success",
+        display_name="No Env Success",
+        category="intelligence",
+        source_type="api",
+        status="pending",
+        env_vars=[],
+    )
+    db_session.add(src)
+    db_session.commit()
+    db_session.refresh(src)
+
+    mock_connector = MagicMock()
+    mock_connector.search = AsyncMock(return_value=[{"status": "ok"}])
+
+    with patch("app.routers.sources._get_connector_for_source", return_value=mock_connector):
+        resp = sources_client.post(f"/api/sources/{src.id}/test")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    # Source status should NOT be updated because no env_vars
+    db_session.refresh(src)
+    assert src.status == "pending"
+
+
+def test_toggle_source_not_found(sources_client: TestClient):
+    """PUT /api/sources/99999/toggle returns 404 for nonexistent source."""
+    resp = sources_client.put("/api/sources/99999/toggle", json={"status": "live"})
+    assert resp.status_code == 404
+
+
+def test_toggle_source_enable_with_credentials(sources_client: TestClient, db_session: Session):
+    """PUT toggle with live status + all creds set auto-detects to live."""
+    src = ApiSource(
+        name="toggle_creds",
+        display_name="Toggle Creds",
+        category="market_data",
+        source_type="api",
+        status="disabled",
+        env_vars=["MY_KEY"],
+    )
+    db_session.add(src)
+    db_session.commit()
+    db_session.refresh(src)
+
+    with patch("app.services.credential_service.credential_is_set", return_value=True):
+        resp = sources_client.put(
+            f"/api/sources/{src.id}/toggle",
+            json={"status": "live"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["status"] == "live"
+
+
+def test_toggle_source_enable_no_credentials(sources_client: TestClient, db_session: Session):
+    """PUT toggle with live status + no creds auto-detects to pending."""
+    src = ApiSource(
+        name="toggle_no_creds",
+        display_name="Toggle No Creds",
+        category="market_data",
+        source_type="api",
+        status="disabled",
+        env_vars=["MY_KEY"],
+    )
+    db_session.add(src)
+    db_session.commit()
+    db_session.refresh(src)
+
+    with patch("app.services.credential_service.credential_is_set", return_value=False):
+        resp = sources_client.put(
+            f"/api/sources/{src.id}/toggle",
+            json={"status": "pending"},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["status"] == "pending"
+
+
+def test_toggle_source_enable_no_env_vars(sources_client: TestClient, db_session: Session):
+    """PUT toggle with live status + no env_vars auto-detects to pending."""
+    src = ApiSource(
+        name="toggle_no_env",
+        display_name="Toggle No Env",
+        category="intelligence",
+        source_type="api",
+        status="disabled",
+        env_vars=[],
+    )
+    db_session.add(src)
+    db_session.commit()
+    db_session.refresh(src)
+
+    resp = sources_client.put(
+        f"/api/sources/{src.id}/toggle",
+        json={"status": "live"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    # No env_vars → not all(credential_is_set) → pending
+    assert data["status"] == "pending"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# NEW TESTS — Email Mining scan with enriched contacts
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_scan_inbox_with_contacts_enriched(
+    sources_client: TestClient,
+    _email_mining_source: ApiSource,
+    db_session: Session,
+):
+    """POST /api/email-mining/scan enriches vendor cards from contacts_enriched data."""
+    mock_miner = MagicMock()
+    mock_miner.scan_inbox = AsyncMock(return_value={
+        "messages_scanned": 20,
+        "vendors_found": 1,
+        "offers_parsed": [],
+        "contacts_enriched": [
+            {
+                "vendor_name": "NewVendor Corp",
+                "emails": ["sales@newvendor.com", "info@newvendor.com"],
+                "phones": ["+1-555-9999"],
+                "websites": ["newvendor.com"],
+            },
+        ],
+        "stock_lists_found": 0,
+    })
+
+    with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+        resp = sources_client.post("/api/email-mining/scan")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["messages_scanned"] == 20
+    assert data["contacts_enriched"] >= 0  # depends on merge_emails_into_card return
+
+
+def test_scan_inbox_enriches_existing_vendor_card(
+    sources_client: TestClient,
+    _email_mining_source: ApiSource,
+    db_session: Session,
+):
+    """Scan enriches an already existing vendor card with new emails."""
+    card = VendorCard(
+        normalized_name="existing vendor",
+        display_name="Existing Vendor",
+        emails=["old@existing.com"],
+        phones=[],
+        source="manual",
+    )
+    db_session.add(card)
+    db_session.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_inbox = AsyncMock(return_value={
+        "messages_scanned": 10,
+        "vendors_found": 1,
+        "offers_parsed": [],
+        "contacts_enriched": [
+            {
+                "vendor_name": "Existing Vendor",
+                "emails": ["new@existing.com"],
+                "phones": ["+1-555-1234"],
+                "websites": [],
+            },
+        ],
+        "stock_lists_found": 0,
+    })
+
+    with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+        resp = sources_client.post("/api/email-mining/scan")
+
+    assert resp.status_code == 200
+
+
+def test_scan_inbox_with_json_body_options(
+    sources_client: TestClient,
+    _email_mining_source: ApiSource,
+):
+    """POST /api/email-mining/scan with explicit JSON body parses mining options."""
+    mock_miner = MagicMock()
+    mock_miner.scan_inbox = AsyncMock(return_value={
+        "messages_scanned": 10,
+        "vendors_found": 0,
+        "offers_parsed": [],
+        "contacts_enriched": [],
+        "stock_lists_found": 0,
+    })
+
+    with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+        resp = sources_client.post(
+            "/api/email-mining/scan",
+            json={"lookback_days": 7},
+            headers={"content-type": "application/json"},
+        )
+
+    assert resp.status_code == 200
+    # Verify miner was called with lookback_days=7
+    mock_miner.scan_inbox.assert_called_once()
+    call_kwargs = mock_miner.scan_inbox.call_args
+    assert call_kwargs[1]["lookback_days"] == 7
+
+
+def test_scan_inbox_empty_contacts(
+    sources_client: TestClient,
+    _email_mining_source: ApiSource,
+):
+    """POST /api/email-mining/scan with contact missing vendor_name is skipped."""
+    mock_miner = MagicMock()
+    mock_miner.scan_inbox = AsyncMock(return_value={
+        "messages_scanned": 5,
+        "vendors_found": 0,
+        "offers_parsed": [],
+        "contacts_enriched": [
+            {"vendor_name": "", "emails": ["nobody@example.com"]},
+        ],
+        "stock_lists_found": 0,
+    })
+
+    with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+        resp = sources_client.post("/api/email-mining/scan")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["contacts_enriched"] == 0
+
+
+def test_scan_inbox_no_email_mining_source(sources_client: TestClient, db_session: Session):
+    """POST /api/email-mining/scan works even if email_mining source row doesn't exist."""
+    mock_miner = MagicMock()
+    mock_miner.scan_inbox = AsyncMock(return_value={
+        "messages_scanned": 5,
+        "vendors_found": 0,
+        "offers_parsed": [],
+        "contacts_enriched": [],
+        "stock_lists_found": 0,
+    })
+
+    with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+        resp = sources_client.post("/api/email-mining/scan")
+
+    assert resp.status_code == 200
+
+
+# ══════════════════════════════════════════════════════════════════════
+# NEW TESTS — Outbound scan edge cases
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_scan_outbound_with_domain_match(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+):
+    """Outbound scan matches vendor card by domain and updates outreach."""
+    test_user.m365_connected = True
+    test_user.access_token = "fake-access-token"
+    db_session.commit()
+
+    card = VendorCard(
+        normalized_name="arrow",
+        display_name="Arrow Electronics",
+        domain="arrow.com",
+        emails=["sales@arrow.com"],
+        phones=[],
+    )
+    db_session.add(card)
+    db_session.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_sent_items = AsyncMock(return_value={
+        "messages_scanned": 10,
+        "rfqs_detected": 2,
+        "vendors_contacted": {"arrow.com": 3},
+        "used_delta": True,
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+        resp = sources_client.post("/api/email-mining/scan-outbound")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["cards_updated"] == 1
+    assert data["used_delta"] is True
+
+    db_session.refresh(card)
+    assert card.total_outreach == 3
+
+
+def test_scan_outbound_with_prefix_match(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+):
+    """Outbound scan falls back to prefix match when domain doesn't match."""
+    test_user.m365_connected = True
+    test_user.access_token = "fake-access-token"
+    db_session.commit()
+
+    card = VendorCard(
+        normalized_name="mouser",
+        display_name="Mouser Electronics",
+        emails=["sales@mouser.com"],
+        phones=[],
+    )
+    db_session.add(card)
+    db_session.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_sent_items = AsyncMock(return_value={
+        "messages_scanned": 10,
+        "rfqs_detected": 1,
+        "vendors_contacted": {"mouser.com": 2},
+        "used_delta": False,
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+        resp = sources_client.post("/api/email-mining/scan-outbound")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["cards_updated"] == 1
+
+
+def test_scan_outbound_db_commit_failure(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+):
+    """Outbound scan handles DB commit failure gracefully."""
+    test_user.m365_connected = True
+    test_user.access_token = "fake-access-token"
+    db_session.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_sent_items = AsyncMock(return_value={
+        "messages_scanned": 5,
+        "rfqs_detected": 0,
+        "vendors_contacted": {},
+        "used_delta": False,
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+        resp = sources_client.post("/api/email-mining/scan-outbound")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["cards_updated"] == 0
+
+
+def test_scan_outbound_with_json_body(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+):
+    """POST /api/email-mining/scan-outbound with JSON body parses mining options."""
+    test_user.m365_connected = True
+    test_user.access_token = "fake-access-token"
+    db_session.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_sent_items = AsyncMock(return_value={
+        "messages_scanned": 5,
+        "rfqs_detected": 0,
+        "vendors_contacted": {},
+        "used_delta": False,
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+        resp = sources_client.post(
+            "/api/email-mining/scan-outbound",
+            json={"lookback_days": 14},
+            headers={"content-type": "application/json"},
+        )
+
+    assert resp.status_code == 200
+    mock_miner.scan_sent_items.assert_called_once()
+    assert mock_miner.scan_sent_items.call_args[1]["lookback_days"] == 14
+
+
+# ══════════════════════════════════════════════════════════════════════
+# NEW TESTS — Email mining status edge cases
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_email_mining_status_no_source(sources_client: TestClient):
+    """GET /api/email-mining/status returns defaults when no source row exists."""
+    resp = sources_client.get("/api/email-mining/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["last_scan"] is None
+    assert data["total_scans"] == 0
+    assert data["total_vendors_found"] == 0
+
+
+# ══════════════════════════════════════════════════════════════════════
+# NEW TESTS — Attachment parsing edge cases
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_parse_response_attachments_no_m365(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+):
+    """POST parse-response-attachments fails when M365 not connected."""
+    test_user.m365_connected = False
+    test_user.access_token = None
+    db_session.commit()
+
+    resp = sources_client.post("/api/email-mining/parse-response-attachments/1")
+    assert resp.status_code == 400
+
+
+def test_parse_response_attachments_no_message_id(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+):
+    """Response without message_id returns 400."""
+    test_user.m365_connected = True
+    test_user.access_token = "fake-token"
+    db_session.commit()
+
+    req = Requisition(
+        name="REQ-NOMSGID",
+        customer_name="Acme",
+        status="open",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(req)
+    db_session.flush()
+
+    vr = VendorResponse(
+        requisition_id=req.id,
+        vendor_name="ACME Corp",
+        vendor_email="sales@acme.com",
+        subject="RE: RFQ",
+        message_id=None,  # no message ID
+        status="new",
+        received_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(vr)
+    db_session.commit()
+    db_session.refresh(vr)
+
+    resp = sources_client.post(
+        f"/api/email-mining/parse-response-attachments/{vr.id}"
+    )
+    assert resp.status_code == 400
+
+
+def test_parse_response_attachments_graph_error(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+    _vendor_response: VendorResponse,
+):
+    """Graph API error during attachment fetch returns 502."""
+    test_user.m365_connected = True
+    test_user.access_token = "fake-token"
+    db_session.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(side_effect=ConnectionError("Network error"))
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        resp = sources_client.post(
+            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
+        )
+
+    assert resp.status_code == 502
+
+
+def test_parse_response_attachments_no_content_bytes(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+    _vendor_response: VendorResponse,
+):
+    """Parseable attachment without contentBytes is skipped."""
+    test_user.m365_connected = True
+    test_user.access_token = "fake-token"
+    db_session.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "value": [
+            {"name": "quote.xlsx", "contentBytes": None},
+        ]
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        resp = sources_client.post(
+            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["parseable"] == 1
+    assert data["rows_parsed"] == 0
+
+
+def test_parse_response_attachments_file_validation_fails(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+    _vendor_response: VendorResponse,
+):
+    """File validation failure skips the attachment."""
+    import base64
+
+    test_user.m365_connected = True
+    test_user.access_token = "fake-token"
+    db_session.commit()
+
+    fake_content = base64.b64encode(b"bad-content").decode()
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "value": [
+            {"name": "malicious.xlsx", "contentBytes": fake_content},
+        ]
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(False, "Invalid file")):
+        resp = sources_client.post(
+            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["parseable"] == 1
+    assert data["rows_parsed"] == 0
+    assert data["sightings_created"] == 0
+
+
+def test_parse_response_attachments_no_requisition_id(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+):
+    """Parsed rows don't create sightings when VR has no requisition_id."""
+    import base64
+
+    test_user.m365_connected = True
+    test_user.access_token = "fake-token"
+    db_session.commit()
+
+    vr = VendorResponse(
+        requisition_id=None,  # no requisition link
+        vendor_name="No Req Vendor",
+        vendor_email="noreq@vendor.com",
+        subject="Quote",
+        message_id="graph-msg-noreq-001",
+        status="new",
+        received_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(vr)
+    db_session.commit()
+    db_session.refresh(vr)
+
+    fake_content = base64.b64encode(b"excel-data").decode()
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "value": [{"name": "quote.csv", "contentBytes": fake_content}]
+    })
+
+    parsed_rows = [{"mpn": "LM358N", "qty": 100}]
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=parsed_rows), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "")):
+        resp = sources_client.post(
+            f"/api/email-mining/parse-response-attachments/{vr.id}"
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["rows_parsed"] == 1
+    assert data["sightings_created"] == 0  # no requisition_id → no sightings
+
+
+def test_parse_response_attachments_commit_failure(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+    _vendor_response: VendorResponse,
+):
+    """SQLAlchemy commit failure returns 500."""
+    import base64
+
+    from sqlalchemy.exc import SQLAlchemyError
+
+    test_user.m365_connected = True
+    test_user.access_token = "fake-token"
+    db_session.commit()
+
+    fake_content = base64.b64encode(b"excel-data").decode()
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "value": [{"name": "quote.xlsx", "contentBytes": fake_content}]
+    })
+
+    parsed_rows = [{"mpn": "LM358N", "qty": 100}]
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=parsed_rows), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "")), \
+         patch("app.routers.sources._create_sightings_from_attachment", return_value=1), \
+         patch.object(db_session, "commit", side_effect=SQLAlchemyError("DB error")):
+        resp = sources_client.post(
+            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
+        )
+
+    assert resp.status_code == 500
+
+
+def test_parse_response_attachments_empty_value(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+    _vendor_response: VendorResponse,
+):
+    """Graph API returns None for att_data — treats as empty."""
+    test_user.m365_connected = True
+    test_user.access_token = "fake-token"
+    db_session.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value=None)
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        resp = sources_client.post(
+            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["attachments_found"] == 0
+    assert data["parseable"] == 0
+
+
+def test_parse_response_attachments_vendor_domain_extraction(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+):
+    """Vendor domain is extracted from email for attachment parsing."""
+    import base64
+
+    test_user.m365_connected = True
+    test_user.access_token = "fake-token"
+    db_session.commit()
+
+    req = Requisition(
+        name="REQ-DOMAIN",
+        customer_name="Acme",
+        status="open",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(req)
+    db_session.flush()
+
+    vr = VendorResponse(
+        requisition_id=req.id,
+        vendor_name="Domain Vendor",
+        vendor_email="sales@domainvendor.com",
+        subject="Quote",
+        message_id="graph-msg-domain-001",
+        status="new",
+        received_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(vr)
+    db_session.commit()
+    db_session.refresh(vr)
+
+    fake_content = base64.b64encode(b"data").decode()
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "value": [{"name": "stock.csv", "contentBytes": fake_content}]
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=[]) as mock_parse, \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "")):
+        resp = sources_client.post(
+            f"/api/email-mining/parse-response-attachments/{vr.id}"
+        )
+
+    assert resp.status_code == 200
+    # Verify domain was passed to parse_attachment
+    call_kwargs = mock_parse.call_args
+    assert call_kwargs[1]["vendor_domain"] == "domainvendor.com"
+
+
+def test_parse_response_attachments_multiple_file_types(
+    sources_client: TestClient,
+    test_user: User,
+    db_session: Session,
+    _vendor_response: VendorResponse,
+):
+    """Parseable attachment types: .xlsx, .xls, .csv, .tsv."""
+    import base64
+
+    test_user.m365_connected = True
+    test_user.access_token = "fake-token"
+    db_session.commit()
+
+    fake_content = base64.b64encode(b"data").decode()
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "value": [
+            {"name": "quote.xlsx", "contentBytes": fake_content},
+            {"name": "quote.csv", "contentBytes": fake_content},
+            {"name": "quote.xls", "contentBytes": fake_content},
+            {"name": "quote.tsv", "contentBytes": fake_content},
+            {"name": "image.png", "contentBytes": fake_content},  # not parseable
+            {"name": "doc.pdf", "contentBytes": fake_content},  # not parseable
+        ]
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fresh-token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=[]), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "")):
+        resp = sources_client.post(
+            f"/api/email-mining/parse-response-attachments/{_vendor_response.id}"
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["attachments_found"] == 6
+    assert data["parseable"] == 4
+
+
+# ══════════════════════════════════════════════════════════════════════
+# NEW TESTS — Sighting creation edge cases
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_create_sightings_unmatched_mpn():
+    """Rows with MPN that doesn't match any requirement (exact or fuzzy) are skipped."""
+    req = SimpleNamespace(id=1, mpn="LM358N", requisition_id=10)
+    vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="a@acme.com")
+    db = _mock_db_for_sightings([req])
+
+    rows = [{"mpn": "TOTALLY_DIFFERENT_PART", "qty": 100}]
+    created = _create_sightings_from_attachment(db, vr, rows)
+
+    assert created == 0
+
+
+def test_create_sightings_vendor_email_without_at(
+):
+    """Sightings created even when vendor_email has no '@'."""
+    req = SimpleNamespace(id=1, mpn="LM358N", requisition_id=10)
+    vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="no-at-sign")
+    db = _mock_db_for_sightings([req])
+
+    rows = [{"mpn": "LM358N", "qty": 100}]
+    created = _create_sightings_from_attachment(db, vr, rows)
+
+    assert created == 1
+
+
+def test_create_sightings_with_all_optional_fields():
+    """Sighting includes all optional fields from row data."""
+    req = SimpleNamespace(id=1, mpn="LM358N", requisition_id=10)
+    vr = SimpleNamespace(requisition_id=10, vendor_name="ACME", vendor_email="a@acme.com")
+    db = _mock_db_for_sightings([req])
+
+    rows = [{
+        "mpn": "LM358N",
+        "qty": 500,
+        "unit_price": "$2.50",
+        "manufacturer": "Texas Instruments",
+        "condition": "New",
+        "date_code": "2025+",
+        "packaging": "Reel",
+        "lead_time": "2 weeks",
+        "moq": 100,
+        "currency": "USD",
+    }]
+    created = _create_sightings_from_attachment(db, vr, rows)
+
+    assert created == 1
+    added = db.add.call_args[0][0]
+    assert added.manufacturer == "Texas Instruments"
+    assert added.confidence == 0.7
+    assert added.source_type == "email_attachment"

@@ -796,3 +796,208 @@ class TestStockDedup:
         )
         assert result["is_duplicate"] is True
         assert result["upload_count"] == 2
+
+
+# ── Salesperson scorecard (6 tests) ──────────────────────────────────
+
+
+class TestSalespersonScorecard:
+    """Tests for get_salesperson_scorecard and _salesperson_metrics_batch."""
+
+    def test_scorecard_no_active_users(self, db_session):
+        """No active users -> empty entries."""
+        from app.services.performance_service import get_salesperson_scorecard
+
+        month = date.today().replace(day=1)
+        result = get_salesperson_scorecard(db_session, month)
+        assert result["entries"] == []
+        assert result["month"] == month.isoformat()
+
+    def test_scorecard_single_user(self, db_session):
+        """Single active user with some activity."""
+        from app.services.performance_service import get_salesperson_scorecard
+
+        user = _make_user(db_session, "sp-buyer@test.com", role="buyer", name="SP Buyer")
+        user.is_active = True
+        db_session.commit()
+
+        month = date.today().replace(day=1)
+        result = get_salesperson_scorecard(db_session, month)
+        assert len(result["entries"]) >= 1
+        entry = next(e for e in result["entries"] if e["user_id"] == user.id)
+        assert entry["user_name"] == "SP Buyer"
+        # Default metrics should be 0
+        assert entry["monthly"]["new_accounts"] == 0
+        assert entry["monthly"]["calls_made"] == 0
+        assert entry["ytd"]["new_accounts"] == 0
+
+    def test_scorecard_december_month_end(self, db_session):
+        """December month end is handled (year rollover)."""
+        from app.services.performance_service import get_salesperson_scorecard
+
+        user = _make_user(db_session, "dec-user@test.com", role="buyer", name="Dec User")
+        user.is_active = True
+        db_session.commit()
+
+        dec = date(2025, 12, 1)
+        result = get_salesperson_scorecard(db_session, dec)
+        assert result["month"] == "2025-12-01"
+        assert result["year"] == 2025
+
+    def test_salesperson_metrics_single_user(self, db_session):
+        """_salesperson_metrics delegates to batch and returns correct user."""
+        from app.services.performance_service import _salesperson_metrics
+
+        user = _make_user(db_session, "single-user@test.com", role="buyer", name="Solo")
+        user.is_active = True
+        db_session.commit()
+
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        result = _salesperson_metrics(db_session, user.id, start, end)
+        assert result["new_accounts"] == 0
+        assert result["emails_sent"] == 0
+
+    def test_salesperson_metrics_batch_empty_user_ids(self, db_session):
+        """Empty user_ids list returns empty results."""
+        from app.services.performance_service import _salesperson_metrics_batch
+
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        result = _salesperson_metrics_batch(db_session, [], start, end)
+        assert result == {}
+
+
+# ── Scorecard list with invalid sort (1 test) ────────────────────────
+
+
+class TestScorecardListInvalidSort:
+    """Tests for get_vendor_scorecard_list with invalid sort_by."""
+
+    def test_invalid_sort_falls_back(self, db_session):
+        """Invalid sort_by column falls back to composite_score."""
+        vc = _make_vendor(db_session, "Sort Vendor", "sort.com")
+        snap = VendorMetricsSnapshot(
+            vendor_card_id=vc.id,
+            snapshot_date=date.today(),
+            composite_score=50.0,
+            is_sufficient_data=True,
+        )
+        db_session.add(snap)
+        db_session.commit()
+
+        result = get_vendor_scorecard_list(
+            db_session, sort_by="INVALID_COLUMN", order="desc"
+        )
+        assert result["total"] == 1  # Still returns results
+
+    def test_invalid_order_falls_back(self, db_session):
+        """Invalid order falls back to desc."""
+        vc = _make_vendor(db_session, "Order Vendor", "order.com")
+        snap = VendorMetricsSnapshot(
+            vendor_card_id=vc.id,
+            snapshot_date=date.today(),
+            composite_score=50.0,
+            is_sufficient_data=True,
+        )
+        db_session.add(snap)
+        db_session.commit()
+
+        result = get_vendor_scorecard_list(
+            db_session, sort_by="composite_score", order="INVALID"
+        )
+        assert result["total"] == 1
+
+    def test_asc_order(self, db_session):
+        """Ascending order works."""
+        vc1 = _make_vendor(db_session, "Low Vendor", "low.com")
+        vc2 = _make_vendor(db_session, "High Vendor", "high.com")
+        for vc, score in [(vc1, 10.0), (vc2, 90.0)]:
+            snap = VendorMetricsSnapshot(
+                vendor_card_id=vc.id,
+                snapshot_date=date.today(),
+                composite_score=score,
+                is_sufficient_data=True,
+            )
+            db_session.add(snap)
+        db_session.commit()
+
+        result = get_vendor_scorecard_list(
+            db_session, sort_by="composite_score", order="asc"
+        )
+        scores = [item["composite_score"] for item in result["items"]]
+        assert scores == sorted(scores)
+
+
+# ── Scorecard detail with no snapshots ────────────────────────────────
+
+
+class TestScorecardDetailNoSnapshots:
+    def test_vendor_exists_no_snapshots(self, db_session):
+        """Vendor exists but has no snapshots -> latest=None, trend=[]."""
+        vc = _make_vendor(db_session, "No Snap Vendor", "nosnap.com")
+        db_session.commit()
+
+        result = get_vendor_scorecard_detail(db_session, vc.id)
+        assert result["vendor_card_id"] == vc.id
+        assert result["latest"] is None
+        assert result["trend"] == []
+
+
+# ── Buyer leaderboard months (1 test) ────────────────────────────────
+
+
+class TestBuyerLeaderboardMonths:
+    def test_get_months_empty(self, db_session):
+        """No snapshots -> empty months list."""
+        from app.services.performance_service import get_buyer_leaderboard_months
+
+        result = get_buyer_leaderboard_months(db_session)
+        assert result == []
+
+    def test_get_months_with_data(self, db_session):
+        """Months with snapshots are returned in desc order."""
+        from app.services.performance_service import get_buyer_leaderboard_months
+
+        buyer = _make_user(db_session, "months-buyer@test.com", role="buyer")
+        for month_date in [date(2026, 1, 1), date(2026, 2, 1)]:
+            snap = BuyerLeaderboardSnapshot(
+                user_id=buyer.id, month=month_date,
+                offers_logged=1, offers_quoted=0, offers_in_buyplan=0,
+                offers_po_confirmed=0, stock_lists_uploaded=0,
+                points_offers=1, points_quoted=0, points_buyplan=0,
+                points_po=0, points_stock=0, total_points=1, rank=1,
+            )
+            db_session.add(snap)
+        db_session.commit()
+
+        result = get_buyer_leaderboard_months(db_session)
+        assert len(result) == 2
+        # Descending order
+        assert result[0] >= result[1]
+
+
+# ── Stock list hash edge cases ────────────────────────────────────────
+
+
+class TestStockHashEdgeCases:
+    def test_hash_empty_rows(self):
+        """Empty row list returns deterministic hash."""
+        result = compute_stock_list_hash([])
+        assert isinstance(result, str)
+        assert len(result) == 64  # SHA-256 hex
+
+    def test_hash_with_part_number_key(self):
+        """Uses 'part_number' key as fallback."""
+        rows = [{"part_number": "LM317T"}, {"part_number": "NE555P"}]
+        result = compute_stock_list_hash(rows)
+        assert isinstance(result, str)
+        assert len(result) == 64
+
+    def test_hash_deduplicates(self):
+        """Duplicate MPNs are deduped before hashing."""
+        rows = [{"mpn": "LM317T"}, {"mpn": "LM317T"}, {"mpn": "NE555P"}]
+        h1 = compute_stock_list_hash(rows)
+        rows_deduped = [{"mpn": "LM317T"}, {"mpn": "NE555P"}]
+        h2 = compute_stock_list_hash(rows_deduped)
+        assert h1 == h2

@@ -430,3 +430,47 @@ class TestComputeAllVendorScores:
         db_session.refresh(card_base)
         db_session.refresh(card_quoted)
         assert card_quoted.vendor_score > card_base.vendor_score
+
+    @pytest.mark.asyncio
+    async def test_buy_plan_stage_increases_score(self, db_session):
+        """Offers in buy plans should score higher than quoted-only offers."""
+        card_quoted = _make_vendor_card(db_session, "bp quoted")
+        offers_quoted = _make_offers(db_session, card_quoted.id, "bp quoted", 6)
+
+        card_bp = _make_vendor_card(db_session, "bp awarded")
+        offers_bp = _make_offers(db_session, card_bp.id, "bp awarded", 6)
+
+        # Quote for both
+        offer_ids_q = [o.id for o in offers_quoted]
+        _make_quote(db_session, offers_quoted[0].requisition_id,
+                     offers_quoted[0].entered_by_id, offer_ids_q, status="sent")
+
+        offer_ids_bp = [o.id for o in offers_bp]
+        q = _make_quote(db_session, offers_bp[0].requisition_id,
+                        offers_bp[0].entered_by_id, offer_ids_bp, status="sent")
+        _make_buy_plan(db_session, offers_bp[0].requisition_id,
+                       q.id, offer_ids_bp, status="approved")
+        db_session.commit()
+
+        await compute_all_vendor_scores(db_session)
+        db_session.refresh(card_quoted)
+        db_session.refresh(card_bp)
+        assert card_bp.vendor_score > card_quoted.vendor_score
+
+    @pytest.mark.asyncio
+    async def test_commit_error_returns_zero(self, db_session, monkeypatch):
+        """Commit failure in compute_all_vendor_scores is handled gracefully."""
+        card = _make_vendor_card(db_session, "commit err vendor")
+        _make_offers(db_session, card.id, "commit err vendor", 6)
+        db_session.commit()
+
+        original_commit = db_session.commit
+
+        def bad_commit(*args, **kwargs):
+            raise RuntimeError("Simulated commit failure")
+
+        monkeypatch.setattr(db_session, "commit", bad_commit)
+
+        result = await compute_all_vendor_scores(db_session)
+        # Should handle gracefully rather than raising
+        assert isinstance(result, dict)

@@ -201,3 +201,185 @@ def test_index_serves_template(client):
     resp = client.get("/")
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
+
+
+# ── Additional coverage tests ─────────────────────────────────────────
+
+from datetime import datetime, timedelta, timezone
+import httpx
+
+
+class TestCallbackHTTPErrors:
+    @patch("app.routers.auth.http")
+    def test_callback_token_exchange_http_error(self, mock_http, auth_client):
+        """httpx.HTTPError during token exchange -> redirect to /."""
+        mock_http.post = AsyncMock(side_effect=httpx.HTTPError("Connection refused"))
+
+        resp = auth_client.get("/auth/callback?code=test-code", follow_redirects=False)
+        assert resp.status_code in (302, 307)
+
+    @patch("app.routers.auth.http")
+    def test_callback_missing_access_token(self, mock_http, auth_client):
+        """Token response missing access_token -> redirect to /."""
+        token_resp = MagicMock()
+        token_resp.status_code = 200
+        token_resp.json.return_value = {
+            "refresh_token": "mock-refresh",
+            "expires_in": 3600,
+            # access_token intentionally missing
+        }
+        mock_http.post = AsyncMock(return_value=token_resp)
+
+        resp = auth_client.get("/auth/callback?code=test-code", follow_redirects=False)
+        assert resp.status_code in (302, 307)
+
+    @patch("app.routers.auth.http")
+    def test_callback_graph_me_http_error(self, mock_http, auth_client):
+        """httpx.HTTPError during Graph /me call -> redirect to /."""
+        mock_http.post = AsyncMock(return_value=_mock_token_response())
+        mock_http.get = AsyncMock(side_effect=httpx.HTTPError("Timeout"))
+
+        resp = auth_client.get("/auth/callback?code=test-code", follow_redirects=False)
+        assert resp.status_code in (302, 307)
+
+    @patch("app.routers.auth.http")
+    def test_callback_new_user_no_refresh_token(self, mock_http, auth_client, db_session):
+        """Token response without refresh_token -> user created but no refresh_token stored."""
+        token_resp = MagicMock()
+        token_resp.status_code = 200
+        token_resp.json.return_value = {
+            "access_token": "mock-access-token",
+            # no refresh_token
+            "expires_in": 3600,
+        }
+        mock_http.post = AsyncMock(return_value=token_resp)
+        mock_http.get = AsyncMock(return_value=_mock_graph_me(
+            email="norefresh@trioscs.com", name="No Refresh"
+        ))
+
+        resp = auth_client.get("/auth/callback?code=test-code", follow_redirects=False)
+        assert resp.status_code in (302, 307)
+
+        user = db_session.query(User).filter_by(email="norefresh@trioscs.com").first()
+        assert user is not None
+        assert user.refresh_token is None
+        assert user.access_token == "mock-access-token"
+
+    @patch("app.routers.auth.http")
+    def test_callback_first_login_no_inbox_scan(self, mock_http, auth_client, db_session):
+        """New user with no last_inbox_scan -> logs backfill info."""
+        mock_http.post = AsyncMock(return_value=_mock_token_response())
+        mock_http.get = AsyncMock(return_value=_mock_graph_me(
+            email="firsttime@trioscs.com", name="First Timer"
+        ))
+
+        resp = auth_client.get("/auth/callback?code=test-code", follow_redirects=False)
+        assert resp.status_code in (302, 307)
+
+        user = db_session.query(User).filter_by(email="firsttime@trioscs.com").first()
+        assert user is not None
+        assert user.last_inbox_scan is None
+
+    @patch("app.routers.auth.http")
+    def test_callback_uses_user_principal_name(self, mock_http, auth_client, db_session):
+        """Profile missing 'mail' uses 'userPrincipalName' instead."""
+        mock_http.post = AsyncMock(return_value=_mock_token_response())
+
+        me_resp = MagicMock()
+        me_resp.status_code = 200
+        me_resp.json.return_value = {
+            "mail": None,  # mail is None
+            "userPrincipalName": "upn@trioscs.com",
+            "displayName": "UPN User",
+            "id": "az-upn",
+        }
+        mock_http.get = AsyncMock(return_value=me_resp)
+
+        resp = auth_client.get("/auth/callback?code=test-code", follow_redirects=False)
+        assert resp.status_code in (302, 307)
+
+        user = db_session.query(User).filter_by(email="upn@trioscs.com").first()
+        assert user is not None
+        assert user.name == "UPN User"
+
+
+class TestAuthStatusExtended:
+    @patch("app.routers.auth.get_user")
+    def test_status_expired_token(self, mock_get_user, client, test_user, db_session):
+        """User with expired token shows 'expired' status."""
+        test_user.refresh_token = "test-refresh"
+        test_user.m365_connected = True
+        test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        db_session.commit()
+        mock_get_user.return_value = test_user
+
+        resp = client.get("/auth/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["connected"] is True
+        # Check user in users list has expired status
+        for u in data["users"]:
+            if u["id"] == test_user.id:
+                assert u["status"] == "expired"
+
+    @patch("app.routers.auth.get_user")
+    def test_status_disconnected_user(self, mock_get_user, client, test_user, db_session):
+        """User with m365_connected=False shows 'disconnected' status."""
+        test_user.refresh_token = "test-refresh"
+        test_user.m365_connected = False
+        db_session.commit()
+        mock_get_user.return_value = test_user
+
+        resp = client.get("/auth/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        for u in data["users"]:
+            if u["id"] == test_user.id:
+                assert u["status"] == "disconnected"
+
+    @patch("app.routers.auth.get_user")
+    def test_status_with_timestamps(self, mock_get_user, client, test_user, db_session):
+        """Auth status includes m365_last_healthy, last_inbox_scan, last_contacts_sync."""
+        now = datetime.now(timezone.utc)
+        test_user.refresh_token = "test-refresh"
+        test_user.m365_connected = True
+        test_user.token_expires_at = now + timedelta(hours=1)
+        test_user.m365_last_healthy = now
+        test_user.last_inbox_scan = now
+        test_user.last_contacts_sync = now
+        test_user.m365_error_reason = None
+        db_session.commit()
+        mock_get_user.return_value = test_user
+
+        resp = client.get("/auth/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["m365_error"] is None
+        assert data["m365_last_healthy"] is not None
+        for u in data["users"]:
+            if u["id"] == test_user.id:
+                assert u["status"] == "connected"
+                assert u["last_inbox_scan"] is not None
+                assert u["last_contacts_sync"] is not None
+                assert u["m365_last_healthy"] is not None
+
+    @patch("app.routers.auth.get_user")
+    def test_status_user_name_fallback(self, mock_get_user, client, test_user, db_session):
+        """User with no name falls back to email prefix."""
+        test_user.name = None
+        test_user.refresh_token = "test-refresh"
+        db_session.commit()
+        mock_get_user.return_value = test_user
+
+        resp = client.get("/auth/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["user_name"] == test_user.email.split("@")[0]
+
+
+class TestIndexExtended:
+    def test_index_unauthenticated(self, auth_client):
+        """GET / without session still serves HTML page."""
+        resp = auth_client.get("/")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers["content-type"]

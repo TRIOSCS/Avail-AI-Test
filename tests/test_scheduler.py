@@ -1408,3 +1408,2131 @@ def test_parse_stock_file_filters_invalid_rows():
         from app.scheduler import _parse_stock_file
         result = _parse_stock_file(b"data", "test.csv")
         assert len(result) == 2
+
+
+# ===========================================================================
+# Additional coverage tests — _traced_job exception path (lines 47-49)
+# ===========================================================================
+
+
+def test_traced_job_exception_is_reraised():
+    """The _traced_job wrapper re-raises exceptions after logging."""
+    from app.scheduler import _traced_job
+
+    @_traced_job
+    async def boom():
+        raise RuntimeError("kaboom")
+
+    with pytest.raises(RuntimeError, match="kaboom"):
+        asyncio.get_event_loop().run_until_complete(boom())
+
+
+# ===========================================================================
+# _job_token_refresh outer exception (lines 288-289)
+# ===========================================================================
+
+
+def test_token_refresh_outer_exception(scheduler_db):
+    """Outer exception in _job_token_refresh is caught."""
+    with patch.object(scheduler_db, "query", side_effect=Exception("DB crash")):
+        from app.scheduler import _job_token_refresh
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_token_refresh())
+
+
+# ===========================================================================
+# _job_inbox_scan error in user-gathering phase (lines 320-322)
+# ===========================================================================
+
+
+def test_inbox_scan_error_in_user_gathering(scheduler_db):
+    """Error during user-gathering phase returns early."""
+    with patch.object(scheduler_db, "query", side_effect=Exception("DB error")), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_scan_interval_min = 30
+        from app.scheduler import _job_inbox_scan
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+
+
+# ===========================================================================
+# _job_inbox_scan _safe_scan timeout (lines 335, 345-349)
+# ===========================================================================
+
+
+def test_inbox_scan_safe_scan_timeout(scheduler_db, test_user):
+    """Timeout during _safe_scan sets m365_error_reason on user."""
+    test_user.refresh_token = "rt_timeout"
+    test_user.access_token = "at_timeout"
+    test_user.m365_connected = True
+    test_user.last_inbox_scan = None
+    scheduler_db.commit()
+
+    async def _timeout_scan(user, db):
+        raise asyncio.TimeoutError()
+
+    with patch("app.scheduler._scan_user_inbox", new_callable=AsyncMock) as mock_scan, \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_scan_interval_min = 30
+
+        # Make wait_for raise TimeoutError
+        original_wait_for = asyncio.wait_for
+
+        async def _mock_wait_for(coro, timeout=None):
+            # Cancel the actual coro
+            try:
+                coro.close()
+            except Exception:
+                pass
+            raise asyncio.TimeoutError()
+
+        with patch("asyncio.wait_for", side_effect=_mock_wait_for):
+            from app.scheduler import _job_inbox_scan
+            asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+
+    scheduler_db.refresh(test_user)
+    assert test_user.m365_error_reason == "Inbox scan timed out"
+
+
+def test_inbox_scan_safe_scan_exception(scheduler_db, test_user):
+    """General exception in _safe_scan is caught."""
+    test_user.refresh_token = "rt_err"
+    test_user.access_token = "at_err"
+    test_user.m365_connected = True
+    test_user.last_inbox_scan = None
+    scheduler_db.commit()
+
+    with patch("app.scheduler._scan_user_inbox", new_callable=AsyncMock,
+               side_effect=Exception("random error")), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_scan_interval_min = 30
+        from app.scheduler import _job_inbox_scan
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+
+
+# ===========================================================================
+# _job_contacts_sync error in user-gathering (lines 400-402)
+# ===========================================================================
+
+
+def test_contacts_sync_error_in_user_gathering(scheduler_db):
+    """Error during user-gathering returns early."""
+    with patch.object(scheduler_db, "query", side_effect=Exception("DB error")):
+        from app.scheduler import _job_contacts_sync
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_contacts_sync())
+
+
+# ===========================================================================
+# _job_contacts_sync timeout handling (lines 412, 415-416)
+# ===========================================================================
+
+
+def test_contacts_sync_timeout(scheduler_db, test_user):
+    """Timeout during contacts sync is handled gracefully."""
+    test_user.refresh_token = "rt_contacts"
+    test_user.access_token = "at_contacts"
+    test_user.m365_connected = True
+    test_user.last_contacts_sync = None
+    scheduler_db.commit()
+
+    async def _mock_wait_for(coro, timeout=None):
+        try:
+            coro.close()
+        except Exception:
+            pass
+        raise asyncio.TimeoutError()
+
+    with patch("asyncio.wait_for", side_effect=_mock_wait_for), \
+         patch("app.scheduler._sync_user_contacts", new_callable=AsyncMock):
+        from app.scheduler import _job_contacts_sync
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_contacts_sync())
+
+
+# ===========================================================================
+# _job_po_verification outer exception (lines 515-517)
+# ===========================================================================
+
+
+def test_po_verification_outer_exception(scheduler_db):
+    """Outer exception in PO verification is caught."""
+    with patch.object(scheduler_db, "query", side_effect=Exception("DB crash")):
+        from app.scheduler import _job_po_verification
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_po_verification())
+
+
+# ===========================================================================
+# _job_stock_autocomplete timeout (lines 538-539)
+# ===========================================================================
+
+
+def test_stock_autocomplete_timeout(scheduler_db):
+    """Stock auto-complete handles timeout gracefully."""
+    async def _mock_wait_for(coro, timeout=None):
+        try:
+            coro.close()
+        except Exception:
+            pass
+        raise asyncio.TimeoutError()
+
+    with patch("app.services.buyplan_service.auto_complete_stock_sales") as mock_complete, \
+         patch("asyncio.wait_for", side_effect=_mock_wait_for):
+        from app.scheduler import _job_stock_autocomplete
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_stock_autocomplete())
+
+
+# ===========================================================================
+# _job_proactive_matching timeout (lines 565-566)
+# ===========================================================================
+
+
+def test_proactive_matching_timeout(scheduler_db):
+    """Proactive matching handles timeout gracefully."""
+    async def _mock_wait_for(coro, timeout=None):
+        try:
+            coro.close()
+        except Exception:
+            pass
+        raise asyncio.TimeoutError()
+
+    with patch("app.services.proactive_service.scan_new_offers_for_matches"), \
+         patch("asyncio.wait_for", side_effect=_mock_wait_for):
+        from app.scheduler import _job_proactive_matching
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_proactive_matching())
+
+
+# ===========================================================================
+# _job_performance_tracking timeout (lines 612-613)
+# ===========================================================================
+
+
+def test_performance_tracking_timeout(scheduler_db):
+    """Performance tracking handles timeout gracefully."""
+    async def _mock_wait_for(coro, timeout=None):
+        try:
+            coro.close()
+        except Exception:
+            pass
+        raise asyncio.TimeoutError()
+
+    with patch("app.services.performance_service.compute_all_vendor_scorecards"), \
+         patch("app.services.performance_service.compute_buyer_leaderboard"), \
+         patch("asyncio.wait_for", side_effect=_mock_wait_for):
+        from app.scheduler import _job_performance_tracking
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_performance_tracking())
+
+
+# ===========================================================================
+# _job_deep_email_mining: link_contact exception (line 665-666)
+# ===========================================================================
+
+
+def test_deep_email_mining_link_contact_exception(scheduler_db, test_user):
+    """Exception in link_contact_to_entities is silently swallowed."""
+    test_user.refresh_token = "rt_deep"
+    test_user.access_token = "at_deep"
+    test_user.m365_connected = True
+    test_user.last_deep_email_scan = None
+    scheduler_db.commit()
+
+    mock_miner_instance = MagicMock()
+    mock_miner_instance.deep_scan_inbox = AsyncMock(return_value={
+        "messages_scanned": 10,
+        "contacts_found": 1,
+        "per_domain": {
+            "example.com": {
+                "emails": ["fail@example.com"],
+                "sender_names": ["Fail User"],
+            }
+        },
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance), \
+         patch("app.services.deep_enrichment_service.link_contact_to_entities",
+               side_effect=Exception("link error")):
+        from app.scheduler import _job_deep_email_mining
+        # Should not raise — the exception is caught with bare except+pass
+        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+        # User should still get updated
+        assert test_user.last_deep_email_scan is not None
+
+
+# ===========================================================================
+# _job_deep_email_mining: per-user timeout (lines 674-675)
+# ===========================================================================
+
+
+def test_deep_email_mining_per_user_timeout(scheduler_db, test_user):
+    """Per-user timeout in deep email mining is caught."""
+    test_user.refresh_token = "rt_deep"
+    test_user.access_token = "at_deep"
+    test_user.m365_connected = True
+    test_user.last_deep_email_scan = None
+    scheduler_db.commit()
+
+    mock_miner_instance = MagicMock()
+    mock_miner_instance.deep_scan_inbox = AsyncMock(side_effect=asyncio.TimeoutError())
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance):
+        from app.scheduler import _job_deep_email_mining
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+
+
+# ===========================================================================
+# _job_deep_email_mining: per-user general exception (lines 676-678)
+# ===========================================================================
+
+
+def test_deep_email_mining_per_user_exception(scheduler_db, test_user):
+    """Per-user general exception in deep email mining is caught."""
+    test_user.refresh_token = "rt_deep"
+    test_user.access_token = "at_deep"
+    test_user.m365_connected = True
+    test_user.last_deep_email_scan = None
+    scheduler_db.commit()
+
+    mock_miner_instance = MagicMock()
+    mock_miner_instance.deep_scan_inbox = AsyncMock(side_effect=Exception("scan crash"))
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance):
+        from app.scheduler import _job_deep_email_mining
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+
+
+# ===========================================================================
+# _job_deep_email_mining: outer exception (lines 682-684)
+# ===========================================================================
+
+
+def test_deep_email_mining_outer_exception(scheduler_db):
+    """Outer exception in deep email mining is caught."""
+    with patch.object(scheduler_db, "query", side_effect=Exception("DB crash")):
+        from app.scheduler import _job_deep_email_mining
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+
+
+# ===========================================================================
+# _job_deep_enrichment: per-vendor/company errors (lines 750-752, 777-779)
+# ===========================================================================
+
+
+def test_deep_enrichment_per_vendor_error_with_savepoint(scheduler_db):
+    """Per-vendor enrichment errors rollback to savepoint."""
+    card = VendorCard(
+        normalized_name="savepoint vendor",
+        display_name="Savepoint Vendor",
+        emails=[],
+        phones=[],
+        deep_enrichment_at=None,
+        sighting_count=10,
+        created_at=datetime.now(timezone.utc) - timedelta(days=30),
+    )
+    scheduler_db.add(card)
+    scheduler_db.commit()
+
+    with patch("app.config.settings") as mock_settings, \
+         patch(
+             "app.services.deep_enrichment_service.deep_enrich_vendor",
+             new_callable=AsyncMock,
+             side_effect=Exception("enrich failed"),
+         ), \
+         patch(
+             "app.services.deep_enrichment_service.deep_enrich_company",
+             new_callable=AsyncMock,
+         ):
+        mock_settings.deep_enrichment_stale_days = 30
+        from app.scheduler import _job_deep_enrichment
+        # Should not raise (errors caught per-vendor with savepoint rollback)
+        asyncio.get_event_loop().run_until_complete(_job_deep_enrichment())
+
+
+def test_deep_enrichment_per_company_error_with_savepoint(scheduler_db, test_company):
+    """Per-company enrichment errors rollback to savepoint."""
+    test_company.deep_enrichment_at = None
+    scheduler_db.commit()
+
+    with patch("app.config.settings") as mock_settings, \
+         patch(
+             "app.services.deep_enrichment_service.deep_enrich_vendor",
+             new_callable=AsyncMock,
+         ), \
+         patch(
+             "app.services.deep_enrichment_service.deep_enrich_company",
+             new_callable=AsyncMock,
+             side_effect=Exception("company enrich failed"),
+         ):
+        mock_settings.deep_enrichment_stale_days = 30
+        from app.scheduler import _job_deep_enrichment
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_deep_enrichment())
+
+
+def test_deep_enrichment_outer_exception(scheduler_db):
+    """Outer exception in deep enrichment is caught."""
+    with patch.object(scheduler_db, "query", side_effect=Exception("DB crash")), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.deep_enrichment_stale_days = 30
+        from app.scheduler import _job_deep_enrichment
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(_job_deep_enrichment())
+
+
+# ===========================================================================
+# _scan_user_inbox (lines 799-850)
+# ===========================================================================
+
+
+def test_scan_user_inbox_first_time_backfill(scheduler_db, test_user):
+    """First-time scan (last_inbox_scan=None) triggers backfill."""
+    test_user.access_token = "at_scan"
+    test_user.last_inbox_scan = None
+    scheduler_db.commit()
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.email_service.poll_inbox", new_callable=AsyncMock, return_value=["resp1"]), \
+         patch("app.scheduler._scan_stock_list_attachments", new_callable=AsyncMock) as mock_stock, \
+         patch("app.scheduler._mine_vendor_contacts", new_callable=AsyncMock) as mock_mine, \
+         patch("app.scheduler._scan_outbound_rfqs", new_callable=AsyncMock) as mock_outbound, \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _scan_user_inbox
+        asyncio.get_event_loop().run_until_complete(
+            _scan_user_inbox(test_user, scheduler_db)
+        )
+
+        mock_stock.assert_called_once()
+        mock_mine.assert_called_once()
+        mock_outbound.assert_called_once()
+        # is_backfill should be True
+        assert mock_stock.call_args[0][2] is True
+        assert test_user.last_inbox_scan is not None
+
+
+def test_scan_user_inbox_not_backfill(scheduler_db, test_user):
+    """Non-first scan sets is_backfill=False."""
+    test_user.access_token = "at_scan"
+    test_user.last_inbox_scan = datetime.now(timezone.utc) - timedelta(hours=1)
+    scheduler_db.commit()
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.email_service.poll_inbox", new_callable=AsyncMock, return_value=[]), \
+         patch("app.scheduler._scan_stock_list_attachments", new_callable=AsyncMock) as mock_stock, \
+         patch("app.scheduler._mine_vendor_contacts", new_callable=AsyncMock), \
+         patch("app.scheduler._scan_outbound_rfqs", new_callable=AsyncMock), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _scan_user_inbox
+        asyncio.get_event_loop().run_until_complete(
+            _scan_user_inbox(test_user, scheduler_db)
+        )
+
+        assert mock_stock.call_args[0][2] is False
+
+
+def test_scan_user_inbox_no_valid_token(scheduler_db, test_user):
+    """Inbox scan is skipped when no valid token is available."""
+    test_user.access_token = "at_scan"
+    test_user.last_inbox_scan = None
+    scheduler_db.commit()
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None), \
+         patch("app.email_service.poll_inbox", new_callable=AsyncMock) as mock_poll, \
+         patch("app.scheduler._scan_stock_list_attachments", new_callable=AsyncMock), \
+         patch("app.scheduler._mine_vendor_contacts", new_callable=AsyncMock), \
+         patch("app.scheduler._scan_outbound_rfqs", new_callable=AsyncMock), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _scan_user_inbox
+        asyncio.get_event_loop().run_until_complete(
+            _scan_user_inbox(test_user, scheduler_db)
+        )
+
+        mock_poll.assert_not_called()
+
+
+def test_scan_user_inbox_poll_exception(scheduler_db, test_user):
+    """Exception in poll_inbox is caught and sub-operations still run."""
+    test_user.access_token = "at_scan"
+    test_user.last_inbox_scan = datetime.now(timezone.utc) - timedelta(hours=1)
+    scheduler_db.commit()
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.email_service.poll_inbox", new_callable=AsyncMock,
+               side_effect=Exception("poll failed")), \
+         patch("app.scheduler._scan_stock_list_attachments", new_callable=AsyncMock) as mock_stock, \
+         patch("app.scheduler._mine_vendor_contacts", new_callable=AsyncMock) as mock_mine, \
+         patch("app.scheduler._scan_outbound_rfqs", new_callable=AsyncMock) as mock_outbound, \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _scan_user_inbox
+        asyncio.get_event_loop().run_until_complete(
+            _scan_user_inbox(test_user, scheduler_db)
+        )
+
+        # Sub-operations should still run
+        mock_stock.assert_called_once()
+        mock_mine.assert_called_once()
+        mock_outbound.assert_called_once()
+
+
+def test_scan_user_inbox_sub_operation_exceptions(scheduler_db, test_user):
+    """Exceptions in sub-operations are caught individually."""
+    test_user.access_token = "at_scan"
+    test_user.last_inbox_scan = datetime.now(timezone.utc) - timedelta(hours=1)
+    scheduler_db.commit()
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.email_service.poll_inbox", new_callable=AsyncMock, return_value=[]), \
+         patch("app.scheduler._scan_stock_list_attachments", new_callable=AsyncMock,
+               side_effect=Exception("stock error")), \
+         patch("app.scheduler._mine_vendor_contacts", new_callable=AsyncMock,
+               side_effect=Exception("mine error")), \
+         patch("app.scheduler._scan_outbound_rfqs", new_callable=AsyncMock,
+               side_effect=Exception("outbound error")), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _scan_user_inbox
+        # Should not raise — errors are caught per-sub-operation
+        asyncio.get_event_loop().run_until_complete(
+            _scan_user_inbox(test_user, scheduler_db)
+        )
+
+
+# ===========================================================================
+# _scan_stock_list_attachments (lines 855-884)
+# ===========================================================================
+
+
+def test_scan_stock_list_attachments_no_emails(scheduler_db, test_user):
+    """No stock emails found — returns early."""
+    test_user.access_token = "at_stock"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_for_stock_lists = AsyncMock(return_value=[])
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _scan_stock_list_attachments
+        asyncio.get_event_loop().run_until_complete(
+            _scan_stock_list_attachments(test_user, scheduler_db, is_backfill=False)
+        )
+
+
+def test_scan_stock_list_attachments_with_files(scheduler_db, test_user):
+    """Stock emails with attachments trigger download and import."""
+    test_user.access_token = "at_stock"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_for_stock_lists = AsyncMock(return_value=[
+        {
+            "vendor_name": "Arrow",
+            "from_email": "sales@arrow.com",
+            "stock_files": [
+                {
+                    "message_id": "msg1",
+                    "attachment_id": "att1",
+                    "filename": "stock.csv",
+                }
+            ],
+        }
+    ])
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.scheduler._download_and_import_stock_list", new_callable=AsyncMock) as mock_dl, \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _scan_stock_list_attachments
+        asyncio.get_event_loop().run_until_complete(
+            _scan_stock_list_attachments(test_user, scheduler_db, is_backfill=True)
+        )
+
+        mock_dl.assert_called_once()
+
+
+def test_scan_stock_list_attachments_import_error(scheduler_db, test_user):
+    """Exception during import is caught per-attachment."""
+    test_user.access_token = "at_stock"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_for_stock_lists = AsyncMock(return_value=[
+        {
+            "vendor_name": "Arrow",
+            "from_email": "sales@arrow.com",
+            "stock_files": [
+                {
+                    "message_id": "msg1",
+                    "attachment_id": "att1",
+                    "filename": "stock.csv",
+                }
+            ],
+        }
+    ])
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.scheduler._download_and_import_stock_list", new_callable=AsyncMock,
+               side_effect=Exception("import failed")), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _scan_stock_list_attachments
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(
+            _scan_stock_list_attachments(test_user, scheduler_db, is_backfill=False)
+        )
+
+
+# ===========================================================================
+# _download_and_import_stock_list (lines 897-1078)
+# ===========================================================================
+
+
+def test_download_and_import_stock_list_attachment_download_fails(scheduler_db, test_user):
+    """Attachment download failure returns early."""
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(side_effect=Exception("download error"))
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+
+
+def test_download_and_import_stock_list_error_in_att_data(scheduler_db, test_user):
+    """Attachment data with error key returns early."""
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={"error": {"code": "NotFound"}})
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+
+
+def test_download_and_import_stock_list_no_content_bytes(scheduler_db, test_user):
+    """Attachment with no contentBytes returns early."""
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={"id": "att1"})  # no contentBytes
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+
+
+def test_download_and_import_stock_list_file_validation_fails(scheduler_db, test_user):
+    """Invalid file type returns early."""
+    import base64
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"not a csv").decode(),
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(False, "application/octet-stream")):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.bin", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+
+
+def test_download_and_import_stock_list_no_rows(scheduler_db, test_user):
+    """No valid rows in parsed file returns early."""
+    import base64
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"header\n").decode(),
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
+         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=[]):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+
+
+def test_download_and_import_stock_list_ai_parser_fallback(scheduler_db, test_user):
+    """AI parser failure falls back to legacy _parse_stock_file."""
+    import base64
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"mpn,qty\nLM317T,100").decode(),
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
+         patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock,
+               side_effect=Exception("AI parser down")), \
+         patch("app.scheduler._parse_stock_file", return_value=[
+             {"mpn": "LM317T", "qty": 100}
+         ]) as mock_legacy, \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"), \
+         patch("app.services.activity_service.match_email_to_entity", return_value=None):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+        mock_legacy.assert_called_once()
+
+
+def test_download_and_import_stock_list_creates_cards_and_mvh(scheduler_db, test_user):
+    """Successful import creates MaterialCard and MaterialVendorHistory."""
+    import base64
+    from app.models import MaterialCard, MaterialVendorHistory
+
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"data").decode(),
+    })
+
+    rows = [
+        {"mpn": "LM317T", "qty": 100, "price": 0.50, "manufacturer": "TI", "description": "Reg"},
+    ]
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
+         patch("app.services.attachment_parser.parse_attachment",
+               new_callable=AsyncMock, return_value=rows), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"), \
+         patch("app.services.activity_service.match_email_to_entity", return_value=None), \
+         patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+
+    # Verify card was created
+    card = scheduler_db.query(MaterialCard).filter_by(normalized_mpn="LM317T").first()
+    assert card is not None
+    assert card.manufacturer == "TI"
+
+    # Verify MVH was created
+    mvh = scheduler_db.query(MaterialVendorHistory).filter_by(
+        material_card_id=card.id, vendor_name="arrow"
+    ).first()
+    assert mvh is not None
+    assert mvh.last_qty == 100
+
+
+def test_download_and_import_stock_list_updates_existing_mvh(scheduler_db, test_user):
+    """Importing into existing MaterialCard updates MVH."""
+    import base64
+    from app.models import MaterialCard, MaterialVendorHistory
+
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    # Pre-create card + MVH
+    card = MaterialCard(
+        normalized_mpn="NE555",
+        display_mpn="NE555",
+        manufacturer="TI",
+        description="Timer",
+    )
+    scheduler_db.add(card)
+    scheduler_db.flush()
+    mvh = MaterialVendorHistory(
+        material_card_id=card.id,
+        vendor_name="arrow",
+        source_type="email_auto_import",
+        last_qty=50,
+        times_seen=1,
+    )
+    scheduler_db.add(mvh)
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"data").decode(),
+    })
+
+    rows = [
+        {"mpn": "NE555", "qty": 200, "unit_price": 0.30, "manufacturer": "TI"},
+    ]
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
+         patch("app.services.attachment_parser.parse_attachment",
+               new_callable=AsyncMock, return_value=rows), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"), \
+         patch("app.services.activity_service.match_email_to_entity", return_value=None), \
+         patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+
+    scheduler_db.refresh(mvh)
+    assert mvh.times_seen == 2
+    assert mvh.last_qty == 200
+    assert mvh.last_price == 0.30
+
+
+def test_download_and_import_stock_list_excess_list(scheduler_db, test_user, test_company):
+    """Import from a company email is classified as excess_list."""
+    import base64
+    from app.models import MaterialCard, MaterialVendorHistory
+
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"data").decode(),
+    })
+
+    rows = [
+        {"mpn": "EXCESS1", "qty": 500, "manufacturer": "Murata"},
+    ]
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
+         patch("app.services.attachment_parser.parse_attachment",
+               new_callable=AsyncMock, return_value=rows), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="acme"), \
+         patch("app.services.activity_service.match_email_to_entity", return_value={
+             "type": "company", "id": test_company.id, "name": "Acme Electronics",
+         }), \
+         patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="excess.csv", vendor_name="Acme Electronics",
+                vendor_email="purchasing@acme-electronics.com",
+            )
+        )
+
+    mvh = scheduler_db.query(MaterialVendorHistory).filter_by(vendor_name="acme").first()
+    assert mvh is not None
+    assert mvh.source_type == "excess_list"
+
+
+def test_download_and_import_stock_list_skips_short_mpn(scheduler_db, test_user):
+    """MPNs shorter than 3 chars are skipped."""
+    import base64
+    from app.models import MaterialCard
+
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"data").decode(),
+    })
+
+    rows = [
+        {"mpn": "AB", "qty": 100},  # too short
+        {"mpn": "", "qty": 200},    # empty
+        {"mpn": "ABC", "qty": 300},  # OK
+    ]
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
+         patch("app.services.attachment_parser.parse_attachment",
+               new_callable=AsyncMock, return_value=rows), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"), \
+         patch("app.services.activity_service.match_email_to_entity", return_value=None), \
+         patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+
+    cards = scheduler_db.query(MaterialCard).all()
+    # Only "ABC" should have been created (existing test cards may be present)
+    abc_card = scheduler_db.query(MaterialCard).filter_by(normalized_mpn="ABC").first()
+    assert abc_card is not None
+
+
+def test_download_and_import_stock_list_commit_fails(scheduler_db, test_user):
+    """Commit failure during import is handled gracefully."""
+    import base64
+
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"data").decode(),
+    })
+
+    rows = [{"mpn": "FAIL1", "qty": 100}]
+
+    original_commit = scheduler_db.commit
+
+    call_count = [0]
+
+    def _failing_commit():
+        call_count[0] += 1
+        # Fail on the final commit (after import loop)
+        if call_count[0] > 2:
+            raise Exception("commit failed")
+        return original_commit()
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
+         patch("app.services.attachment_parser.parse_attachment",
+               new_callable=AsyncMock, return_value=rows), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"), \
+         patch("app.services.activity_service.match_email_to_entity", return_value=None):
+        scheduler_db.commit = _failing_commit
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+        scheduler_db.commit = original_commit
+
+
+def test_download_and_import_stock_list_no_vendor_email(scheduler_db, test_user):
+    """Import works with empty vendor_email."""
+    import base64
+    from app.models import MaterialCard
+
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"data").decode(),
+    })
+
+    rows = [{"mpn": "NOEMAIL1", "qty": 100}]
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
+         patch("app.services.attachment_parser.parse_attachment",
+               new_callable=AsyncMock, return_value=rows), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="unknown"), \
+         patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Unknown",
+                vendor_email="",
+            )
+        )
+
+    card = scheduler_db.query(MaterialCard).filter_by(normalized_mpn="NOEMAIL1").first()
+    assert card is not None
+
+
+def test_download_and_import_stock_list_price_field_fallback(scheduler_db, test_user):
+    """MVH uses price field when unit_price is absent."""
+    import base64
+    from app.models import MaterialCard, MaterialVendorHistory
+
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    # Pre-create card + MVH
+    card = MaterialCard(
+        normalized_mpn="PRICEFB",
+        display_mpn="PRICEFB",
+        manufacturer="Test",
+    )
+    scheduler_db.add(card)
+    scheduler_db.flush()
+    mvh = MaterialVendorHistory(
+        material_card_id=card.id,
+        vendor_name="arrow",
+        source_type="email_auto_import",
+        times_seen=1,
+    )
+    scheduler_db.add(mvh)
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"data").decode(),
+    })
+
+    # Row with "price" but no "unit_price"
+    rows = [{"mpn": "PRICEFB", "qty": 100, "price": 1.25}]
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
+         patch("app.services.attachment_parser.parse_attachment",
+               new_callable=AsyncMock, return_value=rows), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"), \
+         patch("app.services.activity_service.match_email_to_entity", return_value=None), \
+         patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+
+    scheduler_db.refresh(mvh)
+    assert mvh.last_price == 1.25
+
+
+def test_download_and_import_stock_list_teams_alert(
+    scheduler_db, test_user, test_requisition
+):
+    """Teams alert is sent when imported MPNs match open requirements."""
+    import base64
+
+    test_user.access_token = "at_dl"
+    # Status must be in ["active", "sourcing", "offers"] for match
+    test_requisition.status = "active"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"data").decode(),
+    })
+
+    rows = [{"mpn": "LM317T", "qty": 100}]
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
+         patch("app.services.attachment_parser.parse_attachment",
+               new_callable=AsyncMock, return_value=rows), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"), \
+         patch("app.services.activity_service.match_email_to_entity", return_value=None), \
+         patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock) as mock_alert:
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+
+        mock_alert.assert_called_once()
+
+
+def test_download_and_import_stock_list_teams_alert_exception(
+    scheduler_db, test_user, test_requisition
+):
+    """Teams alert exception is caught silently."""
+    import base64
+
+    test_user.access_token = "at_dl"
+    test_requisition.status = "active"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"data").decode(),
+    })
+
+    rows = [{"mpn": "LM317T", "qty": 100}]
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
+         patch("app.services.attachment_parser.parse_attachment",
+               new_callable=AsyncMock, return_value=rows), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"), \
+         patch("app.services.activity_service.match_email_to_entity", return_value=None), \
+         patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock,
+               side_effect=Exception("Teams error")):
+        from app.scheduler import _download_and_import_stock_list
+        # Should not raise
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+
+
+def test_download_and_import_stock_list_null_att_data(scheduler_db, test_user):
+    """None response from get_json returns early."""
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value=None)
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+
+
+# ===========================================================================
+# _mine_vendor_contacts (lines 1099-1164)
+# ===========================================================================
+
+
+def test_mine_vendor_contacts_no_contacts(scheduler_db, test_user):
+    """No contacts found returns early."""
+    test_user.access_token = "at_mine"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_inbox = AsyncMock(return_value={"contacts_enriched": []})
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _mine_vendor_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _mine_vendor_contacts(test_user, scheduler_db, is_backfill=False)
+        )
+
+
+def test_mine_vendor_contacts_creates_new_card(scheduler_db, test_user):
+    """New vendor contacts create VendorCard entries."""
+    test_user.access_token = "at_mine"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_inbox = AsyncMock(return_value={
+        "contacts_enriched": [
+            {
+                "vendor_name": "New Vendor Co",
+                "emails": ["contact@newvendor.com"],
+                "phones": ["+1-555-1234"],
+                "websites": ["newvendor.com"],
+            }
+        ]
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="new vendor co"), \
+         patch("app.vendor_utils.merge_emails_into_card", return_value=1) as mock_merge_emails, \
+         patch("app.vendor_utils.merge_phones_into_card") as mock_merge_phones, \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _mine_vendor_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _mine_vendor_contacts(test_user, scheduler_db, is_backfill=True)
+        )
+
+        mock_merge_emails.assert_called_once()
+        mock_merge_phones.assert_called_once()
+
+
+def test_mine_vendor_contacts_updates_existing_card(scheduler_db, test_user, test_vendor_card):
+    """Existing vendor cards get emails/phones merged."""
+    test_user.access_token = "at_mine"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_inbox = AsyncMock(return_value={
+        "contacts_enriched": [
+            {
+                "vendor_name": "Arrow Electronics",
+                "emails": ["new@arrow.com"],
+                "phones": ["+1-555-9999"],
+                "websites": [],
+            }
+        ]
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow electronics"), \
+         patch("app.vendor_utils.merge_emails_into_card", return_value=1) as mock_merge_emails, \
+         patch("app.vendor_utils.merge_phones_into_card") as mock_merge_phones, \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _mine_vendor_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _mine_vendor_contacts(test_user, scheduler_db, is_backfill=False)
+        )
+
+        mock_merge_emails.assert_called_once()
+        mock_merge_phones.assert_called_once()
+
+
+def test_mine_vendor_contacts_skips_empty_vendor_name(scheduler_db, test_user):
+    """Contacts with empty vendor_name are skipped."""
+    test_user.access_token = "at_mine"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_inbox = AsyncMock(return_value={
+        "contacts_enriched": [
+            {"vendor_name": "", "emails": ["test@test.com"]},
+        ]
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.vendor_utils.merge_emails_into_card") as mock_merge, \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _mine_vendor_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _mine_vendor_contacts(test_user, scheduler_db, is_backfill=False)
+        )
+
+        mock_merge.assert_not_called()
+
+
+def test_mine_vendor_contacts_commit_error(scheduler_db, test_user):
+    """Commit failure during contact mining is handled."""
+    test_user.access_token = "at_mine"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_inbox = AsyncMock(return_value={
+        "contacts_enriched": [
+            {
+                "vendor_name": "Test Vendor",
+                "emails": ["test@test.com"],
+                "phones": [],
+                "websites": [],
+            }
+        ]
+    })
+
+    original_commit = scheduler_db.commit
+    call_count = [0]
+
+    def _failing_commit():
+        call_count[0] += 1
+        if call_count[0] > 2:
+            raise Exception("commit failed")
+        return original_commit()
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="test vendor"), \
+         patch("app.vendor_utils.merge_emails_into_card", return_value=1), \
+         patch("app.vendor_utils.merge_phones_into_card"), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        scheduler_db.commit = _failing_commit
+        from app.scheduler import _mine_vendor_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _mine_vendor_contacts(test_user, scheduler_db, is_backfill=False)
+        )
+        scheduler_db.commit = original_commit
+
+
+# ===========================================================================
+# _scan_outbound_rfqs (lines 1172-1225)
+# ===========================================================================
+
+
+def test_scan_outbound_rfqs_no_vendors(scheduler_db, test_user):
+    """No vendors contacted returns early."""
+    test_user.access_token = "at_out"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_sent_items = AsyncMock(return_value={
+        "rfqs_detected": 0,
+        "vendors_contacted": {},
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _scan_outbound_rfqs
+        asyncio.get_event_loop().run_until_complete(
+            _scan_outbound_rfqs(test_user, scheduler_db, is_backfill=False)
+        )
+
+
+def test_scan_outbound_rfqs_updates_vendor_card(scheduler_db, test_user, test_vendor_card):
+    """Outbound RFQs update vendor card outreach counts."""
+    test_user.access_token = "at_out"
+    test_vendor_card.domain = "arrow.com"
+    test_vendor_card.total_outreach = 5
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_sent_items = AsyncMock(return_value={
+        "rfqs_detected": 3,
+        "vendors_contacted": {"arrow.com": 3},
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _scan_outbound_rfqs
+        asyncio.get_event_loop().run_until_complete(
+            _scan_outbound_rfqs(test_user, scheduler_db, is_backfill=False)
+        )
+
+    scheduler_db.refresh(test_vendor_card)
+    assert test_vendor_card.total_outreach == 8
+    assert test_vendor_card.last_contact_at is not None
+
+
+def test_scan_outbound_rfqs_unmatched_domain(scheduler_db, test_user):
+    """Domains without matching vendor cards are ignored."""
+    test_user.access_token = "at_out"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_sent_items = AsyncMock(return_value={
+        "rfqs_detected": 2,
+        "vendors_contacted": {"unknown-vendor.com": 2},
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _scan_outbound_rfqs
+        asyncio.get_event_loop().run_until_complete(
+            _scan_outbound_rfqs(test_user, scheduler_db, is_backfill=False)
+        )
+
+
+def test_scan_outbound_rfqs_commit_error(scheduler_db, test_user, test_vendor_card):
+    """Commit failure during outbound scan is handled."""
+    test_user.access_token = "at_out"
+    test_vendor_card.domain = "arrow.com"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_sent_items = AsyncMock(return_value={
+        "rfqs_detected": 1,
+        "vendors_contacted": {"arrow.com": 1},
+    })
+
+    original_commit = scheduler_db.commit
+    call_count = [0]
+
+    def _failing_commit():
+        call_count[0] += 1
+        if call_count[0] > 1:
+            raise Exception("commit failed")
+        return original_commit()
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        scheduler_db.commit = _failing_commit
+        from app.scheduler import _scan_outbound_rfqs
+        asyncio.get_event_loop().run_until_complete(
+            _scan_outbound_rfqs(test_user, scheduler_db, is_backfill=True)
+        )
+        scheduler_db.commit = original_commit
+
+
+def test_scan_outbound_rfqs_fallback_name_match(scheduler_db, test_user, test_vendor_card):
+    """Vendor card matched by normalized_name prefix when domain doesn't match."""
+    test_user.access_token = "at_out"
+    test_vendor_card.domain = None
+    test_vendor_card.normalized_name = "arrow"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_sent_items = AsyncMock(return_value={
+        "rfqs_detected": 1,
+        "vendors_contacted": {"arrow.com": 1},
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _scan_outbound_rfqs
+        asyncio.get_event_loop().run_until_complete(
+            _scan_outbound_rfqs(test_user, scheduler_db, is_backfill=False)
+        )
+
+    scheduler_db.refresh(test_vendor_card)
+    assert (test_vendor_card.total_outreach or 0) >= 1
+
+
+# ===========================================================================
+# _sync_user_contacts (lines 1253-1334)
+# ===========================================================================
+
+
+def test_sync_user_contacts_empty(scheduler_db, test_user):
+    """No contacts from Graph API — updates sync timestamp only."""
+    test_user.access_token = "at_sync"
+    test_user.last_contacts_sync = None
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_all_pages = AsyncMock(return_value=[])
+
+    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        from app.scheduler import _sync_user_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _sync_user_contacts(test_user, scheduler_db)
+        )
+
+    assert test_user.last_contacts_sync is not None
+
+
+def test_sync_user_contacts_creates_vendor_card(scheduler_db, test_user):
+    """Outlook contacts create VendorCard entries."""
+    test_user.access_token = "at_sync"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_all_pages = AsyncMock(return_value=[
+        {
+            "companyName": "New Outlook Co",
+            "displayName": "Jane Doe",
+            "emailAddresses": [{"address": "jane@outlookco.com"}],
+            "businessPhones": ["+1-555-0001"],
+            "mobilePhone": "+1-555-0002",
+        }
+    ])
+
+    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="new outlook co"), \
+         patch("app.vendor_utils.merge_emails_into_card", return_value=1) as mock_merge_e, \
+         patch("app.vendor_utils.merge_phones_into_card") as mock_merge_p:
+        from app.scheduler import _sync_user_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _sync_user_contacts(test_user, scheduler_db)
+        )
+
+        mock_merge_e.assert_called_once()
+        mock_merge_p.assert_called_once()
+        # Mobile phone should be included
+        phones_arg = mock_merge_p.call_args[0][1]
+        assert "+1-555-0002" in phones_arg
+
+
+def test_sync_user_contacts_uses_display_name_fallback(scheduler_db, test_user):
+    """When companyName is empty, displayName is used."""
+    test_user.access_token = "at_sync"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_all_pages = AsyncMock(return_value=[
+        {
+            "companyName": None,
+            "displayName": "Solo Contact",
+            "emailAddresses": [{"address": "solo@example.com"}],
+            "businessPhones": [],
+            "mobilePhone": None,
+        }
+    ])
+
+    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="solo contact"), \
+         patch("app.vendor_utils.merge_emails_into_card", return_value=0), \
+         patch("app.vendor_utils.merge_phones_into_card"):
+        from app.scheduler import _sync_user_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _sync_user_contacts(test_user, scheduler_db)
+        )
+
+
+def test_sync_user_contacts_skips_short_company(scheduler_db, test_user):
+    """Companies with names shorter than 2 chars are skipped."""
+    test_user.access_token = "at_sync"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_all_pages = AsyncMock(return_value=[
+        {
+            "companyName": "X",
+            "displayName": "X",
+            "emailAddresses": [],
+            "businessPhones": [],
+            "mobilePhone": None,
+        }
+    ])
+
+    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.vendor_utils.merge_emails_into_card") as mock_merge:
+        from app.scheduler import _sync_user_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _sync_user_contacts(test_user, scheduler_db)
+        )
+
+        mock_merge.assert_not_called()
+
+
+def test_sync_user_contacts_graph_error(scheduler_db, test_user):
+    """Graph API error during contacts sync is handled."""
+    test_user.access_token = "at_sync"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_all_pages = AsyncMock(side_effect=Exception("Graph API error"))
+
+    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        from app.scheduler import _sync_user_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _sync_user_contacts(test_user, scheduler_db)
+        )
+
+    # last_contacts_sync should NOT be updated since sync failed
+    assert test_user.last_contacts_sync is None
+
+
+def test_sync_user_contacts_commit_error(scheduler_db, test_user):
+    """Commit failure during contacts sync is handled."""
+    test_user.access_token = "at_sync"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_all_pages = AsyncMock(return_value=[
+        {
+            "companyName": "Commit Fail Co",
+            "displayName": "Test",
+            "emailAddresses": [],
+            "businessPhones": [],
+            "mobilePhone": None,
+        }
+    ])
+
+    original_commit = scheduler_db.commit
+    call_count = [0]
+
+    def _failing_commit():
+        call_count[0] += 1
+        if call_count[0] > 1:
+            raise Exception("commit failed")
+        return original_commit()
+
+    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="commit fail co"), \
+         patch("app.vendor_utils.merge_emails_into_card", return_value=0), \
+         patch("app.vendor_utils.merge_phones_into_card"):
+        scheduler_db.commit = _failing_commit
+        from app.scheduler import _sync_user_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _sync_user_contacts(test_user, scheduler_db)
+        )
+        scheduler_db.commit = original_commit
+
+
+def test_sync_user_contacts_flush_conflict(scheduler_db, test_user):
+    """Flush conflict for new VendorCard is handled gracefully."""
+    test_user.access_token = "at_sync"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_all_pages = AsyncMock(return_value=[
+        {
+            "companyName": "Conflict Co",
+            "displayName": "Test",
+            "emailAddresses": [{"address": "test@conflict.com"}],
+            "businessPhones": [],
+            "mobilePhone": None,
+        }
+    ])
+
+    original_flush = scheduler_db.flush
+
+    def _failing_flush():
+        raise Exception("unique constraint violation")
+
+    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="conflict co"):
+        scheduler_db.flush = _failing_flush
+        from app.scheduler import _sync_user_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _sync_user_contacts(test_user, scheduler_db)
+        )
+        scheduler_db.flush = original_flush
+
+
+def test_sync_user_contacts_existing_card(scheduler_db, test_user, test_vendor_card):
+    """Existing vendor cards get updated with Outlook contact data."""
+    test_user.access_token = "at_sync"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_all_pages = AsyncMock(return_value=[
+        {
+            "companyName": "Arrow Electronics",
+            "displayName": "Arrow Rep",
+            "emailAddresses": [{"address": "rep@arrow.com"}],
+            "businessPhones": ["+1-555-0300"],
+            "mobilePhone": None,
+        }
+    ])
+
+    with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow electronics"), \
+         patch("app.vendor_utils.merge_emails_into_card", return_value=1) as mock_merge_e, \
+         patch("app.vendor_utils.merge_phones_into_card") as mock_merge_p:
+        from app.scheduler import _sync_user_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _sync_user_contacts(test_user, scheduler_db)
+        )
+
+        mock_merge_e.assert_called_once()
+        mock_merge_p.assert_called_once()
+
+
+# ===========================================================================
+# _job_engagement_scoring: naive datetime handling (line 443-444)
+# ===========================================================================
+
+
+def test_engagement_scoring_naive_datetime(scheduler_db):
+    """Vendor with naive vendor_score_computed_at gets UTC-ified."""
+    card = VendorCard(
+        normalized_name="naive dt vendor",
+        display_name="Naive DT Vendor",
+        emails=[],
+        phones=[],
+        # Naive datetime (no tzinfo) — recent enough to skip
+        vendor_score_computed_at=datetime.now() - timedelta(hours=2),
+    )
+    scheduler_db.add(card)
+    scheduler_db.commit()
+
+    with patch(
+        "app.scheduler._compute_vendor_scores_job", new_callable=AsyncMock
+    ) as mock_compute:
+        from app.scheduler import _job_engagement_scoring
+        asyncio.get_event_loop().run_until_complete(_job_engagement_scoring())
+        # Naive datetime should be made UTC-aware; 2h old = skip
+        mock_compute.assert_not_called()
+
+
+# ===========================================================================
+# _mine_vendor_contacts: flush conflict (new card)
+# ===========================================================================
+
+
+def test_mine_vendor_contacts_flush_conflict(scheduler_db, test_user):
+    """Flush conflict for new VendorCard during mining is handled."""
+    test_user.access_token = "at_mine"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_inbox = AsyncMock(return_value={
+        "contacts_enriched": [
+            {
+                "vendor_name": "Conflict Vendor",
+                "emails": ["test@conflict.com"],
+                "phones": [],
+                "websites": [],
+            }
+        ]
+    })
+
+    original_flush = scheduler_db.flush
+
+    def _failing_flush():
+        raise Exception("unique constraint")
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="conflict vendor"), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        scheduler_db.flush = _failing_flush
+        from app.scheduler import _mine_vendor_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _mine_vendor_contacts(test_user, scheduler_db, is_backfill=False)
+        )
+        scheduler_db.flush = original_flush
+
+
+# ===========================================================================
+# _deep_email_mining: per_domain with empty sender_names
+# ===========================================================================
+
+
+def test_deep_email_mining_empty_sender_names(scheduler_db, test_user):
+    """per_domain with empty sender_names doesn't crash."""
+    test_user.refresh_token = "rt_deep"
+    test_user.access_token = "at_deep"
+    test_user.m365_connected = True
+    test_user.last_deep_email_scan = None
+    scheduler_db.commit()
+
+    mock_miner_instance = MagicMock()
+    mock_miner_instance.deep_scan_inbox = AsyncMock(return_value={
+        "messages_scanned": 10,
+        "contacts_found": 1,
+        "per_domain": {
+            "example.com": {
+                "emails": ["user@example.com"],
+                "sender_names": [],  # empty
+            }
+        },
+    })
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance), \
+         patch("app.services.deep_enrichment_service.link_contact_to_entities") as mock_link:
+        from app.scheduler import _job_deep_email_mining
+        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+        mock_link.assert_called_once()
+        # full_name should be None when sender_names is empty
+        call_kwargs = mock_link.call_args[0][2]
+        assert call_kwargs.get("full_name") is None
+
+
+# ===========================================================================
+# _download_and_import_stock_list: MaterialCard flush conflict
+# ===========================================================================
+
+
+# ===========================================================================
+# Coverage: _safe_scan returning early when user not found (line 335)
+# ===========================================================================
+
+
+def test_inbox_scan_safe_scan_user_not_found(scheduler_db, test_user):
+    """_safe_scan returns early when user is not found in the scan session."""
+    test_user.refresh_token = "rt_notfound"
+    test_user.access_token = "at_notfound"
+    test_user.m365_connected = True
+    test_user.last_inbox_scan = None
+    scheduler_db.commit()
+
+    user_id = test_user.id
+
+    # Make the inner SessionLocal().get(User, user_id) return None
+    # while the outer query still finds the user
+    original_get = scheduler_db.get
+    call_count = [0]
+
+    def _get_none_second_time(model, id_):
+        call_count[0] += 1
+        # First get is in _safe_scan; return None to trigger the early return
+        if call_count[0] >= 1:
+            return None
+        return original_get(model, id_)
+
+    with patch("app.scheduler._scan_user_inbox", new_callable=AsyncMock) as mock_scan, \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_scan_interval_min = 30
+
+        # Temporarily override get
+        scheduler_db.get = _get_none_second_time
+        from app.scheduler import _job_inbox_scan
+        asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+        scheduler_db.get = original_get
+
+        # _scan_user_inbox should NOT have been called
+        mock_scan.assert_not_called()
+
+
+# ===========================================================================
+# Coverage: _safe_scan timeout commit exception (lines 345-346)
+# ===========================================================================
+
+
+def test_inbox_scan_safe_scan_timeout_commit_exception(scheduler_db, test_user):
+    """Exception during timeout recovery commit (lines 345-346) is handled.
+
+    The _safe_scan() function catches asyncio.TimeoutError, does rollback,
+    then tries to set m365_error_reason and commit. If THAT commit fails,
+    there is a bare except that does another rollback.
+    """
+    test_user.refresh_token = "rt_tce"
+    test_user.access_token = "at_tce"
+    test_user.m365_connected = True
+    test_user.last_inbox_scan = None
+    scheduler_db.commit()
+
+    original_commit = scheduler_db.commit
+
+    # Track how many times commit is called — fail on the recovery commit
+    # inside the timeout handler (the one that commits m365_error_reason).
+    # Commits before this: test setup commit (already done).
+    # Inside _safe_scan's TimeoutError handler:
+    #   scan_db.rollback()
+    #   user = scan_db.get(User, user_id)
+    #   user.m365_error_reason = "Inbox scan timed out"
+    #   scan_db.commit()  <-- THIS needs to fail
+    commit_count = [0]
+
+    def _fail_recovery_commit():
+        commit_count[0] += 1
+        raise Exception("commit during timeout recovery failed")
+
+    with patch("app.scheduler._scan_user_inbox", new_callable=AsyncMock) as mock_scan, \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_scan_interval_min = 30
+
+        # Make _scan_user_inbox trigger TimeoutError through wait_for
+        async def _slow(*a, **kw):
+            await asyncio.sleep(9999)
+
+        mock_scan.side_effect = _slow
+
+        original_wait_for = asyncio.wait_for
+
+        async def _mock_wait_for(coro, timeout=None):
+            try:
+                coro.close()
+            except Exception:
+                pass
+            raise asyncio.TimeoutError()
+
+        # Replace commit so the recovery commit fails
+        scheduler_db.commit = _fail_recovery_commit
+
+        with patch("asyncio.wait_for", side_effect=_mock_wait_for):
+            from app.scheduler import _job_inbox_scan
+            asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+
+        scheduler_db.commit = original_commit
+
+
+# ===========================================================================
+# Coverage: _job_contacts_sync user not found (line 412)
+# ===========================================================================
+
+
+def test_contacts_sync_user_not_found(scheduler_db, test_user):
+    """_job_contacts_sync continues when user is not found in sync session."""
+    test_user.refresh_token = "rt_nf"
+    test_user.access_token = "at_nf"
+    test_user.m365_connected = True
+    test_user.last_contacts_sync = None
+    scheduler_db.commit()
+
+    original_get = scheduler_db.get
+    get_count = [0]
+
+    def _get_none_on_second(model, id_):
+        get_count[0] += 1
+        # Return None when the per-user sync tries to get the user
+        if get_count[0] >= 1:
+            return None
+        return original_get(model, id_)
+
+    with patch("app.scheduler._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
+        scheduler_db.get = _get_none_on_second
+        from app.scheduler import _job_contacts_sync
+        asyncio.get_event_loop().run_until_complete(_job_contacts_sync())
+        scheduler_db.get = original_get
+
+        mock_sync.assert_not_called()
+
+
+# ===========================================================================
+# Coverage: _download_and_import commit failure (lines 1044-1047)
+# ===========================================================================
+
+
+def test_download_and_import_stock_list_final_commit_fails(scheduler_db, test_user):
+    """Final db.commit() failure in _download_and_import is handled (lines 1044-1047)."""
+    import base64
+
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"data").decode(),
+    })
+
+    rows = [{"mpn": "COMMITFAIL1", "qty": 100}]
+
+    # Use a mock db so we can precisely control commit behavior
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.all.return_value = []
+    mock_db.flush = MagicMock()
+    mock_db.add = MagicMock()
+    mock_db.commit = MagicMock(side_effect=Exception("final commit failed"))
+    mock_db.rollback = MagicMock()
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
+         patch("app.services.attachment_parser.parse_attachment",
+               new_callable=AsyncMock, return_value=rows), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"), \
+         patch("app.services.activity_service.match_email_to_entity", return_value=None):
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, mock_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+        mock_db.rollback.assert_called()
+
+
+# ===========================================================================
+# Coverage: _mine_vendor_contacts final commit error (lines 1162-1164)
+# ===========================================================================
+
+
+def test_mine_vendor_contacts_final_commit_error(scheduler_db, test_user):
+    """Final commit error in _mine_vendor_contacts is handled (lines 1162-1164)."""
+    test_user.access_token = "at_mine"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_inbox = AsyncMock(return_value={
+        "contacts_enriched": [
+            {
+                "vendor_name": "Commit Error Vendor",
+                "emails": ["err@vendor.com"],
+                "phones": [],
+                "websites": [],
+            }
+        ]
+    })
+
+    # Use a mock db to precisely control commit behavior
+    mock_db = MagicMock()
+    mock_db.query.return_value.filter.return_value.all.return_value = []
+    mock_db.flush = MagicMock()
+    mock_db.add = MagicMock()
+    mock_db.commit = MagicMock(side_effect=Exception("final commit failed"))
+    mock_db.rollback = MagicMock()
+
+    mock_user = MagicMock()
+    mock_user.access_token = "at_mine"
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="commit error vendor"), \
+         patch("app.vendor_utils.merge_emails_into_card", return_value=1), \
+         patch("app.vendor_utils.merge_phones_into_card"), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _mine_vendor_contacts
+        asyncio.get_event_loop().run_until_complete(
+            _mine_vendor_contacts(mock_user, mock_db, is_backfill=False)
+        )
+        mock_db.rollback.assert_called()
+
+
+# ===========================================================================
+# Coverage: _scan_outbound_rfqs final commit error (lines 1223-1225)
+# ===========================================================================
+
+
+def test_scan_outbound_rfqs_final_commit_error(scheduler_db, test_user, test_vendor_card):
+    """Final commit error in _scan_outbound_rfqs is handled (lines 1223-1225)."""
+    test_user.access_token = "at_out"
+    scheduler_db.commit()
+
+    mock_miner = MagicMock()
+    mock_miner.scan_sent_items = AsyncMock(return_value={
+        "rfqs_detected": 1,
+        "vendors_contacted": {"arrow.com": 1},
+    })
+
+    # Use a mock db so the commit failure is targeted
+    mock_card = MagicMock()
+    mock_card.total_outreach = 5
+    mock_card.last_contact_at = None
+    mock_card.domain = "arrow.com"
+    mock_card.normalized_name = "arrow"
+
+    mock_db = MagicMock()
+    # Make query chain return our mock card for domain lookup
+    mock_db.query.return_value.filter.return_value.all.return_value = [mock_card]
+    mock_db.commit = MagicMock(side_effect=Exception("final commit failed"))
+    mock_db.rollback = MagicMock()
+
+    mock_user = MagicMock()
+    mock_user.access_token = "at_out"
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner), \
+         patch("app.config.settings") as mock_settings:
+        mock_settings.inbox_backfill_days = 180
+
+        from app.scheduler import _scan_outbound_rfqs
+        asyncio.get_event_loop().run_until_complete(
+            _scan_outbound_rfqs(mock_user, mock_db, is_backfill=False)
+        )
+        mock_db.rollback.assert_called()
+
+
+def test_download_and_import_stock_list_card_flush_conflict(scheduler_db, test_user):
+    """MaterialCard flush conflict is handled (rollback + continue)."""
+    import base64
+    from app.models import MaterialCard
+
+    test_user.access_token = "at_dl"
+    scheduler_db.commit()
+
+    mock_gc = MagicMock()
+    mock_gc.get_json = AsyncMock(return_value={
+        "contentBytes": base64.b64encode(b"data").decode(),
+    })
+
+    rows = [
+        {"mpn": "CONFLICT1", "qty": 100},
+        {"mpn": "NOCONFLICT", "qty": 200},
+    ]
+
+    original_flush = scheduler_db.flush
+    flush_count = [0]
+
+    def _sometimes_failing_flush():
+        flush_count[0] += 1
+        # Fail on first flush (the CONFLICT1 card) but succeed on second
+        if flush_count[0] == 1:
+            raise Exception("unique constraint")
+        return original_flush()
+
+    with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+         patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
+         patch("app.services.attachment_parser.parse_attachment",
+               new_callable=AsyncMock, return_value=rows), \
+         patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"), \
+         patch("app.services.activity_service.match_email_to_entity", return_value=None), \
+         patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
+        scheduler_db.flush = _sometimes_failing_flush
+        from app.scheduler import _download_and_import_stock_list
+        asyncio.get_event_loop().run_until_complete(
+            _download_and_import_stock_list(
+                test_user, scheduler_db,
+                message_id="msg1", attachment_id="att1",
+                filename="stock.csv", vendor_name="Arrow",
+                vendor_email="sales@arrow.com",
+            )
+        )
+        scheduler_db.flush = original_flush

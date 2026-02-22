@@ -944,3 +944,406 @@ class TestScorecardAndSentOffers:
         assert offers[0]["total_sell"] == 250.0
         assert offers[0]["status"] == "sent"
         assert len(offers[0]["line_items"]) == 1
+
+
+# ── get_matches_for_user ──────────────────────────────────────────
+
+
+class TestGetMatchesForUser:
+    """Tests for get_matches_for_user — grouping by customer site."""
+
+    def test_no_matches(self, db_session, test_user):
+        from app.services.proactive_service import get_matches_for_user
+
+        result = get_matches_for_user(db_session, test_user.id)
+        assert result == []
+
+    def test_matches_grouped_by_site(
+        self, db_session, test_user, test_company, test_customer_site, test_offer
+    ):
+        from app.services.proactive_service import get_matches_for_user
+
+        archived_req, req_item = _make_archived_requisition(
+            db_session, test_user, test_customer_site, mpn="LM317T"
+        )
+        m1 = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=req_item.id,
+            requisition_id=archived_req.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="LM317T",
+            status="new",
+        )
+        db_session.add(m1)
+        db_session.commit()
+
+        result = get_matches_for_user(db_session, test_user.id, status="new")
+        assert len(result) == 1
+        assert result[0]["customer_site_id"] == test_customer_site.id
+        assert len(result[0]["matches"]) == 1
+        assert result[0]["matches"][0]["mpn"] == "LM317T"
+
+    def test_matches_all_statuses(
+        self, db_session, test_user, test_company, test_customer_site, test_offer
+    ):
+        """status='' returns matches of any status."""
+        from app.services.proactive_service import get_matches_for_user
+
+        archived_req, req_item = _make_archived_requisition(
+            db_session, test_user, test_customer_site, mpn="LM317T"
+        )
+        m = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=req_item.id,
+            requisition_id=archived_req.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="LM317T",
+            status="sent",
+        )
+        db_session.add(m)
+        db_session.commit()
+
+        result = get_matches_for_user(db_session, test_user.id, status="")
+        assert len(result) == 1
+
+    def test_match_with_offer_details_included(
+        self, db_session, test_user, test_company, test_customer_site, test_offer
+    ):
+        """Match with a valid offer includes offer details in the response."""
+        from app.services.proactive_service import get_matches_for_user
+
+        archived_req, req_item = _make_archived_requisition(
+            db_session, test_user, test_customer_site, mpn="DETAILS"
+        )
+        m = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=req_item.id,
+            requisition_id=archived_req.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="DETAILS",
+            status="new",
+        )
+        db_session.add(m)
+        db_session.commit()
+
+        result = get_matches_for_user(db_session, test_user.id, status="new")
+        assert len(result) == 1
+        match_dict = result[0]["matches"][0]
+        assert match_dict["vendor_name"] != ""
+        assert match_dict["offer_id"] == test_offer.id
+        assert match_dict["status"] == "new"
+        assert match_dict["created_at"] is not None
+
+
+# ── Scan commit error ─────────────────────────────────────────────
+
+
+class TestScanCommitError:
+    def test_commit_error_rolls_back(
+        self, db_session, test_user, test_company, test_customer_site
+    ):
+        """If commit fails, matches_created returns 0."""
+        _reset_last_scan()
+        _register_btrim(db_session)
+
+        sales = User(
+            email="sales-commit@trioscs.com",
+            name="SalesCommit",
+            role="sales",
+            azure_id="sales-az-commit",
+        )
+        db_session.add(sales)
+        db_session.flush()
+
+        _make_archived_requisition(
+            db_session, sales, test_customer_site, mpn="COMMIT1"
+        )
+
+        source_req = Requisition(
+            name="Src-Commit",
+            customer_name="CommitCo",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(source_req)
+        db_session.flush()
+        _make_offer(db_session, source_req, test_user, mpn="COMMIT1")
+        db_session.commit()
+
+        with patch.object(db_session, "commit", side_effect=Exception("DB error")), \
+             patch.object(db_session, "rollback"):
+            result = scan_new_offers_for_matches(db_session)
+
+        assert result["scanned"] == 1
+        assert result["matches_created"] == 0
+
+
+# ── Greeting variations ───────────────────────────────────────────
+
+
+class TestSendProactiveOfferGreetings:
+    """Test that the greeting in the email varies based on contact count/names."""
+
+    @pytest.mark.asyncio
+    async def test_greeting_single_named_contact(
+        self, db_session, test_user, test_company, test_customer_site, test_offer
+    ):
+        """Single named contact gets 'Hi {name},' greeting."""
+        archived_req, req_item = _make_archived_requisition(
+            db_session, test_user, test_customer_site, mpn="LM317T"
+        )
+        match = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=req_item.id,
+            requisition_id=archived_req.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="LM317T",
+        )
+        db_session.add(match)
+        contact = _make_site_contact(db_session, test_customer_site)
+        db_session.commit()
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock(return_value=None)
+
+        with patch(
+            "app.utils.graph_client.GraphClient", return_value=mock_gc
+        ):
+            result = await send_proactive_offer(
+                db=db_session,
+                user=test_user,
+                token="fake-token",
+                match_ids=[match.id],
+                contact_ids=[contact.id],
+                sell_prices={},
+            )
+
+        # The email HTML should contain "Hi Jane Contact,"
+        po = db_session.get(ProactiveOffer, result["id"])
+        assert "Hi Jane Contact," in po.email_body_html
+
+    @pytest.mark.asyncio
+    async def test_greeting_multiple_named_contacts(
+        self, db_session, test_user, test_company, test_customer_site, test_offer
+    ):
+        """Multiple named contacts get comma-separated names greeting."""
+        archived_req, req_item = _make_archived_requisition(
+            db_session, test_user, test_customer_site, mpn="LM317T"
+        )
+        match = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=req_item.id,
+            requisition_id=archived_req.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="LM317T",
+        )
+        db_session.add(match)
+        contact1 = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Alice",
+            email="alice@acme.com",
+        )
+        contact2 = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Bob",
+            email="bob@acme.com",
+        )
+        db_session.add_all([contact1, contact2])
+        db_session.commit()
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock(return_value=None)
+
+        with patch(
+            "app.utils.graph_client.GraphClient", return_value=mock_gc
+        ):
+            result = await send_proactive_offer(
+                db=db_session,
+                user=test_user,
+                token="fake-token",
+                match_ids=[match.id],
+                contact_ids=[contact1.id, contact2.id],
+                sell_prices={},
+            )
+
+        po = db_session.get(ProactiveOffer, result["id"])
+        assert "Alice" in po.email_body_html
+        assert "Bob" in po.email_body_html
+
+    @pytest.mark.asyncio
+    async def test_greeting_no_name_contact(
+        self, db_session, test_user, test_company, test_customer_site, test_offer
+    ):
+        """Contact with no full_name gets 'Hello,' greeting."""
+        archived_req, req_item = _make_archived_requisition(
+            db_session, test_user, test_customer_site, mpn="LM317T"
+        )
+        match = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=req_item.id,
+            requisition_id=archived_req.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="LM317T",
+        )
+        db_session.add(match)
+        contact = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="",
+            email="anon@acme.com",
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock(return_value=None)
+
+        with patch(
+            "app.utils.graph_client.GraphClient", return_value=mock_gc
+        ):
+            result = await send_proactive_offer(
+                db=db_session,
+                user=test_user,
+                token="fake-token",
+                match_ids=[match.id],
+                contact_ids=[contact.id],
+                sell_prices={},
+            )
+
+        po = db_session.get(ProactiveOffer, result["id"])
+        assert "Hello," in po.email_body_html
+
+
+# ── Scorecard PO counts ───────────────────────────────────────────
+
+
+class TestScorecardPOCounts:
+    """Test the scorecard includes PO counts from BuyPlan."""
+
+    def test_scorecard_with_po_count(
+        self, db_session, test_user, test_company, test_customer_site, test_requisition, test_quote
+    ):
+        """Converted offers with approved buy plans show in po count."""
+        po = ProactiveOffer(
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            line_items=[],
+            recipient_emails=["x@x.com"],
+            subject="With PO",
+            status="converted",
+            total_sell=1000,
+            total_cost=600,
+            converted_quote_id=test_quote.id,
+        )
+        db_session.add(po)
+        db_session.flush()
+
+        bp = BuyPlan(
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            status="approved",
+            line_items=[],
+            submitted_by_id=test_user.id,
+        )
+        db_session.add(bp)
+        db_session.commit()
+
+        result = get_scorecard(db_session)
+        assert result["total_po"] >= 1
+        assert result["total_quoted"] >= 1
+
+    def test_scorecard_admin_breakdown_with_po(
+        self, db_session, test_user, test_company, test_customer_site, test_requisition, test_quote
+    ):
+        """Admin breakdown includes per-user PO counts."""
+        po = ProactiveOffer(
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            line_items=[],
+            recipient_emails=["x@x.com"],
+            subject="Admin PO",
+            status="converted",
+            total_sell=2000,
+            total_cost=1200,
+            converted_quote_id=test_quote.id,
+        )
+        db_session.add(po)
+        db_session.flush()
+
+        bp = BuyPlan(
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            status="po_entered",
+            line_items=[],
+            submitted_by_id=test_user.id,
+        )
+        db_session.add(bp)
+        db_session.commit()
+
+        result = get_scorecard(db_session, salesperson_id=None)
+        assert "breakdown" in result
+        assert len(result["breakdown"]) >= 1
+        user_entry = next(
+            (b for b in result["breakdown"] if b["salesperson_id"] == test_user.id), None
+        )
+        assert user_entry is not None
+        assert user_entry["po"] >= 1
+        assert user_entry["quoted"] >= 1
+
+
+# ── get_match_count ───────────────────────────────────────────────
+
+
+class TestGetMatchCount:
+    def test_count_new_matches(
+        self, db_session, test_user, test_company, test_customer_site, test_offer
+    ):
+        from app.services.proactive_service import get_match_count
+
+        archived_req, req_item = _make_archived_requisition(
+            db_session, test_user, test_customer_site, mpn="COUNT1"
+        )
+        m = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=req_item.id,
+            requisition_id=archived_req.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="COUNT1",
+            status="new",
+        )
+        db_session.add(m)
+        db_session.commit()
+
+        count = get_match_count(db_session, test_user.id)
+        assert count >= 1
+
+    def test_count_excludes_sent(
+        self, db_session, test_user, test_company, test_customer_site, test_offer
+    ):
+        from app.services.proactive_service import get_match_count
+
+        archived_req, req_item = _make_archived_requisition(
+            db_session, test_user, test_customer_site, mpn="COUNT2"
+        )
+        m = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=req_item.id,
+            requisition_id=archived_req.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="COUNT2",
+            status="sent",
+        )
+        db_session.add(m)
+        db_session.commit()
+
+        count = get_match_count(db_session, test_user.id)
+        # "sent" status should not be counted
+        assert count == 0

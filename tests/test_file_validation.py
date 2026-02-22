@@ -178,3 +178,102 @@ class TestIsPasswordProtected:
 
     def test_empty_not_protected(self):
         assert is_password_protected(b"") is False
+
+    def test_password_error_detected(self):
+        """When openpyxl raises with 'password' in message, returns True."""
+        from unittest.mock import patch
+
+        with patch("openpyxl.load_workbook", side_effect=Exception("File is password protected")):
+            assert is_password_protected(b"fake xlsx content") is True
+
+    def test_encrypted_error_detected(self):
+        """When openpyxl raises with 'encrypted' in message, returns True."""
+        from unittest.mock import patch
+
+        with patch("openpyxl.load_workbook", side_effect=Exception("File is encrypted")):
+            assert is_password_protected(b"fake xlsx content") is True
+
+    def test_other_error_not_password(self):
+        """Non-password errors are not treated as password protection."""
+        from unittest.mock import patch
+
+        with patch("openpyxl.load_workbook", side_effect=Exception("corrupted file")):
+            assert is_password_protected(b"fake xlsx content") is False
+
+
+# ── Additional coverage: validate_file edge cases ────────────────────
+
+
+class TestValidateFileAdditional:
+    def test_xlsx_wrong_magic_bytes(self):
+        """XLSX file with wrong magic bytes and xlsx extension."""
+        from unittest.mock import MagicMock, patch
+
+        content = b"This is not really an xlsx" + b"\x00" * 100
+
+        mock_kind = MagicMock()
+        mock_kind.mime = "application/pdf"  # Wrong MIME for xlsx
+
+        with patch("filetype.guess", return_value=mock_kind):
+            ok, reason = validate_file(content, "data.xlsx")
+            assert ok is False
+            assert "detected as" in reason
+
+    def test_filetype_import_error_fallback(self):
+        """When filetype.guess raises ImportError, falls back to extension check."""
+        from unittest.mock import patch
+
+        content = b"MPN,Qty\nLM317T,100"
+
+        # Patch filetype.guess to raise ImportError (simulating missing library)
+        with patch("filetype.guess", side_effect=ImportError("filetype not found")):
+            ok, file_type = validate_file(content, "data.csv")
+            assert ok is True
+            assert file_type == "csv"
+
+    def test_processable_extension_fallback(self):
+        """With processable extension and no magic byte match, trusts extension."""
+        from unittest.mock import patch
+
+        content = b"some binary data" * 10
+
+        with patch("filetype.guess", return_value=None):
+            ok, file_type = validate_file(content, "data.xlsx")
+            assert ok is True
+            assert file_type == "xlsx"
+
+
+# ── detect_encoding additional coverage ──────────────────────────────
+
+
+class TestDetectEncodingAdditional:
+    def test_charset_normalizer_import_error(self):
+        """Falls back to manual detection when charset_normalizer raises ImportError."""
+        from unittest.mock import patch
+
+        content = "Hello, World!".encode("utf-8")
+        with patch("charset_normalizer.from_bytes", side_effect=ImportError("not installed")):
+            enc = detect_encoding(content)
+            assert enc is not None
+
+    def test_charset_normalizer_exception(self):
+        """Falls back when charset_normalizer raises other exception."""
+        from unittest.mock import patch
+
+        content = "Hello".encode("utf-8")
+        with patch("charset_normalizer.from_bytes", side_effect=RuntimeError("unexpected")):
+            enc = detect_encoding(content)
+            assert enc is not None
+
+    def test_best_returns_none(self):
+        """When best() returns None, falls through to manual detection."""
+        from unittest.mock import MagicMock, patch
+
+        content = b"\x80\x81\x82"
+        mock_results = MagicMock()
+        mock_results.best.return_value = None
+
+        with patch("charset_normalizer.from_bytes", return_value=mock_results):
+            enc = detect_encoding(content)
+            # Should still return something from fallback
+            assert enc is not None

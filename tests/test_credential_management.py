@@ -192,3 +192,144 @@ def test_credential_is_set_db(db_session, test_source):
     db_session.commit()
     assert credential_is_set(db_session, "test_connector", "TEST_API_KEY") is True
     assert credential_is_set(db_session, "test_connector", "TEST_API_SECRET") is False
+
+
+# ── get_all_credentials_for_source ────────────────────────────────
+
+
+def test_get_all_credentials_source_not_found(db_session):
+    """Source not found returns empty dict."""
+    from app.services.credential_service import get_all_credentials_for_source
+    result = get_all_credentials_for_source(db_session, "nonexistent_source")
+    assert result == {}
+
+
+def test_get_all_credentials_from_db(db_session, test_source):
+    """All env_vars with DB credentials are returned decrypted."""
+    from app.services.credential_service import encrypt_value, get_all_credentials_for_source
+    test_source.credentials = {
+        "TEST_API_KEY": encrypt_value("db-key-value"),
+        "TEST_API_SECRET": encrypt_value("db-secret-value"),
+    }
+    db_session.commit()
+
+    result = get_all_credentials_for_source(db_session, "test_connector")
+    assert result["TEST_API_KEY"] == "db-key-value"
+    assert result["TEST_API_SECRET"] == "db-secret-value"
+
+
+def test_get_all_credentials_env_fallback(db_session, test_source, monkeypatch):
+    """When DB has no credential, falls back to env var."""
+    from app.services.credential_service import get_all_credentials_for_source
+    monkeypatch.setenv("TEST_API_KEY", "env-key")
+    monkeypatch.setenv("TEST_API_SECRET", "env-secret")
+
+    result = get_all_credentials_for_source(db_session, "test_connector")
+    assert result["TEST_API_KEY"] == "env-key"
+    assert result["TEST_API_SECRET"] == "env-secret"
+
+
+def test_get_all_credentials_decrypt_fallback(db_session, test_source, monkeypatch):
+    """If DB credential decryption fails, falls back to env var."""
+    from app.services.credential_service import get_all_credentials_for_source
+    test_source.credentials = {"TEST_API_KEY": "invalid-not-fernet-encrypted"}
+    db_session.commit()
+    monkeypatch.setenv("TEST_API_KEY", "env-fallback")
+
+    result = get_all_credentials_for_source(db_session, "test_connector")
+    assert result["TEST_API_KEY"] == "env-fallback"
+
+
+def test_get_all_credentials_empty_env_vars(db_session):
+    """Source with no env_vars returns empty dict."""
+    src = ApiSource(
+        name="no_vars_source",
+        display_name="No Vars",
+        category="api",
+        source_type="aggregator",
+        status="pending",
+        env_vars=[],
+        credentials={},
+    )
+    db_session.add(src)
+    db_session.commit()
+
+    from app.services.credential_service import get_all_credentials_for_source
+    result = get_all_credentials_for_source(db_session, "no_vars_source")
+    assert result == {}
+
+
+# ── get_credential_cached ─────────────────────────────────────────
+
+
+def test_get_credential_cached_miss_and_hit(db_session, test_source, monkeypatch):
+    """Cache miss fetches from DB; cache hit returns from memory."""
+    from unittest.mock import MagicMock, patch
+    from app.services.credential_service import _cred_cache, encrypt_value, get_credential_cached
+
+    # Clear cache first
+    _cred_cache.clear()
+
+    test_source.credentials = {"TEST_API_KEY": encrypt_value("cached-value")}
+    db_session.commit()
+
+    # Patch SessionLocal to return our test session
+    mock_session_factory = MagicMock(return_value=db_session)
+    # Prevent db_session.close() from actually closing it
+    original_close = db_session.close
+    db_session.close = MagicMock()
+
+    try:
+        with patch("app.database.SessionLocal", mock_session_factory):
+            # First call = cache miss
+            val1 = get_credential_cached("test_connector", "TEST_API_KEY")
+            assert val1 == "cached-value"
+            assert mock_session_factory.call_count == 1
+
+            # Second call = cache hit (no new SessionLocal call)
+            val2 = get_credential_cached("test_connector", "TEST_API_KEY")
+            assert val2 == "cached-value"
+            assert mock_session_factory.call_count == 1  # Still 1 — cache hit
+    finally:
+        db_session.close = original_close
+        _cred_cache.clear()
+
+
+def test_get_credential_cached_expired(db_session, test_source, monkeypatch):
+    """Expired cache entry triggers fresh DB lookup."""
+    import time
+    from unittest.mock import MagicMock, patch
+    from app.services.credential_service import _CACHE_TTL, _cred_cache, encrypt_value, get_credential_cached
+
+    _cred_cache.clear()
+
+    test_source.credentials = {"TEST_API_KEY": encrypt_value("old-val")}
+    db_session.commit()
+
+    # Manually seed an expired cache entry
+    _cred_cache[("test_connector", "TEST_API_KEY")] = ("old-val", time.time() - _CACHE_TTL - 10)
+
+    mock_session_factory = MagicMock(return_value=db_session)
+    original_close = db_session.close
+    db_session.close = MagicMock()
+
+    try:
+        with patch("app.database.SessionLocal", mock_session_factory):
+            val = get_credential_cached("test_connector", "TEST_API_KEY")
+            assert val == "old-val"
+            # Should have opened a new session since cache expired
+            assert mock_session_factory.call_count == 1
+    finally:
+        db_session.close = original_close
+        _cred_cache.clear()
+
+
+def test_get_credential_decrypt_failure_falls_back(db_session, test_source, monkeypatch):
+    """get_credential with corrupt ciphertext falls back to env var."""
+    from app.services.credential_service import get_credential
+    test_source.credentials = {"TEST_API_KEY": "corrupt-ciphertext-not-fernet"}
+    db_session.commit()
+    monkeypatch.setenv("TEST_API_KEY", "env-fallback-value")
+
+    result = get_credential(db_session, "test_connector", "TEST_API_KEY")
+    assert result == "env-fallback-value"

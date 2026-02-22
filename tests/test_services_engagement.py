@@ -535,3 +535,80 @@ class TestApplyOutboundStats:
 
         updated = apply_outbound_stats(db_session, {"unknownvendor.org": 10})
         assert updated == 0
+
+    def test_apply_outbound_empty_dict(self, db_session):
+        """Empty vendors_contacted dict returns 0."""
+        result = apply_outbound_stats(db_session, {})
+        assert result == 0
+
+    def test_apply_outbound_flush_exception(self, db_session, monkeypatch):
+        """Flush exception in apply_outbound_stats is handled."""
+        _make_vendor_card(db_session, "flushtest", "Flush Test", domain="flushtest.com")
+        db_session.commit()
+
+        # Make flush raise after the card update
+        original_flush = db_session.flush
+        call_count = [0]
+
+        def bad_flush(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] >= 2:
+                raise RuntimeError("Simulated flush failure")
+            return original_flush(*args, **kwargs)
+
+        monkeypatch.setattr(db_session, "flush", bad_flush)
+        # Should not raise
+        apply_outbound_stats(db_session, {"flushtest.com": 5})
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  compute_all_engagement_scores — error paths
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestComputeAllEngagementErrorPaths:
+    @pytest.mark.asyncio
+    async def test_relationship_months_calculated(self, db_session):
+        """relationship_months is computed from card.created_at."""
+        from datetime import timedelta
+
+        card = _make_vendor_card(db_session, "relmonth", "Rel Months Vendor", domain="relmonth.com")
+        card.created_at = datetime.now(timezone.utc) - timedelta(days=120)
+        db_session.commit()
+
+        result = await compute_all_engagement_scores(db_session)
+        assert result["updated"] >= 1
+        db_session.refresh(card)
+        assert card.relationship_months == 4  # 120 / 30 = 4
+
+    @pytest.mark.asyncio
+    async def test_relationship_months_naive_datetime(self, db_session):
+        """relationship_months handles naive created_at (no tzinfo)."""
+        from datetime import timedelta
+
+        card = _make_vendor_card(db_session, "naivetz", "Naive TZ Vendor", domain="naivetz.com")
+        # Force a naive datetime (no tzinfo)
+        card.created_at = datetime(2025, 6, 1)
+        db_session.commit()
+
+        result = await compute_all_engagement_scores(db_session)
+        assert result["updated"] >= 1
+        db_session.refresh(card)
+        assert card.relationship_months is not None
+        assert card.relationship_months >= 0
+
+    @pytest.mark.asyncio
+    async def test_commit_exception_returns_zero_updated(self, db_session, monkeypatch):
+        """Commit failure returns updated=0."""
+        _make_vendor_card(db_session, "commitfail", "Commit Fail", domain="commitfail.com")
+        db_session.commit()
+
+        original_commit = db_session.commit
+
+        def bad_commit(*args, **kwargs):
+            raise RuntimeError("Simulated commit failure")
+
+        monkeypatch.setattr(db_session, "commit", bad_commit)
+
+        result = await compute_all_engagement_scores(db_session)
+        assert result["updated"] == 0

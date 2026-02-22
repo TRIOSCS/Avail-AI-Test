@@ -276,3 +276,73 @@ class TestGraphClientDelta:
         assert len(items) == 2
         assert token == "https://graph.microsoft.com/v1.0/delta?token=final"
         assert mock_http.get.call_count == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Additional coverage — 204 response (line 150) and max_retries return (line 189)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestGraphClientAdditional:
+    @pytest.mark.asyncio
+    @patch("app.utils.graph_client.http")
+    async def test_204_returns_empty_dict(self, mock_http):
+        """204 No Content returns empty dict (line 150)."""
+        mock_http.get = AsyncMock(return_value=_mock_response(204))
+
+        gc = GraphClient("test-token")
+        result = await gc.get_json("/me/contacts/delete-something")
+        assert result == {}
+
+    @pytest.mark.asyncio
+    @patch("app.utils.graph_client.asyncio.sleep", new_callable=AsyncMock)
+    @patch("app.utils.graph_client.http")
+    async def test_max_retries_exhausted_5xx_returns_error(self, mock_http, mock_sleep):
+        """After max retries on 5xx, returns error dict (line 189)."""
+        mock_http.get = AsyncMock(
+            return_value=_mock_response(503, text="Service Unavailable")
+        )
+
+        gc = GraphClient("test-token")
+        result = await gc.get_json("/me/messages")
+        # After MAX_RETRIES+1 attempts of 503, should return error dict
+        assert result["error"] == "max_retries" or result["error"] == 503
+        assert mock_http.get.call_count >= 2  # At least initial + retries
+
+    @pytest.mark.asyncio
+    @patch("app.utils.graph_client.http")
+    async def test_201_returns_json(self, mock_http):
+        """201 Created returns JSON (same as 200)."""
+        mock_http.post = AsyncMock(return_value=_mock_response(201, {"id": "new-1"}))
+
+        gc = GraphClient("test-token")
+        result = await gc.post_json("/me/calendars", {"name": "Test"})
+        assert result == {"id": "new-1"}
+
+    @pytest.mark.asyncio
+    @patch("app.utils.graph_client.http")
+    async def test_full_url_not_prefixed(self, mock_http):
+        """URLs starting with http are used as-is, not prefixed."""
+        mock_http.get = AsyncMock(return_value=_mock_response(200, {"value": []}))
+
+        gc = GraphClient("test-token")
+        await gc.get_json("https://graph.microsoft.com/v1.0/custom/path")
+
+        call_args = mock_http.get.call_args
+        assert "https://graph.microsoft.com/v1.0/custom/path" in str(call_args)
+
+    @pytest.mark.asyncio
+    @patch("app.utils.graph_client.asyncio.sleep", new_callable=AsyncMock)
+    @patch("app.utils.graph_client.http")
+    async def test_429_default_backoff(self, mock_http, mock_sleep):
+        """429 without Retry-After header uses exponential backoff."""
+        mock_http.get = AsyncMock(side_effect=[
+            _mock_response(429, headers={}),
+            _mock_response(200, {"value": []}),
+        ])
+
+        gc = GraphClient("test-token")
+        result = await gc.get_json("/me/messages")
+        assert result == {"value": []}
+        # Default backoff: 2^(0+1) = 2
+        mock_sleep.assert_called()

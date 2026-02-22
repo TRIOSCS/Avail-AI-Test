@@ -373,3 +373,59 @@ def test_draft_rfq_email_endpoint_missing_buyer(client):
             },
         )
     assert resp.status_code == 422
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _format_parts — uncovered delivery_deadline and additional_notes paths
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestFormatPartsEdgeCases:
+    """Tests for _format_parts edge cases."""
+
+    def test_delivery_deadline_as_string(self):
+        """delivery_deadline as a non-date string is formatted."""
+        from app.services.ai_email_drafter import _format_parts
+
+        parts = [{"part_number": "LM317T", "quantity": 100, "delivery_deadline": "ASAP"}]
+        result = _format_parts(parts)
+        assert "Need by: ASAP" in result
+
+    def test_delivery_deadline_as_date(self):
+        """delivery_deadline as a date object uses isoformat."""
+        from datetime import date
+        from app.services.ai_email_drafter import _format_parts
+
+        parts = [{"part_number": "LM317T", "quantity": 100, "delivery_deadline": date(2026, 3, 15)}]
+        result = _format_parts(parts)
+        assert "Need by: 2026-03-15" in result
+
+    def test_additional_notes(self):
+        """additional_notes are appended in brackets."""
+        from app.services.ai_email_drafter import _format_parts
+
+        parts = [{"part_number": "LM317T", "quantity": 100, "additional_notes": "Urgent order"}]
+        result = _format_parts(parts)
+        assert "[Urgent order]" in result
+
+    def test_all_optional_fields(self):
+        """All optional fields are formatted together."""
+        from datetime import date
+        from app.services.ai_email_drafter import _format_parts
+
+        parts = [{
+            "part_number": "LM317T",
+            "manufacturer": "TI",
+            "quantity": 100,
+            "target_price": 0.75,
+            "date_code_requirement": "2024+",
+            "condition_requirement": "new",
+            "delivery_deadline": date(2026, 6, 1),
+            "additional_notes": "Critical",
+        }]
+        result = _format_parts(parts)
+        assert "Target: $0.75" in result
+        assert "DC req: 2024+" in result
+        assert "Condition: new" in result
+        assert "Need by: 2026-06-01" in result
+        assert "[Critical]" in result

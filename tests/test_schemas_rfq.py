@@ -85,3 +85,18 @@ class TestFollowUpEmail:
     def test_with_body(self):
         f = FollowUpEmail(body="Following up on our RFQ")
         assert "Following up" in f.body
+
+
+# ── RfqVendorGroup ──────────────────────────────────────────────────
+
+class TestRfqVendorGroup:
+    def test_valid(self):
+        from app.schemas.rfq import RfqVendorGroup
+        g = RfqVendorGroup(vendor_name="Acme", vendor_email="a@acme.com")
+        assert g.subject == ""
+        assert g.body == ""
+
+    def test_invalid_email_raises(self):
+        from app.schemas.rfq import RfqVendorGroup
+        with pytest.raises(ValidationError, match="Invalid email"):
+            RfqVendorGroup(vendor_name="Acme", vendor_email="not-an-email")

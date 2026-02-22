@@ -18,6 +18,7 @@ import asyncio
 import os
 
 os.environ["TESTING"] = "1"  # Must be set before importing app modules
+os.environ["RATE_LIMIT_ENABLED"] = "false"  # Disable rate limiting in tests
 
 from datetime import datetime, timezone
 

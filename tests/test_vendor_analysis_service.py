@@ -235,3 +235,43 @@ class TestAnalyzeVendorMaterials:
         await _analyze_vendor_materials(card.id, db_session=db_session)
         db_session.refresh(card)
         assert card.brand_tags == []
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
+    async def test_own_session_path(self, mock_claude):
+        """When db_session=None, function creates its own session."""
+        mock_claude.return_value = {"brands": ["Intel"], "commodities": ["Server"]}
+
+        # Patch SessionLocal to return a mock
+        mock_db = AsyncMock()
+        mock_db.get = lambda model, id: None  # No card found -> early return
+
+        with patch("app.database.SessionLocal", return_value=mock_db):
+            await _analyze_vendor_materials(99999, db_session=None)
+            mock_db.close.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
+    async def test_exception_with_own_session_rolls_back(self, mock_claude):
+        """Exception during own_session path triggers rollback and close."""
+        mock_claude.side_effect = Exception("API failure")
+
+        mock_card = type('MockCard', (), {
+            'id': 1, 'normalized_name': 'test', 'display_name': 'Test',
+            'brand_tags': [], 'commodity_tags': [],
+        })()
+
+        mock_db = AsyncMock()
+        mock_db.get = lambda model, id: mock_card
+        mock_db.query = lambda *args: type('Q', (), {
+            'join': lambda self, *a, **kw: self,
+            'filter': lambda self, *a, **kw: self,
+            'order_by': lambda self, *a, **kw: self,
+            'limit': lambda self, *a, **kw: self,
+            'all': lambda self: [type('Row', (), {'display_mpn': 'LM317T', 'manufacturer': 'TI', 'last_manufacturer': 'TI', 'times_seen': 1})()],
+        })()
+
+        with patch("app.database.SessionLocal", return_value=mock_db):
+            await _analyze_vendor_materials(1, db_session=None)
+            mock_db.rollback.assert_called()
+            mock_db.close.assert_called()

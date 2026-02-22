@@ -1091,3 +1091,60 @@ class TestConstants:
     def test_renew_buffer_positive(self):
         """Renew buffer should be a positive value smaller than lifetime."""
         assert 0 < RENEW_BUFFER_HOURS < SUBSCRIPTION_LIFETIME_HOURS
+
+
+# ══════════════════════════════════════════════════════════════════════
+#  handle_notification with pre-validated list
+# ══════════════════════════════════════════════════════════════════════
+
+
+class TestHandleNotificationValidated:
+    """Test handle_notification when called with pre-validated items."""
+
+    def test_pre_validated_list_skips_inline_validation(self, db_session, test_user):
+        """Passing validated=[] to handle_notification uses them directly."""
+        from app.services.webhook_service import handle_notification
+
+        sub = _make_subscription(db_session, test_user, sub_id="sub-pre-1")
+
+        # Build a pre-validated notification item
+        validated_item = {
+            "subscriptionId": "sub-pre-1",
+            "changeType": "created",
+            "resource": "me/messages/msg-pre-1",
+            "clientState": sub.client_state,
+            "_subscription": sub,
+            "_user": test_user,
+        }
+
+        mock_msg = {
+            "id": "msg-pre-1",
+            "subject": "Pre-validated test",
+            "from": {"emailAddress": {"address": "vendor@external.com", "name": "Vendor"}},
+            "toRecipients": [{"emailAddress": {"address": test_user.email}}],
+            "sentDateTime": "2025-01-19T12:00:00Z",
+            "isDraft": False,
+            "parentFolderId": "inbox",
+        }
+
+        mock_gc = MagicMock()
+        mock_gc.get_json = AsyncMock(return_value=mock_msg)
+
+        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
+             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
+             patch(_PATCH_LOG_ACTIVITY, return_value=MagicMock()) as mock_log, \
+             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]):
+            _run(handle_notification({}, db_session, validated=[validated_item]))
+
+        # log_email_activity should have been called for the inbound message
+        mock_log.assert_called_once()
+
+    def test_pre_validated_empty_list_no_processing(self, db_session):
+        """Passing validated=[] (empty) means no processing occurs."""
+        from app.services.webhook_service import handle_notification
+
+        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock) as mock_token:
+            _run(handle_notification({"value": [{"something": "ignored"}]}, db_session, validated=[]))
+
+        # No tokens should be fetched since validated list is empty
+        mock_token.assert_not_called()

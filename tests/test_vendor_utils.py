@@ -342,3 +342,34 @@ class TestFindVendorDedupCandidates:
         results = find_vendor_dedup_candidates(db_session, threshold=70)
         if len(results) > 1:
             assert results[0]["score"] >= results[1]["score"]
+
+    def test_seen_pairs_skipped(self, db_session):
+        """Line 195: when a pair has already been seen, it is skipped."""
+        # This tests the `continue` on line 195 — pairs are deduplicated
+        # by checking (min_id, max_id) tuples
+        from datetime import datetime, timezone
+
+        from app.models import VendorCard
+
+        # Create only 2 similar cards — second iteration would try same pair
+        cards = [
+            VendorCard(normalized_name="test company alpha",
+                       display_name="Test Company Alpha",
+                       sighting_count=10, created_at=datetime.now(timezone.utc)),
+            VendorCard(normalized_name="test company alpha inc",
+                       display_name="Test Company Alpha Inc",
+                       sighting_count=10, created_at=datetime.now(timezone.utc)),
+        ]
+        db_session.add_all(cards)
+        db_session.commit()
+
+        results = find_vendor_dedup_candidates(db_session, threshold=70)
+        # Should have at most 1 pair (no duplicates)
+        pair_keys = set()
+        for r in results:
+            key = (
+                min(r["vendor_a"]["id"], r["vendor_b"]["id"]),
+                max(r["vendor_a"]["id"], r["vendor_b"]["id"]),
+            )
+            assert key not in pair_keys, "Duplicate pair found"
+            pair_keys.add(key)

@@ -600,3 +600,455 @@ def test_draft_rfq_success(ai_client, db_session):
     assert "LM317T" in data["body"]
     assert "Acme Corp" in data["body"]
     mock_draft.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage tests
+# ---------------------------------------------------------------------------
+
+
+def test_list_prospects_company_entity(ai_client, db_session):
+    """GET /api/ai/prospect-contacts returns prospects for company site."""
+    from app.models import Company, CustomerSite, ProspectContact
+
+    co = Company(name="Prospect Co", is_active=True)
+    db_session.add(co)
+    db_session.flush()
+
+    site = CustomerSite(company_id=co.id, site_name="Prospect HQ")
+    db_session.add(site)
+    db_session.flush()
+
+    pc = ProspectContact(
+        customer_site_id=site.id,
+        full_name="Site Contact",
+        email="sc@prospect.com",
+        source="apollo",
+        confidence="high",
+    )
+    db_session.add(pc)
+    db_session.commit()
+
+    resp = ai_client.get(
+        "/api/ai/prospect-contacts",
+        params={"entity_type": "company", "entity_id": site.id},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) >= 1
+
+
+def test_list_prospects_no_entity(ai_client):
+    """GET /api/ai/prospect-contacts without entity_type returns 400."""
+    resp = ai_client.get("/api/ai/prospect-contacts")
+    assert resp.status_code == 400
+
+
+def test_save_prospect_with_notes(ai_client, db_session, ai_test_user):
+    """POST /api/ai/prospect-contacts/{id}/save with notes payload."""
+    from app.models import ProspectContact
+
+    pc = ProspectContact(
+        full_name="Notes Person",
+        email="notes@example.com",
+        source="web_search",
+        confidence="medium",
+    )
+    db_session.add(pc)
+    db_session.commit()
+    db_session.refresh(pc)
+
+    resp = ai_client.post(
+        f"/api/ai/prospect-contacts/{pc.id}/save",
+        json={"notes": "Key contact for procurement"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    db_session.refresh(pc)
+    assert pc.notes == "Key contact for procurement"
+
+
+def test_parse_response_no_result(ai_client, db_session):
+    """Parser returns None -> parsed=False."""
+    from app.models import VendorResponse
+
+    vr = VendorResponse(
+        vendor_name="Empty Vendor",
+        vendor_email="empty@v.com",
+        subject="No content",
+        body="Out of office",
+        received_at=datetime.now(timezone.utc),
+    )
+    db_session.add(vr)
+    db_session.commit()
+    db_session.refresh(vr)
+
+    mock_parse = AsyncMock(return_value=None)
+
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.services.response_parser.parse_vendor_response", mock_parse):
+        resp = ai_client.post(f"/api/ai/parse-response/{vr.id}")
+
+    assert resp.status_code == 200
+    assert resp.json()["parsed"] is False
+
+
+def test_parse_response_with_rfq_context(ai_client, db_session):
+    """Parser uses RFQ context from requisition's requirements."""
+    from app.models import Requirement, Requisition, VendorResponse
+
+    req = Requisition(
+        name="REQ-CTX", customer_name="Test", status="open", created_by=1,
+    )
+    db_session.add(req)
+    db_session.flush()
+
+    r = Requirement(
+        requisition_id=req.id, primary_mpn="CTX-PART", target_qty=100, target_price=1.0,
+    )
+    db_session.add(r)
+    db_session.flush()
+
+    vr = VendorResponse(
+        requisition_id=req.id,
+        vendor_name="Context Vendor",
+        vendor_email="ctx@v.com",
+        subject="RE: RFQ",
+        body="CTX-PART 100pcs at $0.95",
+        received_at=datetime.now(timezone.utc),
+    )
+    db_session.add(vr)
+    db_session.commit()
+    db_session.refresh(vr)
+
+    parse_result = {
+        "overall_classification": "quote_provided",
+        "confidence": 0.88,
+        "parts": [{"mpn": "CTX-PART", "qty": 100, "unit_price": 0.95}],
+    }
+
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.services.response_parser.parse_vendor_response", new_callable=AsyncMock, return_value=parse_result), \
+         patch("app.services.response_parser.extract_draft_offers", return_value=[]), \
+         patch("app.services.response_parser.should_auto_apply", return_value=False), \
+         patch("app.services.response_parser.should_flag_review", return_value=True):
+        resp = ai_client.post(f"/api/ai/parse-response/{vr.id}")
+
+    assert resp.status_code == 200
+    assert resp.json()["parsed"] is True
+
+
+def test_company_intel_not_available(ai_client):
+    """GET /api/ai/company-intel returns available=False when intel is None."""
+    mock_intel = AsyncMock(return_value=None)
+
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.services.ai_service.company_intel", mock_intel):
+        resp = ai_client.get(
+            "/api/ai/company-intel",
+            params={"company_name": "Unknown Corp"},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["available"] is False
+
+
+def test_draft_rfq_not_available(ai_client, db_session):
+    """POST /api/ai/draft-rfq returns available=False when draft is None."""
+    mock_draft = AsyncMock(return_value=None)
+
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.routers.ai._build_vendor_history", return_value={}), \
+         patch("app.services.ai_service.draft_rfq", mock_draft):
+        resp = ai_client.post("/api/ai/draft-rfq", json={
+            "vendor_name": "Acme Corp",
+            "parts": ["LM317T"],
+        })
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["available"] is False
+
+
+def test_parse_email_ai_disabled(ai_client):
+    """POST /api/ai/parse-email with AI off returns 403."""
+    with patch("app.routers.ai._ai_enabled", return_value=False):
+        resp = ai_client.post("/api/ai/parse-email", json={
+            "email_body": "We offer LM317T at $0.50",
+        })
+    assert resp.status_code == 403
+
+
+def test_parse_email_success(ai_client):
+    """POST /api/ai/parse-email parses email into quotes."""
+    parse_result = {
+        "quotes": [{"part_number": "LM317T", "unit_price": 0.50}],
+        "overall_confidence": 0.85,
+        "email_type": "quote",
+        "vendor_notes": "Standard terms",
+    }
+
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.services.ai_email_parser.parse_email", new_callable=AsyncMock, return_value=parse_result), \
+         patch("app.services.ai_email_parser.should_auto_apply", return_value=True), \
+         patch("app.services.ai_email_parser.should_flag_review", return_value=False):
+        resp = ai_client.post("/api/ai/parse-email", json={
+            "email_body": "We offer LM317T at $0.50",
+            "email_subject": "RE: RFQ",
+            "vendor_name": "Test Vendor",
+        })
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["parsed"] is True
+    assert data["auto_apply"] is True
+
+
+def test_parse_email_no_result(ai_client):
+    """POST /api/ai/parse-email returns parsed=False when parser returns None."""
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.services.ai_email_parser.parse_email", new_callable=AsyncMock, return_value=None):
+        resp = ai_client.post("/api/ai/parse-email", json={
+            "email_body": "Out of office auto-reply",
+        })
+
+    assert resp.status_code == 200
+    assert resp.json()["parsed"] is False
+
+
+def test_normalize_parts_ai_disabled(ai_client):
+    """POST /api/ai/normalize-parts with AI off returns 403."""
+    with patch("app.routers.ai._ai_enabled", return_value=False):
+        resp = ai_client.post("/api/ai/normalize-parts", json={
+            "parts": ["LM317T"],
+        })
+    assert resp.status_code == 403
+
+
+def test_normalize_parts_success(ai_client):
+    """POST /api/ai/normalize-parts returns normalized parts."""
+    normalized = [{"original": "LM317T", "normalized": "LM317T", "manufacturer": "TI"}]
+
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.services.ai_part_normalizer.normalize_parts", new_callable=AsyncMock, return_value=normalized):
+        resp = ai_client.post("/api/ai/normalize-parts", json={
+            "parts": ["LM317T"],
+        })
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 1
+
+
+def test_enrich_person_ai_disabled(ai_client):
+    """POST /api/ai/enrich-person with AI off returns 403."""
+    with patch("app.routers.ai._ai_enabled", return_value=False):
+        resp = ai_client.post("/api/ai/enrich-person", json={
+            "email": "test@example.com",
+        })
+    assert resp.status_code == 403
+
+
+def test_enrich_person_success(ai_client):
+    """POST /api/ai/enrich-person returns enriched person data."""
+    person_data = {
+        "full_name": "John Doe",
+        "title": "VP Sales",
+        "email": "john@acme.com",
+        "linkedin_url": "https://linkedin.com/in/johndoe",
+    }
+
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.connectors.apollo_client.enrich_person", new_callable=AsyncMock, return_value=person_data):
+        resp = ai_client.post("/api/ai/enrich-person", json={
+            "email": "john@acme.com",
+        })
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["full_name"] == "John Doe"
+
+
+def test_enrich_person_no_match(ai_client):
+    """POST /api/ai/enrich-person returns 404 when no match found."""
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.connectors.apollo_client.enrich_person", new_callable=AsyncMock, return_value=None):
+        resp = ai_client.post("/api/ai/enrich-person", json={
+            "email": "nobody@nowhere.com",
+        })
+
+    assert resp.status_code == 404
+
+
+def test_draft_rfq_email_ai_disabled(ai_client):
+    """POST /api/ai/draft-rfq-email with AI off returns 403."""
+    with patch("app.routers.ai._ai_enabled", return_value=False):
+        resp = ai_client.post("/api/ai/draft-rfq-email", json={
+            "vendor_name": "Test",
+            "buyer_name": "Buyer",
+            "parts": [{"part_number": "LM317T", "quantity": 100}],
+        })
+    assert resp.status_code == 403
+
+
+def test_draft_rfq_email_success(ai_client):
+    """POST /api/ai/draft-rfq-email returns subject and body."""
+    result = {"subject": "RFQ: LM317T", "body": "Dear vendor..."}
+
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.services.ai_email_drafter.draft_rfq_email", new_callable=AsyncMock, return_value=result):
+        resp = ai_client.post("/api/ai/draft-rfq-email", json={
+            "vendor_name": "Test Vendor",
+            "buyer_name": "Test Buyer",
+            "parts": [{"part_number": "LM317T", "quantity": 100}],
+        })
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["available"] is True
+    assert data["subject"] == "RFQ: LM317T"
+
+
+def test_draft_rfq_email_not_available(ai_client):
+    """POST /api/ai/draft-rfq-email returns available=False when drafter fails."""
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.services.ai_email_drafter.draft_rfq_email", new_callable=AsyncMock, return_value=None):
+        resp = ai_client.post("/api/ai/draft-rfq-email", json={
+            "vendor_name": "Test Vendor",
+            "buyer_name": "Test Buyer",
+            "parts": [{"part_number": "LM317T", "quantity": 100}],
+        })
+
+    assert resp.status_code == 200
+    assert resp.json()["available"] is False
+
+
+def test_compare_quotes_ai_disabled(ai_client):
+    """POST /api/ai/compare-quotes with AI off returns 403."""
+    with patch("app.routers.ai._ai_enabled", return_value=False):
+        resp = ai_client.post("/api/ai/compare-quotes", json={
+            "part_number": "LM317T",
+            "quotes": [
+                {"vendor_name": "A", "unit_price": 0.50},
+                {"vendor_name": "B", "unit_price": 0.45},
+            ],
+        })
+    assert resp.status_code == 403
+
+
+def test_compare_quotes_success(ai_client):
+    """POST /api/ai/compare-quotes returns comparison result."""
+    result = {"recommendation": "Vendor B", "savings": "10%"}
+
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.services.ai_quote_analyzer.compare_quotes", new_callable=AsyncMock, return_value=result):
+        resp = ai_client.post("/api/ai/compare-quotes", json={
+            "part_number": "LM317T",
+            "quotes": [
+                {"vendor_name": "A", "unit_price": 0.50},
+                {"vendor_name": "B", "unit_price": 0.45},
+            ],
+        })
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["available"] is True
+    assert data["recommendation"] == "Vendor B"
+
+
+def test_compare_quotes_not_available(ai_client):
+    """POST /api/ai/compare-quotes returns available=False when comparison fails."""
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.services.ai_quote_analyzer.compare_quotes", new_callable=AsyncMock, return_value=None):
+        resp = ai_client.post("/api/ai/compare-quotes", json={
+            "part_number": "LM317T",
+            "quotes": [
+                {"vendor_name": "A", "unit_price": 0.50},
+                {"vendor_name": "B", "unit_price": 0.45},
+            ],
+        })
+
+    assert resp.status_code == 200
+    assert resp.json()["available"] is False
+
+
+def test_save_parsed_offers_with_mpn_matching(ai_client, db_session, ai_test_user):
+    """Save parsed offers matches MPNs to existing requirements."""
+    from app.models import Offer, Requirement, Requisition
+
+    req = Requisition(
+        name="REQ-MATCH",
+        customer_name="Test",
+        status="open",
+        created_by=ai_test_user.id,
+    )
+    db_session.add(req)
+    db_session.flush()
+
+    r = Requirement(
+        requisition_id=req.id,
+        primary_mpn="LM317T",
+        target_qty=500,
+    )
+    db_session.add(r)
+    db_session.commit()
+    db_session.refresh(req)
+    db_session.refresh(r)
+
+    payload = {
+        "requisition_id": req.id,
+        "response_id": None,
+        "offers": [
+            {
+                "vendor_name": "Test",
+                "mpn": "LM317T",
+                "qty_available": 500,
+                "unit_price": 0.45,
+            },
+        ],
+    }
+
+    resp = ai_client.post("/api/ai/save-parsed-offers", json=payload)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["created"] == 1
+
+    # Verify the offer was linked to the requirement
+    offer = db_session.query(Offer).filter(
+        Offer.requisition_id == req.id,
+    ).first()
+    assert offer.requirement_id == r.id
+
+
+def test_find_contacts_websearch_fallback(ai_client, db_session):
+    """When Apollo returns fewer than 3 results, web search is invoked."""
+    from app.models import VendorCard
+
+    card = VendorCard(
+        normalized_name="fallback supply",
+        display_name="Fallback Supply",
+        domain="fallback.com",
+    )
+    db_session.add(card)
+    db_session.commit()
+    db_session.refresh(card)
+
+    apollo_results = [
+        {"full_name": "One Person", "email": "one@fallback.com", "source": "apollo", "confidence": "high"},
+    ]
+    web_results = [
+        {"full_name": "Web Person", "email": "web@fallback.com", "source": "web_search", "confidence": "medium"},
+    ]
+
+    with patch("app.routers.ai._ai_enabled", return_value=True), \
+         patch("app.connectors.apollo_client.search_contacts", new_callable=AsyncMock, return_value=apollo_results), \
+         patch("app.services.ai_service.enrich_contacts_websearch", new_callable=AsyncMock, return_value=web_results):
+        resp = ai_client.post("/api/ai/find-contacts", json={
+            "entity_type": "vendor",
+            "entity_id": card.id,
+        })
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 2  # Apollo + web search combined

@@ -1556,3 +1556,158 @@ class TestEdgeCases:
         # Total = 100*1.00 + 200*2.00 = $500.00
         assert "$500.00" in msg
         assert "2 line items" in msg
+
+
+# ── 14. _send_teams_dm with direct token (no DB) ───────────────────
+
+
+class TestSendTeamsDmDirectToken:
+    @pytest.mark.asyncio
+    async def test_dm_with_direct_access_token(self):
+        """When db=None but user.access_token is set, uses it directly."""
+        user = MagicMock()
+        user.access_token = "direct-access-token"
+        user.email = "sales@trioscs.com"
+
+        mock_gc = AsyncMock()
+        mock_gc.post_json = AsyncMock(return_value={"id": "chat-direct-1"})
+
+        with patch(_PATCH_GC, return_value=mock_gc):
+            await _send_teams_dm(user, "Direct token test", None)
+
+        # Should have made 2 calls: create chat + send message
+        assert mock_gc.post_json.await_count == 2
+
+    @pytest.mark.asyncio
+    async def test_dm_direct_token_no_chat_id(self):
+        """When chat creation returns no id, message is not sent."""
+        user = MagicMock()
+        user.access_token = "direct-token"
+        user.email = "user@trioscs.com"
+
+        mock_gc = AsyncMock()
+        mock_gc.post_json = AsyncMock(return_value={})  # No "id" key
+
+        with patch(_PATCH_GC, return_value=mock_gc):
+            await _send_teams_dm(user, "No chat id", None)
+
+        # Only 1 call (create chat), no message sent since no chat_id
+        assert mock_gc.post_json.await_count == 1
+
+
+# ── 15. notify_buyplan_approved buyer fallback path ─────────────────
+
+
+class TestNotifyBuyplanApprovedBuyerFallback:
+    @pytest.mark.asyncio
+    async def test_buyer_ids_from_offers_when_no_entered_by(
+        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+    ):
+        """When line items have no entered_by_id, buyer_ids are resolved from offer records."""
+        from app.models import Offer
+
+        # Create an offer with entered_by_id
+        offer = Offer(
+            requisition_id=test_requisition.id,
+            vendor_name="SupplierCo",
+            mpn="LM317T",
+            qty_available=1000,
+            unit_price=0.50,
+            entered_by_id=test_user.id,
+            status="active",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(offer)
+        db_session.flush()
+
+        plan = _create_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=test_user.id,
+            approved_by_id=admin_user.id,
+            status="approved",
+            line_items=[
+                {
+                    "offer_id": offer.id,
+                    "mpn": "LM317T",
+                    "vendor_name": "SupplierCo",
+                    "qty": 1000,
+                    "plan_qty": 1000,
+                    "cost_price": 0.50,
+                    "lead_time": "2 weeks",
+                    # NOTE: no entered_by_id — should fallback to offer lookup
+                },
+            ],
+        )
+
+        mock_gc = MagicMock()
+        mock_gc.post_json = AsyncMock(return_value=None)
+        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value="fake-token"), \
+             patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
+             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock), \
+             patch(_PATCH_TEAMS_DM, new_callable=AsyncMock):
+            await notify_buyplan_approved(plan, db_session)
+
+        # Buyer should have been identified via Offer.entered_by_id fallback
+        logs = _get_activities(db_session, "buyplan_approved")
+        assert len(logs) >= 1
+        assert any(l.user_id == test_user.id for l in logs)
+
+
+# ── 16. notify_stock_sale_approved ──────────────────────────────────
+
+
+class TestNotifyStockSaleApprovedEdgeCases:
+    @pytest.mark.asyncio
+    async def test_no_admin_with_token(
+        self, db_session, test_user, admin_user, test_requisition, test_quote, admin_in_settings,
+    ):
+        """When no admin has an access_token, emails are skipped gracefully."""
+        plan = _create_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=test_user.id,
+            approved_by_id=admin_user.id,
+            status="approved",
+            is_stock_sale=True,
+        )
+
+        # admin_user has no access_token in test fixtures
+        with patch(_PATCH_TOKEN, new_callable=AsyncMock, return_value=None), \
+             patch(_PATCH_TEAMS_CH, new_callable=AsyncMock):
+            # Should not raise
+            await notify_stock_sale_approved(plan, db_session)
+
+        logs = _get_activities(db_session, "buyplan_completed")
+        assert len(logs) >= 1
+
+
+# ── 17. auto_complete_stock_sales edge cases ────────────────────────
+
+
+class TestAutoCompleteStockSalesEdgeCases:
+    def test_no_stuck_plans(self, db_session):
+        """No stuck plans returns 0."""
+        assert auto_complete_stock_sales(db_session) == 0
+
+    def test_recent_plan_not_completed(self, db_session, test_user, test_requisition, test_quote):
+        """Plans approved recently (< 1 hour) are not auto-completed."""
+        plan = _create_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=test_user.id,
+            approved_by_id=test_user.id,
+            status="approved",
+            is_stock_sale=True,
+        )
+        # Set approved_at to just now
+        plan.approved_at = datetime.now(timezone.utc)
+        db_session.commit()
+
+        count = auto_complete_stock_sales(db_session)
+        assert count == 0
+        db_session.refresh(plan)
+        assert plan.status == "approved"  # Not changed

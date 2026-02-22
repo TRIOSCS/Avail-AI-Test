@@ -74,3 +74,17 @@ def test_resolve_storage_redis_unavailable():
             from app.rate_limit import _resolve_storage
             result = _resolve_storage()
             assert result is None
+
+
+def test_resolve_storage_redis_success():
+    """_resolve_storage returns Redis URL when ping succeeds (lines 24-25)."""
+    import redis as redis_lib
+
+    with patch("app.rate_limit.settings") as mock_settings:
+        mock_settings.cache_backend = "redis"
+        mock_settings.redis_url = "redis://localhost:6379/0"
+        with patch.object(redis_lib, "from_url") as mock_from_url:
+            mock_from_url.return_value.ping.return_value = True
+            from app.rate_limit import _resolve_storage
+            result = _resolve_storage()
+            assert result == "redis://localhost:6379/0"

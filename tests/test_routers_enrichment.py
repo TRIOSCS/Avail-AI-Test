@@ -9,6 +9,7 @@ Called by: pytest
 Depends on: app/routers/enrichment.py, conftest.py
 """
 
+import unittest.mock
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -396,3 +397,253 @@ def test_scrape_non_admin(client):
     """Non-admin -> denied."""
     resp = client.post("/api/enrichment/scrape-websites")
     assert resp.status_code in (401, 403)
+
+
+# ── Additional coverage tests ─────────────────────────────────────────
+
+
+def test_queue_filter_by_status_all(client, queue_item):
+    """Filter queue by status=all returns all items."""
+    resp = client.get("/api/enrichment/queue?status=all")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] >= 1
+
+
+def test_queue_filter_by_entity_type_company(client, db_session, test_company):
+    """Filter queue by entity_type=company."""
+    item = EnrichmentQueue(
+        company_id=test_company.id,
+        enrichment_type="company_info",
+        field_name="website",
+        current_value=None,
+        proposed_value="https://acme.com",
+        confidence=0.90,
+        source="clearbit",
+        status="pending",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(item)
+    db_session.commit()
+
+    resp = client.get("/api/enrichment/queue?entity_type=company")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert all(i["entity_type"] == "company" for i in data["items"])
+
+
+def test_queue_filter_by_source(client, queue_item):
+    """Filter queue by source."""
+    resp = client.get("/api/enrichment/queue?source=clearbit")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert all(i["source"] == "clearbit" for i in data["items"])
+
+
+def test_queue_item_with_vendor_contact(client, db_session, test_vendor_contact):
+    """Queue item with vendor_contact_id shows entity_type=contact."""
+    item = EnrichmentQueue(
+        vendor_contact_id=test_vendor_contact.id,
+        enrichment_type="contact_info",
+        field_name="title",
+        current_value=None,
+        proposed_value="VP Sales",
+        confidence=0.75,
+        source="apollo",
+        status="pending",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(item)
+    db_session.commit()
+
+    resp = client.get("/api/enrichment/queue?status=all")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    contact_items = [i for i in items if i["entity_type"] == "contact"]
+    assert len(contact_items) >= 1
+
+
+@patch("app.services.deep_enrichment_service.apply_queue_item", return_value=True)
+def test_queue_approve_low_confidence(mock_apply, client, db_session, test_vendor_card):
+    """Approve item with low_confidence status also works."""
+    item = EnrichmentQueue(
+        vendor_card_id=test_vendor_card.id,
+        enrichment_type="company_info",
+        field_name="industry",
+        proposed_value="Tech",
+        confidence=0.55,
+        source="clearbit",
+        status="low_confidence",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(item)
+    db_session.commit()
+
+    resp = client.post(f"/api/enrichment/queue/{item.id}/approve")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "approved"
+
+
+@patch("app.services.deep_enrichment_service.apply_queue_item", return_value=False)
+def test_queue_approve_apply_fails(mock_apply, client, queue_item):
+    """Apply returns False -> 500 error."""
+    resp = client.post(f"/api/enrichment/queue/{queue_item.id}/approve")
+    assert resp.status_code == 500
+
+
+def test_queue_approve_already_approved(client, db_session, queue_item):
+    """Cannot approve item with non-pending status."""
+    queue_item.status = "approved"
+    db_session.commit()
+    resp = client.post(f"/api/enrichment/queue/{queue_item.id}/approve")
+    assert resp.status_code == 400
+
+
+def test_queue_reject_already_rejected(client, db_session, queue_item):
+    """Cannot reject item that's not pending."""
+    queue_item.status = "rejected"
+    db_session.commit()
+    resp = client.post(f"/api/enrichment/queue/{queue_item.id}/reject")
+    assert resp.status_code == 400
+
+
+@patch("app.services.deep_enrichment_service.apply_queue_item", return_value=False)
+def test_queue_bulk_approve_with_failures(mock_apply, client, queue_item):
+    """Bulk approve counts failures."""
+    resp = client.post("/api/enrichment/queue/bulk-approve", json={"ids": [queue_item.id]})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["failed"] >= 1
+
+
+@patch("app.services.deep_enrichment_service.apply_queue_item", return_value=True)
+def test_queue_bulk_approve_skips_wrong_status(mock_apply, client, db_session, queue_item):
+    """Bulk approve skips items with non-pending status."""
+    queue_item.status = "approved"
+    db_session.commit()
+    resp = client.post("/api/enrichment/queue/bulk-approve", json={"ids": [queue_item.id]})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["approved"] == 0
+
+
+def test_job_detail_zero_total(client, db_session, admin_user):
+    """Job with zero total items shows 0% progress."""
+    job = EnrichmentJob(
+        job_type="backfill", status="running",
+        total_items=0, processed_items=0,
+        started_by_id=admin_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    resp = client.get(f"/api/enrichment/jobs/{job.id}")
+    assert resp.status_code == 200
+    assert resp.json()["progress_pct"] == 0.0
+
+
+def test_job_detail_no_starter(client, db_session):
+    """Job with no started_by_id shows null started_by."""
+    job = EnrichmentJob(
+        job_type="backfill", status="completed",
+        total_items=10, processed_items=10,
+        enriched_items=5,
+        started_by_id=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(job)
+    db_session.commit()
+
+    resp = client.get(f"/api/enrichment/jobs/{job.id}")
+    assert resp.status_code == 200
+    assert resp.json()["started_by"] is None
+
+
+def test_job_cancel_not_found(admin_client):
+    """Cancel non-existent job -> 404."""
+    resp = admin_client.post("/api/enrichment/jobs/99999/cancel")
+    assert resp.status_code == 404
+
+
+def test_deep_scan_user_no_m365(admin_client, db_session, admin_user):
+    """Deep scan user without M365 connected -> 400."""
+    from app.models import User
+    target = User(
+        email="nom365@trioscs.com", name="No M365", role="buyer",
+        azure_id="az-nom365", m365_connected=False,
+    )
+    db_session.add(target)
+    db_session.commit()
+
+    resp = admin_client.post(f"/api/enrichment/deep-email-scan/{target.id}")
+    assert resp.status_code == 400
+
+
+@patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None)
+def test_deep_scan_no_token(mock_token, admin_client, db_session, admin_user):
+    """Deep scan with no valid token -> 400."""
+    admin_user.m365_connected = True
+    admin_user.access_token = None
+    db_session.commit()
+
+    resp = admin_client.post(f"/api/enrichment/deep-email-scan/{admin_user.id}")
+    assert resp.status_code == 400
+
+
+def test_enrich_vendor_with_force(client, test_vendor_card):
+    """Trigger vendor enrichment with force=True."""
+    with patch(
+        "app.services.deep_enrichment_service.deep_enrich_vendor",
+        new_callable=AsyncMock,
+        return_value={"status": "enriched", "fields": 3},
+    ) as mock_enrich:
+        resp = client.post(
+            f"/api/enrichment/vendor/{test_vendor_card.id}",
+            json={"force": True},
+        )
+    assert resp.status_code == 200
+    mock_enrich.assert_awaited_once_with(test_vendor_card.id, unittest.mock.ANY, force=True)
+
+
+def test_enrich_company_with_force(client, test_company):
+    """Trigger company enrichment with force=True."""
+    with patch(
+        "app.services.deep_enrichment_service.deep_enrich_company",
+        new_callable=AsyncMock,
+        return_value={"status": "enriched", "fields": 2},
+    ) as mock_enrich:
+        resp = client.post(
+            f"/api/enrichment/company/{test_company.id}",
+            json={"force": True},
+        )
+    assert resp.status_code == 200
+    mock_enrich.assert_awaited_once_with(test_company.id, unittest.mock.ANY, force=True)
+
+
+def test_backfill_emails_with_data(admin_client, db_session, test_vendor_card, admin_user):
+    """Email backfill processes activity log, vendor card emails, and brokerbin sightings."""
+    from app.models import ActivityLog, Sighting
+
+    # Add an activity log entry with vendor_card_id and contact_email
+    act = ActivityLog(
+        user_id=admin_user.id,
+        activity_type="email_sent",
+        channel="email",
+        vendor_card_id=test_vendor_card.id,
+        contact_email="backfill@arrow.com",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(act)
+
+    # Add email to vendor card for consolidation path
+    test_vendor_card.emails = ["cardmail@arrow.com"]
+    db_session.commit()
+
+    resp = admin_client.post("/api/enrichment/backfill-emails")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total_created"] >= 0
+    assert "activity_log_created" in data
+    assert "vendor_card_created" in data
+    assert "brokerbin_created" in data

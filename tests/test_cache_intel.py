@@ -8,6 +8,7 @@ Depends on: app/cache/intel_cache.py
 """
 
 import json
+import os
 from unittest.mock import MagicMock, patch
 
 import app.cache.intel_cache as cache_mod
@@ -286,3 +287,66 @@ class TestCleanupExpired:
 
         count = cleanup_expired()
         assert count == 1200
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  _get_redis — non-TESTING paths (lines 39-59)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestGetRedisNonTesting:
+    def setup_method(self):
+        """Reset lazy-init state before each test."""
+        cache_mod._redis_client = None
+        cache_mod._redis_init_attempted = False
+
+    def teardown_method(self):
+        """Reset after each test and restore TESTING env."""
+        cache_mod._redis_client = None
+        cache_mod._redis_init_attempted = False
+        os.environ["TESTING"] = "1"
+
+    @patch.dict(os.environ, {"TESTING": ""})
+    def test_postgres_backend_skips_redis(self):
+        """When cache_backend is postgres, returns None without trying Redis."""
+        with patch("app.config.settings") as mock_settings:
+            mock_settings.cache_backend = "postgres"
+            result = _get_redis()
+            assert result is None
+
+    @patch.dict(os.environ, {"TESTING": ""})
+    def test_redis_connection_failure_returns_none(self):
+        """When Redis connection fails, returns None."""
+        with patch("app.config.settings") as mock_settings:
+            mock_settings.cache_backend = "redis"
+            mock_settings.redis_url = "redis://localhost:6379/15"
+            with patch("redis.from_url") as mock_from_url:
+                mock_from_url.return_value.ping.side_effect = Exception("Connection refused")
+                result = _get_redis()
+                assert result is None
+
+    @patch.dict(os.environ, {"TESTING": ""})
+    def test_redis_connection_success(self):
+        """When Redis connects successfully, returns client."""
+        with patch("app.config.settings") as mock_settings:
+            mock_settings.cache_backend = "redis"
+            mock_settings.redis_url = "redis://localhost:6379/0"
+            mock_client = MagicMock()
+            mock_client.ping.return_value = True
+            with patch("redis.from_url", return_value=mock_client):
+                result = _get_redis()
+                assert result is mock_client
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  invalidate — PG error path (lines 151-152)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestInvalidatePgError:
+    @patch("app.cache.intel_cache.SessionLocal")
+    @patch("app.cache.intel_cache._get_redis", return_value=None)
+    def test_pg_error_logged_not_raised(self, mock_redis, mock_session_local):
+        """PG error during invalidate is caught silently."""
+        mock_session_local.side_effect = Exception("DB connection error")
+        invalidate("company:test")  # Should not raise

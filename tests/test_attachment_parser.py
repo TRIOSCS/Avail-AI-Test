@@ -374,6 +374,154 @@ class TestExtractRow:
         # Other fields default to empty string or absent
         assert result.get("manufacturer", "") == ""
 
+    def test_extract_row_lead_time(self):
+        """lead_time field is normalized to lead_time_days and raw preserved."""
+        mapping = {0: "mpn", 1: "lead_time"}
+        row = ["LM317T", "2 weeks"]
+
+        result = _extract_row(row, mapping)
+        assert result is not None
+        assert "lead_time_days" in result
+        assert result["lead_time"] == "2 weeks"
+
+    def test_extract_row_packaging(self):
+        """packaging field is normalized."""
+        mapping = {0: "mpn", 1: "packaging"}
+        row = ["LM317T", "Reel"]
+
+        result = _extract_row(row, mapping)
+        assert result is not None
+        assert "packaging" in result
+
+    def test_extract_row_currency_explicit(self):
+        """Explicit currency field is detected."""
+        mapping = {0: "mpn", 1: "currency", 2: "unit_price"}
+        row = ["LM317T", "EUR", "1.50"]
+
+        result = _extract_row(row, mapping)
+        assert result is not None
+        assert result["currency"] == "EUR"
+
+    def test_extract_row_currency_from_price(self):
+        """When no currency column, currency is inferred from unit_price."""
+        mapping = {0: "mpn", 1: "unit_price"}
+        row = ["LM317T", "$1.50"]
+
+        result = _extract_row(row, mapping)
+        assert result is not None
+        assert "currency" in result
+
+    def test_extract_row_moq(self):
+        """moq field is normalized."""
+        mapping = {0: "mpn", 1: "moq"}
+        row = ["LM317T", "100"]
+
+        result = _extract_row(row, mapping)
+        assert result is not None
+        assert result["moq"] == 100
+
+    def test_extract_row_date_code(self):
+        """date_code field is normalized."""
+        mapping = {0: "mpn", 1: "date_code"}
+        row = ["LM317T", "2525"]
+
+        result = _extract_row(row, mapping)
+        assert result is not None
+        assert "date_code" in result
+
+    def test_extract_row_all_fields(self):
+        """Row with ALL mapped fields produces a complete dict."""
+        mapping = {
+            0: "mpn",
+            1: "manufacturer",
+            2: "qty",
+            3: "unit_price",
+            4: "condition",
+            5: "date_code",
+            6: "lead_time",
+            7: "packaging",
+            8: "currency",
+            9: "moq",
+            10: "description",
+        }
+        row = [
+            "LM317T", "TI", "5000", "0.50", "New",
+            "2525", "2 weeks", "Reel", "USD", "100",
+            "Voltage regulator",
+        ]
+
+        result = _extract_row(row, mapping)
+        assert result is not None
+        assert result["mpn"] == "LM317T"
+        assert result["manufacturer"] == "TI"
+        assert result["qty"] == 5000
+        assert result["unit_price"] == 0.50
+        assert result["condition"] == "new"
+        assert result["lead_time"] == "2 weeks"
+        assert "lead_time_days" in result
+        assert result["currency"] == "USD"
+        assert result["moq"] == 100
+        assert result["description"] == "Voltage regulator"
+
+    def test_extract_row_col_index_beyond_row_length(self):
+        """Column index beyond row length is silently skipped."""
+        mapping = {0: "mpn", 5: "qty"}
+        row = ["LM317T", "extra"]
+
+        result = _extract_row(row, mapping)
+        assert result is not None
+        assert result["mpn"] == "LM317T"
+        assert "qty" not in result
+
+
+# ── Excel parsing edge cases ──────────────────────────────────────
+
+
+class TestParseExcelEdgeCases:
+    """Additional edge cases for _parse_excel."""
+
+    def test_parse_excel_no_active_worksheet(self):
+        """Workbook with no active worksheet returns empty."""
+        mock_wb = MagicMock()
+        mock_wb.active = None
+
+        with patch("openpyxl.load_workbook", return_value=mock_wb):
+            headers, data_rows = _parse_excel(b"fake-excel-bytes")
+
+        assert headers == []
+        assert data_rows == []
+
+    def test_parse_excel_empty_rows(self):
+        """Worksheet with no rows returns empty."""
+        mock_ws = MagicMock()
+        mock_ws.iter_rows.return_value = []
+
+        mock_wb = MagicMock()
+        mock_wb.active = mock_ws
+
+        with patch("openpyxl.load_workbook", return_value=mock_wb):
+            headers, data_rows = _parse_excel(b"fake-excel-bytes")
+
+        assert headers == []
+        assert data_rows == []
+        mock_wb.close.assert_called_once()
+
+    def test_parse_excel_headers_only(self):
+        """Worksheet with only header row returns empty data_rows."""
+        mock_ws = MagicMock()
+        mock_ws.iter_rows.return_value = [
+            ("Part Number", "Qty", "Price"),
+        ]
+
+        mock_wb = MagicMock()
+        mock_wb.active = mock_ws
+
+        with patch("openpyxl.load_workbook", return_value=mock_wb):
+            headers, data_rows = _parse_excel(b"fake-excel-bytes")
+
+        assert headers == ["Part Number", "Qty", "Price"]
+        assert data_rows == []
+
 
 # ── End-to-end pipeline ─────────────────────────────────────────────
 

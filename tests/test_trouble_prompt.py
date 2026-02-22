@@ -153,3 +153,100 @@ class TestGenerateTroublePrompt:
         call_args = mock_gradient.call_args
         prompt_text = call_args[0][0]
         assert "sourcing" in prompt_text.lower()
+
+    @patch("app.services.ai_trouble_prompt.gradient_json", new_callable=AsyncMock)
+    def test_current_url_included(self, mock_gradient):
+        """current_url is appended to the prompt."""
+        from app.services.ai_trouble_prompt import generate_trouble_prompt
+
+        mock_gradient.return_value = MOCK_RESULT
+        _run(generate_trouble_prompt(
+            user_message="Something broke",
+            current_url="https://app.avail.ai/#rfq/123",
+            reporter_name="Tester",
+        ))
+        prompt_text = mock_gradient.call_args[0][0]
+        assert "https://app.avail.ai/#rfq/123" in prompt_text
+
+    @patch("app.services.ai_trouble_prompt.gradient_json", new_callable=AsyncMock)
+    def test_browser_info_included(self, mock_gradient):
+        """browser_info is appended to the prompt."""
+        from app.services.ai_trouble_prompt import generate_trouble_prompt
+
+        mock_gradient.return_value = MOCK_RESULT
+        _run(generate_trouble_prompt(
+            user_message="Rendering bug",
+            browser_info="Chrome 120.0.6099.130",
+            reporter_name="Tester",
+        ))
+        prompt_text = mock_gradient.call_args[0][0]
+        assert "Chrome 120" in prompt_text
+
+    @patch("app.services.ai_trouble_prompt.gradient_json", new_callable=AsyncMock)
+    def test_screen_size_included(self, mock_gradient):
+        """screen_size is appended to the prompt."""
+        from app.services.ai_trouble_prompt import generate_trouble_prompt
+
+        mock_gradient.return_value = MOCK_RESULT
+        _run(generate_trouble_prompt(
+            user_message="Layout issue",
+            screen_size="1920x1080",
+            reporter_name="Tester",
+        ))
+        prompt_text = mock_gradient.call_args[0][0]
+        assert "1920x1080" in prompt_text
+
+    @patch("app.services.ai_trouble_prompt.gradient_json", new_callable=AsyncMock)
+    def test_page_state_included(self, mock_gradient):
+        """page_state is appended to the prompt."""
+        from app.services.ai_trouble_prompt import generate_trouble_prompt
+
+        mock_gradient.return_value = MOCK_RESULT
+        _run(generate_trouble_prompt(
+            user_message="State issue",
+            page_state='{"selectedTab": "quotes", "filterActive": true}',
+            reporter_name="Tester",
+        ))
+        prompt_text = mock_gradient.call_args[0][0]
+        assert "Page state" in prompt_text
+        assert "quotes" in prompt_text
+
+    @patch("app.services.ai_trouble_prompt.gradient_json", new_callable=AsyncMock)
+    def test_all_context_fields(self, mock_gradient):
+        """All optional context fields are included in the prompt."""
+        from app.services.ai_trouble_prompt import generate_trouble_prompt
+
+        mock_gradient.return_value = MOCK_RESULT
+        _run(generate_trouble_prompt(
+            user_message="Everything is broken",
+            current_url="https://app.avail.ai/#crm",
+            current_view="crm",
+            browser_info="Firefox 121.0",
+            screen_size="2560x1440",
+            console_errors='[{"msg":"ReferenceError"}]',
+            page_state='{"tab":"companies"}',
+            has_screenshot=True,
+            reporter_name="Full Context User",
+        ))
+        prompt_text = mock_gradient.call_args[0][0]
+        assert "https://app.avail.ai/#crm" in prompt_text
+        assert "crm" in prompt_text.lower()
+        assert "Firefox 121.0" in prompt_text
+        assert "2560x1440" in prompt_text
+        assert "ReferenceError" in prompt_text
+        assert "companies" in prompt_text
+        assert "screenshot" in prompt_text.lower()
+
+    @patch("app.services.ai_trouble_prompt.gradient_json", new_callable=AsyncMock)
+    def test_empty_console_errors_not_included(self, mock_gradient):
+        """Empty console errors ('[]') are not included in the prompt."""
+        from app.services.ai_trouble_prompt import generate_trouble_prompt
+
+        mock_gradient.return_value = MOCK_RESULT
+        _run(generate_trouble_prompt(
+            user_message="No errors",
+            console_errors="[]",
+            reporter_name="Tester",
+        ))
+        prompt_text = mock_gradient.call_args[0][0]
+        assert "Console errors" not in prompt_text
