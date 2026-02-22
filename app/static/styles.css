@@ -1204,7 +1204,7 @@ body.on-settings .toparea{margin-left:0 !important}
 .btn-g{background:var(--green);color:#fff}.btn-g:hover{background:#0d8f6d}
 .btn-y{background:var(--amber);color:#fff}.btn-y:hover{background:#d4930a}
 .btn-q{background:#8b5cf6;color:#fff;border:none}.btn-q:hover{background:#7c3aed}
-.btn-flash{animation:flash-green 1.2s ease-in-out 3}
+.btn-flash{animation:flash-green 1.2s ease-in-out infinite}
 @keyframes flash-green{0%,100%{opacity:1}50%{opacity:.35}}
 
 /* Clickable company/vendor name links */

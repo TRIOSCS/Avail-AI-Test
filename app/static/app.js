@@ -808,6 +808,24 @@ async function _switchDdTab(reqId, tabName) {
     delete _addRowActive[reqId];
     const drow = document.getElementById('d-' + reqId);
     if (!drow) return;
+    // Clear new-offers flash when salesperson views offers
+    if (tabName === 'offers') {
+        const reqInfo = _reqListData.find(r => r.id === reqId);
+        if (reqInfo && reqInfo.has_new_offers) {
+            reqInfo.has_new_offers = false;
+            // Update the row button to stop flashing
+            const row = document.getElementById('r-' + reqId);
+            if (row) {
+                const flashBtn = row.querySelector('.btn-flash');
+                if (flashBtn) flashBtn.classList.remove('btn-flash');
+            }
+            // Also clear the new-offers dot
+            const dot = row?.querySelector('.new-offers-dot');
+            if (dot) dot.remove();
+            // Persist dismissal server-side
+            apiFetch(`/api/requisitions/${reqId}/dismiss-new-offers`, { method: 'POST' }).catch(() => {});
+        }
+    }
     // Update pill state
     drow.querySelectorAll('.dd-tab').forEach(t => t.classList.toggle('on', t.dataset.tab === tabName));
     const panel = drow.querySelector('.dd-panel');
@@ -1127,27 +1145,40 @@ function _renderDdOffers(reqId, data, panel) {
         <span style="font-size:11px"><b>${allOffers.length}</b> offer${allOffers.length !== 1 ? 's' : ''}${sel.size > 0 ? ` &middot; <b>${sel.size}</b> selected` : ''}</span>
         <button class="btn btn-primary btn-sm" id="ddBuildQuoteBtn-${reqId}" ${sel.size === 0 ? 'disabled style="opacity:.5"' : ''} onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote (${sel.size})</button>
     </div>`;
-    html += `<table class="dtbl"><thead><tr><th style="width:28px"><input type="checkbox" onchange="ddToggleAllOffers(${reqId},this.checked)" ${sel.size === allOffers.length ? 'checked' : ''}></th><th>MPN</th><th>Vendor</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Condition</th><th>Date</th><th>Source</th></tr></thead><tbody>`;
+    html += `<table class="dtbl"><thead><tr><th style="width:28px"><input type="checkbox" onchange="ddToggleAllOffers(${reqId},this.checked)" ${sel.size === allOffers.length ? 'checked' : ''}></th><th>MPN</th><th>Vendor</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Cond</th><th>MOQ</th><th>Date Code</th><th>Source</th><th>Logged</th></tr></thead><tbody>`;
     for (const o of allOffers) {
         const oid = o.id || o.offer_id;
         const checked = sel.has(oid) ? 'checked' : '';
-        const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(2) : '\u2014';
+        const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(4) : '\u2014';
         const date = o.created_at ? fmtRelative(o.created_at) : '';
         const src = o.source || o.offer_source || '';
         const offeredMpn = o.mpn || o.offered_mpn || '';
         const isSub = o._reqMpn && offeredMpn && offeredMpn.trim().toUpperCase() !== o._reqMpn.trim().toUpperCase();
         const subBadge = isSub ? ' <span class="badge b-sub">SUB</span>' : '';
-        const rowBg = isSub ? ' style="background:rgba(14,116,144,.04)"' : '';
-        html += `<tr class="${checked ? 'selected' : ''}"${rowBg} onclick="ddToggleOffer(${reqId},${oid},event)">
+        const rowBg = isSub ? 'background:rgba(14,116,144,.04);' : '';
+        // Build detail chips for extra fields
+        const details = [];
+        if (o.manufacturer) details.push('Mfr: ' + esc(o.manufacturer));
+        if (o.packaging) details.push('Pkg: ' + esc(o.packaging));
+        if (o.firmware) details.push('FW: ' + esc(o.firmware));
+        if (o.hardware_code) details.push('HW: ' + esc(o.hardware_code));
+        if (o.warranty) details.push('Warranty: ' + esc(o.warranty));
+        if (o.country_of_origin) details.push('COO: ' + esc(o.country_of_origin));
+        const detailLine = details.length ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">' + details.join(' · ') + '</div>' : '';
+        const noteLine = o.notes ? '<div style="margin-top:3px;padding:3px 8px;border-radius:4px;background:rgba(59,130,246,.08);border-left:2px solid var(--blue);font-size:10px;color:var(--text);white-space:pre-wrap">' + esc(o.notes) + '</div>' : '';
+        const enteredBy = o.entered_by ? '<div style="font-size:9px;color:var(--muted);margin-top:2px">by ' + esc(o.entered_by) + '</div>' : '';
+        html += `<tr class="${checked ? 'selected' : ''}" style="${rowBg}" onclick="ddToggleOffer(${reqId},${oid},event)">
             <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
             <td class="mono">${esc(offeredMpn)}${subBadge}</td>
-            <td>${esc(o.vendor_name || '')}</td>
-            <td class="mono">${o.quantity || '\u2014'}</td>
+            <td>${esc(o.vendor_name || '')}${detailLine}${noteLine}${enteredBy}</td>
+            <td class="mono">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '\u2014')}</td>
             <td class="mono" style="color:var(--teal)">${price}</td>
             <td>${esc(o.lead_time || '\u2014')}</td>
-            <td>${esc(o.condition || '')}</td>
-            <td style="font-size:10px">${date}</td>
+            <td>${esc(o.condition || '\u2014')}</td>
+            <td class="mono">${o.moq ? Number(o.moq).toLocaleString() : '\u2014'}</td>
+            <td style="font-size:10px">${esc(o.date_code || '\u2014')}</td>
             <td style="font-size:10px;color:var(--muted)">${esc(src)}</td>
+            <td style="font-size:10px">${date}</td>
         </tr>`;
     }
     html += '</tbody></table>';
@@ -2506,7 +2537,7 @@ function _updateToolbarStats() {
 function _renderReqRow(r) {
     const total = r.requirement_count || 0;
     const sourced = r.sourced_count || 0;
-    const offers = r.reply_count || 0;
+    const offers = r.offer_count || 0;
     const pct = total > 0 ? Math.round((sourced / total) * 100) : 0;
     const v = _currentMainView;
 

@@ -490,6 +490,19 @@ async def bulk_archive(
     return {"ok": True, "archived_count": count}
 
 
+@router.post("/api/requisitions/{req_id}/dismiss-new-offers")
+async def dismiss_new_offers(
+    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+):
+    """Mark offers as viewed so the flash alert stops."""
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    req.offers_viewed_at = sqlfunc.now()
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/api/requisitions/{req_id}/clone")
 async def clone_requisition(
     req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
