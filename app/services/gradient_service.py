@@ -27,8 +27,8 @@ from typing import Any
 
 from loguru import logger
 
-from app.http_client import http
 from app.config import settings
+from app.http_client import http
 
 API_URL = "https://inference.do-ai.run/v1/chat/completions"
 

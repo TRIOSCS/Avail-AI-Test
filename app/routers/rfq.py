@@ -29,7 +29,6 @@ from ..dependencies import (
     require_user,
 )
 from ..email_service import log_phone_contact, poll_inbox, send_batch_rfq
-from ..http_client import http
 from ..models import (
     ActivityLog,
     Contact,

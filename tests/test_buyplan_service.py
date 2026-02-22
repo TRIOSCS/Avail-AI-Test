@@ -27,7 +27,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import ActivityLog, BuyPlan, Offer, User
+from app.models import ActivityLog, BuyPlan
 from app.services.buyplan_service import (
     _post_teams_channel,
     _send_teams_dm,

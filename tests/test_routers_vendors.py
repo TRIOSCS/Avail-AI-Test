@@ -11,7 +11,7 @@ Depends on: routers/vendors.py
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -354,7 +354,6 @@ def test_vendor_list_engagement_score_null():
 # ══════════════════════════════════════════════════════════════════════════
 
 from app.models import MaterialCard, User, VendorCard, VendorContact, VendorReview
-
 
 # ── Admin client fixture ─────────────────────────────────────────────────
 

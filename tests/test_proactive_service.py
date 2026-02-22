@@ -14,7 +14,6 @@ Business rules tested:
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -22,7 +21,6 @@ from sqlalchemy.orm import Session
 
 from app.models import (
     BuyPlan,
-    Company,
     CustomerSite,
     Offer,
     ProactiveMatch,

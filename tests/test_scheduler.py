@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import BuyPlan, Company, Quote, Requisition, User, VendorCard
+from app.models import BuyPlan, Requisition, VendorCard
 from app.scheduler import _utc, configure_scheduler, scheduler
 
 # ── Fixtures ───────────────────────────────────────────────────────────
@@ -915,7 +915,7 @@ def test_batch_results_handles_timeout(scheduler_db):
     with patch(
         "app.email_service.process_batch_results",
         new_callable=AsyncMock,
-    ) as mock_pbr, patch(
+    ), patch(
         "asyncio.wait_for",
         new_callable=AsyncMock,
         side_effect=asyncio.TimeoutError(),

@@ -10,11 +10,11 @@ import os
 os.environ["TESTING"] = "1"
 os.environ["DO_GRADIENT_API_KEY"] = "test-key"
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
-from app.services.ai_quote_analyzer import compare_quotes, _format_quotes, _validate_result
+import pytest
 
+from app.services.ai_quote_analyzer import _format_quotes, _validate_result, compare_quotes
 
 # ── Helpers ───────────────────────────────────────────────────────────
 

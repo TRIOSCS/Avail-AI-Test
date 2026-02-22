@@ -12,7 +12,6 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..rate_limit import limiter
 from ..dependencies import require_admin, require_settings_access
 from ..models import (
     ApiSource,
@@ -24,6 +23,7 @@ from ..models import (
     VendorCard,
     VendorContact,
 )
+from ..rate_limit import limiter
 from ..services.admin_service import (
     VALID_ROLES,
     get_all_config,

@@ -22,7 +22,7 @@ os.environ["TESTING"] = "1"
 
 import json
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -42,7 +42,6 @@ from app.services.deep_enrichment_service import (
     deep_enrich_vendor,
     link_contact_to_entities,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 

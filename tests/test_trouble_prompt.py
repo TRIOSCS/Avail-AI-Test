@@ -10,8 +10,6 @@ Depends on: app/services/ai_trouble_prompt.py
 import asyncio
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 
 def _run(coro):
     """Run an async coroutine in a new event loop."""

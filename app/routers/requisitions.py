@@ -25,7 +25,6 @@ from sqlalchemy.orm import Session, joinedload
 
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_user
-from ..rate_limit import limiter
 from ..models import (
     ActivityLog,
     Contact,
@@ -39,6 +38,7 @@ from ..models import (
     User,
     VendorResponse,
 )
+from ..rate_limit import limiter
 from ..schemas.requisitions import (
     RequirementCreate,
     RequirementUpdate,
@@ -480,7 +480,6 @@ async def bulk_archive(
     user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     """Archive all active requisitions NOT created by the current user."""
-    from ..dependencies import user_reqs_query
 
     q = db.query(Requisition).filter(
         Requisition.created_by != user.id,

@@ -4,12 +4,12 @@ Runs against the full FastAPI app with in-memory SQLite, same harness as conftes
 Tests the HTTP-level behavior end-to-end (not just service functions).
 """
 
+import hmac
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
-import hmac
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -17,7 +17,6 @@ from sqlalchemy.orm import Session
 from app.models import GraphSubscription, User
 from app.rate_limit import limiter
 from app.services.webhook_service import _seen_notifications
-
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 

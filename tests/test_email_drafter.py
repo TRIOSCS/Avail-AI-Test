@@ -5,17 +5,16 @@ Covers: single part, multi-part, target price handling, date code/condition
         subject generation, prompt construction, error handling, endpoint.
 """
 
-import json
 import os
 
 os.environ["TESTING"] = "1"
 os.environ["DO_GRADIENT_API_KEY"] = "test-key"
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
-from app.services.ai_email_drafter import draft_rfq_email, _format_parts
+import pytest
 
+from app.services.ai_email_drafter import _format_parts, draft_rfq_email
 
 # ── Helpers ───────────────────────────────────────────────────────────
 

@@ -19,9 +19,6 @@ Depends on: services/gradient_service.py
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 from loguru import logger
 
 from app.services.gradient_service import gradient_json

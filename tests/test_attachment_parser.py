@@ -13,14 +13,12 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from app.services.attachment_parser import (
-    HEADER_PATTERNS,
     _extract_row,
     _match_headers_deterministic,
     _parse_csv,
     _parse_excel,
     parse_attachment,
 )
-
 
 # ── Deterministic header matching ───────────────────────────────────
 
@@ -242,7 +240,7 @@ class TestGetOrDetectMapping:
         from app.services.attachment_parser import _get_or_detect_mapping
 
         # Use headers that deterministic can resolve (includes mpn)
-        result = await _get_or_detect_mapping(
+        await _get_or_detect_mapping(
             headers=["Part Number", "Qty"],
             sample_rows=[["LM317T", "100"]],
             vendor_domain="newvendor.com",

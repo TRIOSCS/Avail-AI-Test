@@ -45,7 +45,6 @@ from app.services.sourcing_score import (
     score_requirement,
 )
 
-
 # ── 1. _sigmoid() ────────────────────────────────────────────────────
 
 

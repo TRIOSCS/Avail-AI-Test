@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import require_admin, require_user
-from ..rate_limit import limiter
 from ..models import (
     ActivityLog,
     Company,
@@ -22,6 +21,7 @@ from ..models import (
     VendorCard,
     VendorContact,
 )
+from ..rate_limit import limiter
 from ..schemas.enrichment import (
     BackfillRequest,
     BulkApproveRequest,

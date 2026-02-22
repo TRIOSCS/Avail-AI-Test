@@ -169,7 +169,7 @@ class GraphClient:
 
                 # 410 Gone — delta token expired, caller must discard and re-sync
                 if resp.status_code == 410:
-                    log.warning(f"Graph 410 SyncStateNotFound — delta token expired")
+                    log.warning("Graph 410 SyncStateNotFound — delta token expired")
                     raise GraphSyncStateExpired(resp.text[:300])
 
                 # Client error (400, 401, 403, 404) — don't retry

@@ -8,7 +8,6 @@ Called by: pytest
 Depends on: app.main (request_id_middleware)
 """
 
-import pytest
 
 
 def test_x_request_id_header(client):

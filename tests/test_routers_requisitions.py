@@ -11,9 +11,6 @@ Depends on: routers/requisitions.py, conftest fixtures
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
-
 # ── Requisition CRUD ──────────────────────────────────────────────────
 
 
@@ -424,7 +421,6 @@ def test_sales_user_sees_only_own_requisitions(
     client, db_session, test_user, sales_user
 ):
     """Sales role can only see requisitions they created."""
-    from app.database import get_db
     from app.dependencies import require_buyer, require_user
     from app.main import app
     from app.models import Requisition

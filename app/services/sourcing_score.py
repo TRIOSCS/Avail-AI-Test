@@ -20,7 +20,6 @@ from __future__ import annotations
 import math
 
 from sqlalchemy import func as sqlfunc
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import (

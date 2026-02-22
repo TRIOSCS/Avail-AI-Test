@@ -5,24 +5,22 @@ Covers: single part, batch normalization, cache hits, low confidence fallback,
         detection, edge cases, and the HTTP endpoint.
 """
 
-import json
 import os
 
 os.environ["TESTING"] = "1"
 os.environ["DO_GRADIENT_API_KEY"] = "test-key"
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.services.ai_part_normalizer import (
-    normalize_parts,
-    clear_cache,
+    _cache,
     _fallback,
     _validate_result,
-    _cache,
-    CONFIDENCE_THRESHOLD,
+    clear_cache,
+    normalize_parts,
 )
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 

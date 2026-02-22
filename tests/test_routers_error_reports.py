@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 from app.models import User
 from app.models.error_report import ErrorReport
 
-
 # ── Fixtures ─────────────────────────────────────────────────────────
 
 
@@ -245,7 +244,6 @@ class TestListErrorReports:
         """Regular user client should get 403 (admin override not present)."""
         # The `client` fixture overrides require_user but not require_admin
         # so the actual require_admin dependency runs and checks role
-        from app.database import get_db
         from app.dependencies import require_user
         from app.main import app
 

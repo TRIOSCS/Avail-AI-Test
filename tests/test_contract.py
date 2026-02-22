@@ -45,7 +45,6 @@ def test_openapi_schema_is_valid():
 @pytest.mark.skipif(not HAS_SCHEMATHESIS, reason="schemathesis not installed")
 def test_contract_health():
     """Schemathesis can load the schema and validate /health."""
-    from starlette.testclient import TestClient
 
     from app.main import app
 

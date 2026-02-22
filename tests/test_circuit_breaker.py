@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from app.connectors.sources import BaseConnector, CircuitBreaker, get_breaker, _breakers
+from app.connectors.sources import BaseConnector, CircuitBreaker, _breakers, get_breaker
 
 
 class _FakeConnector(BaseConnector):

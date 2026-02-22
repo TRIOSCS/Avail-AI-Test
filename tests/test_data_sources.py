@@ -13,13 +13,11 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.models import ApiSource, User
-
+from app.models import ApiSource
 
 # ── Helper: create client with admin + settings access ────────────────
 

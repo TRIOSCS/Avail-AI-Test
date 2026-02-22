@@ -10,8 +10,6 @@ Depends on: app.rate_limit, routers/requisitions.py (search endpoints)
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 
 def test_limiter_is_configured():
     """Rate limiter module exports a Limiter with key_func."""
@@ -23,6 +21,7 @@ def test_limiter_is_configured():
 def test_limiter_uses_remote_address():
     """Key function is get_remote_address (IP-based limiting)."""
     from slowapi.util import get_remote_address
+
     from app.rate_limit import limiter
     assert limiter._key_func is get_remote_address
 

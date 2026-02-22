@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import ApiSource, Company, CustomerSite, SystemConfig, User, VendorCard
+from app.models import ApiSource, Company, SystemConfig, User, VendorCard
 from app.rate_limit import limiter
 
 # ── Admin client fixture ────────────────────────────────────────────

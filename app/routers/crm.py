@@ -26,7 +26,6 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from ..config import settings
 from ..database import get_db
 from ..dependencies import is_admin as _is_admin
-from ..rate_limit import limiter
 from ..dependencies import require_admin, require_buyer, require_user
 from ..models import (
     ActivityLog,
@@ -45,6 +44,7 @@ from ..models import (
     VendorContact,
     VendorReview,
 )
+from ..rate_limit import limiter
 from ..schemas.crm import (
     AddContactsToVendor,
     AddContactToSite,
@@ -57,6 +57,7 @@ from ..schemas.crm import (
     BuyPlanSubmit,
     CompanyCreate,
     CompanyUpdate,
+    CustomerImportRow,
     EnrichDomainRequest,
     OfferCreate,
     OfferUpdate,
@@ -70,7 +71,6 @@ from ..schemas.crm import (
     SiteContactUpdate,
     SiteCreate,
     SiteUpdate,
-    CustomerImportRow,
 )
 from ..schemas.responses import OfferListResponse, QuoteDetailResponse
 from ..services.credential_service import get_credential_cached

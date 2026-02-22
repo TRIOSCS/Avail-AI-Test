@@ -17,7 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import ApiSource, Requirement, Requisition, Sighting, User, VendorCard, VendorResponse
+from app.models import ApiSource, Requirement, Requisition, User, VendorCard, VendorResponse
 from app.rate_limit import limiter
 from app.routers.sources import (
     _create_sightings_from_attachment,

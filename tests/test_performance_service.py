@@ -31,12 +31,8 @@ from app.models import (
 )
 from app.services.performance_service import (
     COLD_START_THRESHOLD,
-    GRACE_DAYS,
-    PTS_BUYPLAN,
     PTS_LOGGED,
-    PTS_PO_CONFIRMED,
     PTS_QUOTED,
-    PTS_STOCK_LIST,
     W_PO_CONVERSION,
     W_QUOTE_CONVERSION,
     W_RESPONSE_RATE,
@@ -51,7 +47,6 @@ from app.services.performance_service import (
     get_vendor_scorecard_detail,
     get_vendor_scorecard_list,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────
 
@@ -293,7 +288,7 @@ class TestComputeVendorScorecard:
         q = Quote(
             requisition_id=test_requisition.id,
             customer_site_id=site.id,
-            quote_number=f"Q-PERF-001",
+            quote_number="Q-PERF-001",
             status="sent",
             line_items=[
                 {"offer_id": offers[0].id, "qty": 100},
@@ -464,7 +459,7 @@ class TestComputeAllVendorScorecards:
             patched_scorecard,
         )
 
-        result = compute_all_vendor_scorecards(db_session)
+        compute_all_vendor_scorecards(db_session)
 
         # vc1 should have a snapshot; vc2 should not
         snap1 = db_session.query(VendorMetricsSnapshot).filter(
@@ -666,7 +661,7 @@ class TestBuyerLeaderboard:
         db_session.add(q)
         db_session.commit()
 
-        result = compute_buyer_leaderboard(db_session, month)
+        compute_buyer_leaderboard(db_session, month)
         snap = db_session.query(BuyerLeaderboardSnapshot).filter(
             BuyerLeaderboardSnapshot.user_id == buyer.id,
             BuyerLeaderboardSnapshot.month == month,

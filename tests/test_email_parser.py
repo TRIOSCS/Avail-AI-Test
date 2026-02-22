@@ -5,23 +5,22 @@ Covers: single-part quotes, multi-part quotes, no-stock responses,
         normalization, confidence thresholds, and the HTTP endpoint.
 """
 
-import json
 import os
 
 os.environ["TESTING"] = "1"
 os.environ["DO_GRADIENT_API_KEY"] = "test-key"
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.services.ai_email_parser import (
+    _clean_email_body,
+    _normalize_quotes,
     parse_email,
     should_auto_apply,
     should_flag_review,
-    _clean_email_body,
-    _normalize_quotes,
 )
-
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -434,7 +433,7 @@ def test_clean_html_table_preserves_rows():
     assert "LM358DR" in cleaned
     assert "5000" in cleaned
     # <tr> → newline ensures rows are on separate lines
-    lines = [l.strip() for l in cleaned.split("\n") if l.strip()]
+    lines = [line.strip() for line in cleaned.split("\n") if line.strip()]
     assert len(lines) > 1
 
 

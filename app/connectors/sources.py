@@ -442,7 +442,7 @@ class NexarConnector(BaseConnector):
             mpn = part.get("mpn", pn)
             mfr = (part.get("manufacturer") or {}).get("name", "")
             total_avail = part.get("totalAvail")
-            avg_avail = part.get("avgAvail")
+            _ = part.get("avgAvail")
             median_price = part.get("medianPrice1000") or {}
             price = median_price.get("price")
             currency = median_price.get("currency", "USD")

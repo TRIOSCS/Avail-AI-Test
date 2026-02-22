@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Float, Index, Integer, JSON, String
+from sqlalchemy import JSON, Column, DateTime, Float, Index, Integer, String
 
 from .base import Base
 

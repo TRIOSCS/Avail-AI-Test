@@ -52,8 +52,6 @@ def test_different_params_different_keys():
     """Different parameter values produce different cache keys."""
     from app.cache.decorators import cached_endpoint
 
-    results = []
-
     @cached_endpoint(prefix="test_keys", ttl_hours=1, key_params=["x"])
     def my_func(x, db=None):
         return {"value": x}

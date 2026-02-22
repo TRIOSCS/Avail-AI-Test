@@ -15,7 +15,7 @@ import hashlib
 import json
 import logging
 
-from .intel_cache import get_cached, invalidate, set_cached
+from .intel_cache import get_cached, set_cached
 
 log = logging.getLogger("avail.cache")
 
@@ -81,7 +81,7 @@ def invalidate_prefix(prefix: str) -> None:
 
     Note: Redis supports pattern deletion, PostgreSQL fallback uses LIKE.
     """
-    from .intel_cache import _get_redis, _REDIS_PREFIX
+    from .intel_cache import _REDIS_PREFIX, _get_redis
 
     # Redis: scan and delete by pattern
     r = _get_redis()

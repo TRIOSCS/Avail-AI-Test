@@ -29,7 +29,6 @@ from .models import (
     Sighting,
 )
 from .scoring import score_sighting
-from .vendor_utils import normalize_vendor_name
 from .utils.normalization import (
     detect_currency,
     normalize_condition,
@@ -42,6 +41,7 @@ from .utils.normalization import (
     normalize_quantity,
 )
 from .utils.normalization_helpers import fix_encoding
+from .vendor_utils import normalize_vendor_name
 
 # Map connector class names to ApiSource.name for stats tracking
 _CONNECTOR_SOURCE_MAP = {
@@ -149,7 +149,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     source_stats_map: dict[str, dict] = {}  # track per-connector status
 
     # All known connector source names
-    ALL_SOURCES = list(_CONNECTOR_SOURCE_MAP.values())
+    _ALL_SOURCES = list(_CONNECTOR_SOURCE_MAP.values())  # noqa: F841
 
     # Tier 1: Direct APIs (skip disabled). DB credentials first, env var fallback.
     from .services.credential_service import get_credential

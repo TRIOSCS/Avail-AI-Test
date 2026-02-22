@@ -19,10 +19,10 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..rate_limit import limiter
 from ..dependencies import is_admin as _is_admin
 from ..dependencies import require_admin, require_user
 from ..models import ActivityLog, Company, User, VendorCard
+from ..rate_limit import limiter
 from ..schemas.v13_features import (
     ActivityAttributeRequest,
     CompanyCallLog,

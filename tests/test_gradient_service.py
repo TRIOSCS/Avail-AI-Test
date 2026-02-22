@@ -9,19 +9,17 @@ import os
 
 os.environ["TESTING"] = "1"
 
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from app.services.gradient_service import (
-    gradient_text,
-    gradient_json,
-    gradient_batch_json,
-    _safe_json_parse,
-    _call_llm,
-    MODELS,
-    API_URL,
-)
+import pytest
 
+from app.services.gradient_service import (
+    MODELS,
+    _safe_json_parse,
+    gradient_batch_json,
+    gradient_json,
+    gradient_text,
+)
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 

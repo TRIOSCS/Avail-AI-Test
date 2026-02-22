@@ -33,8 +33,10 @@ log = logging.getLogger("avail.email_threads")
 _thread_cache: dict[str, tuple[float, list]] = {}
 _CACHE_TTL = 300  # 5 minutes
 
+from ..config import settings as _settings  # noqa: E402
+
 # Company domains — emails between these are internal (driven by config)
-from ..config import settings as _settings
+
 _TRIOSCS_DOMAINS = _settings.own_domains or frozenset({"trioscs.com"})
 
 

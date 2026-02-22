@@ -22,7 +22,6 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import GraphSubscription, User
@@ -210,7 +209,7 @@ class TestHandleNotification:
 
         with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
              patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY) as mock_log, \
+             patch(_PATCH_LOG_ACTIVITY), \
              patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]):
             _run(handle_notification(payload, db_session))
             # Should have proceeded to fetch message
@@ -586,7 +585,7 @@ class TestCreateMailSubscription:
         """Returns existing active subscription without creating a new one."""
         from app.services.webhook_service import create_mail_subscription
 
-        existing = _make_subscription(db_session, test_user, sub_id="existing-sub")
+        _make_subscription(db_session, test_user, sub_id="existing-sub")
 
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock()

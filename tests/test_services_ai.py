@@ -14,7 +14,7 @@ Called by: pytest
 Depends on: app/services/ai_service.py, app/utils/claude_client.py
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -29,7 +29,6 @@ from app.services.ai_service import (
     enrich_contacts_websearch,
     rephrase_rfq,
 )
-
 
 # ── Constants & schema sanity checks ───────────────────────────────
 

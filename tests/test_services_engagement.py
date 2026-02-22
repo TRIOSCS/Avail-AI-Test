@@ -249,7 +249,6 @@ from app.services.engagement_scorer import (
     compute_single_vendor_score,
 )
 
-
 # ── Helpers ────────────────────────────────────────────────────────
 
 

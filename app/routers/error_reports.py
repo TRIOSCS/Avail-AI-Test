@@ -1,6 +1,5 @@
 """Error Reports API — trouble ticket submission and management."""
 
-import json
 from datetime import datetime, timezone
 from typing import Optional
 

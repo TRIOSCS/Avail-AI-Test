@@ -27,7 +27,6 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..database import get_db
 from ..dependencies import require_fresh_token, require_settings_access, require_user
-from ..rate_limit import limiter
 from ..models import (
     ApiSource,
     Requirement,
@@ -36,6 +35,7 @@ from ..models import (
     VendorCard,
     VendorResponse,
 )
+from ..rate_limit import limiter
 from ..schemas.responses import SourceListResponse
 from ..schemas.sources import MiningOptions, SourceStatusToggle
 from ..services.credential_service import get_credential_cached
