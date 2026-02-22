@@ -811,7 +811,24 @@ async def find_suggested_contacts(
         seen.add(key)
         unique.append(c)
 
-    return unique
+    # Filter to relevant B2B titles — avoid wasting credits on irrelevant contacts
+    _RELEVANT_KEYWORDS = {
+        "procurement", "purchasing", "buyer", "sourcing", "supply chain",
+        "component", "commodity", "materials", "vendor", "supplier",
+        "sales", "account", "business development", "director",
+        "president", "vp", "manager", "engineer", "operations",
+        "logistics", "inventory", "planning", "quality",
+    }
+
+    def _is_relevant(contact: dict) -> bool:
+        title = (contact.get("title") or "").lower()
+        if not title:
+            return bool(contact.get("email"))  # Keep if has email but no title
+        return any(kw in title for kw in _RELEVANT_KEYWORDS)
+
+    filtered = [c for c in unique if _is_relevant(c)]
+    # If filter removed everything, return unfiltered (don't lose all results)
+    return filtered if filtered else unique
 
 
 def apply_enrichment_to_company(company, data: dict) -> list[str]:
