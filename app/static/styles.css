@@ -1427,7 +1427,13 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .act-expand-hint { font-size:8px; color:var(--muted); transition:transform .15s; }
 .act-body { display:none; margin-top:6px; padding:8px 10px; background:var(--surface,rgba(255,255,255,.04)); border-radius:4px; border:1px solid var(--border); font-size:11px; line-height:1.6; color:var(--text); max-height:300px; overflow-y:auto; }
 .act-body.act-body-open { display:block; }
+.act-msg-reply .act-body { display:block; }
 .act-body-text { white-space:pre-wrap; word-break:break-word; }
+/* Parsed reply summary */
+.parsed-summary { margin-bottom:8px; padding:8px; background:rgba(166,218,149,.06); border:1px solid rgba(166,218,149,.2); border-radius:6px; }
+.parsed-parts-tbl { width:100%; border-collapse:collapse; font-size:11px; }
+.parsed-parts-tbl th { text-align:left; padding:3px 6px; font-weight:600; color:var(--text2); border-bottom:1px solid var(--border); font-size:10px; }
+.parsed-parts-tbl td { padding:3px 6px; border-bottom:1px solid rgba(0,0,0,.04); }
 
 /* Skip-to-content link — only visible on focus */
 .skip-link{position:absolute;top:-100px;left:12px;background:var(--blue);color:#fff;padding:8px 16px;border-radius:0 0 6px 6px;z-index:9999;font-size:13px;font-weight:600;text-decoration:none;transition:top .15s}

@@ -859,7 +859,10 @@ function _renderDdTab(reqId, tabName, data, panel) {
             if (data && !_ddSightingsCache[reqId]) _ddSightingsCache[reqId] = data;
             _renderSourcingDrillDown(reqId, panel);
             break;
-        case 'activity': _renderDdActivity(reqId, data, panel); break;
+        case 'activity':
+            _renderDdActivity(reqId, data, panel);
+            _autoPollReplies(reqId, data, panel);
+            break;
         case 'offers': _renderDdOffers(reqId, data, panel); break;
         case 'quotes': _renderDdQuotes(reqId, data, panel); break;
         default: panel.innerHTML = '';
@@ -915,7 +918,7 @@ function _renderDdActivity(reqId, data, panel) {
         // Build timeline with email bodies
         const timeline = [];
         for (const c of contacts) timeline.push({type:'sent', date: c.created_at, subject: c.subject || '', body: c.body || '', text: `${c.contact_type} to ${c.vendor_contact || 'vendor'}`, user: c.user_name, parts: c.parts_included || []});
-        for (const r of responses) timeline.push({type:'reply', date: r.received_at, subject: r.subject || '', body: r.body || '', text: r.vendor_email || 'vendor', status: r.status, confidence: r.confidence, classification: r.classification});
+        for (const r of responses) timeline.push({type:'reply', date: r.received_at, subject: r.subject || '', body: r.body || '', text: r.vendor_email || 'vendor', status: r.status, confidence: r.confidence, classification: r.classification, parsed_data: r.parsed_data});
         for (const a of activities) timeline.push({type:'activity', date: a.created_at, subject: '', body: a.notes || '', text: `${a.channel || a.activity_type}: ${a.notes || ''}`.trim(), user: a.user_name});
         timeline.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
         if (timeline.length) {
@@ -957,6 +960,10 @@ function _renderDdActivity(reqId, data, panel) {
                     let bodyHtml = '';
                     if (t.subject) bodyHtml += `<div style="font-weight:600;margin-bottom:4px">${esc(t.subject)}</div>`;
                     if (isSent && t.parts && t.parts.length) bodyHtml += `<div style="color:var(--muted);margin-bottom:4px">Parts: ${t.parts.map(p => esc(p)).join(', ')}</div>`;
+                    // Show AI-parsed summary for replies
+                    if (isReply && t.parsed_data) {
+                        bodyHtml += _renderParsedSummary(t.parsed_data);
+                    }
                     bodyHtml += `<div class="act-body-text">${_formatEmailBody(t.body)}</div>`;
                     html += `<div class="act-body" id="${mid}">${bodyHtml}</div>`;
                 }
@@ -989,13 +996,110 @@ async function checkForReplies(reqId, btn) {
     }
 }
 
+function _renderParsedSummary(pd) {
+    if (!pd || typeof pd !== 'object') return '';
+    const parts = pd.parts || [];
+    const notes = pd.vendor_notes || '';
+    if (!parts.length && !notes) return '';
+    let html = '<div class="parsed-summary">';
+    if (parts.length) {
+        html += '<table class="parsed-parts-tbl"><thead><tr><th>MPN</th><th>Status</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Condition</th><th>Notes</th></tr></thead><tbody>';
+        for (const p of parts) {
+            const statusColors = {quoted:'var(--green)', no_stock:'var(--red)', follow_up:'var(--amber)'};
+            const sc = statusColors[p.status] || 'var(--muted)';
+            const priceStr = p.unit_price != null ? `${p.currency || '$'}${parseFloat(p.unit_price).toFixed(2)}` : '\u2014';
+            html += `<tr>
+                <td class="mono" style="font-weight:600">${esc(p.mpn || '\u2014')}</td>
+                <td><span style="color:${sc};font-weight:600;font-size:10px;text-transform:uppercase">${esc((p.status || '').replace('_', ' '))}</span></td>
+                <td>${p.qty_available != null ? Number(p.qty_available).toLocaleString() : '\u2014'}</td>
+                <td style="color:var(--teal);font-weight:600">${priceStr}</td>
+                <td>${esc(p.lead_time || '\u2014')}</td>
+                <td>${esc(p.condition || '\u2014')}</td>
+                <td style="font-size:10px">${esc(p.notes || p.date_code || '\u2014')}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+    }
+    if (notes) {
+        html += `<div style="font-size:11px;color:var(--text2);margin-top:4px;font-style:italic">${esc(notes)}</div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+const _autoPollTimestamps = {};  // reqId → last poll timestamp
+async function _autoPollReplies(reqId, currentData, panel) {
+    // Auto-poll inbox for replies when activity tab opens.
+    // Throttle: at most once per 60 seconds per requisition.
+    const now = Date.now();
+    if (_autoPollTimestamps[reqId] && now - _autoPollTimestamps[reqId] < 60000) return;
+    _autoPollTimestamps[reqId] = now;
+    // Only poll if there are sent contacts (something to check replies for)
+    const vendors = (currentData && currentData.vendors) || [];
+    const hasSent = vendors.some(v => (v.contacts || []).length > 0);
+    if (!hasSent) return;
+    try {
+        const result = await apiFetch(`/api/requisitions/${reqId}/poll`, { method: 'POST' });
+        const newCount = (result.responses || []).length;
+        if (newCount > 0) {
+            // New replies found — refresh activity tab
+            if (_ddTabCache[reqId]) delete _ddTabCache[reqId].activity;
+            const freshData = await apiFetch(`/api/requisitions/${reqId}/activity`);
+            if (_ddTabCache[reqId]) _ddTabCache[reqId].activity = freshData;
+            _renderDdActivity(reqId, freshData, panel);
+        }
+    } catch (e) {
+        // Silent — auto-poll failures shouldn't disrupt the UI
+    }
+}
+
 function _formatEmailBody(text) {
     if (!text) return '';
-    // Convert plain text email to readable HTML — preserve line breaks, linkify URLs
-    let safe = esc(text);
-    // Linkify URLs
+    let cleaned = text;
+    // If body is HTML (from Graph API), convert to plain text
+    if (/<[a-z][\s\S]*>/i.test(cleaned)) {
+        // Replace <br>, </p>, </div>, </tr>, </li> with newlines
+        cleaned = cleaned.replace(/<br\s*\/?>/gi, '\n');
+        cleaned = cleaned.replace(/<\/(?:p|div|tr|li|h[1-6])>/gi, '\n');
+        // Remove <style> and <head> blocks entirely
+        cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
+        cleaned = cleaned.replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '');
+        // Strip all remaining HTML tags
+        cleaned = cleaned.replace(/<[^>]+>/g, ' ');
+        // Decode common HTML entities
+        cleaned = cleaned.replace(/&nbsp;/gi, ' ');
+        cleaned = cleaned.replace(/&amp;/g, '&');
+        cleaned = cleaned.replace(/&lt;/g, '<');
+        cleaned = cleaned.replace(/&gt;/g, '>');
+        cleaned = cleaned.replace(/&quot;/g, '"');
+        cleaned = cleaned.replace(/&#39;/g, "'");
+        cleaned = cleaned.replace(/&rsquo;/g, "\u2019");
+        cleaned = cleaned.replace(/&ldquo;|&rdquo;/g, '"');
+        cleaned = cleaned.replace(/&mdash;/g, '\u2014');
+        cleaned = cleaned.replace(/&ndash;/g, '\u2013');
+        cleaned = cleaned.replace(/&#\d+;/g, '');
+    }
+    // Remove quoted original message (common patterns)
+    // "On Mon, Jan 1, 2026 at 10:00 AM Name <email> wrote:" and everything after
+    cleaned = cleaned.replace(/\n\s*On\s+.{10,80}\s+wrote:\s*\n[\s\S]*/i, '');
+    // "From: ... Sent: ... To: ... Subject: ..." block and everything after
+    cleaned = cleaned.replace(/\n\s*-{2,}\s*(?:Original Message|Forwarded Message)\s*-{2,}\s*\n[\s\S]*/i, '');
+    cleaned = cleaned.replace(/\n\s*From:\s+\S+.*\n\s*Sent:\s+.*\n[\s\S]*/i, '');
+    cleaned = cleaned.replace(/\n\s*From:\s+\S+.*\n\s*Date:\s+.*\n[\s\S]*/i, '');
+    // "> " quoted lines block at the end
+    cleaned = cleaned.replace(/(\n\s*>.*){3,}[\s\S]*$/, '');
+    // Remove email disclaimers / confidentiality notices
+    cleaned = cleaned.replace(/\n\s*(?:This email and any attachments|Confidentiality notice|DISCLAIMER|This message is intended|This communication is confidential)[\s\S]*/i, '');
+    // Remove common signature separators and everything after
+    cleaned = cleaned.replace(/\n\s*-{2,}\s*\n(?:(?:Sent from|Get Outlook)[\s\S]*)?$/i, '');
+    // Collapse excessive whitespace
+    cleaned = cleaned.replace(/[^\S\n]+/g, ' ');  // horizontal whitespace
+    cleaned = cleaned.replace(/\n{3,}/g, '\n\n'); // 3+ newlines → 2
+    cleaned = cleaned.trim();
+    if (!cleaned) return '<span style="color:var(--muted);font-style:italic">Empty reply</span>';
+    // Escape for display and format
+    let safe = esc(cleaned);
     safe = safe.replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener" style="color:var(--teal)">$1</a>');
-    // Preserve line breaks
     safe = safe.replace(/\n/g, '<br>');
     return safe;
 }
@@ -1826,22 +1930,6 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
                 <span style="font-size:11px;font-weight:700;color:var(--text2)">${esc(label)}${effortBadge} <span style="font-weight:400;color:var(--muted)">(${sightings.length} vendor${sightings.length !== 1 ? 's' : ''})</span></span>
                 <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px" onclick="event.stopPropagation();ddResearchPart(${reqId},${rId})" title="Re-search this part">\u21bb Search</button>
             </div>`;
-
-        // Market summary banner from Octopart aggregate data
-        if (aggregates.length) {
-            const totalAvail = aggregates.reduce((sum, a) => sum + (a.qty_available || 0), 0);
-            const prices = aggregates.filter(a => a.unit_price).map(a => parseFloat(a.unit_price));
-            const minPrice = prices.length ? Math.min(...prices) : null;
-            const octoUrl = aggregates[0].click_url || aggregates[0].octopart_url || '';
-            html += `<div class="mkt-banner">
-                <span class="mkt-icon">&#x1f310;</span>
-                <span class="mkt-label">Market</span>
-                <span class="mkt-stat"><b>${totalAvail ? Number(totalAvail).toLocaleString() : '—'}</b> total available</span>
-                ${minPrice ? `<span class="mkt-stat">from <b style="color:var(--teal)">$${minPrice.toFixed(2)}</b></span>` : ''}
-                <span class="mkt-stat mkt-mpns">${aggregates.map(a => esc(a.mpn_matched || '')).filter(Boolean).join(', ')}</span>
-                ${octoUrl ? `<a href="${encodeURI(octoUrl)}" target="_blank" rel="noopener" class="mkt-link" onclick="event.stopPropagation()">View on Octopart &#x2197;</a>` : ''}
-            </div>`;
-        }
 
         if (!sightings.length && !aggregates.length) {
             html += '<div style="font-size:11px;color:var(--muted);margin-bottom:6px">No sources found</div></div>';
@@ -6373,7 +6461,7 @@ Object.assign(window, {
     toggleVendorEmails, toggleVpThreadMessages, unifiedEnrichVendor,
     viewThread, vpSetRating, vpSubmitReview, vpToggleBlacklist,
     // Internal/underscore-prefixed functions used in inline handlers
-    _appendAddRow, _buildEffortTip, _cancelAddRow,
+    _appendAddRow, _autoPollReplies, _buildEffortTip, _cancelAddRow,
     _collapseAllDrillDowns, _ddDefaultTab, _ddPromptFallback,
     _ddRenderTierRows, _ddSaveEmail, _ddSearchOverlay, _ddSubTabs,
     _ddTabLabel, _ddVendorInlineBadges, _ddVendorLinkPill,
@@ -6381,7 +6469,7 @@ Object.assign(window, {
     _ensureEmailListModal, _formatEmailBody, _gatherBugContext,
     _loadDdSubTab, _matSortArrow, _notifBadgeColor, _notifClickAction,
     _notifLabel, _parseTsvInput, _previewPaste, _pushNav,
-    _rebuildSightingIndex, _renderDdActivity, _renderDdDetails,
+    _rebuildSightingIndex, _renderDdActivity, _renderDdDetails, _renderParsedSummary,
     _renderDdOffers, _renderDdQuotes, _renderDdTab, _renderDdTabPills,
     _renderDetailDeadline, _renderDrillDownTable, _renderReqRow,
     _renderRfqPrepareProgress, _renderSourcingDrillDown, _reqBadge,
