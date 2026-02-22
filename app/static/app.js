@@ -3863,7 +3863,7 @@ async function archiveFromList(reqId) {
         _updateToolbarStats();
         // Re-render to update count and empty state
         renderReqList();
-    } catch (e) { showToast('Failed to archive', 'error'); }
+    } catch (e) { showToast('Failed to archive: ' + (e.message || e), 'error'); }
 }
 
 async function cloneFromList(reqId) {
