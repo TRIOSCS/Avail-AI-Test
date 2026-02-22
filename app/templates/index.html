@@ -1029,8 +1029,15 @@
 
 <script type="application/json" id="app-config">{"userName":"{{ user_name }}","userEmail":"{{ user_email }}","isAdmin":{{ "true" if is_admin else "false" }},"isDevAssistant":{{ "true" if is_dev_assistant else "false" }}}</script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-<script defer src="/static/app.js?v={{ app_version }}"></script>
-<script defer src="/static/crm.js?v={{ app_version }}"></script>
+<script type="importmap">
+{
+  "imports": {
+    "app": "/static/app.js?v={{ app_version }}"
+  }
+}
+</script>
+<script type="module" src="/static/app.js?v={{ app_version }}"></script>
+<script type="module" src="/static/crm.js?v={{ app_version }}"></script>
 {% endif %}
 </body>
 </html>
