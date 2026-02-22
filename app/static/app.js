@@ -1772,19 +1772,22 @@ function ddApplyQuoteMarkup(reqId) {
     if (!q) return;
     const pct = parseFloat(document.getElementById('ddQuoteMarkup-' + reqId)?.value) || 0;
     const lines = q.lines || q.line_items || [];
-    lines.forEach((item, i) => {
+    lines.forEach(item => {
         const cost = item.cost_price || item.unit_cost || 0;
         item.sell_price = Math.round(cost * (1 + pct / 100) * 10000) / 10000;
         item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
-        const inp = document.querySelector(`.ddq-sell[data-req="${reqId}"][data-idx="${i}"]`);
-        if (inp) inp.value = item.sell_price.toFixed(4);
-        const mCell = document.querySelector(`.ddq-margin[data-req="${reqId}"][data-idx="${i}"]`);
-        if (mCell) {
-            mCell.textContent = item.margin_pct.toFixed(1) + '%';
-            mCell.style.color = item.margin_pct >= 20 ? 'var(--green)' : item.margin_pct >= 10 ? 'var(--amber)' : 'var(--red)';
-        }
     });
-    _ddRefreshQuoteTotals(reqId);
+    // Update the cached data and re-render the whole tab
+    const cached = _ddTabCache[reqId]?.quotes;
+    if (cached) {
+        const cl = cached.lines || cached.line_items || [];
+        cl.forEach((item, i) => { if (lines[i]) { item.sell_price = lines[i].sell_price; item.margin_pct = lines[i].margin_pct; } });
+    }
+    const drow = document.getElementById('d-' + reqId);
+    if (drow) {
+        const panel = drow.querySelector('.dd-panel');
+        if (panel) _renderDdQuotes(reqId, _ddQuoteData[reqId], panel);
+    }
 }
 
 function _ddRefreshQuoteTotals(reqId) {
