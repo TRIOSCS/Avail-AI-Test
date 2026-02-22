@@ -936,7 +936,7 @@ function _renderDdActivity(reqId, data, panel) {
         // Build timeline with email bodies
         const timeline = [];
         for (const c of contacts) timeline.push({type:'sent', date: c.created_at, subject: c.subject || '', body: c.body || '', text: `${c.contact_type} to ${c.vendor_contact || 'vendor'}`, user: c.user_name, parts: c.parts_included || []});
-        for (const r of responses) timeline.push({type:'reply', date: r.received_at, subject: r.subject || '', body: r.body || '', text: r.vendor_email || 'vendor', status: r.status, confidence: r.confidence, classification: r.classification, parsed_data: r.parsed_data});
+        for (const r of responses) timeline.push({type:'reply', date: r.received_at, subject: r.subject || '', body: r.body || '', text: r.vendor_email || 'vendor', status: r.status, confidence: r.confidence, classification: r.classification, parsed_data: r.parsed_data, response_id: r.id, vendor_name: v.vendor_name});
         for (const a of activities) timeline.push({type:'activity', date: a.created_at, subject: '', body: a.notes || '', text: `${a.channel || a.activity_type}: ${a.notes || ''}`.trim(), user: a.user_name});
         timeline.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
         if (timeline.length) {
@@ -980,7 +980,7 @@ function _renderDdActivity(reqId, data, panel) {
                     if (isSent && t.parts && t.parts.length) bodyHtml += `<div style="color:var(--muted);margin-bottom:4px">Parts: ${t.parts.map(p => esc(p)).join(', ')}</div>`;
                     // Show AI-parsed summary for replies
                     if (isReply && t.parsed_data) {
-                        bodyHtml += _renderParsedSummary(t.parsed_data);
+                        bodyHtml += _renderParsedSummary(t.parsed_data, reqId, t.response_id, t.vendor_name);
                     }
                     bodyHtml += `<div class="act-body-text">${_formatEmailBody(t.body)}</div>`;
                     html += `<div class="act-body" id="${mid}">${bodyHtml}</div>`;
@@ -1014,18 +1014,24 @@ async function checkForReplies(reqId, btn) {
     }
 }
 
-function _renderParsedSummary(pd) {
+function _renderParsedSummary(pd, reqId, responseId, vendorName) {
     if (!pd || typeof pd !== 'object') return '';
     const parts = pd.parts || [];
     const notes = pd.vendor_notes || '';
     if (!parts.length && !notes) return '';
+    const quotedParts = parts.filter(p => p.status === 'quoted' && p.unit_price != null);
     let html = '<div class="parsed-summary">';
+    html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.4px">AI-Parsed Response</span>';
+    if (quotedParts.length && reqId && responseId) {
+        html += `<button class="btn btn-g btn-sm" style="font-size:10px;padding:2px 8px" onclick="event.stopPropagation();_acceptParsedOffers(${reqId},${responseId},this)" title="Create draft offers from parsed data">Accept ${quotedParts.length} Offer${quotedParts.length > 1 ? 's' : ''}</button>`;
+    }
+    html += '</div>';
     if (parts.length) {
-        html += '<table class="parsed-parts-tbl"><thead><tr><th>MPN</th><th>Status</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Condition</th><th>Notes</th></tr></thead><tbody>';
+        html += '<table class="parsed-parts-tbl"><thead><tr><th>MPN</th><th>Status</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Condition</th><th>Date Code</th><th>MOQ</th><th>Notes</th></tr></thead><tbody>';
         for (const p of parts) {
             const statusColors = {quoted:'var(--green)', no_stock:'var(--red)', follow_up:'var(--amber)'};
             const sc = statusColors[p.status] || 'var(--muted)';
-            const priceStr = p.unit_price != null ? `${p.currency || '$'}${parseFloat(p.unit_price).toFixed(2)}` : '\u2014';
+            const priceStr = p.unit_price != null ? `${p.currency || '$'}${parseFloat(p.unit_price).toFixed(4)}` : '\u2014';
             html += `<tr>
                 <td class="mono" style="font-weight:600">${esc(p.mpn || '\u2014')}</td>
                 <td><span style="color:${sc};font-weight:600;font-size:10px;text-transform:uppercase">${esc((p.status || '').replace('_', ' '))}</span></td>
@@ -1033,7 +1039,9 @@ function _renderParsedSummary(pd) {
                 <td style="color:var(--teal);font-weight:600">${priceStr}</td>
                 <td>${esc(p.lead_time || '\u2014')}</td>
                 <td>${esc(p.condition || '\u2014')}</td>
-                <td style="font-size:10px">${esc(p.notes || p.date_code || '\u2014')}</td>
+                <td style="font-size:10px">${esc(p.date_code || '\u2014')}</td>
+                <td>${p.moq != null ? Number(p.moq).toLocaleString() : '\u2014'}</td>
+                <td style="font-size:10px">${esc(p.notes || '\u2014')}</td>
             </tr>`;
         }
         html += '</tbody></table>';
@@ -1043,6 +1051,62 @@ function _renderParsedSummary(pd) {
     }
     html += '</div>';
     return html;
+}
+
+async function _acceptParsedOffers(reqId, responseId, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Saving\u2026';
+    try {
+        // Get the activity data to find the parsed offers
+        const actData = _ddTabCache[reqId]?.activity;
+        if (!actData) throw new Error('Activity data not cached');
+        let parsedOffers = [];
+        for (const v of (actData.vendors || [])) {
+            for (const r of (v.responses || [])) {
+                if (r.id === responseId && r.parsed_data && r.parsed_data.parts) {
+                    for (const p of r.parsed_data.parts) {
+                        if (p.status === 'quoted' && p.unit_price != null) {
+                            parsedOffers.push({
+                                vendor_name: v.vendor_name,
+                                mpn: p.mpn || '',
+                                manufacturer: p.manufacturer || null,
+                                qty_available: p.qty_available || null,
+                                unit_price: p.unit_price,
+                                currency: p.currency || 'USD',
+                                lead_time: p.lead_time || null,
+                                date_code: p.date_code || null,
+                                condition: p.condition || null,
+                                packaging: p.packaging || null,
+                                moq: p.moq || null,
+                                notes: p.notes || null,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        if (!parsedOffers.length) { showToast('No quoted parts to save', 'warning'); return; }
+        const result = await apiFetch('/api/ai/save-parsed-offers', {
+            method: 'POST',
+            body: { response_id: responseId, offers: parsedOffers, requisition_id: reqId }
+        });
+        showToast(`Created ${result.created} draft offer(s) — review in Offers tab`, 'success');
+        btn.textContent = 'Saved';
+        btn.style.background = 'var(--green)';
+        // Refresh offers cache
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].offers;
+        // Update list counts
+        const reqInfo = _reqListData.find(r => r.id === reqId);
+        if (reqInfo) {
+            reqInfo.offer_count = (reqInfo.offer_count || 0) + result.created;
+            reqInfo.has_new_offers = true;
+        }
+        renderReqList();
+    } catch (e) {
+        showToast('Failed to save offers: ' + (e.message || e), 'error');
+        btn.disabled = false;
+        btn.textContent = 'Accept';
+    }
 }
 
 const _autoPollTimestamps = {};  // reqId → last poll timestamp
@@ -6572,7 +6636,7 @@ Object.assign(window, {
     toggleVendorEmails, toggleVpThreadMessages, unifiedEnrichVendor,
     viewThread, vpSetRating, vpSubmitReview, vpToggleBlacklist,
     // Internal/underscore-prefixed functions used in inline handlers
-    _appendAddRow, _autoPollReplies, _buildEffortTip, _cancelAddRow,
+    _acceptParsedOffers, _appendAddRow, _autoPollReplies, _buildEffortTip, _cancelAddRow,
     _collapseAllDrillDowns, _ddDefaultTab, _ddPromptFallback,
     _ddRenderTierRows, _ddSaveEmail, _ddSearchOverlay, _ddSubTabs,
     _ddTabLabel, _ddVendorInlineBadges, _ddVendorLinkPill,
