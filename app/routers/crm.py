@@ -1679,6 +1679,8 @@ async def send_quote(
     to_email = override_email or (site.contact_email if site else None)
     if not to_email:
         raise HTTPException(400, "No recipient email — select a contact or enter one manually")
+    if "@" not in to_email:
+        raise HTTPException(400, f"Invalid email address: {to_email}")
 
     to_name = override_name or (site.contact_name if site else "") or ""
     company_name = site.company.name if site and site.company else ""

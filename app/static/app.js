@@ -1952,31 +1952,93 @@ async function ddSendQuote(reqId) {
     ddRefreshPreview(reqId);
 }
 
-async function ddRefreshPreview(reqId) {
+function ddRefreshPreview(reqId) {
     const q = _ddQuoteData[reqId];
     if (!q) return;
-    const previewEl = document.getElementById('ddSendPreview-' + reqId);
-    if (!previewEl) return;
-    previewEl.style.display = 'flex';
-    previewEl.style.alignItems = 'center';
-    previewEl.style.justifyContent = 'center';
-    previewEl.innerHTML = '<span style="font-size:11px;color:var(--muted)">Loading preview\u2026</span>';
-    try {
-        const toName = (document.getElementById('ddSendName-' + reqId)?.value || '').trim();
-        const resp = await apiFetch('/api/quotes/' + q.id + '/preview', {
-            method: 'POST', body: { to_name: toName }
-        });
-        if (resp.html) {
-            previewEl.style.display = 'block';
-            previewEl.style.padding = '0';
-            previewEl.innerHTML = `<iframe id="ddPreviewFrame-${reqId}" style="width:100%;border:none;min-height:500px" sandbox="allow-same-origin"></iframe>`;
-            const frame = document.getElementById('ddPreviewFrame-' + reqId);
-            const doc = frame.contentDocument || frame.contentWindow.document;
-            doc.open(); doc.write(resp.html); doc.close();
-        }
-    } catch (e) {
-        previewEl.innerHTML = `<span style="color:var(--red);font-size:11px">Preview failed: ${esc(e.message || 'unknown error')}</span>`;
+    const el = document.getElementById('ddSendPreview-' + reqId);
+    if (!el) return;
+    const toName = (document.getElementById('ddSendName-' + reqId)?.value || '').trim() || q.contact_name || '';
+    const lines = q.lines || q.line_items || [];
+    const validity = q.validity_days || 7;
+    const now = new Date();
+    const expires = new Date(now.getTime() + validity * 86400000);
+    const fmtDate = d => d.toLocaleDateString('en-US', {month:'long',day:'numeric',year:'numeric'});
+    let subtotal = 0;
+
+    let rows = '';
+    for (let i = 0; i < lines.length; i++) {
+        const l = lines[i];
+        const sell = l.sell_price || l.unit_sell || 0;
+        const qty = l.qty || 0;
+        const ext = sell * qty;
+        subtotal += ext;
+        rows += `<tr style="border-bottom:1px solid var(--border)">
+            <td style="padding:6px 8px;font-weight:600" class="mono">${esc(l.mpn || '')}</td>
+            <td style="padding:6px 8px;font-size:10px">${esc(l.manufacturer || '\u2014')}</td>
+            <td style="padding:6px 8px;text-align:center" class="mono">${qty.toLocaleString()}</td>
+            <td style="padding:6px 8px">${esc(l.condition || '\u2014')}</td>
+            <td style="padding:6px 8px">${esc(l.date_code || '\u2014')}</td>
+            <td style="padding:6px 8px">${esc(l.packaging || '\u2014')}</td>
+            <td style="padding:6px 8px;text-align:right" class="mono">$${Number(sell).toFixed(4)}</td>
+            <td style="padding:6px 8px;text-align:right">${esc(l.lead_time || '\u2014')}</td>
+            <td style="padding:6px 8px;text-align:right;font-weight:600" class="mono">$${Number(ext).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
+        </tr>`;
     }
+
+    const greeting = toName ? 'Dear ' + esc(toName) + ',' : 'Dear Valued Customer,';
+
+    el.style.display = 'block';
+    el.style.padding = '0';
+    el.innerHTML = `<div style="font-family:var(--font);font-size:12px;color:var(--text1)">
+        <!-- Header -->
+        <div style="background:#127fbf;padding:16px 20px;text-align:center;border-radius:6px 6px 0 0">
+            <img src="/static/trio_logo.png" alt="TRIO" style="height:40px;filter:brightness(10)">
+        </div>
+        <!-- Quote bar -->
+        <div style="background:#1a2a3a;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;color:#fff">
+            <span style="font-size:14px;font-weight:700">Quotation</span>
+            <span style="font-size:11px;color:#c0d0e0"><strong style="color:#fff">${esc(q.quote_number || '')}</strong> Rev ${q.revision || 1} &middot; ${fmtDate(now)}</span>
+        </div>
+        <!-- Body -->
+        <div style="padding:16px 20px">
+            <p style="margin:0 0 4px;font-size:13px">${greeting}</p>
+            <p style="margin:0 0 14px;font-size:12px;color:var(--text2)">Thank you for your interest. Please find our quotation for <strong>${esc(q.customer_name || 'your company')}</strong> below.</p>
+            <!-- Line items -->
+            <table class="tbl" style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:12px">
+                <thead><tr style="background:var(--bg2)">
+                    <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Part #</th>
+                    <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Mfr</th>
+                    <th style="padding:6px 8px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Qty</th>
+                    <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Cond</th>
+                    <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">DC</th>
+                    <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Pkg</th>
+                    <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Unit Price</th>
+                    <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Lead</th>
+                    <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Ext. Price</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table>
+            <!-- Total -->
+            <div style="text-align:right;font-size:13px;font-weight:700;padding:8px 0;border-top:2px solid #127fbf;color:#127fbf">
+                Total: $${Number(subtotal).toLocaleString(undefined,{minimumFractionDigits:2})}
+            </div>
+            <!-- Terms -->
+            <div style="margin-top:12px;font-size:11px;color:var(--text2)">
+                <table style="font-size:11px">
+                    ${q.payment_terms ? `<tr><td style="padding:4px 0;color:var(--muted);width:90px">Payment</td><td style="padding:4px 0;font-weight:600">${esc(q.payment_terms)}</td></tr>` : ''}
+                    ${q.shipping_terms ? `<tr><td style="padding:4px 0;color:var(--muted)">Shipping</td><td style="padding:4px 0;font-weight:600">${esc(q.shipping_terms)}</td></tr>` : ''}
+                    <tr><td style="padding:4px 0;color:var(--muted)">Currency</td><td style="padding:4px 0;font-weight:600">USD</td></tr>
+                    <tr><td style="padding:4px 0;color:var(--muted)">Valid Until</td><td style="padding:4px 0;font-weight:600">${fmtDate(expires)}</td></tr>
+                </table>
+            </div>
+            ${q.notes ? `<div style="margin-top:10px;padding:8px 12px;background:var(--bg2);border-left:3px solid #127fbf;border-radius:4px;font-size:11px;color:var(--text2)">${esc(q.notes)}</div>` : ''}
+        </div>
+        <!-- Footer -->
+        <div style="background:#1a2a3a;padding:10px 20px;text-align:center;border-radius:0 0 6px 6px">
+            <div style="font-size:11px;color:#8899aa">Trio Supply Chain Solutions</div>
+            <div style="font-size:10px;color:#667788">trioscs.com &middot; info@trioscs.com</div>
+        </div>
+    </div>`;
 }
 
 async function ddConfirmSendQuote(reqId) {
@@ -1985,6 +2047,7 @@ async function ddConfirmSendQuote(reqId) {
     const toEmail = (document.getElementById('ddSendEmail-' + reqId)?.value || '').trim();
     const toName = (document.getElementById('ddSendName-' + reqId)?.value || '').trim();
     if (!toEmail) { showToast('Recipient email is required', 'error'); return; }
+    if (!toEmail.includes('@') || !toEmail.includes('.')) { showToast('Enter a valid email address (e.g. name@company.com)', 'error'); return; }
     const btn = document.getElementById('ddSendConfirmBtn-' + reqId);
     if (btn) { btn.disabled = true; btn.textContent = 'Sending\u2026'; }
     try {
