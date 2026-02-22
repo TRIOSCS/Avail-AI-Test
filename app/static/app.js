@@ -676,6 +676,16 @@ export function notifyStatusChange(data) {
     const reqInfo = _reqListData.find(r => r.id === currentReqId);
     if (reqInfo) reqInfo.status = data.req_status;
 }
+function _refreshReqRow(reqId) {
+    const reqInfo = _reqListData.find(r => r.id === reqId);
+    if (!reqInfo) return;
+    const oldRow = document.querySelector(`tr[onclick*="toggleDrillDown(${reqId})"]`);
+    if (!oldRow) return;
+    const tmp = document.createElement('tbody');
+    tmp.innerHTML = _renderReqRow(reqInfo);
+    const newRow = tmp.firstElementChild;
+    if (newRow) oldRow.replaceWith(newRow);
+}
 
 // ── Requisitions ────────────────────────────────────────────────────────
 let _reqCustomerMap = {};  // id → customer_display
@@ -1188,6 +1198,7 @@ function _formatEmailBody(text) {
 
 let _ddSelectedOffers = {};   // reqId → Set of offer IDs
 let _ddQuoteData = {};        // reqId → quote object for in-memory editing
+let _ddHistoryExpanded = {};  // "reqId-requirementId" → bool
 
 
 function _renderDdOffers(reqId, data, panel) {
@@ -1255,9 +1266,55 @@ function _renderDdOffers(reqId, data, panel) {
                 <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddEditOffer(${reqId},${oid})" title="Edit" style="padding:2px 6px;font-size:10px">\u270e</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddDeleteOffer(${reqId},${oid})" title="Delete" style="padding:2px 6px;font-size:10px;color:var(--red)">\u2715</button></td>
             </tr>`;
         }
-        html += '</tbody></table></div></div>';
+        html += '</tbody></table></div>';
+
+        // ── Historical Offers (cross-requisition) ──────────────────
+        const histOffers = g.historical_offers || [];
+        if (histOffers.length) {
+            const hKey = `${reqId}-${g.requirement_id}`;
+            const expanded = !!_ddHistoryExpanded[hKey];
+            const arrow = expanded ? '\u25BC' : '\u25B6';
+            html += `<div style="margin-top:4px;border-top:1px dashed var(--border);padding-top:4px">`;
+            html += `<div style="cursor:pointer;font-size:11px;color:var(--muted);user-select:none" onclick="event.stopPropagation();ddToggleHistory('${hKey}',${reqId})">
+                ${arrow} \uD83D\uDCCB ${histOffers.length} historical offer${histOffers.length !== 1 ? 's' : ''}
+            </div>`;
+            if (expanded) {
+                html += `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:4px">`;
+                html += `<table class="dtbl"><thead><tr>
+                    <th>Vendor</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th>Date</th><th>Source</th><th>Source Req</th>
+                </tr></thead><tbody>`;
+                for (const ho of histOffers) {
+                    const hPrice = ho.unit_price != null ? '$' + parseFloat(ho.unit_price).toFixed(4) : '\u2014';
+                    const hDate = ho.created_at ? new Date(ho.created_at).toLocaleDateString() : '\u2014';
+                    const hSub = ho.is_substitute ? ' <span class="badge b-sub">SUB</span>' : '';
+                    html += `<tr style="color:var(--muted)">
+                        <td>${esc(ho.vendor_name || '')}${hSub}</td>
+                        <td class="mono">${ho.qty_available != null ? Number(ho.qty_available).toLocaleString() : '\u2014'}</td>
+                        <td class="mono" style="color:var(--teal)">${hPrice}</td>
+                        <td>${esc(ho.lead_time || '\u2014')}</td>
+                        <td>${esc(ho.condition || '\u2014')}</td>
+                        <td style="font-size:10px">${hDate}</td>
+                        <td style="font-size:10px">${esc(ho.source || '\u2014')}</td>
+                        <td style="font-size:10px">RFQ-${ho.from_requisition_id || '\u2014'}</td>
+                    </tr>`;
+                }
+                html += '</tbody></table></div>';
+            }
+            html += '</div>';
+        }
+
+        html += '</div>';  // close .offer-group
     });
     panel.innerHTML = html;
+}
+
+function ddToggleHistory(hKey, reqId) {
+    _ddHistoryExpanded[hKey] = !_ddHistoryExpanded[hKey];
+    const data = _ddTabCache[reqId]?.offers;
+    if (data) {
+        const panel = document.querySelector(`#dd-offers-${reqId}`);
+        if (panel) _renderDdOffers(reqId, data, panel);
+    }
 }
 
 function ddToggleOffer(reqId, offerId, event) {
@@ -1338,18 +1395,18 @@ function ddBuildQuote(reqId) {
     for (let i = 0; i < offers.length; i++) {
         const o = offers[i];
         const cost = o.unit_price != null ? parseFloat(o.unit_price) : 0;
-        const target = o._targetPrice != null ? '$' + Number(o._targetPrice).toFixed(4) : '\u2014';
+        const target = o._targetPrice != null ? fmtPrice(o._targetPrice) : '\u2014';
         const inpStyle = 'width:60px;padding:2px 4px;font-size:10px';
         linesHtml += `<tr>
             <td class="mono" style="font-size:11px">${esc(o.mpn || o.offered_mpn || '')}</td>
             <td style="font-size:10px">${esc(o.manufacturer || '\u2014')}</td>
             <td style="font-size:10px">${esc(o.vendor_name || '')}</td>
             <td class="mono">${(o.qty_available || 0).toLocaleString()}</td>
-            <td class="mono">$${cost.toFixed(4)}</td>
+            <td class="mono">${fmtPrice(cost)}</td>
             <td style="font-size:10px;color:var(--muted)">${target}</td>
-            <td><input type="number" step="0.0001" class="bq-sell" data-idx="${i}" data-cost="${cost}" value="${cost.toFixed(4)}" style="width:85px;padding:2px 4px;font-size:11px;font-family:'JetBrains Mono',monospace"></td>
+            <td><input type="number" step="0.01" class="bq-sell" data-idx="${i}" data-cost="${cost}" value="${cost.toFixed(2)}" style="width:85px;padding:2px 4px;font-size:11px;font-family:'JetBrains Mono',monospace"></td>
             <td class="bq-margin-cell" data-idx="${i}" style="font-weight:600">0.0%</td>
-            <td><input type="text" class="bq-lead" data-idx="${i}" value="${escAttr(o.lead_time || '')}" placeholder="\u2014" style="${inpStyle}"></td>
+            <td><input type="text" class="bq-lead" data-idx="${i}" value="${escAttr(o.lead_time || '')}" placeholder="days" style="${inpStyle}"></td>
             <td><input type="text" class="bq-cond" data-idx="${i}" value="${escAttr(o.condition || '')}" placeholder="\u2014" style="${inpStyle}"></td>
             <td><input type="text" class="bq-dc" data-idx="${i}" value="${escAttr(o.date_code || '')}" placeholder="\u2014" style="${inpStyle}"></td>
             <td><input type="text" class="bq-pkg" data-idx="${i}" value="${escAttr(o.packaging || '')}" placeholder="\u2014" style="${inpStyle}"></td>
@@ -1415,8 +1472,8 @@ function ddApplyGlobalMarkup() {
     const pct = parseFloat(document.getElementById('bqGlobalMargin')?.value) || 0;
     document.querySelectorAll('.bq-sell').forEach(inp => {
         const cost = parseFloat(inp.dataset.cost) || 0;
-        const sell = pct >= 100 ? 0 : Math.round(cost / (1 - pct / 100) * 10000) / 10000;
-        inp.value = sell.toFixed(4);
+        const sell = pct >= 100 ? 0 : Math.round(cost / (1 - pct / 100) * 100) / 100;
+        inp.value = sell.toFixed(2);
         inp.dispatchEvent(new Event('input'));
     });
 }
@@ -1667,24 +1724,21 @@ function _renderQuoteDetail(reqId, q, container) {
     const isDraft = !q.status || q.status === 'draft';
     const statusMap = {draft:'Draft',sent:'Sent',revised:'Revised',won:'Won',lost:'Lost'};
     const statusLabel = statusMap[q.status] || q.status || 'Draft';
-    let html = `<div style="padding:12px;border:1px solid var(--border);border-radius:6px;margin:4px 0;background:var(--bg1)">`;
+    let html = `<div style="border-radius:8px;margin:4px 0;background:#fff;overflow:hidden;border:2px solid var(--blue);box-shadow:var(--shadow-sm)">`;
 
-    // ── Branded quote header ──
-    html += `<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid var(--border)">
+    // ── Logo + quote info ──
+    html += `<div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center">
         <div style="display:flex;align-items:center;gap:10px">
-            <img src="/static/trio_logo.png" alt="TRIO" style="height:40px">
+            <img src="/static/trio_logo.png" alt="TRIO" style="height:28px">
             <div>
-                <div style="font-weight:700;font-size:12px">Trio Supply Chain Solutions</div>
-                <div style="font-size:10px;color:var(--muted)">info@trioscs.com</div>
+                <div style="font-weight:700;font-size:12px;color:var(--blue)">${esc(q.quote_number || 'Q-' + q.id)} <span style="font-weight:400;color:var(--muted)">Rev ${q.revision || 1}</span> <span class="status-badge status-${q.status || 'draft'}" style="font-size:10px;padding:2px 6px;border-radius:4px">${statusLabel}</span></div>
+                <div style="font-size:10px;color:var(--muted)">${esc(q.customer_name || '')}${q.contact_name ? ' \u00b7 ' + esc(q.contact_name) : ''}${q.sent_at ? ' \u00b7 Sent ' + fmtRelative(q.sent_at) : ''}</div>
             </div>
         </div>
-        <div style="text-align:right">
-            <div style="font-weight:700;font-size:12px">${esc(q.quote_number || 'Q-' + q.id)} Rev ${q.revision || 1} <span class="status-badge status-${q.status || 'draft'}" style="font-size:10px;padding:2px 6px;border-radius:4px">${statusLabel}</span></div>
-            <div style="font-size:11px;color:var(--text2);margin-top:2px">${esc(q.customer_name || '')}</div>
-            <div style="font-size:10px;color:var(--muted)">${esc(q.contact_name || '')}${q.contact_email ? ' \u00b7 ' + esc(q.contact_email) : ''}</div>
-            ${q.sent_at ? `<div style="font-size:10px;color:var(--muted)">Sent ${fmtRelative(q.sent_at)}</div>` : ''}
-        </div>
     </div>`;
+
+    // ── Content ──
+    html += `<div style="padding:12px 16px">`;
 
     // ── Line items table ──
     if (lines.length) {
@@ -1699,17 +1753,17 @@ function _renderQuoteDetail(reqId, q, container) {
             const qty = l.qty || 0;
             const margin = l.margin_pct != null ? l.margin_pct : (sell > 0 ? ((sell - cost) / sell * 100) : 0);
             const marginColor = margin >= 20 ? 'var(--green)' : margin >= 10 ? 'var(--amber)' : 'var(--red)';
-            const target = l.target_price != null ? '$' + Number(l.target_price).toFixed(4) : '\u2014';
+            const target = l.target_price != null ? fmtPrice(l.target_price) : '\u2014';
             totalCost += cost * qty;
             totalRev += sell * qty;
 
             const cellStyle = 'padding:2px 4px;font-size:10px;width:55px';
             const sellCell = isDraft
-                ? `<input type="number" step="0.0001" class="quote-sell-input ddq-sell" data-req="${reqId}" data-idx="${i}" value="${sell.toFixed(4)}" style="width:80px;padding:2px 4px;font-size:10px;font-family:'JetBrains Mono',monospace" onchange="ddUpdateQuoteLine(${reqId},${i},this.value)">`
-                : `$${Number(sell).toFixed(4)}`;
+                ? `<input type="number" step="0.01" class="quote-sell-input ddq-sell" data-req="${reqId}" data-idx="${i}" value="${sell.toFixed(2)}" style="width:80px;padding:2px 4px;font-size:10px;font-family:'JetBrains Mono',monospace" onchange="ddUpdateQuoteLine(${reqId},${i},this.value)">`
+                : fmtPrice(sell);
             const leadCell = isDraft
-                ? `<input type="text" class="ddq-field" value="${escAttr(l.lead_time||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'lead_time',this.value)" placeholder="\u2014" style="${cellStyle}">`
-                : esc(l.lead_time || '\u2014');
+                ? `<input type="text" class="ddq-field" value="${escAttr(l.lead_time||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'lead_time',this.value)" placeholder="days" style="${cellStyle}">`
+                : fmtLead(l.lead_time);
             const condCell = isDraft
                 ? `<input type="text" class="ddq-field" value="${escAttr(l.condition||'')}" onchange="ddUpdateQuoteField(${reqId},${i},'condition',this.value)" placeholder="\u2014" style="${cellStyle}">`
                 : esc(l.condition || '\u2014');
@@ -1724,7 +1778,7 @@ function _renderQuoteDetail(reqId, q, container) {
                 <td class="mono">${esc(l.mpn || '')}</td>
                 <td style="font-size:10px">${esc(l.manufacturer || '\u2014')}</td>
                 <td class="mono">${qty.toLocaleString()}</td>
-                ${isDraft ? `<td class="mono">$${Number(cost).toFixed(4)}</td><td style="font-size:10px;color:var(--muted)">${target}</td>` : ''}
+                ${isDraft ? `<td class="mono">${fmtPrice(cost)}</td><td style="font-size:10px;color:var(--muted)">${target}</td>` : ''}
                 <td class="mono" style="color:var(--teal)">${sellCell}</td>
                 ${isDraft ? `<td class="ddq-margin" data-req="${reqId}" data-idx="${i}" style="color:${marginColor};font-weight:600">${margin.toFixed(1)}%</td>` : ''}
                 <td>${leadCell}</td>
@@ -1786,9 +1840,10 @@ function _renderQuoteDetail(reqId, q, container) {
         lost: `<span style="color:var(--red);font-weight:600;font-size:11px">Lost${q.result_reason ? ' \u2014 ' + esc(q.result_reason) : ''}</span> <button class="btn btn-ghost btn-sm" onclick="ddReviseQuote(${reqId})">Revise</button>`,
         revised: `<span style="font-size:11px;color:var(--muted)">Superseded by Rev ${(q.revision||0)+1}</span>`,
     };
-    html += `<div style="margin-top:8px;display:flex;gap:8px;align-items:center">${statusActions[q.status] || statusActions.draft}</div>`;
+    html += `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center">${statusActions[q.status] || statusActions.draft}</div>`;
 
-    html += `</div>`;
+    html += `</div>`; // close content
+    html += `</div>`; // close outer container
     container.innerHTML = html;
 }
 
@@ -1826,7 +1881,7 @@ function ddApplyQuoteMarkup(reqId) {
     const lines = q.lines || q.line_items || [];
     lines.forEach(item => {
         const cost = item.cost_price || item.unit_cost || 0;
-        item.sell_price = pct >= 100 ? 0 : Math.round(cost / (1 - pct / 100) * 10000) / 10000;
+        item.sell_price = pct >= 100 ? 0 : Math.round(cost / (1 - pct / 100) * 100) / 100;
         item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
     });
     // Re-render the expanded detail panel
@@ -2142,8 +2197,8 @@ function ddRefreshPreview(reqId) {
             <td style="padding:6px 8px">${esc(l.condition || '\u2014')}</td>
             <td style="padding:6px 8px">${esc(l.date_code || '\u2014')}</td>
             <td style="padding:6px 8px">${esc(l.packaging || '\u2014')}</td>
-            <td style="padding:6px 8px;text-align:right" class="mono">$${Number(sell).toFixed(4)}</td>
-            <td style="padding:6px 8px;text-align:right">${esc(l.lead_time || '\u2014')}</td>
+            <td style="padding:6px 8px;text-align:right" class="mono">${fmtPrice(sell)}</td>
+            <td style="padding:6px 8px;text-align:right">${fmtLead(l.lead_time)}</td>
             <td style="padding:6px 8px;text-align:right;font-weight:600" class="mono">$${Number(ext).toLocaleString(undefined,{minimumFractionDigits:2})}</td>
         </tr>`;
     }
@@ -2152,54 +2207,67 @@ function ddRefreshPreview(reqId) {
 
     el.style.display = 'block';
     el.style.padding = '0';
-    el.innerHTML = `<div style="font-family:var(--font);font-size:12px;color:var(--text1)">
+    el.innerHTML = `<div style="font-family:var(--font);font-size:12px;color:var(--text);background:#fff;border-radius:8px;overflow:hidden;border:2px solid var(--blue);box-shadow:var(--shadow-sm)">
+        <!-- Logo -->
         <!-- Header -->
-        <div style="background:#127fbf;padding:16px 20px;text-align:center;border-radius:6px 6px 0 0">
-            <img src="/static/trio_logo.png" alt="TRIO" style="height:40px;filter:brightness(10)">
+        <div style="padding:20px 20px 16px">
+            <img src="/static/trio_logo.png" alt="TRIO" style="height:44px">
         </div>
-        <!-- Quote bar -->
-        <div style="background:#1a2a3a;padding:10px 20px;display:flex;justify-content:space-between;align-items:center;color:#fff">
-            <span style="font-size:14px;font-weight:700">Quotation</span>
-            <span style="font-size:11px;color:#c0d0e0"><strong style="color:#fff">${esc(q.quote_number || '')}</strong> Rev ${q.revision || 1} &middot; ${fmtDate(now)}</span>
+        <div style="margin:0 20px;height:1px;background:var(--border)"></div>
+        <!-- Quote info -->
+        <div style="padding:16px 20px;display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+                <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#127fbf;margin-bottom:4px">Quotation</div>
+                <div style="font-size:15px;font-weight:700;color:var(--text)">${esc(q.quote_number || '')}</div>
+                <div style="font-size:10px;color:var(--muted);margin-top:2px">Rev ${q.revision || 1} &middot; ${fmtDate(now)}</div>
+            </div>
+            <div style="text-align:right">
+                <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#127fbf;margin-bottom:4px">Prepared For</div>
+                <div style="font-size:12px;font-weight:600">${esc(q.customer_name || '')}</div>
+                ${toName ? `<div style="font-size:10px;color:var(--muted)">${esc(toName)}</div>` : ''}
+            </div>
         </div>
         <!-- Body -->
-        <div style="padding:16px 20px">
+        <div style="padding:0 20px 16px">
             <p style="margin:0 0 4px;font-size:13px">${greeting}</p>
-            <p style="margin:0 0 14px;font-size:12px;color:var(--text2)">Thank you for your interest. Please find our quotation for <strong>${esc(q.customer_name || 'your company')}</strong> below.</p>
+            <p style="margin:0 0 16px;font-size:11px;color:var(--muted);line-height:1.5">Thank you for your interest. Please find our quotation detailed below.</p>
             <!-- Line items -->
-            <table class="tbl" style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:12px">
-                <thead><tr style="background:var(--bg2)">
-                    <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Part #</th>
-                    <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Mfr</th>
-                    <th style="padding:6px 8px;text-align:center;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Qty</th>
-                    <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Cond</th>
-                    <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">DC</th>
-                    <th style="padding:6px 8px;text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Pkg</th>
-                    <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Unit Price</th>
-                    <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Lead</th>
-                    <th style="padding:6px 8px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf">Ext. Price</th>
+            <table class="tbl" style="width:100%;font-size:11px;border-collapse:collapse;margin-bottom:4px;border:1px solid var(--border);border-radius:4px">
+                <thead><tr style="background:#F3F5F7">
+                    <th style="padding:7px 8px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf;color:var(--text2)">Part #</th>
+                    <th style="padding:7px 8px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf;color:var(--text2)">Mfr</th>
+                    <th style="padding:7px 8px;text-align:center;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf;color:var(--text2)">Qty</th>
+                    <th style="padding:7px 8px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf;color:var(--text2)">Cond</th>
+                    <th style="padding:7px 8px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf;color:var(--text2)">DC</th>
+                    <th style="padding:7px 8px;text-align:left;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf;color:var(--text2)">Pkg</th>
+                    <th style="padding:7px 8px;text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf;color:var(--text2)">Unit Price</th>
+                    <th style="padding:7px 8px;text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf;color:var(--text2)">Lead</th>
+                    <th style="padding:7px 8px;text-align:right;font-size:9px;text-transform:uppercase;letter-spacing:0.5px;border-bottom:2px solid #127fbf;color:var(--text2)">Ext. Price</th>
                 </tr></thead>
                 <tbody>${rows}</tbody>
             </table>
             <!-- Total -->
-            <div style="text-align:right;font-size:13px;font-weight:700;padding:8px 0;border-top:2px solid #127fbf;color:#127fbf">
-                Total: $${Number(subtotal).toLocaleString(undefined,{minimumFractionDigits:2})}
+            <div style="display:flex;justify-content:flex-end;align-items:baseline;gap:12px;padding:12px 0;margin-bottom:16px">
+                <span style="font-size:11px;color:var(--muted)">Subtotal</span>
+                <span style="font-size:16px;font-weight:700;color:var(--blue);font-family:'JetBrains Mono',Consolas,monospace;border-bottom:3px solid #127fbf;padding-bottom:4px">$${Number(subtotal).toLocaleString(undefined,{minimumFractionDigits:2})}</span>
             </div>
             <!-- Terms -->
-            <div style="margin-top:12px;font-size:11px;color:var(--text2)">
-                <table style="font-size:11px">
-                    ${q.payment_terms ? `<tr><td style="padding:4px 0;color:var(--muted);width:90px">Payment</td><td style="padding:4px 0;font-weight:600">${esc(q.payment_terms)}</td></tr>` : ''}
-                    ${q.shipping_terms ? `<tr><td style="padding:4px 0;color:var(--muted)">Shipping</td><td style="padding:4px 0;font-weight:600">${esc(q.shipping_terms)}</td></tr>` : ''}
-                    <tr><td style="padding:4px 0;color:var(--muted)">Currency</td><td style="padding:4px 0;font-weight:600">USD</td></tr>
-                    <tr><td style="padding:4px 0;color:var(--muted)">Valid Until</td><td style="padding:4px 0;font-weight:600">${fmtDate(expires)}</td></tr>
+            <div style="background:#FBFBFC;border:1px solid var(--border);border-radius:4px;padding:10px 14px;margin-bottom:12px">
+                <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:var(--blue);margin-bottom:6px">Terms</div>
+                <table style="font-size:11px;width:100%">
+                    ${q.payment_terms ? `<tr><td style="padding:3px 0;color:var(--muted);width:80px">Payment</td><td style="padding:3px 0;font-weight:600">${esc(q.payment_terms)}</td></tr>` : ''}
+                    ${q.shipping_terms ? `<tr><td style="padding:3px 0;color:var(--muted)">Shipping</td><td style="padding:3px 0;font-weight:600">${esc(q.shipping_terms)}</td></tr>` : ''}
+                    <tr><td style="padding:3px 0;color:var(--muted)">Currency</td><td style="padding:3px 0;font-weight:600">USD</td></tr>
+                    <tr><td style="padding:3px 0;color:var(--muted)">Valid Until</td><td style="padding:3px 0;font-weight:600">${fmtDate(expires)}</td></tr>
                 </table>
             </div>
-            ${q.notes ? `<div style="margin-top:10px;padding:8px 12px;background:var(--bg2);border-left:3px solid #127fbf;border-radius:4px;font-size:11px;color:var(--text2)">${esc(q.notes)}</div>` : ''}
+            ${q.notes ? `<div style="padding:8px 12px;background:#F3F5F7;border-left:3px solid #127fbf;border-radius:4px;font-size:11px;color:var(--text2)">${esc(q.notes)}</div>` : ''}
         </div>
         <!-- Footer -->
-        <div style="background:#1a2a3a;padding:10px 20px;text-align:center;border-radius:0 0 6px 6px">
-            <div style="font-size:11px;color:#8899aa">Trio Supply Chain Solutions</div>
-            <div style="font-size:10px;color:#667788">trioscs.com &middot; info@trioscs.com</div>
+        <div style="border-top:2px solid var(--blue)"></div>
+        <div style="background:#282c30;padding:8px 20px;display:flex;justify-content:space-between;align-items:center;border-radius:0 0 7px 7px">
+            <span style="font-size:10px;color:#8899aa;font-weight:600">Trio Supply Chain Solutions</span>
+            <span style="font-size:10px;color:#127fbf;font-weight:600">trioscs.com</span>
         </div>
     </div>`;
 }
@@ -2214,11 +2282,16 @@ async function ddConfirmSendQuote(reqId) {
     const btn = document.getElementById('ddSendConfirmBtn-' + reqId);
     if (btn) { btn.disabled = true; btn.textContent = 'Sending\u2026'; }
     try {
-        await apiFetch('/api/quotes/' + q.id + '/send', {
+        const sendResult = await apiFetch('/api/quotes/' + q.id + '/send', {
             method: 'POST', body: { to_email: toEmail, to_name: toName }
         });
         document.getElementById('ddSendQuoteBg')?.remove();
         showToast('Quote sent to ' + toEmail, 'success');
+        // Update requisition status badge to "Quoted"
+        notifyStatusChange(sendResult);
+        const reqInfo = _reqListData.find(r => r.id === reqId);
+        if (reqInfo) { reqInfo.quote_status = 'sent'; reqInfo.quote_sent_at = new Date().toISOString(); }
+        _refreshReqRow(reqId);
         if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
         const drow = document.getElementById('d-' + reqId);
         if (drow) {
@@ -2234,15 +2307,20 @@ async function ddConfirmSendQuote(reqId) {
 async function ddMarkQuoteResult(reqId, result) {
     const q = _ddQuoteData[reqId];
     if (!q) return;
+    if (result === 'won') { ddOpenBuyPlanModal(reqId); return; }
     let reason = '';
     if (result === 'lost') {
         reason = prompt('Reason for loss (optional):') || '';
     }
     try {
-        await apiFetch('/api/quotes/' + q.id + '/result', {
+        const markResult = await apiFetch('/api/quotes/' + q.id + '/result', {
             method: 'POST', body: { result, reason }
         });
         showToast('Quote marked as ' + result, 'success');
+        notifyStatusChange(markResult);
+        const reqInfo = _reqListData.find(r => r.id === reqId);
+        if (reqInfo) reqInfo.quote_status = result;
+        _refreshReqRow(reqId);
         if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
         const drow = document.getElementById('d-' + reqId);
         if (drow) {
@@ -2251,6 +2329,127 @@ async function ddMarkQuoteResult(reqId, result) {
         }
     } catch (e) {
         showToast('Error: ' + (e.message || e), 'error');
+    }
+}
+
+// ── Buy Plan (drill-down) ─────────────────────────────────────────────
+
+function ddOpenBuyPlanModal(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    const lines = q.lines || q.line_items || [];
+    const rows = lines.map((item, i) => {
+        const qty = item.qty || 0;
+        const cost = Number(item.cost_price || 0);
+        return `<tr>
+            <td style="text-align:center"><input type="checkbox" class="dd-bp-check" data-idx="${i}" checked></td>
+            <td style="font-weight:600">${esc(item.mpn || '')}</td>
+            <td>${esc(item.manufacturer || '\u2014')}</td>
+            <td>${esc(item.vendor_name || '\u2014')}</td>
+            <td style="text-align:right">${qty.toLocaleString()}</td>
+            <td style="text-align:right"><input type="number" class="dd-bp-qty" data-idx="${i}" value="${qty}" min="1" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;text-align:right" oninput="ddUpdateBpTotals(${reqId})"></td>
+            <td style="text-align:right">${fmtPrice(cost)}</td>
+            <td style="text-align:right" class="dd-bp-line-total">${fmtPrice(qty * cost)}</td>
+            <td>${fmtLead(item.lead_time)}</td>
+        </tr>`;
+    }).join('');
+
+    // Build modal overlay
+    let existing = document.getElementById('ddBuyPlanOverlay');
+    if (existing) existing.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'ddBuyPlanOverlay';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center';
+    overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
+    overlay.innerHTML = `<div style="background:var(--white);border-radius:10px;width:90%;max-width:820px;max-height:85vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2);padding:24px">
+        <h2 style="margin:0 0 4px;font-size:16px">Mark Won & Submit Buy Plan</h2>
+        <p style="font-size:11px;color:var(--muted);margin:0 0 16px">Select items and set the quantity to purchase from each vendor. This will be sent to management for approval.</p>
+        <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+        <table class="tbl" style="font-size:11px;width:100%;margin-bottom:12px">
+            <thead><tr>
+                <th style="width:30px"></th><th>MPN</th><th>Mfr</th><th>Vendor</th><th style="text-align:right">Avail</th><th style="text-align:right">Plan Qty</th><th style="text-align:right">Unit Cost</th><th style="text-align:right">Line Total</th><th>Lead</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table>
+        </div>
+        <div style="text-align:right;font-weight:600;font-size:13px;margin-bottom:16px">Total Cost: <span id="ddBpTotal" style="color:var(--blue)"></span></div>
+        <div style="margin-bottom:16px">
+            <label style="font-size:11px;font-weight:600;display:block;margin-bottom:4px">Notes for Manager & Buyers</label>
+            <textarea id="ddBpNotes" rows="3" placeholder="Add any context, special instructions, or notes for the purchasing team..." style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input);box-sizing:border-box"></textarea>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn btn-ghost" onclick="document.getElementById('ddBuyPlanOverlay').remove()">Cancel</button>
+            <button class="btn btn-success" id="ddBpSubmitBtn" onclick="ddSubmitBuyPlan(${reqId})">Mark Won & Submit Buy Plan</button>
+        </div>
+    </div>`;
+    document.body.appendChild(overlay);
+    ddUpdateBpTotals(reqId);
+}
+
+function ddUpdateBpTotals(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    const lines = q.lines || q.line_items || [];
+    let total = 0;
+    document.querySelectorAll('.dd-bp-qty').forEach(input => {
+        const idx = parseInt(input.dataset.idx);
+        const item = lines[idx];
+        if (!item) return;
+        const qty = parseInt(input.value) || 0;
+        const cost = Number(item.cost_price || 0);
+        const lineTotal = qty * cost;
+        total += lineTotal;
+        const row = input.closest('tr');
+        const cell = row.querySelector('.dd-bp-line-total');
+        if (cell) cell.textContent = fmtPrice(lineTotal);
+    });
+    const el = document.getElementById('ddBpTotal');
+    if (el) el.textContent = '$' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+async function ddSubmitBuyPlan(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    const lines = q.lines || q.line_items || [];
+    const checks = document.querySelectorAll('.dd-bp-check:checked');
+    const selectedIndices = Array.from(checks).map(c => parseInt(c.dataset.idx));
+    if (!selectedIndices.length) { showToast('Select at least one item', 'error'); return; }
+
+    const offerIds = [];
+    const planQtys = {};
+    selectedIndices.forEach(i => {
+        const item = lines[i];
+        if (item && item.offer_id) {
+            offerIds.push(item.offer_id);
+            const qtyInput = document.querySelector('.dd-bp-qty[data-idx="' + i + '"]');
+            if (qtyInput) planQtys[item.offer_id] = parseInt(qtyInput.value) || item.qty || 0;
+        }
+    });
+    if (!offerIds.length) { showToast('No offer IDs found on line items', 'error'); return; }
+
+    const notes = (document.getElementById('ddBpNotes')?.value || '').trim();
+    const btn = document.getElementById('ddBpSubmitBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Submitting\u2026'; }
+    try {
+        const res = await apiFetch('/api/quotes/' + q.id + '/buy-plan', {
+            method: 'POST', body: { offer_ids: offerIds, plan_qtys: planQtys, salesperson_notes: notes }
+        });
+        showToast('Buy plan submitted for approval!', 'success');
+        const overlay = document.getElementById('ddBuyPlanOverlay');
+        if (overlay) overlay.remove();
+        notifyStatusChange(res);
+        const reqInfo = _reqListData.find(r => r.id === reqId);
+        if (reqInfo) reqInfo.quote_status = 'won';
+        _refreshReqRow(reqId);
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
+        const drow = document.getElementById('d-' + reqId);
+        if (drow) {
+            const panel = drow.querySelector('.dd-panel');
+            if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
+        }
+    } catch (e) {
+        showToast('Error: ' + (e.message || e), 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Mark Won & Submit Buy Plan'; }
     }
 }
 
@@ -2401,7 +2600,10 @@ function _renderDrillDownTable(rfqId, targetPanel) {
     const dd = targetPanel || (document.getElementById('d-' + rfqId) || {}).querySelector?.('.dd-panel');
     if (!dd) return;
     const reqs = _ddReqCache[rfqId] || [];
-    if (!reqs.length && !_addRowActive[rfqId]) { dd.innerHTML = '<span style="font-size:11px;color:var(--muted)">No parts yet</span>'; return; }
+    if (!reqs.length && !_addRowActive[rfqId]) {
+        // Auto-open add row when there are no parts
+        _addRowActive[rfqId] = true;
+    }
     if (!reqs.length && _addRowActive[rfqId]) {
         dd.innerHTML = `<table class="dtbl"><thead><tr>
             <th></th><th>MPN</th><th>Qty</th><th>Target $</th><th>Subs</th><th>Condition</th><th>Date Codes</th><th>FW</th><th>HW</th><th>Pkg</th><th>Notes</th><th style="width:24px"></th>
@@ -2605,15 +2807,16 @@ async function _saveAddRow(rfqId) {
 
     try {
         await apiFetch(`/api/requisitions/${rfqId}/requirements`, { method: 'POST', body });
-        delete _addRowActive[rfqId];
+        // Keep add row active so user can enter next part immediately
         delete _ddReqCache[rfqId];
         if (_ddTabCache[rfqId]) { delete _ddTabCache[rfqId].parts; delete _ddTabCache[rfqId].details; }
         const rfq = _reqListData.find(r => r.id === rfqId);
         if (rfq) rfq.requirement_count = (rfq.requirement_count || 0) + 1;
         _ddReqCache[rfqId] = await apiFetch(`/api/requisitions/${rfqId}/requirements`);
         if (_ddTabCache[rfqId]) { _ddTabCache[rfqId].parts = _ddReqCache[rfqId]; _ddTabCache[rfqId].details = _ddReqCache[rfqId]; }
+        _addRowActive[rfqId] = true;
         _renderDrillDownTable(rfqId);
-        showToast('Part added \u2014 click cells to edit details');
+        showToast('Part added \u2014 enter next part or press Esc to finish', 'success');
         const drow = document.getElementById('d-' + rfqId);
         if (drow) {
             const hdr = drow.querySelector('span[style*="font-weight:700"]');
@@ -6707,6 +6910,21 @@ function fmtDollars(n) {
     if (n >= 1000) return '$' + (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
     return '$' + Number(n).toFixed(2);
 }
+function fmtPrice(n) {
+    if (n == null || isNaN(n)) return '\u2014';
+    const v = Number(n);
+    const cents = v % 1;
+    if (cents >= 0.005) return '$' + v.toFixed(2);
+    return '$' + v.toLocaleString(undefined, {maximumFractionDigits: 0});
+}
+function fmtLead(s) {
+    if (!s) return '\u2014';
+    s = s.trim();
+    if (/^\d+$/.test(s)) return s + ' days';
+    if (/^\d+\s*-\s*\d+$/.test(s)) return s.replace(/\s*/g, '') + ' days';
+    if (/days?|wks?|weeks?/i.test(s)) return s;
+    return s + ' days';
+}
 
 function threadSearchFilter(query) {
     const wrap = document.getElementById('threadEntries');
@@ -7548,7 +7766,8 @@ Object.assign(window, {
     addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies,
     cloneFromList, closeModal, ddApplyGlobalMarkup, ddApplyQuoteMarkup, ddBuildQuote,
     ddAddNewContact, ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddDeleteQuote, ddEditOffer, ddExpandQuote,
-    ddFindContacts, ddMarkQuoteResult, ddOnContactSelect, ddPasteRows, ddPickEnrichedContact, ddRefreshPreview, ddUpdateQuoteField,
+    ddFindContacts, ddMarkQuoteResult, ddOnContactSelect, ddOpenBuyPlanModal, ddPasteRows, ddPickEnrichedContact, ddRefreshPreview,
+    ddSubmitBuyPlan, ddUpdateBpTotals, ddUpdateQuoteField,
     ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddReviseQuote, ddSaveEditOffer, ddSaveQuoteDraft, ddSendBulkRfq, ddSendQuote,
     ddToggleAllOffers, ddToggleGroupOffers, ddToggleOffer, ddToggleSighting, ddToggleTier,
     ddUploadFile, debounceOfferHistorySearch, debouncePartsSightingsSearch,

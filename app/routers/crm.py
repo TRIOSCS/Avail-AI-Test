@@ -1100,6 +1100,71 @@ async def list_offers(
         )
     # Preload quoted prices ONCE instead of per-requirement DB call
     quoted_prices = _preload_last_quoted_prices(db)
+
+    # ── Cross-requisition historical offers ──────────────────────────
+    # Collect all MPNs (primary + substitutes) per requirement
+    req_mpn_map: dict[int, set[str]] = {}  # requirement_id → set of normalized MPNs
+    all_mpns: set[str] = set()
+    primary_mpns: set[str] = set()
+    for r in req.requirements:
+        mpns: set[str] = set()
+        p = (r.primary_mpn or "").upper().strip()
+        if p:
+            mpns.add(p)
+            primary_mpns.add(p)
+        for s in r.substitutes or []:
+            s_norm = (s if isinstance(s, str) else "").upper().strip()
+            if s_norm:
+                mpns.add(s_norm)
+        req_mpn_map[r.id] = mpns
+        all_mpns |= mpns
+
+    hist_by_req: dict[int, list] = {}
+    if all_mpns:
+        hist_query = (
+            db.query(Offer)
+            .filter(
+                Offer.requisition_id != req_id,
+                sqlfunc.upper(Offer.mpn).in_(all_mpns),
+                Offer.status.in_(["active", "won"]),
+            )
+            .options(joinedload(Offer.entered_by))
+            .order_by(Offer.created_at.desc())
+            .limit(100)
+            .all()
+        )
+        # Bucket historical offers into requirement groups
+        for ho in hist_query:
+            ho_mpn = (ho.mpn or "").upper().strip()
+            for r in req.requirements:
+                if ho_mpn in req_mpn_map.get(r.id, set()):
+                    if r.id not in hist_by_req:
+                        hist_by_req[r.id] = []
+                    is_sub = ho_mpn not in primary_mpns or (
+                        ho_mpn != (r.primary_mpn or "").upper().strip()
+                    )
+                    hist_by_req[r.id].append(
+                        {
+                            "id": ho.id,
+                            "vendor_name": ho.vendor_name,
+                            "vendor_card_id": ho.vendor_card_id,
+                            "mpn": ho.mpn,
+                            "manufacturer": ho.manufacturer,
+                            "qty_available": ho.qty_available,
+                            "unit_price": float(ho.unit_price) if ho.unit_price else None,
+                            "lead_time": ho.lead_time,
+                            "condition": ho.condition,
+                            "source": ho.source,
+                            "status": ho.status,
+                            "notes": ho.notes,
+                            "entered_by": ho.entered_by.name if ho.entered_by else None,
+                            "created_at": ho.created_at.isoformat() if ho.created_at else None,
+                            "from_requisition_id": ho.requisition_id,
+                            "is_substitute": is_sub,
+                        }
+                    )
+                    break  # assign to first matching requirement only
+
     result = []
     for r in req.requirements:
         target = float(r.target_price) if r.target_price else None
@@ -1112,6 +1177,7 @@ async def list_offers(
                 "target_price": target,
                 "last_quoted": last_q,
                 "offers": groups.get(r.id, []),
+                "historical_offers": hist_by_req.get(r.id, []),
             }
         )
     return {
@@ -1745,7 +1811,8 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
     _esc = _html.escape
 
     BLUE = "#127fbf"
-    DARK = "#1a2a3a"
+    NAVY = "#4a6fa5"
+    DARK = "#282c30"
 
     validity = quote.validity_days or 7
     now_ts = quote.sent_at or datetime.now(timezone.utc)
@@ -1753,28 +1820,51 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
     expires_str = expires.strftime("%B %d, %Y")
     date_str = now_ts.strftime("%B %d, %Y")
 
+    import re as _re
+
+    def _fmt_price(v):
+        if not v:
+            return "—"
+        v = float(v)
+        return f"${v:,.2f}" if v % 1 >= 0.005 else f"${v:,.0f}"
+
+    def _fmt_lead(s):
+        if not s:
+            return "—"
+        s = s.strip()
+        if _re.match(r"^\d+$", s):
+            return s + " days"
+        if _re.match(r"^\d+\s*-\s*\d+$", s):
+            return _re.sub(r"\s*-\s*", "-", s) + " days"
+        if _re.search(r"days?|wks?|weeks?", s, _re.I):
+            return s
+        return s + " days"
+
     # Build line items rows
     rows = ""
     row_bg = ["#ffffff", "#f8fafc"]
     for idx, item in enumerate(quote.line_items or []):
-        price = f"${item.get('sell_price', 0):,.4f}" if item.get("sell_price") else "—"
+        sell = item.get("sell_price", 0)
+        price = _fmt_price(sell) if sell else "—"
         qty = f"{item.get('qty', 0):,}" if item.get("qty") else "—"
-        ext = f"${item.get('sell_price', 0) * item.get('qty', 0):,.2f}" if item.get("sell_price") and item.get("qty") else "—"
+        ext_val = (sell or 0) * (item.get("qty") or 0)
+        ext = f"${ext_val:,.2f}" if ext_val else "—"
         cond = item.get("condition") or "—"
         dc = item.get("date_code") or "—"
         pkg = item.get("packaging") or "—"
+        lead = _fmt_lead(item.get("lead_time") or "")
         bg = row_bg[idx % 2]
-        td = f'style="padding:10px 12px;border-bottom:1px solid #e8ecf0;background:{bg}"'
+        td = f'style="padding:10px 14px;border-bottom:1px solid #e8ecf0;background:{bg}"'
         rows += f"""<tr>
             <td {td}><strong>{_esc(item.get('mpn',''))}</strong></td>
             <td {td}>{_esc(item.get('manufacturer','') or '—')}</td>
-            <td {td} style="padding:10px 12px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:center">{qty}</td>
+            <td {td} style="padding:10px 14px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:center">{qty}</td>
             <td {td}>{_esc(cond)}</td>
             <td {td}>{_esc(dc)}</td>
             <td {td}>{_esc(pkg)}</td>
-            <td {td} style="padding:10px 12px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:right">{price}</td>
-            <td {td} style="padding:10px 12px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:right">{_esc(item.get('lead_time','') or '—')}</td>
-            <td {td} style="padding:10px 12px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:right;font-weight:600">{ext}</td>
+            <td {td} style="padding:10px 14px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:right;font-family:Consolas,monospace">{price}</td>
+            <td {td} style="padding:10px 14px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:right">{_esc(lead)}</td>
+            <td {td} style="padding:10px 14px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:right;font-weight:700;font-family:Consolas,monospace">{ext}</td>
         </tr>"""
 
     total = f"${float(quote.subtotal or 0):,.2f}"
@@ -1782,86 +1872,103 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
     # Terms table
     terms_rows = ""
     if quote.payment_terms:
-        terms_rows += f'<tr><td style="padding:6px 0;color:#666;width:120px">Payment</td><td style="padding:6px 0;font-weight:600">{_esc(quote.payment_terms)}</td></tr>'
+        terms_rows += f'<tr><td style="padding:6px 0;color:#8e8f92;width:120px">Payment</td><td style="padding:6px 0;font-weight:600">{_esc(quote.payment_terms)}</td></tr>'
     if quote.shipping_terms:
-        terms_rows += f'<tr><td style="padding:6px 0;color:#666">Shipping</td><td style="padding:6px 0;font-weight:600">{_esc(quote.shipping_terms)}</td></tr>'
-    terms_rows += '<tr><td style="padding:6px 0;color:#666">Currency</td><td style="padding:6px 0;font-weight:600">USD</td></tr>'
-    terms_rows += f'<tr><td style="padding:6px 0;color:#666">Valid Until</td><td style="padding:6px 0;font-weight:600">{expires_str}</td></tr>'
+        terms_rows += f'<tr><td style="padding:6px 0;color:#8e8f92">Shipping</td><td style="padding:6px 0;font-weight:600">{_esc(quote.shipping_terms)}</td></tr>'
+    terms_rows += '<tr><td style="padding:6px 0;color:#8e8f92">Currency</td><td style="padding:6px 0;font-weight:600">USD</td></tr>'
+    terms_rows += f'<tr><td style="padding:6px 0;color:#8e8f92">Valid Until</td><td style="padding:6px 0;font-weight:600">{expires_str}</td></tr>'
 
     greeting = f"Dear {_esc(to_name)}," if to_name else "Dear Valued Customer,"
-    notes_block = f'<div style="margin-top:16px;padding:12px 16px;background:#f0f7ff;border-left:3px solid {BLUE};border-radius:4px;font-size:13px;color:#444">{_esc(quote.notes)}</div>' if quote.notes else ""
+    notes_block = f'<div style="margin-top:16px;padding:12px 16px;background:#F3F5F7;border-left:3px solid {BLUE};border-radius:4px;font-size:13px;color:#444">{_esc(quote.notes)}</div>' if quote.notes else ""
     signature = user.email_signature or f"{user.name or 'Trio Supply Chain Solutions'}"
     sig_html = _esc(signature).replace("\n", "<br>")
 
-    th = f'style="padding:10px 12px;text-align:left;border-bottom:2px solid {BLUE};font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:{DARK}"'
+    th_base = f"padding:10px 14px;border-bottom:2px solid {BLUE};font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:{DARK};background:#F3F5F7"
 
-    return f"""<html><body style="margin:0;padding:0;background:#f4f6f9;font-family:Calibri,Arial,Helvetica,sans-serif;color:#333">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f4f6f9;padding:20px 0">
+    return f"""<html><body style="margin:0;padding:0;background:#F3F5F7;font-family:Lato,Calibri,Arial,Helvetica,sans-serif;color:#020202;-webkit-font-smoothing:antialiased">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#F3F5F7;padding:32px 0">
 <tr><td align="center">
-<table width="700" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08)">
+<table width="684" cellpadding="0" cellspacing="0" style="border-radius:8px;overflow:hidden;box-shadow:0 2px 16px rgba(0,0,0,0.07)">
+<tr><td style="background:{NAVY};padding:2px">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:6px;overflow:hidden">
 
-<!-- Header -->
-<tr><td style="background:{BLUE};padding:24px 32px;text-align:center">
-    <img src="https://www.trioscs.com/wp-content/uploads/2022/02/TRIO_CV_400.png" alt="Trio Supply Chain Solutions" style="height:50px;display:inline-block">
+<!-- Header: Logo + Company -->
+<tr><td style="padding:32px 40px 24px">
+    <table width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td style="vertical-align:middle"><img src="https://www.trioscs.com/wp-content/uploads/2022/02/TRIO_CV_400.png" alt="Trio Supply Chain Solutions" style="height:64px;display:inline-block"></td>
+    </tr></table>
 </td></tr>
 
-<!-- Quote Info Bar -->
-<tr><td style="background:{DARK};padding:12px 32px">
+<!-- Divider -->
+<tr><td style="padding:0 40px"><div style="height:1px;background:#e8ecf0"></div></td></tr>
+
+<!-- Quote title block -->
+<tr><td style="padding:24px 40px 20px">
     <table width="100%" cellpadding="0" cellspacing="0"><tr>
-        <td style="color:#ffffff;font-size:18px;font-weight:700">Quotation</td>
-        <td style="text-align:right;color:#c0d0e0;font-size:13px">
-            <strong style="color:#ffffff">{quote.quote_number}</strong> &nbsp;Rev {quote.revision}
-            &nbsp;&middot;&nbsp; {date_str}
+        <td style="vertical-align:top">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:{BLUE};margin-bottom:6px">Quotation</div>
+            <div style="font-size:20px;font-weight:700;color:{DARK};line-height:1.2">{quote.quote_number}</div>
+            <div style="font-size:12px;color:#8e8f92;margin-top:4px">Rev {quote.revision} &nbsp;&middot;&nbsp; {date_str}</div>
+        </td>
+        <td style="text-align:right;vertical-align:top">
+            <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:{BLUE};margin-bottom:6px">Prepared For</div>
+            <div style="font-size:14px;font-weight:600;color:{DARK}">{_esc(company_name or '')}</div>
+            {f'<div style="font-size:12px;color:#8e8f92;margin-top:2px">{_esc(to_name)}</div>' if to_name else ''}
         </td>
     </tr></table>
 </td></tr>
 
 <!-- Body -->
-<tr><td style="padding:28px 32px">
-    <p style="margin:0 0 4px;font-size:15px;color:#333">{greeting}</p>
-    <p style="margin:0 0 20px;font-size:14px;color:#666">Thank you for your interest. Please find our quotation for <strong>{_esc(company_name or 'your company')}</strong> below.</p>
+<tr><td style="padding:0 40px 32px">
+    <p style="margin:0 0 4px;font-size:15px;color:{DARK}">{greeting}</p>
+    <p style="margin:0 0 28px;font-size:13px;color:#8e8f92;line-height:1.6">Thank you for your interest. Please find our quotation detailed below.</p>
 
     <!-- Line Items Table -->
-    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:12px;margin-bottom:16px">
+    <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:12px;margin-bottom:4px;border:1px solid #e8ecf0;border-radius:6px">
         <thead>
-            <tr style="background:#f0f4f8">
-                <th {th}>Part Number</th>
-                <th {th}>Mfr</th>
-                <th {th} style="padding:10px 12px;text-align:center;border-bottom:2px solid {BLUE};font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:{DARK}">Qty</th>
-                <th {th}>Cond</th>
-                <th {th}>Date Code</th>
-                <th {th}>Pkg</th>
-                <th {th} style="padding:10px 12px;text-align:right;border-bottom:2px solid {BLUE};font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:{DARK}">Unit Price</th>
-                <th {th} style="padding:10px 12px;text-align:right;border-bottom:2px solid {BLUE};font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:{DARK}">Lead Time</th>
-                <th {th} style="padding:10px 12px;text-align:right;border-bottom:2px solid {BLUE};font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:{DARK}">Ext. Price</th>
+            <tr>
+                <th style="{th_base};text-align:left;border-top-left-radius:6px">Part Number</th>
+                <th style="{th_base};text-align:left">Mfr</th>
+                <th style="{th_base};text-align:center">Qty</th>
+                <th style="{th_base};text-align:left">Cond</th>
+                <th style="{th_base};text-align:left">Date Code</th>
+                <th style="{th_base};text-align:left">Pkg</th>
+                <th style="{th_base};text-align:right">Unit Price</th>
+                <th style="{th_base};text-align:right">Lead Time</th>
+                <th style="{th_base};text-align:right;border-top-right-radius:6px">Ext. Price</th>
             </tr>
         </thead>
         <tbody>{rows}</tbody>
-        <tfoot>
-            <tr>
-                <td colspan="8" style="padding:12px;text-align:right;font-size:14px;font-weight:600;color:#666;border-top:2px solid {BLUE}">Total</td>
-                <td style="padding:12px;text-align:right;font-size:16px;font-weight:700;color:{BLUE};border-top:2px solid {BLUE}">{total}</td>
-            </tr>
-        </tfoot>
+    </table>
+
+    <!-- Total -->
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:28px">
+        <tr>
+            <td style="padding:16px 14px;text-align:right;font-size:13px;color:#8e8f92">Subtotal</td>
+            <td style="padding:16px 14px;text-align:right;font-size:20px;font-weight:700;color:{NAVY};font-family:Consolas,monospace;width:140px;border-bottom:3px solid {BLUE}">{total}</td>
+        </tr>
     </table>
 
     <!-- Terms -->
-    <table cellpadding="0" cellspacing="0" style="font-size:13px;margin-bottom:16px">
-        {terms_rows}
+    <table cellpadding="0" cellspacing="0" style="font-size:13px;margin-bottom:16px;background:#FBFBFC;border-radius:6px;border:1px solid #e8ecf0;width:100%">
+        <tr><td colspan="2" style="padding:12px 16px 6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:{NAVY}">Terms</td></tr>
+        {terms_rows.replace('padding:6px 0', 'padding:6px 16px')}
+        <tr><td colspan="2" style="height:8px"></td></tr>
     </table>
 
     {notes_block}
 
     <!-- Signature -->
-    <div style="margin-top:24px;padding-top:16px;border-top:1px solid #e8ecf0">
-        <p style="margin:0;font-size:13px;color:#555">{sig_html}</p>
+    <div style="margin-top:32px;padding-top:20px;border-top:1px solid #e8ecf0">
+        <p style="margin:0;font-size:13px;color:#555;line-height:1.6">{sig_html}</p>
     </div>
 </td></tr>
 
 <!-- Terms & Conditions -->
-<tr><td style="padding:20px 32px;background:#f8fafc;border-top:1px solid #e8ecf0">
-    <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:{DARK};text-transform:uppercase;letter-spacing:0.5px">Terms &amp; Conditions</p>
-    <ol style="margin:0;padding-left:16px;font-size:10px;color:#777;line-height:1.7">
+<tr><td style="padding:0 40px 28px">
+    <details style="font-size:10px;color:#aaa">
+    <summary style="font-size:10px;font-weight:700;color:#8e8f92;text-transform:uppercase;letter-spacing:0.5px;cursor:pointer;padding:8px 0">Terms &amp; Conditions</summary>
+    <ol style="margin:8px 0 0;padding-left:16px;font-size:10px;color:#aaa;line-height:1.8">
         <li>This quotation is valid for the period stated above. Prices are subject to change after expiration.</li>
         <li>All prices are in USD unless otherwise stated. Sales tax is not included and will be applied where applicable.</li>
         <li>Payment terms are as stated above. Past-due invoices are subject to a 1.5% monthly finance charge.</li>
@@ -1872,20 +1979,21 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
         <li>Trio Supply Chain Solutions shall not be liable for any indirect, incidental, or consequential damages arising from the sale or use of products.</li>
         <li>Export compliance: Buyer is responsible for compliance with all applicable export control laws and regulations.</li>
     </ol>
+    </details>
 </td></tr>
 
 <!-- Footer -->
-<tr><td style="background:{DARK};padding:16px 32px;text-align:center">
-    <p style="margin:0;font-size:12px;color:#8899aa">Trio Supply Chain Solutions</p>
-    <p style="margin:4px 0 0;font-size:11px;color:#667788">
-        <a href="https://trioscs.com" style="color:{BLUE};text-decoration:none">trioscs.com</a>
-        &nbsp;&middot;&nbsp; info@trioscs.com
-    </p>
+<tr><td style="background:{DARK};padding:16px 40px;border-top:2px solid {NAVY}">
+    <table width="100%" cellpadding="0" cellspacing="0"><tr>
+        <td style="font-size:11px;color:#8899aa;font-weight:600">Trio Supply Chain Solutions</td>
+        <td style="text-align:right;font-size:11px"><a href="https://trioscs.com" style="color:{BLUE};text-decoration:none;font-weight:600">trioscs.com</a></td>
+    </tr></table>
 </td></tr>
 
 </table>
 </td></tr>
 </table>
+</td></tr></table>
 </body></html>"""
 
 
