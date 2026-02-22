@@ -729,6 +729,13 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 .offer-group-header span{color:var(--muted)}
 .offer-table{margin-bottom:0}
 .offer-table tr.offer-ref{opacity:.5}
+
+/* RFQ drill-down offer rows */
+.ofr-row{cursor:pointer}
+.ofr-row:hover td{background:var(--surface)}
+.ofr-detail>td{background:var(--surface);border-top:none;padding:8px 14px !important}
+.ofr-chevron{display:inline-block;font-size:9px;margin-right:4px;transition:transform .15s ease;color:var(--muted)}
+.ofr-open .ofr-chevron{transform:rotate(90deg)}
 .offer-ref-badge{font-size:9px;color:var(--muted);font-style:italic}
 .tab.tab-new{background:#22c55e;color:#fff}
 .tab.tab-new.on{background:#16a34a}

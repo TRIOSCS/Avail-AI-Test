@@ -1190,64 +1190,97 @@ let _ddSelectedOffers = {};   // reqId → Set of offer IDs
 
 function _renderDdOffers(reqId, data, panel) {
     const groups = data.groups || data || [];
-    // Flatten all offers
-    let allOffers = [];
+    // Count total offers
+    let totalOffers = 0;
     if (Array.isArray(groups)) {
-        for (const g of groups) {
-            const reqMpn = g.mpn || g.label || '';
-            for (const o of (g.offers || [])) {
-                allOffers.push({...o, _reqMpn: reqMpn, mpn: o.mpn || reqMpn});
-            }
-        }
+        for (const g of groups) totalOffers += (g.offers || []).length;
     }
-    if (!allOffers.length) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet</span>'; return; }
+    if (!totalOffers) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet</span>'; return; }
     if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
     const sel = _ddSelectedOffers[reqId];
-    // Sort by price
-    allOffers.sort((a, b) => (a.unit_price || 999999) - (b.unit_price || 999999));
+
+    // Summary bar
     let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span style="font-size:11px"><b>${allOffers.length}</b> offer${allOffers.length !== 1 ? 's' : ''}${sel.size > 0 ? ` &middot; <b>${sel.size}</b> selected` : ''}</span>
+        <span style="font-size:11px"><b>${totalOffers}</b> offer${totalOffers !== 1 ? 's' : ''}${sel.size > 0 ? ` &middot; <b>${sel.size}</b> selected` : ''}</span>
         <button class="btn btn-primary btn-sm" id="ddBuildQuoteBtn-${reqId}" ${sel.size === 0 ? 'disabled style="opacity:.5"' : ''} onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote (${sel.size})</button>
     </div>`;
-    html += `<table class="dtbl"><thead><tr><th style="width:28px"><input type="checkbox" onchange="ddToggleAllOffers(${reqId},this.checked)" ${sel.size === allOffers.length ? 'checked' : ''}></th><th>MPN</th><th>Vendor</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Cond</th><th>MOQ</th><th>Date Code</th><th>Source</th><th>Logged</th><th></th></tr></thead><tbody>`;
-    for (const o of allOffers) {
-        const oid = o.id || o.offer_id;
-        const checked = sel.has(oid) ? 'checked' : '';
-        const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(4) : '\u2014';
-        const date = o.created_at ? fmtRelative(o.created_at) : '';
-        const src = o.source || o.offer_source || '';
-        const offeredMpn = o.mpn || o.offered_mpn || '';
-        const isSub = o._reqMpn && offeredMpn && offeredMpn.trim().toUpperCase() !== o._reqMpn.trim().toUpperCase();
-        const subBadge = isSub ? ' <span class="badge b-sub">SUB</span>' : '';
-        const rowBg = isSub ? 'background:rgba(14,116,144,.04);' : '';
-        const statusBadge = o.status === 'pending_review' ? ' <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">DRAFT</span>' : '';
-        // Build detail chips for extra fields
-        const details = [];
-        if (o.manufacturer) details.push('Mfr: ' + esc(o.manufacturer));
-        if (o.packaging) details.push('Pkg: ' + esc(o.packaging));
-        if (o.firmware) details.push('FW: ' + esc(o.firmware));
-        if (o.hardware_code) details.push('HW: ' + esc(o.hardware_code));
-        if (o.warranty) details.push('Warranty: ' + esc(o.warranty));
-        if (o.country_of_origin) details.push('COO: ' + esc(o.country_of_origin));
-        const detailLine = details.length ? '<div style="font-size:10px;color:var(--muted);margin-top:2px">' + details.join(' \u00b7 ') + '</div>' : '';
-        const noteLine = o.notes ? '<div style="margin-top:3px;padding:3px 8px;border-radius:4px;background:rgba(59,130,246,.08);border-left:2px solid var(--blue);font-size:10px;color:var(--text);white-space:pre-wrap">' + esc(o.notes) + '</div>' : '';
-        const enteredBy = o.entered_by ? '<div style="font-size:9px;color:var(--muted);margin-top:2px">by ' + esc(o.entered_by) + '</div>' : '';
-        html += `<tr class="${checked ? 'selected' : ''}" style="${rowBg}" onclick="ddToggleOffer(${reqId},${oid},event)">
-            <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
-            <td class="mono">${esc(offeredMpn)}${subBadge}${statusBadge}</td>
-            <td>${esc(o.vendor_name || '')}${detailLine}${noteLine}${enteredBy}</td>
-            <td class="mono">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '\u2014')}</td>
-            <td class="mono" style="color:var(--teal)">${price}</td>
-            <td>${esc(o.lead_time || '\u2014')}</td>
-            <td>${esc(o.condition || '\u2014')}</td>
-            <td class="mono">${o.moq ? Number(o.moq).toLocaleString() : '\u2014'}</td>
-            <td style="font-size:10px">${esc(o.date_code || '\u2014')}</td>
-            <td style="font-size:10px;color:var(--muted)">${esc(src)}</td>
-            <td style="font-size:10px">${date}</td>
-            <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddEditOffer(${reqId},${oid})" title="Edit" style="padding:2px 6px;font-size:10px">\u270e</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddDeleteOffer(${reqId},${oid})" title="Delete" style="padding:2px 6px;font-size:10px;color:var(--red)">\u2715</button></td>
-        </tr>`;
-    }
-    html += '</tbody></table>';
+
+    // Grouped layout
+    const grpArr = Array.isArray(groups) ? groups : [];
+    grpArr.forEach((g, gi) => {
+        const offers = (g.offers || []).slice().sort((a, b) => (a.unit_price || 999999) - (b.unit_price || 999999));
+        if (!offers.length) return;
+        const reqMpn = g.mpn || g.label || '';
+        const targetPrice = g.target_price != null ? '$' + Number(g.target_price).toFixed(4) : '';
+        const lastQ = g.last_quoted != null ? '$' + Number(g.last_quoted).toFixed(4) : '';
+
+        // Count selected within this group
+        const groupIds = offers.map(o => o.id || o.offer_id);
+        const groupSelCount = groupIds.filter(id => sel.has(id)).length;
+
+        html += `<div class="offer-group">`;
+        html += `<div class="offer-group-header">
+            <strong>${esc(reqMpn)}</strong>
+            <span>need ${(g.target_qty || 0).toLocaleString()}</span>
+            ${targetPrice ? '<span>target ' + targetPrice + '</span>' : ''}
+            ${lastQ ? '<span>last: ' + lastQ + '</span>' : ''}
+        </div>`;
+        html += `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">`;
+        html += `<table class="dtbl"><thead><tr>
+            <th style="width:28px"><input type="checkbox" onchange="ddToggleGroupOffers(${reqId},${gi},this.checked)" ${groupSelCount === offers.length ? 'checked' : ''}></th>
+            <th>Vendor</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th style="width:52px"></th>
+        </tr></thead><tbody>`;
+
+        for (const o of offers) {
+            const oid = o.id || o.offer_id;
+            const checked = sel.has(oid) ? 'checked' : '';
+            const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(4) : '\u2014';
+            const offeredMpn = o.mpn || o.offered_mpn || '';
+            const isSub = reqMpn && offeredMpn && offeredMpn.trim().toUpperCase() !== reqMpn.trim().toUpperCase();
+            const subBadge = isSub ? ' <span class="badge b-sub">SUB</span>' : '';
+            const rowBg = isSub ? 'background:rgba(14,116,144,.04);' : '';
+            const statusBadge = o.status === 'pending_review' ? ' <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">DRAFT</span>' : '';
+
+            // Determine if this offer has expandable detail
+            const hasDetail = o.moq || o.date_code || o.manufacturer || o.packaging || o.firmware || o.hardware_code || o.warranty || o.country_of_origin || o.notes || o.entered_by;
+            const chevron = hasDetail ? '<span class="ofr-chevron">\u25b6</span>' : '';
+
+            html += `<tr class="ofr-row ${checked ? 'selected' : ''}" style="${rowBg}" data-oid="${oid}" onclick="ddToggleOfferDetail(this,event,${reqId},${oid})">
+                <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
+                <td>${chevron}${esc(o.vendor_name || '')}${subBadge}${statusBadge}</td>
+                <td class="mono">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '\u2014')}</td>
+                <td class="mono" style="color:var(--teal)">${price}</td>
+                <td>${esc(o.lead_time || '\u2014')}</td>
+                <td>${esc(o.condition || '\u2014')}</td>
+                <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddEditOffer(${reqId},${oid})" title="Edit" style="padding:2px 6px;font-size:10px">\u270e</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddDeleteOffer(${reqId},${oid})" title="Delete" style="padding:2px 6px;font-size:10px;color:var(--red)">\u2715</button></td>
+            </tr>`;
+
+            // Expandable detail row
+            if (hasDetail) {
+                const chips = [];
+                if (o.manufacturer) chips.push('Mfr: ' + esc(o.manufacturer));
+                if (o.packaging) chips.push('Pkg: ' + esc(o.packaging));
+                if (o.moq) chips.push('MOQ: ' + Number(o.moq).toLocaleString());
+                if (o.date_code) chips.push('Date Code: ' + esc(o.date_code));
+                if (o.firmware) chips.push('FW: ' + esc(o.firmware));
+                if (o.hardware_code) chips.push('HW: ' + esc(o.hardware_code));
+                if (o.warranty) chips.push('Warranty: ' + esc(o.warranty));
+                if (o.country_of_origin) chips.push('COO: ' + esc(o.country_of_origin));
+                const chipsHtml = chips.length ? '<div class="det-req-row" style="flex-wrap:wrap;gap:8px;font-size:11px">' + chips.map(c => '<span class="det-k" style="font-size:10px;text-transform:none;letter-spacing:0">' + c + '</span>').join('') + '</div>' : '';
+                const noteLine = o.notes ? '<div class="det-part-notes" style="margin-top:6px">' + esc(o.notes) + '</div>' : '';
+                const src = o.source || o.offer_source || '';
+                const date = o.created_at ? fmtRelative(o.created_at) : '';
+                const metaParts = [];
+                if (src) metaParts.push(esc(src));
+                if (date) metaParts.push('Logged: ' + date);
+                if (o.entered_by) metaParts.push('by ' + esc(o.entered_by));
+                const metaLine = metaParts.length ? '<div style="font-size:10px;color:var(--muted);margin-top:4px">' + metaParts.join(' \u00b7 ') + '</div>' : '';
+
+                html += `<tr class="ofr-detail hidden"><td colspan="7">${chipsHtml}${noteLine}${metaLine}</td></tr>`;
+            }
+        }
+        html += '</tbody></table></div></div>';
+    });
     panel.innerHTML = html;
 }
 
@@ -1284,6 +1317,36 @@ function ddToggleAllOffers(reqId, checked) {
         const panel = drow.querySelector('.dd-panel');
         if (panel) _renderDdOffers(reqId, data, panel);
     }
+}
+
+function ddToggleGroupOffers(reqId, groupIdx, checked) {
+    const data = _ddTabCache[reqId]?.offers;
+    if (!data) return;
+    const groups = data.groups || data || [];
+    const grpArr = Array.isArray(groups) ? groups : [];
+    const g = grpArr[groupIdx];
+    if (!g) return;
+    if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
+    const sel = _ddSelectedOffers[reqId];
+    for (const o of (g.offers || [])) {
+        const oid = o.id || o.offer_id;
+        if (checked) sel.add(oid); else sel.delete(oid);
+    }
+    const drow = document.getElementById('d-' + reqId);
+    if (drow) {
+        const panel = drow.querySelector('.dd-panel');
+        if (panel) _renderDdOffers(reqId, data, panel);
+    }
+}
+
+function ddToggleOfferDetail(rowEl, event, reqId, offerId) {
+    // If the click was on a checkbox or button, don't toggle detail
+    const tag = event.target.tagName;
+    if (tag === 'INPUT' || tag === 'BUTTON') return;
+    const detailRow = rowEl.nextElementSibling;
+    if (!detailRow || !detailRow.classList.contains('ofr-detail')) return;
+    detailRow.classList.toggle('hidden');
+    rowEl.classList.toggle('ofr-open');
 }
 
 async function ddBuildQuote(reqId) {
