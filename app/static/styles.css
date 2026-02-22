@@ -404,13 +404,17 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 .mp-tbl-vendor{font-weight:700;font-size:13px;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}
 .mp-tbl-date{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text2);white-space:nowrap;font-weight:500}
 
-@media(max-width:768px){
+@media(max-width:768px) and (hover:none),(max-width:768px) and (pointer:coarse){
     /* Sidebar → hidden drawer on mobile */
     .sidebar{width:var(--sbw);top:0;transform:translateX(-100%);transition:transform .22s cubic-bezier(.4,0,.2,1);box-shadow:none}
     .sidebar.mobile-open{transform:translateX(0);box-shadow:4px 0 20px rgba(0,0,0,.3)}
     .sidebar.collapsed{transform:translateX(-100%)}
-    .main{margin-left:0 !important;padding:12px 10px;padding-top:calc(52px + env(safe-area-inset-top))}
+    .main{margin-left:0 !important;padding:12px 10px;padding-top:calc(92px + env(safe-area-inset-top))}
     .mobile-topbar{display:flex !important}
+    .mobile-toolbar{display:flex !important}
+    #mobilePills{flex:1;min-width:0;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;min-height:36px;flex-wrap:nowrap}
+    #mobilePills::-webkit-scrollbar{display:none}
+    #mobilePills .fp{white-space:nowrap;flex-shrink:0}
 
     /* Req list */
     .col-headers{display:none}
@@ -558,11 +562,19 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 .mobile-topbar .mobile-logo{height:30px;filter:brightness(0) invert(1);opacity:.9}
 .mobile-search{flex:1;min-width:0;height:32px;font-size:14px;border-radius:6px;border:none;padding:0 10px}
 .mobile-notif-btn{position:relative;background:none;border:none;color:#fff;font-size:18px;padding:4px 8px;cursor:pointer}
-.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:45}
+.sidebar-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:199}
 .sidebar-overlay.open{display:block}
 
+/* Mobile action toolbar — hidden on desktop, shown in mobile media query */
+.mobile-toolbar{display:none;position:fixed;top:calc(48px + env(safe-area-inset-top));left:0;right:0;height:40px;background:var(--white);z-index:150;align-items:center;padding:0 10px;gap:6px;border-bottom:1px solid var(--border);box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.mobile-act-btn{width:36px;height:36px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--text);font-size:16px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;-webkit-tap-highlight-color:transparent}
+.mobile-act-primary{background:var(--blue);color:#fff;border-color:var(--blue)}
+.mobile-act-accent{background:var(--surface);color:var(--text2);border-color:var(--border)}
+.mobile-act-accent.on{background:var(--orange,#f59e0b);color:#fff;border-color:var(--orange,#f59e0b)}
+.mobile-act-trouble{background:#fef2f2;color:#dc2626;border-color:#fca5a5}
+
 /* Extra small screens (phones in portrait) */
-@media(max-width:420px){
+@media(max-width:420px) and (hover:none),(max-width:420px) and (pointer:coarse){
     .tab{font-size:10px;padding:6px 10px}
     .sc-vendor{font-size:12px}
     .act-stat{flex:1 1 calc(50% - 3px)}
@@ -572,6 +584,8 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
     .btn-primary{padding:8px 12px}
     .login-card{padding:32px 16px 28px}
     .login-logo{width:200px}
+    .mobile-act-btn{width:32px;height:32px;font-size:14px}
+    #mobilePills .fp{padding:4px 10px;font-size:10px}
 }
 
 /* ── Data Sources Tab ── */
@@ -832,7 +846,7 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 .ac-vendor{background:var(--teal-light,#e0f5f0);color:var(--teal,#0d9488)}
 .ac-customer{background:#f0e6ff;color:#6b3fa0}
 
-@media(max-width:768px){
+@media(max-width:768px) and (hover:none),(max-width:768px) and (pointer:coarse){
     .lo-form{grid-template-columns:1fr}
     .lo-form .field-full{grid-column:span 1}
     .quote-totals{flex-direction:column;gap:8px}
@@ -943,7 +957,7 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 #toastContainer{position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:6px;pointer-events:none}
 #toastContainer > *{pointer-events:auto}
 
-@media(max-width:768px){
+@media(max-width:768px) and (hover:none),(max-width:768px) and (pointer:coarse){
     .ai-panel-bg{padding:8px;align-items:flex-start;padding-top:40px}
     .ai-panel{padding:16px;max-height:calc(100vh - 60px)}
     .ai-contact-row{flex-direction:column;gap:6px}
@@ -1409,11 +1423,19 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .det-part-notes { grid-column:1/-1; font-size:12px; color:var(--text); background:rgba(59,130,246,.08); border-left:3px solid var(--blue); border-radius:4px; padding:8px 10px; margin-top:6px; line-height:1.5; white-space:pre-wrap; }
 .det-part-notes::before { content:'📝 '; }
 
-@media (max-width:640px) {
+@media (max-width:640px) and (hover:none),(max-width:640px) and (pointer:coarse) {
     .det-ctx { flex-direction:column; align-items:flex-start; }
     .det-ctx-meta { flex-wrap:wrap; gap:10px; }
     .det-part { grid-template-columns:1fr; }
     .det-part-core { margin-bottom:8px; }
+}
+
+/* Desktop narrow window — keep desktop layout, allow graceful wrapping */
+@media (pointer:fine) and (max-width:960px) {
+    .topcontrols{flex-wrap:wrap;gap:6px}
+    .tb-group{flex-wrap:wrap;gap:6px}
+    .search-wrap{min-width:180px}
+    .main-scroll{overflow-x:auto}
 }
 
 /* Market summary banner (Octopart aggregate) */
@@ -1462,7 +1484,7 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .source-status-banner:not(.ss-expanded) .ss-toggle-hint::after{content:' \25b6'}
 
 /* ── Mobile deep fixes ──────────────────────────── */
-@media(max-width:768px){
+@media(max-width:768px) and (hover:none),(max-width:768px) and (pointer:coarse){
     /* Drill-down sub-tabs — horizontal scroll like main tabs */
     .dd-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;scrollbar-width:none}
     .dd-tabs::-webkit-scrollbar{display:none}

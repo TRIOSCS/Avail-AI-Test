@@ -50,6 +50,19 @@ function toggleMobileSidebar() {
     if (ov) ov.classList.toggle('open');
 }
 
+// Sync active pill state between desktop #mainPills and mobile #mobilePills
+function _syncMobilePills(clicked) {
+    var view = clicked && clicked.dataset ? clicked.dataset.view : null;
+    if (!view) return;
+    ['mainPills', 'mobilePills'].forEach(function(id) {
+        var cont = document.getElementById(id);
+        if (!cont) return;
+        cont.querySelectorAll('.fp').forEach(function(b) {
+            b.classList.toggle('on', b.dataset.view === view);
+        });
+    });
+}
+
 // Close filter panel on outside click
 document.addEventListener('click', function(e) {
     document.querySelectorAll('.filter-panel.open').forEach(function(p) {
@@ -595,6 +608,12 @@ export function showView(viewId) {
         topcontrols.querySelectorAll('.fpills, .filter-wrap').forEach(el => {
             el.style.display = isListView ? '' : 'none';
         });
+    }
+    // Mirror visibility for mobile toolbar — only show on list view
+    const mobileToolbar = document.getElementById('mobileToolbar');
+    if (mobileToolbar) {
+        const isListView = viewId === 'view-list';
+        mobileToolbar.style.display = (isSettings || !isListView) ? 'none' : '';
     }
 }
 
@@ -4223,6 +4242,11 @@ let _toolbarQuickFilter = '';
 function toggleMyAccounts(btn) {
     _myReqsOnly = !_myReqsOnly;
     btn.classList.toggle('on', _myReqsOnly);
+    // Sync both desktop and mobile My Accounts buttons
+    var desktop = document.getElementById('myAccountsBtn');
+    var mobile = document.getElementById('mobileMyAccountsBtn');
+    if (desktop) desktop.classList.toggle('on', _myReqsOnly);
+    if (mobile) mobile.classList.toggle('on', _myReqsOnly);
     if (_myReqsOnly) _activeFilters['my_accounts'] = true;
     else delete _activeFilters['my_accounts'];
     renderReqList();
@@ -4234,6 +4258,8 @@ function clearAllFilters() {
     _toolbarQuickFilter = '';
     const btn = document.getElementById('myAccountsBtn');
     if (btn) btn.classList.remove('on');
+    const mobBtn = document.getElementById('mobileMyAccountsBtn');
+    if (mobBtn) mobBtn.classList.remove('on');
     renderReqList();
 }
 
@@ -4290,12 +4316,20 @@ function setMainView(view, btn) {
     // Reset per-RFQ active tab so each view opens its own default sub-tab
     for (const k of Object.keys(_ddActiveTab)) delete _ddActiveTab[k];
     document.querySelectorAll('#mainPills .fp').forEach(b => b.classList.remove('on'));
+    document.querySelectorAll('#mobilePills .fp').forEach(b => b.classList.remove('on'));
     if (btn) btn.classList.add('on');
+    // Sync whichever pill strip the click didn't originate from
+    ['mainPills', 'mobilePills'].forEach(id => {
+        const cont = document.getElementById(id);
+        if (cont) cont.querySelectorAll('.fp').forEach(b => b.classList.toggle('on', b.dataset.view === view));
+    });
     _activeFilters = {};
     _myReqsOnly = false;
     _toolbarQuickFilter = '';
     const maBtn = document.getElementById('myAccountsBtn');
     if (maBtn) maBtn.classList.remove('on');
+    const maMobBtn = document.getElementById('mobileMyAccountsBtn');
+    if (maMobBtn) maMobBtn.classList.remove('on');
     // Hide status toggle — tabs are now locked to their status
     const stEl = document.getElementById('statusToggle');
     if (stEl) stEl.style.display = 'none';
@@ -4448,6 +4482,9 @@ export function navHighlight(btn) {
 
 function setMainPill(view) {
     document.querySelectorAll('#mainPills .fp').forEach(b => {
+        b.classList.toggle('on', b.dataset.view === view);
+    });
+    document.querySelectorAll('#mobilePills .fp').forEach(b => {
         b.classList.toggle('on', b.dataset.view === view);
     });
 }
@@ -8149,7 +8186,7 @@ Object.assign(window, {
     viewThread, vpSetRating, vpSubmitReview, vpToggleBlacklist,
     // Internal/underscore-prefixed functions used in inline handlers
     _acceptParsedOffers, _appendAddRow, _autoPollReplies, _buildEffortTip, _cancelAddRow, ddUpdateQuoteLine,
-    _collapseAllDrillDowns, _ddDefaultTab, _ddPromptFallback,
+    _collapseAllDrillDowns, _ddDefaultTab, _ddPromptFallback, _syncMobilePills,
     _ddRenderTierRows, _ddSaveEmail, _ddSearchOverlay, _ddSubTabs,
     _ddTabLabel, _ddVendorInlineBadges, _ddVendorLinkPill,
     _ddVendorScoreRing, _debouncedPartsSightingsSearch,
