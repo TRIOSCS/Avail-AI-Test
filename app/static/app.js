@@ -8160,7 +8160,7 @@ Object.assign(window, {
     _renderDdOffers, _renderDdQuotes, _renderDdTab, _renderDdTabPills,
     _renderDetailDeadline, _renderDrillDownTable, _renderReqRow,
     _renderRfqPrepareProgress, _renderSourcingDrillDown, _reqBadge,
-    _saveAddRow, _selfGuard, _sightingTier, _sortArrow, _switchDdTab,
+    _saveAddRow, _selfGuard, _sortArrow, _switchDdTab,
     _timeAgo, _updateDdBulkButton, _updateDrillToggleLabel,
     _updateToolbarStats, _vendorHasPartsToSend, _vendorSortArrow,
     // HTML template inline handlers
