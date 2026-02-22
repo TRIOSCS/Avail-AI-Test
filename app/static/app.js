@@ -1639,7 +1639,7 @@ function _renderDdQuotes(reqId, data, panel) {
     if (lines.length) {
         html += `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
         <table class="tbl quote-table" style="font-size:11px;width:100%">
-            <thead><tr><th>MPN</th><th>Mfr</th><th>Qty</th><th>Cost</th><th>Target</th><th>Sell</th><th>Margin</th><th>Lead</th><th>Cond</th><th>DC</th><th>Pkg</th></tr></thead><tbody>`;
+            <thead><tr><th>MPN</th><th>Mfr</th><th>Qty</th>${isDraft ? '<th>Cost</th><th>Target</th>' : ''}<th>Unit Price</th>${isDraft ? '<th>Margin</th>' : ''}<th>Lead</th><th>Cond</th><th>DC</th><th>Pkg</th>${!isDraft ? '<th>Ext. Price</th>' : ''}</tr></thead><tbody>`;
         let totalCost = 0, totalRev = 0;
         for (let i = 0; i < lines.length; i++) {
             const l = lines[i];
@@ -1673,14 +1673,14 @@ function _renderDdQuotes(reqId, data, panel) {
                 <td class="mono">${esc(l.mpn || '')}</td>
                 <td style="font-size:10px">${esc(l.manufacturer || '\u2014')}</td>
                 <td class="mono">${qty.toLocaleString()}</td>
-                <td class="mono">$${Number(cost).toFixed(4)}</td>
-                <td style="font-size:10px;color:var(--muted)">${target}</td>
+                ${isDraft ? `<td class="mono">$${Number(cost).toFixed(4)}</td><td style="font-size:10px;color:var(--muted)">${target}</td>` : ''}
                 <td class="mono" style="color:var(--teal)">${sellCell}</td>
-                <td class="ddq-margin" data-req="${reqId}" data-idx="${i}" style="color:${marginColor};font-weight:600">${margin.toFixed(1)}%</td>
+                ${isDraft ? `<td class="ddq-margin" data-req="${reqId}" data-idx="${i}" style="color:${marginColor};font-weight:600">${margin.toFixed(1)}%</td>` : ''}
                 <td>${leadCell}</td>
                 <td>${condCell}</td>
                 <td>${dcCell}</td>
                 <td>${pkgCell}</td>
+                ${!isDraft ? `<td class="mono" style="font-weight:600">$${Number(sell * qty).toLocaleString(undefined,{minimumFractionDigits:2})}</td>` : ''}
             </tr>`;
         }
         html += `</tbody></table></div>`;
@@ -1696,12 +1696,18 @@ function _renderDdQuotes(reqId, data, panel) {
         // Totals bar
         const totalMargin = totalRev > 0 ? ((totalRev - totalCost) / totalRev * 100) : 0;
         const gp = totalRev - totalCost;
-        html += `<div class="quote-totals" id="ddqTotals-${reqId}" style="display:flex;gap:16px;font-size:11px;padding:8px 0;border-top:1px solid var(--border)">
-            <div>Cost: <strong>$${Number(totalCost).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
-            <div>Revenue: <strong>$${Number(totalRev).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
-            <div>Gross Profit: <strong style="color:var(--green)">$${Number(gp).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
-            <div>Margin: <strong>${totalMargin.toFixed(1)}%</strong></div>
-        </div>`;
+        if (isDraft) {
+            html += `<div class="quote-totals" id="ddqTotals-${reqId}" style="display:flex;gap:16px;font-size:11px;padding:8px 0;border-top:1px solid var(--border)">
+                <div>Cost: <strong>$${Number(totalCost).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+                <div>Revenue: <strong>$${Number(totalRev).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+                <div>Gross Profit: <strong style="color:var(--green)">$${Number(gp).toLocaleString(undefined,{minimumFractionDigits:2})}</strong></div>
+                <div>Margin: <strong>${totalMargin.toFixed(1)}%</strong></div>
+            </div>`;
+        } else {
+            html += `<div style="text-align:right;font-size:12px;font-weight:700;padding:8px 0;border-top:1px solid var(--border)">
+                Subtotal: $${Number(totalRev).toLocaleString(undefined,{minimumFractionDigits:2})}
+            </div>`;
+        }
     }
 
     // ── Terms ──
