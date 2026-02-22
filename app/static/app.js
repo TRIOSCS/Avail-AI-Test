@@ -7896,7 +7896,13 @@ async function aiDraftRfq(btn) {
                 condition_requirement: rfqCondition !== 'any' ? rfqCondition : null
             }))
         };
-        const data = await apiFetch('/api/ai/draft-rfq-email', { method: 'POST', body: payload });
+        let data;
+        try {
+            data = await apiFetch('/api/ai/draft-rfq-email', { method: 'POST', body: payload });
+        } catch(e) {
+            showToast('AI draft failed: ' + e.message, 'error');
+            return;
+        }
         if (data.subject) document.getElementById('rfqSubject').value = data.subject;
         if (data.body) document.getElementById('rfqBody').value = data.body;
         showToast('AI draft generated');
@@ -7934,17 +7940,23 @@ async function ddAiCompare(reqId, btn) {
             quotes: selectedOffers.map(o => ({
                 vendor_name: o.vendor_name || o.vendor || '',
                 unit_price: o.unit_price,
-                quantity_available: o.quantity_available ?? o.qty_available ?? null,
-                lead_time_days: o.lead_time_days ?? null,
+                quantity_available: o.qty_available ?? o.quantity_available ?? null,
+                lead_time_days: null,
                 date_code: o.date_code || null,
                 condition: o.condition || null,
                 moq: o.moq ?? null
             })),
             required_qty: requiredQty
         };
-        const data = await apiFetch('/api/ai/compare-quotes', { method: 'POST', body: payload });
+        let data;
+        try {
+            data = await apiFetch('/api/ai/compare-quotes', { method: 'POST', body: payload });
+        } catch(e) {
+            showToast('AI compare failed: ' + e.message, 'error');
+            return;
+        }
         if (!data.available) { showToast(data.reason || 'AI comparison unavailable', 'error'); return; }
-        const r = data.result || data;
+        const r = data;
         // Build comparison modal
         let html = '<div style="max-width:640px">';
         html += '<h3 style="margin:0 0 12px;font-size:16px">AI Quote Comparison — ' + esc(partNumber) + '</h3>';
@@ -7974,7 +7986,13 @@ async function aiNormalizeParts(btn) {
     const mpns = reqData.map(r => r.primary_mpn).filter(Boolean);
     if (!mpns.length) { showToast('No parts to normalize', 'error'); return; }
     await guardBtn(btn, 'Normalizing…', async () => {
-        const data = await apiFetch('/api/ai/normalize-parts', { method: 'POST', body: { parts: mpns } });
+        let data;
+        try {
+            data = await apiFetch('/api/ai/normalize-parts', { method: 'POST', body: { parts: mpns } });
+        } catch(e) {
+            showToast('AI normalize failed: ' + e.message, 'error');
+            return;
+        }
         const changed = (data.parts || []).filter(p => p.original !== p.normalized);
         if (!changed.length) { showToast('All parts already normalized'); return; }
         // Build review modal
@@ -8039,7 +8057,13 @@ async function aiParseReply(reqId, responseId, vendorName, btn) {
             email_subject: response.subject || '',
             vendor_name: vendorName || ''
         };
-        const data = await apiFetch('/api/ai/parse-email', { method: 'POST', body: payload });
+        let data;
+        try {
+            data = await apiFetch('/api/ai/parse-email', { method: 'POST', body: payload });
+        } catch(e) {
+            showToast('AI parse failed: ' + e.message, 'error');
+            return;
+        }
         if (data.parsed && data.quotes && data.quotes.length) {
             // Build parsed_data structure matching what _renderParsedSummary expects
             response.parsed_data = {
