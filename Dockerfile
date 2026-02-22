@@ -1,9 +1,11 @@
-# Stage 1: Minify JS assets
-FROM node:20-alpine AS minifier
+# Stage 1: Build frontend with Vite
+FROM node:20-alpine AS builder
 WORKDIR /build
-RUN npm install -g terser
-COPY app/static/*.js ./
-RUN for f in *.js; do terser "$f" -o "$f" -c -m; done
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY vite.config.js ./
+COPY app/static/ app/static/
+RUN npm run build
 
 # Stage 2: Python application
 FROM python:3.12-slim
@@ -24,8 +26,8 @@ RUN pip install --no-cache-dir -r requirements.txt \
 # Copy app code
 COPY app/ app/
 
-# Overlay minified JS from stage 1
-COPY --from=minifier /build/*.js app/static/
+# Overlay Vite build output from stage 1
+COPY --from=builder /build/app/static/dist/ app/static/dist/
 
 # Copy migration scripts
 COPY migrate_*.py .

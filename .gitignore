@@ -9,6 +9,7 @@ __pycache__/
 uploads/
 *.egg-info/
 dist/
+app/static/dist/
 build/
 .venv/
 node_modules/

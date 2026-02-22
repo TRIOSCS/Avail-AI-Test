@@ -204,7 +204,8 @@ if not os.environ.get("TESTING"):
         ],
     )
 
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+_static_dir = "app/static/dist" if os.path.isdir("app/static/dist") else "app/static"
+app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 templates = Jinja2Templates(directory="app/templates")
 
 # Prometheus metrics
