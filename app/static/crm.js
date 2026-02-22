@@ -1016,7 +1016,7 @@ function renderQuote() {
     </table>
     </div>
     <div class="quote-markup">
-        Quick Markup: <input type="number" id="quickMarkup" value="20" style="width:50px" min="0" max="100">%
+        Quick Margin: <input type="number" id="quickMarkup" value="20" style="width:50px" min="0" max="99">%
         <button class="btn btn-ghost btn-sm" onclick="applyMarkup()">Apply to All</button>
     </div>
     <div class="quote-totals">
@@ -1082,7 +1082,7 @@ function applyMarkup() {
     if (!crmQuote) return;
     const pct = parseFloat(document.getElementById('quickMarkup').value) || 0;
     crmQuote.line_items.forEach(item => {
-        item.sell_price = Math.round((item.cost_price || 0) * (1 + pct / 100) * 10000) / 10000;
+        item.sell_price = pct >= 100 ? 0 : Math.round((item.cost_price || 0) / (1 - pct / 100) * 10000) / 10000;
         item.margin_pct = item.sell_price > 0 ? ((item.sell_price - (item.cost_price||0)) / item.sell_price * 100) : 0;
     });
     renderQuote();

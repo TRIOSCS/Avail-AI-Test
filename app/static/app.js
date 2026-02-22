@@ -1361,7 +1361,7 @@ function ddBuildQuote(reqId) {
         <div class="modal modal-lg" onclick="event.stopPropagation()" style="max-width:1100px">
             <h2>Build Quote \u2014 ${offers.length} line${offers.length !== 1 ? 's' : ''}</h2>
             <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
-                <label style="font-size:12px;font-weight:600">Global Markup %</label>
+                <label style="font-size:12px;font-weight:600">Global Margin %</label>
                 <input type="number" id="bqGlobalMargin" value="0" step="1" style="width:70px;padding:4px 6px" oninput="ddApplyGlobalMarkup()">
                 <button class="btn btn-ghost btn-sm" onclick="ddApplyGlobalMarkup()">Apply</button>
             </div>
@@ -1415,7 +1415,7 @@ function ddApplyGlobalMarkup() {
     const pct = parseFloat(document.getElementById('bqGlobalMargin')?.value) || 0;
     document.querySelectorAll('.bq-sell').forEach(inp => {
         const cost = parseFloat(inp.dataset.cost) || 0;
-        const sell = Math.round(cost * (1 + pct / 100) * 10000) / 10000;
+        const sell = pct >= 100 ? 0 : Math.round(cost / (1 - pct / 100) * 10000) / 10000;
         inp.value = sell.toFixed(4);
         inp.dispatchEvent(new Event('input'));
     });
@@ -1685,10 +1685,10 @@ function _renderDdQuotes(reqId, data, panel) {
         }
         html += `</tbody></table></div>`;
 
-        // Quick markup (draft only)
+        // Quick margin (draft only)
         if (isDraft) {
             html += `<div class="quote-markup" style="margin:8px 0;font-size:11px;display:flex;align-items:center;gap:8px">
-                Quick Markup: <input type="number" id="ddQuoteMarkup-${reqId}" value="20" style="width:50px;padding:2px 4px" min="0" max="100">%
+                Quick Margin: <input type="number" id="ddQuoteMarkup-${reqId}" value="20" style="width:50px;padding:2px 4px" min="0" max="99">%
                 <button class="btn btn-ghost btn-sm" onclick="ddApplyQuoteMarkup(${reqId})">Apply</button>
             </div>`;
         }
@@ -1774,7 +1774,7 @@ function ddApplyQuoteMarkup(reqId) {
     const lines = q.lines || q.line_items || [];
     lines.forEach(item => {
         const cost = item.cost_price || item.unit_cost || 0;
-        item.sell_price = Math.round(cost * (1 + pct / 100) * 10000) / 10000;
+        item.sell_price = pct >= 100 ? 0 : Math.round(cost / (1 - pct / 100) * 10000) / 10000;
         item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
     });
     // Update the cached data and re-render the whole tab
