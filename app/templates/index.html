@@ -123,74 +123,59 @@
 
     <!-- Log Offer Modal -->
     <div id="logOfferModal" class="modal-bg" onclick="if(event.target===this)closeLogOfferModal()">
-        <div class="modal" style="max-width:520px" onclick="event.stopPropagation()">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-                <h3 style="margin:0;font-size:14px">Log Confirmed Offer</h3>
-                <button class="btn btn-ghost btn-sm" onclick="closeLogOfferModal()" style="font-size:16px;padding:0 6px">&times;</button>
-            </div>
+        <div class="modal modal-lg">
+            <h2>Log Confirmed Offer</h2>
             <form id="logOfferForm" onsubmit="event.preventDefault();submitLogOffer()">
                 <input type="hidden" id="loReqId">
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-                    <div style="grid-column:1/-1">
-                        <label style="font-size:11px;color:var(--muted)">Part *</label>
-                        <select id="loReqPart" style="width:100%" required><option value="">Select part...</option></select>
+                <div class="lo-form">
+                    <div class="field field-full"><label>Part *</label>
+                        <select id="loReqPart" required><option value="">Select part...</option></select>
                     </div>
-                    <div style="grid-column:1/-1">
-                        <label style="font-size:11px;color:var(--muted)">Vendor Name *</label>
-                        <input id="loVendor" required placeholder="e.g. Arrow Electronics" style="width:100%">
+                    <div class="field field-full" style="position:relative"><label>Vendor Name *</label>
+                        <input id="loVendor" required placeholder="Start typing vendor name..." autocomplete="off">
+                        <div id="loVendorSuggestions" class="ac-dropdown"></div>
                     </div>
-                    <div>
-                        <label style="font-size:11px;color:var(--muted)">Qty Available</label>
-                        <input id="loQty" type="number" min="0" placeholder="0" style="width:100%">
+                    <div class="field"><label>Qty Available</label>
+                        <input id="loQty" type="number" min="0" placeholder="0">
                     </div>
-                    <div>
-                        <label style="font-size:11px;color:var(--muted)">Unit Price ($)</label>
-                        <input id="loPrice" type="number" step="0.0001" min="0" placeholder="0.00" style="width:100%">
+                    <div class="field"><label>Unit Price ($)</label>
+                        <input id="loPrice" type="number" step="0.0001" min="0" placeholder="0.00">
                     </div>
-                    <div>
-                        <label style="font-size:11px;color:var(--muted)">Lead Time</label>
-                        <input id="loLead" placeholder="e.g. 2-3 weeks" style="width:100%">
+                    <div class="field"><label>Lead Time</label>
+                        <input id="loLead" placeholder="e.g. 2-3 weeks">
                     </div>
-                    <div>
-                        <label style="font-size:11px;color:var(--muted)">MOQ</label>
-                        <input id="loMoq" type="number" min="0" placeholder="0" style="width:100%">
+                    <div class="field"><label>MOQ</label>
+                        <input id="loMoq" type="number" min="0" placeholder="0">
                     </div>
-                    <div>
-                        <label style="font-size:11px;color:var(--muted)">Condition</label>
-                        <select id="loCond" style="width:100%">
+                    <div class="field"><label>Condition</label>
+                        <select id="loCond">
                             <option value="new">New</option>
                             <option value="refurbished">Refurbished</option>
                             <option value="used">Used</option>
                         </select>
                     </div>
-                    <div>
-                        <label style="font-size:11px;color:var(--muted)">Date Code</label>
-                        <input id="loDc" placeholder="e.g. 2024+" style="width:100%">
+                    <div class="field"><label>Date Code</label>
+                        <input id="loDc" placeholder="e.g. 2024+">
                     </div>
-                    <div>
-                        <label style="font-size:11px;color:var(--muted)">Packaging</label>
-                        <input id="loPkg" placeholder="e.g. Tray, Reel" style="width:100%">
+                    <div class="field"><label>Packaging</label>
+                        <input id="loPkg" placeholder="e.g. Tray, Reel">
                     </div>
-                    <div>
-                        <label style="font-size:11px;color:var(--muted)">Manufacturer</label>
-                        <input id="loMfr" placeholder="e.g. Texas Instruments" style="width:100%">
+                    <div class="field"><label>Manufacturer</label>
+                        <input id="loMfr" placeholder="e.g. Texas Instruments">
                     </div>
-                    <div>
-                        <label style="font-size:11px;color:var(--muted)">Warranty</label>
-                        <input id="loWarranty" placeholder="e.g. 90 days" style="width:100%">
+                    <div class="field"><label>Warranty</label>
+                        <input id="loWarranty" placeholder="e.g. 90 days">
                     </div>
-                    <div>
-                        <label style="font-size:11px;color:var(--muted)">Country of Origin</label>
-                        <input id="loCOO" placeholder="e.g. Taiwan" style="width:100%">
+                    <div class="field"><label>Country of Origin</label>
+                        <input id="loCOO" placeholder="e.g. Taiwan">
                     </div>
-                    <div style="grid-column:1/-1">
-                        <label style="font-size:11px;color:var(--muted)">Notes</label>
-                        <textarea id="loNotes" rows="2" placeholder="Additional details..." style="width:100%;resize:vertical"></textarea>
+                    <div class="field field-full"><label>Notes</label>
+                        <textarea id="loNotes" rows="2" placeholder="Additional details..." style="resize:vertical"></textarea>
                     </div>
                 </div>
-                <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
-                    <button type="button" class="btn btn-ghost btn-sm" onclick="closeLogOfferModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary btn-sm" id="loSubmitBtn">Log Offer</button>
+                <div class="mactions">
+                    <button type="button" class="btn btn-ghost" onclick="closeLogOfferModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="loSubmitBtn">Log Offer</button>
                 </div>
             </form>
         </div>

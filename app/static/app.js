@@ -1112,8 +1112,9 @@ function _renderDdOffers(reqId, data, panel) {
     let allOffers = [];
     if (Array.isArray(groups)) {
         for (const g of groups) {
+            const reqMpn = g.mpn || g.label || '';
             for (const o of (g.offers || [])) {
-                allOffers.push({...o, mpn: g.mpn || g.label || ''});
+                allOffers.push({...o, _reqMpn: reqMpn, mpn: o.mpn || reqMpn});
             }
         }
     }
@@ -1133,9 +1134,13 @@ function _renderDdOffers(reqId, data, panel) {
         const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(2) : '\u2014';
         const date = o.created_at ? fmtRelative(o.created_at) : '';
         const src = o.source || o.offer_source || '';
-        html += `<tr class="${checked ? 'selected' : ''}" onclick="ddToggleOffer(${reqId},${oid},event)">
+        const offeredMpn = o.mpn || o.offered_mpn || '';
+        const isSub = o._reqMpn && offeredMpn && offeredMpn.trim().toUpperCase() !== o._reqMpn.trim().toUpperCase();
+        const subBadge = isSub ? ' <span class="badge b-sub">SUB</span>' : '';
+        const rowBg = isSub ? ' style="background:rgba(14,116,144,.04)"' : '';
+        html += `<tr class="${checked ? 'selected' : ''}"${rowBg} onclick="ddToggleOffer(${reqId},${oid},event)">
             <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
-            <td class="mono">${esc(o.mpn || o.offered_mpn || '')}</td>
+            <td class="mono">${esc(offeredMpn)}${subBadge}</td>
             <td>${esc(o.vendor_name || '')}</td>
             <td class="mono">${o.quantity || '\u2014'}</td>
             <td class="mono" style="color:var(--teal)">${price}</td>
@@ -1857,7 +1862,7 @@ function _ddVendorInlineBadges(s) {
     return html;
 }
 
-function _ddRenderTierRows(sightings, reqId, sel) {
+function _ddRenderTierRows(sightings, reqId, sel, groupLabel) {
     let html = '';
     for (const s of sightings) {
         const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
@@ -1872,10 +1877,13 @@ function _ddRenderTierRows(sightings, reqId, sel) {
         const linkPill = _ddVendorLinkPill(s);
         const inlineBadges = _ddVendorInlineBadges(s);
         const sAge = s.created_at ? fmtRelative(s.created_at) : '\u2014';
-        html += `<tr style="${dimStyle}">
+        const isSub = groupLabel && s.mpn_matched && s.mpn_matched.trim().toUpperCase() !== groupLabel.trim().toUpperCase();
+        const subBadge = isSub ? '<span class="badge b-sub">SUB</span> ' : '';
+        const rowBg = isSub ? 'background:rgba(14,116,144,.04)' : '';
+        html += `<tr style="${dimStyle}${rowBg ? ';' + rowBg : ''}">
             <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
             <td>${ring}${esc(s.vendor_name || '\u2014')}${inlineBadges}${linkPill}${needsEmail}</td>
-            <td class="mono">${esc(s.mpn_matched || '\u2014')}</td>
+            <td class="mono">${subBadge}${esc(s.mpn_matched || '\u2014')}</td>
             <td class="mono">${qty}</td>
             <td class="mono" style="color:${s.unit_price ? 'var(--teal)' : 'var(--muted)'}">${price}</td>
             <td style="font-size:10px">${esc(s.source_type || '\u2014')}</td>
@@ -1967,7 +1975,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
                 html += `<table class="dtbl" style="margin:0"><thead><tr>
                     <th style="width:24px"></th><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Condition</th><th>Age</th>
                 </tr></thead><tbody>`;
-                html += _ddRenderTierRows(visible, reqId, sel);
+                html += _ddRenderTierRows(visible, reqId, sel, label);
                 html += '</tbody></table>';
                 if (!showAll && items.length > DD_LIMIT) {
                     html += `<a onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin:2px 0 0 12px">Show all ${items.length} sources\u2026</a>`;
@@ -2178,7 +2186,79 @@ async function openLogOfferFromList(reqId) {
 
 function closeLogOfferModal() {
     closeModal('logOfferModal');
+    const dd = document.getElementById('loVendorSuggestions');
+    if (dd) dd.classList.remove('open');
 }
+
+// ── Vendor autocomplete for Log Offer ───────────────────────────────────
+let _loVendorDebounce = null;
+let _loVendorCache = {};
+let _loAcIndex = -1;
+
+function _initLoVendorAutocomplete() {
+    const input = document.getElementById('loVendor');
+    const dropdown = document.getElementById('loVendorSuggestions');
+    if (!input || !dropdown) return;
+    input.addEventListener('input', () => {
+        clearTimeout(_loVendorDebounce);
+        const q = input.value.trim();
+        if (q.length < 2) { dropdown.classList.remove('open'); return; }
+        _loVendorDebounce = setTimeout(() => _loVendorSearch(q), 250);
+    });
+    input.addEventListener('keydown', (e) => {
+        const items = dropdown.querySelectorAll('.ac-item');
+        if (!items.length || !dropdown.classList.contains('open')) return;
+        if (e.key === 'ArrowDown') { e.preventDefault(); _loAcIndex = Math.min(_loAcIndex + 1, items.length - 1); _loHighlight(items); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); _loAcIndex = Math.max(_loAcIndex - 1, 0); _loHighlight(items); }
+        else if (e.key === 'Enter' && _loAcIndex >= 0) { e.preventDefault(); items[_loAcIndex].click(); }
+        else if (e.key === 'Escape') { dropdown.classList.remove('open'); }
+    });
+    document.addEventListener('click', (e) => {
+        if (!dropdown.contains(e.target) && e.target !== input) dropdown.classList.remove('open');
+    });
+}
+
+function _loHighlight(items) {
+    items.forEach((it, i) => it.classList.toggle('ac-active', i === _loAcIndex));
+}
+
+async function _loVendorSearch(q) {
+    const dropdown = document.getElementById('loVendorSuggestions');
+    if (_loVendorCache[q]) { _loRenderSuggestions(_loVendorCache[q]); return; }
+    try {
+        const data = await apiFetch(`/api/autocomplete/names?q=${encodeURIComponent(q)}&limit=10`);
+        const names = (data || []).filter(r => r.type === 'vendor').map(r => r.name).filter(Boolean);
+        _loVendorCache[q] = names;
+        _loRenderSuggestions(names);
+    } catch {
+        dropdown.classList.remove('open');
+    }
+}
+
+function _loRenderSuggestions(names) {
+    const dropdown = document.getElementById('loVendorSuggestions');
+    const input = document.getElementById('loVendor');
+    _loAcIndex = -1;
+    if (!names.length) {
+        dropdown.innerHTML = '<div class="ac-empty">No vendors found</div>';
+        dropdown.classList.add('open');
+        return;
+    }
+    dropdown.innerHTML = names.map(n => `<div class="ac-item">${esc(n)}</div>`).join('');
+    dropdown.classList.add('open');
+    dropdown.querySelectorAll('.ac-item').forEach(item => {
+        item.addEventListener('click', () => {
+            input.value = item.textContent;
+            dropdown.classList.remove('open');
+            // Focus next field
+            const qty = document.getElementById('loQty');
+            if (qty) qty.focus();
+        });
+    });
+}
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', _initLoVendorAutocomplete);
 
 async function submitLogOffer() {
     const reqId = parseInt(document.getElementById('loReqId').value);

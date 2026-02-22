@@ -622,7 +622,8 @@ function renderOffers() {
             const checked = selectedOffers.has(o.id) ? 'checked' : '';
             const isRef = o.status === 'reference';
             const isExpired = o.status === 'expired';
-            const rowCls = isRef ? 'offer-ref' : (isExpired ? 'offer-expired' : '');
+            const isSub = o.mpn && group.mpn && o.mpn.trim().toUpperCase() !== group.mpn.trim().toUpperCase();
+            const rowCls = isRef ? 'offer-ref' : (isExpired ? 'offer-expired' : (isSub ? 'offer-sub' : ''));
             const subDetails = [o.firmware && 'FW: '+esc(o.firmware), o.hardware_code && 'HW: '+esc(o.hardware_code), o.packaging && 'Pkg: '+esc(o.packaging)].filter(Boolean).join(' · ');
 
             // Notes pill — shows date/time, click to expand
@@ -645,7 +646,7 @@ function renderOffers() {
             return `
             <tr class="${rowCls}">
                 <td><input type="checkbox" ${checked} ${isRef ? 'disabled' : ''} onchange="toggleOfferSelect(${o.id},this.checked)"></td>
-                <td>${esc(o.vendor_name)}${subDetails ? '<div class="sc-detail" style="font-size:10px;color:var(--muted)">'+subDetails+'</div>' : ''}${noteStr ? '<div>'+noteStr+'</div>' : ''}${photoHtml || fileHtml ? '<div style="margin-top:2px">'+photoHtml+(fileHtml?' '+fileHtml:'')+'</div>' : ''}</td>
+                <td>${esc(o.vendor_name)}${isSub ? ' <span class="badge b-sub">SUB</span>' : ''}${o.mpn && isSub ? '<div style="font-size:10px;color:#0e7490;font-weight:600">'+esc(o.mpn)+'</div>' : ''}${subDetails ? '<div class="sc-detail" style="font-size:10px;color:var(--muted)">'+subDetails+'</div>' : ''}${noteStr ? '<div>'+noteStr+'</div>' : ''}${photoHtml || fileHtml ? '<div style="margin-top:2px">'+photoHtml+(fileHtml?' '+fileHtml:'')+'</div>' : ''}</td>
                 <td>${o.unit_price != null ? '$'+Number(o.unit_price).toFixed(4) : '—'}</td>
                 <td>${o.qty_available != null ? o.qty_available.toLocaleString() : '—'}</td>
                 <td>${esc(o.lead_time || '—')}</td>
