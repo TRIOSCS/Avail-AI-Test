@@ -7,7 +7,7 @@ app.availai.net {
         X-Content-Type-Options "nosniff"
         Referrer-Policy "strict-origin-when-cross-origin"
         Permissions-Policy "camera=(), microphone=(), geolocation=()"
-        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'"
     }
 
     @blocked path /metrics
@@ -35,6 +35,16 @@ app.availai.net {
 
     @api path /api/* /auth/*
     handle @api {
+        header Cache-Control "no-cache, no-store, must-revalidate"
+        reverse_proxy app:8000
+    }
+
+    # HTML pages — no cache to ensure fresh JS/CSS references after deploy
+    @html {
+        path /
+        header Accept *text/html*
+    }
+    handle @html {
         header Cache-Control "no-cache, no-store, must-revalidate"
         reverse_proxy app:8000
     }

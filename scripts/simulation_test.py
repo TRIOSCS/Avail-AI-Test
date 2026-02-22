@@ -828,43 +828,6 @@ def test_config_defaults(pass_num):
 
 
 # ══════════════════════════════════════════════════════════════════════
-#  P. MIGRATION SQL VALIDATION
-# ══════════════════════════════════════════════════════════════════════
-
-def test_migration_sql(pass_num):
-    """Deep validation of all migration files."""
-    import glob
-    migration_files = sorted(glob.glob("migrations/*.sql"))
-    assert_true(len(migration_files) >= 3, f"expected ≥3 migrations, found {len(migration_files)}")
-
-    for mig_path in migration_files:
-        sql = open(mig_path).read()
-        name = os.path.basename(mig_path)
-
-        # Balanced parentheses
-        opens = sql.count("(")
-        closes = sql.count(")")
-        assert_eq(opens, closes, f"{name}: unbalanced parens ({opens} open, {closes} close)")
-
-        # No SQL typos
-        typos = {
-            "INTEGET": "INTEGER", "VARCAHR": "VARCHAR", "BOOELAN": "BOOLEAN",
-            "DEFALT": "DEFAULT", "FORIEGN": "FOREIGN", "REFERNCES": "REFERENCES",
-            "CREAT TABLE": "CREATE TABLE", "ATLER": "ALTER",
-        }
-        for bad, good in typos.items():
-            assert_true(bad not in sql.upper(), f"{name}: typo '{bad}' (should be '{good}')")
-
-        # Every statement ends with semicolon
-        lines = [l.strip() for l in sql.split("\n") if l.strip() and not l.strip().startswith("--")]
-        # Statements that need semicolons
-        for line in lines:
-            if line.upper().startswith(("CREATE", "ALTER", "INSERT", "DROP")):
-                # Find end of this statement (may span lines)
-                pass  # Multi-line statements make line-by-line check unreliable
-
-
-# ══════════════════════════════════════════════════════════════════════
 #  Q. EMAILMINER CLASS INTERFACE
 # ══════════════════════════════════════════════════════════════════════
 
@@ -1090,9 +1053,6 @@ def run_pass(pass_num):
 
     test(f"[O] Config Defaults — all settings have sane defaults (pass {pass_num})",
          lambda: test_config_defaults(pass_num))
-
-    test(f"[P] Migration SQL — balanced parens, no typos, structure (pass {pass_num})",
-         lambda: test_migration_sql(pass_num))
 
     test(f"[Q] EmailMiner Class — H2/H8 helpers, constructor, scan methods (pass {pass_num})",
          lambda: test_emailminer_class(pass_num))

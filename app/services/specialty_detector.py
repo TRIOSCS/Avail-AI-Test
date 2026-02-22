@@ -195,15 +195,3 @@ def analyze_vendor_specialties(vendor_card_id: int, db) -> dict:
         "commodity_tags": commodity_tags,
         "confidence": confidence,
     }
-
-
-def batch_analyze_specialties(vendor_card_ids: list[int], db) -> dict[int, dict]:
-    """Analyze specialties for multiple vendors. Returns {vendor_card_id: result}."""
-    results = {}
-    for vid in vendor_card_ids:
-        try:
-            results[vid] = analyze_vendor_specialties(vid, db)
-        except Exception as e:
-            log.warning("Specialty analysis failed for vendor %d: %s", vid, e)
-            results[vid] = {"brand_tags": [], "commodity_tags": [], "confidence": 0.0}
-    return results

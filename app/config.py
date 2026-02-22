@@ -80,8 +80,6 @@ class Settings:
     agent_api_key: str = os.getenv("AGENT_API_KEY", "")
 
     # Enrichment APIs
-    clay_api_key: str = os.getenv("CLAY_API_KEY", "")
-    explorium_api_key: str = os.getenv("EXPLORIUM_API_KEY", "")
     apollo_api_key: str = os.getenv("APOLLO_API_KEY", "")
 
     # Deep Enrichment APIs
