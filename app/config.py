@@ -73,7 +73,7 @@ class Settings:
     # DigitalOcean Gradient AI (serverless inference)
     do_gradient_api_key: str = os.getenv("DO_GRADIENT_API_KEY", "")
     do_gradient_model: str = os.getenv(
-        "DO_GRADIENT_MODEL", "anthropic-claude-sonnet-4-5"
+        "DO_GRADIENT_MODEL", "anthropic-claude-4.5-sonnet"
     )
 
     # Agent service-to-service auth
