@@ -1188,7 +1188,7 @@ function _formatEmailBody(text) {
 
 let _ddSelectedOffers = {};   // reqId → Set of offer IDs
 let _ddQuoteData = {};        // reqId → quote object for in-memory editing
-let _ddBuildQuoteOffers = [];  // offers array used by Build Quote modal + AI analyze
+
 
 function _renderDdOffers(reqId, data, panel) {
     const groups = data.groups || data || [];
@@ -1367,8 +1367,6 @@ function ddBuildQuote(reqId) {
         }
     }
     if (!offers.length) return;
-    _ddBuildQuoteOffers = offers;  // store for AI analyze
-
     // Build modal
     let linesHtml = '';
     for (let i = 0; i < offers.length; i++) {
@@ -1408,10 +1406,8 @@ function ddBuildQuote(reqId) {
                 </tr></tfoot>
             </table>
             </div>
-            <div id="bqAiResult"></div>
             <div class="mactions" style="margin-top:12px">
                 <button class="btn btn-ghost" onclick="document.getElementById('ddBuildQuoteBg').remove()">Cancel</button>
-                <button class="btn btn-ghost btn-sm" id="bqAiBtn" onclick="ddAiAnalyze(${reqId})">&#10024; AI Analyze</button>
                 <button class="btn btn-primary" id="bqCreateBtn" onclick="ddConfirmBuildQuote(${reqId})">Create Quote</button>
             </div>
         </div>
@@ -1508,62 +1504,6 @@ async function ddConfirmBuildQuote(reqId) {
             showToast('Error building quote: ' + (e.message || 'unknown'), 'error');
         }
     }
-}
-
-async function ddAiAnalyze(reqId) {
-    const btn = document.getElementById('bqAiBtn');
-    const container = document.getElementById('bqAiResult');
-    if (!container || !_ddBuildQuoteOffers.length) return;
-    if (btn) { btn.disabled = true; btn.textContent = 'Analyzing\u2026'; }
-    container.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px">Running AI analysis\u2026</div>';
-
-    // Group offers by MPN
-    const byMpn = {};
-    for (const o of _ddBuildQuoteOffers) {
-        const mpn = (o.mpn || o.offered_mpn || '').toUpperCase();
-        if (!byMpn[mpn]) byMpn[mpn] = [];
-        byMpn[mpn].push(o);
-    }
-
-    let html = '';
-    for (const [mpn, offers] of Object.entries(byMpn)) {
-        if (offers.length < 2) continue;
-        try {
-            const quotes = offers.map(o => ({
-                vendor_name: o.vendor_name || '',
-                unit_price: o.unit_price != null ? parseFloat(o.unit_price) : null,
-                quantity_available: o.qty_available || null,
-                lead_time_days: o.lead_time_days || null,
-                date_code: o.date_code || null,
-                condition: o.condition || null,
-            }));
-            const result = await apiFetch('/api/ai/compare-quotes', {
-                method: 'POST',
-                body: { part_number: mpn, quotes, required_qty: offers[0]._targetQty || null }
-            });
-            if (result.available) {
-                html += `<div style="background:var(--bg2);border-radius:8px;padding:10px;margin-bottom:8px;font-size:11px">
-                    <div style="font-weight:700;margin-bottom:4px">${esc(mpn)}</div>`;
-                if (result.recommendation) html += `<div style="margin-bottom:3px"><strong>Recommendation:</strong> ${esc(result.recommendation)}</div>`;
-                if (result.best_overall) html += `<div style="margin-bottom:3px"><strong>Best Overall:</strong> ${esc(result.best_overall.vendor || result.best_overall.vendor_name || '')} \u2014 ${esc(result.best_overall.reason || '')}</div>`;
-                if (result.risk_factors && result.risk_factors.length) {
-                    html += `<div style="color:var(--amber)"><strong>Risks:</strong> ${result.risk_factors.map(r => esc(typeof r === 'string' ? r : r.description || r.risk || JSON.stringify(r))).join('; ')}</div>`;
-                }
-                if (result.anomalies && result.anomalies.length) {
-                    html += `<div style="color:var(--red)"><strong>Anomalies:</strong> ${result.anomalies.map(a => esc(typeof a === 'string' ? a : a.description || JSON.stringify(a))).join('; ')}</div>`;
-                }
-                html += '</div>';
-            }
-        } catch (e) {
-            html += `<div style="font-size:11px;color:var(--red);padding:4px">${esc(mpn)}: Analysis unavailable</div>`;
-        }
-    }
-
-    if (!html) {
-        html = '<div style="font-size:11px;color:var(--muted);padding:8px">Need 2+ offers for the same MPN to compare.</div>';
-    }
-    container.innerHTML = html;
-    if (btn) { btn.disabled = false; btn.textContent = '\u2728 AI Analyze'; }
 }
 
 function ddEditOffer(reqId, offerId) {
@@ -7207,7 +7147,7 @@ async function submitTrouble(btn) {
 Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
     addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies,
-    cloneFromList, closeModal, ddAiAnalyze, ddApplyGlobalMarkup, ddApplyQuoteMarkup, ddBuildQuote,
+    cloneFromList, closeModal, ddApplyGlobalMarkup, ddApplyQuoteMarkup, ddBuildQuote,
     ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddEditOffer, ddMarkQuoteResult, ddPasteRows,
     ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddReviseQuote, ddSaveEditOffer, ddSaveQuoteDraft, ddSendBulkRfq, ddSendQuote,
     ddToggleAllOffers, ddToggleGroupOffers, ddToggleOffer, ddToggleOfferDetail, ddToggleSighting, ddToggleTier,
