@@ -849,7 +849,7 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 .ac-vendor{background:var(--teal-light,#e0f5f0);color:var(--teal,#0d9488)}
 .ac-customer{background:#f0e6ff;color:#6b3fa0}
 
-@media(max-width:768px) and (hover:none),(max-width:768px) and (pointer:coarse){
+@media(max-width:768px){
     .lo-form{grid-template-columns:1fr}
     .lo-form .field-full{grid-column:span 1}
     .quote-totals{flex-direction:column;gap:8px}
@@ -960,7 +960,7 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 #toastContainer{position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:6px;pointer-events:none}
 #toastContainer > *{pointer-events:auto}
 
-@media(max-width:768px) and (hover:none),(max-width:768px) and (pointer:coarse){
+@media(max-width:768px){
     .ai-panel-bg{padding:8px;align-items:flex-start;padding-top:40px}
     .ai-panel{padding:16px;max-height:calc(100vh - 60px)}
     .ai-contact-row{flex-direction:column;gap:6px}
@@ -1321,7 +1321,7 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .sbox-med{width:220px}
 
 /* Notification panel — standalone fixed positioning */
-.notif-panel-standalone{display:none;position:fixed;top:52px;right:16px;width:360px;max-height:400px;overflow-y:auto;background:var(--white);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:12px;z-index:310}
+.notif-panel-standalone{display:none;position:fixed;top:90px;right:16px;width:360px;max-height:400px;overflow-y:auto;background:var(--white);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:12px;z-index:310}
 .notif-panel-standalone.open{display:block}
 
 /* View toggle */
@@ -1427,19 +1427,11 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .det-part-notes { grid-column:1/-1; font-size:12px; color:var(--text); background:rgba(59,130,246,.08); border-left:3px solid var(--blue); border-radius:4px; padding:8px 10px; margin-top:6px; line-height:1.5; white-space:pre-wrap; }
 .det-part-notes::before { content:'📝 '; }
 
-@media (max-width:640px) and (hover:none),(max-width:640px) and (pointer:coarse) {
+@media (max-width:640px) {
     .det-ctx { flex-direction:column; align-items:flex-start; }
     .det-ctx-meta { flex-wrap:wrap; gap:10px; }
     .det-part { grid-template-columns:1fr; }
     .det-part-core { margin-bottom:8px; }
-}
-
-/* Desktop narrow window — keep desktop layout, allow graceful wrapping */
-@media (pointer:fine) and (max-width:960px) {
-    .topcontrols{flex-wrap:wrap;gap:6px}
-    .tb-group{flex-wrap:wrap;gap:6px}
-    .search-wrap{min-width:180px}
-    .main-scroll{overflow-x:auto}
 }
 
 /* Market summary banner (Octopart aggregate) */
@@ -1488,7 +1480,7 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .source-status-banner:not(.ss-expanded) .ss-toggle-hint::after{content:' \25b6'}
 
 /* ── Mobile deep fixes ──────────────────────────── */
-@media(max-width:768px) and (hover:none),(max-width:768px) and (pointer:coarse){
+@media(max-width:768px){
     /* Drill-down sub-tabs — horizontal scroll like main tabs */
     .dd-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;scrollbar-width:none}
     .dd-tabs::-webkit-scrollbar{display:none}

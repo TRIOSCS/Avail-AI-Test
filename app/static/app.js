@@ -7636,6 +7636,15 @@ function toggleNotifications() {
     const opening = !panel.classList.contains('open');
     panel.classList.toggle('open');
     if (opening) {
+        // Position below the bell button (desktop or mobile)
+        var anchor = document.querySelector('.mobile-topbar')?.offsetParent !== null
+            ? document.querySelector('.mobile-notif-btn')
+            : document.querySelector('.filter-wrap .tb-action[title="Notifications"]');
+        if (anchor) {
+            var rect = anchor.getBoundingClientRect();
+            panel.style.top = (rect.bottom + 6) + 'px';
+            panel.style.right = Math.max(12, window.innerWidth - rect.right) + 'px';
+        }
         loadNotifications();
         // Close on click outside
         setTimeout(() => {
