@@ -81,7 +81,7 @@ let rfqVendorData = [];
 let activeTabCache = {};  // reqId → tab name
 let _vendorListData = [];   // cached vendor list for client-side filtering
 let _vendorTierFilter = 'all';  // all|proven|developing|caution|new
-let expandedGroups = new Set();  // reqIds that are expanded (default: all collapsed)
+let expandedGroups = new Set();  // reqIds that are expanded (default: all expanded on load)
 let _ddReqCache = {};  // drill-down requirements cache: rfqId → [requirements]
 let _addRowActive = {};  // rfqId → true when inline add row is visible
 let _ddActFilter = {};   // rfqId → 'all'|'email'|'phone'|'notes' for activity filter
@@ -100,7 +100,7 @@ function _rebuildSightingIndex() {
 }
 
 // ── Shared Helpers ──────────────────────────────────────────────────────
-async function apiFetch(url, opts = {}) {
+export async function apiFetch(url, opts = {}) {
     // CSRF: include double-submit cookie value as header
     const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
     if (csrf) opts.headers = {...(opts.headers || {}), 'x-csrftoken': csrf};
@@ -134,7 +134,7 @@ async function apiFetch(url, opts = {}) {
     throw lastErr;
 }
 
-function debounce(fn, ms = 300) {
+export function debounce(fn, ms = 300) {
     let timer;
     return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
 }
@@ -143,24 +143,24 @@ function debounce(fn, ms = 300) {
 const debouncedRenderReqTable = debounce(() => renderRequirementsTable(), 150);
 const debouncedRenderSources = debounce(() => renderSources(), 150);
 const debouncedRenderActivity = debounce(() => renderActivityCards(), 150);
-const debouncedLoadCustomers = debounce(() => loadCustomers(), 300);
+const debouncedLoadCustomers = debounce(() => window.loadCustomers(), 300);
 const debouncedFilterVendors = debounce(() => filterVendorList(), 150);
 const debouncedLoadMaterials = debounce(() => loadMaterialList(), 300);
-const debouncedFilterSites = debounce((v) => filterSiteTypeahead(v), 150);
+const debouncedFilterSites = debounce((v) => window.filterSiteTypeahead(v), 150);
 
 // ── Utilities ───────────────────────────────────────────────────────────
-function esc(s) {
+export function esc(s) {
     if (!s) return '';
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-function escAttr(s) {
+export function escAttr(s) {
     if (!s) return '';
     return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
-function logCatchError(ctx, err) { if (err) console.warn('[' + ctx + ']', err); }
+export function logCatchError(ctx, err) { if (err) console.warn('[' + ctx + ']', err); }
 
 var _modalStack = [];
-function openModal(id, focusId) {
+export function openModal(id, focusId) {
     var el = document.getElementById(id);
     if (!el) return;
     el.classList.add('open');
@@ -180,7 +180,7 @@ function openModal(id, focusId) {
     }, 100);
 }
 
-async function guardBtn(btn, loadingText, action) {
+export async function guardBtn(btn, loadingText, action) {
     if (!btn || btn.disabled) return;
     var orig = btn.textContent;
     btn.disabled = true;
@@ -206,11 +206,11 @@ function _timeAgo(iso) {
     if (s < 86400) return Math.floor(s / 3600) + 'h ago';
     return Math.floor(s / 86400) + 'd ago';
 }
-function fmtDate(iso) {
+export function fmtDate(iso) {
     if (!iso) return '';
     return new Date(iso).toLocaleDateString();
 }
-function fmtDateTime(iso) {
+export function fmtDateTime(iso) {
     if (!iso) return '';
     const d = new Date(iso);
     return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
@@ -228,7 +228,7 @@ function stars(avg, count) {
 }
 
 // ── Name Autocomplete ───────────────────────────────────────────────────
-function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
+export function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
     const input = document.getElementById(inputId);
     const list  = document.getElementById(listId);
     if (!input || !list) return;
@@ -333,11 +333,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         const initRoutes = {
             'view-vendors': () => showVendors(),
             'view-materials': () => showMaterials(),
-            'view-customers': () => showCustomers(),
-            'view-buyplans': () => showBuyPlans(),
-            'view-proactive': () => showProactiveOffers(),
-            'view-performance': () => showPerformance(),
-            'view-settings': () => showSettings(),
+            'view-customers': () => window.showCustomers(),
+            'view-buyplans': () => window.showBuyPlans(),
+            'view-proactive': () => window.showProactiveOffers(),
+            'view-performance': () => window.showPerformance(),
+            'view-settings': () => window.showSettings(),
         };
         if (initRoutes[initView]) initRoutes[initView]();
         const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-performance':'navScorecards','view-settings':'navSettings'};
@@ -484,7 +484,7 @@ function applyRoleGating() {
 }
 function isBuyer() { return ['buyer','trader','manager','admin'].includes(window.userRole) || window.__isAdmin; }
 
-async function refreshProactiveBadge() {
+export async function refreshProactiveBadge() {
     try {
         const data = await apiFetch('/api/proactive/count');
         const badge = document.getElementById('proactiveBadge');
@@ -543,11 +543,11 @@ window.addEventListener('popstate', (e) => {
         },
         'view-vendors': () => showVendors(),
         'view-materials': () => showMaterials(),
-        'view-customers': () => showCustomers(),
-        'view-buyplans': () => showBuyPlans(),
-        'view-proactive': () => showProactiveOffers(),
-        'view-performance': () => showPerformance(),
-        'view-settings': () => showSettings(),
+        'view-customers': () => window.showCustomers(),
+        'view-buyplans': () => window.showBuyPlans(),
+        'view-proactive': () => window.showProactiveOffers(),
+        'view-performance': () => window.showPerformance(),
+        'view-settings': () => window.showSettings(),
     };
     if (routes[viewId]) routes[viewId]();
     // Highlight correct sidebar button
@@ -560,7 +560,7 @@ window.addEventListener('popstate', (e) => {
 const _viewScrollPos = {};  // viewId → scrollTop
 let _currentViewId = 'view-list';
 
-function showView(viewId) {
+export function showView(viewId) {
     // Save scroll position for the view we're leaving
     var scroller = document.querySelector('.main-scroll');
     if (scroller && _currentViewId) _viewScrollPos[_currentViewId] = scroller.scrollTop;
@@ -631,7 +631,7 @@ function showMaterials() {
 function openNewReqModal() {
     openModal('newReqModal', 'nrName');
 }
-function closeModal(id) {
+export function closeModal(id) {
     var el = document.getElementById(id);
     if (el) el.classList.remove('open');
     var entry = _modalStack.pop();
@@ -640,7 +640,7 @@ function closeModal(id) {
     }
 }
 
-function showToast(msg, type = 'info') {
+export function showToast(msg, type = 'info') {
     let container = document.getElementById('toastContainer');
     if (!container) {
         container = document.createElement('div');
@@ -670,7 +670,7 @@ function updateDetailStatus(status) {
     void chip.offsetWidth;
     chip.classList.add('pulse');
 }
-function notifyStatusChange(data) {
+export function notifyStatusChange(data) {
     if (!data || !data.status_changed) return;
     updateDetailStatus(data.req_status);
     const reqInfo = _reqListData.find(r => r.id === currentReqId);
@@ -703,7 +703,7 @@ let _reqSearchSeq = 0; // Sequence counter to discard stale responses
 let _archiveHasMore = false;
 let _archivePageSize = 200;
 
-async function loadRequisitions(query = '', append = false) {
+export async function loadRequisitions(query = '', append = false) {
     // Cancel any in-flight request
     if (_reqAbort) { try { _reqAbort.abort(); } catch(e){} }
     _reqAbort = new AbortController();
@@ -1122,7 +1122,7 @@ function _renderDdQuotes(reqId, data, panel) {
     panel.innerHTML = html;
 }
 
-async function toggleDrillDown(reqId) {
+export async function toggleDrillDown(reqId) {
     const drow = document.getElementById('d-' + reqId);
     const arrow = document.getElementById('a-' + reqId);
     if (!drow) return;
@@ -2880,7 +2880,7 @@ function toggleSidebar() {
     document.body.classList.toggle('sb-open');
 }
 
-function sidebarNav(page, el) {
+export function sidebarNav(page, el) {
     document.querySelectorAll('.sidebar-nav button').forEach(i => i.classList.remove('active'));
     if (el) el.classList.add('active');
     // Close sidebar on mobile
@@ -2893,19 +2893,19 @@ function sidebarNav(page, el) {
     if (np) np.classList.remove('open');
     const routes = {
         reqs: () => { showList(); setMainPill('rfq'); },
-        customers: () => showCustomers(),
+        customers: () => window.showCustomers(),
         vendors: () => showVendors(),
         materials: () => showMaterials(),
-        buyplans: () => showBuyPlans(),
-        proactive: () => showProactiveOffers(),
-        performance: () => showPerformance(),
-        settings: () => showSettings()
+        buyplans: () => window.showBuyPlans(),
+        proactive: () => window.showProactiveOffers(),
+        performance: () => window.showPerformance(),
+        settings: () => window.showSettings()
     };
     try { if (routes[page]) routes[page](); }
     catch(e) { console.error('sidebarNav error:', page, e); }
 }
 
-function navHighlight(btn) {
+export function navHighlight(btn) {
     document.querySelectorAll('.sidebar-nav button').forEach(i => i.classList.remove('active'));
     if (btn) btn.classList.add('active');
     document.body.classList.remove('sb-open');
@@ -3349,7 +3349,7 @@ async function searchAll() {
             searchResultsCache[currentReqId] = searchResults;
             _rebuildSightingIndex();
             selectedSightings.clear();
-            expandedGroups.clear();
+            expandedGroups = new Set(Object.keys(results));
             renderSources();
             updateRequirementCounts();
             switchTab('sources', document.querySelectorAll('#reqTabs .tab')[1]);
@@ -4155,7 +4155,7 @@ async function logCall(event, vendorName, vendorPhone, mpn) {
 }
 
 // ── Vendor Card Popup ──────────────────────────────────────────────────
-async function openVendorPopup(cardId) {
+export async function openVendorPopup(cardId) {
     _vendorEmailsLoaded = null;  // Reset so emails reload for new vendor
     let card;
     try { card = await apiFetch(`/api/vendors/${cardId}`); }
@@ -4514,7 +4514,7 @@ async function vpToggleBlacklist(cardId, blacklisted) {
 
 // ── Vendor Contacts CRUD ──────────────────────────────────────────────
 
-async function loadVendorContacts(cardId) {
+export async function loadVendorContacts(cardId) {
     const el = document.getElementById('vpContactsList');
     if (!el) return;
     try {
@@ -4653,7 +4653,7 @@ async function loadVendorActivityStatus(cardId) {
 }
 
 
-function autoLogEmail(email, contactName) {
+export function autoLogEmail(email, contactName) {
     apiFetch('/api/activities/email', {
         method: 'POST', body: { email: email, contact_name: contactName || null }
     }).catch(function(e) { console.error('autoLogEmail:', e); });
@@ -5467,7 +5467,7 @@ function renderActivityCards() {
     }).join('');
 }
 
-function fmtRelative(iso) {
+export function fmtRelative(iso) {
     if (!iso) return '—';
     const d = new Date(iso);
     const now = new Date();
@@ -6318,3 +6318,58 @@ async function submitTrouble(btn) {
         setTimeout(function() { closeTroubleChat(); }, 2500);
     });
 }
+
+// ── ESM: expose all inline-handler functions to window ────────────────
+Object.assign(window, {
+    // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
+    addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall,
+    cloneFromList, closeModal, ddBuildQuote, ddPasteRows,
+    ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddSendBulkRfq,
+    ddToggleAllOffers, ddToggleOffer, ddToggleSighting, ddToggleTier,
+    ddUploadFile, debounceOfferHistorySearch, debouncePartsSightingsSearch,
+    deleteDrillRow, deleteMaterial, deleteReq, deleteVendor,
+    deleteVendorContact, editDeadline, editDrillCell, editMaterialField,
+    editReqCell, editReqCustomer, editReqName, editVendorField, escAttr,
+    expandMatchingGroups, expandToSubTab, inlineSourceAll,
+    loadMoreOfferHistory, loadMorePartsSightings, loadRequisitions,
+    logCall, markAllNotifsRead, markUnavailable, openAddVendorContact,
+    openEditVendorContact, openLogOfferFromList, openMaterialPopup,
+    openMaterialPopupByMpn, openVendorLogNoteModal,
+    openVendorPopup, placeVendorCall, renderReqList, requoteFromList,
+    rfqIncludeRepeats, rfqManualEmail, rfqRemoveVendor, rfqSelectEmail,
+    rfqToggleVendor, saveDeadline, sendEmailReply, sendFollowUp,
+    setToolbarQuickFilter, showView, sidebarNav, sortMatList, sortReqList,
+    sortVendorList, threadSearchFilter, toggleAllDrillRows,
+    toggleArchiveGroup, toggleConfirmedQuotes, toggleDrillDown,
+    toggleGroup, toggleOfferHistory, togglePartsSightings,
+    toggleReqSelection, toggleSighting, toggleThreadMessages,
+    toggleVendorEmails, toggleVpThreadMessages, unifiedEnrichVendor,
+    viewThread, vpSetRating, vpSubmitReview, vpToggleBlacklist,
+    // Internal/underscore-prefixed functions used in inline handlers
+    _appendAddRow, _buildEffortTip, _cancelAddRow,
+    _collapseAllDrillDowns, _ddDefaultTab, _ddPromptFallback,
+    _ddRenderTierRows, _ddSaveEmail, _ddSearchOverlay, _ddSubTabs,
+    _ddTabLabel, _ddVendorInlineBadges, _ddVendorLinkPill,
+    _ddVendorScoreRing, _debouncedPartsSightingsSearch,
+    _ensureEmailListModal, _formatEmailBody, _gatherBugContext,
+    _loadDdSubTab, _matSortArrow, _notifBadgeColor, _notifClickAction,
+    _notifLabel, _parseTsvInput, _previewPaste, _pushNav,
+    _rebuildSightingIndex, _renderDdActivity, _renderDdDetails,
+    _renderDdOffers, _renderDdQuotes, _renderDdTab, _renderDdTabPills,
+    _renderDetailDeadline, _renderDrillDownTable, _renderReqRow,
+    _renderRfqPrepareProgress, _renderSourcingDrillDown, _reqBadge,
+    _saveAddRow, _selfGuard, _sightingTier, _sortArrow, _switchDdTab,
+    _timeAgo, _updateDdBulkButton, _updateDrillToggleLabel,
+    _updateToolbarStats, _vendorHasPartsToSend, _vendorSortArrow,
+    // HTML template inline handlers
+    clearFileInput, clearNrSite, closeLogOfferModal, closeTroubleChat,
+    createRequisition, debouncedFilterSites, debouncedFilterVendors,
+    debouncedLoadCustomers, debouncedLoadMaterials, debouncedMainSearch,
+    doStockImport, filterVendorList, openNewReqModal, openTroubleChat,
+    rfqDeselectAllVendors, rfqSelectAllVendors, saveVendorContact,
+    saveVendorLogCall, saveVendorLogNote, sendBatchRfq, setMainView,
+    setRfqCondition, setStatusFilter, setVendorTier, showFileReady,
+    submitLogOffer, submitPastedRows, submitTrouble, toggleMobileSidebar,
+    toggleMyAccounts, toggleNotifications, toggleSidebar, toggleStockImport,
+    triggerMainSearch,
+});
