@@ -1389,8 +1389,9 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .det-spec { display:flex; flex-direction:column; }
 .det-spec-val { font-size:11px; font-weight:500; margin-top:1px; }
 
-/* Notes — full width below the grid */
-.det-part-notes { grid-column:1/-1; font-size:11px; color:var(--muted); font-style:italic; padding-top:6px; border-top:1px solid var(--border); margin-top:4px; line-height:1.4; }
+/* Notes — full width below the grid, prominent callout */
+.det-part-notes { grid-column:1/-1; font-size:12px; color:var(--text); background:rgba(59,130,246,.08); border-left:3px solid var(--blue); border-radius:4px; padding:8px 10px; margin-top:6px; line-height:1.5; white-space:pre-wrap; }
+.det-part-notes::before { content:'📝 '; }
 
 @media (max-width:640px) {
     .det-ctx { flex-direction:column; align-items:flex-start; }

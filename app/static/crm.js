@@ -1,6 +1,13 @@
 /* AVAIL v1.2.0 — CRM Extension: Customers, Offers, Quotes */
 
-// Depends on app.js (loaded first): apiFetch, debounce, esc, escAttr, showToast, fmtDate, fmtDateTime
+import {
+    apiFetch, debounce, esc, escAttr, logCatchError, showToast,
+    fmtDate, fmtDateTime, fmtRelative, openModal, closeModal,
+    showView, sidebarNav, navHighlight, autoLogEmail,
+    initNameAutocomplete, notifyStatusChange, loadRequisitions,
+    toggleDrillDown, guardBtn, openVendorPopup,
+    loadVendorContacts, refreshProactiveBadge,
+} from 'app';
 
 // ── Debounced CRM Handlers ─────────────────────────────────────────────
 const _debouncedFilterSiteContacts = debounce((input, siteId) => filterSiteContacts(input, siteId), 150);
@@ -4919,3 +4926,53 @@ async function regeneratePrompt(id, btn) {
         viewTicketDetail(id);
     });
 }
+
+// ── ESM: expose all inline-handler functions to window ────────────────
+Object.assign(window, {
+    _attrSearch, _attrSelect, _debouncedFilterSiteContacts,
+    _debouncedLoadVendorScorecards, _debouncedUpdateBpTotals,
+    _debouncedUpdateProactivePreview,
+    applyMarkup, approveBuyPlan, approveEnrichItem,
+    autoCreateSiteAndSelect, autoLogCrmCall,
+    browseOneDrive, cancelBuyPlan, cancelCredEdit, cancelEnrichJob,
+    completeBuyPlan, convertProactiveOffer, copyPromptToClipboard,
+    copyQuoteTable, deleteAIContact, deleteAdminUser, deleteCredential,
+    deleteOffer, deleteOfferAttachment, deleteSiteContact,
+    dismissActivity, dismissProactiveGroup, editCredential,
+    eqToggleAll, eqToggleItem, loadBuyPlans, loadBuyerLeaderboard,
+    loadQuote, loadSpecificQuote, loadSalespersonScorecard,
+    loadTroubleTickets, markQuoteResult, onSourcesSearch,
+    openAddSiteContact, openAddSiteModal, openBuyPlanDetail,
+    openEditCompany, openEditOffer, openEditSiteContact,
+    openEditSiteModal, openLogNoteModal, openLostModal,
+    openOfferGallery, openPricingHistory, openProactiveSendModal,
+    openRejectBuyPlanModal, promptAttributeActivity, quickCreateCompany,
+    refreshBuyerLeaderboard, refreshTeamsChannels,
+    refreshVendorScorecards, regeneratePrompt, rejectBuyPlan,
+    rejectEnrichItem, reopenQuote, resubmitBuyPlan, reviseQuote,
+    saveAIContact, saveBuyPlanPOs, saveConfig, saveCredential,
+    saveParsedOffers, saveQuoteDraft, saveTeamsConfig, scToggle,
+    selectOneDriveFile, selectSite, sendQuoteEmail, setOfferFilter,
+    setOfferSort, setSourcesFilter, showView, sortBpList, sortCustList,
+    sortSalesScorecard, testSourceCred, testTeamsPost, toggleCustDrill,
+    toggleOfferSelect, togglePlannedSources, toggleSiteDetail,
+    toggleSourceStatus, tokenApprovePlan, tokenRejectPlan,
+    triggerDeepScan, unifiedEnrichCompany, updateQuoteLine,
+    updateQuoteLineField, updateTicketStatus, updateUserField,
+    updateWeightTotal, verifyBuyPlanPOs, viewTicketDetail,
+    openSuggestedContacts,
+    // HTML template inline handlers
+    addSelectedSuggestedContacts, addSite, bulkApproveSelected,
+    confirmSendQuote, createCompany, createUser, exportTicketsXlsx,
+    filterSiteTypeahead, importCustomers, importVendors,
+    loadCustomers, loadEnrichmentQueue, onSqContactChange,
+    openNewCompanyModal, renderBuyPlansList, saveEditCompany,
+    saveLogCall, saveLogNote, saveSiteContact, searchSuggestedContacts,
+    sendProactiveOffer, setBpFilter, startBackfill, startEmailBackfill,
+    startWebsiteScrape, submitBuyPlan, submitLost, switchEnrichTab,
+    switchPerfTab, switchProactiveTab, switchSettingsTab,
+    toggleCustUnassigned, updateOffer,
+    // Cross-file calls from app.js
+    goToCompany, showBuyPlans, showCustomers, showPerformance,
+    showProactiveOffers, showSettings,
+});

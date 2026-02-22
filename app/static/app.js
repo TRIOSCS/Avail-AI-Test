@@ -732,6 +732,7 @@ export async function loadRequisitions(query = '', append = false) {
             _ddSightingsCache = {};
             _ddSelectedSightings = {};
             _ddTierState = {};
+            for (const k of Object.keys(_ddTabCache)) delete _ddTabCache[k];
         }
         _archiveHasMore = _currentMainView === 'archive' && items.length >= limit;
         _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
@@ -854,7 +855,10 @@ function _renderDdTab(reqId, tabName, data, panel) {
     switch (tabName) {
         case 'details': _renderDdDetails(reqId, panel); break;
         case 'parts': _renderDrillDownTable(reqId, panel); break;
-        case 'sightings': _renderSourcingDrillDown(reqId, panel); break;
+        case 'sightings':
+            if (data && !_ddSightingsCache[reqId]) _ddSightingsCache[reqId] = data;
+            _renderSourcingDrillDown(reqId, panel);
+            break;
         case 'activity': _renderDdActivity(reqId, data, panel); break;
         case 'offers': _renderDdOffers(reqId, data, panel); break;
         case 'quotes': _renderDdQuotes(reqId, data, panel); break;
@@ -1264,7 +1268,7 @@ function _renderDrillDownTable(rfqId, targetPanel) {
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'firmware')" style="font-size:10px">${esc(r.firmware || '—')}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'hardware_codes')" style="font-size:10px">${esc(r.hardware_codes || '—')}</td>
             <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'packaging')" style="font-size:10px">${esc(r.packaging || '—')}</td>
-            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'notes')" title="${escAttr(r.notes || '')}" style="font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(notesTrunc)}</td>
+            <td class="dd-edit" onclick="event.stopPropagation();editDrillCell(this,${rfqId},${r.id},'notes')" title="${escAttr(r.notes || '')}" style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${r.notes ? 'color:var(--blue);font-weight:600' : ''}">${r.notes ? '📝 ' : ''}${esc(notesTrunc)}</td>
             <td><button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteDrillRow(${rfqId},${r.id})" title="Remove" style="font-size:10px;padding:1px 5px">\u2715</button></td>
         </tr>`;
     }
