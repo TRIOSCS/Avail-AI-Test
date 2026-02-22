@@ -45,17 +45,28 @@ def test_openapi_schema_is_valid():
 @pytest.mark.skipif(not HAS_SCHEMATHESIS, reason="schemathesis not installed")
 def test_contract_health():
     """Schemathesis can load the schema and validate /health."""
+    from starlette.testclient import TestClient
 
     from app.main import app
 
-    schema = schemathesis.from_asgi("/openapi.json", app)
+    # schemathesis 4.x removed from_asgi; fall back to from_dict
+    if hasattr(schemathesis, "from_asgi"):
+        schema = schemathesis.from_asgi("/openapi.json", app)
+    else:
+        client = TestClient(app)
+        raw = client.get("/openapi.json").json()
+        schema = schemathesis.from_dict(raw)
 
     # Validate just the /health endpoint as a smoke test
     for endpoint in schema.get_all_endpoints():
         path, method = endpoint[0], endpoint[1]
         if path == "/health" and method.upper() == "GET":
             case = endpoint[2].make_case()
-            response = case.call_asgi(app)
+            if hasattr(case, "call_asgi"):
+                response = case.call_asgi(app)
+            else:
+                client = TestClient(app)
+                response = client.get("/health")
             case.validate_response(response)
             return
 
