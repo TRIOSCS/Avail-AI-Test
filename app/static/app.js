@@ -3158,6 +3158,28 @@ function _ddVendorInlineBadges(s) {
 function _ddRenderTierRows(sightings, reqId, sel, groupLabel) {
     let html = '';
     for (const s of sightings) {
+        // Historical offer rows get different rendering
+        if (s._historical) {
+            const ho = s._ho;
+            const hPrice = ho.unit_price != null ? '$' + parseFloat(ho.unit_price).toFixed(4) : '\u2014';
+            const hSub = ho.is_substitute ? ' <span class="badge b-sub">SUB</span>' : '';
+            const sAge = ho.created_at ? fmtRelative(ho.created_at) : '\u2014';
+            const hoJson = esc(JSON.stringify(ho));
+            html += `<tr>
+                <td><span style="font-size:8px;padding:1px 4px;border-radius:3px;background:var(--blue-light,#e0f2fe);color:var(--blue,#0284c7);font-weight:700;letter-spacing:.3px">HIST</span></td>
+                <td>${esc(ho.vendor_name || '\u2014')}${hSub} <span style="font-size:9px;color:var(--muted)">RFQ-${ho.from_requisition_id || '\u2014'}</span></td>
+                <td class="mono">${esc(ho.mpn || '\u2014')}</td>
+                <td class="mono">${ho.qty_available != null ? Number(ho.qty_available).toLocaleString() : '\u2014'}</td>
+                <td class="mono" style="color:var(--teal)">${hPrice}</td>
+                <td style="font-size:10px">historical</td>
+                <td style="font-size:10px">${esc(ho.condition || '\u2014')}</td>
+                <td style="font-size:10px;color:var(--muted)">${sAge}
+                    <button class="btn btn-ghost btn-sm" style="font-size:9px;padding:1px 4px;margin-left:4px" onclick="event.stopPropagation();ddReconfirmOffer(${ho.id},${reqId})" title="Mark as still valid">\u2713</button>
+                    <button class="btn btn-ghost btn-sm" style="font-size:9px;padding:1px 4px;color:var(--teal)" onclick='event.stopPropagation();ddLogFromHistorical(${reqId},${hoJson})' title="Log as new offer on this RFQ">+Log</button>
+                </td>
+            </tr>`;
+            continue;
+        }
         const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
         const checked = sel.has(s.id) ? 'checked' : '';
         const dimStyle = !hasEmail ? 'opacity:.5' : '';
@@ -3219,6 +3241,27 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         const aggregates = allSightings.filter(s => (s.source_type || '').toLowerCase() === 'octopart');
         const sightings = allSightings.filter(s => (s.source_type || '').toLowerCase() !== 'octopart');
 
+        // Merge historical offers into sightings as regular rows
+        const histOffers = group.historical_offers || [];
+        for (const ho of histOffers) {
+            sightings.push({
+                id: 'ho-' + ho.id,
+                vendor_name: ho.vendor_name,
+                mpn_matched: ho.mpn || label,
+                qty_available: ho.qty_available,
+                unit_price: ho.unit_price,
+                source_type: 'historical',
+                condition: ho.condition,
+                lead_time: ho.lead_time,
+                created_at: ho.created_at,
+                is_substitute: ho.is_substitute,
+                _historical: true,
+                _ho: ho,
+                vendor_card: {},
+                score: 40,
+            });
+        }
+
         // Per-requirement sourcing score dot with tooltip
         const rs = scoreMap[rId];
         let effortBadge = '';
@@ -3273,46 +3316,6 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
                 if (!showAll && items.length > DD_LIMIT) {
                     html += `<a onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin:2px 0 0 12px">Show all ${items.length} sources\u2026</a>`;
                 }
-            }
-            html += '</div>';
-        }
-
-        // ── Historical Offers (cross-requisition) in sightings ──────
-        const histOffers = group.historical_offers || [];
-        if (histOffers.length) {
-            const hKey = `sightings-${reqId}-${rId}`;
-            const expanded = !!_ddHistoryExpanded[hKey];
-            const arrow = expanded ? '\u25BC' : '\u25B6';
-            html += `<div style="margin-top:4px;border-top:1px dashed var(--border);padding-top:4px">`;
-            html += `<div style="cursor:pointer;font-size:11px;color:var(--muted);user-select:none" onclick="event.stopPropagation();ddToggleHistorySightings('${hKey}',${reqId})">
-                ${arrow} \uD83D\uDCCB ${histOffers.length} historical offer${histOffers.length !== 1 ? 's' : ''}
-            </div>`;
-            if (expanded) {
-                html += `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:4px">`;
-                html += `<table class="dtbl"><thead><tr>
-                    <th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th>Date</th><th>Source Req</th><th>Actions</th>
-                </tr></thead><tbody>`;
-                for (const ho of histOffers) {
-                    const hPrice = ho.unit_price != null ? '$' + parseFloat(ho.unit_price).toFixed(4) : '\u2014';
-                    const hDate = ho.created_at ? new Date(ho.created_at).toLocaleDateString() : '\u2014';
-                    const hSub = ho.is_substitute ? ' <span class="badge b-sub">SUB</span>' : '';
-                    const hoJson = esc(JSON.stringify(ho));
-                    html += `<tr style="color:var(--muted)" data-ho-id="${ho.id}">
-                        <td>${esc(ho.vendor_name || '')}${hSub}</td>
-                        <td class="mono">${esc(ho.mpn || '\u2014')}</td>
-                        <td class="mono">${ho.qty_available != null ? Number(ho.qty_available).toLocaleString() : '\u2014'}</td>
-                        <td class="mono" style="color:var(--teal)">${hPrice}</td>
-                        <td>${esc(ho.lead_time || '\u2014')}</td>
-                        <td>${esc(ho.condition || '\u2014')}</td>
-                        <td style="font-size:10px">${hDate}</td>
-                        <td style="font-size:10px">RFQ-${ho.from_requisition_id || '\u2014'}</td>
-                        <td style="white-space:nowrap">
-                            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px" onclick="event.stopPropagation();ddReconfirmOffer(${ho.id},${reqId})" title="Mark as still valid">\u2713 Reconfirm</button>
-                            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;color:var(--teal)" onclick='event.stopPropagation();ddLogFromHistorical(${reqId},${hoJson})' title="Log as new offer on this RFQ">+ Log</button>
-                        </td>
-                    </tr>`;
-                }
-                html += '</tbody></table></div>';
             }
             html += '</div>';
         }
