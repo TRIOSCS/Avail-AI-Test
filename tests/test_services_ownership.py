@@ -22,6 +22,7 @@ from app.services.ownership_service import (
     get_my_accounts,
     get_open_pool_accounts,
     run_ownership_sweep,
+    send_manager_digest_email,
 )
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -320,3 +321,149 @@ class TestWasWarnedToday:
         db_session.commit()
 
         assert _was_warned_today(co.id, sales.id, db_session) is False
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  send_manager_digest_email
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestSendManagerDigestEmail:
+    @pytest.mark.asyncio
+    async def test_nothing_to_report_early_return(self, db_session):
+        """No at-risk or cleared accounts → early return, no email sent."""
+        with patch("app.services.ownership_service.settings") as mock_settings:
+            mock_settings.admin_emails = ["admin@trioscs.com"]
+            mock_settings.customer_inactivity_days = 30
+            mock_settings.strategic_inactivity_days = 90
+
+            # No at-risk accounts in empty DB → nothing to report
+            await send_manager_digest_email(db_session)
+            # Should not raise; early return
+
+    @pytest.mark.asyncio
+    async def test_sends_to_admin_emails(self, db_session):
+        """Digest is sent to all admin emails when there are at-risk accounts."""
+        # Create an at-risk account
+        sales = _make_sales_user(db_session)
+        admin = User(
+            email="admin@trioscs.com", name="Admin",
+            role="admin", azure_id="az-admin",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(admin)
+        db_session.flush()
+        _make_company(
+            db_session, name="At Risk Co", owner_id=sales.id,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=25),
+        )
+        db_session.commit()
+
+        with patch("app.services.ownership_service.settings") as mock_settings, \
+             patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"), \
+             patch("app.utils.graph_client.GraphClient") as mock_gc_class:
+            mock_settings.admin_emails = ["admin@trioscs.com"]
+            mock_settings.customer_inactivity_days = 30
+            mock_settings.strategic_inactivity_days = 90
+            mock_gc = mock_gc_class.return_value
+            mock_gc.post_json = AsyncMock()
+
+            await send_manager_digest_email(db_session)
+
+        mock_gc.post_json.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_graph_error_logged_not_raised(self, db_session):
+        """Graph API error during digest send is logged, not raised."""
+        sales = _make_sales_user(db_session)
+        admin = User(
+            email="admin@trioscs.com", name="Admin",
+            role="admin", azure_id="az-admin-err",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(admin)
+        db_session.flush()
+        _make_company(
+            db_session, name="Risk Co 2", owner_id=sales.id,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=25),
+        )
+        db_session.commit()
+
+        with patch("app.services.ownership_service.settings") as mock_settings, \
+             patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token"), \
+             patch("app.utils.graph_client.GraphClient") as mock_gc_class:
+            mock_settings.admin_emails = ["admin@trioscs.com"]
+            mock_settings.customer_inactivity_days = 30
+            mock_settings.strategic_inactivity_days = 90
+            mock_gc = mock_gc_class.return_value
+            mock_gc.post_json = AsyncMock(side_effect=Exception("Graph API error"))
+
+            # Should not raise
+            await send_manager_digest_email(db_session)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  get_my_accounts — status classification
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestGetMyAccountsStatuses:
+    def test_no_activity_status(self, db_session):
+        """Account with no last_activity_at → 'no_activity'."""
+        sales = _make_sales_user(db_session, "stat1@t.com")
+        _make_company(db_session, name="No Activity Co", owner_id=sales.id, last_activity_at=None)
+        db_session.commit()
+
+        result = get_my_accounts(sales.id, db_session)
+        assert len(result) == 1
+        assert result[0]["status"] == "no_activity"
+
+    def test_green_zone(self, db_session):
+        """Recent activity → 'green'."""
+        sales = _make_sales_user(db_session, "stat2@t.com")
+        _make_company(
+            db_session, name="Green Co", owner_id=sales.id,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=5),
+        )
+        db_session.commit()
+
+        result = get_my_accounts(sales.id, db_session)
+        assert result[0]["status"] == "green"
+
+    def test_yellow_zone(self, db_session):
+        """24 days inactive (in 23-30 window) → 'yellow'."""
+        sales = _make_sales_user(db_session, "stat3@t.com")
+        _make_company(
+            db_session, name="Yellow Co", owner_id=sales.id,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=24),
+        )
+        db_session.commit()
+
+        result = get_my_accounts(sales.id, db_session)
+        assert result[0]["status"] == "yellow"
+
+    def test_red_zone(self, db_session):
+        """31 days inactive (past 30-day limit) → 'red'."""
+        sales = _make_sales_user(db_session, "stat4@t.com")
+        _make_company(
+            db_session, name="Red Co", owner_id=sales.id,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=31),
+        )
+        db_session.commit()
+
+        result = get_my_accounts(sales.id, db_session)
+        assert result[0]["status"] == "red"
+
+    def test_strategic_account_longer_limit(self, db_session):
+        """Strategic account at 35 days → still 'green' (90-day limit)."""
+        sales = _make_sales_user(db_session, "stat5@t.com")
+        co = _make_company(
+            db_session, name="Strategic Co", owner_id=sales.id,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
+        )
+        co.is_strategic = True
+        db_session.commit()
+
+        result = get_my_accounts(sales.id, db_session)
+        assert result[0]["status"] == "green"
+        assert result[0]["is_strategic"] is True

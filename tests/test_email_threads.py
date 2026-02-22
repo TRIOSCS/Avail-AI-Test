@@ -24,7 +24,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.models import Contact
+from app.models import Contact, Sighting, VendorCard, VendorContact
 from app.schemas.emails import (
     EmailMessage,
     EmailReplyRequest,
@@ -544,3 +544,307 @@ class TestFetchThreadsForVendor:
             99999, "fake-token", db_session, user_id=test_user.id
         )
         assert threads == []
+
+    @pytest.mark.asyncio
+    async def test_vendor_contacts_collect_domains(self, db_session, test_user, test_vendor_card):
+        """VendorContacts contribute their email domains to the search."""
+        test_vendor_card.domain = None
+        test_vendor_card.emails = []
+        db_session.flush()
+
+        # Add a vendor contact with a non-generic domain
+        vc = VendorContact(
+            vendor_card_id=test_vendor_card.id,
+            full_name="Arrow Rep",
+            email="rep@arrowelectronics.com",
+            source="manual",
+        )
+        db_session.add(vc)
+        db_session.commit()
+
+        mock_messages = [
+            {
+                "id": "msg-vc1",
+                "subject": "Stock update",
+                "from": {"emailAddress": {"address": "rep@arrowelectronics.com"}},
+                "toRecipients": [{"emailAddress": {"address": "buyer@trioscs.com"}}],
+                "bodyPreview": "Updated list",
+                "receivedDateTime": "2025-01-20T10:00:00Z",
+                "conversationId": "conv-vc-domain",
+            },
+        ]
+
+        with patch("app.services.email_threads.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.get_all_pages = AsyncMock(return_value=mock_messages)
+
+            threads = await fetch_threads_for_vendor(
+                test_vendor_card.id, "fake-token", db_session, user_id=test_user.id
+            )
+
+        assert len(threads) == 1
+        assert threads[0]["matched_via"] == "vendor_domain"
+
+    @pytest.mark.asyncio
+    async def test_vendor_domain_aliases_included(self, db_session, test_user, test_vendor_card):
+        """domain_aliases on VendorCard are included in the search."""
+        test_vendor_card.domain = "arrow.com"
+        test_vendor_card.domain_aliases = ["arrowglobal.com"]
+        test_vendor_card.emails = []
+        db_session.commit()
+
+        mock_messages = [
+            {
+                "id": "msg-alias",
+                "subject": "Quote",
+                "from": {"emailAddress": {"address": "sales@arrowglobal.com"}},
+                "toRecipients": [{"emailAddress": {"address": "buyer@trioscs.com"}}],
+                "bodyPreview": "Quote attached",
+                "receivedDateTime": "2025-02-01T10:00:00Z",
+                "conversationId": "conv-alias-1",
+            },
+        ]
+
+        with patch("app.services.email_threads.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.get_all_pages = AsyncMock(return_value=mock_messages)
+
+            threads = await fetch_threads_for_vendor(
+                test_vendor_card.id, "fake-token", db_session, user_id=test_user.id
+            )
+
+        # Should search both arrow.com and arrowglobal.com
+        assert MockGC.return_value.get_all_pages.call_count >= 2
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_skips_graph(self, db_session, test_user, test_vendor_card):
+        """Second call returns cached data without hitting Graph."""
+        test_vendor_card.domain = "arrow.com"
+        db_session.commit()
+
+        mock_messages = [
+            {
+                "id": "msg-cache",
+                "subject": "Cache test",
+                "from": {"emailAddress": {"address": "sales@arrow.com"}},
+                "toRecipients": [{"emailAddress": {"address": "buyer@trioscs.com"}}],
+                "bodyPreview": "data",
+                "receivedDateTime": "2025-01-20T10:00:00Z",
+                "conversationId": "conv-cache-1",
+            },
+        ]
+
+        with patch("app.services.email_threads.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.get_all_pages = AsyncMock(return_value=mock_messages)
+
+            # First call populates cache
+            await fetch_threads_for_vendor(
+                test_vendor_card.id, "fake-token", db_session, user_id=test_user.id
+            )
+            first_call_count = MockGC.call_count
+
+            # Second call should use cache
+            await fetch_threads_for_vendor(
+                test_vendor_card.id, "fake-token", db_session, user_id=test_user.id
+            )
+
+        assert MockGC.call_count == first_call_count  # No additional GraphClient creation
+
+    @pytest.mark.asyncio
+    async def test_generic_domains_filtered(self, db_session, test_user, test_vendor_card):
+        """Generic domains (gmail.com etc) are filtered from vendor search."""
+        test_vendor_card.domain = None
+        test_vendor_card.emails = ["vendor@gmail.com", "vendor@yahoo.com"]
+        db_session.commit()
+
+        threads = await fetch_threads_for_vendor(
+            test_vendor_card.id, "fake-token", db_session, user_id=test_user.id
+        )
+        # Should return empty since only generic domains
+        assert threads == []
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Tier 2-4 matching in fetch_threads_for_requirement
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestFetchThreadsForRequirementTiers:
+    """Extended tier matching tests."""
+
+    def setup_method(self):
+        clear_cache()
+
+    @pytest.mark.asyncio
+    async def test_tier2_subject_token_match(self, db_session, test_user, test_requisition):
+        """Tier 2: Match via [AVAIL-{req_id}] in email subject."""
+        requirement = test_requisition.requirements[0]
+        req_id = test_requisition.id
+
+        mock_messages = [
+            {
+                "id": "msg-t2",
+                "subject": f"[AVAIL-{req_id}] RFQ for LM317T",
+                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
+                "toRecipients": [{"emailAddress": {"address": "buyer@trioscs.com"}}],
+                "bodyPreview": "Quote attached",
+                "receivedDateTime": "2025-01-16T10:00:00Z",
+                "conversationId": "conv-tier2",
+            },
+        ]
+
+        with patch("app.services.email_threads.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.get_all_pages = AsyncMock(return_value=mock_messages)
+
+            threads = await fetch_threads_for_requirement(
+                requirement.id, "fake-token", db_session, user_id=test_user.id
+            )
+
+        subject_threads = [t for t in threads if t.get("matched_via") == "subject_token"]
+        assert len(subject_threads) >= 1
+
+    @pytest.mark.asyncio
+    async def test_tier3_part_number_match(self, db_session, test_user, test_requisition):
+        """Tier 3: Match via part number in email subject/body."""
+        requirement = test_requisition.requirements[0]
+
+        # Tier 1+2 return empty; Tier 3 finds by part number
+        call_count = 0
+
+        async def mock_get_all_pages(path, params=None, max_items=50):
+            nonlocal call_count
+            call_count += 1
+            # First calls are tier 1/2 (conversation_id, subject token) → empty
+            if "$search" in (params or {}) and "LM317T" in params.get("$search", ""):
+                return [
+                    {
+                        "id": "msg-t3",
+                        "subject": "Stock: LM317T available",
+                        "from": {"emailAddress": {"address": "sales@mouser.com"}},
+                        "toRecipients": [{"emailAddress": {"address": "buyer@trioscs.com"}}],
+                        "bodyPreview": "We have LM317T in stock",
+                        "receivedDateTime": "2025-01-17T10:00:00Z",
+                        "conversationId": "conv-tier3",
+                    },
+                ]
+            return []
+
+        with patch("app.services.email_threads.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.get_all_pages = AsyncMock(side_effect=mock_get_all_pages)
+
+            threads = await fetch_threads_for_requirement(
+                requirement.id, "fake-token", db_session, user_id=test_user.id
+            )
+
+        pn_threads = [t for t in threads if t.get("matched_via") == "part_number"]
+        assert len(pn_threads) >= 1
+
+    @pytest.mark.asyncio
+    async def test_tier4_vendor_domain_match(self, db_session, test_user, test_requisition):
+        """Tier 4: Match via vendor domain from sightings."""
+        requirement = test_requisition.requirements[0]
+
+        # Create a sighting with vendor email
+        sighting = Sighting(
+            requirement_id=requirement.id,
+            vendor_name="Arrow",
+            vendor_email="sales@arrow.com",
+            mpn_matched="LM317T",
+            source_type="broker",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(sighting)
+        db_session.commit()
+
+        async def mock_get_all_pages(path, params=None, max_items=50):
+            search_str = (params or {}).get("$search", "")
+            if "arrow.com" in search_str:
+                return [
+                    {
+                        "id": "msg-t4",
+                        "subject": "Arrow quote",
+                        "from": {"emailAddress": {"address": "rep@arrow.com"}},
+                        "toRecipients": [{"emailAddress": {"address": "buyer@trioscs.com"}}],
+                        "bodyPreview": "Quote for LM317T",
+                        "receivedDateTime": "2025-01-18T10:00:00Z",
+                        "conversationId": "conv-tier4",
+                    },
+                ]
+            return []
+
+        with patch("app.services.email_threads.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.get_all_pages = AsyncMock(side_effect=mock_get_all_pages)
+
+            threads = await fetch_threads_for_requirement(
+                requirement.id, "fake-token", db_session, user_id=test_user.id
+            )
+
+        domain_threads = [t for t in threads if t.get("matched_via") == "vendor_domain"]
+        assert len(domain_threads) >= 1
+
+    @pytest.mark.asyncio
+    async def test_combined_tiers_dedup_by_conversation_id(
+        self, db_session, test_user, test_requisition
+    ):
+        """Same conversation_id found by multiple tiers only appears once."""
+        requirement = test_requisition.requirements[0]
+        req_id = test_requisition.id
+
+        shared_conv = "conv-shared-dedup"
+
+        async def mock_get_all_pages(path, params=None, max_items=50):
+            # Both subject token and part number search return same conversation
+            return [
+                {
+                    "id": "msg-dedup",
+                    "subject": f"[AVAIL-{req_id}] LM317T quote",
+                    "from": {"emailAddress": {"address": "vendor@arrow.com"}},
+                    "toRecipients": [{"emailAddress": {"address": "buyer@trioscs.com"}}],
+                    "bodyPreview": "dedup test",
+                    "receivedDateTime": "2025-01-19T10:00:00Z",
+                    "conversationId": shared_conv,
+                },
+            ]
+
+        with patch("app.services.email_threads.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.get_all_pages = AsyncMock(side_effect=mock_get_all_pages)
+
+            threads = await fetch_threads_for_requirement(
+                requirement.id, "fake-token", db_session, user_id=test_user.id
+            )
+
+        # Should only have one thread for this conversation_id
+        matching = [t for t in threads if t["conversation_id"] == shared_conv]
+        assert len(matching) == 1
+
+    @pytest.mark.asyncio
+    async def test_graph_error_graceful_fallthrough(
+        self, db_session, test_user, test_requisition
+    ):
+        """Graph API error at one tier doesn't break other tiers."""
+        requirement = test_requisition.requirements[0]
+
+        call_count = 0
+
+        async def mock_get_all_pages(path, params=None, max_items=50):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise Exception("Graph API rate limited")
+            return []
+
+        with patch("app.services.email_threads.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.get_all_pages = AsyncMock(side_effect=mock_get_all_pages)
+
+            # Should not raise
+            threads = await fetch_threads_for_requirement(
+                requirement.id, "fake-token", db_session, user_id=test_user.id
+            )
+
+        assert isinstance(threads, list)
