@@ -149,3 +149,171 @@ def test_company_activity_status_with_activity(client, test_company, test_activi
     assert data["days_since_activity"] is not None
     assert data["days_since_activity"] >= 0
     assert data["status"] in ("green", "yellow", "red")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Activity Logging Endpoints
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_log_company_call(client, test_company):
+    """POST /api/companies/{id}/activities/call logs a phone call."""
+    resp = client.post(
+        f"/api/companies/{test_company.id}/activities/call",
+        json={"phone": "+1-555-1234", "duration_seconds": 180, "notes": "Discussed pricing"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "logged"
+
+
+def test_log_company_note(client, test_company):
+    """POST /api/companies/{id}/activities/note logs a note."""
+    resp = client.post(
+        f"/api/companies/{test_company.id}/activities/note",
+        json={"notes": "Met at trade show"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "logged"
+
+
+def test_log_vendor_call(client, test_vendor_card):
+    """POST /api/vendors/{id}/activities/call logs a vendor phone call."""
+    resp = client.post(
+        f"/api/vendors/{test_vendor_card.id}/activities/call",
+        json={"phone": "+1-555-9876", "duration_seconds": 60},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "logged"
+
+
+def test_log_vendor_note(client, test_vendor_card):
+    """POST /api/vendors/{id}/activities/note logs a vendor note."""
+    resp = client.post(
+        f"/api/vendors/{test_vendor_card.id}/activities/note",
+        json={"notes": "Confirmed availability for LM317T"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "logged"
+
+
+def test_vendor_activity_status(client, test_vendor_card):
+    """GET /api/vendors/{id}/activity-status returns status info."""
+    resp = client.get(f"/api/vendors/{test_vendor_card.id}/activity-status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "vendor_card_id" in data
+    assert "status" in data
+
+
+def test_log_email_click(client):
+    """POST /api/activities/email logs an email click event."""
+    resp = client.post("/api/activities/email", json={
+        "email": "vendor@example.com",
+        "subject": "Re: RFQ LM317T",
+    })
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "logged"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Sales / Ownership Endpoints
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_my_accounts(client):
+    """GET /api/sales/my-accounts returns user's owned accounts."""
+    resp = client.get("/api/sales/my-accounts")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "accounts" in data or isinstance(data, list)
+
+
+def test_at_risk_accounts(client):
+    """GET /api/sales/at-risk returns accounts at risk of going stale."""
+    resp = client.get("/api/sales/at-risk")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "accounts" in data or isinstance(data, list)
+
+
+def test_open_pool_accounts(client):
+    """GET /api/sales/open-pool returns unowned accounts."""
+    resp = client.get("/api/sales/open-pool")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "accounts" in data or isinstance(data, list)
+
+
+def test_claim_account(client, db_session, test_company, test_user):
+    """POST /api/sales/claim/{id} claims an unowned account (needs sales role)."""
+    # claim_account requires role='sales' or 'trader'
+    original_role = test_user.role
+    test_user.role = "sales"
+    db_session.commit()
+    try:
+        test_company.account_owner_id = None
+        db_session.commit()
+        resp = client.post(f"/api/sales/claim/{test_company.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("ok") is True or data.get("status") == "claimed"
+    finally:
+        test_user.role = original_role
+        db_session.commit()
+
+
+def test_claim_account_forbidden_for_buyer(client, test_company):
+    """POST /api/sales/claim/{id} returns 403 for buyer role."""
+    resp = client.post(f"/api/sales/claim/{test_company.id}")
+    assert resp.status_code == 403
+
+
+def test_toggle_strategic(client, db_session, test_company, test_user):
+    """PUT /api/companies/{id}/strategic toggles strategic flag (admin only)."""
+    original_role = test_user.role
+    test_user.role = "admin"
+    db_session.commit()
+    try:
+        resp = client.put(
+            f"/api/companies/{test_company.id}/strategic",
+            json={"is_strategic": True},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("ok") is True or "is_strategic" in data
+    finally:
+        test_user.role = original_role
+        db_session.commit()
+
+
+def test_toggle_strategic_forbidden_for_buyer(client, test_company):
+    """PUT /api/companies/{id}/strategic returns 403 for non-admin."""
+    resp = client.put(
+        f"/api/companies/{test_company.id}/strategic",
+        json={"is_strategic": True},
+    )
+    assert resp.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Notifications
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_sales_notifications_empty(client):
+    """GET /api/sales/notifications returns empty list when none exist."""
+    resp = client.get("/api/sales/notifications")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert isinstance(data, list)
+    assert len(data) == 0
+
+
+def test_mark_all_notifications_read(client):
+    """POST /api/sales/notifications/read-all succeeds."""
+    resp = client.post("/api/sales/notifications/read-all")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data.get("ok") is True or data.get("count") is not None

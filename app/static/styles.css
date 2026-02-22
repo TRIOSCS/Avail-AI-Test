@@ -813,7 +813,6 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 .quote-notes textarea{background:var(--input);border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px;resize:vertical}
 .quote-notes textarea:focus{outline:none;border-color:var(--teal)}
 .quote-actions{display:flex;gap:8px;padding:12px 0;align-items:center;flex-wrap:wrap}
-.btn-danger{background:var(--red-light);color:var(--red);border:1px solid rgba(217,68,82,.15)}
 
 /* Pricing history modal */
 .ph-summary{margin-top:10px;font-size:12px;color:var(--text2);padding:8px 10px;background:var(--surface);border-radius:6px}
@@ -840,7 +839,7 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 /* Customer site selector in new req modal */
 .site-typeahead{position:relative}
 .site-typeahead input{width:100%}
-.site-typeahead-list{position:absolute;top:100%;left:0;right:0;background:var(--white);border:1px solid var(--border);border-radius:6px;max-height:160px;overflow-y:auto;z-index:10;display:none;box-shadow:0 4px 16px rgba(0,0,0,.08)}
+.site-typeahead-list{position:absolute;top:100%;left:0;right:0;background:var(--white);border:1px solid var(--border);border-radius:6px;max-height:160px;overflow-y:auto;z-index:600;display:none;box-shadow:0 4px 16px rgba(0,0,0,.08)}
 .site-typeahead-list.show{display:block}
 .site-typeahead-item{padding:8px 10px;font-size:12px;cursor:pointer;transition:.1s}
 .site-typeahead-item:hover,.site-typeahead-item.active{background:var(--bg)}
@@ -867,6 +866,56 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
     /* Vendor contacts in popup */
     #vpContactsList .si-contact{flex-direction:column;align-items:flex-start;gap:4px}
     #vpContactsList .si-contact-actions{width:100%;justify-content:flex-end}
+    /* AI panel */
+    .ai-panel-bg{padding:8px;align-items:flex-start;padding-top:40px}
+    .ai-panel{padding:16px;max-height:calc(100vh - 60px)}
+    .ai-contact-row{flex-direction:column;gap:6px}
+    .ai-contact-actions{width:100%;justify-content:flex-end}
+    .intel-meta{flex-direction:column;gap:4px}
+    /* Drill-down sub-tabs — horizontal scroll like main tabs */
+    .dd-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;scrollbar-width:none}
+    .dd-tabs::-webkit-scrollbar{display:none}
+    .dd-tab{white-space:nowrap;flex-shrink:0;padding:8px 14px;font-size:12px;min-height:36px}
+    /* Drill-down inner tables — scroll via panel wrapper */
+    .dtbl{font-size:11px}
+    .dtbl th,.dtbl td{padding:4px 6px;white-space:nowrap}
+    /* Drill-down cell — more breathing room */
+    .drow>td{padding:8px 6px 12px}
+    /* Expand arrow — larger touch target */
+    .ea{width:34px;height:34px;font-size:12px}
+    /* Quote table — wrap in scrollable parent */
+    .quote-table th,.quote-table td{padding:4px 6px;white-space:nowrap}
+    .quote-sell-input{width:70px;font-size:14px;min-height:36px}
+    .quote-cell-input{font-size:12px;min-height:30px}
+    .quote-markup input{font-size:14px;min-height:36px}
+    /* Quote header — stack on narrow */
+    .quote-header{flex-direction:column;gap:8px;padding:10px 12px}
+    /* Proactive offer cards */
+    .proactive-match{flex-direction:column;gap:4px;align-items:flex-start}
+    .proactive-match .pm-mpn{min-width:auto}
+    .proactive-match .pm-vendor{min-width:auto}
+    /* Buy plan approve/reject actions */
+    .proactive-actions{flex-wrap:wrap}
+    /* Activity thread on mobile */
+    .act-vendor-card{padding:6px 8px}
+    .act-msg{padding:6px 8px}
+    .act-body{max-height:200px;font-size:12px}
+    /* Email thread body — prevent horizontal overflow */
+    .act-body-text{word-break:break-word;overflow-wrap:break-word}
+    /* Toast — full width on mobile */
+    #toastContainer{left:12px;right:12px;top:auto;bottom:calc(12px + env(safe-area-inset-bottom))}
+    /* Fix: tables inside drill-down need wrapper-level scroll */
+    .dd-panel{overflow-x:auto;-webkit-overflow-scrolling:touch}
+    /* Offer group header — stack */
+    .offer-group-header{flex-direction:column;gap:4px;align-items:flex-start}
+    /* Parse preview panel — tighter on mobile */
+    .parse-preview{padding:10px}
+    .parse-parts-table{font-size:10px}
+    .parse-actions{flex-wrap:wrap;justify-content:stretch}
+    .parse-actions .btn{flex:1;text-align:center}
+    /* Intel card — compact */
+    .intel-card summary{padding:8px 10px;font-size:11px}
+    .intel-body{padding:8px 10px}
 }
 
 /* Suggested Contacts */
@@ -960,13 +1009,6 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 #toastContainer{position:fixed;top:16px;right:16px;z-index:9999;display:flex;flex-direction:column;gap:6px;pointer-events:none}
 #toastContainer > *{pointer-events:auto}
 
-@media(max-width:768px){
-    .ai-panel-bg{padding:8px;align-items:flex-start;padding-top:40px}
-    .ai-panel{padding:16px;max-height:calc(100vh - 60px)}
-    .ai-contact-row{flex-direction:column;gap:6px}
-    .ai-contact-actions{width:100%;justify-content:flex-end}
-    .intel-meta{flex-direction:column;gap:4px}
-}
 
 /* Tablet breakpoint */
 @media(min-width:769px) and (max-width:1024px){
@@ -1328,7 +1370,6 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .view{display:none}.view.on{display:block}
 
 /* ── Utility classes ──────────────────────────────── */
-.u-hidden { display: none !important; }
 .u-mt-sm { margin-top: 6px; }
 .u-mt-md { margin-top: 10px; }
 .u-mt-lg { margin-top: 16px; }
@@ -1479,68 +1520,7 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .source-status-banner.ss-expanded .ss-toggle-hint::after{content:' \25bc'}
 .source-status-banner:not(.ss-expanded) .ss-toggle-hint::after{content:' \25b6'}
 
-/* ── Mobile deep fixes ──────────────────────────── */
-@media(max-width:768px){
-    /* Drill-down sub-tabs — horizontal scroll like main tabs */
-    .dd-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;flex-wrap:nowrap;scrollbar-width:none}
-    .dd-tabs::-webkit-scrollbar{display:none}
-    .dd-tab{white-space:nowrap;flex-shrink:0;padding:8px 14px;font-size:12px;min-height:36px}
-
-    /* Drill-down inner tables — scroll via panel wrapper */
-    .dtbl{font-size:11px}
-    .dtbl th,.dtbl td{padding:4px 6px;white-space:nowrap}
-
-    /* Drill-down cell — more breathing room */
-    .drow>td{padding:8px 6px 12px}
-
-    /* Expand arrow — larger touch target */
-    .ea{width:34px;height:34px;font-size:12px}
-
-    /* Quote table — wrap in scrollable parent (crm.js quote-wrap div) */
-    .quote-table th,.quote-table td{padding:4px 6px;white-space:nowrap}
-    .quote-sell-input{width:70px;font-size:14px;min-height:36px}
-    .quote-cell-input{font-size:12px;min-height:30px}
-    .quote-markup input{font-size:14px;min-height:36px}
-
-    /* Quote header — stack on narrow */
-    .quote-header{flex-direction:column;gap:8px;padding:10px 12px}
-
-    /* Proactive offer cards */
-    .proactive-match{flex-direction:column;gap:4px;align-items:flex-start}
-    .proactive-match .pm-mpn{min-width:auto}
-    .proactive-match .pm-vendor{min-width:auto}
-
-    /* Buy plan approve/reject actions */
-    .proactive-actions{flex-wrap:wrap}
-
-    /* Activity thread on mobile */
-    .act-vendor-card{padding:6px 8px}
-    .act-msg{padding:6px 8px}
-    .act-body{max-height:200px;font-size:12px}
-
-    /* Email thread body — prevent horizontal overflow */
-    .act-body-text{word-break:break-word;overflow-wrap:break-word}
-
-    /* Toast — full width on mobile */
-    #toastContainer{left:12px;right:12px;top:auto;bottom:calc(12px + env(safe-area-inset-bottom))}
-
-    /* Fix: tables inside drill-down need wrapper-level scroll */
-    .dd-panel{overflow-x:auto;-webkit-overflow-scrolling:touch}
-
-    /* Offer group header — stack */
-    .offer-group-header{flex-direction:column;gap:4px;align-items:flex-start}
-
-    /* Parse preview panel — tighter on mobile */
-    .parse-preview{padding:10px}
-    .parse-parts-table{font-size:10px}
-    .parse-actions{flex-wrap:wrap;justify-content:stretch}
-    .parse-actions .btn{flex:1;text-align:center}
-
-    /* Intel card — compact */
-    .intel-card summary{padding:8px 10px;font-size:11px}
-    .intel-body{padding:8px 10px}
-
-}
+/* ── Mobile deep fixes — consolidated into @media(max-width:768px) above ── */
 
 /* Bug Report Link — inline next to pills */
 .bug-link{font-size:11px;font-weight:600;color:var(--red);cursor:pointer;text-decoration:none;padding:4px 10px;border-radius:6px;border:1px solid var(--red);transition:background .2s,color .2s;white-space:nowrap;line-height:1.4}

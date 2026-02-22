@@ -77,6 +77,11 @@ document.addEventListener('DOMContentLoaded', function() {
     if (ms && ds) {
         ms.addEventListener('input', function() { ds.value = ms.value; });
         ds.addEventListener('input', function() { ms.value = ds.value; });
+        // Sync on viewport change (device rotation / resize across breakpoint)
+        var mql = window.matchMedia('(max-width:768px)');
+        var syncSearch = function() { var active = mql.matches ? ds.value : ms.value; ds.value = active; ms.value = active; };
+        if (mql.addEventListener) mql.addEventListener('change', syncSearch);
+        else if (mql.addListener) mql.addListener(syncSearch);
     }
     var nb = document.getElementById('notifBadge');
     var mb = document.getElementById('mobileNotifBadge');
@@ -88,7 +93,8 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-let currentReqId = null;
+export let currentReqId = null;
+export function setCurrentReqId(id) { currentReqId = id; }
 let currentReqName = '';
 let searchResults = {};
 let _sightingIndex = {};  // sightingId → {reqId, sighting} for O(1) lookups
@@ -466,20 +472,11 @@ function applyRoleGating() {
         pNav.style.display = '';
         refreshProactiveBadge();
     }
-    // Performance nav visible to all (old + sidebar)
-    const perfNav = document.getElementById('navPerformance');
-    if (perfNav) perfNav.style.display = '';
-    // v7 sidebar nav items
+    // Scorecards nav visible to all
     const perfNav2 = document.getElementById('navScorecards');
     if (perfNav2) perfNav2.style.display = '';
     const pNav2 = document.getElementById('navProactive');
     if (pNav2 && (['sales','trader'].includes(window.userRole) || window.__isAdmin)) pNav2.style.display = '';
-    // Enrichment nav visible to admin, manager, trader
-    const enrichNav = document.getElementById('navEnrichment');
-    if (enrichNav && (window.__isAdmin || ['manager','trader'].includes(window.userRole))) {
-        enrichNav.style.display = '';
-        refreshEnrichmentBadge();
-    }
     // "My Accounts" pill: only visible for admin, manager, trader
     const myAccountsBtn = document.getElementById('myAccountsBtn');
     if (myAccountsBtn) {
@@ -1376,13 +1373,14 @@ async function ddLogFromHistorical(reqId, ho) {
     await openLogOfferFromList(reqId);
     // Pre-fill fields from historical offer after modal opens
     setTimeout(() => {
-        if (ho.vendor_name) document.getElementById('loVendor').value = ho.vendor_name;
-        if (ho.qty_available) document.getElementById('loQty').value = ho.qty_available;
-        if (ho.unit_price) document.getElementById('loPrice').value = ho.unit_price;
-        if (ho.lead_time) document.getElementById('loLead').value = ho.lead_time;
-        if (ho.condition) document.getElementById('loCond').value = ho.condition;
-        if (ho.manufacturer) document.getElementById('loMfr').value = ho.manufacturer;
-        document.getElementById('loNotes').value = 'Logged from RFQ-' + (ho.from_requisition_id || '');
+        const _s = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+        if (ho.vendor_name) _s('loVendor', ho.vendor_name);
+        if (ho.qty_available) _s('loQty', ho.qty_available);
+        if (ho.unit_price) _s('loPrice', ho.unit_price);
+        if (ho.lead_time) _s('loLead', ho.lead_time);
+        if (ho.condition) _s('loCond', ho.condition);
+        if (ho.manufacturer) _s('loMfr', ho.manufacturer);
+        _s('loNotes', 'Logged from RFQ-' + (ho.from_requisition_id || ''));
         // Auto-select matching requirement by MPN
         const sel = document.getElementById('loReqPart');
         if (sel && ho.mpn) {
@@ -1686,23 +1684,24 @@ function ddEditOffer(reqId, offerId) {
 
 async function ddSaveEditOffer(reqId, offerId) {
     const btn = document.getElementById('ddEoSaveBtn');
-    btn.disabled = true; btn.textContent = 'Saving\u2026';
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving\u2026'; }
     try {
+        const _v = id => document.getElementById(id)?.value ?? '';
         const body = {
-            vendor_name: document.getElementById('ddEoVendor').value.trim() || undefined,
-            mpn: document.getElementById('ddEoMpn').value.trim() || undefined,
-            qty_available: parseInt(document.getElementById('ddEoQty').value) || null,
-            unit_price: parseFloat(document.getElementById('ddEoPrice').value) || null,
-            lead_time: document.getElementById('ddEoLead').value.trim() || null,
-            condition: document.getElementById('ddEoCond').value || null,
-            moq: parseInt(document.getElementById('ddEoMoq').value) || null,
-            date_code: document.getElementById('ddEoDc').value.trim() || null,
-            manufacturer: document.getElementById('ddEoMfr').value.trim() || null,
-            packaging: document.getElementById('ddEoPkg').value.trim() || null,
-            warranty: document.getElementById('ddEoWar').value.trim() || null,
-            country_of_origin: document.getElementById('ddEoCoo').value.trim() || null,
-            notes: document.getElementById('ddEoNotes').value.trim() || null,
-            status: document.getElementById('ddEoStatus').value,
+            vendor_name: _v('ddEoVendor').trim() || undefined,
+            mpn: _v('ddEoMpn').trim() || undefined,
+            qty_available: parseInt(_v('ddEoQty')) || null,
+            unit_price: parseFloat(_v('ddEoPrice')) || null,
+            lead_time: _v('ddEoLead').trim() || null,
+            condition: _v('ddEoCond') || null,
+            moq: parseInt(_v('ddEoMoq')) || null,
+            date_code: _v('ddEoDc').trim() || null,
+            manufacturer: _v('ddEoMfr').trim() || null,
+            packaging: _v('ddEoPkg').trim() || null,
+            warranty: _v('ddEoWar').trim() || null,
+            country_of_origin: _v('ddEoCoo').trim() || null,
+            notes: _v('ddEoNotes').trim() || null,
+            status: _v('ddEoStatus'),
         };
         await apiFetch(`/api/offers/${offerId}`, { method: 'PUT', body });
         document.getElementById('ddEditOfferBg')?.remove();
@@ -1716,7 +1715,7 @@ async function ddSaveEditOffer(reqId, offerId) {
         }
     } catch (e) {
         showToast('Failed to update: ' + (e.message || e), 'error');
-        btn.disabled = false; btn.textContent = 'Save Changes';
+        if (btn) { btn.disabled = false; btn.textContent = 'Save Changes'; }
     }
 }
 
@@ -3519,28 +3518,22 @@ async function ddResearchAll(reqId) {
 
 // ── Log Offer Modal ─────────────────────────────────────────────────────
 async function openLogOfferFromList(reqId) {
-    document.getElementById('loReqId').value = reqId;
+    const loReqId = document.getElementById('loReqId'); if (loReqId) loReqId.value = reqId;
     // Load requirements to populate part picker
     const reqs = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`).catch(() => []);
     _ddReqCache[reqId] = reqs;
     const sel = document.getElementById('loReqPart');
-    sel.innerHTML = '<option value="">Select part...</option>';
-    for (const r of (reqs || [])) {
-        sel.innerHTML += `<option value="${r.id}" data-mpn="${escAttr(r.primary_mpn || '')}">${esc(r.primary_mpn || 'Part #' + r.id)}${r.target_qty ? ' (qty ' + r.target_qty + ')' : ''}</option>`;
+    if (sel) {
+        sel.innerHTML = '<option value="">Select part...</option>';
+        for (const r of (reqs || [])) {
+            sel.innerHTML += `<option value="${r.id}" data-mpn="${escAttr(r.primary_mpn || '')}">${esc(r.primary_mpn || 'Part #' + r.id)}${r.target_qty ? ' (qty ' + r.target_qty + ')' : ''}</option>`;
+        }
     }
     // Clear form fields
-    document.getElementById('loVendor').value = '';
-    document.getElementById('loQty').value = '';
-    document.getElementById('loPrice').value = '';
-    document.getElementById('loLead').value = '';
-    document.getElementById('loMoq').value = '';
-    document.getElementById('loCond').value = 'new';
-    document.getElementById('loDc').value = '';
-    document.getElementById('loPkg').value = '';
-    document.getElementById('loMfr').value = '';
-    document.getElementById('loWarranty').value = '';
-    document.getElementById('loCOO').value = '';
-    document.getElementById('loNotes').value = '';
+    const _s = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    _s('loVendor', ''); _s('loQty', ''); _s('loPrice', ''); _s('loLead', '');
+    _s('loMoq', ''); _s('loCond', 'new'); _s('loDc', ''); _s('loPkg', '');
+    _s('loMfr', ''); _s('loWarranty', ''); _s('loCOO', ''); _s('loNotes', '');
     openModal('logOfferModal', 'loVendor');
 }
 
@@ -5428,32 +5421,35 @@ async function openBatchRfqModal(prebuiltGroups) {
     if (needsLookup.length) {
         // Prevent backdrop click from closing modal during lookup
         modal.dataset.loading = '1';
-        document.getElementById('rfqPrepareStatus').textContent = `Finding contacts for ${needsLookup.length} vendor(s)…`;
-        needsLookup.forEach(v => { v.lookup_status = 'loading'; });
-        _renderRfqPrepareProgress();
-        // Look up all vendors in parallel instead of one-at-a-time
-        let done = 0;
-        await Promise.all(needsLookup.map(async (v) => {
-            try {
-                const data = await apiFetch('/api/vendor-contact', {
-                    method: 'POST', body: { vendor_name: v.vendor_name }
-                });
-                v.emails = data.emails || [];
-                v.phones = data.phones || [];
-                v.card_id = data.card_id;
-                v.selected_email = v.emails.length ? v.emails[0] : '';
-                v.lookup_status = v.emails.length ? 'ready' : 'no_email';
-                v.contact_source = data.source || null;
-                v.contact_tier = data.tier || 0;
-            } catch (e) {
-                console.warn(`Vendor lookup failed for ${v.vendor_name}:`, e);
-                v.lookup_status = 'no_email';
-            }
-            done++;
-            document.getElementById('rfqPrepareStatus').textContent = `Finding contacts… ${done}/${needsLookup.length} done`;
+        try {
+            document.getElementById('rfqPrepareStatus').textContent = `Finding contacts for ${needsLookup.length} vendor(s)…`;
+            needsLookup.forEach(v => { v.lookup_status = 'loading'; });
             _renderRfqPrepareProgress();
-        }));
-        delete modal.dataset.loading;
+            // Look up all vendors in parallel instead of one-at-a-time
+            let done = 0;
+            await Promise.all(needsLookup.map(async (v) => {
+                try {
+                    const data = await apiFetch('/api/vendor-contact', {
+                        method: 'POST', body: { vendor_name: v.vendor_name }
+                    });
+                    v.emails = data.emails || [];
+                    v.phones = data.phones || [];
+                    v.card_id = data.card_id;
+                    v.selected_email = v.emails.length ? v.emails[0] : '';
+                    v.lookup_status = v.emails.length ? 'ready' : 'no_email';
+                    v.contact_source = data.source || null;
+                    v.contact_tier = data.tier || 0;
+                } catch (e) {
+                    console.warn(`Vendor lookup failed for ${v.vendor_name}:`, e);
+                    v.lookup_status = 'no_email';
+                }
+                done++;
+                document.getElementById('rfqPrepareStatus').textContent = `Finding contacts… ${done}/${needsLookup.length} done`;
+                _renderRfqPrepareProgress();
+            }));
+        } finally {
+            delete modal.dataset.loading;
+        }
     }
 
     document.getElementById('rfqPrepare').style.display = 'none';

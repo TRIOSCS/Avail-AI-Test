@@ -417,6 +417,120 @@ def test_mark_sighting_unavailable_not_found(client):
 # ── Sales Role Access ─────────────────────────────────────────────────
 
 
+# ── Bulk Operations ──────────────────────────────────────────────────
+
+
+def test_bulk_archive(client, db_session, test_user):
+    """PUT /api/requisitions/bulk-archive archives reqs not created by current user."""
+    from app.models import Requisition, User
+
+    # bulk-archive archives reqs NOT created by the current user
+    other = User(
+        email="other@trioscs.com", name="Other", role="buyer",
+        azure_id="az-other-bulk", created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(other)
+    db_session.flush()
+
+    r1 = Requisition(
+        name="BULK-1", status="open",
+        created_by=other.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    r2 = Requisition(
+        name="BULK-2", status="open",
+        created_by=other.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add_all([r1, r2])
+    db_session.commit()
+
+    resp = client.put("/api/requisitions/bulk-archive")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["archived_count"] >= 2
+
+
+def test_dismiss_new_offers(client, db_session, test_requisition):
+    """POST /api/requisitions/{id}/dismiss-new-offers clears offers_viewed_at."""
+    resp = client.post(f"/api/requisitions/{test_requisition.id}/dismiss-new-offers")
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+
+def test_dismiss_new_offers_not_found(client):
+    """Dismiss returns 404 for non-existent requisition."""
+    resp = client.post("/api/requisitions/99999/dismiss-new-offers")
+    assert resp.status_code == 404
+
+
+# ── Upload Requirements ─────────────────────────────────────────────
+
+
+def test_upload_requirements_csv(client, test_requisition):
+    """POST /api/requisitions/{id}/upload accepts a CSV of MPNs."""
+    import io
+    csv_bytes = b"mpn,qty,target_price\nNE555P,500,0.25\nLM7805,200,0.30"
+    resp = client.post(
+        f"/api/requisitions/{test_requisition.id}/upload",
+        files={"file": ("reqs.csv", io.BytesIO(csv_bytes), "text/csv")},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["created"] >= 1
+
+
+def test_upload_requirements_not_found(client):
+    """Upload returns 404 for non-existent requisition."""
+    import io
+    resp = client.post(
+        "/api/requisitions/99999/upload",
+        files={"file": ("reqs.csv", io.BytesIO(b"mpn\nFOO"), "text/csv")},
+    )
+    assert resp.status_code == 404
+
+
+# ── Import Stock List ───────────────────────────────────────────────
+
+
+def test_import_stock_list(client, db_session, test_requisition):
+    """POST /api/requisitions/{id}/import-stock imports a vendor stock file."""
+    import io
+    csv_bytes = b"mpn,qty,price\nLM317T,5000,0.40\nNE555P,2000,0.20"
+    resp = client.post(
+        f"/api/requisitions/{test_requisition.id}/import-stock",
+        data={"vendor_name": "Test Vendor"},
+        files={"file": ("stock.csv", io.BytesIO(csv_bytes), "text/csv")},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "imported_rows" in data
+
+
+def test_import_stock_list_no_file(client, test_requisition):
+    """Import stock without file returns 400."""
+    resp = client.post(
+        f"/api/requisitions/{test_requisition.id}/import-stock",
+        data={"vendor_name": "Some Vendor"},
+    )
+    assert resp.status_code in (400, 422)
+
+
+def test_import_stock_list_not_found(client):
+    """Import stock for non-existent requisition returns 404."""
+    import io
+    resp = client.post(
+        "/api/requisitions/99999/import-stock",
+        data={"vendor_name": "Test"},
+        files={"file": ("stock.csv", io.BytesIO(b"mpn,qty\nFOO,100"), "text/csv")},
+    )
+    assert resp.status_code == 404
+
+
+# ── Sales Role Access ─────────────────────────────────────────────────
+
+
 def test_sales_user_sees_only_own_requisitions(
     client, db_session, test_user, sales_user
 ):

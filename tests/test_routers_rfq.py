@@ -307,6 +307,54 @@ def test_rfq_prepare_unknown_vendor(client, test_requisition):
 # ── POST /api/contacts/phone ─────────────────────────────────────────
 
 
+# ── GET /api/requisitions/{id}/activity ──────────────────────────────
+
+
+def test_get_activity(client, db_session, test_user, test_requisition):
+    """Activity endpoint returns vendor-level summary."""
+    _make_contact(
+        db_session, test_requisition, test_user,
+        vendor_name="Arrow Electronics",
+        status="sent",
+        days_ago=2,
+    )
+    _make_contact(
+        db_session, test_requisition, test_user,
+        vendor_name="Arrow Electronics",
+        vendor_contact="rfq@arrow.com",
+        status="replied",
+        days_ago=1,
+    )
+
+    resp = client.get(f"/api/requisitions/{test_requisition.id}/activity")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "vendors" in data
+    assert "summary" in data
+    # Summary has sent/replied/opened/awaiting keys
+    assert data["summary"]["sent"] >= 1
+
+
+def test_get_activity_empty(client, test_requisition):
+    """Activity for requisition with no contacts returns empty."""
+    resp = client.get(f"/api/requisitions/{test_requisition.id}/activity")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["vendors"] == []
+    assert data["summary"]["sent"] == 0
+
+
+def test_get_activity_no_req(client):
+    """Activity for non-existent requisition returns empty vendors."""
+    resp = client.get("/api/requisitions/99999/activity")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["vendors"] == []
+
+
+# ── POST /api/contacts/phone ─────────────────────────────────────────
+
+
 def test_log_phone_call(client, test_requisition):
     """Phone call logging creates a contact record."""
     resp = client.post(

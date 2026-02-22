@@ -7,6 +7,7 @@ import {
     initNameAutocomplete, notifyStatusChange, loadRequisitions,
     toggleDrillDown, guardBtn, openVendorPopup,
     loadVendorContacts, refreshProactiveBadge,
+    currentReqId, setCurrentReqId,
 } from 'app';
 
 // ── Debounced CRM Handlers ─────────────────────────────────────────────
@@ -59,7 +60,7 @@ function toggleCustUnassigned(btn) {
 
 async function showCustomers() {
     showView('view-customers');
-    currentReqId = null;
+    setCurrentReqId(null);
     // Role-based account filtering
     const isManagerOrAdmin = window.__isAdmin || ['manager','trader'].includes(window.userRole);
     const isSalesOnly = window.userRole === 'sales';
@@ -98,7 +99,7 @@ async function loadCustomers() {
 async function goToCompany(companyId) {
     if (!companyId) return;
     showView('view-customers');
-    currentReqId = null;
+    setCurrentReqId(null);
     try {
         crmCustomers = await apiFetch('/api/companies');
         renderCustomers();
@@ -336,6 +337,12 @@ async function toggleSiteDetail(siteId) {
 }
 
 function openNewCompanyModal() {
+    ['ncName','ncWebsite','ncLinkedin','ncIndustry'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    });
+    const warn = document.getElementById('ncDupWarning');
+    if (warn) warn.style.display = 'none';
     openModal('newCompanyModal', 'ncName');
 }
 
@@ -372,7 +379,7 @@ async function createCompany() {
                 }
             });
             closeModal('newCompanyModal');
-            ['ncName','ncWebsite','ncLinkedin','ncIndustry'].forEach(id => document.getElementById(id).value = '');
+            ['ncName','ncWebsite','ncLinkedin','ncIndustry'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
             showToast('Company "' + data.name + '" created', 'success');
             await loadSiteOptions();
             loadCustomers();
@@ -390,57 +397,59 @@ async function createCompany() {
 async function openEditCompany(companyId) {
     var c = crmCustomers.find(x => x.id === companyId);
     if (!c) return;
-    document.getElementById('ecId').value = companyId;
-    document.getElementById('ecName').value = c.name || '';
-    document.getElementById('ecAccountType').value = c.account_type || '';
-    document.getElementById('ecPhone').value = c.phone || '';
-    document.getElementById('ecWebsite').value = c.website || '';
-    document.getElementById('ecDomain').value = c.domain || '';
-    document.getElementById('ecLinkedin').value = c.linkedin_url || '';
-    document.getElementById('ecIndustry').value = c.industry || '';
-    document.getElementById('ecLegalName').value = c.legal_name || '';
-    document.getElementById('ecEmployeeSize').value = c.employee_size || '';
-    document.getElementById('ecHqCity').value = c.hq_city || '';
-    document.getElementById('ecHqState').value = c.hq_state || '';
-    document.getElementById('ecHqCountry').value = c.hq_country || '';
-    document.getElementById('ecCreditTerms').value = c.credit_terms || '';
-    document.getElementById('ecTaxId').value = c.tax_id || '';
-    document.getElementById('ecCurrency').value = c.currency || 'USD';
-    document.getElementById('ecCarrier').value = c.preferred_carrier || '';
-    document.getElementById('ecNotes').value = c.notes || '';
-    document.getElementById('ecStrategic').checked = !!c.is_strategic;
+    const _s = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    _s('ecId', companyId);
+    _s('ecName', c.name || '');
+    _s('ecAccountType', c.account_type || '');
+    _s('ecPhone', c.phone || '');
+    _s('ecWebsite', c.website || '');
+    _s('ecDomain', c.domain || '');
+    _s('ecLinkedin', c.linkedin_url || '');
+    _s('ecIndustry', c.industry || '');
+    _s('ecLegalName', c.legal_name || '');
+    _s('ecEmployeeSize', c.employee_size || '');
+    _s('ecHqCity', c.hq_city || '');
+    _s('ecHqState', c.hq_state || '');
+    _s('ecHqCountry', c.hq_country || '');
+    _s('ecCreditTerms', c.credit_terms || '');
+    _s('ecTaxId', c.tax_id || '');
+    _s('ecCurrency', c.currency || 'USD');
+    _s('ecCarrier', c.preferred_carrier || '');
+    _s('ecNotes', c.notes || '');
+    const ecStrategic = document.getElementById('ecStrategic'); if (ecStrategic) ecStrategic.checked = !!c.is_strategic;
     await loadUserOptions('ecOwner');
-    if (c.account_owner_id) document.getElementById('ecOwner').value = c.account_owner_id;
+    if (c.account_owner_id) _s('ecOwner', c.account_owner_id);
     openModal('editCompanyModal', 'ecName');
 }
 
 async function saveEditCompany() {
-    var id = document.getElementById('ecId').value;
-    var name = document.getElementById('ecName').value.trim();
+    const _v = id => document.getElementById(id)?.value ?? '';
+    var id = _v('ecId');
+    var name = _v('ecName').trim();
     if (!name) { showToast('Company name is required', 'error'); return; }
-    var ownerVal = document.getElementById('ecOwner').value;
+    var ownerVal = _v('ecOwner');
     try {
         await apiFetch('/api/companies/' + id, {
             method: 'PUT',
             body: {
                 name: name,
-                account_type: document.getElementById('ecAccountType').value || null,
-                phone: document.getElementById('ecPhone').value.trim() || null,
-                website: document.getElementById('ecWebsite').value.trim() || null,
-                domain: document.getElementById('ecDomain').value.trim() || null,
-                linkedin_url: document.getElementById('ecLinkedin').value.trim() || null,
-                industry: document.getElementById('ecIndustry').value.trim() || null,
-                legal_name: document.getElementById('ecLegalName').value.trim() || null,
-                employee_size: document.getElementById('ecEmployeeSize').value.trim() || null,
-                hq_city: document.getElementById('ecHqCity').value.trim() || null,
-                hq_state: document.getElementById('ecHqState').value.trim() || null,
-                hq_country: document.getElementById('ecHqCountry').value.trim() || null,
-                credit_terms: document.getElementById('ecCreditTerms').value.trim() || null,
-                tax_id: document.getElementById('ecTaxId').value.trim() || null,
-                currency: document.getElementById('ecCurrency').value.trim() || null,
-                preferred_carrier: document.getElementById('ecCarrier').value.trim() || null,
-                notes: document.getElementById('ecNotes').value,
-                is_strategic: document.getElementById('ecStrategic').checked,
+                account_type: _v('ecAccountType') || null,
+                phone: _v('ecPhone').trim() || null,
+                website: _v('ecWebsite').trim() || null,
+                domain: _v('ecDomain').trim() || null,
+                linkedin_url: _v('ecLinkedin').trim() || null,
+                industry: _v('ecIndustry').trim() || null,
+                legal_name: _v('ecLegalName').trim() || null,
+                employee_size: _v('ecEmployeeSize').trim() || null,
+                hq_city: _v('ecHqCity').trim() || null,
+                hq_state: _v('ecHqState').trim() || null,
+                hq_country: _v('ecHqCountry').trim() || null,
+                credit_terms: _v('ecCreditTerms').trim() || null,
+                tax_id: _v('ecTaxId').trim() || null,
+                currency: _v('ecCurrency').trim() || null,
+                preferred_carrier: _v('ecCarrier').trim() || null,
+                notes: _v('ecNotes'),
+                is_strategic: document.getElementById('ecStrategic')?.checked ?? false,
                 account_owner_id: ownerVal ? parseInt(ownerVal) : null,
             }
         });
@@ -455,35 +464,36 @@ function openAddSiteModal(companyId, companyName) {
     delete document.getElementById('asSiteCompanyId').dataset.editSiteId;
     document.getElementById('asSiteCompanyName').textContent = companyName;
     document.querySelector('#addSiteModal h2').innerHTML = 'Add Site to <span id="asSiteCompanyName">' + esc(companyName) + '</span>';
-    ['asSiteName','asSiteAddr1','asSiteAddr2','asSiteCity','asSiteState','asSiteZip','asSitePayTerms','asSiteShipTerms','asSiteTimezone','asSiteRecvHours','asSiteCarrierAcct'].forEach(id => document.getElementById(id).value = '');
-    document.getElementById('asSiteCountry').value = 'US';
-    document.getElementById('asSiteType').value = '';
-    document.getElementById('asSiteNotes').value = '';
+    ['asSiteName','asSiteAddr1','asSiteAddr2','asSiteCity','asSiteState','asSiteZip','asSitePayTerms','asSiteShipTerms','asSiteTimezone','asSiteRecvHours','asSiteCarrierAcct'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    const asSiteCountry = document.getElementById('asSiteCountry'); if (asSiteCountry) asSiteCountry.value = 'US';
+    const asSiteType = document.getElementById('asSiteType'); if (asSiteType) asSiteType.value = '';
+    const asSiteNotes = document.getElementById('asSiteNotes'); if (asSiteNotes) asSiteNotes.value = '';
     openModal('addSiteModal', 'asSiteName');
 }
 
 async function addSite() {
-    const companyId = document.getElementById('asSiteCompanyId').value;
+    const _v = id => document.getElementById(id)?.value ?? '';
+    const companyId = _v('asSiteCompanyId');
     const data = {
-        site_name: document.getElementById('asSiteName').value.trim(),
-        owner_id: document.getElementById('asSiteOwner').value || null,
-        address_line1: document.getElementById('asSiteAddr1').value.trim() || null,
-        address_line2: document.getElementById('asSiteAddr2').value.trim() || null,
-        city: document.getElementById('asSiteCity').value.trim() || null,
-        state: document.getElementById('asSiteState').value.trim() || null,
-        zip: document.getElementById('asSiteZip').value.trim() || null,
-        country: document.getElementById('asSiteCountry').value.trim() || 'US',
-        payment_terms: document.getElementById('asSitePayTerms').value.trim(),
-        shipping_terms: document.getElementById('asSiteShipTerms').value.trim(),
-        site_type: document.getElementById('asSiteType').value || null,
-        timezone: document.getElementById('asSiteTimezone').value.trim() || null,
-        receiving_hours: document.getElementById('asSiteRecvHours').value.trim() || null,
-        carrier_account: document.getElementById('asSiteCarrierAcct').value.trim() || null,
-        notes: document.getElementById('asSiteNotes').value.trim() || null,
+        site_name: _v('asSiteName').trim(),
+        owner_id: _v('asSiteOwner') || null,
+        address_line1: _v('asSiteAddr1').trim() || null,
+        address_line2: _v('asSiteAddr2').trim() || null,
+        city: _v('asSiteCity').trim() || null,
+        state: _v('asSiteState').trim() || null,
+        zip: _v('asSiteZip').trim() || null,
+        country: _v('asSiteCountry').trim() || 'US',
+        payment_terms: _v('asSitePayTerms').trim(),
+        shipping_terms: _v('asSiteShipTerms').trim(),
+        site_type: _v('asSiteType') || null,
+        timezone: _v('asSiteTimezone').trim() || null,
+        receiving_hours: _v('asSiteRecvHours').trim() || null,
+        carrier_account: _v('asSiteCarrierAcct').trim() || null,
+        notes: _v('asSiteNotes').trim() || null,
     };
     if (!data.site_name) return;
     try {
-        const editId = document.getElementById('asSiteCompanyId').dataset.editSiteId;
+        const editId = document.getElementById('asSiteCompanyId')?.dataset?.editSiteId;
         if (editId) {
             await apiFetch('/api/sites/' + editId, { method: 'PUT', body: data });
             delete document.getElementById('asSiteCompanyId').dataset.editSiteId;
@@ -493,9 +503,9 @@ async function addSite() {
             showToast('Site created', 'success');
         }
         closeModal('addSiteModal');
-        ['asSiteName','asSiteAddr1','asSiteAddr2','asSiteCity','asSiteState','asSiteZip','asSitePayTerms','asSiteShipTerms'].forEach(id => document.getElementById(id).value = '');
-        document.getElementById('asSiteCountry').value = 'US';
-        document.getElementById('asSiteNotes').value = '';
+        ['asSiteName','asSiteAddr1','asSiteAddr2','asSiteCity','asSiteState','asSiteZip','asSitePayTerms','asSiteShipTerms'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+        const asSC = document.getElementById('asSiteCountry'); if (asSC) asSC.value = 'US';
+        const asSN = document.getElementById('asSiteNotes'); if (asSN) asSN.value = '';
         loadCustomers();
         loadSiteOptions();
     } catch (e) { showToast('Failed to save site', 'error'); }
@@ -1674,7 +1684,7 @@ let _buyPlans = [];
 
 async function showBuyPlans() {
     showView('view-buyplans');
-    currentReqId = null;
+    setCurrentReqId(null);
     await loadBuyPlans();
 }
 
@@ -1815,10 +1825,7 @@ async function checkTokenApproval() {
     const token = location.hash.replace('#approve-token/', '');
     if (!token) return false;
     try {
-        const bp = await fetch('/api/buy-plans/token/' + encodeURIComponent(token)).then(r => {
-            if (!r.ok) throw new Error('Invalid token');
-            return r.json();
-        });
+        const bp = await apiFetch('/api/buy-plans/token/' + encodeURIComponent(token));
         showView('view-buyplans');
         const el = document.getElementById('buyPlansList');
         const statusLabel = bp.status === 'pending_approval' ? 'Pending Approval' : bp.status;
@@ -1866,11 +1873,9 @@ async function tokenApprovePlan(token) {
     if (!soNumber) { showToast('Acctivate Sales Order # is required', 'error'); return; }
     const notes = document.getElementById('tokenManagerNotes')?.value?.trim() || '';
     try {
-        await fetch('/api/buy-plans/token/' + encodeURIComponent(token) + '/approve', {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ sales_order_number: soNumber, manager_notes: notes })
-        }).then(r => { if (!r.ok) throw new Error('Approval failed'); return r.json(); });
+        await apiFetch('/api/buy-plans/token/' + encodeURIComponent(token) + '/approve', {
+            method: 'PUT', body: { sales_order_number: soNumber, manager_notes: notes }
+        });
         _showTokenResult('approved', 'Buy plan approved — buyers have been notified.');
     } catch (e) { showToast('Failed to approve: ' + (e.message || e), 'error'); }
 }
@@ -1879,11 +1884,9 @@ async function tokenRejectPlan(token) {
     const reason = prompt('Rejection reason:');
     if (reason === null) return;
     try {
-        await fetch('/api/buy-plans/token/' + encodeURIComponent(token) + '/reject', {
-            method: 'PUT',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ reason })
-        }).then(r => { if (!r.ok) throw new Error('Rejection failed'); return r.json(); });
+        await apiFetch('/api/buy-plans/token/' + encodeURIComponent(token) + '/reject', {
+            method: 'PUT', body: { reason }
+        });
         _showTokenResult('rejected', 'Buy plan has been rejected.');
     } catch (e) { showToast('Failed to reject: ' + (e.message || e), 'error'); }
 }
@@ -2609,7 +2612,7 @@ function openAddSiteContact(siteId) {
     document.getElementById('scSiteId').value = siteId;
     document.getElementById('scContactId').value = '';
     document.getElementById('siteContactModalTitle').textContent = 'Add Contact';
-    ['scFullName','scTitle','scEmail','scPhone','scNotes'].forEach(id => document.getElementById(id).value = '');
+    ['scFullName','scTitle','scEmail','scPhone','scNotes'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     document.getElementById('scPrimary').checked = false;
     openModal('siteContactModal', 'scFullName');
 }
@@ -2750,7 +2753,7 @@ async function saveLogCall() {
 function openLogNoteModal(companyId, companyName) {
     document.getElementById('lnCompanyId').value = companyId;
     document.getElementById('lnCompanyName').textContent = companyName;
-    ['lnContactName','lnNotes'].forEach(id => document.getElementById(id).value = '');
+    ['lnContactName','lnNotes'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     openModal('logNoteModal', 'lnNotes');
 }
 
@@ -2787,7 +2790,7 @@ let _proactiveSiteContacts = [];
 
 async function showProactiveOffers() {
     showView('view-proactive');
-    currentReqId = null;
+    setCurrentReqId(null);
     switchProactiveTab('matches');
 }
 
@@ -3114,7 +3117,7 @@ let _perfVendorOrder = 'desc';
 
 function showPerformance() {
     showView('view-performance');
-    currentReqId = null;
+    setCurrentReqId(null);
     // Show digest tab for admins
     const digestTab = document.getElementById('perfDigestTab');
     if (digestTab) digestTab.style.display = window.__isAdmin ? '' : 'none';
