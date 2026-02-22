@@ -1621,6 +1621,23 @@ async def update_quote(
     return quote_to_dict(quote)
 
 
+@router.delete("/api/quotes/{quote_id}")
+async def delete_quote(
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a draft quote. Sent/won/lost quotes cannot be deleted."""
+    quote = db.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    if quote.status != "draft":
+        raise HTTPException(400, "Only draft quotes can be deleted")
+    db.delete(quote)
+    db.commit()
+    return {"ok": True}
+
+
 @router.post("/api/quotes/{quote_id}/preview")
 async def preview_quote_email(
     quote_id: int,

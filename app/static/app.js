@@ -1780,7 +1780,7 @@ function _renderQuoteDetail(reqId, q, container) {
 
     // ── Actions by status ──
     const statusActions = {
-        draft: `<button class="btn btn-ghost btn-sm" onclick="ddSaveQuoteDraft(${reqId})">Save Draft</button> <button class="btn btn-primary btn-sm" onclick="ddSendQuote(${reqId})">Send Quote</button>`,
+        draft: `<button class="btn btn-ghost btn-sm" onclick="ddSaveQuoteDraft(${reqId})">Save Draft</button> <button class="btn btn-primary btn-sm" onclick="ddSendQuote(${reqId})">Send Quote</button> <button class="btn btn-danger btn-sm" onclick="ddDeleteQuote(${reqId},${q.id})">Delete</button>`,
         sent: `<button class="btn btn-success btn-sm" onclick="ddMarkQuoteResult(${reqId},'won')">Mark Won</button> <button class="btn btn-danger btn-sm" onclick="ddMarkQuoteResult(${reqId},'lost')">Mark Lost</button> <button class="btn btn-ghost btn-sm" onclick="ddReviseQuote(${reqId})">Revise</button>`,
         won: `<span style="color:var(--green);font-weight:600;font-size:11px">Won${q.won_revenue ? ' \u2014 $' + Number(q.won_revenue).toLocaleString() : ''}</span>`,
         lost: `<span style="color:var(--red);font-weight:600;font-size:11px">Lost${q.result_reason ? ' \u2014 ' + esc(q.result_reason) : ''}</span> <button class="btn btn-ghost btn-sm" onclick="ddReviseQuote(${reqId})">Revise</button>`,
@@ -2042,6 +2042,22 @@ async function ddReviseQuote(reqId) {
         }
     } catch (e) {
         showToast('Error revising: ' + (e.message || e), 'error');
+    }
+}
+
+async function ddDeleteQuote(reqId, quoteId) {
+    if (!confirm('Delete this draft quote? This cannot be undone.')) return;
+    try {
+        await apiFetch('/api/quotes/' + quoteId, { method: 'DELETE' });
+        showToast('Draft deleted', 'success');
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].quotes;
+        const drow = document.getElementById('d-' + reqId);
+        if (drow) {
+            const panel = drow.querySelector('.dd-panel');
+            if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
+        }
+    } catch (e) {
+        showToast('Error: ' + (e.message || e), 'error');
     }
 }
 
@@ -7305,7 +7321,7 @@ Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
     addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies,
     cloneFromList, closeModal, ddApplyGlobalMarkup, ddApplyQuoteMarkup, ddBuildQuote,
-    ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddEditOffer, ddExpandQuote, ddMarkQuoteResult, ddPasteRows, ddRefreshPreview, ddUpdateQuoteField,
+    ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddDeleteQuote, ddEditOffer, ddExpandQuote, ddMarkQuoteResult, ddPasteRows, ddRefreshPreview, ddUpdateQuoteField,
     ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddReviseQuote, ddSaveEditOffer, ddSaveQuoteDraft, ddSendBulkRfq, ddSendQuote,
     ddToggleAllOffers, ddToggleGroupOffers, ddToggleOffer, ddToggleSighting, ddToggleTier,
     ddUploadFile, debounceOfferHistorySearch, debouncePartsSightingsSearch,
