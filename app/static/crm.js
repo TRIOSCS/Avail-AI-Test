@@ -622,8 +622,8 @@ async function saveCustNotes(companyId) {
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
         if (document.getElementById('custDrawer')?.classList.contains('open')) { closeCustDrawer(); e.preventDefault(); return; }
-        if (document.getElementById('vendorDrawer')?.classList.contains('open')) { closeVendorDrawer(); e.preventDefault(); return; }
-        if (document.getElementById('contactDrawer')?.classList.contains('open')) { closeContactDrawer(); e.preventDefault(); return; }
+        if (document.getElementById('vendorDrawer')?.classList.contains('open') && window.closeVendorDrawer) { window.closeVendorDrawer(); e.preventDefault(); return; }
+        if (document.getElementById('contactDrawer')?.classList.contains('open') && window.closeContactDrawer) { window.closeContactDrawer(); e.preventDefault(); return; }
     }
 });
 
@@ -5354,7 +5354,6 @@ Object.assign(window, {
     setCustFilter, openCustDrawer, closeCustDrawer, switchCustDrawerTab,
     toggleCustCheckbox, toggleAllCustCheckboxes, clearCustSelection,
     bulkAssignOwner, bulkExportAccounts, toggleSiteAccordion,
-    closeVendorDrawer, closeContactDrawer,
     // Cross-file calls from app.js
     goToCompany, showBuyPlans, showCustomers, showPerformance,
     showProactiveOffers, showSettings,
