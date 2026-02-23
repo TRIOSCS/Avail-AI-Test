@@ -1635,3 +1635,17 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .contact-card-info p{font-size:12px;color:var(--text2);margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .contact-card-meta{flex-shrink:0;text-align:right}
 
+/* ── Stat Grid ───────────────────────────────────────────── */
+.stat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin-bottom:16px}
+
+/* ── v2 Responsive ───────────────────────────────────────── */
+@media (max-width:768px){
+    .stat-grid{grid-template-columns:repeat(2,1fr)}
+    .nav-group-label{padding:6px 12px 2px;font-size:9px}
+    .contact-card{flex-wrap:wrap}
+    .contact-card-meta{width:100%;margin-top:4px}
+}
+@media (max-width:480px){
+    .stat-grid{grid-template-columns:1fr}
+}
+

@@ -6899,9 +6899,10 @@ function filterVendorList() {
         const bc = c.is_blacklisted ? 'b-bl' : (tierBadge[tier] || 'b-new');
         const tl = c.is_blacklisted ? 'Blacklisted' : (tierLabel[tier] || 'New');
         const primaryEmail = (c.emails || [])[0] || '';
-        const scoreText = c.vendor_score != null ? Math.round(c.vendor_score) : '\u2014';
+        const score = c.vendor_score != null ? Math.round(c.vendor_score) : 0;
+        const scoreText = c.vendor_score != null ? score : '\u2014';
         html += `<tr onclick="openVendorPopup(${c.id})">
-            <td><b class="cust-link">${esc(c.display_name)}</b></td>
+            <td style="display:flex;align-items:center;gap:8px">${engRing(score, 32)}<b class="cust-link">${esc(c.display_name)}</b></td>
             <td><span class="badge ${bc}">${tl}</span></td>
             <td class="mono">${scoreText}</td>
             <td>${stars(c.avg_rating, c.review_count)}</td>
@@ -6994,6 +6995,8 @@ function renderMaterialList() {
 
     for (const c of data) {
         const bestPrice = c.best_price != null ? `$${Number(c.best_price).toFixed(2)}` : '\u2014';
+        const matDays = daysSince(c.last_searched_at);
+        const matColor = recencyColor(matDays, [30, 90]);
         html += `<tr onclick="openMaterialPopup(${c.id})">
             <td><b class="cust-link">${esc(c.display_mpn)}</b></td>
             <td>${esc(c.manufacturer || '\u2014')}</td>
@@ -7001,7 +7004,7 @@ function renderMaterialList() {
             <td class="mono" style="color:${c.best_price != null ? 'var(--green)' : 'var(--muted)'};font-weight:600">${bestPrice}</td>
             <td class="mono">${c.offer_count || 0}</td>
             <td class="mono">${c.search_count || 0}</td>
-            <td style="font-size:11px;color:var(--muted)">${c.last_searched_at ? fmtDate(c.last_searched_at) : '\u2014'}</td>
+            <td style="font-size:11px;color:var(--muted)">${healthDot(matColor, matDays < 900 ? matDays + 'd ago' : '')} ${c.last_searched_at ? fmtDate(c.last_searched_at) : '\u2014'}</td>
         </tr>`;
     }
 

@@ -170,14 +170,17 @@ function renderCustomers() {
             ? esc(c.account_owner_name)
             : '<span style="color:var(--red);font-weight:600">unassigned</span>';
 
+        const enrichDays = window.daysSince ? window.daysSince(c.last_enriched_at) : 999;
+        const enrichColor = window.recencyColor ? window.recencyColor(enrichDays, [7, 21]) : 'muted';
+
         html += `<tr onclick="toggleCustDrill(${c.id})" data-company-id="${c.id}">
             <td><button class="ea" id="ca-${c.id}">\u25b6</button></td>
             <td><b class="cust-link">${esc(displayName)}</b>${domain ? '<br><span style="font-size:10px;color:var(--muted)">' + esc(domain) + '</span>' : ''}</td>
             <td>${c.account_type ? '<span class="badge b-src">' + esc(c.account_type) + '</span>' : '\u2014'}</td>
             <td style="font-size:11px">${esc(c.industry || '\u2014')}</td>
             <td class="mono">${c.site_count || 0}</td>
-            <td>${ownerHtml}</td>
-            <td><span id="actHealth-${c.id}"></span></td>
+            <td>${ownerHtml}${c.account_owner_name ? '<br><span class="badge b-src" style="font-size:9px;margin-top:2px">' + esc(c.account_owner_name) + '</span>' : ''}</td>
+            <td>${window.healthDot ? window.healthDot(enrichColor, enrichDays < 900 ? enrichDays + 'd since enrichment' : 'Never enriched') : ''} <span id="actHealth-${c.id}"></span></td>
             <td style="white-space:nowrap" onclick="event.stopPropagation()">
                 <button class="btn-enrich" onclick="openEditCompany(${c.id})">Edit</button>
                 <button class="btn-enrich" onclick="unifiedEnrichCompany(${c.id})">Enrich</button>
@@ -2840,7 +2843,7 @@ function renderProactiveMatches() {
             </tr>
         `).join('');
         return `
-        <div class="card" style="margin-bottom:12px">
+        <div class="card-v2" style="margin-bottom:12px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
                 <div>
                     <strong>${esc(group.company_name)}</strong>
@@ -3160,7 +3163,7 @@ async function loadManagerDigest() {
             { label: 'Response Rate', val: s.response_rate != null ? Math.round(s.response_rate) + '%' : '—', color: 'var(--teal)' }
         ];
         for (const c of cards) {
-            html += `<div class="card" style="padding:16px;min-width:120px;text-align:center">
+            html += `<div class="card-v2" style="padding:16px;min-width:120px;text-align:center">
                 <div style="font-size:24px;font-weight:800;color:${c.color}">${c.val}</div>
                 <div style="font-size:11px;color:var(--muted);margin-top:4px">${c.label}</div>
             </div>`;
@@ -3254,8 +3257,9 @@ function renderVendorScorecards(data) {
         const reviewDisplay = v.avg_review_rating !== null && v.avg_review_rating !== undefined
             ? `<td class="metric-cell ${v.avg_review_rating >= 0.7 ? 'metric-green' : v.avg_review_rating >= 0.4 ? 'metric-yellow' : 'metric-red'}">${(v.avg_review_rating * 5).toFixed(1)}/5</td>`
             : '<td class="metric-cell na">N/A</td>';
+        const ringScore = v.composite_score != null ? Math.round(v.composite_score * 100) : 0;
         html += `<tr>
-            <td><strong>${v.vendor_name}</strong></td>
+            <td style="display:flex;align-items:center;gap:8px">${window.engRing ? window.engRing(ringScore, 28) : ''}<strong>${v.vendor_name}</strong></td>
             ${metricCell(v.response_rate)}
             ${metricCell(v.quote_conversion)}
             ${metricCell(v.po_conversion)}
