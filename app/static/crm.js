@@ -91,7 +91,10 @@ async function loadCustomers() {
         if ((isSalesOnly || myOnly) && window.userId) url += '&owner_id=' + window.userId;
         if (_custUnassigned) url += '&unassigned=1';
         const result = await apiFetch(url, {signal: _custAbort.signal});
-        crmCustomers = result;
+        // Filter out vendor-type accounts — they belong in the Vendors view
+        crmCustomers = (Array.isArray(result) ? result : []).filter(c =>
+            !c.account_type || c.account_type.toLowerCase() !== 'vendor'
+        );
         renderCustomers();
     } catch (e) { if (e.name === 'AbortError') return; showToast('Failed to load customers', 'error'); console.error(e); }
 }
