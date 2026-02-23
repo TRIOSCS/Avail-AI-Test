@@ -703,7 +703,11 @@ function showMaterials() {
 }
 
 let _contactStatusFilter = 'all';
-const debouncedLoadContacts = debounce(() => loadContacts(), 300);
+const debouncedLoadContacts = debounce(() => {
+    const q = (document.getElementById('contactFilter')?.value || '').trim();
+    if (_contactCache.length) renderContacts(q);
+    else loadContacts();
+}, 300);
 
 function setContactStatusFilter(status, btn) {
     _contactStatusFilter = status;
@@ -712,80 +716,133 @@ function setContactStatusFilter(status, btn) {
     loadContacts();
 }
 
+let _contactCache = [];
+
 async function loadContacts() {
     const list = document.getElementById('contactList');
     if (!list) return;
     const q = (document.getElementById('contactFilter')?.value || '').trim();
 
+    // If we have a cache and user is just filtering/searching, skip refetch
+    if (_contactCache.length && (q || _contactStatusFilter !== 'all')) {
+        return renderContacts(q);
+    }
+
+    list.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading contacts\u2026</div>';
+
     try {
-        let url = '/api/vendors?limit=500';
-        if (q) url += `&q=${encodeURIComponent(q)}`;
-        const resp = await apiFetch(url);
-        let vendors = resp.vendors || resp || [];
-        if (!Array.isArray(vendors)) vendors = [];
-
-        // Flatten: each vendor with emails becomes a "contact" row
-        let contacts = [];
-        for (const v of vendors) {
-            const emails = v.emails || [];
-            const phones = v.phones || [];
-            if (emails.length === 0 && phones.length === 0) continue;
-            contacts.push({
-                vendor_id: v.id,
-                display_name: v.display_name || 'Unknown',
-                emails,
-                phones,
-                engagement_score: v.engagement_score ?? v.vendor_score ?? 0,
-                sighting_count: v.sighting_count || 0,
-                is_blacklisted: v.is_blacklisted || false,
-                updated_at: v.updated_at || v.created_at || null,
-            });
-        }
-
-        // Client-side status filter based on engagement score
-        contacts = contacts.filter(c => {
-            if (_contactStatusFilter === 'all') return true;
-            const score = c.engagement_score || 0;
-            if (_contactStatusFilter === 'active') return score >= 50;
-            if (_contactStatusFilter === 'stale') return score > 0 && score < 50;
-            if (_contactStatusFilter === 'new') return score === 0;
-            return true;
-        });
-
-        const countEl = document.getElementById('contactFilterCount');
-        if (countEl) countEl.textContent = `${contacts.length} contacts`;
-
-        if (contacts.length === 0) {
-            list.innerHTML = '<p class="empty">No contacts found.</p>';
+        // Step 1: get all vendors
+        const resp = await apiFetch('/api/vendors?limit=500');
+        const vendors = resp.vendors || resp || [];
+        if (!Array.isArray(vendors) || !vendors.length) {
+            list.innerHTML = '<p class="empty">No vendors found.</p>';
             return;
         }
 
-        list.innerHTML = contacts.map(c => {
-            const score = Math.min(c.engagement_score || 0, 100);
-            const color = score >= 70 ? 'green' : score >= 40 ? 'amber' : score > 0 ? 'red' : 'muted';
-            const emailStr = c.emails.slice(0, 2).map(e => esc(e)).join(', ');
-            const phoneStr = c.phones.slice(0, 1).map(p => esc(p)).join('');
+        // Step 2: fetch contacts for each vendor in parallel (batches of 20)
+        const people = [];
+        const batchSize = 20;
+        for (let i = 0; i < vendors.length; i += batchSize) {
+            const batch = vendors.slice(i, i + batchSize);
+            const results = await Promise.allSettled(
+                batch.map(v => apiFetch(`/api/vendors/${v.id}/contacts`).then(contacts => ({ v, contacts })))
+            );
+            for (const r of results) {
+                if (r.status !== 'fulfilled') continue;
+                const { v, contacts } = r.value;
+                if (!Array.isArray(contacts)) continue;
+                for (const c of contacts) {
+                    if (!c.full_name && !c.email) continue;
+                    people.push({
+                        id: c.id,
+                        vendor_id: v.id,
+                        vendor_name: v.display_name || 'Unknown',
+                        full_name: c.full_name || '',
+                        title: c.title || '',
+                        email: c.email || '',
+                        phone: c.phone || '',
+                        source: c.source || '',
+                        is_verified: c.is_verified || false,
+                        confidence: c.confidence || 0,
+                        interaction_count: c.interaction_count || 0,
+                        last_interaction_at: c.last_interaction_at || null,
+                        first_seen_at: c.first_seen_at || null,
+                    });
+                }
+            }
+        }
 
-            return `<div class="card-v2 contact-card" onclick="openVendorPopup(${c.vendor_id})">
-                ${engRing(score, 40)}
-                <div class="contact-card-info">
-                    <h4>${healthDot(color)} ${esc(c.display_name)}</h4>
-                    <p>${emailStr}</p>
-                    <p>${phoneStr}${c.sighting_count ? ' · ' + c.sighting_count + ' sightings' : ''}</p>
-                </div>
-                <div class="contact-card-meta">
-                    <span class="text-xs-muted">${c.is_blacklisted ? '⛔ Blacklisted' : ''}</span>
-                </div>
-            </div>`;
-        }).join('');
+        _contactCache = people;
+        renderContacts(q);
     } catch (err) {
         console.error('loadContacts error:', err);
         list.innerHTML = '<p class="empty">Failed to load contacts.</p>';
     }
 }
 
+function renderContacts(q) {
+    const list = document.getElementById('contactList');
+    if (!list) return;
+    let contacts = [..._contactCache];
+
+    // Search filter
+    if (q) {
+        const lq = q.toLowerCase();
+        contacts = contacts.filter(c =>
+            (c.full_name || '').toLowerCase().includes(lq) ||
+            (c.email || '').toLowerCase().includes(lq) ||
+            (c.vendor_name || '').toLowerCase().includes(lq) ||
+            (c.title || '').toLowerCase().includes(lq)
+        );
+    }
+
+    // Status filter based on interaction recency
+    contacts = contacts.filter(c => {
+        if (_contactStatusFilter === 'all') return true;
+        const days = daysSince(c.last_interaction_at || c.first_seen_at);
+        if (_contactStatusFilter === 'active') return days <= 7;
+        if (_contactStatusFilter === 'stale') return days > 21;
+        if (_contactStatusFilter === 'new') return days <= 3 && c.interaction_count === 0;
+        return true;
+    });
+
+    // Sort: most interactions first, then alphabetical
+    contacts.sort((a, b) => (b.interaction_count || 0) - (a.interaction_count || 0) || (a.full_name || '').localeCompare(b.full_name || ''));
+
+    const countEl = document.getElementById('contactFilterCount');
+    if (countEl) countEl.textContent = `${contacts.length} contact${contacts.length !== 1 ? 's' : ''}`;
+
+    if (!contacts.length) {
+        list.innerHTML = '<p class="empty">No contacts found.</p>';
+        return;
+    }
+
+    list.innerHTML = contacts.map(c => {
+        const days = daysSince(c.last_interaction_at || c.first_seen_at);
+        const color = recencyColor(days);
+        const score = Math.min(c.confidence || 0, 100);
+        const verifiedBadge = c.is_verified ? '<span class="badge b-auth" style="font-size:9px;margin-left:6px">Verified</span>' : '';
+        const interactionText = c.interaction_count ? c.interaction_count + ' interaction' + (c.interaction_count !== 1 ? 's' : '') : '';
+        const dateLabel = c.last_interaction_at ? new Date(c.last_interaction_at).toLocaleDateString() : '';
+
+        return `<div class="card-v2 contact-card" onclick="openVendorPopup(${c.vendor_id})">
+            ${engRing(score, 40)}
+            <div class="contact-card-info">
+                <h4>${healthDot(color)} ${esc(c.full_name || 'Unknown')}${verifiedBadge}</h4>
+                <p>${esc(c.title)}${c.title && c.vendor_name ? ' at ' : ''}${esc(c.vendor_name)}</p>
+                <p>${c.email ? esc(c.email) : ''}${c.email && c.phone ? ' \u00b7 ' : ''}${c.phone ? esc(c.phone) : ''}</p>
+            </div>
+            <div class="contact-card-meta">
+                <span class="text-xs-muted">${interactionText}</span>
+                ${dateLabel ? '<br><span class="text-xs-muted">' + dateLabel + '</span>' : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
 function showContacts() {
     showView('view-contacts');
+    _contactCache = [];
     loadContacts();
 }
 
@@ -8554,5 +8611,5 @@ Object.assign(window, {
     // v2 visual helpers
     engRing, healthDot, statCard, daysSince, recencyColor,
     // Contact Intelligence view
-    debouncedLoadContacts, setContactStatusFilter, loadContacts, showContacts,
+    debouncedLoadContacts, setContactStatusFilter, loadContacts, renderContacts, showContacts,
 });
