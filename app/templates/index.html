@@ -39,7 +39,7 @@
         </div>
         <a class="bug-link" onclick="openTroubleChat()">Trouble</a>
         <div class="search-wrap">
-            <input type="text" class="sbox" id="mainSearch" placeholder="&#x1f50d;  Search customer, part, RFQ&hellip;" aria-label="Search requisitions" oninput="debouncedMainSearch(this.value)" onkeydown="if(event.key==='Enter')triggerMainSearch()">
+            <input type="text" class="sbox" id="mainSearch" placeholder="Search customer, part, RFQ&hellip;" aria-label="Search requisitions" oninput="debouncedMainSearch(this.value)" onkeydown="if(event.key==='Enter')triggerMainSearch()">
             <button type="button" class="search-btn" id="mainSearchBtn" onclick="triggerMainSearch()" title="Search"><svg class="search-icon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="spinner-icon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2" stroke-dasharray="32" stroke-dashoffset="10" stroke-linecap="round"/></svg></button>
             <kbd class="search-hint">/</kbd>
         </div>
@@ -79,7 +79,7 @@
     <img src="/static/avail_logo.png" alt="AVAIL" class="mobile-logo" onclick="sidebarNav('reqs',document.getElementById('navReqs'))" style="cursor:pointer">
     <div class="search-wrap mobile-search-wrap">
         <input type="text" class="sbox mobile-search" id="mobileMainSearch"
-               placeholder="&#x1f50d; Search…" aria-label="Search requisitions" oninput="debouncedMainSearch(this.value)" onkeydown="if(event.key==='Enter')triggerMainSearch()">
+               placeholder="Search…" aria-label="Search requisitions" oninput="debouncedMainSearch(this.value)" onkeydown="if(event.key==='Enter')triggerMainSearch()">
         <button type="button" class="search-btn" id="mobileSearchBtn" onclick="triggerMainSearch()" title="Search"><svg class="search-icon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="spinner-icon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2" stroke-dasharray="32" stroke-dashoffset="10" stroke-linecap="round"/></svg></button>
     </div>
     <button type="button" class="mobile-notif-btn" onclick="toggleNotifications()" title="Notifications">
