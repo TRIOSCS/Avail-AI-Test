@@ -802,6 +802,8 @@ function showDetail(id, name, tab) {
 
 function showVendors() {
     showView('view-vendors');
+    const viewEl = document.getElementById('view-vendors');
+    if (viewEl) viewEl.style.display = 'flex';
     currentReqId = null;
     loadVendorList();
 }
@@ -890,6 +892,20 @@ async function loadContacts() {
     }
 }
 
+let _contactSortCol = null;
+let _contactSortDir = 'asc';
+
+function sortContactList(col) {
+    if (_contactSortCol === col) {
+        if (_contactSortDir === 'asc') _contactSortDir = 'desc';
+        else { _contactSortCol = null; _contactSortDir = 'asc'; }
+    } else {
+        _contactSortCol = col;
+        _contactSortDir = col === 'name' ? 'asc' : 'desc';
+    }
+    renderContacts((document.getElementById('contactFilter')?.value || '').trim());
+}
+
 function renderContacts(q) {
     const list = document.getElementById('contactList');
     if (!list) return;
@@ -906,7 +922,7 @@ function renderContacts(q) {
         );
     }
 
-    // Status filter based on interaction recency and type
+    // Status filter
     contacts = contacts.filter(c => {
         if (_contactStatusFilter === 'all') return true;
         if (_contactStatusFilter === 'customer') return c.contact_type === 'customer';
@@ -918,43 +934,137 @@ function renderContacts(q) {
         return true;
     });
 
-    // Sort: most interactions first, then alphabetical
-    contacts.sort((a, b) => (b.interaction_count || 0) - (a.interaction_count || 0) || (a.full_name || '').localeCompare(b.full_name || ''));
+    // Sort
+    if (_contactSortCol) {
+        contacts.sort((a, b) => {
+            let va, vb;
+            switch (_contactSortCol) {
+                case 'name': va = (a.full_name || ''); vb = (b.full_name || ''); break;
+                case 'company': va = (a.vendor_name || ''); vb = (b.vendor_name || ''); break;
+                case 'interactions': va = (a.interaction_count || 0); vb = (b.interaction_count || 0); break;
+                default: va = 0; vb = 0;
+            }
+            if (typeof va === 'string') return _contactSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+            return _contactSortDir === 'asc' ? va - vb : vb - va;
+        });
+    } else {
+        contacts.sort((a, b) => (b.interaction_count || 0) - (a.interaction_count || 0) || (a.full_name || '').localeCompare(b.full_name || ''));
+    }
 
     const countEl = document.getElementById('contactFilterCount');
     if (countEl) countEl.textContent = `${contacts.length} contact${contacts.length !== 1 ? 's' : ''}`;
 
     if (!contacts.length) {
-        list.innerHTML = '<p class="empty">No contacts found.</p>';
+        list.innerHTML = '<p class="crm-empty">No contacts found.</p>';
         return;
     }
 
-    list.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">' +
-    contacts.map(c => {
-        const initials = (c.full_name || '?').split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
-        const days = daysSince(c.last_interaction_at || c.first_seen_at);
-        const lastLabel = c.last_interaction_at ? getRelativeTime(c.last_interaction_at) : '';
-        const verifiedBadge = c.is_verified ? ' <span style="font-size:9px;color:var(--green)">✓</span>' : '';
+    // Build table
+    const thSort = (col, label, extra = '') => {
+        const active = _contactSortCol === col;
+        const arrow = active ? (_contactSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+        return `<th class="${active ? 'sorted' : ''}" onclick="sortContactList('${col}')" ${extra}>${label}<span class="sort-arrow">${arrow}</span></th>`;
+    };
 
-        return `<div class="card-v2" style="padding:12px;cursor:pointer;display:flex;gap:10px;align-items:start" onclick="openVendorPopup(${c.vendor_id})">
-            <div class="owner-avatar owner-avatar-md" style="background:${_avatarColor(c.full_name)}">${initials}</div>
-            <div style="flex:1;min-width:0">
-                <div style="display:flex;align-items:center;gap:4px">
-                    <span style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.full_name || 'Unknown')}${verifiedBadge}</span>
+    let html = `<table class="crm-table">
+        <thead><tr>
+            ${thSort('name', 'Name')}
+            ${thSort('company', 'Company')}
+            <th>Title</th>
+            <th>Email</th>
+            <th>Phone</th>
+            ${thSort('interactions', 'Activity')}
+            <th>Last Contact</th>
+        </tr></thead><tbody>`;
+
+    for (const c of contacts) {
+        const days = daysSince(c.last_interaction_at || c.first_seen_at);
+        const lastLabel = c.last_interaction_at ? getRelativeTime(c.last_interaction_at) : '—';
+        const verifiedBadge = c.is_verified ? ' <span style="color:var(--green);font-size:9px">✓</span>' : '';
+        const healthColor = days <= 7 ? 'green' : days <= 30 ? 'amber' : 'red';
+
+        html += `<tr onclick="openContactDrawer(${c.vendor_id}, ${c.id})" style="cursor:pointer">
+            <td>
+                <div style="display:flex;align-items:center;gap:8px">
+                    <span class="health-dot health-dot-${healthColor}"></span>
+                    <span style="font-weight:600">${esc(c.full_name || 'Unknown')}${verifiedBadge}</span>
                 </div>
-                <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.vendor_name)}</div>
-                <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.title || '')}</div>
-                <div style="margin-top:4px;display:flex;align-items:center;gap:8px;font-size:10px;color:var(--muted)">
-                    ${lastLabel ? '<span>' + lastLabel + '</span>' : ''}
-                    ${c.source ? '<span>' + esc(c.source.replace(/_/g,' ')) + '</span>' : ''}
-                </div>
+            </td>
+            <td>${esc(c.vendor_name)}</td>
+            <td class="muted-cell">${esc(c.title || '—')}</td>
+            <td>${c.email ? '<a href="mailto:'+escAttr(c.email)+'" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none;font-size:12px">'+esc(c.email)+'</a>' : '<span class="muted-cell">—</span>'}</td>
+            <td>${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none;font-size:12px">'+esc(c.phone)+'</a>' : '<span class="muted-cell">—</span>'}</td>
+            <td>${c.interaction_count || 0}</td>
+            <td class="muted-cell">${lastLabel}</td>
+        </tr>`;
+    }
+    html += '</tbody></table>';
+    list.innerHTML = html;
+}
+
+function openContactDrawer(vendorId, contactId) {
+    const backdrop = document.getElementById('contactDrawerBackdrop');
+    const drawer = document.getElementById('contactDrawer');
+    if (backdrop) backdrop.classList.add('open');
+    if (drawer) drawer.classList.add('open');
+
+    const contact = _contactCache.find(c => c.id === contactId && c.vendor_id === vendorId);
+    const title = document.getElementById('contactDrawerTitle');
+    const body = document.getElementById('contactDrawerBody');
+    if (!body) return;
+
+    if (!contact) {
+        if (title) title.textContent = 'Contact';
+        body.innerHTML = '<div class="drawer-section"><p class="crm-empty">Contact not found</p></div>';
+        return;
+    }
+
+    if (title) title.textContent = contact.full_name || 'Unknown';
+
+    const initials = (contact.full_name || '?').split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    const days = daysSince(contact.last_interaction_at || contact.first_seen_at);
+    const healthColor = days <= 7 ? 'green' : days <= 30 ? 'amber' : 'red';
+    const healthLabel = days <= 7 ? 'Active' : days <= 30 ? 'Aging' : 'Needs Follow-up';
+
+    let html = `<div class="drawer-section">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px">
+            <div class="owner-avatar owner-avatar-lg" style="background:${_avatarColor(contact.full_name)}">${initials}</div>
+            <div>
+                <div style="font-size:14px;font-weight:700;color:var(--text)">${esc(contact.full_name || 'Unknown')}</div>
+                ${contact.title ? '<div style="font-size:12px;color:var(--muted)">' + esc(contact.title) + '</div>' : ''}
+                <div style="font-size:12px;color:var(--muted)">${esc(contact.vendor_name)}</div>
             </div>
-        </div>`;
-    }).join('') + '</div>';
+        </div>
+        <div class="health-indicator" style="margin-bottom:12px"><span class="health-dot health-dot-${healthColor}"></span><span class="health-indicator-label" style="font-weight:600">${healthLabel}</span></div>
+        ${contact.email ? '<div class="drawer-field"><span class="drawer-field-label">Email</span><span class="drawer-field-value"><a href="mailto:'+escAttr(contact.email)+'">'+esc(contact.email)+'</a></span></div>' : ''}
+        ${contact.phone ? '<div class="drawer-field"><span class="drawer-field-label">Phone</span><span class="drawer-field-value"><a href="tel:'+escAttr(contact.phone)+'">'+esc(contact.phone)+'</a></span></div>' : ''}
+        <div class="drawer-field"><span class="drawer-field-label">Company</span><span class="drawer-field-value">${esc(contact.vendor_name)}</span></div>
+        <div class="drawer-field"><span class="drawer-field-label">Interactions</span><span class="drawer-field-value">${contact.interaction_count || 0}</span></div>
+        <div class="drawer-field"><span class="drawer-field-label">Last Contact</span><span class="drawer-field-value">${contact.last_interaction_at ? getRelativeTime(contact.last_interaction_at) : 'Never'}</span></div>
+        ${contact.source ? '<div class="drawer-field"><span class="drawer-field-label">Source</span><span class="drawer-field-value">'+esc(contact.source.replace(/_/g, ' '))+'</span></div>' : ''}
+        ${contact.is_verified ? '<div class="drawer-field"><span class="drawer-field-label">Verified</span><span class="drawer-field-value" style="color:var(--green)">✓ Verified</span></div>' : ''}
+    </div>`;
+
+    html += `<div class="drawer-section">
+        <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" onclick="openVendorPopup(${vendorId})">View Vendor</button>
+        </div>
+    </div>`;
+
+    body.innerHTML = html;
+}
+
+function closeContactDrawer() {
+    const backdrop = document.getElementById('contactDrawerBackdrop');
+    const drawer = document.getElementById('contactDrawer');
+    if (backdrop) backdrop.classList.remove('open');
+    if (drawer) drawer.classList.remove('open');
 }
 
 function showContacts() {
     showView('view-contacts');
+    const viewEl = document.getElementById('view-contacts');
+    if (viewEl) viewEl.style.display = 'flex';
     _contactCache = [];
     loadContacts();
 }
@@ -7090,24 +7200,6 @@ async function unifiedEnrichVendor(cardId) {
 }
 
 // ── Vendors Tab ────────────────────────────────────────────────────────
-let _vendorSortCol = null;
-let _vendorSortDir = 'asc';
-
-function _vendorSortArrow(col) {
-    if (_vendorSortCol !== col) return '\u21c5';
-    return _vendorSortDir === 'asc' ? '\u25b2' : '\u25bc';
-}
-
-function sortVendorList(col) {
-    if (_vendorSortCol === col) {
-        if (_vendorSortDir === 'asc') _vendorSortDir = 'desc';
-        else { _vendorSortCol = null; _vendorSortDir = 'asc'; }
-    } else {
-        _vendorSortCol = col;
-        _vendorSortDir = 'asc';
-    }
-    filterVendorList();
-}
 
 let _vendorAbort = null;
 async function loadVendorList() {
@@ -7140,6 +7232,8 @@ function setVendorTier(tier, btn) {
 }
 
 let _selectedVendorId = null;
+let _vendorSortCol = null;
+let _vendorSortDir = 'asc';
 
 function filterVendorList() {
     const q = (document.getElementById('vendorSearch') || {}).value || '';
@@ -7152,177 +7246,220 @@ function filterVendorList() {
         filtered = filtered.filter(c => vendorTier(c) === _vendorTierFilter);
     }
 
-    // Sort by score descending by default (matches v0 design)
-    filtered.sort((a, b) => (b.vendor_score ?? -1) - (a.vendor_score ?? -1));
+    // Sort
+    if (_vendorSortCol) {
+        filtered.sort((a, b) => {
+            let va, vb;
+            switch (_vendorSortCol) {
+                case 'name': va = (a.display_name || ''); vb = (b.display_name || ''); break;
+                case 'score': va = (a.vendor_score ?? -1); vb = (b.vendor_score ?? -1); break;
+                case 'response': va = (a.response_rate ?? 0); vb = (b.response_rate ?? 0); break;
+                case 'parts': va = (a.sighting_count ?? 0); vb = (b.sighting_count ?? 0); break;
+                default: va = 0; vb = 0;
+            }
+            if (typeof va === 'string') return _vendorSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
+            return _vendorSortDir === 'asc' ? va - vb : vb - va;
+        });
+    } else {
+        filtered.sort((a, b) => (b.vendor_score ?? -1) - (a.vendor_score ?? -1));
+    }
 
     const countEl = document.getElementById('vendorFilterCount');
     if (countEl) countEl.textContent = filtered.length + ' vendors';
 
     const el = document.getElementById('vendorList');
     if (!filtered.length) {
-        el.innerHTML = `<p class="empty">${_vendorListData.length ? 'No vendors match filters' : 'No vendors yet — they\'ll appear after your first search'}</p>`;
+        el.innerHTML = `<p class="crm-empty">${_vendorListData.length ? 'No vendors match filters' : 'No vendors yet — they\'ll appear after your first search'}</p>`;
         return;
     }
 
-    let html = '';
+    // Build table
+    const thSort = (col, label, extra = '') => {
+        const active = _vendorSortCol === col;
+        const arrow = active ? (_vendorSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+        return `<th class="${active ? 'sorted' : ''}" onclick="sortVendorList('${col}')" ${extra}>${label}<span class="sort-arrow">${arrow}</span></th>`;
+    };
+
+    let html = `<table class="crm-table">
+        <thead><tr>
+            ${thSort('name', 'Vendor')}
+            <th>Tier</th>
+            ${thSort('score', 'Score')}
+            ${thSort('response', 'Response Rate')}
+            ${thSort('parts', 'Parts Seen')}
+            <th>Last Activity</th>
+        </tr></thead><tbody>`;
+
     for (const c of filtered) {
         const score = c.vendor_score != null ? Math.round(c.vendor_score) : 0;
-        const isSelected = _selectedVendorId === c.id;
+        const tier = vendorTier(c);
         const responseRate = c.response_rate != null ? Math.round(c.response_rate) + '%' : '—';
         const lastAgo = c.last_sighting_at ? getRelativeTime(c.last_sighting_at) : '—';
+        const activeRow = _selectedVendorId === c.id ? ' active-row' : '';
 
-        html += `<div class="list-item${isSelected ? ' selected' : ''}" onclick="selectVendor(${c.id})" data-vendor-id="${c.id}">
-            ${engRing(score, 32)}
-            <div class="list-item-body">
-                <div class="list-item-title">${esc(c.display_name)}${c.is_blacklisted ? ' <span style="color:var(--red);font-size:10px">BL</span>' : ''}</div>
-                <div class="list-item-sub" style="display:flex;gap:10px">
-                    <span>${responseRate} response</span>
-                    <span>${c.sighting_count || 0} sightings</span>
-                </div>
-            </div>
-            <span style="font-size:10px;color:var(--muted)">${lastAgo}</span>
-        </div>`;
+        html += `<tr class="${activeRow}" onclick="openVendorDrawer(${c.id})" data-vendor-id="${c.id}">
+            <td>
+                <span style="font-weight:600;color:var(--text)">${esc(c.display_name)}</span>
+                ${c.is_blacklisted ? ' <span style="color:var(--red);font-size:10px;font-weight:600">BLOCKED</span>' : ''}
+            </td>
+            <td><span class="tier-badge tier-badge-${tier}">${tier}</span></td>
+            <td><span style="font-weight:600;font-family:'JetBrains Mono',monospace">${score}</span></td>
+            <td>${responseRate}</td>
+            <td>${c.sighting_count || 0}</td>
+            <td class="muted-cell">${lastAgo}</td>
+        </tr>`;
     }
+    html += '</tbody></table>';
     el.innerHTML = html;
+}
 
-    // Auto-select first if nothing selected
-    if (!_selectedVendorId && filtered.length) {
-        selectVendor(filtered[0].id);
-    } else if (_selectedVendorId) {
-        renderVendorDetail(_selectedVendorId);
+function sortVendorList(col) {
+    if (_vendorSortCol === col) {
+        if (_vendorSortDir === 'asc') _vendorSortDir = 'desc';
+        else { _vendorSortCol = null; _vendorSortDir = 'asc'; }
+    } else {
+        _vendorSortCol = col;
+        _vendorSortDir = col === 'name' ? 'asc' : 'desc';
     }
+    filterVendorList();
 }
 
-function selectVendor(vendorId) {
+function selectVendor(vendorId) { openVendorDrawer(vendorId); }
+
+function openVendorDrawer(vendorId) {
     _selectedVendorId = vendorId;
-    document.querySelectorAll('#vendorList .list-item').forEach(el => {
-        el.classList.toggle('selected', Number(el.dataset.vendorId) === vendorId);
+    document.querySelectorAll('#vendorList tbody tr').forEach(r => {
+        r.classList.toggle('active-row', Number(r.dataset.vendorId) === vendorId);
     });
-    renderVendorDetail(vendorId);
+    const backdrop = document.getElementById('vendorDrawerBackdrop');
+    const drawer = document.getElementById('vendorDrawer');
+    if (backdrop) backdrop.classList.add('open');
+    if (drawer) drawer.classList.add('open');
+    _renderVendorDrawerOverview(vendorId);
+    document.querySelectorAll('#vendorDrawerTabs .drawer-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
 }
 
-async function renderVendorDetail(vendorId) {
-    const el = document.getElementById('vendorDetail');
-    if (!el) return;
+function closeVendorDrawer() {
+    _selectedVendorId = null;
+    const backdrop = document.getElementById('vendorDrawerBackdrop');
+    const drawer = document.getElementById('vendorDrawer');
+    if (backdrop) backdrop.classList.remove('open');
+    if (drawer) drawer.classList.remove('open');
+    document.querySelectorAll('#vendorList tbody tr').forEach(r => r.classList.remove('active-row'));
+}
+
+function switchVendorDrawerTab(tab, btn) {
+    document.querySelectorAll('#vendorDrawerTabs .drawer-tab').forEach(t => t.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    if (!_selectedVendorId) return;
+    if (tab === 'overview') _renderVendorDrawerOverview(_selectedVendorId);
+    else if (tab === 'contacts') _renderVendorDrawerContacts(_selectedVendorId);
+    else if (tab === 'parts') _renderVendorDrawerParts(_selectedVendorId);
+    else if (tab === 'comms') _renderVendorDrawerComms(_selectedVendorId);
+}
+
+function _renderVendorDrawerOverview(vendorId) {
+    const body = document.getElementById('vendorDrawerBody');
+    const title = document.getElementById('vendorDrawerTitle');
+    if (!body) return;
     const v = _vendorListData.find(x => x.id === vendorId);
-    if (!v) { el.innerHTML = '<div class="split-panel-empty">Select a vendor</div>'; return; }
+    if (!v) { body.innerHTML = '<p class="crm-empty">Vendor not found</p>'; return; }
 
+    if (title) title.textContent = v.display_name;
     const score = v.vendor_score != null ? Math.round(v.vendor_score) : 0;
+    const tier = vendorTier(v);
 
-    // Header
-    let html = `<div style="padding:16px">
-        <div style="margin-bottom:12px">
-            <h2 style="margin:0;font-size:18px">${esc(v.display_name)}</h2>
-            <div style="font-size:12px;color:var(--muted);margin-top:4px">
-                Last interaction: ${v.last_sighting_at ? getRelativeTime(v.last_sighting_at) : 'Never'}
+    let html = `<div class="drawer-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div style="display:flex;align-items:center;gap:8px">
+                <span class="tier-badge tier-badge-${tier}">${tier}</span>
+                <span style="font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace">${score}</span>
+                <span style="font-size:12px;color:var(--muted)">score</span>
             </div>
-        </div>`;
-
-    // Engagement Score Card with Factor Bars
-    html += `<div class="card-v2" style="margin-bottom:16px;padding:16px">
-        <div style="display:flex;gap:20px;align-items:center">
-            <div style="position:relative;display:flex;align-items:center;justify-content:center">
-                ${engRing(score, 72)}
-                <span style="position:absolute;font-size:18px;font-weight:700;color:var(--text)">${score}</span>
-            </div>
-            <div style="flex:1;display:flex;flex-direction:column;gap:6px">
-                ${factorBar('Response Velocity', v.response_velocity ?? score)}
-                ${factorBar('Ghost Rate', v.ghost_rate ?? Math.max(0, 100 - (v.ghost_rate_pct ?? 50)))}
-                ${factorBar('Pricing', v.pricing_competitiveness ?? score)}
-                ${factorBar('Volume Consistency', v.volume_consistency ?? score)}
-                ${factorBar('Delivery Reliability', v.delivery_reliability ?? score)}
+            <div style="display:flex;gap:6px">
+                <button class="btn btn-ghost btn-sm" onclick="openVendorPopup(${v.id})">Full Details</button>
             </div>
         </div>
+        <div class="drawer-field"><span class="drawer-field-label">Response Rate</span><span class="drawer-field-value">${v.response_rate != null ? Math.round(v.response_rate) + '%' : '—'}</span></div>
+        <div class="drawer-field"><span class="drawer-field-label">Parts Tracked</span><span class="drawer-field-value">${v.sighting_count || 0}</span></div>
+        <div class="drawer-field"><span class="drawer-field-label">Last Activity</span><span class="drawer-field-value">${v.last_sighting_at ? getRelativeTime(v.last_sighting_at) : 'Never'}</span></div>
+        ${v.email ? '<div class="drawer-field"><span class="drawer-field-label">Email</span><span class="drawer-field-value"><a href="mailto:'+escAttr(v.email)+'">'+esc(v.email)+'</a></span></div>' : ''}
+        ${v.phone ? '<div class="drawer-field"><span class="drawer-field-label">Phone</span><span class="drawer-field-value">'+esc(v.phone)+'</span></div>' : ''}
+        ${v.website ? '<div class="drawer-field"><span class="drawer-field-label">Website</span><span class="drawer-field-value"><a href="'+escAttr(v.website)+'" target="_blank">'+esc(v.website)+'</a></span></div>' : ''}
     </div>`;
 
-    // Detail tabs
-    html += `<div class="detail-tabs" id="vendorDetailTabs">
-        <button class="detail-tab active" onclick="switchVendorTab('contacts',${v.id},this)">Contacts</button>
-        <button class="detail-tab" onclick="switchVendorTab('comms',${v.id},this)">Communication</button>
-        <button class="detail-tab" onclick="switchVendorTab('parts',${v.id},this)">Part History</button>
-    </div>
-    <div id="vendorTabContent-${v.id}"><p class="empty">Loading...</p></div>
-
-    <div style="margin-top:12px;display:flex;gap:6px">
-        <button class="btn btn-ghost btn-sm" onclick="openVendorPopup(${v.id})">Full Details</button>
-        <button class="btn-enrich" onclick="unifiedEnrichVendor(${v.id})">Enrich</button>
-    </div>
-    </div>`;
-
-    el.innerHTML = html;
-    _loadVendorContactsTab(v);
+    body.innerHTML = html;
 }
 
-function switchVendorTab(tab, vendorId, btn) {
-    document.querySelectorAll('#vendorDetailTabs .detail-tab').forEach(t => t.classList.remove('active'));
-    if (btn) btn.classList.add('active');
-    const v = _vendorListData.find(x => x.id === vendorId);
-    if (!v) return;
-    if (tab === 'contacts') _loadVendorContactsTab(v);
-    else if (tab === 'comms') _loadVendorCommsTab(v);
-    else if (tab === 'parts') _loadVendorPartsTab(v);
-}
-
-async function _loadVendorContactsTab(v) {
-    const el = document.getElementById('vendorTabContent-' + v.id);
-    if (!el) return;
-    el.innerHTML = '<p class="empty" style="padding:8px">Loading contacts...</p>';
+async function _renderVendorDrawerContacts(vendorId) {
+    const body = document.getElementById('vendorDrawerBody');
+    if (!body) return;
+    body.innerHTML = '<div class="drawer-section"><p class="empty">Loading contacts...</p></div>';
     try {
-        const contacts = await apiFetch('/api/vendors/' + v.id + '/contacts');
+        const contacts = await apiFetch('/api/vendors/' + vendorId + '/contacts');
         if (!contacts.length) {
-            el.innerHTML = '<p class="empty">No contacts — <a href="#" onclick="event.preventDefault();openAddVendorContact(' + v.id + ')">add one</a></p>';
+            body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No contacts — <a href="#" onclick="event.preventDefault();openAddVendorContact(${vendorId})">add one</a></p></div>`;
             return;
         }
-        el.innerHTML = contacts.map(c => {
+        let html = '<div style="padding:12px 20px">';
+        for (const c of contacts) {
             const isPrimary = c.is_primary || c.contact_type === 'primary';
-            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
-                <div style="min-width:0">
-                    <div style="display:flex;align-items:center;gap:6px">
-                        <span style="font-size:12px;font-weight:600;color:var(--text)">${esc(c.full_name || c.label || '—')}</span>
-                        ${isPrimary ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--blue)"></span>' : ''}
-                    </div>
-                    <div style="font-size:11px;color:var(--muted)">${esc(c.title || '')}</div>
+            const initials = (c.full_name || c.label || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+            html += `<div class="site-contact-row">
+                <div class="site-contact-avatar">${initials}</div>
+                <div class="site-contact-info">
+                    <div class="site-contact-name">${esc(c.full_name || c.label || '—')}${isPrimary ? ' <span style="font-size:9px;color:var(--blue);font-weight:700">PRIMARY</span>' : ''}</div>
+                    ${c.title ? '<div class="site-contact-title">' + esc(c.title) + '</div>' : ''}
                 </div>
-                <div style="text-align:right;font-size:11px;color:var(--muted)">
-                    ${c.email ? '<div>' + esc(c.email) + '</div>' : ''}
-                    ${c.phone ? '<div>' + esc(c.phone) + '</div>' : ''}
+                <div class="site-contact-actions">
+                    ${c.email ? '<a href="mailto:'+escAttr(c.email)+'" title="'+escAttr(c.email)+'">✉</a>' : ''}
+                    ${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" title="'+escAttr(c.phone)+'">📞</a>' : ''}
                 </div>
             </div>`;
-        }).join('');
-    } catch (e) { el.innerHTML = '<p class="empty">Error loading contacts</p>'; }
+        }
+        html += '</div>';
+        body.innerHTML = html;
+    } catch (e) { body.innerHTML = '<div class="drawer-section"><p class="crm-empty">Error loading contacts</p></div>'; }
 }
 
-async function _loadVendorCommsTab(v) {
-    const el = document.getElementById('vendorTabContent-' + v.id);
-    if (!el) return;
-    el.innerHTML = '<p class="empty" style="padding:8px">Loading communications...</p>';
+async function _renderVendorDrawerComms(vendorId) {
+    const body = document.getElementById('vendorDrawerBody');
+    if (!body) return;
+    body.innerHTML = '<div class="drawer-section"><p class="empty">Loading communications...</p></div>';
     try {
-        const emails = await apiFetch('/api/vendors/' + v.id + '/emails?limit=20');
+        const emails = await apiFetch('/api/vendors/' + vendorId + '/emails?limit=20');
         if (!emails.length) {
-            el.innerHTML = '<p class="empty">No communications recorded</p>';
+            body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No communications recorded</p></div>';
             return;
         }
-        el.innerHTML = emails.map(e => `<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
-            ${activityIcon(e.direction === 'inbound' ? 'email_received' : 'email_sent')}
-            <div style="flex:1;min-width:0">
-                <div style="font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.subject || '(no subject)')}</div>
-                <div style="font-size:10px;color:var(--muted)">${getRelativeTime(e.received_at || e.sent_at)}</div>
-            </div>
-        </div>`).join('');
-    } catch (err) { el.innerHTML = '<p class="empty">Error loading communications</p>'; }
+        let html = '<div style="padding:12px 20px"><div class="activity-feed">';
+        for (const e of emails) {
+            const typeClass = e.direction === 'inbound' ? 'activity-icon-email' : 'activity-icon-system';
+            html += `<div class="activity-item">
+                <div class="activity-icon ${typeClass}">${activityIcon(e.direction === 'inbound' ? 'email_received' : 'email_sent')}</div>
+                <div class="activity-content">
+                    <div class="activity-title">${esc(e.subject || '(no subject)')}</div>
+                    <div class="activity-detail">${e.direction === 'inbound' ? 'Received' : 'Sent'}</div>
+                </div>
+                <span class="activity-time">${getRelativeTime(e.received_at || e.sent_at)}</span>
+            </div>`;
+        }
+        html += '</div></div>';
+        body.innerHTML = html;
+    } catch (err) { body.innerHTML = '<div class="drawer-section"><p class="crm-empty">Error loading communications</p></div>'; }
 }
 
-async function _loadVendorPartsTab(v) {
-    const el = document.getElementById('vendorTabContent-' + v.id);
-    if (!el) return;
-    el.innerHTML = '<p class="empty" style="padding:8px">Loading part history...</p>';
+async function _renderVendorDrawerParts(vendorId) {
+    const body = document.getElementById('vendorDrawerBody');
+    if (!body) return;
+    body.innerHTML = '<div class="drawer-section"><p class="empty">Loading part history...</p></div>';
     try {
-        const sightings = await apiFetch('/api/vendors/' + v.id + '/sightings?limit=20');
+        const sightings = await apiFetch('/api/vendors/' + vendorId + '/sightings?limit=20');
         if (!sightings.length) {
-            el.innerHTML = '<p class="empty">No part history</p>';
+            body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No part history</p></div>';
             return;
         }
-        let html = `<table class="v2-table"><thead><tr>
+        let html = `<div style="padding:12px 20px"><table class="crm-table"><thead><tr>
             <th>Part #</th><th>Last Seen</th><th style="text-align:right">Price</th><th style="text-align:right">Qty</th>
         </tr></thead><tbody>`;
         for (const s of sightings) {
@@ -7333,10 +7470,14 @@ async function _loadVendorPartsTab(v) {
                 <td style="text-align:right;color:var(--muted)">${s.quantity != null ? Number(s.quantity).toLocaleString() : '—'}</td>
             </tr>`;
         }
-        html += '</tbody></table>';
-        el.innerHTML = html;
-    } catch (err) { el.innerHTML = '<p class="empty">Error loading parts</p>'; }
+        html += '</tbody></table></div>';
+        body.innerHTML = html;
+    } catch (err) { body.innerHTML = '<div class="drawer-section"><p class="crm-empty">Error loading parts</p></div>'; }
 }
+
+// Legacy compat wrappers
+async function renderVendorDetail(vendorId) { openVendorDrawer(vendorId); }
+function switchVendorTab(tab, vendorId, btn) { switchVendorDrawerTab(tab, btn); }
 
 // ── Materials Tab ──────────────────────────────────────────────────────
 let _materialListData = [];
@@ -8937,6 +9078,8 @@ Object.assign(window, {
     rfqToggleVendor, saveDeadline, sendEmailReply, sendFollowUp,
     setToolbarQuickFilter, showView, sidebarNav, sortMatList, sortReqList,
     selectVendor, renderVendorDetail, switchVendorTab,
+    openVendorDrawer, closeVendorDrawer, switchVendorDrawerTab,
+    openContactDrawer, closeContactDrawer, sortContactList,
     sortVendorList, threadSearchFilter, toggleAllDrillRows,
     toggleArchiveGroup, toggleConfirmedQuotes, toggleDrillDown,
     toggleGroup, toggleOfferHistory, togglePartsSightings,

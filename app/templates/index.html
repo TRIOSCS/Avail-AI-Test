@@ -210,52 +210,88 @@
         </div>
     </div>
 
-    <!-- VIEW: Customers -->
-    <div id="view-customers" style="display:none">
-        <div class="split-panel" style="height:calc(100vh - 56px)">
-            <!-- Left: Company list -->
-            <div class="split-panel-left" id="custPanelLeft">
-                <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-                    <input class="sbox" id="custFilter" placeholder="Search accounts…" oninput="debouncedLoadCustomers()" style="flex:1;min-width:140px" aria-label="Search companies">
-                    <button class="chip" id="custSortChip" onclick="cycleCustSort()">Name</button>
-                    <button class="chip" id="custUnassignedPill" onclick="toggleCustUnassigned(this)">Unassigned</button>
-                    <label id="custMyOnlyLabel" style="display:none;font-size:11px;gap:4px;cursor:pointer;align-items:center">
-                        <input type="checkbox" id="custMyOnly" onchange="loadCustomers()"> Mine
-                    </label>
-                    <button class="btn btn-primary btn-sm" onclick="openNewCompanyModal()" style="padding:4px 10px;font-size:11px">+ New</button>
-                </div>
-                <div id="custListCount" style="padding:4px 14px;font-size:11px;color:var(--muted)"></div>
-                <div id="custList" aria-live="polite"><p class="empty">Loading…</p></div>
+    <!-- VIEW: Customers (full-width table + slide drawer) -->
+    <div id="view-customers" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+        <div class="crm-header">
+            <h2>Accounts</h2>
+            <div class="crm-header-actions">
+                <label id="custMyOnlyLabel" style="display:none;font-size:11px;gap:4px;cursor:pointer;align-items:center">
+                    <input type="checkbox" id="custMyOnly" onchange="loadCustomers()"> My accounts
+                </label>
+                <button class="btn btn-primary btn-sm" onclick="openNewCompanyModal()">+ New Account</button>
             </div>
-            <!-- Right: Company detail -->
-            <div class="split-panel-right" id="custPanelRight">
-                <div id="custDetail" class="split-panel-empty">Select an account to view details</div>
+        </div>
+        <div class="crm-toolbar">
+            <input class="sbox" id="custFilter" placeholder="Search accounts…" oninput="debouncedLoadCustomers()" style="flex:1;min-width:140px" aria-label="Search companies">
+            <div class="chip-row" style="margin:0">
+                <span class="chip on" data-value="all" onclick="setCustFilter('all',this)">All</span>
+                <span class="chip" data-value="strategic" onclick="setCustFilter('strategic',this)">Strategic</span>
+                <span class="chip" data-value="healthy" onclick="setCustFilter('healthy',this)">Healthy</span>
+                <span class="chip" data-value="at-risk" onclick="setCustFilter('at-risk',this)">At Risk</span>
+                <span class="chip" data-value="unassigned" onclick="setCustFilter('unassigned',this)">Unassigned</span>
             </div>
+            <span id="custListCount" style="font-size:11px;color:var(--muted);white-space:nowrap"></span>
+        </div>
+        <div class="crm-table-wrap" id="custTableWrap">
+            <div id="custList" aria-live="polite"><p class="empty">Loading…</p></div>
+        </div>
+        <!-- Account detail drawer -->
+        <div class="drawer-backdrop" id="custDrawerBackdrop" onclick="closeCustDrawer()"></div>
+        <div class="drawer" id="custDrawer">
+            <div class="drawer-header">
+                <h3 id="custDrawerTitle">Account</h3>
+                <button class="drawer-close" onclick="closeCustDrawer()">&times;</button>
+            </div>
+            <div class="drawer-tabs" id="custDrawerTabs">
+                <button class="drawer-tab active" onclick="switchCustDrawerTab('overview',this)">Overview</button>
+                <button class="drawer-tab" onclick="switchCustDrawerTab('sites',this)">Sites &amp; Contacts</button>
+                <button class="drawer-tab" onclick="switchCustDrawerTab('activity',this)">Activity</button>
+                <button class="drawer-tab" onclick="switchCustDrawerTab('pipeline',this)">Pipeline</button>
+            </div>
+            <div class="drawer-body" id="custDrawerBody"></div>
+        </div>
+        <!-- Bulk action bar -->
+        <div class="bulk-bar" id="custBulkBar">
+            <span class="bulk-bar-count" id="custBulkCount">0</span> selected
+            <button onclick="bulkAssignOwner()">Assign Owner</button>
+            <button onclick="bulkExportAccounts()">Export</button>
+            <button class="bulk-bar-close" onclick="clearCustSelection()">&times;</button>
         </div>
     </div>
 
-    <!-- VIEW: Vendors -->
-    <div id="view-vendors" style="display:none">
-        <div class="split-panel" style="height:calc(100vh - 56px)">
-            <!-- Left: Vendor list -->
-            <div class="split-panel-left" id="vendorPanelLeft">
-                <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-                    <input class="sbox" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" style="flex:1;min-width:120px" aria-label="Search vendors">
-                    <div class="chip-row" style="margin:0" id="vendorTierPills">
-                        <span class="chip on" data-value="all" onclick="setVendorTier('all',this)">All</span>
-                        <span class="chip" data-value="proven" onclick="setVendorTier('proven',this)">Proven</span>
-                        <span class="chip" data-value="developing" onclick="setVendorTier('developing',this)">Dev</span>
-                        <span class="chip" data-value="caution" onclick="setVendorTier('caution',this)">Caution</span>
-                        <span class="chip" data-value="new" onclick="setVendorTier('new',this)">New</span>
-                    </div>
-                </div>
-                <div id="vendorFilterCount" style="padding:4px 14px;font-size:11px;color:var(--muted)"></div>
-                <div id="vendorList" aria-live="polite"><p class="empty">Loading…</p></div>
+    <!-- VIEW: Vendors (full-width table + slide drawer) -->
+    <div id="view-vendors" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+        <div class="crm-header">
+            <h2>Vendors</h2>
+        </div>
+        <div class="crm-toolbar">
+            <input class="sbox" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" style="flex:1;min-width:120px" aria-label="Search vendors">
+            <div class="chip-row" style="margin:0" id="vendorTierPills">
+                <span class="chip on" data-value="all" onclick="setVendorTier('all',this)">All</span>
+                <span class="chip" data-value="proven" onclick="setVendorTier('proven',this)">Proven</span>
+                <span class="chip" data-value="developing" onclick="setVendorTier('developing',this)">Dev</span>
+                <span class="chip" data-value="caution" onclick="setVendorTier('caution',this)">Caution</span>
+                <span class="chip" data-value="new" onclick="setVendorTier('new',this)">New</span>
             </div>
-            <!-- Right: Vendor detail -->
-            <div class="split-panel-right" id="vendorPanelRight">
-                <div id="vendorDetail" class="split-panel-empty">Select a vendor to view details</div>
+            <span id="vendorFilterCount" style="font-size:11px;color:var(--muted);white-space:nowrap"></span>
+        </div>
+        <div class="crm-table-wrap" id="vendorTableWrap">
+            <div id="vendorList" aria-live="polite"><p class="empty">Loading…</p></div>
+        </div>
+        <!-- Vendor detail drawer -->
+        <div class="drawer-backdrop" id="vendorDrawerBackdrop" onclick="closeVendorDrawer()"></div>
+        <div class="drawer" id="vendorDrawer">
+            <div class="drawer-header">
+                <h3 id="vendorDrawerTitle">Vendor</h3>
+                <button class="drawer-close" onclick="closeVendorDrawer()">&times;</button>
             </div>
+            <div class="drawer-tabs" id="vendorDrawerTabs">
+                <button class="drawer-tab active" onclick="switchVendorDrawerTab('overview',this)">Overview</button>
+                <button class="drawer-tab" onclick="switchVendorDrawerTab('contacts',this)">Contacts</button>
+                <button class="drawer-tab" onclick="switchVendorDrawerTab('parts',this)">Parts</button>
+                <button class="drawer-tab" onclick="switchVendorDrawerTab('comms',this)">Communications</button>
+            </div>
+            <div class="drawer-body" id="vendorDrawerBody"></div>
         </div>
     </div>
 
@@ -813,15 +849,17 @@
     </div>
 </div>
 
-    <!-- VIEW: Contact Intelligence -->
-    <div id="view-contacts" style="display:none">
-        <div style="padding:16px;border-bottom:1px solid var(--border)">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-                <h2 style="margin:0;font-size:18px">Contact Intelligence</h2>
+    <!-- VIEW: Contact Intelligence (full-width table) -->
+    <div id="view-contacts" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+        <div class="crm-header">
+            <h2>Contacts</h2>
+            <div class="crm-header-actions">
                 <span id="contactFilterCount" style="font-size:12px;color:var(--muted)"></span>
             </div>
-            <input class="sbox" id="contactFilter" placeholder="Search contacts by name, email, company, or title…" oninput="debouncedLoadContacts()" style="width:100%;margin-bottom:10px" aria-label="Search contacts">
-            <div class="chip-row" id="contactStatusPills">
+        </div>
+        <div class="crm-toolbar">
+            <input class="sbox" id="contactFilter" placeholder="Search contacts by name, email, company, title…" oninput="debouncedLoadContacts()" style="flex:1;min-width:140px" aria-label="Search contacts">
+            <div class="chip-row" style="margin:0" id="contactStatusPills">
                 <span class="chip on" onclick="setContactStatusFilter('all',this)">All</span>
                 <span class="chip" onclick="setContactStatusFilter('customer',this)">Customer</span>
                 <span class="chip" onclick="setContactStatusFilter('vendor',this)">Vendor</span>
@@ -830,7 +868,18 @@
                 <span class="chip" onclick="setContactStatusFilter('new',this)">New</span>
             </div>
         </div>
-        <div id="contactList" aria-live="polite" style="padding:16px"><p class="empty">Loading…</p></div>
+        <div class="crm-table-wrap" id="contactTableWrap">
+            <div id="contactList" aria-live="polite"><p class="empty">Loading…</p></div>
+        </div>
+        <!-- Contact detail drawer -->
+        <div class="drawer-backdrop" id="contactDrawerBackdrop" onclick="closeContactDrawer()"></div>
+        <div class="drawer" id="contactDrawer">
+            <div class="drawer-header">
+                <h3 id="contactDrawerTitle">Contact</h3>
+                <button class="drawer-close" onclick="closeContactDrawer()">&times;</button>
+            </div>
+            <div class="drawer-body" id="contactDrawerBody"></div>
+        </div>
     </div>
 
     <!-- VIEW: Dashboard Overview -->

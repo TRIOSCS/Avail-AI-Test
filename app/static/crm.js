@@ -47,19 +47,28 @@ function autoLogCrmCall(phone) {
     }).catch(function(e) { logCatchError('autoLogCrmCall', e); });
 }
 
-// ── Customer Filter / Sort Helpers ─────────────────────────────────────
-function toggleCustUnassigned(btn) {
-    _custUnassigned = !_custUnassigned;
-    btn.classList.toggle('on', _custUnassigned);
-    loadCustomers();
+// ── Customer Filter / Sort / Drawer Helpers ───────────────────────────
+
+let _custFilterMode = 'all';
+let _custSelectedIds = new Set();
+
+function setCustFilter(mode, btn) {
+    _custFilterMode = mode;
+    document.querySelectorAll('#view-customers .chip-row .chip').forEach(c => c.classList.toggle('on', c.dataset.value === mode));
+    renderCustomers();
 }
 
-// sortCustomers removed — now handled by sortCustList() with column headers
+function toggleCustUnassigned(btn) {
+    setCustFilter('unassigned', btn);
+}
 
 // ── Customers View ─────────────────────────────────────────────────────
 
 async function showCustomers() {
     showView('view-customers');
+    // Ensure flex display for the full-width layout
+    const viewEl = document.getElementById('view-customers');
+    if (viewEl) viewEl.style.display = 'flex';
     setCurrentReqId(null);
     // Role-based account filtering
     const isManagerOrAdmin = window.__isAdmin || ['manager','trader'].includes(window.userRole);
@@ -68,9 +77,9 @@ async function showCustomers() {
     const toggleInput = document.getElementById('custMyOnly');
     if (toggleLabel && toggleInput) {
         if (isManagerOrAdmin) {
-            toggleLabel.style.display = '';  // Show toggle for managers/admins/traders
+            toggleLabel.style.display = '';
         } else {
-            toggleLabel.style.display = 'none';  // Hide for sales — forced to my accounts
+            toggleLabel.style.display = 'none';
             toggleInput.checked = true;
         }
     }
@@ -89,9 +98,8 @@ async function loadCustomers() {
         const myOnly = document.getElementById('custMyOnly')?.checked;
         let url = '/api/companies?search=' + encodeURIComponent(filter);
         if ((isSalesOnly || myOnly) && window.userId) url += '&owner_id=' + window.userId;
-        if (_custUnassigned) url += '&unassigned=1';
+        if (_custFilterMode === 'unassigned') url += '&unassigned=1';
         const result = await apiFetch(url, {signal: _custAbort.signal});
-        // Filter out vendor-type accounts — they belong in the Vendors view
         crmCustomers = (Array.isArray(result) ? result : []).filter(c =>
             !c.account_type || c.account_type.toLowerCase() !== 'vendor'
         );
@@ -102,229 +110,503 @@ async function loadCustomers() {
 async function goToCompany(companyId) {
     if (!companyId) return;
     showView('view-customers');
+    const viewEl = document.getElementById('view-customers');
+    if (viewEl) viewEl.style.display = 'flex';
     setCurrentReqId(null);
     try {
         crmCustomers = await apiFetch('/api/companies');
         crmCustomers = (Array.isArray(crmCustomers) ? crmCustomers : []).filter(c =>
             !c.account_type || c.account_type.toLowerCase() !== 'vendor'
         );
-        _selectedCustId = companyId;
         renderCustomers();
     } catch (e) { showToast('Failed to load customers', 'error'); return; }
-    setTimeout(() => {
-        const item = document.querySelector(`#custList .list-item[data-company-id="${companyId}"]`);
-        if (item) item.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }, 100);
+    setTimeout(() => openCustDrawer(companyId), 150);
     navHighlight(document.getElementById('navCustomers'));
 }
 
 let _selectedCustId = null;
+
+function _custHealthColor(c) {
+    const enrichDays = window.daysSince ? window.daysSince(c.last_enriched_at) : 999;
+    if (enrichDays <= 30) return 'green';
+    if (enrichDays <= 90) return 'amber';
+    return 'red';
+}
+
+function _custHealthLabel(c) {
+    const enrichDays = window.daysSince ? window.daysSince(c.last_enriched_at) : 999;
+    if (enrichDays <= 30) return 'Healthy';
+    if (enrichDays <= 90) return 'Aging';
+    if (enrichDays < 900) return 'At Risk';
+    return 'New';
+}
 
 function renderCustomers() {
     const el = document.getElementById('custList');
     if (!el) return;
     const countEl = document.getElementById('custListCount');
     if (!crmCustomers.length) {
-        el.innerHTML = '<p class="empty">No customers yet — add a company to get started</p>';
+        el.innerHTML = '<p class="crm-empty">No accounts yet — click <b>+ New Account</b> to get started</p>';
         if (countEl) countEl.textContent = '';
         return;
     }
+
+    // Apply view filters
+    let filtered = [...crmCustomers];
+    if (_custFilterMode === 'strategic') filtered = filtered.filter(c => c.is_strategic);
+    if (_custFilterMode === 'healthy') filtered = filtered.filter(c => _custHealthColor(c) === 'green');
+    if (_custFilterMode === 'at-risk') filtered = filtered.filter(c => _custHealthColor(c) === 'red');
+    if (_custFilterMode === 'unassigned') filtered = filtered.filter(c => !c.account_owner_id);
+
     // Sort
-    const sorted = [...crmCustomers];
     if (_custSortCol) {
-        sorted.sort((a, b) => {
+        filtered.sort((a, b) => {
             let va, vb;
             switch (_custSortCol) {
                 case 'name': va = (a.name || ''); vb = (b.name || ''); break;
-                case 'activity': va = a._actDays ?? 999; vb = b._actDays ?? 999; break;
-                case 'owner': va = (a.account_owner_name || ''); vb = (b.account_owner_name || ''); break;
+                case 'health': va = _custHealthColor(a) === 'green' ? 0 : _custHealthColor(a) === 'amber' ? 1 : 2; vb = _custHealthColor(b) === 'green' ? 0 : _custHealthColor(b) === 'amber' ? 1 : 2; break;
+                case 'owner': va = (a.account_owner_name || 'zzz'); vb = (b.account_owner_name || 'zzz'); break;
+                case 'sites': va = (a.site_count || 0); vb = (b.site_count || 0); break;
+                case 'reqs': va = (a.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0); vb = (b.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0); break;
+                case 'industry': va = (a.industry || ''); vb = (b.industry || ''); break;
                 default: va = 0; vb = 0;
             }
             if (typeof va === 'string') return _custSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
             return _custSortDir === 'asc' ? va - vb : vb - va;
         });
     } else {
-        sorted.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     }
 
-    if (countEl) countEl.textContent = sorted.length + ' accounts';
+    if (countEl) countEl.textContent = filtered.length + ' accounts';
 
-    let html = '';
-    for (const c of sorted) {
+    // Build table
+    const thSort = (col, label) => {
+        const active = _custSortCol === col;
+        const arrow = active ? (_custSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+        return `<th class="${active ? 'sorted' : ''}" onclick="sortCustList('${col}')">${label}<span class="sort-arrow">${arrow}</span></th>`;
+    };
+
+    let html = `<table class="crm-table">
+        <thead><tr>
+            <th class="td-check"><input type="checkbox" onchange="toggleAllCustCheckboxes(this)"></th>
+            ${thSort('name', 'Account')}
+            ${thSort('health', 'Health')}
+            ${thSort('owner', 'Owner')}
+            ${thSort('sites', 'Sites')}
+            ${thSort('reqs', 'Open Reqs')}
+            ${thSort('industry', 'Industry')}
+        </tr></thead><tbody>`;
+
+    for (const c of filtered) {
         const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
-        const enrichDays = window.daysSince ? window.daysSince(c.last_enriched_at) : 999;
-        const healthColor = window.recencyColor ? window.recencyColor(enrichDays, [30, 90]) : 'muted';
-        const isSelected = _selectedCustId === c.id;
-        const contacts = (c.sites || []).reduce((n, s) => n + (s.contact_count || 0), 0);
+        const healthColor = _custHealthColor(c);
+        const healthLabel = _custHealthLabel(c);
         const openReqs = (c.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0);
+        const checked = _custSelectedIds.has(c.id) ? ' checked' : '';
+        const activeRow = _selectedCustId === c.id ? ' active-row' : '';
 
-        html += `<div class="list-item${isSelected ? ' selected' : ''}" onclick="selectCustomer(${c.id})" data-company-id="${c.id}">
-            <span class="health-dot health-dot-${healthColor}" title="${enrichDays < 900 ? enrichDays + 'd' : 'Never'}"></span>
-            <div class="list-item-body">
-                <div class="list-item-title">
-                    ${esc(displayName)}
-                    ${c.is_strategic ? '<span title="Strategic" style="color:var(--amber)">★</span>' : ''}
+        html += `<tr class="${activeRow}" onclick="openCustDrawer(${c.id})" data-company-id="${c.id}">
+            <td class="td-check"><input type="checkbox" onclick="event.stopPropagation();toggleCustCheckbox(${c.id},this)"${checked}></td>
+            <td>
+                <div style="display:flex;align-items:center;gap:8px">
+                    <span style="font-weight:600;color:var(--text)">${esc(displayName)}</span>
+                    ${c.is_strategic ? '<span title="Strategic" style="color:var(--amber);font-size:12px">★</span>' : ''}
                 </div>
-                <div class="list-item-sub">${esc(c.industry || '')}</div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
-                ${c.account_owner_name ? (window.ownerAvatar ? window.ownerAvatar(c.account_owner_name, 'sm') : '') : ''}
-                <div class="list-item-badges">
-                    <span class="list-item-badge">${c.site_count || 0} sites</span>
-                    ${openReqs ? '<span class="list-item-badge">' + openReqs + ' open</span>' : ''}
-                </div>
-            </div>
-        </div>`;
+                ${c.domain ? '<div style="font-size:11px;color:var(--muted)">' + esc(c.domain) + '</div>' : ''}
+            </td>
+            <td><div class="health-indicator"><span class="health-dot health-dot-${healthColor}"></span><span class="health-indicator-label">${healthLabel}</span></div></td>
+            <td>${c.account_owner_name ? '<span style="font-size:12px">' + esc(c.account_owner_name) + '</span>' : '<span style="font-size:11px;color:var(--muted)">—</span>'}</td>
+            <td>${c.site_count || 0}</td>
+            <td>${openReqs || '<span style="color:var(--muted)">0</span>'}</td>
+            <td class="muted-cell">${esc(c.industry || '—')}</td>
+        </tr>`;
     }
+    html += '</tbody></table>';
     el.innerHTML = html;
-
-    // Auto-select first if nothing selected
-    if (!_selectedCustId && sorted.length) {
-        selectCustomer(sorted[0].id);
-    } else if (_selectedCustId) {
-        renderCustomerDetail(_selectedCustId);
-    }
 }
 
-function cycleCustSort() {
-    const order = ['name', 'activity', 'owner'];
-    const idx = order.indexOf(_custSortCol || 'name');
-    const next = order[(idx + 1) % order.length];
-    _custSortCol = next;
-    _custSortDir = 'asc';
-    const chip = document.getElementById('custSortChip');
-    if (chip) chip.textContent = next.charAt(0).toUpperCase() + next.slice(1);
-    renderCustomers();
+// ── Checkbox / Bulk Actions ───────────────────────────────────────────
+
+function toggleCustCheckbox(companyId, cb) {
+    if (cb.checked) _custSelectedIds.add(companyId);
+    else _custSelectedIds.delete(companyId);
+    _updateCustBulkBar();
 }
 
-function selectCustomer(companyId) {
-    _selectedCustId = companyId;
-    // Highlight in list
-    document.querySelectorAll('#custList .list-item').forEach(el => {
-        el.classList.toggle('selected', Number(el.dataset.companyId) === companyId);
+function toggleAllCustCheckboxes(masterCb) {
+    const checkboxes = document.querySelectorAll('#custList tbody .td-check input[type="checkbox"]');
+    checkboxes.forEach(cb => {
+        cb.checked = masterCb.checked;
+        const row = cb.closest('tr');
+        const cid = Number(row?.dataset?.companyId);
+        if (cid) { if (masterCb.checked) _custSelectedIds.add(cid); else _custSelectedIds.delete(cid); }
     });
-    renderCustomerDetail(companyId);
+    _updateCustBulkBar();
 }
 
-async function renderCustomerDetail(companyId) {
-    const el = document.getElementById('custDetail');
-    if (!el) return;
+function clearCustSelection() {
+    _custSelectedIds.clear();
+    document.querySelectorAll('#custList .td-check input[type="checkbox"]').forEach(cb => cb.checked = false);
+    _updateCustBulkBar();
+}
+
+function _updateCustBulkBar() {
+    const bar = document.getElementById('custBulkBar');
+    const countEl = document.getElementById('custBulkCount');
+    if (!bar) return;
+    const n = _custSelectedIds.size;
+    if (countEl) countEl.textContent = n;
+    bar.classList.toggle('visible', n > 0);
+}
+
+async function bulkAssignOwner() {
+    // Simple prompt for now
+    const name = prompt('Assign owner (enter user ID):');
+    if (!name) return;
+    const ownerId = parseInt(name);
+    if (isNaN(ownerId)) { showToast('Invalid user ID', 'error'); return; }
+    for (const cid of _custSelectedIds) {
+        try { await apiFetch('/api/companies/' + cid, { method: 'PUT', body: { account_owner_id: ownerId } }); }
+        catch (e) { console.error('bulk assign error', cid, e); }
+    }
+    showToast(_custSelectedIds.size + ' accounts updated', 'success');
+    clearCustSelection();
+    loadCustomers();
+}
+
+function bulkExportAccounts() {
+    const ids = [..._custSelectedIds];
+    const data = crmCustomers.filter(c => ids.includes(c.id));
+    const csv = ['Name,Industry,Owner,Sites,Domain'].concat(
+        data.map(c => [c.name, c.industry || '', c.account_owner_name || '', c.site_count || 0, c.domain || ''].map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','))
+    ).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'accounts_export.csv'; a.click();
+    URL.revokeObjectURL(url);
+    showToast('Exported ' + data.length + ' accounts', 'success');
+}
+
+// ── Customer Drawer ───────────────────────────────────────────────────
+
+function openCustDrawer(companyId) {
+    _selectedCustId = companyId;
+    // Highlight active row in table
+    document.querySelectorAll('#custList tbody tr').forEach(r => {
+        r.classList.toggle('active-row', Number(r.dataset.companyId) === companyId);
+    });
+    const backdrop = document.getElementById('custDrawerBackdrop');
+    const drawer = document.getElementById('custDrawer');
+    if (backdrop) backdrop.classList.add('open');
+    if (drawer) drawer.classList.add('open');
+    _renderCustDrawerOverview(companyId);
+    // Reset to overview tab
+    document.querySelectorAll('#custDrawerTabs .drawer-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
+}
+
+function closeCustDrawer() {
+    _selectedCustId = null;
+    const backdrop = document.getElementById('custDrawerBackdrop');
+    const drawer = document.getElementById('custDrawer');
+    if (backdrop) backdrop.classList.remove('open');
+    if (drawer) drawer.classList.remove('open');
+    document.querySelectorAll('#custList tbody tr').forEach(r => r.classList.remove('active-row'));
+}
+
+function switchCustDrawerTab(tab, btn) {
+    document.querySelectorAll('#custDrawerTabs .drawer-tab').forEach(t => t.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    if (!_selectedCustId) return;
+    if (tab === 'overview') _renderCustDrawerOverview(_selectedCustId);
+    else if (tab === 'sites') _renderCustDrawerSites(_selectedCustId);
+    else if (tab === 'activity') _renderCustDrawerActivity(_selectedCustId);
+    else if (tab === 'pipeline') _renderCustDrawerPipeline(_selectedCustId);
+}
+
+function _renderCustDrawerOverview(companyId) {
+    const body = document.getElementById('custDrawerBody');
+    const title = document.getElementById('custDrawerTitle');
+    if (!body) return;
     const c = crmCustomers.find(x => x.id === companyId);
-    if (!c) { el.innerHTML = '<div class="split-panel-empty">Select an account</div>'; return; }
+    if (!c) { body.innerHTML = '<p class="crm-empty">Account not found</p>'; return; }
 
     const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
+    if (title) title.innerHTML = esc(displayName) + (c.is_strategic ? ' <span style="color:var(--amber)">★</span>' : '');
 
-    // Header
-    let html = `<div style="padding:16px">
-        <div style="display:flex;align-items:start;justify-content:space-between;margin-bottom:12px">
-            <div>
-                <h2 style="margin:0;font-size:18px;display:flex;align-items:center;gap:8px">
-                    ${esc(displayName)}
-                    ${c.is_strategic ? '<span title="Strategic" style="color:var(--amber);font-size:16px">★</span>' : ''}
-                </h2>
-                <div style="font-size:12px;color:var(--muted);display:flex;gap:12px;margin-top:4px">
-                    ${c.industry ? '<span>' + esc(c.industry) + '</span>' : ''}
-                    ${c.account_owner_name ? '<span>Owner: ' + esc(c.account_owner_name) + '</span>' : '<span style="color:var(--red)">No owner</span>'}
-                    <span>${c.site_count || 0} sites</span>
-                </div>
-            </div>
+    const healthColor = _custHealthColor(c);
+    const healthLabel = _custHealthLabel(c);
+
+    let html = `<div class="drawer-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div class="health-indicator"><span class="health-dot health-dot-${healthColor}"></span><span class="health-indicator-label" style="font-weight:600">${healthLabel}</span></div>
             <div style="display:flex;gap:6px">
                 <button class="btn btn-ghost btn-sm" onclick="openEditCompany(${c.id})">Edit</button>
                 <button class="btn-enrich" onclick="unifiedEnrichCompany(${c.id})">Enrich</button>
             </div>
-        </div>`;
+        </div>
+        <div class="drawer-field"><span class="drawer-field-label">Owner</span><span class="drawer-field-value">${c.account_owner_name ? esc(c.account_owner_name) : '<span style="color:var(--red)">Unassigned</span>'}</span></div>
+        <div class="drawer-field"><span class="drawer-field-label">Industry</span><span class="drawer-field-value">${esc(c.industry || '—')}</span></div>
+        ${c.domain ? '<div class="drawer-field"><span class="drawer-field-label">Domain</span><span class="drawer-field-value"><a href="https://'+escAttr(c.domain)+'" target="_blank">'+esc(c.domain)+'</a></span></div>' : ''}
+        ${c.website ? '<div class="drawer-field"><span class="drawer-field-label">Website</span><span class="drawer-field-value"><a href="'+escAttr(c.website)+'" target="_blank">'+esc(c.website)+'</a></span></div>' : ''}
+        ${c.phone ? '<div class="drawer-field"><span class="drawer-field-label">Phone</span><span class="drawer-field-value"><a href="tel:'+escAttr(c.phone)+'" onclick="autoLogCrmCall(\''+escAttr(c.phone)+'\')">'+esc(c.phone)+'</a></span></div>' : ''}
+        ${c.employee_size ? '<div class="drawer-field"><span class="drawer-field-label">Size</span><span class="drawer-field-value">'+esc(c.employee_size)+'</span></div>' : ''}
+        ${c.hq_city ? '<div class="drawer-field"><span class="drawer-field-label">HQ</span><span class="drawer-field-value">'+esc(c.hq_city)+(c.hq_state ? ', '+esc(c.hq_state) : '')+'</span></div>' : ''}
+        ${c.credit_terms ? '<div class="drawer-field"><span class="drawer-field-label">Credit Terms</span><span class="drawer-field-value">'+esc(c.credit_terms)+'</span></div>' : ''}
+        ${c.linkedin_url ? '<div class="drawer-field"><span class="drawer-field-label">LinkedIn</span><span class="drawer-field-value"><a href="'+escAttr(c.linkedin_url)+'" target="_blank">View Profile</a></span></div>' : ''}
+        <div class="drawer-field"><span class="drawer-field-label">Sites</span><span class="drawer-field-value">${c.site_count || 0}</span></div>
+    </div>`;
 
     // Notes
-    html += `<div class="card-v2" style="margin-bottom:12px;padding:12px">
-        <label style="font-size:11px;font-weight:600;color:var(--text);display:block;margin-bottom:4px">Notes</label>
-        <textarea id="custNotes-${c.id}" rows="2" style="width:100%;resize:none;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12px;background:var(--white)"
+    html += `<div class="drawer-section">
+        <div class="drawer-section-title">Notes</div>
+        <textarea id="custNotes-${c.id}" rows="3" style="width:100%;resize:vertical;border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px;background:var(--white);font-family:inherit"
             onblur="saveCustNotes(${c.id})">${esc(c.notes || '')}</textarea>
     </div>`;
 
-    // Enrichment tags
-    const tags = [
-        c.employee_size ? '👥 ' + esc(c.employee_size) : '',
-        c.hq_city ? '📍 ' + esc(c.hq_city) + (c.hq_state ? ', ' + esc(c.hq_state) : '') : '',
-        c.phone ? '📞 ' + esc(c.phone) : '',
-        c.credit_terms ? esc(c.credit_terms) : '',
-        c.domain ? esc(c.domain) : '',
-    ].filter(Boolean);
-    if (tags.length) {
-        html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${tags.map(t => '<span class="enrich-tag">' + t + '</span>').join('')}</div>`;
-    }
-
-    // Detail tabs
-    html += `<div class="detail-tabs" id="custDetailTabs">
-        <button class="detail-tab active" onclick="switchCustTab('sites',${c.id},this)">Sites (${c.site_count || 0})</button>
-        <button class="detail-tab" onclick="switchCustTab('activity',${c.id},this)">Activity</button>
-    </div>
-    <div id="custTabContent-${c.id}"><p class="empty">Loading...</p></div>
+    // Quick stats
+    const openReqs = (c.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0);
+    html += `<div class="drawer-section">
+        <div class="drawer-section-title">Quick Stats</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;text-align:center">
+            <div><div style="font-size:20px;font-weight:700;color:var(--text)">${c.site_count || 0}</div><div style="font-size:10px;color:var(--muted)">Sites</div></div>
+            <div><div style="font-size:20px;font-weight:700;color:var(--blue)">${openReqs}</div><div style="font-size:10px;color:var(--muted)">Open Reqs</div></div>
+            <div><div style="font-size:20px;font-weight:700;color:var(--text)">${c.account_type || 'Standard'}</div><div style="font-size:10px;color:var(--muted)">Type</div></div>
+        </div>
     </div>`;
 
-    el.innerHTML = html;
-    // Default to sites tab
-    _loadCustSitesTab(c);
+    body.innerHTML = html;
 }
 
-function switchCustTab(tab, companyId, btn) {
-    document.querySelectorAll('#custDetailTabs .detail-tab').forEach(t => t.classList.remove('active'));
-    if (btn) btn.classList.add('active');
+async function _renderCustDrawerSites(companyId) {
+    const body = document.getElementById('custDrawerBody');
+    if (!body) return;
     const c = crmCustomers.find(x => x.id === companyId);
     if (!c) return;
-    if (tab === 'sites') _loadCustSitesTab(c);
-    else if (tab === 'activity') _loadCustActivityTab(c);
-}
 
-function _loadCustSitesTab(c) {
-    const el = document.getElementById('custTabContent-' + c.id);
-    if (!el) return;
     const sites = c.sites || [];
     if (!sites.length) {
-        el.innerHTML = `<p class="empty">No sites — <a href="#" onclick="event.preventDefault();openAddSiteModal(${c.id},'${escAttr(c.name)}')">add one</a></p>`;
+        body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No sites — <a href="#" onclick="event.preventDefault();openAddSiteModal(${c.id},'${escAttr(c.name)}')">add one</a></p></div>`;
         return;
     }
-    let html = '';
+
+    let html = `<div class="drawer-section" style="padding-bottom:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div class="drawer-section-title" style="margin:0">${sites.length} Sites</div>
+            <button class="btn btn-ghost btn-sm" onclick="openAddSiteModal(${c.id},'${escAttr(c.name)}')">+ Add Site</button>
+        </div>`;
+
     for (const s of sites) {
-        html += `<div class="card-v2" style="margin-bottom:8px;padding:12px;cursor:pointer" onclick="toggleSiteDetail(${s.id})">
-            <div style="display:flex;align-items:center;gap:8px">
-                <span class="ea" id="sa-${s.id}" style="font-size:10px">▶</span>
-                <span style="font-size:13px;font-weight:600">${esc(s.site_name)}</span>
-                <span style="flex:1"></span>
-                ${s.owner_name ? '<span style="font-size:11px;color:var(--muted)">' + esc(s.owner_name) + '</span>' : ''}
-                ${s.open_reqs ? '<span class="list-item-badge">' + s.open_reqs + ' open</span>' : ''}
+        const contactCount = s.contact_count || 0;
+        html += `<div class="site-accordion" id="siteAccordion-${s.id}">
+            <div class="site-accordion-header" onclick="toggleSiteAccordion(${s.id})">
+                <div class="site-accordion-title">
+                    <span style="font-size:10px;transition:transform 0.2s" id="siteArrow-${s.id}">▶</span>
+                    ${esc(s.site_name)}
+                    ${s.owner_name ? '<span style="font-size:11px;color:var(--muted);font-weight:400">' + esc(s.owner_name) + '</span>' : ''}
+                </div>
+                <div class="site-accordion-meta">
+                    ${s.open_reqs ? s.open_reqs + ' reqs' : ''}
+                    ${s.city ? (s.open_reqs ? ' · ' : '') + esc(s.city) : ''}
+                </div>
             </div>
-            <div id="siteDetail-${s.id}" style="display:none;margin-top:10px"></div>
+            <div class="site-accordion-body" id="siteAccBody-${s.id}"></div>
         </div>`;
     }
-    html += `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="event.stopPropagation();openAddSiteModal(${c.id},'${escAttr(c.name)}')">+ Add Site</button>`;
-    el.innerHTML = html;
+    html += '</div>';
+    body.innerHTML = html;
 }
 
-async function _loadCustActivityTab(c) {
-    const el = document.getElementById('custTabContent-' + c.id);
-    if (!el) return;
-    el.innerHTML = '<p class="empty" style="padding:8px">Loading...</p>';
+async function toggleSiteAccordion(siteId) {
+    const bodyEl = document.getElementById('siteAccBody-' + siteId);
+    const arrow = document.getElementById('siteArrow-' + siteId);
+    if (!bodyEl) return;
+
+    if (bodyEl.classList.contains('open')) {
+        bodyEl.classList.remove('open');
+        if (arrow) arrow.style.transform = '';
+        return;
+    }
+
+    bodyEl.classList.add('open');
+    if (arrow) arrow.style.transform = 'rotate(90deg)';
+
+    // Load site details
+    bodyEl.innerHTML = '<p class="empty" style="padding:8px;font-size:11px">Loading...</p>';
     try {
-        const activities = await apiFetch('/api/companies/' + c.id + '/activities');
+        const s = await apiFetch('/api/sites/' + siteId);
+        const contacts = s.contacts || [];
+        const sorted = [...contacts].sort((a, b) => {
+            if (a.is_primary !== b.is_primary) return b.is_primary ? 1 : -1;
+            return (a.full_name || '').localeCompare(b.full_name || '');
+        });
+
+        let html = '';
+
+        // Contacts
+        if (sorted.length) {
+            html += '<div style="margin-bottom:10px">';
+            for (const c of sorted) {
+                const initials = (c.full_name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+                html += `<div class="site-contact-row">
+                    <div class="site-contact-avatar">${initials}</div>
+                    <div class="site-contact-info">
+                        <div class="site-contact-name">${esc(c.full_name)}${c.is_primary ? ' <span style="font-size:9px;color:var(--blue);font-weight:700">PRIMARY</span>' : ''}</div>
+                        ${c.title ? '<div class="site-contact-title">' + esc(c.title) + '</div>' : ''}
+                    </div>
+                    <div class="site-contact-actions">
+                        ${c.email ? '<a href="mailto:'+escAttr(c.email)+'" title="Email" onclick="event.stopPropagation();autoLogEmail(\''+escAttr(c.email)+'\',\''+escAttr(c.full_name || '')+'\')">✉</a>' : ''}
+                        ${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" title="Call" onclick="event.stopPropagation();autoLogCrmCall(\''+escAttr(c.phone)+'\')">📞</a>' : ''}
+                        <a href="#" onclick="event.preventDefault();event.stopPropagation();openEditSiteContact(${s.id},${c.id})">Edit</a>
+                    </div>
+                </div>`;
+            }
+            html += '</div>';
+        } else {
+            html += '<p style="font-size:11px;color:var(--muted);padding:4px 0">No contacts yet</p>';
+        }
+
+        // Site details
+        html += `<div style="font-size:11px;color:var(--muted);display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+            ${s.payment_terms ? '<span>Terms: ' + esc(s.payment_terms) + '</span>' : ''}
+            ${s.shipping_terms ? '<span>Ship: ' + esc(s.shipping_terms) + '</span>' : ''}
+            ${s.city ? '<span>' + esc(s.city) + (s.state ? ', ' + esc(s.state) : '') + '</span>' : ''}
+        </div>`;
+
+        // Recent reqs
+        if ((s.recent_reqs || []).length) {
+            html += '<div style="margin-bottom:8px">';
+            for (const r of s.recent_reqs.slice(0, 3)) {
+                html += `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:11px;cursor:pointer" onclick="event.stopPropagation();sidebarNav('reqs');setTimeout(()=>toggleDrillDown(${r.id}),300)">
+                    <span class="status-badge status-${r.status}" style="font-size:10px">${r.status}</span>
+                    <span style="color:var(--text)">REQ-${String(r.id).padStart(3,'0')}</span>
+                    <span style="color:var(--muted)">${r.requirement_count} MPNs</span>
+                </div>`;
+            }
+            html += '</div>';
+        }
+
+        // Action buttons
+        html += `<div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openAddSiteContact(${s.id})">+ Contact</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditSiteModal(${s.id})">Edit Site</button>
+        </div>`;
+
+        bodyEl.innerHTML = html;
+    } catch (e) {
+        bodyEl.innerHTML = '<p class="empty" style="color:var(--red);font-size:11px">Failed to load site</p>';
+    }
+}
+
+async function _renderCustDrawerActivity(companyId) {
+    const body = document.getElementById('custDrawerBody');
+    if (!body) return;
+    body.innerHTML = '<div class="drawer-section"><p class="empty">Loading activity...</p></div>';
+    try {
+        const activities = await apiFetch('/api/companies/' + companyId + '/activities');
+        const c = crmCustomers.find(x => x.id === companyId);
         if (!activities.length) {
-            el.innerHTML = `<p class="empty">No activity recorded — <a href="#" onclick="event.preventDefault();openLogNoteModal(${c.id},'${escAttr(c.name)}')">add a note</a></p>`;
+            body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No activity recorded</p>
+                ${c ? '<button class="btn btn-ghost btn-sm" onclick="openLogNoteModal('+c.id+',\''+escAttr(c.name)+'\')">+ Add Note</button>' : ''}
+            </div>`;
             return;
         }
         const actIcon = window.activityIcon || (() => '');
         const relTime = window.getRelativeTime || (() => '');
-        el.innerHTML = activities.slice(0, 20).map(a => {
+
+        let html = '<div style="padding:12px 20px">';
+        html += `<div class="activity-feed">`;
+        for (const a of activities.slice(0, 30)) {
             const label = (a.activity_type || '').replace(/_/g, ' ');
             const dur = a.duration_seconds ? ' (' + Math.round(a.duration_seconds / 60) + 'm)' : '';
-            return `<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
-                ${actIcon(a.activity_type)}
-                <div style="flex:1;min-width:0">
-                    <div style="font-size:12px;color:var(--text)">${esc(a.summary || label + dur)}</div>
-                    <div style="font-size:10px;color:var(--muted)">${relTime(a.created_at)} · ${esc(a.user_name || '')}</div>
+            const typeClass = 'activity-icon-' + (a.activity_type === 'email' ? 'email' : a.activity_type === 'call' ? 'call' : a.activity_type === 'note' ? 'note' : 'system');
+            html += `<div class="activity-item">
+                <div class="activity-icon ${typeClass}">${actIcon(a.activity_type)}</div>
+                <div class="activity-content">
+                    <div class="activity-title">${esc(a.summary || label + dur)}</div>
+                    <div class="activity-detail">${esc(a.user_name || '')}</div>
                 </div>
+                <span class="activity-time">${relTime(a.created_at)}</span>
             </div>`;
-        }).join('');
-    } catch (e) { el.innerHTML = '<p class="empty">Error loading activities</p>'; }
+        }
+        html += '</div></div>';
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load activity</p></div>';
+    }
 }
+
+async function _renderCustDrawerPipeline(companyId) {
+    const body = document.getElementById('custDrawerBody');
+    if (!body) return;
+    const c = crmCustomers.find(x => x.id === companyId);
+    if (!c) return;
+
+    // Gather all reqs from all sites
+    const siteIds = (c.sites || []).map(s => s.id);
+    body.innerHTML = '<div class="drawer-section"><p class="empty">Loading pipeline...</p></div>';
+
+    try {
+        // Fetch site details for recent reqs
+        const sitePromises = siteIds.slice(0, 20).map(sid => apiFetch('/api/sites/' + sid).catch(() => null));
+        const siteResults = await Promise.all(sitePromises);
+        const allReqs = [];
+        for (const s of siteResults) {
+            if (s && s.recent_reqs) {
+                for (const r of s.recent_reqs) {
+                    allReqs.push({ ...r, site_name: s.site_name });
+                }
+            }
+        }
+
+        if (!allReqs.length) {
+            body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No requisitions for this account</p></div>';
+            return;
+        }
+
+        // Group by status
+        const groups = { open: [], quoted: [], won: [], lost: [], archived: [] };
+        for (const r of allReqs) {
+            const st = (r.status || 'open').toLowerCase();
+            if (groups[st]) groups[st].push(r);
+            else groups.open.push(r);
+        }
+
+        let html = '<div style="padding:12px 20px">';
+        for (const [status, reqs] of Object.entries(groups)) {
+            if (!reqs.length) continue;
+            const color = status === 'won' ? 'var(--green)' : status === 'lost' ? 'var(--red)' : status === 'quoted' ? 'var(--amber)' : 'var(--blue)';
+            html += `<div style="margin-bottom:16px">
+                <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:6px">
+                    <span style="width:8px;height:8px;border-radius:50%;background:${color}"></span>
+                    ${status} (${reqs.length})
+                </div>`;
+            for (const r of reqs) {
+                html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="sidebarNav('reqs');setTimeout(()=>toggleDrillDown(${r.id}),300)">
+                    <span style="font-size:12px;font-weight:600;color:var(--blue)">REQ-${String(r.id).padStart(3,'0')}</span>
+                    <span style="font-size:12px;color:var(--text);flex:1">${esc(r.name || '')}</span>
+                    <span style="font-size:11px;color:var(--muted)">${r.requirement_count || 0} MPNs</span>
+                </div>`;
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load pipeline</p></div>';
+    }
+}
+
+// Legacy compat
+function selectCustomer(companyId) { openCustDrawer(companyId); }
+function renderCustomerDetail(companyId) { openCustDrawer(companyId); }
+function switchCustTab(tab, companyId, btn) { switchCustDrawerTab(tab === 'sites' ? 'sites' : tab === 'activity' ? 'activity' : 'overview', btn); }
+function cycleCustSort() { /* no-op, replaced by column header sorting */ }
+function toggleCustDrill(companyId) { openCustDrawer(companyId); }
+
+function _loadCustSitesTab(c) { _renderCustDrawerSites(c.id); }
+async function _loadCustActivityTab(c) { await _renderCustDrawerActivity(c.id); }
 
 async function saveCustNotes(companyId) {
     const el = document.getElementById('custNotes-' + companyId);
@@ -336,10 +618,14 @@ async function saveCustNotes(companyId) {
     } catch (e) { logCatchError('saveCustNotes', e); }
 }
 
-function toggleCustDrill(companyId) {
-    // Legacy: redirect to split-panel selection
-    selectCustomer(companyId);
-}
+// Escape key to close drawer
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+        if (document.getElementById('custDrawer')?.classList.contains('open')) { closeCustDrawer(); e.preventDefault(); return; }
+        if (document.getElementById('vendorDrawer')?.classList.contains('open')) { closeVendorDrawer(); e.preventDefault(); return; }
+        if (document.getElementById('contactDrawer')?.classList.contains('open')) { closeContactDrawer(); e.preventDefault(); return; }
+    }
+});
 
 async function toggleSiteDetail(siteId) {
     const panel = document.getElementById('siteDetail-' + siteId);
@@ -5065,6 +5351,10 @@ Object.assign(window, {
     switchPerfTab, switchProactiveTab, switchSettingsTab,
     toggleCustUnassigned, updateOffer,
     selectCustomer, renderCustomerDetail, switchCustTab, cycleCustSort, saveCustNotes,
+    setCustFilter, openCustDrawer, closeCustDrawer, switchCustDrawerTab,
+    toggleCustCheckbox, toggleAllCustCheckboxes, clearCustSelection,
+    bulkAssignOwner, bulkExportAccounts, toggleSiteAccordion,
+    closeVendorDrawer, closeContactDrawer,
     // Cross-file calls from app.js
     goToCompany, showBuyPlans, showCustomers, showPerformance,
     showProactiveOffers, showSettings,
