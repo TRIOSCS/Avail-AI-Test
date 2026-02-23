@@ -9102,7 +9102,7 @@ Object.assign(window, {
     _renderRfqPrepareProgress, _renderSourcingDrillDown, _reqBadge,
     _saveAddRow, _selfGuard, _sortArrow, _switchDdTab,
     _timeAgo, _updateDdBulkButton, _updateDrillToggleLabel,
-    _updateToolbarStats, _vendorHasPartsToSend, _vendorSortArrow,
+    _updateToolbarStats, _vendorHasPartsToSend,
     // HTML template inline handlers
     clearFileInput, clearNrSite, closeLogOfferModal, closeTroubleChat,
     createRequisition, debouncedFilterSites, debouncedFilterVendors,

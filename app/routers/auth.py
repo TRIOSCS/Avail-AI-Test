@@ -29,7 +29,7 @@ from ..database import get_db
 from ..dependencies import get_user
 from ..http_client import http
 from ..models import User
-from ..vite import vite_css_tags, vite_js_tags
+from ..vite import vite_css_tags, vite_js_tags, vite_app_url, vite_crm_url
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
@@ -57,6 +57,8 @@ async def index(request: Request, db: Session = Depends(get_db)):
             "app_version": APP_VERSION,
             "vite_css_tags": vite_css_tags(APP_VERSION),
             "vite_js_tags": vite_js_tags(APP_VERSION),
+            "vite_app_url": vite_app_url(APP_VERSION),
+            "vite_crm_url": vite_crm_url(APP_VERSION),
         },
     )
 
