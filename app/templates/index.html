@@ -37,7 +37,6 @@
             <button type="button" class="fp" data-view="sourcing" onclick="setMainView('sourcing',this)">Sourcing</button>
             <button type="button" class="fp" data-view="archive" onclick="setMainView('archive',this)">Archive</button>
         </div>
-        <a class="bug-link" onclick="openTroubleChat()">Trouble</a>
         <div class="search-wrap">
             <input type="text" class="sbox" id="mainSearch" placeholder="Search customer, part, RFQ&hellip;" aria-label="Search requisitions" oninput="debouncedMainSearch(this.value)" onkeydown="if(event.key==='Enter')triggerMainSearch()">
             <button type="button" class="search-btn" id="mainSearchBtn" onclick="triggerMainSearch()" title="Search"><svg class="search-icon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="spinner-icon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2" stroke-dasharray="32" stroke-dashoffset="10" stroke-linecap="round"/></svg></button>
@@ -48,6 +47,8 @@
             <button type="button" class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
         </div>
         <div class="tb-group">
+            <a class="bug-link" onclick="openTroubleChat()">Trouble</a>
+            <span class="tb-sep"></span>
             <button type="button" class="tb-action tb-accent-orange" id="myAccountsBtn" onclick="toggleMyAccounts(this)">My Accounts</button>
             <div class="toolbar-stats" id="toolbarStats"></div>
             <span class="tb-sep"></span>
