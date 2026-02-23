@@ -105,28 +105,27 @@ async function goToCompany(companyId) {
     setCurrentReqId(null);
     try {
         crmCustomers = await apiFetch('/api/companies');
+        crmCustomers = (Array.isArray(crmCustomers) ? crmCustomers : []).filter(c =>
+            !c.account_type || c.account_type.toLowerCase() !== 'vendor'
+        );
+        _selectedCustId = companyId;
         renderCustomers();
     } catch (e) { showToast('Failed to load customers', 'error'); return; }
-    // Find and expand the target company drill-down row
     setTimeout(() => {
-        const drow = document.getElementById('cd-' + companyId);
-        if (drow) {
-            const dataRow = drow.previousElementSibling;
-            if (dataRow) dataRow.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            if (!drow.classList.contains('open')) {
-                toggleCustDrill(companyId);
-            }
-        }
+        const item = document.querySelector(`#custList .list-item[data-company-id="${companyId}"]`);
+        if (item) item.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }, 100);
     navHighlight(document.getElementById('navCustomers'));
 }
 
+let _selectedCustId = null;
+
 function renderCustomers() {
     const el = document.getElementById('custList');
     if (!el) return;
-    const countEl = document.getElementById('custFilterCount');
+    const countEl = document.getElementById('custListCount');
     if (!crmCustomers.length) {
-        el.innerHTML = '<p class="empty">No customers yet \u2014 add a company to get started</p>';
+        el.innerHTML = '<p class="empty">No customers yet — add a company to get started</p>';
         if (countEl) countEl.textContent = '';
         return;
     }
@@ -137,9 +136,7 @@ function renderCustomers() {
             let va, vb;
             switch (_custSortCol) {
                 case 'name': va = (a.name || ''); vb = (b.name || ''); break;
-                case 'type': va = (a.account_type || ''); vb = (b.account_type || ''); break;
-                case 'industry': va = (a.industry || ''); vb = (b.industry || ''); break;
-                case 'sites': va = a.site_count || 0; vb = b.site_count || 0; break;
+                case 'activity': va = a._actDays ?? 999; vb = b._actDays ?? 999; break;
                 case 'owner': va = (a.account_owner_name || ''); vb = (b.account_owner_name || ''); break;
                 default: va = 0; vb = 0;
             }
@@ -150,112 +147,198 @@ function renderCustomers() {
         sorted.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     }
 
-    if (countEl) countEl.textContent = sorted.length + ' companies';
+    if (countEl) countEl.textContent = sorted.length + ' accounts';
 
-    const thC = (col) => _custSortCol === col ? ' class="sorted"' : '';
-    const sa = (col) => `<span class="sort-arrow">${_custSortArrow(col)}</span>`;
-
-    let html = `<div style="padding:0 16px"><table class="tbl"><thead><tr>
-        <th style="width:30px"></th>
-        <th onclick="sortCustList('name')"${thC('name')}>Company ${sa('name')}</th>
-        <th onclick="sortCustList('type')"${thC('type')}>Type ${sa('type')}</th>
-        <th onclick="sortCustList('industry')"${thC('industry')}>Industry ${sa('industry')}</th>
-        <th onclick="sortCustList('sites')"${thC('sites')}>Sites ${sa('sites')}</th>
-        <th onclick="sortCustList('owner')"${thC('owner')}>Owner ${sa('owner')}</th>
-        <th>Health</th>
-        <th style="width:90px">Actions</th>
-    </tr></thead><tbody>`;
-
+    let html = '';
     for (const c of sorted) {
         const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
-        const domain = c.domain || (c.website ? c.website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
-        const ownerHtml = c.account_owner_name
-            ? esc(c.account_owner_name)
-            : '<span style="color:var(--red);font-weight:600">unassigned</span>';
-
         const enrichDays = window.daysSince ? window.daysSince(c.last_enriched_at) : 999;
-        const enrichColor = window.recencyColor ? window.recencyColor(enrichDays, [7, 21]) : 'muted';
+        const healthColor = window.recencyColor ? window.recencyColor(enrichDays, [30, 90]) : 'muted';
+        const isSelected = _selectedCustId === c.id;
+        const contacts = (c.sites || []).reduce((n, s) => n + (s.contact_count || 0), 0);
+        const openReqs = (c.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0);
 
-        html += `<tr onclick="toggleCustDrill(${c.id})" data-company-id="${c.id}">
-            <td><button class="ea" id="ca-${c.id}">\u25b6</button></td>
-            <td><b class="cust-link">${esc(displayName)}</b>${domain ? '<br><span style="font-size:10px;color:var(--muted)">' + esc(domain) + '</span>' : ''}</td>
-            <td>${c.account_type ? '<span class="badge b-src">' + esc(c.account_type) + '</span>' : '\u2014'}</td>
-            <td style="font-size:11px">${esc(c.industry || '\u2014')}</td>
-            <td class="mono">${c.site_count || 0}</td>
-            <td>${ownerHtml}${c.account_owner_name ? '<br><span class="badge b-src" style="font-size:9px;margin-top:2px">' + esc(c.account_owner_name) + '</span>' : ''}</td>
-            <td>${window.healthDot ? window.healthDot(enrichColor, enrichDays < 900 ? enrichDays + 'd since enrichment' : 'Never enriched') : ''} <span id="actHealth-${c.id}"></span></td>
-            <td style="white-space:nowrap" onclick="event.stopPropagation()">
-                <button class="btn-enrich" onclick="openEditCompany(${c.id})">Edit</button>
+        html += `<div class="list-item${isSelected ? ' selected' : ''}" onclick="selectCustomer(${c.id})" data-company-id="${c.id}">
+            <span class="health-dot health-dot-${healthColor}" title="${enrichDays < 900 ? enrichDays + 'd' : 'Never'}"></span>
+            <div class="list-item-body">
+                <div class="list-item-title">
+                    ${esc(displayName)}
+                    ${c.is_strategic ? '<span title="Strategic" style="color:var(--amber)">★</span>' : ''}
+                </div>
+                <div class="list-item-sub">${esc(c.industry || '')}</div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
+                ${c.account_owner_name ? (window.ownerAvatar ? window.ownerAvatar(c.account_owner_name, 'sm') : '') : ''}
+                <div class="list-item-badges">
+                    <span class="list-item-badge">${c.site_count || 0} sites</span>
+                    ${openReqs ? '<span class="list-item-badge">' + openReqs + ' open</span>' : ''}
+                </div>
+            </div>
+        </div>`;
+    }
+    el.innerHTML = html;
+
+    // Auto-select first if nothing selected
+    if (!_selectedCustId && sorted.length) {
+        selectCustomer(sorted[0].id);
+    } else if (_selectedCustId) {
+        renderCustomerDetail(_selectedCustId);
+    }
+}
+
+function cycleCustSort() {
+    const order = ['name', 'activity', 'owner'];
+    const idx = order.indexOf(_custSortCol || 'name');
+    const next = order[(idx + 1) % order.length];
+    _custSortCol = next;
+    _custSortDir = 'asc';
+    const chip = document.getElementById('custSortChip');
+    if (chip) chip.textContent = next.charAt(0).toUpperCase() + next.slice(1);
+    renderCustomers();
+}
+
+function selectCustomer(companyId) {
+    _selectedCustId = companyId;
+    // Highlight in list
+    document.querySelectorAll('#custList .list-item').forEach(el => {
+        el.classList.toggle('selected', Number(el.dataset.companyId) === companyId);
+    });
+    renderCustomerDetail(companyId);
+}
+
+async function renderCustomerDetail(companyId) {
+    const el = document.getElementById('custDetail');
+    if (!el) return;
+    const c = crmCustomers.find(x => x.id === companyId);
+    if (!c) { el.innerHTML = '<div class="split-panel-empty">Select an account</div>'; return; }
+
+    const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
+
+    // Header
+    let html = `<div style="padding:16px">
+        <div style="display:flex;align-items:start;justify-content:space-between;margin-bottom:12px">
+            <div>
+                <h2 style="margin:0;font-size:18px;display:flex;align-items:center;gap:8px">
+                    ${esc(displayName)}
+                    ${c.is_strategic ? '<span title="Strategic" style="color:var(--amber);font-size:16px">★</span>' : ''}
+                </h2>
+                <div style="font-size:12px;color:var(--muted);display:flex;gap:12px;margin-top:4px">
+                    ${c.industry ? '<span>' + esc(c.industry) + '</span>' : ''}
+                    ${c.account_owner_name ? '<span>Owner: ' + esc(c.account_owner_name) + '</span>' : '<span style="color:var(--red)">No owner</span>'}
+                    <span>${c.site_count || 0} sites</span>
+                </div>
+            </div>
+            <div style="display:flex;gap:6px">
+                <button class="btn btn-ghost btn-sm" onclick="openEditCompany(${c.id})">Edit</button>
                 <button class="btn-enrich" onclick="unifiedEnrichCompany(${c.id})">Enrich</button>
-            </td>
-        </tr>
-        <tr class="drow" id="cd-${c.id}"><td colspan="8">
-            <div id="cdInner-${c.id}"><p class="empty" style="padding:4px;font-size:11px">Loading...</p></div>
-        </td></tr>`;
+            </div>
+        </div>`;
+
+    // Notes
+    html += `<div class="card-v2" style="margin-bottom:12px;padding:12px">
+        <label style="font-size:11px;font-weight:600;color:var(--text);display:block;margin-bottom:4px">Notes</label>
+        <textarea id="custNotes-${c.id}" rows="2" style="width:100%;resize:none;border:1px solid var(--border);border-radius:6px;padding:6px 8px;font-size:12px;background:var(--white)"
+            onblur="saveCustNotes(${c.id})">${esc(c.notes || '')}</textarea>
+    </div>`;
+
+    // Enrichment tags
+    const tags = [
+        c.employee_size ? '👥 ' + esc(c.employee_size) : '',
+        c.hq_city ? '📍 ' + esc(c.hq_city) + (c.hq_state ? ', ' + esc(c.hq_state) : '') : '',
+        c.phone ? '📞 ' + esc(c.phone) : '',
+        c.credit_terms ? esc(c.credit_terms) : '',
+        c.domain ? esc(c.domain) : '',
+    ].filter(Boolean);
+    if (tags.length) {
+        html += `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">${tags.map(t => '<span class="enrich-tag">' + t + '</span>').join('')}</div>`;
     }
 
-    html += '</tbody></table></div>';
+    // Detail tabs
+    html += `<div class="detail-tabs" id="custDetailTabs">
+        <button class="detail-tab active" onclick="switchCustTab('sites',${c.id},this)">Sites (${c.site_count || 0})</button>
+        <button class="detail-tab" onclick="switchCustTab('activity',${c.id},this)">Activity</button>
+    </div>
+    <div id="custTabContent-${c.id}"><p class="empty">Loading...</p></div>
+    </div>`;
+
+    el.innerHTML = html;
+    // Default to sites tab
+    _loadCustSitesTab(c);
+}
+
+function switchCustTab(tab, companyId, btn) {
+    document.querySelectorAll('#custDetailTabs .detail-tab').forEach(t => t.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    const c = crmCustomers.find(x => x.id === companyId);
+    if (!c) return;
+    if (tab === 'sites') _loadCustSitesTab(c);
+    else if (tab === 'activity') _loadCustActivityTab(c);
+}
+
+function _loadCustSitesTab(c) {
+    const el = document.getElementById('custTabContent-' + c.id);
+    if (!el) return;
+    const sites = c.sites || [];
+    if (!sites.length) {
+        el.innerHTML = `<p class="empty">No sites — <a href="#" onclick="event.preventDefault();openAddSiteModal(${c.id},'${escAttr(c.name)}')">add one</a></p>`;
+        return;
+    }
+    let html = '';
+    for (const s of sites) {
+        html += `<div class="card-v2" style="margin-bottom:8px;padding:12px;cursor:pointer" onclick="toggleSiteDetail(${s.id})">
+            <div style="display:flex;align-items:center;gap:8px">
+                <span class="ea" id="sa-${s.id}" style="font-size:10px">▶</span>
+                <span style="font-size:13px;font-weight:600">${esc(s.site_name)}</span>
+                <span style="flex:1"></span>
+                ${s.owner_name ? '<span style="font-size:11px;color:var(--muted)">' + esc(s.owner_name) + '</span>' : ''}
+                ${s.open_reqs ? '<span class="list-item-badge">' + s.open_reqs + ' open</span>' : ''}
+            </div>
+            <div id="siteDetail-${s.id}" style="display:none;margin-top:10px"></div>
+        </div>`;
+    }
+    html += `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="event.stopPropagation();openAddSiteModal(${c.id},'${escAttr(c.name)}')">+ Add Site</button>`;
     el.innerHTML = html;
 }
 
-function toggleCustDrill(companyId) {
-    const drow = document.getElementById('cd-' + companyId);
-    const arrow = document.getElementById('ca-' + companyId);
-    if (!drow) return;
-    const opening = !drow.classList.contains('open');
-    drow.classList.toggle('open');
-    if (arrow) arrow.classList.toggle('open');
-    if (opening) {
-        _loadCustDrillContent(companyId);
-        loadCompanyActivityStatus(companyId);
-    }
+async function _loadCustActivityTab(c) {
+    const el = document.getElementById('custTabContent-' + c.id);
+    if (!el) return;
+    el.innerHTML = '<p class="empty" style="padding:8px">Loading...</p>';
+    try {
+        const activities = await apiFetch('/api/companies/' + c.id + '/activities');
+        if (!activities.length) {
+            el.innerHTML = `<p class="empty">No activity recorded — <a href="#" onclick="event.preventDefault();openLogNoteModal(${c.id},'${escAttr(c.name)}')">add a note</a></p>`;
+            return;
+        }
+        const actIcon = window.activityIcon || (() => '');
+        const relTime = window.getRelativeTime || (() => '');
+        el.innerHTML = activities.slice(0, 20).map(a => {
+            const label = (a.activity_type || '').replace(/_/g, ' ');
+            const dur = a.duration_seconds ? ' (' + Math.round(a.duration_seconds / 60) + 'm)' : '';
+            return `<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+                ${actIcon(a.activity_type)}
+                <div style="flex:1;min-width:0">
+                    <div style="font-size:12px;color:var(--text)">${esc(a.summary || label + dur)}</div>
+                    <div style="font-size:10px;color:var(--muted)">${relTime(a.created_at)} · ${esc(a.user_name || '')}</div>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) { el.innerHTML = '<p class="empty">Error loading activities</p>'; }
 }
 
-async function _loadCustDrillContent(companyId) {
-    const inner = document.getElementById('cdInner-' + companyId);
-    if (!inner || inner.dataset.loaded) return;
-    const c = crmCustomers.find(x => x.id === companyId);
-    if (!c) return;
+async function saveCustNotes(companyId) {
+    const el = document.getElementById('custNotes-' + companyId);
+    if (!el) return;
+    try {
+        await apiFetch('/api/companies/' + companyId, {
+            method: 'PUT', body: { notes: el.value }
+        });
+    } catch (e) { logCatchError('saveCustNotes', e); }
+}
 
-    // Enrichment tags
-    const acctTags = [
-        c.employee_size ? '<span class="enrich-tag">\ud83d\udc65 ' + esc(c.employee_size) + '</span>' : '',
-        c.hq_city ? '<span class="enrich-tag">\ud83d\udccd ' + esc(c.hq_city) + (c.hq_state ? ', ' + esc(c.hq_state) : '') + '</span>' : '',
-        c.phone ? '<span class="enrich-tag">\ud83d\udcde ' + esc(c.phone) + '</span>' : '',
-        c.credit_terms ? '<span class="enrich-tag">' + esc(c.credit_terms) + '</span>' : '',
-        c.linkedin_url ? '<a href="' + escAttr(c.linkedin_url) + '" target="_blank" style="color:var(--teal);text-decoration:none;font-size:10px">LinkedIn \u2197</a>' : '',
-    ].filter(Boolean).join('');
-    const enrichHtml = acctTags ? '<div class="enrich-bar" style="margin-bottom:8px">' + acctTags + '</div>' : '';
-
-    // Sites sub-table
-    const sites = c.sites || [];
-    let sitesHtml = '';
-    if (sites.length) {
-        sitesHtml = `<table class="dtbl"><thead><tr><th>Site</th><th>Owner</th><th>Open Reqs</th></tr></thead><tbody>`;
-        for (const s of sites) {
-            sitesHtml += `<tr style="cursor:pointer" onclick="toggleSiteDetail(${s.id})">
-                <td style="font-weight:600">${esc(s.site_name)}</td>
-                <td>${esc(s.owner_name || '\u2014')}</td>
-                <td class="mono">${s.open_reqs || 0}</td>
-            </tr>
-            <tr><td colspan="3"><div id="siteDetail-${s.id}" class="site-detail-panel" style="display:none"></div></td></tr>`;
-        }
-        sitesHtml += '</tbody></table>';
-    }
-    sitesHtml += `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="event.stopPropagation();openAddSiteModal(${c.id},'${escAttr(c.name)}')">+ Add Site</button>`;
-
-    // Activity section
-    const actHtml = `<div class="cust-activity-section" style="margin-top:8px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <span class="si-contacts-title">Recent Activity</span>
-            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openLogNoteModal(${c.id},'${escAttr(c.name)}')">+ Note</button>
-        </div>
-        <div id="actList-${c.id}"><p class="empty" style="padding:4px;font-size:11px">Loading...</p></div>
-    </div>`;
-
-    inner.innerHTML = enrichHtml + sitesHtml + actHtml;
-    inner.dataset.loaded = '1';
-    loadCompanyActivities(companyId);
+function toggleCustDrill(companyId) {
+    // Legacy: redirect to split-panel selection
+    selectCustomer(companyId);
 }
 
 async function toggleSiteDetail(siteId) {
@@ -4981,6 +5064,7 @@ Object.assign(window, {
     startWebsiteScrape, submitBuyPlan, submitLost, switchEnrichTab,
     switchPerfTab, switchProactiveTab, switchSettingsTab,
     toggleCustUnassigned, updateOffer,
+    selectCustomer, renderCustomerDetail, switchCustTab, cycleCustSort, saveCustNotes,
     // Cross-file calls from app.js
     goToCompany, showBuyPlans, showCustomers, showPerformance,
     showProactiveOffers, showSettings,

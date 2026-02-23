@@ -212,39 +212,51 @@
 
     <!-- VIEW: Customers -->
     <div id="view-customers" style="display:none">
-        <div class="view-toolbar">
-            <h2>Customers</h2>
-            <input class="sbox sbox-wide" id="custFilter" placeholder="Search companies…" oninput="debouncedLoadCustomers()" aria-label="Search companies">
-            <div class="fpills fpills-sm">
-                <button type="button" class="fp fp-sm" id="custUnassignedPill" onclick="toggleCustUnassigned(this)">Unassigned</button>
+        <div class="split-panel" style="height:calc(100vh - 56px)">
+            <!-- Left: Company list -->
+            <div class="split-panel-left" id="custPanelLeft">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+                    <input class="sbox" id="custFilter" placeholder="Search accounts…" oninput="debouncedLoadCustomers()" style="flex:1;min-width:140px" aria-label="Search companies">
+                    <button class="chip" id="custSortChip" onclick="cycleCustSort()">Name</button>
+                    <button class="chip" id="custUnassignedPill" onclick="toggleCustUnassigned(this)">Unassigned</button>
+                    <label id="custMyOnlyLabel" style="display:none;font-size:11px;gap:4px;cursor:pointer;align-items:center">
+                        <input type="checkbox" id="custMyOnly" onchange="loadCustomers()"> Mine
+                    </label>
+                    <button class="btn btn-primary btn-sm" onclick="openNewCompanyModal()" style="padding:4px 10px;font-size:11px">+ New</button>
+                </div>
+                <div id="custListCount" style="padding:4px 14px;font-size:11px;color:var(--muted)"></div>
+                <div id="custList" aria-live="polite"><p class="empty">Loading…</p></div>
             </div>
-            <label id="custMyOnlyLabel" class="tb-btn" style="display:none;gap:4px;cursor:pointer;align-items:center">
-                <input type="checkbox" id="custMyOnly" onchange="loadCustomers()" class="u-accent-teal" aria-label="Show only my accounts"> My accounts
-            </label>
-            <button type="button" class="btn btn-primary btn-sm" onclick="openNewCompanyModal()">+ New Company</button>
-            <span id="custFilterCount" class="text-muted u-fs-xs"></span>
+            <!-- Right: Company detail -->
+            <div class="split-panel-right" id="custPanelRight">
+                <div id="custDetail" class="split-panel-empty">Select an account to view details</div>
+            </div>
         </div>
-        <div id="custList" aria-live="polite"><p class="empty">Loading…</p></div>
     </div>
 
     <!-- VIEW: Vendors -->
     <div id="view-vendors" style="display:none">
-        <div class="view-toolbar">
-            <h2>Vendor Directory</h2>
-            <div class="fpills" id="vendorTierPills">
-                <button type="button" class="fp on" onclick="setVendorTier('all',this)">All</button>
-                <button type="button" class="fp" onclick="setVendorTier('proven',this)">Proven</button>
-                <button type="button" class="fp" onclick="setVendorTier('developing',this)">Developing</button>
-                <button type="button" class="fp" onclick="setVendorTier('caution',this)">Caution</button>
-                <button type="button" class="fp" onclick="setVendorTier('new',this)">New</button>
+        <div class="split-panel" style="height:calc(100vh - 56px)">
+            <!-- Left: Vendor list -->
+            <div class="split-panel-left" id="vendorPanelLeft">
+                <div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+                    <input class="sbox" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" style="flex:1;min-width:120px" aria-label="Search vendors">
+                    <div class="chip-row" style="margin:0" id="vendorTierPills">
+                        <span class="chip on" data-value="all" onclick="setVendorTier('all',this)">All</span>
+                        <span class="chip" data-value="proven" onclick="setVendorTier('proven',this)">Proven</span>
+                        <span class="chip" data-value="developing" onclick="setVendorTier('developing',this)">Dev</span>
+                        <span class="chip" data-value="caution" onclick="setVendorTier('caution',this)">Caution</span>
+                        <span class="chip" data-value="new" onclick="setVendorTier('new',this)">New</span>
+                    </div>
+                </div>
+                <div id="vendorFilterCount" style="padding:4px 14px;font-size:11px;color:var(--muted)"></div>
+                <div id="vendorList" aria-live="polite"><p class="empty">Loading…</p></div>
             </div>
-            <input class="sbox sbox-med" id="vendorSearch" placeholder="Search vendors…" oninput="debouncedFilterVendors()" aria-label="Search vendors">
-            <label class="tb-btn" style="display:flex;align-items:center;gap:4px;cursor:pointer">
-                <input type="checkbox" id="vendorHideBL" onchange="filterVendorList()" aria-label="Hide blacklisted" class="u-accent-teal"> Hide blacklisted
-            </label>
-            <span id="vendorFilterCount" class="text-muted"></span>
+            <!-- Right: Vendor detail -->
+            <div class="split-panel-right" id="vendorPanelRight">
+                <div id="vendorDetail" class="split-panel-empty">Select a vendor to view details</div>
+            </div>
         </div>
-        <div id="vendorList" aria-live="polite"><p class="empty">Loading…</p></div>
     </div>
 
     <!-- VIEW: Materials -->
@@ -803,31 +815,35 @@
 
     <!-- VIEW: Contact Intelligence -->
     <div id="view-contacts" style="display:none">
-        <div class="view-toolbar">
-            <h2>Contact Intelligence</h2>
-            <input class="sbox sbox-wide" id="contactFilter" placeholder="Search contacts…" oninput="debouncedLoadContacts()" aria-label="Search contacts">
-            <div class="fpills fpills-sm" id="contactStatusPills">
-                <button type="button" class="fp fp-sm on" onclick="setContactStatusFilter('all',this)">All</button>
-                <button type="button" class="fp fp-sm" onclick="setContactStatusFilter('active',this)">Active</button>
-                <button type="button" class="fp fp-sm" onclick="setContactStatusFilter('stale',this)">Stale</button>
-                <button type="button" class="fp fp-sm" onclick="setContactStatusFilter('new',this)">New</button>
+        <div style="padding:16px;border-bottom:1px solid var(--border)">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                <h2 style="margin:0;font-size:18px">Contact Intelligence</h2>
+                <span id="contactFilterCount" style="font-size:12px;color:var(--muted)"></span>
             </div>
-            <span id="contactFilterCount" class="text-muted u-fs-xs"></span>
+            <input class="sbox" id="contactFilter" placeholder="Search contacts by name, email, company, or title…" oninput="debouncedLoadContacts()" style="width:100%;margin-bottom:10px" aria-label="Search contacts">
+            <div class="chip-row" id="contactStatusPills">
+                <span class="chip on" onclick="setContactStatusFilter('all',this)">All</span>
+                <span class="chip" onclick="setContactStatusFilter('customer',this)">Customer</span>
+                <span class="chip" onclick="setContactStatusFilter('vendor',this)">Vendor</span>
+                <span class="chip" onclick="setContactStatusFilter('active',this)">Recent</span>
+                <span class="chip" onclick="setContactStatusFilter('stale',this)">Needs Follow-up</span>
+                <span class="chip" onclick="setContactStatusFilter('new',this)">New</span>
+            </div>
         </div>
-        <div id="contactList" aria-live="polite"><p class="empty">Loading…</p></div>
+        <div id="contactList" aria-live="polite" style="padding:16px"><p class="empty">Loading…</p></div>
     </div>
 
     <!-- VIEW: Dashboard Overview -->
     <div id="view-dashboard" style="display:none">
-        <div class="view-toolbar">
-            <h2>Dashboard</h2>
-            <div class="fpills fpills-sm" id="dashPeriodPills">
-                <button type="button" class="fp fp-sm on" onclick="setDashPeriod('7d',this)">7 Days</button>
-                <button type="button" class="fp fp-sm" onclick="setDashPeriod('30d',this)">30 Days</button>
-                <button type="button" class="fp fp-sm" onclick="setDashPeriod('90d',this)">90 Days</button>
+        <div style="padding:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+            <h2 style="margin:0;font-size:18px">Dashboard</h2>
+            <div class="chip-row" style="margin:0" id="dashPeriodPills">
+                <span class="chip on" onclick="setDashPeriod('7d',this)">7 Days</span>
+                <span class="chip" onclick="setDashPeriod('30d',this)">30 Days</span>
+                <span class="chip" onclick="setDashPeriod('90d',this)">90 Days</span>
             </div>
         </div>
-        <div id="dashboardContent" aria-live="polite"><p class="empty">Loading…</p></div>
+        <div id="dashboardContent" style="padding:16px" aria-live="polite"><p class="empty">Loading…</p></div>
     </div>
 
     <!-- VIEW: Performance Tracking -->

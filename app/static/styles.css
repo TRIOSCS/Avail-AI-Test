@@ -1647,8 +1647,117 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
     .nav-group button{margin-left:4px}
     .contact-card{flex-wrap:wrap}
     .contact-card-meta{width:100%;margin-top:4px}
+    .split-panel{flex-direction:column;height:auto!important}
+    .split-panel-left{width:100%!important;border-right:none!important;border-bottom:1px solid var(--border);max-height:40vh;overflow-y:auto}
+    .split-panel-right{min-height:50vh}
+    .kanban{flex-direction:column}
+    .kanban-col{width:100%}
 }
 @media (max-width:480px){
     .stat-grid{grid-template-columns:1fr}
+    .chip-row{gap:4px}
+    .chip{font-size:10px;padding:3px 8px}
 }
+
+/* ── v2 Owner Avatar ─────────────────────────────────────── */
+.owner-avatar{display:inline-flex;align-items:center;justify-content:center;border-radius:50%;font-weight:600;color:#fff;flex-shrink:0;font-family:'Inter',sans-serif}
+.owner-avatar-sm{width:24px;height:24px;font-size:9px}
+.owner-avatar-md{width:32px;height:32px;font-size:11px}
+.owner-avatar-lg{width:40px;height:40px;font-size:13px}
+
+/* ── v2 Factor Bars (Vendor Engagement) ──────────────────── */
+.factor-bar{display:flex;align-items:center;gap:10px}
+.factor-bar-label{width:140px;font-size:12px;color:var(--muted);flex-shrink:0;white-space:nowrap}
+.factor-bar-track{flex:1;height:6px;background:var(--bg2);border-radius:3px;overflow:hidden}
+.factor-bar-fill{height:100%;border-radius:3px;transition:width 0.4s ease}
+.factor-bar-fill-green{background:var(--green)}
+.factor-bar-fill-amber{background:var(--amber)}
+.factor-bar-fill-red{background:var(--red)}
+.factor-bar-value{width:28px;text-align:right;font-size:12px;font-weight:700;color:var(--text);font-family:'JetBrains Mono',monospace}
+
+/* ── v2 Relationship Health Bar ──────────────────────────── */
+.rel-health{display:flex;flex-direction:column;gap:6px}
+.rel-health-header{display:flex;justify-content:space-between;align-items:center;font-size:12px}
+.rel-health-label{color:var(--muted)}
+.rel-health-remaining{font-weight:600}
+.rel-health-track{height:6px;width:100%;border-radius:3px;background:var(--bg2);overflow:hidden}
+.rel-health-fill{height:100%;border-radius:3px;transition:width 0.4s ease}
+.rel-health-meta{display:flex;justify-content:space-between;font-size:10px;color:var(--muted)}
+
+/* ── v2 Contact Status Bar (qualification funnel) ────────── */
+.cs-bar-wrap{display:flex;flex-direction:column;gap:6px}
+.cs-bar-header{display:flex;justify-content:space-between;align-items:center;font-size:12px}
+.cs-bar-label{color:var(--muted)}
+.cs-bar-total{font-weight:600;color:var(--text)}
+.cs-bar-track{display:flex;height:8px;width:100%;border-radius:4px;overflow:hidden}
+.cs-bar-seg{height:100%;transition:width 0.3s ease}
+.cs-bar-legend{display:flex;flex-wrap:wrap;gap:4px 10px}
+.cs-bar-legend span{font-size:10px;font-weight:600}
+
+/* ── v2 Status Badge (contact lifecycle) ─────────────────── */
+.status-pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;font-weight:600;white-space:nowrap;cursor:default}
+.status-pill-sm{padding:2px 8px;font-size:10px}
+.status-pill-md{padding:3px 10px;font-size:11px}
+.status-pill-new{background:#dbeafe;color:#2563eb}
+.status-pill-researching{background:#fef3c7;color:#d97706}
+.status-pill-qualified{background:#dbeafe;color:#1d4ed8}
+.status-pill-engaged{background:#ede9fe;color:#7c3aed}
+.status-pill-champion{background:#dcfce7;color:#16a34a}
+.status-pill-dead_end{background:var(--bg2);color:var(--muted)}
+
+/* ── v2 Activity Icon Circles ────────────────────────────── */
+.act-icon{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--bg2);flex-shrink:0;font-size:13px}
+
+/* ── v2 Split Panel Layout ───────────────────────────────── */
+.split-panel{display:flex;height:100%;overflow:hidden}
+.split-panel-left{width:40%;border-right:1px solid var(--border);overflow-y:auto;flex-shrink:0}
+.split-panel-right{flex:1;overflow-y:auto}
+.split-panel-empty{display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:14px}
+
+/* ── v2 Detail Tabs ──────────────────────────────────────── */
+.detail-tabs{display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:12px}
+.detail-tab{padding:8px 16px;font-size:12px;font-weight:600;color:var(--muted);background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;transition:all var(--speed-fast)}
+.detail-tab:hover{color:var(--text)}
+.detail-tab.active{color:var(--blue);border-bottom-color:var(--blue)}
+
+/* ── v2 Compact Table ────────────────────────────────────── */
+.v2-table{width:100%;border-collapse:collapse;font-size:12px}
+.v2-table th{text-align:left;padding:8px 12px;font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:0.3px;border-bottom:1px solid var(--border);background:var(--bg)}
+.v2-table td{padding:8px 12px;border-bottom:1px solid var(--border)}
+.v2-table tbody tr:hover{background:var(--blue-lt)}
+.v2-table td.mono{font-family:'JetBrains Mono',monospace;color:var(--blue)}
+
+/* ── v2 Expandable Row ───────────────────────────────────── */
+.expand-row{cursor:pointer;transition:background var(--speed-fast)}
+.expand-row:hover{background:var(--blue-lt)}
+.expand-detail{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 16px}
+
+/* ── v2 Filter Chips Row ─────────────────────────────────── */
+.chip-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:10px}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border-radius:999px;font-size:11px;font-weight:600;cursor:pointer;transition:all var(--speed-fast);border:1px solid var(--border);background:var(--white);color:var(--text2)}
+.chip:hover{border-color:var(--blue);color:var(--blue)}
+.chip.on{background:var(--blue);color:#fff;border-color:var(--blue)}
+.chip-count{font-size:10px;opacity:.7}
+
+/* ── v2 List Item (company/vendor row in left panel) ─────── */
+.list-item{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background var(--speed-fast)}
+.list-item:hover{background:var(--blue-lt)}
+.list-item.selected{background:var(--blue-lt);border-left:3px solid var(--blue)}
+.list-item-body{flex:1;min-width:0}
+.list-item-title{font-size:13px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.list-item-sub{font-size:11px;color:var(--muted);margin-top:1px}
+.list-item-badges{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0}
+.list-item-badge{font-size:10px;padding:1px 6px;border-radius:4px;background:var(--bg2);color:var(--text2)}
+
+/* ── v2 Kanban Columns (Pipeline) ────────────────────────── */
+.kanban{display:flex;gap:16px;overflow-x:auto;padding-bottom:8px;flex:1}
+.kanban-col{width:260px;flex-shrink:0;display:flex;flex-direction:column}
+.kanban-col-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;margin-bottom:8px;background:var(--white);border-radius:8px;border-left:3px solid var(--border)}
+.kanban-col-header .kanban-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.kanban-col-header-title{font-size:12px;font-weight:700;color:var(--text)}
+.kanban-col-header-count{font-size:11px;color:var(--muted)}
+.kanban-col-header-value{font-size:11px;font-weight:600;color:var(--text2);font-family:'JetBrains Mono',monospace}
+.kanban-cards{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:8px}
+.kanban-card{background:var(--white);border:1px solid var(--border);border-radius:8px;padding:10px 12px;cursor:pointer;transition:all var(--speed-fast)}
+.kanban-card:hover{box-shadow:var(--shadow-sm);border-color:var(--blue)}
 

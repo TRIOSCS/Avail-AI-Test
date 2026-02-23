@@ -290,6 +290,116 @@ export function recencyColor(days, thresholds = [7, 21]) {
     return 'red';
 }
 
+/* ── v2 Extended Helpers ─────────────────────────────────────────────── */
+
+const AVATAR_COLORS = [
+    '#3b6ea8','#7c3aed','#059669','#d97706','#dc2626',
+    '#0891b2','#9333ea','#c026d3','#4f46e5','#0d9488'
+];
+function _avatarColor(name) {
+    let h = 0;
+    for (let i = 0; i < (name || '').length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+    return AVATAR_COLORS[Math.abs(h) % AVATAR_COLORS.length];
+}
+export function ownerAvatar(name, size = 'md') {
+    if (!name) return '';
+    const initials = name.split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    return `<div class="owner-avatar owner-avatar-${size}" style="background:${_avatarColor(name)}" title="${esc(name)}">${initials}</div>`;
+}
+
+export function factorBar(label, value) {
+    const color = value >= 70 ? 'green' : value >= 40 ? 'amber' : 'red';
+    return `<div class="factor-bar">
+        <span class="factor-bar-label">${esc(label)}</span>
+        <div class="factor-bar-track"><div class="factor-bar-fill factor-bar-fill-${color}" style="width:${Math.min(100, Math.max(0, value))}%"></div></div>
+        <span class="factor-bar-value">${Math.round(value)}</span>
+    </div>`;
+}
+
+export function relationshipHealthBar(lastContactedDays, windowDays = 30) {
+    const elapsed = Math.min(lastContactedDays, windowDays);
+    const remaining = windowDays - elapsed;
+    const pct = (elapsed / windowDays) * 100;
+    const color = elapsed <= 7 ? 'green' : elapsed <= 21 ? 'amber' : 'red';
+    const textColor = elapsed > 21 ? 'color:var(--red)' : elapsed > 7 ? 'color:var(--amber)' : '';
+    return `<div class="rel-health">
+        <div class="rel-health-header">
+            <span class="rel-health-label">Relationship Health</span>
+            <span class="rel-health-remaining" style="${textColor}">${remaining <= 0 ? 'Requires contact' : remaining + 'd remaining'}</span>
+        </div>
+        <div class="rel-health-track"><div class="rel-health-fill" style="width:${pct.toFixed(1)}%;background:var(--${color})"></div></div>
+        <div class="rel-health-meta"><span>${elapsed}d since last contact</span><span>${windowDays}d window</span></div>
+    </div>`;
+}
+
+const CONTACT_STATUS = {
+    champion:    { label:'Champion',    color:'#16a34a', bg:'#dcfce7' },
+    engaged:     { label:'Engaged',     color:'#7c3aed', bg:'#ede9fe' },
+    qualified:   { label:'Qualified',   color:'#1d4ed8', bg:'#dbeafe' },
+    researching: { label:'Researching', color:'#d97706', bg:'#fef3c7' },
+    new:         { label:'New',         color:'#2563eb', bg:'#dbeafe' },
+    dead_end:    { label:'Dead End',    color:'#64748b', bg:'#e2e8f0' },
+};
+const CONTACT_STATUS_ORDER = ['champion','engaged','qualified','researching','new','dead_end'];
+
+export function contactStatusBar(contacts, statusOverrides = {}) {
+    if (!contacts || !contacts.length) return '';
+    const counts = {};
+    CONTACT_STATUS_ORDER.forEach(s => counts[s] = 0);
+    contacts.forEach(c => {
+        const st = statusOverrides[c.id] || c.status || 'new';
+        counts[st] = (counts[st] || 0) + 1;
+    });
+    const total = contacts.length;
+    const segments = CONTACT_STATUS_ORDER
+        .filter(s => counts[s] > 0)
+        .map(s => `<div class="cs-bar-seg" style="width:${(counts[s]/total*100).toFixed(1)}%;background:${CONTACT_STATUS[s].color}"></div>`)
+        .join('');
+    const legend = CONTACT_STATUS_ORDER
+        .filter(s => counts[s] > 0)
+        .map(s => `<span style="color:${CONTACT_STATUS[s].color}">${counts[s]} ${CONTACT_STATUS[s].label}</span>`)
+        .join('');
+    return `<div class="cs-bar-wrap">
+        <div class="cs-bar-header"><span class="cs-bar-label">Contact Qualification</span><span class="cs-bar-total">${total} total</span></div>
+        <div class="cs-bar-track">${segments}</div>
+        <div class="cs-bar-legend">${legend}</div>
+    </div>`;
+}
+
+export function statusPill(status, size = 'sm') {
+    const cfg = CONTACT_STATUS[status] || CONTACT_STATUS.new;
+    return `<span class="status-pill status-pill-${size} status-pill-${status}">${cfg.label}</span>`;
+}
+
+export function activityIcon(type) {
+    const map = {
+        email_sent: '📤', email_received: '📥', phone: '📞',
+        note: '📝', quote: '📄', offer: '🏷️', meeting: '🤝',
+    };
+    return `<span class="act-icon">${map[type] || '📋'}</span>`;
+}
+
+export function getRelativeTime(dateStr) {
+    if (!dateStr) return '—';
+    const d = new Date(dateStr);
+    if (isNaN(d)) return '—';
+    const sec = Math.floor((Date.now() - d.getTime()) / 1000);
+    if (sec < 60) return 'just now';
+    const min = Math.floor(sec / 60);
+    if (min < 60) return min + 'm ago';
+    const hrs = Math.floor(min / 60);
+    if (hrs < 24) return hrs + 'h ago';
+    const days = Math.floor(hrs / 24);
+    if (days < 30) return days + 'd ago';
+    const months = Math.floor(days / 30);
+    return months + 'mo ago';
+}
+
+export function filterChip(label, value, isActive, count) {
+    const countHtml = count != null ? ` <span class="chip-count">(${count})</span>` : '';
+    return `<span class="chip${isActive ? ' on' : ''}" data-value="${esc(String(value))}">${esc(label)}${countHtml}</span>`;
+}
+
 // ── Name Autocomplete ───────────────────────────────────────────────────
 export function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
     const input = document.getElementById(inputId);
@@ -711,8 +821,8 @@ const debouncedLoadContacts = debounce(() => {
 
 function setContactStatusFilter(status, btn) {
     _contactStatusFilter = status;
-    document.querySelectorAll('#contactStatusPills .fp').forEach(b => b.classList.remove('on'));
-    btn.classList.add('on');
+    document.querySelectorAll('#contactStatusPills .chip').forEach(b => b.classList.remove('on'));
+    if (btn) btn.classList.add('on');
     loadContacts();
 }
 
@@ -796,12 +906,14 @@ function renderContacts(q) {
         );
     }
 
-    // Status filter based on interaction recency
+    // Status filter based on interaction recency and type
     contacts = contacts.filter(c => {
         if (_contactStatusFilter === 'all') return true;
+        if (_contactStatusFilter === 'customer') return c.contact_type === 'customer';
+        if (_contactStatusFilter === 'vendor') return c.contact_type !== 'customer';
         const days = daysSince(c.last_interaction_at || c.first_seen_at);
         if (_contactStatusFilter === 'active') return days <= 7;
-        if (_contactStatusFilter === 'stale') return days > 21;
+        if (_contactStatusFilter === 'stale') return days > 14;
         if (_contactStatusFilter === 'new') return days <= 3 && c.interaction_count === 0;
         return true;
     });
@@ -817,27 +929,28 @@ function renderContacts(q) {
         return;
     }
 
-    list.innerHTML = contacts.map(c => {
+    list.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px">' +
+    contacts.map(c => {
+        const initials = (c.full_name || '?').split(/\s+/).map(w => w[0]).join('').toUpperCase().slice(0, 2);
         const days = daysSince(c.last_interaction_at || c.first_seen_at);
-        const color = recencyColor(days);
-        const score = Math.min(c.confidence || 0, 100);
-        const verifiedBadge = c.is_verified ? '<span class="badge b-auth" style="font-size:9px;margin-left:6px">Verified</span>' : '';
-        const interactionText = c.interaction_count ? c.interaction_count + ' interaction' + (c.interaction_count !== 1 ? 's' : '') : '';
-        const dateLabel = c.last_interaction_at ? new Date(c.last_interaction_at).toLocaleDateString() : '';
+        const lastLabel = c.last_interaction_at ? getRelativeTime(c.last_interaction_at) : '';
+        const verifiedBadge = c.is_verified ? ' <span style="font-size:9px;color:var(--green)">✓</span>' : '';
 
-        return `<div class="card-v2 contact-card" onclick="openVendorPopup(${c.vendor_id})">
-            ${engRing(score, 40)}
-            <div class="contact-card-info">
-                <h4>${healthDot(color)} ${esc(c.full_name || 'Unknown')}${verifiedBadge}</h4>
-                <p>${esc(c.title)}${c.title && c.vendor_name ? ' at ' : ''}${esc(c.vendor_name)}</p>
-                <p>${c.email ? esc(c.email) : ''}${c.email && c.phone ? ' \u00b7 ' : ''}${c.phone ? esc(c.phone) : ''}</p>
-            </div>
-            <div class="contact-card-meta">
-                <span class="text-xs-muted">${interactionText}</span>
-                ${dateLabel ? '<br><span class="text-xs-muted">' + dateLabel + '</span>' : ''}
+        return `<div class="card-v2" style="padding:12px;cursor:pointer;display:flex;gap:10px;align-items:start" onclick="openVendorPopup(${c.vendor_id})">
+            <div class="owner-avatar owner-avatar-md" style="background:${_avatarColor(c.full_name)}">${initials}</div>
+            <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:4px">
+                    <span style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.full_name || 'Unknown')}${verifiedBadge}</span>
+                </div>
+                <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.vendor_name)}</div>
+                <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(c.title || '')}</div>
+                <div style="margin-top:4px;display:flex;align-items:center;gap:8px;font-size:10px;color:var(--muted)">
+                    ${lastLabel ? '<span>' + lastLabel + '</span>' : ''}
+                    ${c.source ? '<span>' + esc(c.source.replace(/_/g,' ')) + '</span>' : ''}
+                </div>
             </div>
         </div>`;
-    }).join('');
+    }).join('') + '</div>';
 }
 
 function showContacts() {
@@ -846,8 +959,141 @@ function showContacts() {
     loadContacts();
 }
 
+let _dashPeriod = '7d';
+
+function setDashPeriod(period, btn) {
+    _dashPeriod = period;
+    document.querySelectorAll('#dashPeriodPills .chip').forEach(b => b.classList.remove('on'));
+    if (btn) btn.classList.add('on');
+    loadDashboard();
+}
+
 function showDashboard() {
     showView('view-dashboard');
+    loadDashboard();
+}
+
+async function loadDashboard() {
+    const el = document.getElementById('dashboardContent');
+    if (!el) return;
+    el.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading dashboard\u2026</div>';
+
+    try {
+        // Fetch data in parallel
+        const [companies, vendorResp, reqs] = await Promise.all([
+            apiFetch('/api/companies').catch(() => []),
+            apiFetch('/api/vendors?limit=100').catch(() => ({ vendors: [] })),
+            apiFetch('/api/requisitions').catch(() => []),
+        ]);
+
+        const vendors = vendorResp.vendors || vendorResp || [];
+        const reqList = Array.isArray(reqs) ? reqs : [];
+        const compList = Array.isArray(companies) ? companies : [];
+
+        // Pipeline summary
+        const statusCounts = { open: 0, quoted: 0, won: 0, lost: 0 };
+        for (const r of reqList) statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
+
+        // Stat cards
+        const statsHtml = `<div class="stat-grid" style="margin-bottom:16px">
+            ${statCard('Active Reqs', statusCounts.open + statusCounts.quoted)}
+            ${statCard('Companies', compList.length)}
+            ${statCard('Vendors', vendors.length)}
+            ${statCard('Won', statusCounts.won, { prefix: '', trendDir: 'trend-up' })}
+        </div>`;
+
+        // Dashboard 6-card grid
+        let html = statsHtml + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">';
+
+        // Card 1: Pipeline Summary
+        const total = reqList.length || 1;
+        html += `<div class="card-v2" style="padding:16px">
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Pipeline Summary</h3>
+            <div style="display:flex;height:12px;border-radius:6px;overflow:hidden;margin-bottom:8px">
+                <div style="width:${(statusCounts.open/total*100).toFixed(1)}%;background:var(--amber)"></div>
+                <div style="width:${(statusCounts.quoted/total*100).toFixed(1)}%;background:var(--blue)"></div>
+                <div style="width:${(statusCounts.won/total*100).toFixed(1)}%;background:var(--green)"></div>
+                <div style="width:${(statusCounts.lost/total*100).toFixed(1)}%;background:var(--red)"></div>
+            </div>
+            <div style="display:flex;gap:12px;font-size:11px">
+                <span style="color:var(--amber)">Open ${statusCounts.open}</span>
+                <span style="color:var(--blue)">Quoted ${statusCounts.quoted}</span>
+                <span style="color:var(--green)">Won ${statusCounts.won}</span>
+                <span style="color:var(--red)">Lost ${statusCounts.lost}</span>
+            </div>
+        </div>`;
+
+        // Card 2: Top Vendors by Score
+        const topVendors = [...vendors].sort((a, b) => (b.vendor_score ?? 0) - (a.vendor_score ?? 0)).slice(0, 5);
+        html += `<div class="card-v2" style="padding:16px">
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Top Vendors</h3>
+            ${topVendors.map(v => {
+                const s = v.vendor_score != null ? Math.round(v.vendor_score) : 0;
+                const rate = v.response_rate != null ? Math.round(v.response_rate) + '%' : '—';
+                return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+                    ${engRing(s, 28)}
+                    <span style="flex:1;font-size:12px;font-weight:600">${esc(v.display_name)}</span>
+                    <span style="font-size:11px;color:var(--muted)">${rate}</span>
+                </div>`;
+            }).join('')}
+        </div>`;
+
+        // Card 3: Ownership Alerts (companies needing attention)
+        const staleCompanies = compList.filter(c => {
+            const d = daysSince(c.last_enriched_at);
+            return d > 30;
+        }).slice(0, 5);
+        html += `<div class="card-v2" style="padding:16px">
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px;display:flex;align-items:center;gap:6px">
+                <span style="color:var(--amber)">⚠</span> Needs Attention
+            </h3>
+            ${staleCompanies.length ? staleCompanies.map(c => {
+                const d = daysSince(c.last_enriched_at);
+                return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+                    ${healthDot(recencyColor(d, [30, 90]))}
+                    <span style="flex:1;font-size:12px">${esc(c.name)}</span>
+                    <span style="font-size:10px;color:var(--muted)">${d < 900 ? d + 'd' : 'Never'}</span>
+                </div>`;
+            }).join('') : '<p style="font-size:12px;color:var(--muted)">All accounts are healthy</p>'}
+        </div>`;
+
+        // Card 4: Recent Requisitions
+        const recentReqs = [...reqList].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0, 5);
+        html += `<div class="card-v2" style="padding:16px">
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Recent Requisitions</h3>
+            ${recentReqs.map(r => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--blue)">REQ-${String(r.id).padStart(3, '0')}</span>
+                <span style="flex:1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.name || '—')}</span>
+                <span class="status-badge status-${r.status}" style="font-size:9px">${r.status}</span>
+            </div>`).join('')}
+        </div>`;
+
+        // Card 5: Unassigned Companies
+        const unassigned = compList.filter(c => !c.account_owner_id).slice(0, 5);
+        html += `<div class="card-v2" style="padding:16px">
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Unassigned Accounts</h3>
+            ${unassigned.length ? unassigned.map(c => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+                <span style="flex:1;font-size:12px">${esc(c.name)}</span>
+                <span style="font-size:10px;color:var(--muted)">${c.site_count || 0} sites</span>
+            </div>`).join('') : '<p style="font-size:12px;color:var(--green)">All accounts assigned</p>'}
+        </div>`;
+
+        // Card 6: Quick Actions
+        html += `<div class="card-v2" style="padding:16px">
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Quick Actions</h3>
+            <div style="display:flex;flex-direction:column;gap:6px">
+                <button class="btn btn-primary btn-sm" onclick="openNewReqModal()" style="text-align:left">+ New Requisition</button>
+                <button class="btn btn-ghost btn-sm" onclick="openNewCompanyModal()" style="text-align:left">+ New Company</button>
+                <button class="btn btn-ghost btn-sm" onclick="sidebarNav('vendors')" style="text-align:left">Browse Vendors</button>
+            </div>
+        </div>`;
+
+        html += '</div>';
+        el.innerHTML = html;
+    } catch (err) {
+        console.error('loadDashboard error:', err);
+        el.innerHTML = '<p class="empty">Failed to load dashboard data.</p>';
+    }
 }
 
 // ── Modals ──────────────────────────────────────────────────────────────
@@ -6888,13 +7134,14 @@ function vendorTier(c) {
 
 function setVendorTier(tier, btn) {
     _vendorTierFilter = tier;
-    document.querySelectorAll('#vendorTierPills .fp').forEach(b => b.classList.remove('on'));
-    btn.classList.add('on');
+    document.querySelectorAll('#vendorTierPills .chip').forEach(b => b.classList.remove('on'));
+    if (btn) btn.classList.add('on');
     filterVendorList();
 }
 
+let _selectedVendorId = null;
+
 function filterVendorList() {
-    const hideBL = (document.getElementById('vendorHideBL') || {}).checked;
     const q = (document.getElementById('vendorSearch') || {}).value || '';
     let filtered = [..._vendorListData];
     if (q) {
@@ -6904,73 +7151,191 @@ function filterVendorList() {
     if (_vendorTierFilter !== 'all') {
         filtered = filtered.filter(c => vendorTier(c) === _vendorTierFilter);
     }
-    if (hideBL) filtered = filtered.filter(c => !c.is_blacklisted);
 
-    // Sort by column or default (name A-Z)
-    if (_vendorSortCol) {
-        filtered.sort((a, b) => {
-            let va, vb;
-            switch (_vendorSortCol) {
-                case 'name': va = (a.display_name || ''); vb = (b.display_name || ''); break;
-                case 'tier': va = (a.vendor_score ?? -1); vb = (b.vendor_score ?? -1); break;
-                case 'score': va = (a.vendor_score ?? -1); vb = (b.vendor_score ?? -1); break;
-                case 'rating': va = (a.avg_rating ?? -1); vb = (b.avg_rating ?? -1); break;
-                case 'sightings': va = (a.sighting_count || 0); vb = (b.sighting_count || 0); break;
-                case 'email': va = ((a.emails || [])[0] || ''); vb = ((b.emails || [])[0] || ''); break;
-                case 'last': va = (a.last_sighting_at || ''); vb = (b.last_sighting_at || ''); break;
-                default: va = 0; vb = 0;
-            }
-            if (typeof va === 'string') return _vendorSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
-            return _vendorSortDir === 'asc' ? va - vb : vb - va;
-        });
-    } else {
-        filtered.sort((a, b) => (a.display_name || '').localeCompare(b.display_name || ''));
-    }
+    // Sort by score descending by default (matches v0 design)
+    filtered.sort((a, b) => (b.vendor_score ?? -1) - (a.vendor_score ?? -1));
 
     const countEl = document.getElementById('vendorFilterCount');
-    if (countEl) countEl.textContent = filtered.length < _vendorListData.length ? `${filtered.length} of ${_vendorListData.length}` : '';
+    if (countEl) countEl.textContent = filtered.length + ' vendors';
 
     const el = document.getElementById('vendorList');
     if (!filtered.length) {
-        el.innerHTML = `<p class="empty">${_vendorListData.length ? 'No vendors match filters' : 'No vendors yet \u2014 they\'ll appear here after your first search'}</p>`;
+        el.innerHTML = `<p class="empty">${_vendorListData.length ? 'No vendors match filters' : 'No vendors yet — they\'ll appear after your first search'}</p>`;
         return;
     }
 
-    const thC = (col) => _vendorSortCol === col ? ' class="sorted"' : '';
-    const sa = (col) => `<span class="sort-arrow">${_vendorSortArrow(col)}</span>`;
-    const tierBadge = {proven:'b-proven',developing:'b-developing',caution:'b-caution',new:'b-new'};
-    const tierLabel = {proven:'Proven',developing:'Developing',caution:'Caution',new:'New'};
-
-    let html = `<div style="padding:0 16px"><table class="tbl"><thead><tr>
-        <th onclick="sortVendorList('name')"${thC('name')}>Vendor ${sa('name')}</th>
-        <th onclick="sortVendorList('tier')"${thC('tier')}>Tier ${sa('tier')}</th>
-        <th onclick="sortVendorList('score')"${thC('score')}>Score ${sa('score')}</th>
-        <th onclick="sortVendorList('rating')"${thC('rating')}>Rating ${sa('rating')}</th>
-        <th onclick="sortVendorList('sightings')"${thC('sightings')}>Sightings ${sa('sightings')}</th>
-        <th onclick="sortVendorList('email')"${thC('email')}>Email ${sa('email')}</th>
-        <th onclick="sortVendorList('last')"${thC('last')}>Last Active ${sa('last')}</th>
-    </tr></thead><tbody>`;
-
+    let html = '';
     for (const c of filtered) {
-        const tier = vendorTier(c);
-        const bc = c.is_blacklisted ? 'b-bl' : (tierBadge[tier] || 'b-new');
-        const tl = c.is_blacklisted ? 'Blacklisted' : (tierLabel[tier] || 'New');
-        const primaryEmail = (c.emails || [])[0] || '';
         const score = c.vendor_score != null ? Math.round(c.vendor_score) : 0;
-        const scoreText = c.vendor_score != null ? score : '\u2014';
-        html += `<tr onclick="openVendorPopup(${c.id})">
-            <td style="display:flex;align-items:center;gap:8px">${engRing(score, 32)}<b class="cust-link">${esc(c.display_name)}</b></td>
-            <td><span class="badge ${bc}">${tl}</span></td>
-            <td class="mono">${scoreText}</td>
-            <td>${stars(c.avg_rating, c.review_count)}</td>
-            <td class="mono">${c.sighting_count || 0}</td>
-            <td style="font-size:11px;color:var(--text2)">${primaryEmail ? esc(primaryEmail) : '\u2014'}</td>
-            <td style="font-size:11px;color:var(--muted)">${c.last_sighting_at ? fmtDate(c.last_sighting_at) : '\u2014'}</td>
-        </tr>`;
-    }
+        const isSelected = _selectedVendorId === c.id;
+        const responseRate = c.response_rate != null ? Math.round(c.response_rate) + '%' : '—';
+        const lastAgo = c.last_sighting_at ? getRelativeTime(c.last_sighting_at) : '—';
 
-    html += '</tbody></table></div>';
+        html += `<div class="list-item${isSelected ? ' selected' : ''}" onclick="selectVendor(${c.id})" data-vendor-id="${c.id}">
+            ${engRing(score, 32)}
+            <div class="list-item-body">
+                <div class="list-item-title">${esc(c.display_name)}${c.is_blacklisted ? ' <span style="color:var(--red);font-size:10px">BL</span>' : ''}</div>
+                <div class="list-item-sub" style="display:flex;gap:10px">
+                    <span>${responseRate} response</span>
+                    <span>${c.sighting_count || 0} sightings</span>
+                </div>
+            </div>
+            <span style="font-size:10px;color:var(--muted)">${lastAgo}</span>
+        </div>`;
+    }
     el.innerHTML = html;
+
+    // Auto-select first if nothing selected
+    if (!_selectedVendorId && filtered.length) {
+        selectVendor(filtered[0].id);
+    } else if (_selectedVendorId) {
+        renderVendorDetail(_selectedVendorId);
+    }
+}
+
+function selectVendor(vendorId) {
+    _selectedVendorId = vendorId;
+    document.querySelectorAll('#vendorList .list-item').forEach(el => {
+        el.classList.toggle('selected', Number(el.dataset.vendorId) === vendorId);
+    });
+    renderVendorDetail(vendorId);
+}
+
+async function renderVendorDetail(vendorId) {
+    const el = document.getElementById('vendorDetail');
+    if (!el) return;
+    const v = _vendorListData.find(x => x.id === vendorId);
+    if (!v) { el.innerHTML = '<div class="split-panel-empty">Select a vendor</div>'; return; }
+
+    const score = v.vendor_score != null ? Math.round(v.vendor_score) : 0;
+
+    // Header
+    let html = `<div style="padding:16px">
+        <div style="margin-bottom:12px">
+            <h2 style="margin:0;font-size:18px">${esc(v.display_name)}</h2>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px">
+                Last interaction: ${v.last_sighting_at ? getRelativeTime(v.last_sighting_at) : 'Never'}
+            </div>
+        </div>`;
+
+    // Engagement Score Card with Factor Bars
+    html += `<div class="card-v2" style="margin-bottom:16px;padding:16px">
+        <div style="display:flex;gap:20px;align-items:center">
+            <div style="position:relative;display:flex;align-items:center;justify-content:center">
+                ${engRing(score, 72)}
+                <span style="position:absolute;font-size:18px;font-weight:700;color:var(--text)">${score}</span>
+            </div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:6px">
+                ${factorBar('Response Velocity', v.response_velocity ?? score)}
+                ${factorBar('Ghost Rate', v.ghost_rate ?? Math.max(0, 100 - (v.ghost_rate_pct ?? 50)))}
+                ${factorBar('Pricing', v.pricing_competitiveness ?? score)}
+                ${factorBar('Volume Consistency', v.volume_consistency ?? score)}
+                ${factorBar('Delivery Reliability', v.delivery_reliability ?? score)}
+            </div>
+        </div>
+    </div>`;
+
+    // Detail tabs
+    html += `<div class="detail-tabs" id="vendorDetailTabs">
+        <button class="detail-tab active" onclick="switchVendorTab('contacts',${v.id},this)">Contacts</button>
+        <button class="detail-tab" onclick="switchVendorTab('comms',${v.id},this)">Communication</button>
+        <button class="detail-tab" onclick="switchVendorTab('parts',${v.id},this)">Part History</button>
+    </div>
+    <div id="vendorTabContent-${v.id}"><p class="empty">Loading...</p></div>
+
+    <div style="margin-top:12px;display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="openVendorPopup(${v.id})">Full Details</button>
+        <button class="btn-enrich" onclick="unifiedEnrichVendor(${v.id})">Enrich</button>
+    </div>
+    </div>`;
+
+    el.innerHTML = html;
+    _loadVendorContactsTab(v);
+}
+
+function switchVendorTab(tab, vendorId, btn) {
+    document.querySelectorAll('#vendorDetailTabs .detail-tab').forEach(t => t.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    const v = _vendorListData.find(x => x.id === vendorId);
+    if (!v) return;
+    if (tab === 'contacts') _loadVendorContactsTab(v);
+    else if (tab === 'comms') _loadVendorCommsTab(v);
+    else if (tab === 'parts') _loadVendorPartsTab(v);
+}
+
+async function _loadVendorContactsTab(v) {
+    const el = document.getElementById('vendorTabContent-' + v.id);
+    if (!el) return;
+    el.innerHTML = '<p class="empty" style="padding:8px">Loading contacts...</p>';
+    try {
+        const contacts = await apiFetch('/api/vendors/' + v.id + '/contacts');
+        if (!contacts.length) {
+            el.innerHTML = '<p class="empty">No contacts — <a href="#" onclick="event.preventDefault();openAddVendorContact(' + v.id + ')">add one</a></p>';
+            return;
+        }
+        el.innerHTML = contacts.map(c => {
+            const isPrimary = c.is_primary || c.contact_type === 'primary';
+            return `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--border)">
+                <div style="min-width:0">
+                    <div style="display:flex;align-items:center;gap:6px">
+                        <span style="font-size:12px;font-weight:600;color:var(--text)">${esc(c.full_name || c.label || '—')}</span>
+                        ${isPrimary ? '<span style="width:6px;height:6px;border-radius:50%;background:var(--blue)"></span>' : ''}
+                    </div>
+                    <div style="font-size:11px;color:var(--muted)">${esc(c.title || '')}</div>
+                </div>
+                <div style="text-align:right;font-size:11px;color:var(--muted)">
+                    ${c.email ? '<div>' + esc(c.email) + '</div>' : ''}
+                    ${c.phone ? '<div>' + esc(c.phone) + '</div>' : ''}
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) { el.innerHTML = '<p class="empty">Error loading contacts</p>'; }
+}
+
+async function _loadVendorCommsTab(v) {
+    const el = document.getElementById('vendorTabContent-' + v.id);
+    if (!el) return;
+    el.innerHTML = '<p class="empty" style="padding:8px">Loading communications...</p>';
+    try {
+        const emails = await apiFetch('/api/vendors/' + v.id + '/emails?limit=20');
+        if (!emails.length) {
+            el.innerHTML = '<p class="empty">No communications recorded</p>';
+            return;
+        }
+        el.innerHTML = emails.map(e => `<div style="display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+            ${activityIcon(e.direction === 'inbound' ? 'email_received' : 'email_sent')}
+            <div style="flex:1;min-width:0">
+                <div style="font-size:12px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(e.subject || '(no subject)')}</div>
+                <div style="font-size:10px;color:var(--muted)">${getRelativeTime(e.received_at || e.sent_at)}</div>
+            </div>
+        </div>`).join('');
+    } catch (err) { el.innerHTML = '<p class="empty">Error loading communications</p>'; }
+}
+
+async function _loadVendorPartsTab(v) {
+    const el = document.getElementById('vendorTabContent-' + v.id);
+    if (!el) return;
+    el.innerHTML = '<p class="empty" style="padding:8px">Loading part history...</p>';
+    try {
+        const sightings = await apiFetch('/api/vendors/' + v.id + '/sightings?limit=20');
+        if (!sightings.length) {
+            el.innerHTML = '<p class="empty">No part history</p>';
+            return;
+        }
+        let html = `<table class="v2-table"><thead><tr>
+            <th>Part #</th><th>Last Seen</th><th style="text-align:right">Price</th><th style="text-align:right">Qty</th>
+        </tr></thead><tbody>`;
+        for (const s of sightings) {
+            html += `<tr>
+                <td class="mono">${esc(s.mpn || s.part_number || '—')}</td>
+                <td style="color:var(--muted)">${s.seen_at ? fmtDate(s.seen_at) : '—'}</td>
+                <td style="text-align:right">${s.price != null ? '$' + Number(s.price).toFixed(2) : '—'}</td>
+                <td style="text-align:right;color:var(--muted)">${s.quantity != null ? Number(s.quantity).toLocaleString() : '—'}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    } catch (err) { el.innerHTML = '<p class="empty">Error loading parts</p>'; }
 }
 
 // ── Materials Tab ──────────────────────────────────────────────────────
@@ -8571,6 +8936,7 @@ Object.assign(window, {
     rfqIncludeRepeats, rfqManualEmail, rfqRemoveVendor, rfqSelectEmail,
     rfqToggleVendor, saveDeadline, sendEmailReply, sendFollowUp,
     setToolbarQuickFilter, showView, sidebarNav, sortMatList, sortReqList,
+    selectVendor, renderVendorDetail, switchVendorTab,
     sortVendorList, threadSearchFilter, toggleAllDrillRows,
     toggleArchiveGroup, toggleConfirmedQuotes, toggleDrillDown,
     toggleGroup, toggleOfferHistory, togglePartsSightings,
@@ -8610,6 +8976,11 @@ Object.assign(window, {
     _applyNormalized, _showAiModal, _canAI,
     // v2 visual helpers
     engRing, healthDot, statCard, daysSince, recencyColor,
+    ownerAvatar, factorBar, relationshipHealthBar, contactStatusBar,
+    statusPill, activityIcon, getRelativeTime, filterChip,
+    CONTACT_STATUS, CONTACT_STATUS_ORDER,
     // Contact Intelligence view
     debouncedLoadContacts, setContactStatusFilter, loadContacts, renderContacts, showContacts,
+    // Dashboard
+    setDashPeriod, showDashboard, loadDashboard,
 });
