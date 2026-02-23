@@ -246,7 +246,7 @@ class TestCompanies:
         assert resp.status_code == 200
         assert resp.json() == []
 
-    @patch("app.routers.crm.get_credential_cached", return_value=None)
+    @patch("app.routers.crm.companies.get_credential_cached", return_value=None)
     @patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock)
     def test_create_company(self, mock_normalize, mock_cred, client, db_session):
         mock_normalize.return_value = ("New Corp", "newcorp.com")
@@ -707,7 +707,7 @@ class TestCompaniesAdditional:
         resp = client.put("/api/companies/99999", json={"notes": "nope"})
         assert resp.status_code == 404
 
-    @patch("app.routers.crm.get_credential_cached", return_value=None)
+    @patch("app.routers.crm.companies.get_credential_cached", return_value=None)
     @patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock)
     def test_create_company_with_website_domain(self, mock_normalize, mock_cred, client, db_session):
         """Domain is extracted from website when no explicit domain given."""
@@ -893,12 +893,12 @@ class TestSitesAdditional:
 
 
 class TestEnrichment:
-    @patch("app.routers.crm.get_credential_cached", return_value=None)
+    @patch("app.routers.crm.enrichment.get_credential_cached", return_value=None)
     def test_enrich_company_no_provider(self, mock_cred, client, db_session, test_company):
         resp = client.post(f"/api/enrich/company/{test_company.id}")
         assert resp.status_code == 503
 
-    @patch("app.routers.crm.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
     def test_enrich_company_success(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company):
@@ -911,12 +911,12 @@ class TestEnrichment:
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
-    @patch("app.routers.crm.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
     def test_enrich_company_not_found(self, mock_cred, client):
         resp = client.post("/api/enrich/company/99999")
         assert resp.status_code == 404
 
-    @patch("app.routers.crm.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
     def test_enrich_company_no_domain(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company):
@@ -928,7 +928,7 @@ class TestEnrichment:
         resp = client.post(f"/api/enrich/company/{test_company.id}")
         assert resp.status_code == 400
 
-    @patch("app.routers.crm.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
     def test_enrich_company_with_override_domain(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company):
@@ -943,12 +943,12 @@ class TestEnrichment:
         assert resp.status_code == 200
         mock_enrich.assert_called_once_with("override-domain.com", test_company.name)
 
-    @patch("app.routers.crm.get_credential_cached", return_value=None)
+    @patch("app.routers.crm.enrichment.get_credential_cached", return_value=None)
     def test_enrich_vendor_no_provider(self, mock_cred, client, db_session, test_vendor_card):
         resp = client.post(f"/api/enrich/vendor/{test_vendor_card.id}")
         assert resp.status_code == 503
 
-    @patch("app.routers.crm.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_vendor")
     def test_enrich_vendor_success(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_vendor_card):
@@ -961,12 +961,12 @@ class TestEnrichment:
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
-    @patch("app.routers.crm.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
     def test_enrich_vendor_not_found(self, mock_cred, client):
         resp = client.post("/api/enrich/vendor/99999")
         assert resp.status_code == 404
 
-    @patch("app.routers.crm.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_vendor")
     def test_enrich_vendor_no_domain(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_vendor_card):
@@ -977,7 +977,7 @@ class TestEnrichment:
         resp = client.post(f"/api/enrich/vendor/{test_vendor_card.id}")
         assert resp.status_code == 400
 
-    @patch("app.routers.crm.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_vendor")
     def test_enrich_vendor_override_domain(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_vendor_card):
@@ -990,17 +990,17 @@ class TestEnrichment:
         )
         assert resp.status_code == 200
 
-    @patch("app.routers.crm.get_credential_cached", return_value=None)
+    @patch("app.routers.crm.enrichment.get_credential_cached", return_value=None)
     def test_suggested_contacts_no_provider(self, mock_cred, client):
         resp = client.get("/api/suggested-contacts", params={"domain": "acme.com"})
         assert resp.status_code == 503
 
-    @patch("app.routers.crm.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
     def test_suggested_contacts_no_domain(self, mock_cred, client):
         resp = client.get("/api/suggested-contacts")
         assert resp.status_code == 400
 
-    @patch("app.routers.crm.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
     @patch("app.enrichment_service.find_suggested_contacts", new_callable=AsyncMock)
     def test_suggested_contacts_success(self, mock_contacts, mock_cred, client):
         mock_contacts.return_value = [
@@ -1651,10 +1651,10 @@ class TestQuotesAdditional:
 
 @pytest.fixture(autouse=False)
 def naive_crm_datetime(monkeypatch):
-    """Monkeypatch datetime in crm module to return naive UTC datetimes.
+    """Monkeypatch datetime in crm sub-modules to return naive UTC datetimes.
     SQLite strips timezone info, so comparisons with datetime.now(timezone.utc) fail.
     This fixture makes datetime.now() return naive utcnow() instead."""
-    import app.routers.crm as crm_module
+    from app.routers.crm import buy_plans, offers, quotes
 
     _real_datetime = datetime
 
@@ -1663,7 +1663,8 @@ def naive_crm_datetime(monkeypatch):
         def now(cls, tz=None):
             return _real_datetime.utcnow()
 
-    monkeypatch.setattr(crm_module, "datetime", _NaiveDatetime)
+    for mod in (buy_plans, offers, quotes):
+        monkeypatch.setattr(mod, "datetime", _NaiveDatetime)
 
 
 class TestBuyPlansAdditional:
@@ -2291,6 +2292,7 @@ class TestCloneRequisition:
         data = resp.json()
         assert "(clone)" in data["name"]
         assert data["id"] != test_requisition.id
+        assert data["ok"] is True
 
     def test_clone_requisition_not_found(self, client):
         resp = client.post("/api/requisitions/99999/clone")
@@ -2789,7 +2791,7 @@ class TestReqStatusTransitions:
         assert data["status_changed"] is True
         assert data["req_status"] == "quoting"
 
-    @patch("app.routers.crm.get_credential_cached", return_value=None)
+    @patch("app.routers.crm.offers.get_credential_cached", return_value=None)
     def test_create_offer_with_vendor_website(self, mock_cred, client, db_session, test_requisition, monkeypatch):
         """Creating offer with vendor_website extracts domain for new VendorCard."""
         monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)
@@ -2808,7 +2810,7 @@ class TestReqStatusTransitions:
         )
         assert resp.status_code == 200
 
-    @patch("app.routers.crm.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch("app.routers.crm.offers.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
     def test_create_offer_triggers_vendor_enrichment(self, mock_cred, client, db_session, test_requisition, monkeypatch):
         """Creating offer with new vendor + domain triggers background enrichment."""
         monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)

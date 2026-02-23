@@ -26,7 +26,7 @@ def _make_client(db_session, user):
         return user
 
     def _override_buyer():
-        if user.role in ("sales", "dev_assistant"):
+        if user.role == "sales":
             from fastapi import HTTPException
             raise HTTPException(403, "Buyer role required")
         return user
@@ -38,7 +38,7 @@ def _make_client(db_session, user):
         return user
 
     def _override_settings():
-        if user.role not in ("admin", "dev_assistant"):
+        if user.role != "admin":
             from fastapi import HTTPException
             raise HTTPException(403, "Settings access required")
         return user
@@ -65,26 +65,6 @@ def buyer_client(db_session, test_user):
 
 
 @pytest.fixture()
-def dev_assistant_user(db_session):
-    user = User(
-        email="devbot@trioscs.com",
-        name="Dev Bot",
-        role="dev_assistant",
-        azure_id="test-azure-dev",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(user)
-    db_session.commit()
-    db_session.refresh(user)
-    return user
-
-
-@pytest.fixture()
-def dev_client(db_session, dev_assistant_user):
-    yield from _make_client(db_session, dev_assistant_user)
-
-
-@pytest.fixture()
 def seed_config(db_session):
     """Seed system_config with test data."""
     configs = [
@@ -103,11 +83,6 @@ def test_require_admin_rejects_buyer(buyer_client):
     assert resp.status_code == 403
 
 
-def test_require_admin_rejects_dev_assistant(dev_client):
-    resp = dev_client.get("/api/admin/users")
-    assert resp.status_code == 403
-
-
 def test_require_admin_allows_admin(admin_client, admin_user):
     resp = admin_client.get("/api/admin/users")
     assert resp.status_code == 200
@@ -116,22 +91,65 @@ def test_require_admin_allows_admin(admin_client, admin_user):
     assert any(u["email"] == admin_user.email for u in data)
 
 
-def test_require_settings_allows_dev_assistant(dev_client, seed_config):
-    # /api/admin/health should work for dev_assistant
-    resp = dev_client.get("/api/admin/health")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "version" in data
+def test_buyer_cannot_access_credentials(buyer_client, db_session):
+    """Buyer role should be denied credential endpoints."""
+    from app.models import ApiSource
 
-    # /api/admin/config GET should also work
-    resp = dev_client.get("/api/admin/config")
-    assert resp.status_code == 200
+    src = ApiSource(
+        name="test_connector",
+        display_name="Test Connector",
+        category="api",
+        source_type="aggregator",
+        status="pending",
+        env_vars=["TEST_API_KEY"],
+        credentials={},
+    )
+    db_session.add(src)
+    db_session.commit()
+    db_session.refresh(src)
 
-
-def test_dev_assistant_cannot_write_config(dev_client, seed_config):
-    resp = dev_client.put("/api/admin/config/email_mining_enabled",
-                          json={"value": "true"})
+    resp = buyer_client.get(f"/api/admin/sources/{src.id}/credentials")
     assert resp.status_code == 403
+
+
+def test_sales_cannot_access_credentials(db_session, sales_user):
+    """Sales role should be denied credential endpoints."""
+    from app.models import ApiSource
+
+    src = ApiSource(
+        name="test_conn_sales",
+        display_name="Test Connector Sales",
+        category="api",
+        source_type="aggregator",
+        status="pending",
+        env_vars=["TEST_API_KEY"],
+        credentials={},
+    )
+    db_session.add(src)
+    db_session.commit()
+    db_session.refresh(src)
+
+    from fastapi import HTTPException
+
+    from app.database import get_db
+    from app.dependencies import require_settings_access, require_user
+    from app.main import app
+
+    def _db():
+        yield db_session
+
+    def _deny_settings():
+        raise HTTPException(403, "Settings access required")
+
+    app.dependency_overrides[get_db] = _db
+    app.dependency_overrides[require_user] = lambda: sales_user
+    app.dependency_overrides[require_settings_access] = _deny_settings
+
+    with TestClient(app) as c:
+        resp = c.get(f"/api/admin/sources/{src.id}/credentials")
+        assert resp.status_code == 403
+
+    app.dependency_overrides.clear()
 
 
 # ── User Management Tests ────────────────────────────────────────────

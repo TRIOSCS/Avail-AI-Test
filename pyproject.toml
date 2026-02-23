@@ -1,0 +1,3 @@
+[tool.bandit]
+exclude_dirs = ["tests", "alembic"]
+skips = ["B101"]  # allow assert in non-test code (used in type narrowing)

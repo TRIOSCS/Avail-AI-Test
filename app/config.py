@@ -68,12 +68,12 @@ class Settings:
 
     # AI parsing
     anthropic_api_key: str = os.getenv("ANTHROPIC_API_KEY", "")
-    anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+    anthropic_model: str = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 
     # DigitalOcean Gradient AI (serverless inference)
     do_gradient_api_key: str = os.getenv("DO_GRADIENT_API_KEY", "")
     do_gradient_model: str = os.getenv(
-        "DO_GRADIENT_MODEL", "anthropic-claude-4.5-sonnet"
+        "DO_GRADIENT_MODEL", "anthropic-claude-sonnet-4-6"
     )
 
     # Agent service-to-service auth

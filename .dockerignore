@@ -1,0 +1,37 @@
+# Git
+.git
+.gitignore
+
+# CI/CD
+.github
+
+# Tests
+tests/
+.pytest_cache/
+.coverage
+coverage.xml
+test-results.xml
+
+# Dev tools
+.pre-commit-config.yaml
+.claude/
+*.md
+ruff.toml
+pyproject.toml
+
+# Docker
+docker-compose.yml
+Dockerfile
+.dockerignore
+
+# Environment
+.env
+.env.example
+
+# Misc
+__pycache__/
+*.pyc
+*.pyo
+node_modules/
+scripts/
+*.bak

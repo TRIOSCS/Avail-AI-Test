@@ -173,6 +173,27 @@ class ProactiveThrottle(Base):
     )
 
 
+class ChangeLog(Base):
+    """Field-level change log for audit trail on offers, requirements, requisitions."""
+
+    __tablename__ = "change_log"
+    id = Column(Integer, primary_key=True)
+    entity_type = Column(String(50), nullable=False)  # offer, requirement, requisition
+    entity_id = Column(Integer, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    field_name = Column(String(100), nullable=False)
+    old_value = Column(Text)
+    new_value = Column(Text)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("ix_changelog_entity", "entity_type", "entity_id"),
+        Index("ix_changelog_user", "user_id"),
+    )
+
+
 class ActivityLog(Base):
     """Activity log — system events (email, phone) and manual entries (call, note)."""
 

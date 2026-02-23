@@ -33,7 +33,8 @@ class MouserConnector(BaseConnector):
         }
 
         r = await http.post(
-            f"{self.SEARCH_URL}?apiKey={self.api_key}",
+            self.SEARCH_URL,
+            params={"apiKey": self.api_key},
             json=payload,
             headers={"Content-Type": "application/json"},
             timeout=self.timeout,

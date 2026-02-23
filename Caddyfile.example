@@ -1,4 +1,55 @@
-# Change this to your actual domain
+# Change "app.yourdomain.com" to your actual domain
+# Caddy auto-generates and renews SSL certificates
 app.yourdomain.com {
+    encode gzip
+
+    header {
+        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Permissions-Policy "camera=(), microphone=(), geolocation=()"
+        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'"
+    }
+
+    @blocked path /metrics
+    handle @blocked {
+        respond 403
+    }
+
+    @static path /static/*
+    handle @static {
+        header Cache-Control "public, max-age=31536000, immutable"
+        root * /srv
+        file_server
+    }
+
+    # Safe read-only GET endpoints — 30s browser cache reduces redundant
+    # API calls when switching tabs rapidly
+    @safe_api {
+        method GET
+        path /api/companies /api/users/list /api/vendors
+    }
+    handle @safe_api {
+        header Cache-Control "private, max-age=30"
+        reverse_proxy app:8000
+    }
+
+    @api path /api/* /auth/*
+    handle @api {
+        header Cache-Control "no-cache, no-store, must-revalidate"
+        reverse_proxy app:8000
+    }
+
+    # HTML pages — no cache to ensure fresh JS/CSS references after deploy
+    @html {
+        path /
+        header Accept *text/html*
+    }
+    handle @html {
+        header Cache-Control "no-cache, no-store, must-revalidate"
+        reverse_proxy app:8000
+    }
+
     reverse_proxy app:8000
 }

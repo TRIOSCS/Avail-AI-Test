@@ -4,7 +4,7 @@ Hardening: H9 (Structured Outputs), H10 (Prompt Caching).
 
 Two model tiers:
   - FAST: claude-haiku-4-5 for high-volume parsing (responses, column mapping)
-  - SMART: claude-sonnet-4-5 for intelligence (enrichment, intel, RFQ drafts)
+  - SMART: claude-sonnet-4-6 for intelligence (enrichment, intel, RFQ drafts)
 
 Usage:
     from app.utils.claude_client import claude_structured, claude_text
@@ -31,7 +31,7 @@ API_VERSION = "2023-06-01"
 # Model tiers
 MODELS = {
     "fast": "claude-haiku-4-5-20251001",
-    "smart": "claude-sonnet-4-5-20250929",
+    "smart": "claude-sonnet-4-6",
 }
 
 

@@ -16,7 +16,7 @@ class User(Base):
     name = Column(String(255))
     role = Column(
         String(20), default="buyer"
-    )  # buyer | sales | trader | manager | admin | dev_assistant
+    )  # buyer | sales | trader | manager | admin
     is_active = Column(Boolean, default=True)
     azure_id = Column(String(255), unique=True)
     refresh_token = Column(EncryptedText)
@@ -32,5 +32,5 @@ class User(Base):
     last_deep_email_scan = Column(DateTime)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    requisitions = relationship("Requisition", back_populates="creator")
+    requisitions = relationship("Requisition", back_populates="creator", foreign_keys="[Requisition.created_by]")
     contacts = relationship("Contact", back_populates="user")

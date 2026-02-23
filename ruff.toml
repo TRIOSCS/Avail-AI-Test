@@ -12,3 +12,7 @@ ignore = ["E501"]  # line length handled separately
 "app/main.py" = ["E402"]
 "app/services/credential_service.py" = ["E402"]
 "app/services/routing_service.py" = ["E402"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

@@ -58,12 +58,9 @@ def normalize_phone_e164(raw: str | None) -> str | None:
     if len(digits) >= 11:
         return f"+{digits}"
 
-    # 7-9 digits — assume US domestic (missing area code or partial)
+    # 7-10 digits — assume US domestic (missing area code or partial)
     # Return as-is with +1 prefix for consistency
-    if len(digits) <= 10:
-        return f"+1{digits}"
-
-    return f"+{digits}"
+    return f"+1{digits}"
 
 
 # ── Contact name cleanup ────────────────────────────────────────────

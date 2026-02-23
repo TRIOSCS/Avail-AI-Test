@@ -58,6 +58,14 @@ class Offer(Base):
     status = Column(String(20), default="active")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    # Audit trail
+    updated_at = Column(DateTime)
+    updated_by_id = Column(Integer, ForeignKey("users.id"))
+
+    # Approval workflow
+    approved_by_id = Column(Integer, ForeignKey("users.id"))
+    approved_at = Column(DateTime)
+
     # v1.3.0: Attribution fields — 14-day TTL with reconfirmation
     expires_at = Column(DateTime)
     reconfirmed_at = Column(DateTime)
@@ -69,6 +77,8 @@ class Offer(Base):
     requisition = relationship("Requisition", back_populates="offers")
     requirement = relationship("Requirement", back_populates="offers")
     entered_by = relationship("User", foreign_keys=[entered_by_id])
+    updated_by = relationship("User", foreign_keys=[updated_by_id])
+    approved_by = relationship("User", foreign_keys=[approved_by_id])
     attachments = relationship(
         "OfferAttachment", back_populates="offer", cascade="all, delete-orphan"
     )

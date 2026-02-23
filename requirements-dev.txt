@@ -21,5 +21,12 @@ mypy>=1.11.0
 sqlalchemy[mypy]>=2.0.46
 types-redis>=4.6.0
 
+# Pre-commit
+pre-commit>=4.0.0
+
+# Security scanning
+bandit>=1.8.0
+pip-audit>=2.7.0
+
 # Debugging
 ipdb>=0.13.0

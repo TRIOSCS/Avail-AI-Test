@@ -567,6 +567,7 @@ _NOTIFICATION_TYPES = (
     "vendor_reply_review",
     "competitive_quote",
     "proactive_match",
+    "offer_pending_review",
 )
 
 

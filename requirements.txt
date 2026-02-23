@@ -23,6 +23,8 @@ thefuzz[speedup]>=0.22.0
 weasyprint>=60.0
 # Scheduling
 apscheduler>=3.10.4,<4.0
+# Migrations
+alembic>=1.13.0
 # Caching
 redis[hiredis]>=5.2.0
 # CSRF protection

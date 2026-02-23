@@ -279,6 +279,7 @@ class SiteContactUpdate(BaseModel):
 class OfferCreate(BaseModel):
     mpn: str
     vendor_name: str
+    vendor_card_id: int | None = None
     requirement_id: int | None = None
     manufacturer: str | None = None
     qty_available: int | None = Field(default=None, ge=0)

@@ -10,7 +10,7 @@
             window.__userEmail = cfg.userEmail || '';
             window.__isAdmin = !!cfg.isAdmin;
             window.__isManager = !!cfg.isManager;
-            window.__isDevAssistant = !!cfg.isDevAssistant;
+            if (cfg.userRole) window.userRole = cfg.userRole;
         } catch(e) { console.warn('Failed to parse app-config', e); }
     }
 })();
@@ -250,6 +250,46 @@ function stars(avg, count) {
     return s;
 }
 
+// ── v2 Visual Helpers ───────────────────────────────────────────────────
+export function engRing(score, size = 44) {
+    const r = (size / 2) - 4;
+    const circ = 2 * Math.PI * r;
+    const offset = circ - (Math.max(0, Math.min(100, score)) / 100 * circ);
+    const tier = score >= 70 ? 'green' : score >= 40 ? 'amber' : 'red';
+    return `<svg class="eng-ring eng-ring-${tier}" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+        <circle class="eng-ring-bg" cx="${size/2}" cy="${size/2}" r="${r}"/>
+        <circle class="eng-ring-fg" cx="${size/2}" cy="${size/2}" r="${r}"
+            stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${offset.toFixed(1)}"
+            transform="rotate(-90 ${size/2} ${size/2})"/>
+        <text class="eng-ring-text" x="${size/2}" y="${size/2}">${Math.round(score)}</text>
+    </svg>`;
+}
+export function healthDot(color, title = '') {
+    return `<span class="health-dot health-dot-${color}" ${title ? `title="${title}"` : ''}></span>`;
+}
+export function statCard(label, value, opts = {}) {
+    const trend = opts.trend
+        ? `<span class="stat-card-trend ${opts.trendDir || ''}">${opts.trend}</span>`
+        : '';
+    return `<div class="stat-card">
+        <span class="stat-card-value">${opts.prefix || ''}${value}</span>
+        <span class="stat-card-label">${label}</span>
+        ${trend}
+    </div>`;
+}
+export function daysSince(dateStr) {
+    if (!dateStr) return 999;
+    const d = new Date(dateStr);
+    if (isNaN(d)) return 999;
+    return Math.floor((Date.now() - d.getTime()) / 86400000);
+}
+export function recencyColor(days, thresholds = [7, 21]) {
+    if (days > 900) return 'muted';
+    if (days <= thresholds[0]) return 'green';
+    if (days <= thresholds[1]) return 'amber';
+    return 'red';
+}
+
 // ── Name Autocomplete ───────────────────────────────────────────────────
 export function initNameAutocomplete(inputId, listId, hiddenId, opts = {}) {
     const input = document.getElementById(inputId);
@@ -391,7 +431,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         dz.addEventListener('drop', e => {
             e.preventDefault(); dz.classList.remove('drag');
             if (e.dataTransfer.files.length) {
-                document.getElementById('fileInput').files = e.dataTransfer.files;
+                const fi = document.getElementById('fileInput');
+                if (fi) fi.files = e.dataTransfer.files;
                 showFileReady('fileInput','uploadReady','uploadFileName');
             }
         });
@@ -450,50 +491,62 @@ window.addEventListener('beforeunload', () => clearInterval(_m365Timer));
 
 // ── Role-Based UI Gating ────────────────────────────────────────────────
 function applyRoleGating() {
-    // Elements with data-role="buyer" are visible for buyer, manager, and admin
-    const canBuy = ['buyer','trader','manager','admin'].includes(window.userRole) || window.__isAdmin;
+    const role = window.userRole;
+    const isAdmin = window.__isAdmin;
+
+    // Elements with data-role="buyer" visible for buyer/trader/manager/admin
+    const canBuy = ['buyer','trader','manager','admin'].includes(role) || isAdmin;
     document.querySelectorAll('[data-role="buyer"]').forEach(el => {
         el.style.display = canBuy ? '' : 'none';
     });
-    // Role badge hidden — keep element for JS role gating but don't display
+
+    // Role badge (hidden but used for gating)
     const roleBadge = document.getElementById('roleBadge');
     if (roleBadge) {
-        const roleLabels = {buyer:'Buyer', sales:'Sales', trader:'Trader', manager:'Manager', admin:'Admin', dev_assistant:'Dev'};
-        roleBadge.textContent = roleLabels[window.userRole] || window.userRole;
-        roleBadge.className = `role-badge role-${window.userRole}`;
+        const roleLabels = {buyer:'Buyer', sales:'Sales', trader:'Trader', manager:'Manager', admin:'Admin'};
+        roleBadge.textContent = roleLabels[role] || role;
+        roleBadge.className = `role-badge role-${role}`;
         roleBadge.style.display = 'none';
     }
-    // Show Buy Plans nav for all roles except dev_assistant
+
+    // ── Opportunity Management ──
     const bpNav = document.getElementById('navBuyPlans');
-    if (bpNav && window.userRole !== 'dev_assistant') bpNav.style.display = '';
-    // Proactive nav visible for sales + admin (old + sidebar)
+    if (bpNav) bpNav.style.display = '';
+
+    // Proactive: visible to all
     const pNav = document.getElementById('navProactive');
-    if (pNav && (['sales','trader'].includes(window.userRole) || window.__isAdmin)) {
+    if (pNav) {
         pNav.style.display = '';
-        refreshProactiveBadge();
+        if (['sales','trader'].includes(role) || isAdmin) refreshProactiveBadge();
     }
-    // Scorecards nav visible to all
-    const perfNav2 = document.getElementById('navScorecards');
-    if (perfNav2) perfNav2.style.display = '';
-    const pNav2 = document.getElementById('navProactive');
-    if (pNav2 && (['sales','trader'].includes(window.userRole) || window.__isAdmin)) pNav2.style.display = '';
-    // "My Accounts" pill: only visible for admin, manager, trader
+
+    // ── CRM Section — Role-based visibility ──
+    const navContacts = document.getElementById('navContacts');
+    const navVendors = document.getElementById('navVendors');
+    const navCustomers = document.getElementById('navCustomers');
+
+    // Sales: Customers (own) + Contacts only — no Vendors
+    // Buyers: Vendors + Contacts only — no Customers
+    // Traders/Admin/Manager: all visible
+    if (role === 'sales') {
+        if (navVendors) navVendors.style.display = 'none';
+    } else if (role === 'buyer') {
+        if (navCustomers) navCustomers.style.display = 'none';
+    }
+
+    // ── Dashboard ──
+    const perfNav = document.getElementById('navScorecards');
+    if (perfNav) perfNav.style.display = '';
+
+    // ── Settings: admin only ──
+    const navSettings = document.getElementById('navSettings');
+    if (navSettings) navSettings.style.display = isAdmin ? '' : 'none';
+
+    // "My Accounts" toggle: admin/manager/trader
     const myAccountsBtn = document.getElementById('myAccountsBtn');
     if (myAccountsBtn) {
-        const canSeeMyAccounts = window.__isAdmin || ['manager','trader','admin'].includes(window.userRole);
-        if (!canSeeMyAccounts) {
-            myAccountsBtn.style.display = 'none';
-            // Expand search bar into the freed space
-            const sw = document.querySelector('.topcontrols .search-wrap');
-            if (sw) { sw.style.maxWidth = '560px'; }
-        }
-    }
-    // Settings nav visible to admin and dev_assistant
-    const navSettings = document.getElementById('navSettings');
-    if (navSettings && (window.__isAdmin || window.__isDevAssistant)) navSettings.style.display = '';
-    // Dev assistants: hide Users/Scoring/Create User/Data Import tabs
-    if (window.__isDevAssistant && !window.__isAdmin) {
-        document.querySelectorAll('.settings-tab-users, .settings-tab-scoring').forEach(el => el.style.display = 'none');
+        const canSeeMyAccounts = isAdmin || ['manager','trader','admin'].includes(role);
+        if (!canSeeMyAccounts) myAccountsBtn.style.display = 'none';
     }
 }
 function isBuyer() { return ['buyer','trader','manager','admin'].includes(window.userRole) || window.__isAdmin; }
@@ -510,10 +563,10 @@ export async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-performance', 'view-settings'];
+const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-performance', 'view-settings', 'view-contacts', 'view-dashboard'];
 
 // Hash-based routing for browser back/forward
-const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-performance':'performance','view-settings':'settings'};
+const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-performance':'performance','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard'};
 const _hashToView = Object.fromEntries(Object.entries(_viewToHash).map(([k,v])=>[v,k]));
 let _navFromPopstate = false;
 
@@ -562,10 +615,12 @@ window.addEventListener('popstate', (e) => {
         'view-proactive': () => window.showProactiveOffers(),
         'view-performance': () => window.showPerformance(),
         'view-settings': () => window.showSettings(),
+        'view-contacts': () => showContacts(),
+        'view-dashboard': () => showDashboard(),
     };
     if (routes[viewId]) routes[viewId]();
     // Highlight correct sidebar button
-    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-performance':'navScorecards','view-settings':'navSettings'};
+    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-performance':'navScorecards','view-settings':'navSettings','view-contacts':'navContacts','view-dashboard':'navDashboard'};
     const navBtn = document.getElementById(sidebarMap[viewId]);
     if (navBtn) navHighlight(navBtn);
     _navFromPopstate = false;
@@ -645,6 +700,97 @@ function showMaterials() {
     showView('view-materials');
     currentReqId = null;
     loadMaterialList();
+}
+
+let _contactStatusFilter = 'all';
+const debouncedLoadContacts = debounce(() => loadContacts(), 300);
+
+function setContactStatusFilter(status, btn) {
+    _contactStatusFilter = status;
+    document.querySelectorAll('#contactStatusPills .fp').forEach(b => b.classList.remove('on'));
+    btn.classList.add('on');
+    loadContacts();
+}
+
+async function loadContacts() {
+    const list = document.getElementById('contactList');
+    if (!list) return;
+    const q = (document.getElementById('contactFilter')?.value || '').trim();
+
+    try {
+        let url = '/api/vendors?limit=500';
+        if (q) url += `&q=${encodeURIComponent(q)}`;
+        const resp = await apiFetch(url);
+        let vendors = resp.vendors || resp || [];
+        if (!Array.isArray(vendors)) vendors = [];
+
+        // Flatten: each vendor with emails becomes a "contact" row
+        let contacts = [];
+        for (const v of vendors) {
+            const emails = v.emails || [];
+            const phones = v.phones || [];
+            if (emails.length === 0 && phones.length === 0) continue;
+            contacts.push({
+                vendor_id: v.id,
+                display_name: v.display_name || 'Unknown',
+                emails,
+                phones,
+                engagement_score: v.engagement_score ?? v.vendor_score ?? 0,
+                sighting_count: v.sighting_count || 0,
+                is_blacklisted: v.is_blacklisted || false,
+                updated_at: v.updated_at || v.created_at || null,
+            });
+        }
+
+        // Client-side status filter based on engagement score
+        contacts = contacts.filter(c => {
+            if (_contactStatusFilter === 'all') return true;
+            const score = c.engagement_score || 0;
+            if (_contactStatusFilter === 'active') return score >= 50;
+            if (_contactStatusFilter === 'stale') return score > 0 && score < 50;
+            if (_contactStatusFilter === 'new') return score === 0;
+            return true;
+        });
+
+        const countEl = document.getElementById('contactFilterCount');
+        if (countEl) countEl.textContent = `${contacts.length} contacts`;
+
+        if (contacts.length === 0) {
+            list.innerHTML = '<p class="empty">No contacts found.</p>';
+            return;
+        }
+
+        list.innerHTML = contacts.map(c => {
+            const score = Math.min(c.engagement_score || 0, 100);
+            const color = score >= 70 ? 'green' : score >= 40 ? 'amber' : score > 0 ? 'red' : 'muted';
+            const emailStr = c.emails.slice(0, 2).map(e => esc(e)).join(', ');
+            const phoneStr = c.phones.slice(0, 1).map(p => esc(p)).join('');
+
+            return `<div class="card-v2 contact-card" onclick="openVendorPopup(${c.vendor_id})">
+                ${engRing(score, 40)}
+                <div class="contact-card-info">
+                    <h4>${healthDot(color)} ${esc(c.display_name)}</h4>
+                    <p>${emailStr}</p>
+                    <p>${phoneStr}${c.sighting_count ? ' · ' + c.sighting_count + ' sightings' : ''}</p>
+                </div>
+                <div class="contact-card-meta">
+                    <span class="text-xs-muted">${c.is_blacklisted ? '⛔ Blacklisted' : ''}</span>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (err) {
+        console.error('loadContacts error:', err);
+        list.innerHTML = '<p class="empty">Failed to load contacts.</p>';
+    }
+}
+
+function showContacts() {
+    showView('view-contacts');
+    loadContacts();
+}
+
+function showDashboard() {
+    showView('view-dashboard');
 }
 
 // ── Modals ──────────────────────────────────────────────────────────────
@@ -828,9 +974,21 @@ async function expandToSubTab(reqId, tabName) {
 function _renderDdTabPills(reqId) {
     const tabs = _ddSubTabs(_currentMainView);
     const active = _ddActiveTab[reqId] || _ddDefaultTab(_currentMainView);
-    return tabs.map(t =>
+    const pills = tabs.map(t =>
         `<button class="dd-tab${t === active ? ' on' : ''}" data-tab="${t}" onclick="event.stopPropagation();_switchDdTab(${reqId},'${t}')">${_ddTabLabel(t)}</button>`
     ).join('');
+    return pills + `<button class="dd-tab-refresh" onclick="event.stopPropagation();ddRefreshTab(${reqId})" title="Refresh">\u21bb</button>`;
+}
+
+async function ddRefreshTab(reqId) {
+    const tabName = _ddActiveTab[reqId] || _ddDefaultTab(_currentMainView);
+    // Clear cached data for this tab
+    if (_ddTabCache[reqId]) delete _ddTabCache[reqId][tabName];
+    if (tabName === 'parts' || tabName === 'details') delete _ddReqCache[reqId];
+    if (tabName === 'sightings') delete _ddSightingsCache[reqId];
+    const drow = document.getElementById('d-' + reqId);
+    const panel = drow?.querySelector('.dd-panel');
+    if (panel) await _loadDdSubTab(reqId, tabName, panel);
 }
 
 async function _switchDdTab(reqId, tabName) {
@@ -1230,10 +1388,13 @@ let _ddHistoryExpanded = {};  // "reqId-requirementId" → bool
 
 function _renderDdOffers(reqId, data, panel) {
     const groups = data.groups || data || [];
-    // Count total offers
-    let totalOffers = 0;
+    // Count total offers and pending
+    let totalOffers = 0, pendingCount = 0;
     if (Array.isArray(groups)) {
-        for (const g of groups) totalOffers += (g.offers || []).length;
+        for (const g of groups) {
+            totalOffers += (g.offers || []).length;
+            pendingCount += (g.offers || []).filter(o => o.status === 'pending_review').length;
+        }
     }
     if (!totalOffers) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet</span>'; return; }
     if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
@@ -1241,7 +1402,7 @@ function _renderDdOffers(reqId, data, panel) {
 
     // Summary bar
     let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span style="font-size:11px"><b>${totalOffers}</b> offer${totalOffers !== 1 ? 's' : ''}${sel.size > 0 ? ` &middot; <b>${sel.size}</b> selected` : ''}</span>
+        <span style="font-size:11px"><b>${totalOffers}</b> offer${totalOffers !== 1 ? 's' : ''}${sel.size > 0 ? ` &middot; <b>${sel.size}</b> selected` : ''}${pendingCount > 0 ? ` &middot; <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">${pendingCount} pending review</span>` : ''}</span>
         <span style="display:flex;gap:6px">`;
     if (_canAI() && sel.size >= 2) {
         html += `<button class="btn btn-sm" style="font-size:11px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();ddAiCompare(${reqId},this)">AI Compare</button>`;
@@ -1253,7 +1414,12 @@ function _renderDdOffers(reqId, data, panel) {
     // Grouped layout
     const grpArr = Array.isArray(groups) ? groups : [];
     grpArr.forEach((g, gi) => {
-        const offers = (g.offers || []).slice().sort((a, b) => (a.unit_price || 999999) - (b.unit_price || 999999));
+        // Sort: unquoted first, then by price
+        const offers = (g.offers || []).slice().sort((a, b) => {
+            if (a.quoted_on && !b.quoted_on) return 1;
+            if (!a.quoted_on && b.quoted_on) return -1;
+            return (a.unit_price || 999999) - (b.unit_price || 999999);
+        });
         if (!offers.length) return;
         const reqMpn = g.mpn || g.label || '';
         const targetPrice = g.target_price != null ? '$' + Number(g.target_price).toFixed(4) : '';
@@ -1273,7 +1439,7 @@ function _renderDdOffers(reqId, data, panel) {
         html += `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">`;
         html += `<table class="dtbl"><thead><tr>
             <th style="width:28px"><input type="checkbox" onchange="ddToggleGroupOffers(${reqId},${gi},this.checked)" ${groupSelCount === offers.length ? 'checked' : ''}></th>
-            <th>Vendor</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th>Warranty</th><th>Notes</th><th style="width:52px"></th>
+            <th>Vendor</th><th>Mfr</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th>DC</th><th>Pkg</th><th>MOQ</th><th>Warranty</th><th>Source</th><th>Status</th><th>By</th><th>Notes</th><th style="width:80px"></th>
         </tr></thead><tbody>`;
 
         for (const o of offers) {
@@ -1283,19 +1449,35 @@ function _renderDdOffers(reqId, data, panel) {
             const offeredMpn = o.mpn || o.offered_mpn || '';
             const isSub = reqMpn && offeredMpn && offeredMpn.trim().toUpperCase() !== reqMpn.trim().toUpperCase();
             const subBadge = isSub ? ' <span class="badge b-sub">SUB</span>' : '';
-            const rowBg = isSub ? 'background:rgba(14,116,144,.04);' : '';
-            const statusBadge = o.status === 'pending_review' ? ' <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">DRAFT</span>' : '';
+            const isPending = o.status === 'pending_review';
+            const rowBg = isPending ? 'background:rgba(245,158,11,.06);border-left:2px dashed var(--amber);' : (isSub ? 'background:rgba(14,116,144,.04);' : '');
+            const statusBadge = isPending ? ' <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">DRAFT</span>' : '';
+            const quotedBadge = o.quoted_on ? ` <span class="badge b-quoted">${esc(o.quoted_on)}</span>` : '';
+
+            // Edited-by info
+            let editedInfo = '';
+            if (o.updated_at) {
+                const ago = _timeAgo(o.updated_at);
+                editedInfo = `<div style="font-size:9px;color:var(--muted);margin-top:1px">Edited by ${esc(o.updated_by || '?')} \u00b7 ${ago} <span style="cursor:pointer" onclick="event.stopPropagation();ddShowChangelog('offer',${oid})" title="View changes">\u2139\ufe0f</span></div>`;
+            }
 
             html += `<tr class="ofr-row ${checked ? 'selected' : ''}" style="${rowBg}" data-oid="${oid}">
                 <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
-                <td>${esc(o.vendor_name || '')}${subBadge}${statusBadge}</td>
-                <td class="mono">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '\u2014')}</td>
-                <td class="mono" style="color:var(--teal)">${price}</td>
-                <td>${esc(o.lead_time || '\u2014')}</td>
-                <td>${esc(o.condition || '\u2014')}</td>
-                <td style="font-size:10px">${esc(o.warranty || '\u2014')}</td>
-                <td style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(o.notes || '')}">${esc(o.notes || '\u2014')}</td>
-                <td style="white-space:nowrap"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddEditOffer(${reqId},${oid})" title="Edit" style="padding:2px 6px;font-size:10px">\u270e</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddDeleteOffer(${reqId},${oid})" title="Delete" style="padding:2px 6px;font-size:10px;color:var(--red)">\u2715</button></td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${subBadge}${statusBadge}${quotedBadge}${editedInfo}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'manufacturer',this)" style="font-size:10px">${esc(o.manufacturer || '\u2014')}</td>
+                <td class="req-edit-cell mono" onclick="ddInlineEditOffer(${reqId},${oid},'qty_available',this)">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '\u2014')}</td>
+                <td class="req-edit-cell mono" style="color:var(--teal)" onclick="ddInlineEditOffer(${reqId},${oid},'unit_price',this)">${price}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'lead_time',this)">${esc(o.lead_time || '\u2014')}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'condition',this)">${esc(o.condition || '\u2014')}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'date_code',this)" style="font-size:10px">${esc(o.date_code || '\u2014')}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'packaging',this)" style="font-size:10px">${esc(o.packaging || '\u2014')}</td>
+                <td class="req-edit-cell mono" onclick="ddInlineEditOffer(${reqId},${oid},'moq',this)" style="font-size:10px">${o.moq != null ? Number(o.moq).toLocaleString() : '\u2014'}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'warranty',this)" style="font-size:10px">${esc(o.warranty || '\u2014')}</td>
+                <td style="font-size:10px">${esc(o.source || '\u2014')}</td>
+                <td style="font-size:10px">${esc(o.status || '\u2014')}</td>
+                <td style="font-size:10px">${esc(o.entered_by || '\u2014')}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'notes',this)" style="font-size:10px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escAttr(o.notes || '')}">${esc(o.notes || '\u2014')}</td>
+                <td style="white-space:nowrap">${isPending ? `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddApproveOffer(${reqId},${oid})" title="Approve" style="padding:2px 6px;font-size:10px;color:var(--green)">\u2713</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddRejectOffer(${reqId},${oid})" title="Reject" style="padding:2px 6px;font-size:10px;color:var(--red)">\u2715</button>` : `<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddEditOffer(${reqId},${oid})" title="Edit" style="padding:2px 6px;font-size:10px">\u270e</button><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();ddDeleteOffer(${reqId},${oid})" title="Delete" style="padding:2px 6px;font-size:10px;color:var(--red)">\u2715</button>`}</td>
             </tr>`;
         }
         html += '</tbody></table></div>';
@@ -1305,11 +1487,10 @@ function _renderDdOffers(reqId, data, panel) {
         if (histOffers.length) {
             const hKey = `${reqId}-${g.requirement_id}`;
             const expanded = !!_ddHistoryExpanded[hKey];
-            const arrow = expanded ? '\u25BC' : '\u25B6';
-            html += `<div style="margin-top:4px;border-top:1px dashed var(--border);padding-top:4px">`;
-            html += `<div style="cursor:pointer;font-size:11px;color:var(--muted);user-select:none" onclick="event.stopPropagation();ddToggleHistory('${hKey}',${reqId})">
-                ${arrow} \uD83D\uDCCB ${histOffers.length} historical offer${histOffers.length !== 1 ? 's' : ''}
-            </div>`;
+            html += `<div style="margin-top:6px;border-top:1px dashed var(--border);padding-top:6px">`;
+            html += `<button class="btn btn-sm" style="font-size:11px;background:var(--bg2);color:var(--text);border:1px solid var(--border);padding:4px 10px" onclick="event.stopPropagation();ddToggleHistory('${hKey}',${reqId})">
+                ${expanded ? '\u25BC' : '\u25B6'} ${histOffers.length} historical offer${histOffers.length !== 1 ? 's' : ''} from other RFQs
+            </button>`;
             if (expanded) {
                 html += `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:4px">`;
                 html += `<table class="dtbl"><thead><tr>
@@ -1344,9 +1525,136 @@ function ddToggleHistory(hKey, reqId) {
     _ddHistoryExpanded[hKey] = !_ddHistoryExpanded[hKey];
     const data = _ddTabCache[reqId]?.offers;
     if (data) {
-        const panel = document.querySelector(`#dd-offers-${reqId}`);
+        const drow = document.getElementById('d-' + reqId);
+        const panel = drow?.querySelector('.dd-panel');
         if (panel) _renderDdOffers(reqId, data, panel);
     }
+}
+
+// ── Inline Editing for Offers ──────────────────────────────────────────
+function ddInlineEditOffer(reqId, offerId, field, td) {
+    if (td.querySelector('.req-edit-input')) return; // already editing
+    const groups = (_ddTabCache[reqId]?.offers?.groups || []);
+    let offer;
+    for (const g of groups) {
+        offer = (g.offers || []).find(o => (o.id || o.offer_id) === offerId);
+        if (offer) break;
+    }
+    if (!offer) return;
+
+    const CONDITION_OPTIONS = ['New','New Surplus','Refurbished','Used','As-Is',''];
+    let currentVal = '';
+    if (field === 'qty_available') currentVal = String(offer.qty_available || '');
+    else if (field === 'unit_price') currentVal = offer.unit_price != null ? String(offer.unit_price) : '';
+    else if (field === 'moq') currentVal = offer.moq != null ? String(offer.moq) : '';
+    else currentVal = offer[field] || '';
+
+    let el;
+    if (field === 'condition') {
+        el = document.createElement('select');
+        el.className = 'req-edit-input';
+        el.innerHTML = '<option value="">\u2014</option>' + CONDITION_OPTIONS.filter(Boolean).map(o => `<option value="${o}"${currentVal === o ? ' selected' : ''}>${o}</option>`).join('');
+    } else if (field === 'notes') {
+        el = document.createElement('textarea');
+        el.className = 'req-edit-input';
+        el.value = currentVal;
+        el.rows = 2;
+        el.style.cssText = 'width:160px;font-size:11px;resize:vertical';
+    } else {
+        el = document.createElement('input');
+        el.className = 'req-edit-input';
+        el.value = currentVal;
+        if (field === 'qty_available' || field === 'moq') { el.type = 'number'; el.min = '0'; el.style.width = '60px'; }
+        else if (field === 'unit_price') { el.type = 'number'; el.step = '0.0001'; el.min = '0'; el.style.width = '70px'; }
+        else el.style.width = '100px';
+    }
+
+    td.textContent = '';
+    td.appendChild(el);
+    el.focus();
+    if (el.select) el.select();
+
+    let _saved = false;
+    const save = async () => {
+        if (_saved) return;
+        _saved = true;
+        const val = el.value.trim();
+        if (val === currentVal) { _reRenderOffers(reqId); return; }
+        const body = {};
+        if (field === 'unit_price') body[field] = val ? parseFloat(val) : null;
+        else if (field === 'qty_available' || field === 'moq') body[field] = val ? parseInt(val) : null;
+        else body[field] = val || null;
+        try {
+            await apiFetch(`/api/offers/${offerId}`, { method: 'PUT', body });
+            // Update cached offer data
+            offer[field] = body[field];
+            offer.updated_at = new Date().toISOString();
+            offer.updated_by = window.__userName || '?';
+        } catch(e) { logCatchError('ddInlineEditOffer', e); }
+        _reRenderOffers(reqId);
+    };
+
+    el.addEventListener('blur', save);
+    if (field === 'condition') el.addEventListener('change', () => el.blur());
+    el.addEventListener('keydown', e => {
+        if (e.key === 'Enter' && field !== 'notes') { e.preventDefault(); el.blur(); }
+        if (e.key === 'Escape') { e.preventDefault(); _saved = true; _reRenderOffers(reqId); }
+    });
+}
+
+function _reRenderOffers(reqId) {
+    const data = _ddTabCache[reqId]?.offers;
+    if (!data) return;
+    const drow = document.getElementById('d-' + reqId);
+    const panel = drow?.querySelector('.dd-panel');
+    if (panel) _renderDdOffers(reqId, data, panel);
+}
+
+// ── Approve / Reject Offers ────────────────────────────────────────────
+async function ddApproveOffer(reqId, offerId) {
+    try {
+        await apiFetch(`/api/offers/${offerId}/approve`, { method: 'PUT' });
+        showToast('Offer approved', 'success');
+        delete _ddTabCache[reqId]?.offers;
+        const drow = document.getElementById('d-' + reqId);
+        const panel = drow?.querySelector('.dd-panel');
+        if (panel) await _loadDdSubTab(reqId, 'offers', panel);
+    } catch(e) { logCatchError('ddApproveOffer', e); showToast('Failed to approve', 'error'); }
+}
+
+async function ddRejectOffer(reqId, offerId) {
+    const reason = prompt('Rejection reason (optional):') || '';
+    try {
+        await apiFetch(`/api/offers/${offerId}/reject?reason=${encodeURIComponent(reason)}`, { method: 'PUT' });
+        showToast('Offer rejected', 'success');
+        delete _ddTabCache[reqId]?.offers;
+        const drow = document.getElementById('d-' + reqId);
+        const panel = drow?.querySelector('.dd-panel');
+        if (panel) await _loadDdSubTab(reqId, 'offers', panel);
+    } catch(e) { logCatchError('ddRejectOffer', e); showToast('Failed to reject', 'error'); }
+}
+
+// ── Changelog Popover ──────────────────────────────────────────────────
+async function ddShowChangelog(entityType, entityId) {
+    // Remove existing popover
+    document.querySelectorAll('.changelog-popover').forEach(el => el.remove());
+    try {
+        const changes = await apiFetch(`/api/changelog/${entityType}/${entityId}`);
+        if (!changes.length) { showToast('No change history', 'info'); return; }
+        const pop = document.createElement('div');
+        pop.className = 'changelog-popover';
+        let rows = changes.slice(0, 20).map(c => {
+            const ago = c.created_at ? _timeAgo(c.created_at) : '';
+            return `<tr><td style="font-weight:600">${esc(c.field_name)}</td><td style="color:var(--red);text-decoration:line-through">${esc(c.old_value || '\u2014')}</td><td style="color:var(--green)">${esc(c.new_value || '\u2014')}</td><td style="font-size:10px">${esc(c.user_name || '?')}</td><td style="font-size:10px;color:var(--muted)">${ago}</td></tr>`;
+        }).join('');
+        pop.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><strong style="font-size:12px">Change History</strong><button onclick="this.closest('.changelog-popover').remove()" style="border:none;background:none;cursor:pointer;font-size:14px;color:var(--muted)">\u2715</button></div><table class="dtbl" style="font-size:11px"><thead><tr><th>Field</th><th>Old</th><th>New</th><th>By</th><th>When</th></tr></thead><tbody>${rows}</tbody></table>`;
+        document.body.appendChild(pop);
+        // Position near click
+        const rect = event?.target?.getBoundingClientRect();
+        if (rect) { pop.style.top = (rect.bottom + 4) + 'px'; pop.style.left = Math.min(rect.left, window.innerWidth - 400) + 'px'; }
+        // Click outside to close
+        setTimeout(() => document.addEventListener('click', function _cl(e) { if (!pop.contains(e.target)) { pop.remove(); document.removeEventListener('click', _cl); } }, { once: false }), 100);
+    } catch(e) { logCatchError('ddShowChangelog', e); }
 }
 
 function ddToggleHistorySightings(hKey, reqId) {
@@ -2411,7 +2719,7 @@ async function ddMarkQuoteResult(reqId, result) {
     }
 }
 
-// ── Buy Plan (drill-down) ─────────────────────────────────────────────
+// ── Buy Plan (drill-down) ──────��──────────────────────────────────────
 
 function ddOpenBuyPlanModal(reqId) {
     const q = _ddQuoteData[reqId];
@@ -3547,6 +3855,7 @@ function closeLogOfferModal() {
 let _loVendorDebounce = null;
 let _loVendorCache = {};
 let _loAcIndex = -1;
+let _loVendorCardId = null;
 
 function _initLoVendorAutocomplete() {
     const input = document.getElementById('loVendor');
@@ -3554,6 +3863,7 @@ function _initLoVendorAutocomplete() {
     if (!input || !dropdown) return;
     input.addEventListener('input', () => {
         clearTimeout(_loVendorDebounce);
+        _loVendorCardId = null; // Clear selection on manual edit
         const q = input.value.trim();
         if (q.length < 2) { dropdown.classList.remove('open'); return; }
         _loVendorDebounce = setTimeout(() => _loVendorSearch(q), 250);
@@ -3580,28 +3890,29 @@ async function _loVendorSearch(q) {
     if (_loVendorCache[q]) { _loRenderSuggestions(_loVendorCache[q]); return; }
     try {
         const data = await apiFetch(`/api/autocomplete/names?q=${encodeURIComponent(q)}&limit=10`);
-        const names = (data || []).filter(r => r.type === 'vendor').map(r => r.name).filter(Boolean);
-        _loVendorCache[q] = names;
-        _loRenderSuggestions(names);
+        const vendors = (data || []).filter(r => r.type === 'vendor').filter(r => r.id && r.name);
+        _loVendorCache[q] = vendors;
+        _loRenderSuggestions(vendors);
     } catch {
         dropdown.classList.remove('open');
     }
 }
 
-function _loRenderSuggestions(names) {
+function _loRenderSuggestions(vendors) {
     const dropdown = document.getElementById('loVendorSuggestions');
     const input = document.getElementById('loVendor');
     _loAcIndex = -1;
-    if (!names.length) {
+    if (!vendors.length) {
         dropdown.innerHTML = '<div class="ac-empty">No vendors found</div>';
         dropdown.classList.add('open');
         return;
     }
-    dropdown.innerHTML = names.map(n => `<div class="ac-item">${esc(n)}</div>`).join('');
+    dropdown.innerHTML = vendors.map(v => `<div class="ac-item" data-id="${v.id}">${esc(v.name)}</div>`).join('');
     dropdown.classList.add('open');
     dropdown.querySelectorAll('.ac-item').forEach(item => {
         item.addEventListener('click', () => {
             input.value = item.textContent;
+            _loVendorCardId = parseInt(item.dataset.id) || null;
             dropdown.classList.remove('open');
             // Focus next field
             const qty = document.getElementById('loQty');
@@ -3627,6 +3938,7 @@ async function submitLogOffer() {
         const body = {
             mpn: mpn,
             vendor_name: vendor,
+            vendor_card_id: _loVendorCardId || null,
             requirement_id: reqPartId,
             qty_available: parseInt(document.getElementById('loQty').value) || null,
             unit_price: parseFloat(document.getElementById('loPrice').value) || null,
@@ -3643,6 +3955,7 @@ async function submitLogOffer() {
             status: 'active',
         };
         await apiFetch(`/api/requisitions/${reqId}/offers`, { method: 'POST', body });
+        _loVendorCardId = null;
         closeLogOfferModal();
         showToast('Offer logged', 'success');
         // Invalidate caches and refresh list
@@ -4466,7 +4779,9 @@ export function sidebarNav(page, el) {
         buyplans: () => window.showBuyPlans(),
         proactive: () => window.showProactiveOffers(),
         performance: () => window.showPerformance(),
-        settings: () => window.showSettings()
+        settings: () => window.showSettings(),
+        contacts: () => showContacts(),
+        dashboard: () => showDashboard()
     };
     try { if (routes[page]) routes[page](); }
     catch(e) { console.error('sidebarNav error:', page, e); }
@@ -5964,7 +6279,8 @@ export async function openVendorPopup(cardId) {
         </div>
     </div>`;
 
-    document.getElementById('vendorPopupContent').innerHTML = html;
+    const vpcEl = document.getElementById('vendorPopupContent');
+    if (vpcEl) vpcEl.innerHTML = html;
     openModal('vendorPopup');
 
     // Load contacts, activities, metrics, and intel asynchronously
@@ -7664,6 +7980,7 @@ function _notifBadgeColor(type) {
         case 'buyplan_rejected': return '#ef4444';
         case 'ownership_warning': case 'buyplan_pending': case 'buyplan_cancelled': return '#f59e0b';
         case 'proactive_match': return '#a855f7';
+        case 'offer_pending_review': return '#f59e0b';
         default: return '#6b7280';
     }
 }
@@ -7678,11 +7995,15 @@ function _notifLabel(type) {
         case 'buyplan_rejected': return 'Rejected';
         case 'buyplan_completed': return 'Completed';
         case 'buyplan_cancelled': return 'Cancelled';
+        case 'offer_pending_review': return 'Offer Review';
         default: return type;
     }
 }
 function _notifClickAction(n) {
     const close = `markNotifRead(${n.id});document.getElementById('notifPanel').classList.remove('open');`;
+    // Offer pending review → navigate to requisition offers tab
+    if (n.type === 'offer_pending_review' && n.requisition_id)
+        return close + `toggleDrillDown(${n.requisition_id});setTimeout(()=>_switchDdTab(${n.requisition_id},'offers'),400)`;
     // Buy plan notifications → open buy plan detail
     if (n.type && n.type.startsWith('buyplan_') && n.requisition_id)
         return close + `showBuyPlans();setTimeout(()=>openBuyPlanDetail(${n.requisition_id}),300)`;
@@ -8198,6 +8519,7 @@ Object.assign(window, {
     viewThread, vpSetRating, vpSubmitReview, vpToggleBlacklist,
     // Internal/underscore-prefixed functions used in inline handlers
     _acceptParsedOffers, _appendAddRow, _autoPollReplies, _buildEffortTip, _cancelAddRow, ddUpdateQuoteLine,
+    ddInlineEditOffer, ddApproveOffer, ddRejectOffer, ddShowChangelog, ddRefreshTab,
     _collapseAllDrillDowns, _ddDefaultTab, _ddPromptFallback, _syncMobilePills,
     _ddRenderTierRows, _ddSaveEmail, _ddSearchOverlay, _ddSubTabs,
     _ddTabLabel, _ddVendorInlineBadges, _ddVendorLinkPill,
@@ -8226,4 +8548,8 @@ Object.assign(window, {
     // AI feature functions
     aiDraftRfq, ddAiCompare, aiNormalizeParts, aiParseReply,
     _applyNormalized, _showAiModal, _canAI,
+    // v2 visual helpers
+    engRing, healthDot, statCard, daysSince, recencyColor,
+    // Contact Intelligence view
+    debouncedLoadContacts, setContactStatusFilter, loadContacts, showContacts,
 });

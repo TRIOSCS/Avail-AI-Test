@@ -9,7 +9,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v4
@@ -35,15 +35,39 @@ jobs:
       - name: Lint with ruff
         run: ruff check app/ tests/
 
-      - name: Run tests
+      - name: Validate Alembic migrations
         env:
           TESTING: "1"
           PYTHONPATH: ${{ github.workspace }}
-        run: pytest tests/ -v --tb=short --junitxml=test-results.xml
+        run: |
+          python -c "
+          from alembic.config import Config
+          from alembic.script import ScriptDirectory
+          cfg = Config('alembic.ini')
+          scripts = ScriptDirectory.from_config(cfg)
+          head = scripts.get_current_head()
+          revs = list(scripts.walk_revisions())
+          print(f'Migration chain OK: {len(revs)} revision(s), head={head}')
+          # Check for multiple heads (branching)
+          heads = scripts.get_heads()
+          assert len(heads) <= 1, f'Multiple migration heads detected: {heads}'
+          "
+
+      - name: Run tests with coverage
+        env:
+          TESTING: "1"
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          pytest tests/ -v --tb=short \
+            --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
+            --cov-fail-under=100 \
+            --junitxml=test-results.xml
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results
-          path: test-results.xml
+          path: |
+            test-results.xml
+            coverage.xml

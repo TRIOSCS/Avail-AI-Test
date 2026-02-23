@@ -17,10 +17,13 @@ node_modules/
 
 # Dev/test artifacts
 .coverage
+coverage.xml
+test-results.xml
 .ruff_cache/
 htmlcov/
 *.bak
 walkthrough_report_*.json
+.mypy_cache/
 
 # Reference / scratch
 app/_reference/

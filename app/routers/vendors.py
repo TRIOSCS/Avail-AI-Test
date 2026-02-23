@@ -364,13 +364,30 @@ async def autocomplete_names(
     limit = min(int(request.query_params.get("limit", "8")), 20)
     safe_q = q.replace("%", r"\%").replace("_", r"\_")
 
-    vendors = (
-        db.query(VendorCard.id, VendorCard.display_name)
+    from sqlalchemy import cast, String
+
+    # Primary: match on normalized_name
+    vendors_by_name = (
+        db.query(VendorCard)
         .filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
-        .order_by(VendorCard.display_name)
+        .order_by(VendorCard.sighting_count.desc().nullslast(), VendorCard.display_name)
         .limit(limit)
         .all()
     )
+
+    # Secondary: match on alternate_names JSON (cast to text for ILIKE)
+    seen_ids = {v.id for v in vendors_by_name}
+    vendors_by_alt = (
+        db.query(VendorCard)
+        .filter(
+            cast(VendorCard.alternate_names, String).ilike(f"%{safe_q}%"),
+            VendorCard.id.notin_(seen_ids) if seen_ids else True,
+        )
+        .order_by(VendorCard.sighting_count.desc().nullslast(), VendorCard.display_name)
+        .limit(limit)
+        .all()
+    )
+
     companies = (
         db.query(Company.id, Company.name)
         .filter(Company.is_active, Company.name.ilike(f"%{safe_q}%"))
@@ -380,11 +397,11 @@ async def autocomplete_names(
     )
 
     results = []
-    for v in vendors:
+    for v in vendors_by_name + vendors_by_alt:
         results.append({"id": v.id, "name": v.display_name, "type": "vendor"})
     for c in companies:
         results.append({"id": c.id, "name": c.name, "type": "customer"})
-    results.sort(key=lambda r: r["name"].lower())
+    # Vendors first (by sighting_count already), then customers
     return results[:limit]
 
 

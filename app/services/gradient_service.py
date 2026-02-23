@@ -12,7 +12,7 @@ Design rules:
   - Retries with exponential backoff on transient errors (429, 500, 502, 503, 504)
 
 Available model tiers:
-  - DEFAULT: anthropic-claude-sonnet-4-5 (structured extraction, parsing, drafting)
+  - DEFAULT: anthropic-claude-sonnet-4-6 (structured extraction, parsing, drafting)
   - STRONG: anthropic-claude-opus-4-6 (complex reasoning, analysis)
 
 Called by: ai_email_parser, ai_part_normalizer, ai_email_drafter, ai_quote_analyzer,
@@ -35,7 +35,7 @@ API_URL = "https://inference.do-ai.run/v1/chat/completions"
 # Model tiers — use configured model from env, fall back to Anthropic names
 _configured = getattr(settings, "do_gradient_model", None)
 MODELS = {
-    "default": _configured or "anthropic-claude-4.5-sonnet",
+    "default": _configured or "anthropic-claude-sonnet-4-6",
     "strong": "anthropic-claude-opus-4.6",
 }
 

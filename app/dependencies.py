@@ -10,8 +10,8 @@ Business Rules:
 - require_user raises 401 if not logged in, 403 if deactivated
 - require_buyer raises 403 if user is not buyer/trader/manager/admin
 - require_admin raises 403 if user.role != "admin"
-- require_settings_access allows admin or dev_assistant
-- user_reqs_query enforces role-based access: sales/trader sees own, dev_assistant sees none
+- require_settings_access allows admin only
+- user_reqs_query enforces role-based access: sales sees own only
 - require_fresh_token handles M365 token refresh with 15-min buffer
 
 Called by: all routers
@@ -77,9 +77,9 @@ def require_admin(request: Request, db: Session = Depends(get_db)) -> User:
 
 
 def require_settings_access(request: Request, db: Session = Depends(get_db)) -> User:
-    """Dependency: allows admin (full) or dev_assistant (limited)."""
+    """Dependency: allows admin only."""
     user = require_user(request, db)
-    if user.role not in ("admin", "dev_assistant"):
+    if user.role != "admin":
         raise HTTPException(403, "Settings access required")
     return user
 
@@ -97,19 +97,15 @@ def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
 
 def user_reqs_query(db: Session, user: User):
     """Base requisition query respecting role-based access.
-    Sales sees own reqs only; dev_assistant sees none; all other roles see all."""
+    Sales sees own reqs only; all other roles see all."""
     q = db.query(Requisition)
-    if user.role == "dev_assistant":
-        q = q.filter(sa.false())
-    elif user.role == "sales":
+    if user.role == "sales":
         q = q.filter(Requisition.created_by == user.id)
     return q
 
 
 def get_req_for_user(db: Session, user: User, req_id: int) -> Requisition:
     """Get a single requisition with role-based access check."""
-    if user.role == "dev_assistant":
-        return None
     if user.role == "sales":
         return db.query(Requisition).filter_by(id=req_id, created_by=user.id).first()
     return db.query(Requisition).filter_by(id=req_id).first()

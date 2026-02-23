@@ -92,7 +92,7 @@ class TestUpdateUser:
         assert "sales" in VALID_ROLES
         assert "admin" in VALID_ROLES
         assert "manager" in VALID_ROLES
-        assert "dev_assistant" in VALID_ROLES
+        assert "dev_assistant" not in VALID_ROLES
 
 
 # ── System Config ───────────────────────────────────────────────────

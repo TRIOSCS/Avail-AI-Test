@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from .models import ActivityLog, Contact, PendingBatch, ProcessedMessage, Requisition, VendorResponse
+from .models import ActivityLog, Contact, Offer, PendingBatch, ProcessedMessage, Requirement, Requisition, VendorResponse
 from .services.credential_service import get_credential_cached
 
 log = logging.getLogger(__name__)
@@ -252,6 +252,10 @@ async def poll_inbox(
                 db.flush()
         except Exception as e:
             log.warning(f"Delta query failed, falling back to full scan: {e}")
+            # Clear stale delta token so next poll starts fresh
+            if sync and sync.delta_token:
+                sync.delta_token = None
+                db.flush()
             messages = []
             used_delta = False
 
@@ -794,6 +798,69 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                 ))
         except Exception as e:
             log.warning(f"Failed to create vendor_reply_review activity: {e}")
+
+    # Auto-create draft Offer records from parsed emails (confidence >= 0.5)
+    if db and vr.confidence and vr.confidence >= 0.5 and vr.requisition_id:
+        try:
+            from .services.response_parser import extract_draft_offers
+            draft_offers = extract_draft_offers(parsed, vr.vendor_name or "Unknown")
+            req = db.get(Requisition, vr.requisition_id) if not (vr.needs_action and 0.5 <= vr.confidence <= 0.8) else req
+            owner_id = vr.scanned_by_user_id
+            if req and req.created_by:
+                owner_id = req.created_by
+
+            # Build a map of MPN → requirement_id for linking
+            req_obj = db.get(Requisition, vr.requisition_id)
+            mpn_to_req_id: dict[str, int] = {}
+            if req_obj:
+                for r in db.query(Requirement).filter(Requirement.requisition_id == vr.requisition_id).all():
+                    if r.primary_mpn:
+                        mpn_to_req_id[r.primary_mpn.upper().strip()] = r.id
+
+            for draft in draft_offers:
+                mpn = (draft.get("mpn") or "").upper().strip()
+                # Dedup: check if offer already exists from this vendor response
+                existing = db.query(Offer.id).filter(
+                    Offer.vendor_response_id == vr.id,
+                    Offer.mpn == draft.get("mpn", ""),
+                ).first()
+                if existing:
+                    continue
+
+                offer = Offer(
+                    requisition_id=vr.requisition_id,
+                    requirement_id=mpn_to_req_id.get(mpn),
+                    vendor_name=draft.get("vendor_name", ""),
+                    mpn=draft.get("mpn", ""),
+                    manufacturer=draft.get("manufacturer"),
+                    qty_available=draft.get("qty_available"),
+                    unit_price=draft.get("unit_price"),
+                    currency=draft.get("currency", "USD"),
+                    lead_time=draft.get("lead_time"),
+                    date_code=draft.get("date_code"),
+                    condition=draft.get("condition"),
+                    packaging=draft.get("packaging"),
+                    moq=draft.get("moq"),
+                    notes=draft.get("notes"),
+                    source="email_parse",
+                    status="pending_review",
+                    vendor_response_id=vr.id,
+                )
+                db.add(offer)
+                db.flush()
+
+                # Create notification for each draft offer
+                if owner_id:
+                    db.add(ActivityLog(
+                        user_id=owner_id,
+                        activity_type="offer_pending_review",
+                        channel="system",
+                        requisition_id=vr.requisition_id,
+                        contact_name=vr.vendor_name,
+                        subject=f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} — {draft.get('mpn', '?')}",
+                    ))
+        except Exception as e:
+            log.warning(f"Failed to auto-create draft offers: {e}")
 
 
 async def process_batch_results(db: Session) -> int:

@@ -160,3 +160,87 @@ def test_delete_offer(client):
 def test_delete_nonexistent_offer(client):
     resp = client.delete("/api/offers/99999")
     assert resp.status_code == 404
+
+
+# -- Vendor Dedup on Offer Creation -------------------------------------------
+
+
+def test_offer_fuzzy_match_reuses_existing_card(client, db_session):
+    """Fuzzy match reuses existing VendorCard instead of creating a new one."""
+    from app.models import VendorCard
+
+    card = VendorCard(
+        normalized_name="arrow electronics",
+        display_name="Arrow Electronics",
+        emails=[],
+        phones=[],
+        sighting_count=10,
+    )
+    db_session.add(card)
+    db_session.commit()
+    db_session.refresh(card)
+
+    req_id, req_item_id = _create_req_with_requirement(client)
+    # "Arrow Electronic" (missing trailing 's') — close enough for fuzzy ≥88
+    resp = client.post(f"/api/requisitions/{req_id}/offers", json={
+        "mpn": "LM317T",
+        "vendor_name": "Arrow Electronic",
+        "requirement_id": req_item_id,
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["vendor_card_id"] == card.id
+    # The submitted name should be added as an alternate
+    db_session.refresh(card)
+    assert "Arrow Electronic" in (card.alternate_names or [])
+
+
+def test_offer_vendor_card_id_skips_name_matching(client, db_session):
+    """When vendor_card_id is provided, skip all name matching."""
+    from app.models import VendorCard
+
+    card = VendorCard(
+        normalized_name="totally different name",
+        display_name="Totally Different Name",
+        emails=[],
+        phones=[],
+    )
+    db_session.add(card)
+    db_session.commit()
+    db_session.refresh(card)
+
+    req_id, req_item_id = _create_req_with_requirement(client)
+    resp = client.post(f"/api/requisitions/{req_id}/offers", json={
+        "mpn": "LM317T",
+        "vendor_name": "Whatever Name",
+        "vendor_card_id": card.id,
+        "requirement_id": req_item_id,
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["vendor_card_id"] == card.id
+
+
+def test_offer_exact_match_before_fuzzy(client, db_session):
+    """Exact normalized match is preferred over fuzzy match."""
+    from app.models import VendorCard
+
+    card = VendorCard(
+        normalized_name="mouser electronics",
+        display_name="Mouser Electronics",
+        emails=[],
+        phones=[],
+    )
+    db_session.add(card)
+    db_session.commit()
+    db_session.refresh(card)
+
+    req_id, req_item_id = _create_req_with_requirement(client)
+    resp = client.post(f"/api/requisitions/{req_id}/offers", json={
+        "mpn": "LM317T",
+        "vendor_name": "Mouser Electronics Inc.",
+        "requirement_id": req_item_id,
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["vendor_card_id"] == card.id

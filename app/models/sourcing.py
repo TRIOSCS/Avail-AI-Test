@@ -43,7 +43,12 @@ class Requisition(Base):
     last_searched_at = Column(DateTime)
     offers_viewed_at = Column(DateTime)
 
-    creator = relationship("User", back_populates="requisitions")
+    # Audit trail
+    updated_at = Column(DateTime)
+    updated_by_id = Column(Integer, ForeignKey("users.id"))
+
+    creator = relationship("User", back_populates="requisitions", foreign_keys=[created_by])
+    updated_by = relationship("User", foreign_keys=[updated_by_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
     requirements = relationship(
         "Requirement", back_populates="requisition", cascade="all, delete-orphan"

@@ -1488,6 +1488,40 @@ class TestPollInbox:
         assert len(results) == 1
 
     @pytest.mark.asyncio
+    async def test_delta_failure_clears_stale_token(self, db_session, test_user, test_requisition):
+        """When delta query fails (e.g. 410), the stale delta_token is cleared from SyncState."""
+        sync = SyncState(
+            user_id=test_user.id,
+            folder="inbox",
+            delta_token="stale-token-from-410",
+            last_sync_at=datetime.now(timezone.utc),
+        )
+        db_session.add(sync)
+        db_session.commit()
+
+        mock_gc = AsyncMock()
+        mock_gc.delta_query.side_effect = Exception("410 SyncStateNotFound")
+        mock_gc.get_json.return_value = {
+            "value": [self._make_inbox_message()]
+        }
+
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.email_service.get_credential_cached", return_value=None),
+        ):
+            results = await poll_inbox(
+                token="fake-token",
+                db=db_session,
+                requisition_id=test_requisition.id,
+                scanned_by_user_id=test_user.id,
+            )
+
+        assert len(results) == 1
+        # Stale delta token must be cleared so next poll starts fresh
+        sync = db_session.query(SyncState).first()
+        assert sync.delta_token is None
+
+    @pytest.mark.asyncio
     async def test_fallback_fetch_failure(self, db_session, test_user, test_requisition):
         """When fallback fetch also fails, return empty."""
         mock_gc = AsyncMock()

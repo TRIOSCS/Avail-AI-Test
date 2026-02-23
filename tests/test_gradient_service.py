@@ -49,7 +49,7 @@ def _mock_response(status_code=200, json_data=None, text=""):
     return resp
 
 
-def _chat_response(content, model="anthropic-claude-4.5-sonnet", prompt_tokens=50, completion_tokens=20):
+def _chat_response(content, model="anthropic-claude-sonnet-4-6", prompt_tokens=50, completion_tokens=20):
     """Build a standard chat completion response dict."""
     return {
         "choices": [
@@ -72,7 +72,7 @@ def _chat_response(content, model="anthropic-claude-4.5-sonnet", prompt_tokens=5
 
 def test_model_tiers():
     """Verify model tier mapping."""
-    assert MODELS["default"] == "anthropic-claude-4.5-sonnet"
+    assert MODELS["default"] == "anthropic-claude-sonnet-4-6"
     assert MODELS["strong"] == "anthropic-claude-opus-4.6"
 
 
@@ -114,7 +114,7 @@ async def test_gradient_text_with_system_prompt():
 
 @pytest.mark.asyncio
 async def test_gradient_text_default_model():
-    """Default model tier uses anthropic-claude-4.5-sonnet."""
+    """Default model tier uses anthropic-claude-sonnet-4-6."""
     mock_data = _chat_response("result")
     with patch("app.services.gradient_service.http") as mock_http:
         mock_http.post = AsyncMock(return_value=_mock_response(200, mock_data))
@@ -122,7 +122,7 @@ async def test_gradient_text_default_model():
 
     call_args = mock_http.post.call_args
     body = call_args.kwargs.get("json") or call_args[1].get("json")
-    assert body["model"] == "anthropic-claude-4.5-sonnet"
+    assert body["model"] == "anthropic-claude-sonnet-4-6"
 
 
 @pytest.mark.asyncio

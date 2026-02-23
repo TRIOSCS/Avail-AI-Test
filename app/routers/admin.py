@@ -167,7 +167,7 @@ def api_health(
     return get_system_health(db)
 
 
-# ── Credential Management (admin + dev_assistant) ─────────────────────
+# ── Credential Management (admin) ─────────────────────────────────────
 
 
 @router.get("/api/admin/sources/{source_id}/credentials")

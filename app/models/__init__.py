@@ -29,6 +29,7 @@ from .error_report import ErrorReport  # noqa: F401
 # Intelligence: Materials, Proactive, Activity
 from .intelligence import (  # noqa: F401
     ActivityLog,
+    ChangeLog,
     MaterialCard,
     MaterialVendorHistory,
     ProactiveMatch,

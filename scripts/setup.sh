@@ -29,10 +29,13 @@ fi
 # --- Create .env from template if it doesn't exist ---
 if [ ! -f .env ]; then
     cp .env.example .env
-    # Generate a random secret key
-    SECRET=$(openssl rand -hex 32)
-    sed -i "s|SECRET_KEY=change-me|SECRET_KEY=${SECRET}|" .env
-    echo "  ✓ Created .env file with random secret key"
+    # Generate random secrets
+    SESSION_SECRET=$(openssl rand -hex 32)
+    PG_PASSWORD=$(openssl rand -hex 16)
+    sed -i "s|SESSION_SECRET=change-me-to-random-string|SESSION_SECRET=${SESSION_SECRET}|" .env
+    sed -i "s|POSTGRES_PASSWORD=availai|POSTGRES_PASSWORD=${PG_PASSWORD}|" .env
+    sed -i "s|postgresql://availai:availai@db:5432/availai|postgresql://availai:${PG_PASSWORD}@db:5432/availai|" .env
+    echo "  ✓ Created .env with random session secret and database password"
     echo ""
     echo "================================================"
     echo "  IMPORTANT: Edit .env with your settings!"

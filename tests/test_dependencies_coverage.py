@@ -2,13 +2,13 @@
 test_dependencies_coverage.py — Additional coverage for app/dependencies.py
 
 Covers uncovered lines:
-- get_user exception path (lines 44-46)
-- require_user: agent key auth, no user 401, deactivated 403 (lines 57, 60-63)
-- require_admin 403 (lines 74-76)
-- require_settings_access 403 (lines 82-84)
-- require_buyer 403 (lines 89-92)
-- get_req_for_user sales path (line 114)
-- require_fresh_token full flow (lines 127-152)
+- get_user exception path
+- require_user: agent key auth, no user 401, deactivated 403
+- require_admin 403
+- require_settings_access 403 (admin-only)
+- require_buyer 403
+- get_req_for_user sales path
+- require_fresh_token full flow
 """
 
 from datetime import datetime, timedelta, timezone
@@ -161,21 +161,12 @@ class TestRequireSettingsAccess:
         user = require_settings_access(request, db_session)
         assert user.role == "admin"
 
-    def test_dev_assistant_allowed(self, db_session):
-        """dev_assistant has settings access."""
-        dev = User(
-            email="dev@trioscs.com",
-            name="Dev",
-            role="dev_assistant",
-            azure_id="az-dev",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(dev)
-        db_session.commit()
-
-        request = _mock_request({"user_id": dev.id})
-        user = require_settings_access(request, db_session)
-        assert user.role == "dev_assistant"
+    def test_sales_raises_403(self, db_session, sales_user):
+        """Sales role should not have settings access."""
+        request = _mock_request({"user_id": sales_user.id})
+        with pytest.raises(HTTPException) as exc_info:
+            require_settings_access(request, db_session)
+        assert exc_info.value.status_code == 403
 
 
 # ── require_buyer (lines 89-92) ──────────────────────────────────────
@@ -213,23 +204,6 @@ class TestRequireBuyer:
         request = _mock_request({"user_id": manager_user.id})
         user = require_buyer(request, db_session)
         assert user.role == "manager"
-
-    def test_dev_assistant_raises_403(self, db_session):
-        """dev_assistant is not allowed for buyer actions."""
-        dev = User(
-            email="dev3@test.com",
-            name="Dev",
-            role="dev_assistant",
-            azure_id="az-dev3",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(dev)
-        db_session.commit()
-
-        request = _mock_request({"user_id": dev.id})
-        with pytest.raises(HTTPException) as exc_info:
-            require_buyer(request, db_session)
-        assert exc_info.value.status_code == 403
 
 
 # ── get_req_for_user — sales path (line 114) ────────────────────────

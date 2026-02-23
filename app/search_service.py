@@ -4,10 +4,14 @@
 - Upserts vendor/part combos onto MaterialCards after each search
 - Merges MaterialCard vendor history into results
 - Vendor card enrichment (ratings, blacklist) happens in main.py
+- Caches connector results in Redis (15-min TTL) to avoid redundant API calls
 """
 
 import asyncio
+import hashlib
+import json
 import logging
+import os
 import time
 from datetime import datetime, timezone
 
@@ -57,6 +61,69 @@ _CONNECTOR_SOURCE_MAP = {
 }
 
 log = logging.getLogger(__name__)
+
+# ── Search result cache (Redis, 15-min TTL) ─────────────────────────────
+
+_SEARCH_CACHE_TTL = 900  # 15 minutes
+_SEARCH_CACHE_PREFIX = "search:"
+_search_redis = None
+_search_redis_attempted = False
+
+
+def _get_search_redis():
+    """Lazy-init Redis for search caching. Returns client or None."""
+    global _search_redis, _search_redis_attempted
+    if _search_redis_attempted:
+        return _search_redis
+    _search_redis_attempted = True
+    if os.environ.get("TESTING"):
+        return None
+    try:
+        import redis
+        from .config import settings
+        _search_redis = redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=1,
+            retry_on_timeout=True,
+        )
+        _search_redis.ping()
+    except Exception:
+        _search_redis = None
+    return _search_redis
+
+
+def _search_cache_key(pns: list[str], connector_names: list[str]) -> str:
+    """Deterministic cache key from sorted PNs + active connectors."""
+    payload = json.dumps({"pns": sorted(pns), "connectors": sorted(connector_names)}, sort_keys=True)
+    return _SEARCH_CACHE_PREFIX + hashlib.md5(payload.encode()).hexdigest()
+
+
+def _get_search_cache(key: str) -> tuple[list[dict], list[dict]] | None:
+    """Return (results, source_stats) from cache or None on miss."""
+    r = _get_search_redis()
+    if not r:
+        return None
+    try:
+        data = r.get(key)
+        if data:
+            parsed = json.loads(data)
+            return parsed["results"], parsed["source_stats"]
+    except Exception:
+        pass
+    return None
+
+
+def _set_search_cache(key: str, results: list[dict], source_stats: list[dict]) -> None:
+    """Store search results in Redis with TTL."""
+    r = _get_search_redis()
+    if not r:
+        return
+    try:
+        r.setex(key, _SEARCH_CACHE_TTL, json.dumps({"results": results, "source_stats": source_stats}))
+    except Exception:
+        pass
 
 
 def get_all_pns(req: Requirement) -> list[str]:
@@ -216,6 +283,20 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     if not connectors:
         return [], list(source_stats_map.values())
 
+    # Check search cache (keyed by PNs + active connector set)
+    active_names = sorted(
+        _CONNECTOR_SOURCE_MAP.get(c.__class__.__name__, "") for c in connectors
+    )
+    cache_key = _search_cache_key(pns, active_names)
+    cached = _get_search_cache(cache_key)
+    if cached is not None:
+        cached_results, cached_stats = cached
+        # Merge cached stats with disabled/skipped entries
+        cached_stats_map = {s["source"]: s for s in cached_stats}
+        source_stats_map.update(cached_stats_map)
+        log.info("Search cache HIT for %s (%d results)", pns[0] if pns else "?", len(cached_results))
+        return cached_results, list(source_stats_map.values())
+
     # Run ALL connectors × ALL part numbers in parallel.
     # IMPORTANT: Stats are collected in a plain list (not written to DB) during
     # gather, because the SQLAlchemy session is not safe for concurrent access.
@@ -332,6 +413,10 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     # Merge with skipped/disabled entries
     for name, entry in agg.items():
         source_stats_map[name] = entry
+
+    # Cache results for subsequent searches of the same PNs
+    connector_stats = [v for k, v in agg.items()]
+    _set_search_cache(cache_key, out, connector_stats)
 
     return out, list(source_stats_map.values())
 

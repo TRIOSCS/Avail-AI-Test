@@ -7,6 +7,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+
     steps:
       - name: Deploy via SSH
         uses: appleboy/ssh-action@v1
@@ -14,19 +16,30 @@ jobs:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          command_timeout: 10m
           script: |
             set -e
+            TIMESTAMP=$(date +%Y%m%d_%H%M)
+
+            echo "=== Pre-flight: health check ==="
+            cd /root/availai
+            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+              echo "Current deployment healthy"
+            else
+              echo "WARNING: Current deployment unhealthy — proceeding anyway"
+            fi
+
             echo "=== Backing up database ==="
             mkdir -p /root/backups
-            cd /root/availai
-            docker compose exec -T db pg_dump -U availai availai > /root/backups/avail_$(date +%Y%m%d_%H%M).sql
+            docker compose exec -T db pg_dump -U availai availai > /root/backups/avail_${TIMESTAMP}.sql
+            echo "DB backup: /root/backups/avail_${TIMESTAMP}.sql ($(du -h /root/backups/avail_${TIMESTAMP}.sql | cut -f1))"
 
             echo "=== Backing up code ==="
-            cp -r /root/availai /root/backups/code_$(date +%Y%m%d_%H%M)
+            cp -r /root/availai /root/backups/code_${TIMESTAMP}
 
             echo "=== Downloading release ${{ github.event.release.tag_name }} ==="
             DOWNLOAD_URL=$(echo '${{ toJSON(github.event.release.assets) }}' | python3 -c "import sys,json; assets=json.load(sys.stdin); print(assets[0]['browser_download_url'] if assets else '')")
-            if [ -z "$DOWNLOAD_URL" ]; then echo "No asset found"; exit 1; fi
+            if [ -z "$DOWNLOAD_URL" ]; then echo "ERROR: No release asset found"; exit 1; fi
             curl -L -o /tmp/release.zip "$DOWNLOAD_URL"
 
             echo "=== Extracting ==="
@@ -37,8 +50,32 @@ jobs:
             docker compose build --no-cache app
             docker compose up -d
 
-            echo "=== Health check ==="
-            sleep 5
-            curl -sf https://app.availai.net/health || echo "WARNING: Health check failed"
+            echo "=== Health check (waiting up to 60s) ==="
+            for i in $(seq 1 12); do
+              sleep 5
+              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+                echo "Health check passed after $((i*5))s"
+                rm -f /tmp/release.zip
+                # Prune backups older than 7 days
+                find /root/backups -name "avail_*.sql" -mtime +7 -delete 2>/dev/null || true
+                find /root/backups -maxdepth 1 -name "code_*" -mtime +7 -exec rm -rf {} + 2>/dev/null || true
+                echo "=== Deploy ${{ github.event.release.tag_name }} complete ==="
+                exit 0
+              fi
+              echo "  Attempt $i/12 — waiting..."
+            done
+
+            echo "ERROR: Health check failed after 60s — rolling back"
+            rm -rf /root/availai
+            cp -r /root/backups/code_${TIMESTAMP} /root/availai
+            cd /root/availai
+            docker compose build --no-cache app
+            docker compose up -d
+            sleep 10
+            if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+              echo "Rollback successful — previous version restored"
+            else
+              echo "CRITICAL: Rollback also failed — manual intervention required"
+            fi
             rm -f /tmp/release.zip
-            echo "=== Deploy complete ==="
+            exit 1

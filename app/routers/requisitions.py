@@ -27,6 +27,7 @@ from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_user
 from ..models import (
     ActivityLog,
+    ChangeLog,
     Contact,
     CustomerSite,
     Offer,
@@ -503,54 +504,6 @@ async def dismiss_new_offers(
     return {"ok": True}
 
 
-@router.post("/api/requisitions/{req_id}/clone")
-async def clone_requisition(
-    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
-    """Clone an archived (or any) requisition into a new draft with all its requirements."""
-    src = get_req_for_user(db, user, req_id)
-    if not src:
-        raise HTTPException(404, "Requisition not found")
-    clone = Requisition(
-        name=f"{src.name} (copy)",
-        customer_site_id=src.customer_site_id,
-        customer_name=src.customer_name,
-        deadline=src.deadline,
-        created_by=user.id,
-        status="draft",
-        cloned_from_id=src.id,
-    )
-    db.add(clone)
-    db.flush()  # get clone.id
-    for r in src.requirements:
-        # Re-normalize cloned data and dedup substitutes
-        cloned_mpn = normalize_mpn(r.primary_mpn) or r.primary_mpn
-        seen_keys = {normalize_mpn_key(cloned_mpn)}
-        deduped_subs = []
-        for s in (r.substitutes or []):
-            ns = normalize_mpn(s) or s
-            key = normalize_mpn_key(ns)
-            if key and key not in seen_keys:
-                seen_keys.add(key)
-                deduped_subs.append(ns)
-        db.add(Requirement(
-            requisition_id=clone.id,
-            primary_mpn=cloned_mpn,
-            normalized_mpn=normalize_mpn_key(cloned_mpn),
-            target_qty=r.target_qty,
-            target_price=r.target_price,
-            substitutes=deduped_subs[:20],
-            firmware=r.firmware,
-            date_codes=r.date_codes,
-            hardware_codes=r.hardware_codes,
-            packaging=normalize_packaging(r.packaging) or r.packaging,
-            condition=normalize_condition(r.condition) or r.condition,
-            notes=r.notes,
-        ))
-    db.commit()
-    return {"ok": True, "id": clone.id, "name": clone.name}
-
-
 @router.put("/api/requisitions/{req_id}")
 async def update_requisition(
     req_id: int,
@@ -846,6 +799,12 @@ async def update_requirement(
     req = get_req_for_user(db, user, r.requisition_id)
     if not req:
         raise HTTPException(403, "Not authorized for this requisition")
+    # Snapshot old values for changelog
+    _req_track_fields = [
+        "primary_mpn", "target_qty", "target_price", "firmware",
+        "date_codes", "hardware_codes", "packaging", "condition", "notes", "sale_notes",
+    ]
+    old_vals = {f: getattr(r, f) for f in _req_track_fields}
     if data.primary_mpn is not None:
         r.primary_mpn = normalize_mpn(data.primary_mpn) or data.primary_mpn.strip()
         r.normalized_mpn = normalize_mpn_key(data.primary_mpn)
@@ -878,6 +837,20 @@ async def update_requirement(
         r.notes = data.notes.strip()
     if data.sale_notes is not None:
         r.sale_notes = data.sale_notes.strip()
+    # Record changes
+    new_vals = {f: getattr(r, f) for f in _req_track_fields}
+    for f in _req_track_fields:
+        old_v = str(old_vals.get(f) or "")
+        new_v = str(new_vals.get(f) or "")
+        if old_v != new_v:
+            db.add(ChangeLog(
+                entity_type="requirement",
+                entity_id=item_id,
+                user_id=user.id,
+                field_name=f,
+                old_value=old_v,
+                new_value=new_v,
+            ))
     db.commit()
     return {"ok": True}
 

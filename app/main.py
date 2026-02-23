@@ -55,12 +55,44 @@ async def lifespan(app):
     # Sentry error tracking (conditional on DSN being set)
     if settings.sentry_dsn:
         import sentry_sdk
+        from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+
+        def _sentry_before_send(event, hint):
+            """Scrub sensitive data from Sentry events."""
+            _SENSITIVE_HEADERS = {
+                "authorization", "cookie", "x-api-key",
+                "anthropic-api-key", "session",
+            }
+            _SENSITIVE_VARS = {
+                "api_key", "apikey", "api_secret", "password",
+                "secret", "token", "dsn", "database_url",
+            }
+            if "request" in event:
+                req = event["request"]
+                hdrs = req.get("headers", {})
+                if isinstance(hdrs, dict):
+                    for k in list(hdrs):
+                        if k.lower() in _SENSITIVE_HEADERS:
+                            hdrs[k] = "[Filtered]"
+                qs = req.get("query_string", "")
+                if isinstance(qs, str) and "key" in qs.lower():
+                    req["query_string"] = "[Filtered]"
+            for frame in (event.get("exception", {}) or {}).get("values", []) or []:
+                for sf in (frame.get("stacktrace", {}) or {}).get("frames", []) or []:
+                    for k in list((sf.get("vars") or {})):
+                        if any(s in k.lower() for s in _SENSITIVE_VARS):
+                            sf["vars"][k] = "[Filtered]"
+            return event
+
         sentry_sdk.init(
             dsn=settings.sentry_dsn,
             traces_sample_rate=settings.sentry_traces_sample_rate,
             profiles_sample_rate=settings.sentry_profiles_sample_rate,
             environment="production" if "https" in settings.app_url else "development",
             release=APP_VERSION,
+            integrations=[FastApiIntegration(), SqlalchemyIntegration()],
+            before_send=_sentry_before_send,
         )
         logger.info("Sentry initialized (DSN configured)")
 

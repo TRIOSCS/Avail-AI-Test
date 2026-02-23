@@ -1297,6 +1297,7 @@ function openBuyPlanModal() {
             <td><input type="checkbox" class="bp-check" data-idx="${i}" checked></td>
             <td>${esc(item.mpn)}</td>
             <td>${esc(item.manufacturer || '\u2014')}</td>
+            <td>${esc(item.vendor_name || '\u2014')}</td>
             <td>${qty.toLocaleString()}</td>
             <td><input type="number" class="bp-plan-qty" data-idx="${i}" value="${qty}" min="1" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;text-align:right" oninput="_debouncedUpdateBpTotals()"></td>
             <td>$${Number(item.cost_price||0).toFixed(4)}</td>
@@ -1456,6 +1457,7 @@ function renderBuyPlanStatus(targetId) {
             <td>${esc(item.mpn)}</td>
             <td>${esc(item.vendor_name)}</td>
             <td>${vsBadge}</td>
+            <td style="font-size:11px">${esc(item.entered_by_name||'\u2014')}</td>
             <td>${planQty.toLocaleString()}</td>
             <td>$${Number(item.cost_price||0).toFixed(4)}</td>
             <td>${esc(item.lead_time||'\u2014')}</td>
@@ -1504,10 +1506,11 @@ function renderBuyPlanStatus(targetId) {
         }
     }
     if (!bp.is_stock_sale && isBuyer && (bp.status === 'approved' || bp.status === 'po_entered')) {
+        const hasAnyPO = (bp.line_items || []).some(li => li.po_number);
         actionsHtml += `
             <div style="margin-top:12px">
                 <button class="btn btn-primary" onclick="saveBuyPlanPOs()">Save PO Numbers</button>
-                <button class="btn btn-ghost" onclick="verifyBuyPlanPOs()">Verify PO Sent</button>
+                <button class="btn btn-ghost" onclick="verifyBuyPlanPOs()" ${hasAnyPO ? '' : 'disabled style="opacity:.5" title="Add PO numbers first"'}>Verify PO Sent</button>
             </div>`;
     }
     // Cancel button for approved plans with no POs (admin/manager only)
@@ -1541,7 +1544,7 @@ function renderBuyPlanStatus(targetId) {
             ${notesHtml}
             <div style="overflow-x:auto;-webkit-overflow-scrolling:touch">
             <table class="tbl" style="margin-bottom:0">
-                <thead><tr><th>MPN</th><th>Vendor</th><th>V.Score</th><th>Plan Qty</th><th>Cost</th><th>Lead</th>${hidePoCol ? '' : '<th>PO</th>'}</tr></thead>
+                <thead><tr><th>MPN</th><th>Vendor</th><th>V.Score</th><th>Buyer</th><th>Plan Qty</th><th>Cost</th><th>Lead</th>${hidePoCol ? '' : '<th>PO</th>'}</tr></thead>
                 <tbody>${itemsHtml}</tbody>
             </table>
             </div>
@@ -3532,10 +3535,6 @@ function openSettingsTab(panel) {
     document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
     const navBtn = document.getElementById('navSettings');
     if (navBtn) navBtn.classList.add('active');
-    // Dev assistant defaults to sources tab (Users tab is hidden for them)
-    if (!panel && window.__isDevAssistant && !window.__isAdmin) {
-        panel = 'sources';
-    }
     switchSettingsTab(panel || 'users');
 }
 
@@ -3622,7 +3621,7 @@ function _renderSourceCards() {
         manual: 'Manual Import',
     };
 
-    const canToggle = window.__isAdmin || window.__isDevAssistant;
+    const canToggle = window.__isAdmin;
 
     // --- Render configurable sources ---
     const grouped = {};
@@ -4085,7 +4084,6 @@ function renderAdminUsers() {
                 <option value="sales" ${u.role==='sales'?'selected':''}>Sales</option>
                 <option value="manager" ${u.role==='manager'?'selected':''}>Manager</option>
                 <option value="admin" ${u.role==='admin'?'selected':''}>Admin</option>
-                <option value="dev_assistant" ${u.role==='dev_assistant'?'selected':''}>Dev Assistant</option>
             </select></td>
             <td><input type="checkbox" ${activeChecked} onchange="updateUserField(${u.id}, 'is_active', this.checked)"></td>
             <td>${u.m365_connected ? '<span style="color:var(--teal)">Connected</span>' : '<span style="color:var(--muted)">—</span>'}</td>

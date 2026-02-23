@@ -43,7 +43,7 @@ async def index(request: Request, db: Session = Depends(get_db)):
     user = get_user(request, db)
     is_admin = user.role == "admin" if user else False
     is_manager = user.role == "manager" if user else False
-    is_dev_assistant = user.role == "dev_assistant" if user else False
+    user_role = user.role if user else ""
     return templates.TemplateResponse(
         "index.html",
         {
@@ -53,7 +53,7 @@ async def index(request: Request, db: Session = Depends(get_db)):
             "user_email": user.email if user else "",
             "is_admin": is_admin,
             "is_manager": is_manager,
-            "is_dev_assistant": is_dev_assistant,
+            "user_role": user_role,
             "app_version": APP_VERSION,
             "vite_css_tags": vite_css_tags(APP_VERSION),
             "vite_js_tags": vite_js_tags(APP_VERSION),

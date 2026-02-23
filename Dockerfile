@@ -14,7 +14,7 @@ WORKDIR /app
 
 # System deps for thefuzz (C extension) and WeasyPrint (PDF rendering)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc python3-dev curl \
+    gcc python3-dev curl tini \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info \
     && rm -rf /var/lib/apt/lists/*
 
@@ -38,5 +38,5 @@ RUN useradd -r -u 1000 -m appuser \
     && chown -R appuser:appuser /app \
     && mkdir -p /var/log/avail && chown appuser:appuser /var/log/avail
 
-ENTRYPOINT ["./docker-entrypoint.sh"]
+ENTRYPOINT ["tini", "--", "./docker-entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

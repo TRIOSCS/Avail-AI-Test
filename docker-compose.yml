@@ -16,6 +16,9 @@ services:
       -c maintenance_work_mem=256MB
       -c random_page_cost=1.1
       -c checkpoint_completion_target=0.9
+      -c log_min_duration_statement=500
+      -c log_checkpoints=on
+      -c log_lock_waits=on
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-availai}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-availai}
@@ -27,6 +30,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 2G
     logging:
       driver: json-file
       options:
@@ -45,6 +52,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     logging:
       driver: json-file
       options:
@@ -65,12 +76,17 @@ services:
     volumes:
       - uploads:/app/uploads
       - static_files:/srv/static
+      - applogs:/var/log/avail
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 2G
     logging:
       driver: json-file
       options:
@@ -92,6 +108,15 @@ services:
     depends_on:
       app:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:80"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     logging:
       driver: json-file
       options:
@@ -105,3 +130,4 @@ volumes:
   caddy_data:
   caddy_config:
   static_files:
+  applogs:

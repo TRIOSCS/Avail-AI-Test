@@ -485,7 +485,7 @@ async def toggle_api_source(
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
-    """Enable or disable a source (admin + dev_assistant)."""
+    """Enable or disable a source (admin only)."""
     from ..services.credential_service import credential_is_set
 
     src = db.get(ApiSource, source_id)

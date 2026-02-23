@@ -76,35 +76,11 @@ class TestUserReqsQuery:
         # sales_user didn't create test_requisition, so should see 0
         assert len(results) == 0
 
-    def test_dev_assistant_sees_none(self, db_session, test_requisition):
-        dev = User(
-            email="dev@trioscs.com", name="Dev", role="dev_assistant",
-            azure_id="az-dev", created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(dev)
-        db_session.commit()
-
-        query = user_reqs_query(db_session, dev)
-        results = query.all()
-        assert len(results) == 0
-
-
 class TestGetReqForUser:
     def test_buyer_can_get_any(self, db_session, test_user, test_requisition):
         req = get_req_for_user(db_session, test_user, test_requisition.id)
         assert req is not None
         assert req.id == test_requisition.id
-
-    def test_dev_assistant_gets_none(self, db_session, test_requisition):
-        dev = User(
-            email="dev2@trioscs.com", name="Dev", role="dev_assistant",
-            azure_id="az-dev2", created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(dev)
-        db_session.commit()
-
-        req = get_req_for_user(db_session, dev, test_requisition.id)
-        assert req is None
 
     def test_nonexistent_req(self, db_session, test_user):
         req = get_req_for_user(db_session, test_user, 99999)
