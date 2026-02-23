@@ -27,6 +27,28 @@
     </div>
 </div>
 {% else %}
+<div id="debugBar" style="position:fixed;top:0;left:0;right:0;background:#111;color:#0f0;padding:8px 16px;z-index:99999;font:12px monospace;display:flex;gap:12px;align-items:center">
+<button onclick="alert('click works')" style="background:#0f0;color:#000;border:none;padding:4px 12px;cursor:pointer;font-weight:bold">TEST CLICK</button>
+<span id="dbgStatus">Loading...</span>
+<span id="dbgClickLog"></span>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  var s = document.getElementById('dbgStatus');
+  s.textContent = 'DOM ready. ';
+  setTimeout(function(){
+    var fns = ['showView','sidebarNav','loadRequisitions','setMainView','openNewReqModal'];
+    var missing = fns.filter(function(f){ return typeof window[f] !== 'function'; });
+    if (missing.length) s.textContent = 'MISSING: ' + missing.join(', ');
+    else s.textContent = 'All ' + fns.length + ' core functions OK';
+  }, 3000);
+});
+document.addEventListener('click', function(e){
+  var el = e.target;
+  var log = document.getElementById('dbgClickLog');
+  if (log) log.textContent = 'Clicked: <' + el.tagName + '> ' + (el.className||'').substring(0,30) + ' onclick=' + (el.getAttribute('onclick')?'YES':'no');
+}, true);
+</script>
 <a href="#view-list" class="skip-link" onclick="document.getElementById('mainSearch').focus();return false;">Skip to content</a>
 <!-- TOP AREA — logo on grey bg + controls inline to the right -->
 <div class="toparea">
