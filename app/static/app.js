@@ -710,6 +710,8 @@ function applyRoleGating() {
     if (navDashboard) {
         navDashboard.style.display = role === 'buyer' ? 'none' : '';
     }
+    const ccGroup = document.querySelector('.sb-cc-group');
+    if (ccGroup) ccGroup.style.display = role === 'buyer' ? 'none' : '';
     const perfNav = document.getElementById('navScorecards');
     if (perfNav) perfNav.style.display = '';
 
@@ -5993,7 +5995,7 @@ function toggleSidebarGroup(headerEl) {
 export function sidebarNav(page, el) {
     // Track activity for auto-dashboard on return
     localStorage.setItem('_lastActivityTs', String(Date.now()));
-    document.querySelectorAll('.sb-nav-btn').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.sb-nav-btn, .sb-cc-header').forEach(i => i.classList.remove('active'));
     if (el) el.classList.add('active');
     // Highlight both Command Center (top) and Dashboard (insight) for dashboard view
     if (page === 'dashboard') {
@@ -6032,7 +6034,7 @@ export function sidebarNav(page, el) {
 }
 
 export function navHighlight(btn) {
-    document.querySelectorAll('.sb-nav-btn').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.sb-nav-btn, .sb-cc-header').forEach(i => i.classList.remove('active'));
     if (btn) btn.classList.add('active');
     var section = btn && btn.closest('[data-section]');
     if (section) {

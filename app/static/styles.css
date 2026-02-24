@@ -1217,32 +1217,23 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 [data-section="sourcing"] .sb-nav-btn.active{background:linear-gradient(135deg,rgba(234,179,8,.1),rgba(234,179,8,.04));color:var(--sourcing-color);box-shadow:inset 3px 0 0 var(--sourcing-accent)}
 [data-section="relationships"] .sb-nav-btn.active{background:linear-gradient(135deg,rgba(20,184,166,.1),rgba(20,184,166,.04));color:var(--relationships-color);box-shadow:inset 3px 0 0 var(--relationships-accent)}
 [data-section="insights"] .sb-nav-btn.active{background:linear-gradient(135deg,rgba(139,92,246,.1),rgba(139,92,246,.04));color:var(--insights-color);box-shadow:inset 3px 0 0 var(--insights-accent)}
-/* Command Center button — pinned above sections */
-.sb-cc-btn{width:100%;margin-bottom:4px}
-/* ── Trio Honeycomb Icon ── */
-/* Honeycomb SVG: stroked outlines matching sidebar icon style */
-.cc-honeycomb{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
-.cc-hex{transition:all .45s cubic-bezier(.4,0,.2,1);transform-origin:center}
-/* Collapsed sidebar: match other icon sizes (28×28 container, 22×22 svg) */
-.sidebar .sb-cc-icon{width:28px;height:28px;transition:color .2s,filter .2s,transform .5s cubic-bezier(.34,1.56,.64,1)}
-.sidebar .sb-cc-icon svg{width:22px;height:22px}
-/* Hover: glow + slight scale */
-.sb-cc-btn:hover .sb-cc-icon{color:var(--blue);filter:drop-shadow(0 0 6px var(--blue));transform:scale(1.08)}
-.sb-cc-btn:hover .cc-hex{stroke-width:1.8}
-/* Active state: rotate 60deg, scale up, gradient glow, staggered hex animation */
-.sb-cc-btn.active .sb-cc-icon{transform:rotate(60deg) scale(1.12);filter:drop-shadow(0 0 10px rgba(59,110,168,.5)) drop-shadow(0 0 20px rgba(59,110,168,.2))}
-.sb-cc-btn.active .cc-honeycomb{stroke:url(#ccGrad)}
-.sb-cc-btn.active .cc-hex{fill:rgba(59,110,168,.08);stroke-width:1.75}
-/* Staggered entry — each hex pops in with slight delay */
-@keyframes cc-hex-pop{0%{opacity:.3;transform:scale(.7)}60%{transform:scale(1.05)}100%{opacity:1;transform:scale(1)}}
-.sb-cc-btn.active .cc-hex-tl{animation:cc-hex-pop .4s .0s cubic-bezier(.34,1.56,.64,1) both}
-.sb-cc-btn.active .cc-hex-tr{animation:cc-hex-pop .4s .08s cubic-bezier(.34,1.56,.64,1) both}
-.sb-cc-btn.active .cc-hex-b{animation:cc-hex-pop .4s .16s cubic-bezier(.34,1.56,.64,1) both}
-/* Expanded sidebar: same sizes as other nav icons (20×20 container, 16×16 svg) */
-body.sb-open .sb-cc-icon,.sidebar:hover .sb-cc-icon{width:20px;height:20px}
-body.sb-open .sb-cc-icon svg,.sidebar:hover .sb-cc-icon svg{width:16px;height:16px}
-body.sb-open .sb-cc-btn.active .sb-cc-icon,.sidebar:hover .sb-cc-btn.active .sb-cc-icon{transform:rotate(60deg) scale(1.15)}
-body.sb-open .sb-cc-btn:hover .sb-cc-icon,.sidebar:hover .sb-cc-btn:hover .sb-cc-icon{transform:scale(1.1)}
+/* ── Command Center — section header style ── */
+.sb-cc-group{margin-bottom:0}
+.sb-cc-header{cursor:pointer;pointer-events:auto!important;transition:all var(--speed) cubic-bezier(.4,0,.2,1)}
+.sb-cc-header:hover{background:rgba(59,110,168,.06)}
+/* Active highlight — matches section-colored active states */
+.sb-cc-header.active{background:linear-gradient(135deg,rgba(59,110,168,.12),rgba(59,110,168,.04));box-shadow:inset 3px 0 0 var(--blue);border-radius:var(--radius-sm)}
+.sb-cc-header.active .sb-group-label{color:var(--blue)}
+/* Honeycomb icon: rotate on active */
+.sb-cc-header .sb-group-icon{transition:transform .5s cubic-bezier(.34,1.56,.64,1),box-shadow .3s}
+.sb-cc-header.active .sb-group-icon{transform:rotate(60deg);box-shadow:0 0 12px rgba(59,110,168,.35)}
+/* Collapsed: tooltip like other icons */
+.sidebar .sb-cc-header{position:relative}
+.sidebar .sb-cc-header::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%);background:var(--navy-900);color:#fff;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s;z-index:999}
+.sidebar .sb-cc-header:hover::after{opacity:1}
+/* Hover glow on icon */
+.sb-cc-header:hover .sb-group-icon{filter:drop-shadow(0 0 6px var(--blue));transform:scale(1.1)}
+.sb-cc-header.active:hover .sb-group-icon{transform:rotate(60deg) scale(1.1)}
 /* Top gradient bar — always brand gold, sits above OPPORTUNITY */
 .sb-top-gradient{height:2px;flex-shrink:0;background:#C4941D;transition:background .4s ease;margin:-12px -10px 8px;width:calc(100% + 20px)}
 /* Sidebar scroll arrows — appear when nav overflows */
