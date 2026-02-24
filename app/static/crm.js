@@ -898,12 +898,6 @@ async function _renderCustDrawerPipeline(companyId) {
 // Legacy compat
 function selectCustomer(companyId) { openCustDrawer(companyId); }
 function renderCustomerDetail(companyId) { openCustDrawer(companyId); }
-function switchCustTab(tab, companyId, btn) { switchCustDrawerTab(tab === 'sites' ? 'sites' : tab === 'activity' ? 'activity' : 'overview', btn); }
-function cycleCustSort() { /* no-op, replaced by column header sorting */ }
-function toggleCustDrill(companyId) { openCustDrawer(companyId); }
-
-function _loadCustSitesTab(c) { _renderCustDrawerSites(c.id); }
-async function _loadCustActivityTab(c) { await _renderCustDrawerActivity(c.id); }
 
 async function toggleStrategic(companyId, checked) {
     try {
@@ -6376,7 +6370,7 @@ Object.assign(window, {
     saveParsedOffers, saveQuoteDraft, saveTeamsConfig, scToggle,
     selectOneDriveFile, selectSite, sendQuoteEmail, setOfferFilter,
     setOfferSort, setSourcesFilter, showView, sortBpList, sortCustList,
-    sortSalesScorecard, testSourceCred, testTeamsPost, toggleCustDrill,
+    sortSalesScorecard, testSourceCred, testTeamsPost,
     toggleOfferSelect, togglePlannedSources, toggleSiteDetail,
     toggleSourceStatus, tokenApprovePlan, tokenRejectPlan,
     triggerDeepScan, unifiedEnrichCompany, updateQuoteLine,
@@ -6394,7 +6388,7 @@ Object.assign(window, {
     startWebsiteScrape, submitBuyPlan, submitLost, switchEnrichTab,
     switchPerfTab, switchProactiveTab, switchSettingsTab,
     toggleCustUnassigned, updateOffer,
-    selectCustomer, renderCustomerDetail, switchCustTab, cycleCustSort, saveCustNotes,
+    selectCustomer, renderCustomerDetail, saveCustNotes,
     logCustNote, saveContactNotes, logContactNote, _loadContactRecentNotes, toggleContactArchive,
     toggleStrategic, _renderMiniList, _renderMiniListFromSearch, _miniListKeyNav,
     _setTopViewLabel, _setTopDrillLabel, _abortAllCrmFetches,

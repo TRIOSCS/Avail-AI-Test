@@ -38,8 +38,7 @@
     };
 })();
 
-// ── AI feature gate — show AI buttons for all authenticated users ─────
-function _canAI() { return true; }
+// AI features enabled for all authenticated users
 
 // ── Early stubs (available before full init for onclick handlers) ──────
 
@@ -1745,7 +1744,7 @@ function _renderDdActivity(reqId, data, panel) {
                     // Show AI-parsed summary for replies
                     if (isReply && t.parsed_data) {
                         bodyHtml += _renderParsedSummary(t.parsed_data, reqId, t.response_id, t.vendor_name);
-                    } else if (isReply && !t.parsed_data && _canAI() && t.response_id) {
+                    } else if (isReply && !t.parsed_data && t.response_id) {
                         bodyHtml += `<div style="margin-bottom:6px"><button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();aiParseReply(${reqId},${t.response_id},'${escAttr(t.vendor_name||'')}',this)">Parse with AI</button></div>`;
                     }
                     bodyHtml += `<div class="act-body-text">${_formatEmailBody(t.body)}</div>`;
@@ -1789,7 +1788,7 @@ function _renderParsedSummary(pd, reqId, responseId, vendorName) {
     let html = '<div class="parsed-summary">';
     html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-size:10px;font-weight:700;color:var(--text2);text-transform:uppercase;letter-spacing:.4px">AI-Parsed Response</span>';
     html += '<span style="display:flex;gap:4px">';
-    if (_canAI() && reqId && responseId) {
+    if (reqId && responseId) {
         html += `<button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();aiParseReply(${reqId},${responseId},'${escAttr(vendorName||'')}',this)" title="Re-parse email with AI">Re-parse</button>`;
     }
     if (quotedParts.length && reqId && responseId) {
@@ -1982,7 +1981,7 @@ function _renderDdOffers(reqId, data, panel) {
     let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <span style="font-size:11px"><b>${totalOffers}</b> offer${totalOffers !== 1 ? 's' : ''}${sel.size > 0 ? ` &middot; <b>${sel.size}</b> selected` : ''}${pendingCount > 0 ? ` &middot; <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">${pendingCount} pending review</span>` : ''}</span>
         <span style="display:flex;gap:6px">`;
-    if (_canAI() && sel.size >= 2) {
+    if (sel.size >= 2) {
         html += `<button class="btn btn-sm" style="font-size:11px;background:var(--bg3);color:var(--teal);border:1px solid var(--teal)" onclick="event.stopPropagation();ddAiCompare(${reqId},this)">AI Compare</button>`;
     }
     html += `<button class="btn btn-primary btn-sm" id="ddBuildQuoteBtn-${reqId}" ${sel.size === 0 ? 'disabled style="opacity:.5"' : ''} onclick="event.stopPropagation();ddBuildQuote(${reqId})">Build Quote (${sel.size})</button>
@@ -5748,7 +5747,7 @@ function renderRequirementsTable() {
     // AI Normalize button in toolbar
     const normWrap = document.getElementById('aiNormWrap');
     if (normWrap) normWrap.remove();
-    if (_canAI() && reqData.length > 0) {
+    if (reqData.length > 0) {
         const filterBar = document.getElementById('reqFilterBar');
         if (filterBar) {
             const wrap = document.createElement('span');
@@ -6705,7 +6704,7 @@ function renderRfqMessage() {
     }
     // Show AI Draft button for admins
     const aiWrap = document.getElementById('aiDraftWrap');
-    if (aiWrap) aiWrap.style.display = _canAI() ? '' : 'none';
+    if (aiWrap) aiWrap.style.display = '';
 }
 
 
@@ -7953,9 +7952,6 @@ async function _renderVendorDrawerParts(vendorId) {
     } catch (err) { body.innerHTML = '<div class="drawer-section"><p class="crm-empty">Error loading parts</p></div>'; }
 }
 
-// Legacy compat wrappers
-async function renderVendorDetail(vendorId) { openVendorDrawer(vendorId); }
-function switchVendorTab(tab, vendorId, btn) { switchVendorDrawerTab(tab, btn); }
 
 // ── Materials Tab ──────────────────────────────────────────────────────
 let _materialListData = [];
@@ -9555,7 +9551,7 @@ Object.assign(window, {
     rfqIncludeRepeats, rfqManualEmail, rfqRemoveVendor, rfqSelectEmail,
     rfqToggleVendor, saveDeadline, sendEmailReply, sendFollowUp,
     setToolbarQuickFilter, showView, sidebarNav, sortMatList, sortReqList,
-    selectVendor, renderVendorDetail, switchVendorTab,
+    selectVendor,
     openVendorDrawer, closeVendorDrawer, switchVendorDrawerTab,
     openContactDrawer, closeContactDrawer, sortContactList,
     sortVendorList, threadSearchFilter, toggleAllDrillRows,
@@ -9594,7 +9590,7 @@ Object.assign(window, {
     triggerMainSearch,
     // AI feature functions
     aiDraftRfq, ddAiCompare, aiNormalizeParts, aiParseReply,
-    _applyNormalized, _showAiModal, _canAI,
+    _applyNormalized, _showAiModal,
     // v2 visual helpers
     engRing, healthDot, statCard, daysSince, recencyColor,
     ownerAvatar, factorBar, relationshipHealthBar, contactStatusBar,
