@@ -10,11 +10,14 @@ git pull
 echo "Rebuilding..."
 docker compose up -d --build
 
-# Run migration if migrate script exists
-if [ -f "migrate_v105.py" ]; then
-    echo "Running v1.0.5 migration..."
-    docker compose exec -T web python migrate_v105.py || echo "Migration may have already been applied"
-fi
+echo "Waiting for app to be healthy..."
+until docker compose ps app --format '{{.Status}}' | grep -q healthy; do
+    sleep 2
+done
+
+echo "Restarting Caddy to clear stale upstream connections..."
+docker compose restart caddy
+sleep 3
 
 echo ""
 echo "✓ Updated and running"
