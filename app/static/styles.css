@@ -1197,7 +1197,8 @@ body.sb-open .sb-rail svg{transform:rotate(180deg)}
 .sb-scroll-down{background:linear-gradient(to top,rgba(255,255,255,.95),rgba(255,255,255,.7))}
 .sb-scroll-arrow.visible{display:flex}
 /* Collapsed mode — icon-only sidebar (default state) */
-.sb-section-dot{display:none;width:8px;height:8px;border-radius:50%;background:var(--section-dot,var(--blue));margin:6px auto}
+/* Collapsed: colored line divider between groups */
+.sb-section-dot{display:block;width:24px;height:2px;border-radius:1px;background:var(--section-dot,var(--blue));margin:6px auto 4px;opacity:.6}
 .sidebar .sb-group-header{display:none}
 .sidebar .sb-group-items{max-height:none!important;opacity:1;pointer-events:auto}
 .sidebar .sb-top-gradient{display:none}
@@ -1228,6 +1229,7 @@ body.sb-open .sb-rail svg{transform:rotate(180deg)}
 .sb-user-popover button:hover{background:var(--surface);color:var(--text)}
 .sb-user-popover button:last-child:hover{color:var(--red);background:var(--red-light)}
 /* Expanded state overrides */
+body.sb-open .sb-section-dot{display:none}
 body.sb-open .sidebar .sb-group-header{display:flex}
 body.sb-open .sidebar .sb-group-items{transition:max-height .25s ease,opacity .2s ease}
 body.sb-open .sidebar .sb-top-gradient{display:block}
