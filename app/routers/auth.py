@@ -51,6 +51,7 @@ async def index(request: Request, db: Session = Depends(get_db)):
             "logged_in": user is not None,
             "user_name": user.name if user else "",
             "user_email": user.email if user else "",
+            "user_id": user.id if user else None,
             "is_admin": is_admin,
             "is_manager": is_manager,
             "user_role": user_role,
