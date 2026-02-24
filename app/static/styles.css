@@ -85,7 +85,7 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 .shell{display:flex;height:100vh;overflow:hidden}
 
 /* Sidebar — frosted glass, always visible */
-.sidebar{position:fixed;top:0;left:0;bottom:0;width:var(--sidebar-collapsed);background:#f0f2f5;border-right:1px solid rgba(0,0,0,.08);box-shadow:1px 0 8px rgba(0,0,0,.04);z-index:200;transition:width var(--speed-slow) cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;overflow:hidden}
+.sidebar{position:fixed;top:0;left:0;bottom:0;width:var(--sidebar-collapsed);background:#f0f2f5;border-right:1px solid var(--blue);box-shadow:1px 0 8px rgba(0,0,0,.04);z-index:200;transition:width var(--speed-slow) cubic-bezier(.4,0,.2,1);display:flex;flex-direction:column;overflow:hidden}
 @media(min-width:769px){.sidebar:hover{width:var(--sbw);border-right:1px solid rgba(0,0,0,.08);box-shadow:2px 0 12px rgba(0,0,0,.06)}}
 .sidebar-footer{border-top:1px solid rgba(0,0,0,.08);padding:10px 0;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:rgba(240,242,245,.8)}
 
