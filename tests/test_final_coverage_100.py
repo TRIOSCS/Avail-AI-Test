@@ -1189,6 +1189,27 @@ async def test_claude_structured_cache_read_tokens():
 
 
 @pytest.mark.asyncio
+async def test_claude_text_cache_read_tokens():
+    """claude_client.py line 248: cache_read_input_tokens in claude_text response."""
+    from app.utils.claude_client import claude_text
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "content": [{"type": "text", "text": "cached response"}],
+        "usage": {"input_tokens": 10, "output_tokens": 5,
+                  "cache_read_input_tokens": 8}}
+
+    with (
+        patch("app.utils.claude_client.get_credential_cached", return_value="sk-t"),
+        patch("app.utils.claude_client.http") as mh,
+    ):
+        mh.post = AsyncMock(return_value=mock_resp)
+        result = await claude_text("test prompt")
+        assert result == "cached response"
+
+
+@pytest.mark.asyncio
 async def test_batch_blank_line_skipped():
     from app.utils.claude_client import claude_batch_results
 

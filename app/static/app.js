@@ -1247,12 +1247,13 @@ async function loadDashboard() {
         const daysParam = _dashPeriod === '30d' ? 30 : _dashPeriod === '90d' ? 90 : 7;
 
         // Fetch all sales-focused data in parallel
-        const [brief, needsAttn, reqs, quotes, scorecard] = await Promise.all([
+        const [brief, needsAttn, reqs, quotes, scorecard, hotOffers] = await Promise.all([
             apiFetch('/api/dashboard/morning-brief').catch(() => null),
             apiFetch(`/api/dashboard/needs-attention?days=${daysParam}`).catch(() => []),
             apiFetch('/api/requisitions').catch(() => []),
             apiFetch('/api/quotes').catch(() => []),
             apiFetch('/api/proactive/scorecard').catch(() => null),
+            apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(() => []),
         ]);
 
         const reqList = Array.isArray(reqs) ? reqs : [];
@@ -1302,10 +1303,17 @@ async function loadDashboard() {
         // ── Detail Cards Grid ──
         html += '<div class="cc-cards-grid">';
 
-        // Card 1: Needs Attention (revenue-enhanced)
+        // Card 1: Needs Attention (revenue-enhanced, top 15, scrollable)
+        // Sort by priority: highest open_quote_value first, then most overdue
+        const attnSorted = [...attnList].sort((a, b) => {
+            const aVal = (a.open_quote_value || 0) + (a.days_since_contact || 0) * 100;
+            const bVal = (b.open_quote_value || 0) + (b.days_since_contact || 0) * 100;
+            return bVal - aVal;
+        });
         html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Needs Attention <span class="cc-card-count">${attnList.length}</span></h3>`;
-        if (attnList.length) {
-            html += attnList.slice(0, 5).map(a => {
+        if (attnSorted.length) {
+            html += '<div class="cc-card-scroll">';
+            html += attnSorted.slice(0, 15).map(a => {
                 const hasQuote = a.open_quote_value > 0;
                 const neverContacted = !a.last_outreach_at;
                 const dotColor = (neverContacted || (hasQuote && a.days_since_contact >= 5)) ? 'var(--red)' : 'var(--amber)';
@@ -1322,6 +1330,10 @@ async function loadDashboard() {
                     ${a.open_req_count ? '<span class="cc-row-badge">' + a.open_req_count + ' open</span>' : ''}
                 </div>`;
             }).join('');
+            html += '</div>';
+            if (attnList.length > 15) {
+                html += `<div class="cc-view-all"><a class="cc-link" onclick="sidebarNav('customers',document.getElementById('navCustomers'))">View All ${attnList.length} &rarr;</a></div>`;
+            }
         } else {
             html += '<p class="cc-empty">All accounts contacted recently.</p>';
         }
@@ -1412,6 +1424,27 @@ async function loadDashboard() {
                 <div style="margin-top:6px"><a class="cc-link" onclick="sidebarNav('proactive',document.getElementById('navProactive'))">View all matches &rarr;</a></div>
             </div>`;
         }
+
+        // Card 6: Hot Offers — recent vendor offers/responses
+        const hotList = Array.isArray(hotOffers) ? hotOffers : [];
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--green)">&#9679;</span> Hot Offers <span class="cc-card-count">${hotList.length}</span></h3>`;
+        if (hotList.length) {
+            html += '<div class="cc-card-scroll">';
+            html += hotList.map(o => {
+                const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
+                return `<div class="cc-row" onclick="goToReq(${o.requisition_id})">
+                    <span class="cc-dot" style="background:var(--green)"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(o.vendor_name)}</span>
+                        <span class="cc-row-detail"><span class="mono">${esc(o.mpn)}</span> &middot; ${price} &middot; ${o.age_label}</span>
+                    </div>
+                </div>`;
+            }).join('');
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No new offers.</p>';
+        }
+        html += '</div>';
 
         html += '</div>'; // close cc-cards-grid
 

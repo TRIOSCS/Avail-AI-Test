@@ -326,3 +326,57 @@ async def morning_brief(
         "generated_at": now.isoformat(),
         "stats": stats,
     }
+
+
+@router.get("/hot-offers")
+def hot_offers(
+    days: int = Query(default=7, ge=1, le=90),
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    """Return recent vendor offers received within `days` window.
+
+    Shows vendor name, MPN, unit price, age, and links to the requisition.
+    Sorted by most recent first.
+    """
+    from ..models.offers import Offer
+    from ..models.sourcing import Requisition
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=days)
+
+    offers = (
+        db.query(Offer)
+        .join(Requisition, Offer.requisition_id == Requisition.id)
+        .filter(
+            Offer.created_at >= cutoff,
+            Offer.status == "active",
+        )
+        .order_by(Offer.created_at.desc())
+        .limit(15)
+        .all()
+    )
+
+    results = []
+    for o in offers:
+        age_hours = (now - o.created_at).total_seconds() / 3600 if o.created_at else 0
+        if age_hours < 1:
+            age_label = "just now"
+        elif age_hours < 24:
+            age_label = f"{int(age_hours)}h ago"
+        else:
+            age_label = f"{int(age_hours / 24)}d ago"
+
+        results.append({
+            "id": o.id,
+            "vendor_name": o.vendor_name,
+            "mpn": o.mpn,
+            "unit_price": float(o.unit_price) if o.unit_price else None,
+            "currency": o.currency or "USD",
+            "requisition_id": o.requisition_id,
+            "source": o.source,
+            "age_label": age_label,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+        })
+
+    return results

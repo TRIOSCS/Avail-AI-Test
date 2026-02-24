@@ -1,4 +1,4 @@
-"""Tests for GET /api/dashboard/needs-attention endpoint."""
+"""Tests for GET /api/dashboard/needs-attention and /hot-offers endpoints."""
 
 from datetime import datetime, timedelta, timezone
 
@@ -9,6 +9,7 @@ from app.models import (
     ActivityLog,
     Company,
     CustomerSite,
+    Offer,
     Quote,
     Requisition,
     User,
@@ -201,50 +202,162 @@ class TestNeedsAttention:
         assert data[0]["company_name"] == "Acme Corp"
 
     def test_stale_company_tz_aware_outreach(self, db_session, test_user, client):
-        """When last outreach already has tzinfo (line 153: else branch)."""
-        from unittest.mock import patch
+        """When last outreach already has tzinfo (line 153: else branch).
 
-        c = self._make_company(db_session, test_user, name="TZ Aware Corp")
-        self._make_site(db_session, c, "HQ")
-        self._make_activity(db_session, test_user, c, days_ago=60)
-        db_session.commit()
+        Directly calls needs_attention() with a mock db that returns
+        tz-aware datetimes from the activity query, bypassing SQLite's
+        naive datetime behavior.
+        """
+        from types import SimpleNamespace
+        from unittest.mock import MagicMock
+
+        from app.routers.dashboard import needs_attention
 
         aware_dt = datetime.now(timezone.utc) - timedelta(days=60)
+        assert aware_dt.tzinfo is not None  # sanity check
 
-        # Patch the outreach map after it's built to inject tz-aware datetimes
-        from app.routers.dashboard import needs_attention as _orig
+        company = SimpleNamespace(id=1, name="TZ Corp", is_active=True, is_strategic=False)
+        activity_row = SimpleNamespace(company_id=1, last_at=aware_dt)
+        channel_row = SimpleNamespace(company_id=1, channel="email")
 
-        async def patched_needs_attention(days=30, user=None, db=None):
-            # Call original but intercept to ensure tz-aware path is hit
-            return await _orig(days=days, user=user, db=db)
+        # Build mock query chains for each db.query() call
+        def make_chain(result):
+            q = MagicMock()
+            q.filter.return_value = q
+            q.group_by.return_value = q
+            q.order_by.return_value = q
+            q.all.return_value = result
+            return q
 
-        # Simpler: just mock the max() result to return tz-aware datetime
-        original_query = db_session.query
+        mock_db = MagicMock()
+        mock_db.query.side_effect = [
+            make_chain([company]),       # Company query
+            make_chain([activity_row]),   # Activity (outreach) query
+            make_chain([channel_row]),    # Channel query
+            make_chain([]),              # Site query (empty)
+        ]
 
-        class TzAwareRow:
-            def __init__(self, cid, dt):
-                self.company_id = cid
-                self.last_outreach = dt
+        result = needs_attention(days=30, db=mock_db, user=SimpleNamespace(id=1))
 
-        def mock_query(*args, **kwargs):
-            result = original_query(*args, **kwargs)
-            # Wrap .all() to inject tz-aware datetimes for outreach query
-            original_all = result.all
+        assert len(result) == 1
+        assert result[0]["company_name"] == "TZ Corp"
+        assert result[0]["days_since_contact"] >= 59
 
-            def patched_all():
-                rows = original_all()
-                new_rows = []
-                for r in rows:
-                    if hasattr(r, 'last_outreach') and r.last_outreach and r.last_outreach.tzinfo is None:
-                        new_rows.append(TzAwareRow(r.company_id, r.last_outreach.replace(tzinfo=timezone.utc)))
-                    else:
-                        new_rows.append(r)
-                return new_rows if new_rows else rows
 
-            result.all = patched_all
-            return result
+class TestHotOffers:
+    """Tests for GET /api/dashboard/hot-offers endpoint."""
 
-        with patch.object(db_session, 'query', side_effect=mock_query):
-            resp = client.get("/api/dashboard/needs-attention?days=30")
-
+    def test_no_offers_returns_empty(self, client):
+        """Empty DB → empty list."""
+        resp = client.get("/api/dashboard/hot-offers")
         assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_recent_offer_returned(self, client, db_session, test_user):
+        """An active offer within the window appears in results."""
+        req = Requisition(
+            name="REQ-HOT-1", customer_name="Acme", status="open",
+            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        offer = Offer(
+            requisition_id=req.id, vendor_name="Arrow", mpn="LM317T",
+            qty_available=1000, unit_price=0.50, entered_by_id=test_user.id,
+            status="active", created_at=datetime.now(timezone.utc) - timedelta(hours=2),
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        resp = client.get("/api/dashboard/hot-offers?days=7")
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["vendor_name"] == "Arrow"
+        assert data[0]["mpn"] == "LM317T"
+        assert data[0]["age_label"] == "2h ago"
+
+    def test_old_offer_excluded(self, client, db_session, test_user):
+        """Offer older than the window is excluded."""
+        req = Requisition(
+            name="REQ-HOT-2", customer_name="Acme", status="open",
+            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        offer = Offer(
+            requisition_id=req.id, vendor_name="Mouser", mpn="NE555",
+            qty_available=500, unit_price=0.25, entered_by_id=test_user.id,
+            status="active", created_at=datetime.now(timezone.utc) - timedelta(days=10),
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        resp = client.get("/api/dashboard/hot-offers?days=7")
+        assert resp.json() == []
+
+    def test_age_label_just_now(self, client, db_session, test_user):
+        """Offer created < 1 hour ago shows 'just now'."""
+        req = Requisition(
+            name="REQ-HOT-3", customer_name="Acme", status="open",
+            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        offer = Offer(
+            requisition_id=req.id, vendor_name="DigiKey", mpn="ATmega328P",
+            qty_available=100, unit_price=2.50, entered_by_id=test_user.id,
+            status="active", created_at=datetime.now(timezone.utc) - timedelta(minutes=10),
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        resp = client.get("/api/dashboard/hot-offers?days=7")
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["age_label"] == "just now"
+
+    def test_age_label_days_ago(self, client, db_session, test_user):
+        """Offer created 3 days ago shows '3d ago'."""
+        req = Requisition(
+            name="REQ-HOT-4", customer_name="Acme", status="open",
+            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        offer = Offer(
+            requisition_id=req.id, vendor_name="Arrow", mpn="LM7805",
+            qty_available=200, unit_price=None, entered_by_id=test_user.id,
+            status="active", created_at=datetime.now(timezone.utc) - timedelta(days=3),
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        resp = client.get("/api/dashboard/hot-offers?days=7")
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["age_label"] == "3d ago"
+        assert data[0]["unit_price"] is None
+
+    def test_days_filter(self, client, db_session, test_user):
+        """The days parameter controls the window."""
+        req = Requisition(
+            name="REQ-HOT-5", customer_name="Acme", status="open",
+            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        offer = Offer(
+            requisition_id=req.id, vendor_name="Arrow", mpn="LM317T",
+            qty_available=1000, unit_price=0.50, entered_by_id=test_user.id,
+            status="active", created_at=datetime.now(timezone.utc) - timedelta(days=20),
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        # 7 days: excluded
+        resp = client.get("/api/dashboard/hot-offers?days=7")
+        assert resp.json() == []
+
+        # 30 days: included
+        resp = client.get("/api/dashboard/hot-offers?days=30")
+        assert len(resp.json()) == 1
