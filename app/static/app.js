@@ -1212,154 +1212,195 @@ function goToReq(reqId) {
     setTimeout(() => { if (typeof toggleDrillDown === 'function') toggleDrillDown(reqId); }, 300);
 }
 
+function _ccUrgencyClass(score) {
+    if (score >= 80) return 'cc-urgency-red';
+    if (score >= 60) return 'cc-urgency-amber';
+    return 'cc-urgency-blue';
+}
+
+function _ccTrend(curr, prev) {
+    if (curr > prev) return '<span style="color:var(--green);font-size:10px;margin-left:4px">&#9650;</span>';
+    if (curr < prev) return '<span style="color:var(--red);font-size:10px;margin-left:4px">&#9660;</span>';
+    return '<span style="color:var(--muted);font-size:10px;margin-left:4px">&mdash;</span>';
+}
+
 async function loadDashboard() {
     const el = document.getElementById('dashboardContent');
     if (!el) return;
     el.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading Command Center\u2026</div>';
 
     try {
-        // Fetch data in parallel
-        const [companies, vendorResp, reqs, actionsResp] = await Promise.all([
-            apiFetch('/api/companies').catch(() => []),
-            apiFetch('/api/vendors?limit=100').catch(() => ({ vendors: [] })),
+        const daysParam = _dashPeriod === '30d' ? 30 : _dashPeriod === '90d' ? 90 : 7;
+
+        // Fetch all sales-focused data in parallel
+        const [brief, needsAttn, reqs, quotes, scorecard] = await Promise.all([
+            apiFetch('/api/dashboard/morning-brief').catch(() => null),
+            apiFetch(`/api/dashboard/needs-attention?days=${daysParam}`).catch(() => []),
             apiFetch('/api/requisitions').catch(() => []),
-            apiFetch('/api/command-center/actions').catch(() => ({})),
+            apiFetch('/api/quotes').catch(() => []),
+            apiFetch('/api/proactive/scorecard').catch(() => null),
         ]);
 
-        const vendors = vendorResp.vendors || vendorResp || [];
         const reqList = Array.isArray(reqs) ? reqs : [];
-        const compList = Array.isArray(companies) ? companies : [];
+        const quoteList = Array.isArray(quotes) ? quotes : [];
+        const attnList = Array.isArray(needsAttn) ? needsAttn : [];
+        const myId = window.userId;
 
-        // Pipeline summary
-        const statusCounts = { open: 0, quoted: 0, won: 0, lost: 0 };
-        for (const r of reqList) statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
+        // Filter to "my" data
+        const myReqs = myId ? reqList.filter(r => r.created_by === myId || r.sales_user_id === myId) : reqList;
 
-        // This week's data
+        // Stat calculations
         const now = new Date();
-        const weekAgo = new Date(now - 7 * 86400000);
-        const twoWeeksAgo = new Date(now - 14 * 86400000);
-        const todayStr = now.toISOString().slice(0, 10);
-        const thisWeekReqs = reqList.filter(r => r.created_at && new Date(r.created_at) >= weekAgo);
-        const lastWeekReqs = reqList.filter(r => r.created_at && new Date(r.created_at) >= twoWeeksAgo && new Date(r.created_at) < weekAgo);
-        const thisWeekWon = thisWeekReqs.filter(r => r.status === 'won').length;
-        const lastWeekWon = lastWeekReqs.filter(r => r.status === 'won').length;
-        const thisWeekQuoted = thisWeekReqs.filter(r => r.status === 'quoted').length;
-        const lastWeekQuoted = lastWeekReqs.filter(r => r.status === 'quoted').length;
+        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
 
-        function trendArrow(curr, prev) {
-            if (curr > prev) return '<span style="color:var(--green);font-size:10px">&#9650;</span>';
-            if (curr < prev) return '<span style="color:var(--red);font-size:10px">&#9660;</span>';
-            return '<span style="color:var(--muted);font-size:10px">=</span>';
+        const myOpenReqs = myReqs.filter(r => ['open','active','sourcing'].includes(r.status)).length;
+        const quotesOut = quoteList.filter(q => q.status === 'sent' && !q.result).length;
+        const wonThisMonth = myReqs.filter(r => r.status === 'won' && r.updated_at && new Date(r.updated_at) >= monthStart).length;
+        const wonLastMonth = myReqs.filter(r => r.status === 'won' && r.updated_at && new Date(r.updated_at) >= lastMonthStart && new Date(r.updated_at) <= lastMonthEnd).length;
+        const lostThisMonth = myReqs.filter(r => r.status === 'lost' && r.updated_at && new Date(r.updated_at) >= monthStart).length;
+        const winRate = (wonThisMonth + lostThisMonth) > 0 ? Math.round(wonThisMonth / (wonThisMonth + lostThisMonth) * 100) : 0;
+        const lostLastMonth = myReqs.filter(r => r.status === 'lost' && r.updated_at && new Date(r.updated_at) >= lastMonthStart && new Date(r.updated_at) <= lastMonthEnd).length;
+        const lastWinRate = (wonLastMonth + lostLastMonth) > 0 ? Math.round(wonLastMonth / (wonLastMonth + lostLastMonth) * 100) : 0;
+
+        let html = '';
+
+        // ── Morning Brief ──
+        if (brief) {
+            const briefText = brief.text || null;
+            const stats = brief.stats || {};
+            if (briefText) {
+                html += `<div class="cc-brief"><p>${esc(briefText)}</p></div>`;
+            } else {
+                html += `<div class="cc-brief cc-brief-fallback"><p>You have ${stats.stale_accounts || 0} stale accounts, ${stats.quotes_awaiting || 0} quotes awaiting response, and ${stats.new_proactive_matches || 0} new proactive matches.</p></div>`;
+            }
         }
 
-        // Command Center 6-card grid
-        let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">';
-
-        // Card 1: Needs Action (top-left)
-        const staleRfqs = actionsResp.stale_rfqs || [];
-        const pendingQuotes = actionsResp.pending_quotes || [];
-        const pendingReviews = actionsResp.pending_reviews || [];
-        const actionItems = [
-            ...staleRfqs.map(r => ({ label: `Vendor RFQ #${r.id} — no response 48h+`, id: r.requisition_id || r.id, type: 'rfq' })),
-            ...pendingQuotes.map(q => ({ label: `Quote #${q.id} — pending ${q.days_pending || '5+'}d`, id: q.requisition_id || q.id, type: 'rfq' })),
-            ...pendingReviews.map(o => ({ label: `Offer #${o.id} — needs review`, id: o.requisition_id || o.id, type: 'rfq' })),
-        ].slice(0, 8);
-        html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px;display:flex;align-items:center;gap:6px">
-                <span style="color:var(--red)">&#9888;</span> Needs Action
-                ${actionItems.length ? '<span style="background:var(--red);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:700">'+actionItems.length+'</span>' : ''}
-            </h3>
-            ${actionItems.length ? actionItems.map(a => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
-                <span style="flex:1;font-size:12px">${esc(a.label)}</span>
-                <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="goToReq(${a.id})">Go</button>
-            </div>`).join('') : '<p style="font-size:12px;color:var(--green)">All clear — nothing needs attention</p>'}
+        // ── Stat Row ──
+        html += `<div class="cc-stat-row">
+            <div class="cc-stat"><div class="cc-stat-num">${myOpenReqs}</div><div class="cc-stat-label">My Open Reqs</div></div>
+            <div class="cc-stat"><div class="cc-stat-num">${quotesOut}</div><div class="cc-stat-label">Quotes Out</div></div>
+            <div class="cc-stat"><div class="cc-stat-num" style="color:var(--green)">${wonThisMonth}${_ccTrend(wonThisMonth, wonLastMonth)}</div><div class="cc-stat-label">Won This Month</div></div>
+            <div class="cc-stat"><div class="cc-stat-num">${winRate}%${_ccTrend(winRate, lastWinRate)}</div><div class="cc-stat-label">Win Rate</div></div>
         </div>`;
 
-        // Card 2: Today's Inbox (top-right)
-        const todayResps = actionsResp.today_responses || [];
-        const todayNewReqs = reqList.filter(r => r.created_at && r.created_at.slice(0, 10) === todayStr);
-        html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Today's Inbox</h3>
-            <div style="display:flex;gap:16px;margin-bottom:10px">
-                <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--blue)">${todayResps.length}</div><div style="font-size:10px;color:var(--muted)">Vendor Responses</div></div>
-                <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--amber)">${todayNewReqs.length}</div><div style="font-size:10px;color:var(--muted)">New RFQs</div></div>
-            </div>
-            ${todayResps.slice(0, 4).map(r => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0">
-                <span style="font-size:11px;font-weight:600">${esc(r.vendor_name || 'Unknown')}</span>
-                <span style="flex:1;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.subject || '')}</span>
-                ${r.confidence != null ? '<span style="font-size:10px;color:' + (r.confidence >= 0.8 ? 'var(--green)' : 'var(--amber)') + '">' + Math.round(r.confidence * 100) + '%</span>' : ''}
-            </div>`).join('')}
-            ${!todayResps.length && !todayNewReqs.length ? '<p style="font-size:12px;color:var(--muted)">No new activity today</p>' : ''}
-        </div>`;
+        // ── Detail Cards Grid ──
+        html += '<div class="cc-cards-grid">';
 
-        // Card 3: This Week's Numbers (mid-left)
-        html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">This Week's Numbers</h3>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
-                    <span style="font-size:12px">RFQs Received</span>
-                    <span style="font-weight:700;font-size:12px">${thisWeekReqs.length} ${trendArrow(thisWeekReqs.length, lastWeekReqs.length)}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
-                    <span style="font-size:12px">Quotes Sent</span>
-                    <span style="font-weight:700;font-size:12px">${thisWeekQuoted} ${trendArrow(thisWeekQuoted, lastWeekQuoted)}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
-                    <span style="font-size:12px">Won</span>
-                    <span style="font-weight:700;font-size:12px;color:var(--green)">${thisWeekWon} ${trendArrow(thisWeekWon, lastWeekWon)}</span>
-                </div>
-                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
-                    <span style="font-size:12px">Active Reqs</span>
-                    <span style="font-weight:700;font-size:12px">${statusCounts.open + statusCounts.quoted}</span>
-                </div>
-            </div>
-        </div>`;
-
-        // Card 4: Account Health (mid-right)
-        const unhealthyAccounts = compList
-            .map(c => ({ ...c, daysSinceActivity: daysSince(c.last_enriched_at), openReqs: (c.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0) }))
-            .filter(c => c.daysSinceActivity > 30)
-            .sort((a, b) => b.daysSinceActivity - a.daysSinceActivity)
-            .slice(0, 6);
-        html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Account Health</h3>
-            ${unhealthyAccounts.length ? unhealthyAccounts.map(c => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer" onclick="goToCompany(${c.id})">
-                ${healthDot(recencyColor(c.daysSinceActivity, [30, 90]))}
-                <span style="flex:1;font-size:12px;font-weight:500">${esc(c.name)}</span>
-                <span style="font-size:10px;color:var(--muted)">${c.daysSinceActivity < 900 ? c.daysSinceActivity + 'd' : 'Never'}</span>
-                ${c.openReqs ? '<span style="font-size:10px;background:var(--blue-bg,#dbeafe);color:var(--blue);padding:1px 5px;border-radius:3px">' + c.openReqs + ' open</span>' : ''}
-            </div>`).join('') : '<p style="font-size:12px;color:var(--green)">All accounts are healthy</p>'}
-        </div>`;
-
-        // Card 5: Vendor Pulse (bottom-left)
-        const ghostVendors = [...vendors].filter(v => v.ghost_rate != null && v.ghost_rate > 0.3).sort((a, b) => (b.ghost_rate || 0) - (a.ghost_rate || 0)).slice(0, 3);
-        const topByVolume = [...vendors].sort((a, b) => (b.sighting_count || 0) - (a.sighting_count || 0)).slice(0, 5);
-        html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Vendor Pulse</h3>
-            ${ghostVendors.length ? '<div style="font-size:10px;font-weight:600;color:var(--red);margin-bottom:4px">Top Ghosting</div>' : ''}
-            ${ghostVendors.map(v => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer" onclick="openVendorDrawer(${v.id})">
-                <span style="flex:1;font-size:12px">${esc(v.display_name)}</span>
-                <span style="font-size:10px;color:var(--red);font-weight:600">${Math.round((v.ghost_rate || 0) * 100)}% ghost</span>
-            </div>`).join('')}
-            <div style="font-size:10px;font-weight:600;color:var(--muted);margin:8px 0 4px">Top by Volume</div>
-            ${topByVolume.map(v => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer" onclick="openVendorDrawer(${v.id})">
-                ${engRing(v.vendor_score != null ? Math.round(v.vendor_score) : 0, 22)}
-                <span style="flex:1;font-size:12px">${esc(v.display_name)}</span>
-                <span style="font-size:10px;color:var(--muted)">${v.sighting_count || 0} parts</span>
-            </div>`).join('')}
-        </div>`;
-
-        // Card 6: Quick Actions (bottom-right)
-        html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Quick Actions</h3>
-            <div style="display:flex;flex-direction:column;gap:6px">
-                <button class="btn btn-primary btn-sm" onclick="openNewReqModal()" style="text-align:left">+ New Requisition</button>
-                <button class="btn btn-ghost btn-sm" onclick="openNewCompanyModal()" style="text-align:left">+ New Account</button>
-                <button class="btn btn-ghost btn-sm" onclick="sidebarNav('vendors')" style="text-align:left">Browse Vendors</button>
-            </div>
-        </div>`;
-
+        // Card 1: Needs Attention (revenue-enhanced)
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Needs Attention <span class="cc-card-count">${attnList.length}</span></h3>`;
+        if (attnList.length) {
+            html += attnList.slice(0, 8).map(a => {
+                const hasQuote = a.open_quote_value > 0;
+                const neverContacted = !a.last_outreach_at;
+                const dotColor = (neverContacted || (hasQuote && a.days_since_contact >= 5)) ? 'var(--red)' : 'var(--amber)';
+                let detail = '';
+                if (neverContacted) detail = 'Never contacted';
+                else if (hasQuote) detail = `$${(a.open_quote_value/1000).toFixed(1)}K quote going cold &middot; ${a.days_since_contact}d`;
+                else detail = `${a.days_since_contact}d ago &middot; ${a.last_channel || 'unknown'}`;
+                return `<div class="cc-row" onclick="goToCompany(${a.company_id})">
+                    <span class="cc-dot" style="background:${dotColor}"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(a.company_name)}${a.is_strategic ? ' <span class="cc-star">&#9733;</span>' : ''}</span>
+                        <span class="cc-row-detail">${detail}</span>
+                    </div>
+                    ${a.open_req_count ? '<span class="cc-row-badge">' + a.open_req_count + ' open</span>' : ''}
+                </div>`;
+            }).join('');
+        } else {
+            html += '<p class="cc-empty">All accounts contacted recently.</p>';
+        }
         html += '</div>';
+
+        // Card 2: Quotes Awaiting Response
+        const awaitingQuotes = quoteList.filter(q => q.status === 'sent' && !q.result).sort((a, b) => new Date(a.sent_at || 0) - new Date(b.sent_at || 0));
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--amber)">&#9679;</span> Quotes Awaiting Response <span class="cc-card-count">${awaitingQuotes.length}</span></h3>`;
+        if (awaitingQuotes.length) {
+            html += awaitingQuotes.slice(0, 6).map(q => {
+                const daysSent = q.sent_at ? Math.floor((now - new Date(q.sent_at)) / 86400000) : 0;
+                const dotColor = daysSent >= 7 ? 'var(--red)' : daysSent >= 3 ? 'var(--amber)' : 'var(--green)';
+                return `<div class="cc-row" onclick="goToReq(${q.requisition_id || q.id})">
+                    <span class="cc-dot" style="background:${dotColor}"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(q.quote_number || 'Quote #' + q.id)}${q.customer_name ? ' &mdash; ' + esc(q.customer_name) : ''}</span>
+                        <span class="cc-row-detail">${daysSent}d since sent${q.subtotal ? ' &middot; $' + Number(q.subtotal).toLocaleString() : ''}</span>
+                    </div>
+                </div>`;
+            }).join('');
+        } else {
+            html += '<p class="cc-empty">No quotes waiting for response.</p>';
+        }
+        html += '</div>';
+
+        // Card 3: Ready to Quote
+        const readyToQuote = myReqs.filter(r => ['open','active','sourcing'].includes(r.status) && (r.offer_count || 0) > 0 && (r.quote_count || 0) === 0);
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--blue)">&#9679;</span> Ready to Quote <span class="cc-card-count">${readyToQuote.length}</span></h3>`;
+        if (readyToQuote.length) {
+            html += readyToQuote.slice(0, 6).map(r => `<div class="cc-row" onclick="goToReq(${r.id})">
+                <span class="cc-dot" style="background:var(--blue)"></span>
+                <div class="cc-row-body">
+                    <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
+                    <span class="cc-row-detail">${r.offer_count} offer${r.offer_count > 1 ? 's' : ''} ready</span>
+                </div>
+            </div>`).join('');
+        } else {
+            html += '<p class="cc-empty">No reqs with unquoted offers.</p>';
+        }
+        html += '</div>';
+
+        // Card 4: Upcoming Deadlines
+        const withDeadline = myReqs.filter(r => r.deadline && ['open','active','sourcing'].includes(r.status));
+        withDeadline.sort((a, b) => {
+            if (a.deadline === 'ASAP') return -1;
+            if (b.deadline === 'ASAP') return 1;
+            return new Date(a.deadline) - new Date(b.deadline);
+        });
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Upcoming Deadlines <span class="cc-card-count">${withDeadline.length}</span></h3>`;
+        if (withDeadline.length) {
+            html += withDeadline.slice(0, 6).map(r => {
+                let dotColor = 'var(--green)';
+                let deadlineLabel = r.deadline;
+                if (r.deadline === 'ASAP') {
+                    dotColor = 'var(--red)';
+                } else {
+                    const dl = new Date(r.deadline);
+                    const daysLeft = Math.floor((dl - now) / 86400000);
+                    if (daysLeft <= 0) { dotColor = 'var(--red)'; deadlineLabel = daysLeft === 0 ? 'Today' : Math.abs(daysLeft) + 'd overdue'; }
+                    else if (daysLeft <= 3) { dotColor = 'var(--amber)'; deadlineLabel = daysLeft + 'd left'; }
+                    else { deadlineLabel = r.deadline; }
+                }
+                return `<div class="cc-row" onclick="goToReq(${r.id})">
+                    <span class="cc-dot" style="background:${dotColor}"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
+                        <span class="cc-row-detail">${deadlineLabel}</span>
+                    </div>
+                </div>`;
+            }).join('');
+        } else {
+            html += '<p class="cc-empty">No upcoming deadlines.</p>';
+        }
+        html += '</div>';
+
+        html += '</div>'; // close cc-cards-grid
+
+        // ── Proactive Intelligence ──
+        if (scorecard) {
+            const sc = scorecard;
+            const rate = sc.conversion_rate != null ? Math.round(sc.conversion_rate) : 0;
+            html += `<div class="card-v2 cc-card cc-proactive-card">
+                <h3 class="cc-card-title"><span style="color:var(--sourcing-color)">&#9679;</span> Proactive Intelligence</h3>
+                <div class="cc-proactive-stats">
+                    <span class="cc-pill">Sent: <b>${sc.total_sent || 0}</b></span>
+                    <span class="cc-pill">Quoted: <b>${sc.total_quoted || 0}</b></span>
+                    <span class="cc-pill">POs: <b>${sc.total_po || 0}</b></span>
+                    <span class="cc-pill">Rate: <b>${rate}%</b></span>
+                </div>
+                <div style="margin-top:8px"><a class="cc-link" onclick="sidebarNav('proactive',document.getElementById('navProactive'))">View all matches &rarr;</a></div>
+            </div>`;
+        }
+
         el.innerHTML = html;
     } catch (err) {
         console.error('loadDashboard error:', err);
