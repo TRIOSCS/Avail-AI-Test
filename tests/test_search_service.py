@@ -331,6 +331,57 @@ class TestSightingToDict:
         d = sighting_to_dict(s)
         assert d["condition"] == "refurbished"
 
+    def test_is_stale_recent(self, db_session):
+        """Sightings created recently should not be stale."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        s = Sighting(
+            requirement_id=req.id,
+            vendor_name="Arrow",
+            mpn_matched="LM317T",
+            created_at=datetime.now(timezone.utc) - timedelta(days=10),
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        d = sighting_to_dict(s)
+        assert d["is_stale"] is False
+
+    def test_is_stale_old(self, db_session):
+        """Sightings older than 90 days should be stale."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        s = Sighting(
+            requirement_id=req.id,
+            vendor_name="Arrow",
+            mpn_matched="LM317T",
+            created_at=datetime.now(timezone.utc) - timedelta(days=91),
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        d = sighting_to_dict(s)
+        assert d["is_stale"] is True
+
+    def test_is_stale_no_created_at(self, db_session):
+        """Sightings with no created_at should not be stale."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        s = Sighting(
+            requirement_id=req.id,
+            vendor_name="Arrow",
+            mpn_matched="LM317T",
+            created_at=None,
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        d = sighting_to_dict(s)
+        assert d["is_stale"] is False
+
 
 # ── _history_to_result ───────────────────────────────────────────────────
 

@@ -86,6 +86,31 @@ def _add_missing_columns(conn) -> None:
     for stmt in stmts:
         _exec(conn, stmt)
 
+    # FK constraint migration: SET NULL on offers.vendor_card_id
+    _exec(conn, """
+        DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM information_schema.table_constraints
+            WHERE constraint_name='offers_vendor_card_id_fkey' AND table_name='offers')
+          THEN
+            ALTER TABLE offers DROP CONSTRAINT offers_vendor_card_id_fkey;
+            ALTER TABLE offers ADD CONSTRAINT offers_vendor_card_id_fkey
+              FOREIGN KEY (vendor_card_id) REFERENCES vendor_cards(id) ON DELETE SET NULL;
+          END IF;
+        END $$
+    """)
+    # FK constraint migration: SET NULL on offers.vendor_response_id
+    _exec(conn, """
+        DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM information_schema.table_constraints
+            WHERE constraint_name='offers_vendor_response_id_fkey' AND table_name='offers')
+          THEN
+            ALTER TABLE offers DROP CONSTRAINT offers_vendor_response_id_fkey;
+            ALTER TABLE offers ADD CONSTRAINT offers_vendor_response_id_fkey
+              FOREIGN KEY (vendor_response_id) REFERENCES vendor_responses(id) ON DELETE SET NULL;
+          END IF;
+        END $$
+    """)
+
     # Backfill vendor_score from engagement_score as initial data
     _exec(conn, """
         UPDATE vendor_cards
@@ -420,3 +445,6 @@ def _create_perf_indexes(conn) -> None:
         CREATE INDEX IF NOT EXISTS ix_vendor_responses_vendor_name
         ON vendor_responses (vendor_name) WHERE vendor_name IS NOT NULL
     """)
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_vendor_name ON offers (vendor_name)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_vendor_cards_created_at ON vendor_cards (created_at)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_vendor_cards_score_computed_at ON vendor_cards (vendor_score_computed_at)")

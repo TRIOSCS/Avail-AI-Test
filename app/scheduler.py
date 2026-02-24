@@ -289,10 +289,24 @@ async def _job_token_refresh():
 
         # Refresh all users in parallel
         async def _safe_refresh(user):
+            from .cache.intel_cache import _get_redis
+            lock_key = f"lock:token_refresh:{user.id}"
+            r = _get_redis()
+            if r:
+                acquired = r.set(lock_key, "1", nx=True, ex=60)
+                if not acquired:
+                    logger.debug("Token refresh skipped for %s — lock held", user.email)
+                    return
             try:
                 await refresh_user_token(user, db)
             except Exception as e:
                 logger.error(f"Token refresh error for {user.email}: {e}")
+            finally:
+                if r:
+                    try:
+                        r.delete(lock_key)
+                    except Exception:
+                        pass
 
         if users_to_refresh:
             await asyncio.gather(*[_safe_refresh(u) for u in users_to_refresh])

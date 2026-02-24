@@ -818,4 +818,5 @@ def sighting_to_dict(s: Sighting) -> dict:
         "lead_time_days": s.lead_time_days,
         "lead_time": s.lead_time,
         "created_at": s.created_at.isoformat() if s.created_at else None,
+        "is_stale": (datetime.now(timezone.utc) - (s.created_at.replace(tzinfo=timezone.utc) if s.created_at.tzinfo is None else s.created_at)).days > 90 if s.created_at else False,
     }

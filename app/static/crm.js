@@ -797,7 +797,7 @@ async function _renderCustDrawerActivity(companyId) {
         const activities = await apiFetch('/api/companies/' + companyId + '/activities');
         const c = crmCustomers.find(x => x.id === companyId);
         if (!activities.length) {
-            body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No activity recorded</p>
+            body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No activity recorded — send an RFQ or log a note to get started</p>
                 ${c ? '<button class="btn btn-ghost btn-sm" onclick="openLogNoteModal('+c.id+',\''+escAttr(c.name)+'\')">+ Add Note</button>' : ''}
             </div>`;
             return;
@@ -858,7 +858,7 @@ async function _renderCustDrawerPipeline(companyId) {
         }
 
         if (!allReqs.length) {
-            body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No requisitions for this account</p></div>';
+            body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No requisitions for this account — create one from the main RFQ list</p></div>';
             return;
         }
 
@@ -2253,6 +2253,7 @@ async function markQuoteResult(result) {
         showToast('Quote updated', 'info');
         notifyStatusChange(resultData);
         loadQuote();
+        _refreshCustPipeline();
     } catch (e) {
         // Revert on failure
         if (badge) { badge.textContent = prevStatus; badge.className = 'status-badge status-' + prevStatus; }
@@ -2920,6 +2921,7 @@ async function submitLost() {
         showToast('Quote marked as lost', 'info');
         notifyStatusChange(lostData);
         loadQuote();
+        _refreshCustPipeline();
     } catch (e) { console.error('submitLost:', e); showToast('Error submitting', 'error'); }
 }
 
@@ -4547,10 +4549,11 @@ function openSettingsTab(panel) {
     document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
     const navBtn = document.getElementById('navSettings');
     if (navBtn) navBtn.classList.add('active');
-    switchSettingsTab(panel || 'users');
+    switchSettingsTab(panel || localStorage.getItem('settings_active_tab') || 'users');
 }
 
 function switchSettingsTab(name, btn) {
+    try { localStorage.setItem('settings_active_tab', name); } catch(e) {}
     document.querySelectorAll('.settings-panel').forEach(p => p.style.display = 'none');
     document.querySelectorAll('#settingsTabs .tab').forEach(t => t.classList.remove('on'));
     const target = document.getElementById('settings-' + name);
@@ -6071,7 +6074,7 @@ function renderProspecting() {
             <td>${esc([s.city, s.state].filter(Boolean).join(', '))}</td>
             <td>${s.last_activity_at ? fmtRelative(s.last_activity_at) : '<span class="u-color-muted">Never</span>'}</td>
             <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();claimSite(${s.site_id})">Claim</button></td>
-        </tr>`).join('') : '<tr><td colspan="6" class="empty">No unassigned sites in the pool</td></tr>';
+        </tr>`).join('') : '<tr><td colspan="6" class="empty">No unassigned sites — all sites have owners</td></tr>';
     } else if (_prospectingTab === 'my-sites') {
         head.innerHTML = '<th>Company</th><th>Site</th><th>Contact</th><th>Location</th><th>Status</th><th>Last Activity</th>';
         body.innerHTML = filtered.length ? filtered.map(s => {
@@ -6319,7 +6322,7 @@ async function _renderProspectDrawerActivity(siteId) {
     try {
         const activities = await apiFetch('/api/activities?site_id=' + siteId);
         if (!activities.length) {
-            body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No activity recorded</p></div>';
+            body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No activity recorded — claim this site and start outreach</p></div>';
             return;
         }
         let html = '<div class="drawer-section"><div class="drawer-section-title">Activity Feed</div>';
@@ -6340,8 +6343,13 @@ async function _renderProspectDrawerActivity(siteId) {
     }
 }
 
+function _refreshCustPipeline() {
+    if (_selectedCustId) _renderCustDrawerPipeline(_selectedCustId);
+}
+
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
+    _refreshCustPipeline,
     _attrSearch, _attrSelect, _debouncedFilterSiteContacts,
     _debouncedFilterDrawerContacts, _debouncedLoadVendorScorecards,
     _debouncedUpdateBpTotals, _debouncedUpdateProactivePreview,

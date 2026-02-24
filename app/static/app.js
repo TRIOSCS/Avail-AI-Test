@@ -137,6 +137,9 @@ export async function apiFetch(url, opts = {}) {
     const dedupeKey = method === 'GET' ? method + ':' + url : null;
     if (dedupeKey && _apiFetchInflight[dedupeKey]) return _apiFetchInflight[dedupeKey];
     const doFetch = async () => {
+        if (!navigator.onLine) {
+            throw Object.assign(new Error('You appear to be offline'), {status: 0});
+        }
         const maxRetries = method === 'GET' ? 2 : 0;
         let lastErr;
         for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -145,8 +148,8 @@ export async function apiFetch(url, opts = {}) {
             }
             const res = await fetch(url, opts);
             if (!res.ok) {
-                const msg = await res.text().catch(() => res.statusText);
-                lastErr = Object.assign(new Error(msg), {status: res.status});
+                const rawMsg = await res.text().catch(() => res.statusText);
+                lastErr = Object.assign(new Error(rawMsg.length > 200 ? rawMsg.slice(0, 200) : rawMsg), {status: res.status});
                 // Session expired — redirect to login
                 if (res.status === 401) {
                     showToast('Session expired — redirecting to login…', 'error');
@@ -220,8 +223,19 @@ export async function guardBtn(btn, loadingText, action) {
     var orig = btn.textContent;
     btn.disabled = true;
     if (loadingText) btn.textContent = loadingText;
+    var lockedEls = [];
+    var form = btn.closest('form');
+    if (form) {
+        form.querySelectorAll('input,select,textarea,button').forEach(function(el) {
+            if (!el.disabled) { el.disabled = true; lockedEls.push(el); }
+        });
+    }
     try { return await action(); }
-    finally { btn.disabled = false; btn.textContent = orig; }
+    finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+        lockedEls.forEach(function(el) { el.disabled = false; });
+    }
 }
 // Lightweight self-guard for async onclick handlers: call _selfGuard(ev) at top,
 // returns false if button already busy. Automatically re-enables when function returns.
@@ -778,6 +792,7 @@ export function showView(viewId) {
     // Close any open CRM drawers, reset split-pane state, and cancel in-flight fetches
     if (typeof closeCustDrawer === 'function') try { closeCustDrawer(); } catch(e) {}
     if (typeof closeProspectDrawer === 'function') try { closeProspectDrawer(); } catch(e) {}
+    if (typeof closeVendorDrawer === 'function') try { closeVendorDrawer(); } catch(e) {}
     if (typeof _abortAllCrmFetches === 'function') try { _abortAllCrmFetches(); } catch(e) {}
     // Clear top breadcrumb when switching views (CRM views will re-set it)
     const topBc = document.getElementById('topBreadcrumb');
@@ -825,6 +840,7 @@ function showVendors() {
     const viewEl = document.getElementById('view-vendors');
     if (viewEl) viewEl.style.display = 'flex';
     currentReqId = null;
+    if (window._setTopViewLabel) window._setTopViewLabel('Vendors');
     loadVendorList();
 }
 
@@ -1935,7 +1951,7 @@ function _renderDdOffers(reqId, data, panel) {
             pendingCount += (g.offers || []).filter(o => o.status === 'pending_review').length;
         }
     }
-    if (!totalOffers) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet</span>'; return; }
+    if (!totalOffers) { panel.innerHTML = '<span style="font-size:11px;color:var(--muted)">No offers yet — log one from the vendor tab or send an RFQ</span>'; return; }
     if (!_ddSelectedOffers[reqId]) _ddSelectedOffers[reqId] = new Set();
     const sel = _ddSelectedOffers[reqId];
 
@@ -3263,6 +3279,7 @@ async function ddMarkQuoteResult(reqId, result) {
             const panel = drow.querySelector('.dd-panel');
             if (panel) await _loadDdSubTab(reqId, 'quotes', panel);
         }
+        if (window._refreshCustPipeline) window._refreshCustPipeline();
     } catch (e) {
         showToast('Error: ' + (e.message || e), 'error');
     }
@@ -4166,7 +4183,8 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice) {
             priceTitle = ` title="${pctDelta > 0 ? '+' : ''}${pctDelta.toFixed(0)}% vs target ($${Number(targetPrice).toFixed(2)})"`;
         }
         const rowBg = unavail ? 'background:rgba(220,38,38,.04);opacity:.6' : isSub ? 'background:rgba(14,116,144,.04)' : '';
-        html += `<tr style="${dimStyle}${rowBg ? ';' + rowBg : ''}">
+        const staleOpacity = s.is_stale && !unavail ? 'opacity:0.55;' : '';
+        html += `<tr style="${staleOpacity}${dimStyle}${rowBg ? ';' + rowBg : ''}">
             <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
             <td>${ring}${s.vendor_card && s.vendor_card.id ? '<a onclick="event.stopPropagation();openVendorDrawer('+s.vendor_card.id+')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>' : esc(s.vendor_name || '\u2014')}${inlineBadges}${linkPill}${needsEmail}${unavailBadge}</td>
             <td style="font-size:10px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis">${contactHtml || '\u2014'}</td>
@@ -5964,7 +5982,7 @@ function renderSources() {
     const el = document.getElementById('sourceResults');
     const keys = Object.keys(searchResults);
     if (!keys.length) {
-        el.innerHTML = '<p class="empty">No results found</p>';
+        el.innerHTML = '<p class="empty">No results found — try a different part number or check spelling</p>';
         document.getElementById('srcFilterCount').textContent = '';
         document.getElementById('collapsedMatchHint')?.classList.add('hidden');
         return;
@@ -6703,11 +6721,11 @@ async function sendBatchRfq() {
             const sent = results.filter(r => r.status === 'sent').length;
             const failed = results.filter(r => r.status !== 'sent');
             if (failed.length > 0 && sent > 0) {
-                showToast(`${sent} of ${payload.length} sent. ${failed.length} failed: ${failed.map(f => f.vendor_name || 'unknown').join(', ')}`, 'warn');
+                showToast(`Sent ${sent} of ${results.length} RFQs (${failed.length} failed)`, 'warn');
             } else if (failed.length > 0 && sent === 0) {
                 showToast(`All ${failed.length} emails failed to send`, 'error');
             } else {
-                showToast(`${sent} of ${payload.length} emails sent successfully`, 'success');
+                showToast(`Sent ${sent} of ${results.length} RFQs`, 'success');
             }
             closeModal('rfqModal');
             selectedSightings.clear();
@@ -7673,6 +7691,8 @@ function openVendorDrawer(vendorId) {
     const drawer = document.getElementById('vendorDrawer');
     if (backdrop) backdrop.classList.add('open');
     if (drawer) drawer.classList.add('open');
+    const v = _vendorListData.find(x => x.id === vendorId);
+    if (window._setTopDrillLabel) window._setTopDrillLabel(v?.display_name || 'Vendor');
     _renderVendorDrawerOverview(vendorId);
     document.querySelectorAll('#vendorDrawerTabs .drawer-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
 }
@@ -7684,6 +7704,7 @@ function closeVendorDrawer() {
     if (backdrop) backdrop.classList.remove('open');
     if (drawer) drawer.classList.remove('open');
     document.querySelectorAll('#vendorList tbody tr').forEach(r => r.classList.remove('active-row'));
+    if (window._setTopViewLabel) window._setTopViewLabel('Vendors');
 }
 
 function switchVendorDrawerTab(tab, btn) {

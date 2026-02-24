@@ -31,7 +31,7 @@ class Offer(Base):
     )
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"))
 
-    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"))
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"))
     vendor_name = Column(String(255), nullable=False)
 
     mpn = Column(String(255), nullable=False)
@@ -51,7 +51,7 @@ class Offer(Base):
     country_of_origin = Column(String(100))
 
     source = Column(String(50), default="manual")
-    vendor_response_id = Column(Integer, ForeignKey("vendor_responses.id"))
+    vendor_response_id = Column(Integer, ForeignKey("vendor_responses.id", ondelete="SET NULL"))
     entered_by_id = Column(Integer, ForeignKey("users.id"))
 
     notes = Column(Text)
@@ -93,6 +93,7 @@ class Offer(Base):
         Index("ix_offers_req_status", "requisition_id", "status"),
         Index("ix_offers_entered_created", "entered_by_id", "created_at"),
         Index("ix_offers_req_created", "requisition_id", "created_at"),
+        Index("ix_offers_vendor_name", "vendor_name"),
     )
 
 

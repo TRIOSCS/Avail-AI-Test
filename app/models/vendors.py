@@ -104,6 +104,11 @@ class VendorCard(Base):
         "VendorContact", back_populates="vendor_card", cascade="all, delete-orphan"
     )
 
+    __table_args__ = (
+        Index("ix_vendor_cards_created_at", "created_at"),
+        Index("ix_vendor_cards_score_computed_at", "vendor_score_computed_at"),
+    )
+
 
 class VendorContact(Base):
     __tablename__ = "vendor_contacts"
