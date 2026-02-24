@@ -110,28 +110,50 @@
 <!-- SIDEBAR — v7 slide-out -->
 <aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
     <nav class="sidebar-nav">
-        <div class="nav-group">
-            <span class="nav-group-label">Sourcing</span>
-            <button type="button" class="active" id="navReqs" onclick="sidebarNav('reqs',this)"><span class="ni">&#x1f4cb;</span> RFQs</button>
-            <button type="button" id="navProactive" onclick="sidebarNav('proactive',this)"><span class="ni">&#x2b50;</span> Proactive</button>
-            <button type="button" id="navMaterials" onclick="sidebarNav('materials',this)"><span class="ni">&#x1f527;</span> Materials</button>
-            <button type="button" id="navBuyPlans" onclick="sidebarNav('buyplans',this)"><span class="ni">&#x1f4e6;</span> Buy Plans</button>
+        <div class="sb-top-gradient" data-section="sourcing"></div>
+        <div class="sb-nav-group" data-section="sourcing" style="--section-color:var(--sourcing-color);--section-dot:var(--sourcing-dot);--section-border:var(--sourcing-border)">
+            <div class="sb-section-dot"></div>
+            <div class="sb-group-header" onclick="toggleSidebarGroup(this)">
+                <span class="sb-group-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 12l5-3M12 12v-6"/><circle cx="12" cy="12" r="1" fill="#fff" stroke="none"/></svg></span>
+                <span class="sb-group-label">Sourcing</span>
+                <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="sb-group-items">
+                <button type="button" class="sb-nav-btn active" id="navReqs" onclick="sidebarNav('reqs',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><line x1="8" y1="8" x2="16" y2="8"/><line x1="8" y1="12" x2="16" y2="12"/><line x1="8" y1="16" x2="12" y2="16"/></svg></span> RFQs</button>
+                <button type="button" class="sb-nav-btn" id="navProactive" onclick="sidebarNav('proactive',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg></span> Proactive</button>
+                <button type="button" class="sb-nav-btn" id="navMaterials" onclick="sidebarNav('materials',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></span> Materials</button>
+                <button type="button" class="sb-nav-btn" id="navBuyPlans" onclick="sidebarNav('buyplans',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span> Buy Plans</button>
+            </div>
         </div>
-        <div class="nav-group">
-            <span class="nav-group-label">Relationships</span>
-            <button type="button" id="navDashboard" onclick="sidebarNav('dashboard',this)"><span class="ni">&#x1f4ca;</span> Command Center</button>
-            <button type="button" id="navCustomers" onclick="sidebarNav('customers',this)"><span class="ni">&#x1f3e2;</span> Accounts</button>
-            <button type="button" id="navVendors" onclick="sidebarNav('vendors',this)"><span class="ni">&#x1f91d;</span> Vendors</button>
-            <button type="button" id="navContacts" onclick="sidebarNav('contacts',this)"><span class="ni">&#x1f465;</span> Contacts</button>
-            <button type="button" id="navProspecting" onclick="sidebarNav('prospecting',this)" style="display:none"><span class="ni">&#x1f3af;</span> Prospecting</button>
+        <div class="sb-nav-group" data-section="relationships" style="--section-color:var(--relationships-color);--section-dot:var(--relationships-dot);--section-border:var(--relationships-border)">
+            <div class="sb-section-dot"></div>
+            <div class="sb-group-header" onclick="toggleSidebarGroup(this)">
+                <span class="sb-group-icon"><svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z"/></svg></span>
+                <span class="sb-group-label">Relationships</span>
+                <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="sb-group-items">
+                <button type="button" class="sb-nav-btn" id="navDashboard" onclick="sidebarNav('dashboard',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></span> Command Center</button>
+                <button type="button" class="sb-nav-btn" id="navCustomers" onclick="sidebarNav('customers',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg></span> Accounts</button>
+                <button type="button" class="sb-nav-btn" id="navVendors" onclick="sidebarNav('vendors',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span> Vendors</button>
+                <button type="button" class="sb-nav-btn" id="navContacts" onclick="sidebarNav('contacts',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span> Contacts</button>
+                <button type="button" class="sb-nav-btn" id="navProspecting" onclick="sidebarNav('prospecting',this)" style="display:none"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span> Prospecting</button>
+            </div>
         </div>
-        <div class="nav-group">
-            <span class="nav-group-label">Insights</span>
-            <button type="button" id="navScorecards" onclick="sidebarNav('performance',this)"><span class="ni">&#x1f3c6;</span> Scorecards</button>
+        <div class="sb-nav-group" data-section="insights" style="--section-color:var(--insights-color);--section-dot:var(--insights-dot);--section-border:var(--insights-border)">
+            <div class="sb-section-dot"></div>
+            <div class="sb-group-header" onclick="toggleSidebarGroup(this)">
+                <span class="sb-group-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>
+                <span class="sb-group-label">Insights</span>
+                <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="sb-group-items">
+                <button type="button" class="sb-nav-btn" id="navScorecards" onclick="sidebarNav('performance',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/></svg></span> Scorecards</button>
+            </div>
         </div>
-        <div class="nav-group nav-group-bottom">
-            <button type="button" id="navSettings" onclick="sidebarNav('settings',this)" style="display:none"><span class="ni">&#x2699;</span> Settings</button>
-            <button type="button" class="nav-logout" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())"><span class="ni">&#x1f6aa;</span> Logout</button>
+        <div class="sb-nav-group nav-group-bottom">
+            <button type="button" class="sb-nav-btn" id="navSettings" onclick="sidebarNav('settings',this)" style="display:none"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings</button>
+            <button type="button" class="sb-nav-btn nav-logout" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span> Logout</button>
         </div>
     </nav>
     <div class="sidebar-footer">
