@@ -1168,6 +1168,27 @@ async def test_claude_structured_system_cache():
 
 
 @pytest.mark.asyncio
+async def test_claude_structured_cache_read_tokens():
+    """Sentry AI monitoring: cache_read_input_tokens branch (line 151)."""
+    from app.utils.claude_client import claude_structured
+
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "content": [{"type": "tool_use", "name": "structured_output", "input": {"k": "v"}}],
+        "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 8}}
+
+    with (
+        patch("app.utils.claude_client.get_credential_cached", return_value="sk-t"),
+        patch("app.utils.claude_client.http") as mh,
+    ):
+        mh.post = AsyncMock(return_value=mock_resp)
+        result = await claude_structured("test",
+            schema={"type": "object", "properties": {"k": {"type": "string"}}})
+        assert result == {"k": "v"}
+
+
+@pytest.mark.asyncio
 async def test_batch_blank_line_skipped():
     from app.utils.claude_client import claude_batch_results
 
