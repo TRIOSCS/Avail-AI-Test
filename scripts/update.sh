@@ -15,9 +15,10 @@ until docker compose ps app --format '{{.Status}}' | grep -q healthy; do
     sleep 2
 done
 
-echo "Restarting Caddy to clear stale upstream connections..."
-docker compose restart caddy
-sleep 3
+# Caddy auto-recovers via health checks — no restart needed.
+# Only reload config if the Caddyfile changed.
+echo "Reloading Caddy config..."
+docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null || true
 
 echo ""
 echo "✓ Updated and running"

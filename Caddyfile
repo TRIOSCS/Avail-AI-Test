@@ -1,48 +1,62 @@
+(backend) {
+	reverse_proxy app:8000 {
+		lb_try_duration 30s
+		lb_try_interval 1s
+		health_uri /health
+		health_interval 5s
+		health_timeout 3s
+		transport http {
+			keepalive 30s
+			keepalive_idle_conns 10
+		}
+	}
+}
+
 app.availai.net {
-    encode gzip zstd
+	encode gzip zstd
 
-    header {
-        Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
-        X-Frame-Options "SAMEORIGIN"
-        X-Content-Type-Options "nosniff"
-        Referrer-Policy "strict-origin-when-cross-origin"
-        Permissions-Policy "camera=(), microphone=(), geolocation=()"
-        Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'"
-    }
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		X-Frame-Options "SAMEORIGIN"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'"
+	}
 
-    @blocked path /metrics
-    handle @blocked {
-        respond 403
-    }
+	@blocked path /metrics
+	handle @blocked {
+		respond 403
+	}
 
-    @static path /static/*
-    handle @static {
-        header Cache-Control "public, max-age=31536000, immutable"
-        root * /srv
-        file_server
-    }
+	@static path /static/*
+	handle @static {
+		header Cache-Control "public, max-age=31536000, immutable"
+		root * /srv
+		file_server
+	}
 
-    # Safe read-only GET endpoints — 30s browser cache reduces redundant
-    # API calls when switching tabs rapidly
-    @safe_api {
-        method GET
-        path /api/companies /api/users/list /api/vendors
-    }
-    handle @safe_api {
-        header Cache-Control "private, max-age=30"
-        reverse_proxy app:8000
-    }
+	# Safe read-only GET endpoints — 30s browser cache reduces redundant
+	# API calls when switching tabs rapidly
+	@safe_api {
+		method GET
+		path /api/companies /api/users/list /api/vendors
+	}
+	handle @safe_api {
+		header Cache-Control "private, max-age=30"
+		import backend
+	}
 
-    @api path /api/* /auth/*
-    handle @api {
-        header Cache-Control "no-cache, no-store, must-revalidate"
-        reverse_proxy app:8000
-    }
+	@api path /api/* /auth/*
+	handle @api {
+		header Cache-Control "no-cache, no-store, must-revalidate"
+		import backend
+	}
 
-    # Everything else (HTML pages, etc.) — never cache
-    handle {
-        header Cache-Control "no-store, must-revalidate"
-        header Pragma "no-cache"
-        reverse_proxy app:8000
-    }
+	# Everything else (HTML pages, etc.) — never cache
+	handle {
+		header Cache-Control "no-store, must-revalidate"
+		header Pragma "no-cache"
+		import backend
+	}
 }
