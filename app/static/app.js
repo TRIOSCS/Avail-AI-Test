@@ -8,7 +8,6 @@
             var cfg = JSON.parse(el.textContent);
             window.__userName = cfg.userName || '';
             window.__userEmail = cfg.userEmail || '';
-            window.__userId = cfg.userId || 0;
             window.__isAdmin = !!cfg.isAdmin;
             window.__isManager = !!cfg.isManager;
             if (cfg.userRole) window.userRole = cfg.userRole;
@@ -1213,165 +1212,144 @@ async function loadDashboard() {
     el.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading Command Center\u2026</div>';
 
     try {
-        const [reqsResp, needsAttn, scorecardResp] = await Promise.all([
-            apiFetch('/api/requisitions?limit=500').catch(() => ({ requisitions: [] })),
-            apiFetch('/api/dashboard/needs-attention?days=5').catch(() => []),
-            apiFetch('/api/proactive/scorecard').catch(() => null),
+        // Fetch data in parallel
+        const [companies, vendorResp, reqs, actionsResp] = await Promise.all([
+            apiFetch('/api/companies').catch(() => []),
+            apiFetch('/api/vendors?limit=100').catch(() => ({ vendors: [] })),
+            apiFetch('/api/requisitions').catch(() => []),
+            apiFetch('/api/command-center/actions').catch(() => ({})),
         ]);
 
-        const allReqs = reqsResp.requisitions || [];
-        const myId = window.__userId;
-        const myReqs = allReqs.filter(r => r.created_by === myId);
+        const vendors = vendorResp.vendors || vendorResp || [];
+        const reqList = Array.isArray(reqs) ? reqs : [];
+        const compList = Array.isArray(companies) ? companies : [];
+
+        // Pipeline summary
+        const statusCounts = { open: 0, quoted: 0, won: 0, lost: 0 };
+        for (const r of reqList) statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
+
+        // This week's data
         const now = new Date();
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const attnList = Array.isArray(needsAttn) ? needsAttn : [];
+        const weekAgo = new Date(now - 7 * 86400000);
+        const twoWeeksAgo = new Date(now - 14 * 86400000);
+        const todayStr = now.toISOString().slice(0, 10);
+        const thisWeekReqs = reqList.filter(r => r.created_at && new Date(r.created_at) >= weekAgo);
+        const lastWeekReqs = reqList.filter(r => r.created_at && new Date(r.created_at) >= twoWeeksAgo && new Date(r.created_at) < weekAgo);
+        const thisWeekWon = thisWeekReqs.filter(r => r.status === 'won').length;
+        const lastWeekWon = lastWeekReqs.filter(r => r.status === 'won').length;
+        const thisWeekQuoted = thisWeekReqs.filter(r => r.status === 'quoted').length;
+        const lastWeekQuoted = lastWeekReqs.filter(r => r.status === 'quoted').length;
 
-        // ── Stat row helpers ──
-        const myOpen = myReqs.filter(r => ['open','active'].includes(r.status));
-        const quotesOut = myReqs.filter(r => r.quote_status === 'sent' && !r.quote_won_value);
-        const wonThisMonth = myReqs.filter(r => r.status === 'won' && r.created_at && new Date(r.created_at) >= monthStart);
-        const wonLastMonth = myReqs.filter(r => r.status === 'won' && r.created_at && new Date(r.created_at) >= lastMonthStart && new Date(r.created_at) < monthStart);
-        const lostThisMonth = myReqs.filter(r => r.status === 'lost' && r.created_at && new Date(r.created_at) >= monthStart);
-        const winDenom = wonThisMonth.length + lostThisMonth.length;
-        const winRate = winDenom > 0 ? Math.round(wonThisMonth.length / winDenom * 100) : 0;
-
-        function trend(curr, prev) {
+        function trendArrow(curr, prev) {
             if (curr > prev) return '<span style="color:var(--green);font-size:10px">&#9650;</span>';
             if (curr < prev) return '<span style="color:var(--red);font-size:10px">&#9660;</span>';
-            return '';
+            return '<span style="color:var(--muted);font-size:10px">=</span>';
         }
 
-        let html = '';
+        // Command Center 6-card grid
+        let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">';
 
-        // ── Stat Row ──
-        html += `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-bottom:16px">
-            <div class="card-v2" style="padding:12px;text-align:center">
-                <div style="font-size:22px;font-weight:700">${myOpen.length}</div>
-                <div style="font-size:11px;color:var(--muted)">My Open Reqs</div>
-            </div>
-            <div class="card-v2" style="padding:12px;text-align:center">
-                <div style="font-size:22px;font-weight:700;color:var(--blue)">${quotesOut.length}</div>
-                <div style="font-size:11px;color:var(--muted)">Quotes Out</div>
-            </div>
-            <div class="card-v2" style="padding:12px;text-align:center">
-                <div style="font-size:22px;font-weight:700;color:var(--green)">${wonThisMonth.length} ${trend(wonThisMonth.length, wonLastMonth.length)}</div>
-                <div style="font-size:11px;color:var(--muted)">Won This Month</div>
-            </div>
-            <div class="card-v2" style="padding:12px;text-align:center">
-                <div style="font-size:22px;font-weight:700">${winRate}%</div>
-                <div style="font-size:11px;color:var(--muted)">Win Rate</div>
-            </div>
-        </div>`;
-
-        // ── Cards Grid ──
-        html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">';
-
-        // Card 1: Needs Attention
+        // Card 1: Needs Action (top-left)
+        const staleRfqs = actionsResp.stale_rfqs || [];
+        const pendingQuotes = actionsResp.pending_quotes || [];
+        const pendingReviews = actionsResp.pending_reviews || [];
+        const actionItems = [
+            ...staleRfqs.map(r => ({ label: `Vendor RFQ #${r.id} — no response 48h+`, id: r.requisition_id || r.id, type: 'rfq' })),
+            ...pendingQuotes.map(q => ({ label: `Quote #${q.id} — pending ${q.days_pending || '5+'}d`, id: q.requisition_id || q.id, type: 'rfq' })),
+            ...pendingReviews.map(o => ({ label: `Offer #${o.id} — needs review`, id: o.requisition_id || o.id, type: 'rfq' })),
+        ].slice(0, 8);
         html += `<div class="card-v2" style="padding:16px">
             <h3 style="font-size:13px;font-weight:700;margin:0 0 10px;display:flex;align-items:center;gap:6px">
-                <span style="color:var(--red)">&#9679;</span> Needs Attention
-                ${attnList.length ? '<span style="background:var(--red);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:700">'+attnList.length+'</span>' : ''}
+                <span style="color:var(--red)">&#9888;</span> Needs Action
+                ${actionItems.length ? '<span style="background:var(--red);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:700">'+actionItems.length+'</span>' : ''}
             </h3>
-            ${attnList.length ? attnList.slice(0, 8).map(a => {
-                const isNever = !a.last_outreach_at;
-                const dotColor = isNever ? 'var(--red)' : 'var(--amber)';
-                const label = isNever ? 'Never contacted' : a.days_since_contact + 'd ago' + (a.last_channel ? ' \u00b7 ' + a.last_channel : '');
-                return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer" onclick="goToCompany(${a.company_id})">
-                    <span style="color:${dotColor};font-size:8px">&#9679;</span>
-                    ${a.is_strategic ? '<span style="font-size:10px" title="Strategic">&#11088;</span>' : ''}
-                    <span style="flex:1;font-size:12px;font-weight:500">${esc(a.company_name)}</span>
-                    <span style="font-size:10px;color:var(--muted)">${esc(label)}</span>
-                    ${a.open_req_count ? '<span style="font-size:10px;background:var(--blue-bg,#dbeafe);color:var(--blue);padding:1px 5px;border-radius:3px">' + a.open_req_count + ' open</span>' : ''}
-                </div>`;
-            }).join('') : '<p style="font-size:12px;color:var(--green)">All accounts contacted recently</p>'}
+            ${actionItems.length ? actionItems.map(a => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+                <span style="flex:1;font-size:12px">${esc(a.label)}</span>
+                <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="goToReq(${a.id})">Go</button>
+            </div>`).join('') : '<p style="font-size:12px;color:var(--green)">All clear — nothing needs attention</p>'}
         </div>`;
 
-        // Card 2: Quotes Awaiting Response
-        const quotesAwaiting = myReqs.filter(r => r.quote_status === 'sent' && !r.quote_won_value)
-            .map(r => {
-                const sentDays = r.quote_sent_at ? Math.floor((now - new Date(r.quote_sent_at)) / 86400000) : null;
-                return { ...r, sentDays };
-            })
-            .sort((a, b) => (b.sentDays || 0) - (a.sentDays || 0));
+        // Card 2: Today's Inbox (top-right)
+        const todayResps = actionsResp.today_responses || [];
+        const todayNewReqs = reqList.filter(r => r.created_at && r.created_at.slice(0, 10) === todayStr);
         html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Quotes Awaiting Response</h3>
-            ${quotesAwaiting.length ? quotesAwaiting.slice(0, 8).map(q => {
-                const color = (q.sentDays || 0) >= 7 ? 'var(--red)' : (q.sentDays || 0) >= 3 ? 'var(--amber)' : 'var(--muted)';
-                return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer" onclick="goToReq(${q.id})">
-                    <span style="flex:1;font-size:12px;font-weight:500">${esc(q.name)}</span>
-                    <span style="font-size:11px;color:var(--muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(q.customer_display || '')}</span>
-                    ${q.quote_total ? '<span style="font-size:10px;font-weight:600">$' + Number(q.quote_total).toLocaleString() + '</span>' : ''}
-                    <span style="font-size:10px;color:${color};font-weight:600">${q.sentDays != null ? q.sentDays + 'd' : ''}</span>
-                </div>`;
-            }).join('') : '<p style="font-size:12px;color:var(--muted)">No quotes waiting for response</p>'}
-        </div>`;
-
-        // Card 3: Ready to Quote
-        const readyToQuote = myReqs.filter(r => ['open','active'].includes(r.status) && (r.offer_count || 0) > 0 && !r.quote_status);
-        html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Ready to Quote</h3>
-            ${readyToQuote.length ? readyToQuote.slice(0, 8).map(r => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer" onclick="goToReq(${r.id})">
-                <span style="flex:1;font-size:12px;font-weight:500">${esc(r.name)}</span>
-                <span style="font-size:11px;color:var(--muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.customer_display || '')}</span>
-                <span style="font-size:10px;color:var(--green);font-weight:600">${r.offer_count} offer${r.offer_count > 1 ? 's' : ''}</span>
-            </div>`).join('') : '<p style="font-size:12px;color:var(--muted)">No reqs with unquoted offers</p>'}
-        </div>`;
-
-        // Card 4: Upcoming Deadlines
-        const withDeadline = myReqs.filter(r => r.deadline && ['open','active','quoted'].includes(r.status))
-            .map(r => {
-                const isAsap = r.deadline.toUpperCase() === 'ASAP';
-                const dlDate = isAsap ? null : new Date(r.deadline);
-                const daysUntil = dlDate ? Math.ceil((dlDate - now) / 86400000) : -999;
-                return { ...r, isAsap, dlDate, daysUntil };
-            })
-            .sort((a, b) => (a.isAsap ? -9999 : a.daysUntil) - (b.isAsap ? -9999 : b.daysUntil));
-        html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Upcoming Deadlines</h3>
-            ${withDeadline.length ? withDeadline.slice(0, 8).map(r => {
-                const color = r.isAsap || r.daysUntil <= 0 ? 'var(--red)' : r.daysUntil <= 3 ? 'var(--amber)' : 'var(--green)';
-                const label = r.isAsap ? 'ASAP' : (r.daysUntil <= 0 ? 'Overdue' : r.daysUntil + 'd left');
-                return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer" onclick="goToReq(${r.id})">
-                    <span style="flex:1;font-size:12px;font-weight:500">${esc(r.name)}</span>
-                    <span style="font-size:11px;color:var(--muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.customer_display || '')}</span>
-                    <span style="font-size:10px;color:${color};font-weight:600">${label}</span>
-                </div>`;
-            }).join('') : '<p style="font-size:12px;color:var(--muted)">No upcoming deadlines</p>'}
-        </div>`;
-
-        // Card 5: Proactive Intelligence
-        const sc = scorecardResp || {};
-        html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Proactive Intelligence</h3>
-            <div style="display:flex;gap:16px;margin-bottom:10px;flex-wrap:wrap">
-                <span style="font-size:11px"><b>${sc.total_sent || 0}</b> Sent</span>
-                <span style="font-size:11px"><b>${sc.total_quoted || 0}</b> Quoted</span>
-                <span style="font-size:11px"><b>${sc.total_po || 0}</b> POs</span>
-                <span style="font-size:11px"><b>${sc.conversion_rate != null ? Math.round(sc.conversion_rate) + '%' : '—'}</b> Rate</span>
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Today's Inbox</h3>
+            <div style="display:flex;gap:16px;margin-bottom:10px">
+                <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--blue)">${todayResps.length}</div><div style="font-size:10px;color:var(--muted)">Vendor Responses</div></div>
+                <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--amber)">${todayNewReqs.length}</div><div style="font-size:10px;color:var(--muted)">New RFQs</div></div>
             </div>
-            ${(sc.total_sent || 0) > 0
-                ? '<a style="font-size:12px;color:var(--blue);cursor:pointer;text-decoration:underline" onclick="sidebarNav(\'proactive\')">View all proactive matches \u2192</a>'
-                : '<p style="font-size:12px;color:var(--muted)">No proactive matches yet. Matches appear when buyers log offers for parts your archived customers needed.</p>'}
+            ${todayResps.slice(0, 4).map(r => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0">
+                <span style="font-size:11px;font-weight:600">${esc(r.vendor_name || 'Unknown')}</span>
+                <span style="flex:1;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.subject || '')}</span>
+                ${r.confidence != null ? '<span style="font-size:10px;color:' + (r.confidence >= 0.8 ? 'var(--green)' : 'var(--amber)') + '">' + Math.round(r.confidence * 100) + '%</span>' : ''}
+            </div>`).join('')}
+            ${!todayResps.length && !todayNewReqs.length ? '<p style="font-size:12px;color:var(--muted)">No new activity today</p>' : ''}
         </div>`;
 
-        // Card 6: My Pipeline Summary
-        const myCounts = { open: 0, quoted: 0, won: 0, lost: 0 };
-        for (const r of myReqs) { const s = r.status === 'active' ? 'open' : r.status; myCounts[s] = (myCounts[s] || 0) + 1; }
-        const pipeTotal = myCounts.open + myCounts.quoted + myCounts.won + myCounts.lost || 1;
+        // Card 3: This Week's Numbers (mid-left)
         html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">My Pipeline</h3>
-            <div style="display:flex;height:18px;border-radius:4px;overflow:hidden;margin-bottom:8px">
-                <div style="width:${myCounts.open/pipeTotal*100}%;background:var(--blue)" title="Open: ${myCounts.open}"></div>
-                <div style="width:${myCounts.quoted/pipeTotal*100}%;background:var(--amber)" title="Quoted: ${myCounts.quoted}"></div>
-                <div style="width:${myCounts.won/pipeTotal*100}%;background:var(--green)" title="Won: ${myCounts.won}"></div>
-                <div style="width:${myCounts.lost/pipeTotal*100}%;background:var(--red)" title="Lost: ${myCounts.lost}"></div>
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">This Week's Numbers</h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+                    <span style="font-size:12px">RFQs Received</span>
+                    <span style="font-weight:700;font-size:12px">${thisWeekReqs.length} ${trendArrow(thisWeekReqs.length, lastWeekReqs.length)}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+                    <span style="font-size:12px">Quotes Sent</span>
+                    <span style="font-weight:700;font-size:12px">${thisWeekQuoted} ${trendArrow(thisWeekQuoted, lastWeekQuoted)}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+                    <span style="font-size:12px">Won</span>
+                    <span style="font-weight:700;font-size:12px;color:var(--green)">${thisWeekWon} ${trendArrow(thisWeekWon, lastWeekWon)}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+                    <span style="font-size:12px">Active Reqs</span>
+                    <span style="font-weight:700;font-size:12px">${statusCounts.open + statusCounts.quoted}</span>
+                </div>
             </div>
-            <div style="display:flex;gap:12px;font-size:11px;flex-wrap:wrap">
-                <span><span style="color:var(--blue)">&#9679;</span> Open ${myCounts.open}</span>
-                <span><span style="color:var(--amber)">&#9679;</span> Quoted ${myCounts.quoted}</span>
-                <span><span style="color:var(--green)">&#9679;</span> Won ${myCounts.won}</span>
-                <span><span style="color:var(--red)">&#9679;</span> Lost ${myCounts.lost}</span>
+        </div>`;
+
+        // Card 4: Account Health (mid-right)
+        const unhealthyAccounts = compList
+            .map(c => ({ ...c, daysSinceActivity: daysSince(c.last_enriched_at), openReqs: (c.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0) }))
+            .filter(c => c.daysSinceActivity > 30)
+            .sort((a, b) => b.daysSinceActivity - a.daysSinceActivity)
+            .slice(0, 6);
+        html += `<div class="card-v2" style="padding:16px">
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Account Health</h3>
+            ${unhealthyAccounts.length ? unhealthyAccounts.map(c => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer" onclick="goToCompany(${c.id})">
+                ${healthDot(recencyColor(c.daysSinceActivity, [30, 90]))}
+                <span style="flex:1;font-size:12px;font-weight:500">${esc(c.name)}</span>
+                <span style="font-size:10px;color:var(--muted)">${c.daysSinceActivity < 900 ? c.daysSinceActivity + 'd' : 'Never'}</span>
+                ${c.openReqs ? '<span style="font-size:10px;background:var(--blue-bg,#dbeafe);color:var(--blue);padding:1px 5px;border-radius:3px">' + c.openReqs + ' open</span>' : ''}
+            </div>`).join('') : '<p style="font-size:12px;color:var(--green)">All accounts are healthy</p>'}
+        </div>`;
+
+        // Card 5: Vendor Pulse (bottom-left)
+        const ghostVendors = [...vendors].filter(v => v.ghost_rate != null && v.ghost_rate > 0.3).sort((a, b) => (b.ghost_rate || 0) - (a.ghost_rate || 0)).slice(0, 3);
+        const topByVolume = [...vendors].sort((a, b) => (b.sighting_count || 0) - (a.sighting_count || 0)).slice(0, 5);
+        html += `<div class="card-v2" style="padding:16px">
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Vendor Pulse</h3>
+            ${ghostVendors.length ? '<div style="font-size:10px;font-weight:600;color:var(--red);margin-bottom:4px">Top Ghosting</div>' : ''}
+            ${ghostVendors.map(v => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer" onclick="openVendorDrawer(${v.id})">
+                <span style="flex:1;font-size:12px">${esc(v.display_name)}</span>
+                <span style="font-size:10px;color:var(--red);font-weight:600">${Math.round((v.ghost_rate || 0) * 100)}% ghost</span>
+            </div>`).join('')}
+            <div style="font-size:10px;font-weight:600;color:var(--muted);margin:8px 0 4px">Top by Volume</div>
+            ${topByVolume.map(v => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer" onclick="openVendorDrawer(${v.id})">
+                ${engRing(v.vendor_score != null ? Math.round(v.vendor_score) : 0, 22)}
+                <span style="flex:1;font-size:12px">${esc(v.display_name)}</span>
+                <span style="font-size:10px;color:var(--muted)">${v.sighting_count || 0} parts</span>
+            </div>`).join('')}
+        </div>`;
+
+        // Card 6: Quick Actions (bottom-right)
+        html += `<div class="card-v2" style="padding:16px">
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Quick Actions</h3>
+            <div style="display:flex;flex-direction:column;gap:6px">
+                <button class="btn btn-primary btn-sm" onclick="openNewReqModal()" style="text-align:left">+ New Requisition</button>
+                <button class="btn btn-ghost btn-sm" onclick="openNewCompanyModal()" style="text-align:left">+ New Account</button>
+                <button class="btn btn-ghost btn-sm" onclick="sidebarNav('vendors')" style="text-align:left">Browse Vendors</button>
             </div>
         </div>`;
 
