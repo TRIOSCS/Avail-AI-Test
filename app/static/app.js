@@ -5496,7 +5496,6 @@ export function sidebarNav(page, el) {
     // Close sidebar on mobile
     const sb = document.getElementById('sidebar');
     if (sb && sb.classList.contains('mobile-open')) toggleMobileSidebar();
-    document.body.classList.remove('sb-open');
     // Clean up UI state before switching views
     _collapseAllDrillDowns();
     var np = document.getElementById('notifPanel');
