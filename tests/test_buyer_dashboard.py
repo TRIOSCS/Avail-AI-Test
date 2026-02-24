@@ -71,6 +71,7 @@ class TestBuyerBrief:
         assert data["offers_to_review"] == []
         assert data["awaiting_vendor"] == []
         assert data["quotes_due_soon"] == []
+        assert data["top_vendors"] == []
         assert data["pipeline"]["active_reqs"] == 0
 
     # 2. Sourcing ratio KPI
@@ -262,7 +263,37 @@ class TestBuyerBrief:
         assert "RECENT" in names
         assert "OLD" not in names
 
-    # 15. Datetime deadline with T
+    # 15. Top vendors tile
+    def test_top_vendors(self, client, db_session, test_user):
+        r1 = self._make_req(db_session, test_user)
+        # Arrow: 3 offers, Mouser: 1 offer
+        for _ in range(3):
+            o = Offer(
+                requisition_id=r1.id, vendor_name="Arrow", mpn="LM317T",
+                qty_available=100, unit_price=1.50, entered_by_id=test_user.id,
+                status="active", attribution_status="active",
+                created_at=datetime.now(timezone.utc),
+            )
+            db_session.add(o)
+        o2 = Offer(
+            requisition_id=r1.id, vendor_name="Mouser", mpn="NE555",
+            qty_available=50, unit_price=0.75, entered_by_id=test_user.id,
+            status="approved", attribution_status="active",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(o2)
+        db_session.commit()
+
+        resp = client.get("/api/dashboard/buyer-brief")
+        data = resp.json()
+        tv = data["top_vendors"]
+        assert len(tv) == 2
+        assert tv[0]["vendor_name"] == "Arrow"
+        assert tv[0]["offer_count"] == 3
+        assert tv[1]["vendor_name"] == "Mouser"
+        assert tv[1]["offer_count"] == 1
+
+    # 16. Datetime deadline with T
     def test_datetime_deadline(self, client, db_session, test_user):
         soon = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()
         self._make_req(db_session, test_user, name="DT-DL", deadline=soon)

@@ -622,6 +622,26 @@ def buyer_brief(
     pipeline_won = won_quotes
     pipeline_buyplans = approved_bps
 
+    # ── Tile 6: Top Vendors (by offer volume this month) ──
+    top_vendors_q = (
+        db.query(
+            Offer.vendor_name,
+            func.count(Offer.id).label("offer_count"),
+        )
+        .filter(
+            Offer.created_at >= month_start,
+            Offer.status.in_(("active", "approved")),
+        )
+        .group_by(Offer.vendor_name)
+        .order_by(func.count(Offer.id).desc())
+        .limit(10)
+        .all()
+    )
+    top_vendors = [
+        {"vendor_name": row.vendor_name, "offer_count": row.offer_count}
+        for row in top_vendors_q
+    ]
+
     return {
         "kpis": {
             "sourcing_ratio": sourcing_ratio,
@@ -641,6 +661,7 @@ def buyer_brief(
         "offers_to_review": offers_to_review,
         "awaiting_vendor": awaiting_vendor,
         "quotes_due_soon": quotes_due_soon,
+        "top_vendors": top_vendors,
         "pipeline": {
             "active_reqs": pipeline_active,
             "quotes_out": pipeline_quoted,

@@ -1545,6 +1545,7 @@ async function loadBuyerDashboard(el) {
         const reviewOffers = brief.offers_to_review || [];
         const awaitingVendor = brief.awaiting_vendor || [];
         const quotesDue = brief.quotes_due_soon || [];
+        const topVendors = brief.top_vendors || [];
         const hotList = Array.isArray(hotOffers) ? hotOffers : [];
 
         let html = '';
@@ -1672,7 +1673,29 @@ async function loadBuyerDashboard(el) {
         }
         html += '</div>';
 
-        // Card 5: Hot Offers
+        // Card 5: Top Vendors (by offer volume this month)
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--sourcing-color)">&#9679;</span> Top Vendors <span class="cc-card-count">${topVendors.length}</span></h3>`;
+        if (topVendors.length) {
+            html += '<div class="cc-card-scroll">';
+            const maxOffers = topVendors[0]?.offer_count || 1;
+            html += topVendors.map((v, i) => {
+                const pct = Math.round(v.offer_count / maxOffers * 100);
+                return `<div class="cc-row">
+                    <span class="cc-rank">${i + 1}</span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(v.vendor_name)}</span>
+                        <div class="cc-bar-track"><div class="cc-bar-fill" style="width:${pct}%"></div></div>
+                    </div>
+                    <span class="cc-row-badge">${v.offer_count}</span>
+                </div>`;
+            }).join('');
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No vendor activity this month.</p>';
+        }
+        html += '</div>';
+
+        // Card 6: Hot Offers
         html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--green)">&#9679;</span> Hot Offers <span class="cc-card-count">${hotList.length}</span></h3>`;
         if (hotList.length) {
             html += '<div class="cc-card-scroll">';
@@ -10092,5 +10115,5 @@ Object.assign(window, {
     // Contact Intelligence view
     debouncedLoadContacts, setContactStatusFilter, loadContacts, renderContacts, showContacts, updateContactStatus,
     // Dashboard / Command Center
-    setDashPeriod, showDashboard, loadDashboard, goToReq,
+    setDashPeriod, setBuyerScope, setDashPerspective, showDashboard, loadDashboard, loadBuyerDashboard, goToReq,
 });
