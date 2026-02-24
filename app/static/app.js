@@ -3699,10 +3699,10 @@ function _renderDdDetails(reqId, targetPanel) {
 }
 
 function _reqBadge(r) {
-    if (r.offer_count > 0) return '<span class="req-badge req-badge-offers">OFFERS</span>';
-    if (r.contact_count > 0 && r.hours_since_activity != null && r.hours_since_activity < 48) return '<span class="req-badge req-badge-searching">SEARCHING</span>';
-    if (r.contact_count > 0) return '<span class="req-badge req-badge-stalled">STALLED</span>';
-    return '<span class="req-badge req-badge-norfq">NO RFQ</span>';
+    if (r.offer_count > 0) return '<span class="req-badge req-badge-offers"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 4l6-2 6 2v5a6 6 0 0 1-6 5 6 6 0 0 1-6-5z"/><path d="M5.5 8l2 2 3.5-3.5"/></svg>OFFERS</span>';
+    if (r.contact_count > 0 && r.hours_since_activity != null && r.hours_since_activity < 48) return '<span class="req-badge req-badge-searching"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7" cy="7" r="4.5"/><line x1="10.2" y1="10.2" x2="13.5" y2="13.5"/></svg>SOURCING</span>';
+    if (r.contact_count > 0) return '<span class="req-badge req-badge-stalled"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="8" cy="8" r="6"/><line x1="8" y1="5" x2="8" y2="8.5"/><line x1="8" y1="8.5" x2="10.5" y2="10"/></svg>STALLED</span>';
+    return '<span class="req-badge req-badge-norfq"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><line x1="4" y1="8" x2="12" y2="8"/></svg>NO RFQ</span>';
 }
 
 function _renderDrillDownTable(rfqId, targetPanel) {

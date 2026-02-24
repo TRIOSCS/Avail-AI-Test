@@ -178,11 +178,17 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 .add-row input{background:var(--input);border:1px solid var(--border);border-radius:5px;padding:6px 8px;font-size:12px;color:var(--text);width:100%;font-family:'JetBrains Mono',monospace}
 .add-row input:focus{outline:none;border-color:var(--teal);background:var(--white)}
 .add-row input::placeholder{font-family:'DM Sans',sans-serif;color:var(--muted);font-style:italic}
-.req-badge{font-size:9px;font-weight:700;padding:1px 6px;border-radius:3px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
-.req-badge-offers{background:#dcfce7;color:#166534}
-.req-badge-searching{background:#fef9c3;color:#854d0e}
-.req-badge-stalled{background:#fee2e2;color:#991b1b}
-.req-badge-norfq{background:var(--bg);color:var(--muted)}
+.req-badge{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;padding:2px 7px;border-radius:4px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap;cursor:default;transition:all .2s}
+.req-badge svg{width:10px;height:10px;flex-shrink:0;transition:all .25s}
+.req-badge:hover svg{filter:drop-shadow(0 0 4px currentColor);transform:scale(1.2)}
+.req-badge-offers{background:rgba(22,101,52,.08);color:#166534;border:1px solid rgba(22,101,52,.15)}
+.req-badge-offers:hover{background:#166534;color:#fff;box-shadow:0 2px 6px rgba(22,101,52,.25)}
+.req-badge-searching{background:rgba(133,77,14,.08);color:#854d0e;border:1px solid rgba(133,77,14,.15)}
+.req-badge-searching:hover{background:#854d0e;color:#fff;box-shadow:0 2px 6px rgba(133,77,14,.25)}
+.req-badge-stalled{background:rgba(153,27,27,.08);color:#991b1b;border:1px solid rgba(153,27,27,.15)}
+.req-badge-stalled:hover{background:#991b1b;color:#fff;box-shadow:0 2px 6px rgba(153,27,27,.25)}
+.req-badge-norfq{background:var(--bg);color:var(--muted);border:1px solid transparent}
+.req-badge-norfq:hover{background:var(--surface);color:var(--text2)}
 
 /* Sightings */
 .sight-group{margin-bottom:10px}
@@ -699,16 +705,25 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 /* ── v1.2.0 CRM ────────────────────────────────── */
 
 /* Status badges */
-.status-badge{display:inline-block;font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;text-transform:uppercase;letter-spacing:.3px;border:1px solid rgba(0,0,0,.08)}
-.status-active{background:var(--blue-lt);color:var(--blue)}
-.status-sourcing{background:var(--blue-lt);color:var(--blue)}
-.status-quoting{background:var(--amber-light);color:var(--amber)}
-.status-quoted{background:var(--green-light);color:#065f5a}
-.status-won{background:var(--green-light);color:#065f5a}
-.status-lost{background:var(--red-light);color:#991b1b}
-.status-reopened{background:var(--blue-lt);color:var(--blue)}
-.status-archived{background:var(--amber-light);color:#92400e}
-.status-draft{background:var(--bg2);color:var(--text2)}
+.status-badge{display:inline-block;font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;text-transform:uppercase;letter-spacing:.3px;border:1px solid transparent;transition:all .2s;cursor:default}
+.status-active{background:rgba(59,110,168,.08);color:var(--blue);border-color:rgba(59,110,168,.15)}
+.status-active:hover{background:var(--blue);color:#fff;box-shadow:0 2px 6px rgba(59,110,168,.25)}
+.status-sourcing{background:rgba(59,110,168,.08);color:var(--blue);border-color:rgba(59,110,168,.15)}
+.status-sourcing:hover{background:var(--blue);color:#fff;box-shadow:0 2px 6px rgba(59,110,168,.25)}
+.status-quoting{background:rgba(217,119,6,.08);color:var(--amber);border-color:rgba(217,119,6,.15)}
+.status-quoting:hover{background:var(--amber);color:#fff;box-shadow:0 2px 6px rgba(217,119,6,.25)}
+.status-quoted{background:rgba(6,95,90,.08);color:#065f5a;border-color:rgba(6,95,90,.15)}
+.status-quoted:hover{background:#065f5a;color:#fff;box-shadow:0 2px 6px rgba(6,95,90,.25)}
+.status-won{background:rgba(6,95,90,.08);color:#065f5a;border-color:rgba(6,95,90,.15)}
+.status-won:hover{background:#065f5a;color:#fff;box-shadow:0 2px 6px rgba(6,95,90,.25)}
+.status-lost{background:rgba(153,27,27,.08);color:#991b1b;border-color:rgba(153,27,27,.15)}
+.status-lost:hover{background:#991b1b;color:#fff;box-shadow:0 2px 6px rgba(153,27,27,.25)}
+.status-reopened{background:rgba(59,110,168,.08);color:var(--blue);border-color:rgba(59,110,168,.15)}
+.status-reopened:hover{background:var(--blue);color:#fff;box-shadow:0 2px 6px rgba(59,110,168,.25)}
+.status-archived{background:rgba(146,64,14,.08);color:#92400e;border-color:rgba(146,64,14,.15)}
+.status-archived:hover{background:#92400e;color:#fff;box-shadow:0 2px 6px rgba(146,64,14,.25)}
+.status-draft{background:var(--bg2);color:var(--text2);border-color:rgba(0,0,0,.06)}
+.status-draft:hover{background:var(--text2);color:#fff}
 .status-chip{display:inline-block;font-size:10px;font-weight:700;padding:3px 10px;border-radius:10px;text-transform:uppercase;letter-spacing:.4px;transition:all .3s}
 .status-chip.pulse{animation:chipPulse .6s ease}
 @keyframes chipPulse{0%{transform:scale(1)}30%{transform:scale(1.15)}100%{transform:scale(1)}}
@@ -1843,12 +1858,18 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .status-pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;font-weight:600;white-space:nowrap;cursor:default}
 .status-pill-sm{padding:2px 8px;font-size:10px}
 .status-pill-md{padding:3px 10px;font-size:11px}
-.status-pill-new{background:#dbeafe;color:#2563eb}
-.status-pill-researching{background:#fef3c7;color:#a16207}
-.status-pill-qualified{background:#dbeafe;color:#1d4ed8}
-.status-pill-engaged{background:#ede9fe;color:#7c3aed}
-.status-pill-champion{background:#dcfce7;color:#16a34a}
-.status-pill-dead_end{background:var(--bg2);color:var(--muted)}
+.status-pill-new{background:rgba(37,99,235,.08);color:#2563eb;border:1px solid rgba(37,99,235,.15);transition:all .2s}
+.status-pill-new:hover{background:#2563eb;color:#fff;box-shadow:0 2px 6px rgba(37,99,235,.25)}
+.status-pill-researching{background:rgba(161,98,7,.08);color:#a16207;border:1px solid rgba(161,98,7,.15);transition:all .2s}
+.status-pill-researching:hover{background:#a16207;color:#fff;box-shadow:0 2px 6px rgba(161,98,7,.25)}
+.status-pill-qualified{background:rgba(29,78,216,.08);color:#1d4ed8;border:1px solid rgba(29,78,216,.15);transition:all .2s}
+.status-pill-qualified:hover{background:#1d4ed8;color:#fff;box-shadow:0 2px 6px rgba(29,78,216,.25)}
+.status-pill-engaged{background:rgba(124,58,237,.08);color:#7c3aed;border:1px solid rgba(124,58,237,.15);transition:all .2s}
+.status-pill-engaged:hover{background:#7c3aed;color:#fff;box-shadow:0 2px 6px rgba(124,58,237,.25)}
+.status-pill-champion{background:rgba(22,163,74,.08);color:#16a34a;border:1px solid rgba(22,163,74,.15);transition:all .2s}
+.status-pill-champion:hover{background:#16a34a;color:#fff;box-shadow:0 2px 6px rgba(22,163,74,.25)}
+.status-pill-dead_end{background:var(--bg2);color:var(--muted);border:1px solid transparent;transition:all .2s}
+.status-pill-dead_end:hover{background:var(--text2);color:#fff}
 
 /* ── v2 Activity Icon Circles ────────────────────────────── */
 .act-icon{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--bg2);flex-shrink:0;font-size:13px}
