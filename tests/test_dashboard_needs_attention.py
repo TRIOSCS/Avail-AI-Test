@@ -199,3 +199,52 @@ class TestNeedsAttention:
         data = resp.json()
         assert len(data) == 1
         assert data[0]["company_name"] == "Acme Corp"
+
+    def test_stale_company_tz_aware_outreach(self, db_session, test_user, client):
+        """When last outreach already has tzinfo (line 153: else branch)."""
+        from unittest.mock import patch
+
+        c = self._make_company(db_session, test_user, name="TZ Aware Corp")
+        self._make_site(db_session, c, "HQ")
+        self._make_activity(db_session, test_user, c, days_ago=60)
+        db_session.commit()
+
+        aware_dt = datetime.now(timezone.utc) - timedelta(days=60)
+
+        # Patch the outreach map after it's built to inject tz-aware datetimes
+        from app.routers.dashboard import needs_attention as _orig
+
+        async def patched_needs_attention(days=30, user=None, db=None):
+            # Call original but intercept to ensure tz-aware path is hit
+            return await _orig(days=days, user=user, db=db)
+
+        # Simpler: just mock the max() result to return tz-aware datetime
+        original_query = db_session.query
+
+        class TzAwareRow:
+            def __init__(self, cid, dt):
+                self.company_id = cid
+                self.last_outreach = dt
+
+        def mock_query(*args, **kwargs):
+            result = original_query(*args, **kwargs)
+            # Wrap .all() to inject tz-aware datetimes for outreach query
+            original_all = result.all
+
+            def patched_all():
+                rows = original_all()
+                new_rows = []
+                for r in rows:
+                    if hasattr(r, 'last_outreach') and r.last_outreach and r.last_outreach.tzinfo is None:
+                        new_rows.append(TzAwareRow(r.company_id, r.last_outreach.replace(tzinfo=timezone.utc)))
+                    else:
+                        new_rows.append(r)
+                return new_rows if new_rows else rows
+
+            result.all = patched_all
+            return result
+
+        with patch.object(db_session, 'query', side_effect=mock_query):
+            resp = client.get("/api/dashboard/needs-attention?days=30")
+
+        assert resp.status_code == 200

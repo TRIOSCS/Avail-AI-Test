@@ -284,79 +284,84 @@ async def list_vendors(
     db: Session = Depends(get_db),
 ):
     """List vendor cards with search, pagination, and engagement scores."""
-    q = q.strip().lower()
-    query = db.query(VendorCard).order_by(VendorCard.display_name)
-    if tag.strip():
-        from sqlalchemy import String as SAString
-        safe_tag = tag.strip().lower()
-        query = query.filter(
-            sqlfunc.lower(sqlfunc.cast(VendorCard.brand_tags, SAString)).contains(safe_tag)
-            | sqlfunc.lower(sqlfunc.cast(VendorCard.commodity_tags, SAString)).contains(safe_tag)
-        )
-    if q:
-        if len(q) >= 3:
-            # Full-text search for longer queries (faster + ranked)
-            try:
-                fts_query = db.query(VendorCard).filter(
-                    VendorCard.search_vector.isnot(None),
-                    sqltext("search_vector @@ plainto_tsquery('english', :q)"),
-                ).params(q=q).order_by(
-                    sqltext("ts_rank(search_vector, plainto_tsquery('english', :q)) DESC"),
-                ).params(q=q)
-                fts_count = fts_query.count()
-                if fts_count > 0:
-                    query = fts_query
-                else:
-                    # FTS found nothing, fall back to ILIKE
+
+    @cached_endpoint(prefix="vendor_list", ttl_hours=0.5, key_params=["q", "tag", "limit", "offset"])
+    def _fetch(q, tag, limit, offset, db):
+        query = db.query(VendorCard).order_by(VendorCard.display_name)
+        if tag.strip():
+            from sqlalchemy import String as SAString
+            safe_tag = tag.strip().lower()
+            query = query.filter(
+                sqlfunc.lower(sqlfunc.cast(VendorCard.brand_tags, SAString)).contains(safe_tag)
+                | sqlfunc.lower(sqlfunc.cast(VendorCard.commodity_tags, SAString)).contains(safe_tag)
+            )
+        if q:
+            if len(q) >= 3:
+                # Full-text search for longer queries (faster + ranked)
+                try:
+                    fts_query = db.query(VendorCard).filter(
+                        VendorCard.search_vector.isnot(None),
+                        sqltext("search_vector @@ plainto_tsquery('english', :q)"),
+                    ).params(q=q).order_by(
+                        sqltext("ts_rank(search_vector, plainto_tsquery('english', :q)) DESC"),
+                    ).params(q=q)
+                    fts_count = fts_query.count()
+                    if fts_count > 0:
+                        query = fts_query
+                    else:
+                        # FTS found nothing, fall back to ILIKE
+                        safe_q = q.replace("%", r"\%").replace("_", r"\_")
+                        query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
+                except (ProgrammingError, OperationalError):
+                    # FTS not available (e.g., SQLite in tests), fall back to ILIKE
                     safe_q = q.replace("%", r"\%").replace("_", r"\_")
                     query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
-            except (ProgrammingError, OperationalError):
-                # FTS not available (e.g., SQLite in tests), fall back to ILIKE
+            else:
                 safe_q = q.replace("%", r"\%").replace("_", r"\_")
                 query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
-        else:
-            safe_q = q.replace("%", r"\%").replace("_", r"\_")
-            query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
-    total = query.count()
-    cards = query.limit(limit).offset(offset).all()
-    if not cards:
-        return []
-    # Batch fetch review stats — single query instead of N+1
-    card_ids = [c.id for c in cards]
-    review_stats = {}
-    if card_ids:
-        for cid, avg, cnt in (
-            db.query(
-                VendorReview.vendor_card_id,
-                sqlfunc.avg(VendorReview.rating),
-                sqlfunc.count(VendorReview.id),
+        total = query.count()
+        cards = query.limit(limit).offset(offset).all()
+        if not cards:
+            return {"vendors": [], "total": 0, "limit": limit, "offset": offset}
+        # Batch fetch review stats — single query instead of N+1
+        card_ids = [c.id for c in cards]
+        review_stats = {}
+        if card_ids:
+            for cid, avg, cnt in (
+                db.query(
+                    VendorReview.vendor_card_id,
+                    sqlfunc.avg(VendorReview.rating),
+                    sqlfunc.count(VendorReview.id),
+                )
+                .filter(VendorReview.vendor_card_id.in_(card_ids))
+                .group_by(VendorReview.vendor_card_id)
+                .all()
+            ):
+                review_stats[cid] = (avg, cnt)
+        results = []
+        for c in cards:
+            stat = review_stats.get(c.id)
+            avg_rating = round(float(stat[0]), 1) if stat else None
+            review_count = int(stat[1]) if stat else 0
+            results.append(
+                {
+                    "id": c.id,
+                    "display_name": c.display_name,
+                    "emails": c.emails or [],
+                    "phones": c.phones or [],
+                    "sighting_count": c.sighting_count or 0,
+                    "vendor_score": c.vendor_score,
+                    "is_new_vendor": c.is_new_vendor if c.is_new_vendor is not None else True,
+                    "engagement_score": c.vendor_score,
+                    "is_blacklisted": c.is_blacklisted or False,
+                    "avg_rating": avg_rating,
+                    "review_count": review_count,
+                }
             )
-            .filter(VendorReview.vendor_card_id.in_(card_ids))
-            .group_by(VendorReview.vendor_card_id)
-            .all()
-        ):
-            review_stats[cid] = (avg, cnt)
-    results = []
-    for c in cards:
-        stat = review_stats.get(c.id)
-        avg_rating = round(float(stat[0]), 1) if stat else None
-        review_count = int(stat[1]) if stat else 0
-        results.append(
-            {
-                "id": c.id,
-                "display_name": c.display_name,
-                "emails": c.emails or [],
-                "phones": c.phones or [],
-                "sighting_count": c.sighting_count or 0,
-                "vendor_score": c.vendor_score,
-                "is_new_vendor": c.is_new_vendor if c.is_new_vendor is not None else True,
-                "engagement_score": c.vendor_score,
-                "is_blacklisted": c.is_blacklisted or False,
-                "avg_rating": avg_rating,
-                "review_count": review_count,
-            }
-        )
-    return {"vendors": results, "total": total, "limit": limit, "offset": offset}
+        return {"vendors": results, "total": total, "limit": limit, "offset": offset}
+
+    q = q.strip().lower()
+    return _fetch(q=q, tag=tag, limit=limit, offset=offset, db=db)
 
 
 @router.get("/api/autocomplete/names")

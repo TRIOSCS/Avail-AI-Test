@@ -408,6 +408,7 @@ async def list_api_sources(
                 "category": src.category,
                 "source_type": src.source_type,
                 "status": src.status,
+                "is_active": src.is_active,
                 "description": src.description,
                 "setup_notes": src.setup_notes,
                 "signup_url": src.signup_url,
@@ -502,6 +503,45 @@ async def toggle_api_source(
     src.status = new_status
     db.commit()
     return {"ok": True, "status": src.status}
+
+
+@router.put("/api/sources/{source_id}/activate")
+async def toggle_source_active(
+    source_id: int,
+    user: User = Depends(require_settings_access),
+    db: Session = Depends(get_db),
+):
+    """Toggle is_active flag on a source (settings access required)."""
+    src = db.get(ApiSource, source_id)
+    if not src:
+        raise HTTPException(404, "API source not found")
+    src.is_active = not src.is_active
+    db.commit()
+    return {"ok": True, "is_active": src.is_active}
+
+
+@router.get("/api/sources/health-summary")
+async def health_summary(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lightweight health check — returns active sources with errors (for 60s polling)."""
+    errored = (
+        db.query(ApiSource)
+        .filter(ApiSource.is_active == True, ApiSource.status == "error")  # noqa: E712
+        .all()
+    )
+    return {
+        "has_errors": len(errored) > 0,
+        "errored_sources": [
+            {
+                "id": s.id,
+                "display_name": s.display_name,
+                "last_error": s.last_error,
+            }
+            for s in errored
+        ],
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════

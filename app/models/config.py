@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from .base import Base
@@ -16,6 +16,7 @@ class ApiSource(Base):
     category = Column(String(50), nullable=False)
     source_type = Column(String(50), nullable=False)
     status = Column(String(20), nullable=False, default="pending")
+    is_active = Column(Boolean, default=False, nullable=False, server_default="false")
     description = Column(String(500))
     setup_notes = Column(Text)
     signup_url = Column(String(500))

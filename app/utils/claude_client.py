@@ -20,6 +20,7 @@ import json
 import logging
 from typing import Any
 
+import sentry_sdk
 from app.http_client import http
 from app.services.credential_service import get_credential_cached
 
@@ -118,28 +119,47 @@ async def claude_structured(
     body["tool_choice"] = {"type": "tool", "name": "structured_output"}
 
     try:
-        resp = await http.post(
-            API_URL,
-            headers=_headers(cache=cache_system),
-            json=body,
-            timeout=timeout,
-        )
+        with sentry_sdk.start_span(
+            op="ai.chat_completions.create",
+            description=f"claude_structured ({model_tier})",
+        ) as span:
+            span.set_data("ai.model_id", model)
+            span.set_data("ai.streaming", False)
+            span.set_data("ai.pipeline.name", "claude_structured")
 
-        if resp.status_code != 200:
-            log.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
+            resp = await http.post(
+                API_URL,
+                headers=_headers(cache=cache_system),
+                json=body,
+                timeout=timeout,
+            )
+
+            if resp.status_code != 200:
+                span.set_data("ai.response.status_code", resp.status_code)
+                log.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
+                return None
+
+            data = resp.json()
+            usage = data.get("usage", {})
+            span.set_data("ai.prompt_tokens.used", usage.get("input_tokens", 0))
+            span.set_data("ai.completion_tokens.used", usage.get("output_tokens", 0))
+            span.set_data(
+                "ai.total_tokens.used",
+                usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+            )
+            if usage.get("cache_read_input_tokens"):
+                span.set_data("ai.cache_read_tokens", usage["cache_read_input_tokens"])
+
+            # Tool use response — extract the tool input (guaranteed valid JSON)
+            for block in data.get("content", []):
+                if (
+                    block.get("type") == "tool_use"
+                    and block.get("name") == "structured_output"
+                ):
+                    return block.get("input")
+
+            log.warning("Claude structured output: no tool_use block in response")
             return None
-
-        data = resp.json()
-        # Tool use response — extract the tool input (guaranteed valid JSON)
-        for block in data.get("content", []):
-            if (
-                block.get("type") == "tool_use"
-                and block.get("name") == "structured_output"
-            ):
-                return block.get("input")
-
-        log.warning("Claude structured output: no tool_use block in response")
-        return None
 
     except Exception as e:
         log.warning(f"Claude structured call failed: {e}")
@@ -196,23 +216,42 @@ async def claude_text(
         body["tools"] = tools
 
     try:
-        resp = await http.post(
-            API_URL,
-            headers=_headers(cache=cache_system),
-            json=body,
-            timeout=timeout,
-        )
+        with sentry_sdk.start_span(
+            op="ai.chat_completions.create",
+            description=f"claude_text ({model_tier})",
+        ) as span:
+            span.set_data("ai.model_id", model)
+            span.set_data("ai.streaming", False)
+            span.set_data("ai.pipeline.name", "claude_text")
 
-        if resp.status_code != 200:
-            log.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
-            return None
+            resp = await http.post(
+                API_URL,
+                headers=_headers(cache=cache_system),
+                json=body,
+                timeout=timeout,
+            )
 
-        data = resp.json()
-        # Extract text from response (may be interleaved with tool use)
-        texts = [
-            b["text"] for b in data.get("content", []) if b.get("type") == "text"
-        ]
-        return "\n".join(texts) if texts else None
+            if resp.status_code != 200:
+                span.set_data("ai.response.status_code", resp.status_code)
+                log.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
+                return None
+
+            data = resp.json()
+            usage = data.get("usage", {})
+            span.set_data("ai.prompt_tokens.used", usage.get("input_tokens", 0))
+            span.set_data("ai.completion_tokens.used", usage.get("output_tokens", 0))
+            span.set_data(
+                "ai.total_tokens.used",
+                usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+            )
+            if usage.get("cache_read_input_tokens"):
+                span.set_data("ai.cache_read_tokens", usage["cache_read_input_tokens"])
+
+            # Extract text from response (may be interleaved with tool use)
+            texts = [
+                b["text"] for b in data.get("content", []) if b.get("type") == "text"
+            ]
+            return "\n".join(texts) if texts else None
 
     except Exception as e:
         log.warning(f"Claude text call failed: {e}")

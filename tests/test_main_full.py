@@ -604,3 +604,7 @@ class TestModuleLevelBranches:
             # Restore the original app object to avoid breaking other tests
             main_mod.app = original_app
 
+
+# ── Cache warmup (lines 121-123) ───────────────────────────────────────
+
+

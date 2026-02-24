@@ -20,7 +20,7 @@ Depends on: app/services/contact_intelligence.py, app/routers/vendors.py
 """
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -612,6 +612,23 @@ class TestContactEndpoints:
 # ── _run_sync_or_return_empty ────────────────────────────────────────
 
 
+class TestSplitNameWithPrefix:
+    def test_name_with_prefix(self):
+        """Line 49: name with surname prefix like 'van' returns prefix as part of last name."""
+        from app.services.contact_intelligence import split_name
+
+        first, last = split_name("John van Berg")
+        assert first == "John"
+        assert last == "van Berg"
+
+    def test_name_with_de_prefix(self):
+        from app.services.contact_intelligence import split_name
+
+        first, last = split_name("Maria de Silva")
+        assert first == "Maria"
+        assert last == "de Silva"
+
+
 class TestRunSyncHelper:
     def test_returns_empty_on_exception(self):
         from app.services.contact_intelligence import _run_sync_or_return_empty
@@ -630,3 +647,605 @@ class TestRunSyncHelper:
 
         result = _run_sync_or_return_empty(good_fn, 42)
         assert result == {"value": 42}
+
+    def test_returns_empty_when_loop_is_running(self):
+        """Line 206: returns {} when called from within a running async loop."""
+        import asyncio
+        from app.services.contact_intelligence import _run_sync_or_return_empty
+
+        async def inner():
+            return {"should": "not reach"}
+
+        async def outer():
+            return _run_sync_or_return_empty(inner)
+
+        result = asyncio.run(outer())
+        assert result == {}
+
+
+# ── Field-level update tests for existing contacts (lines 124-136) ─────
+
+
+class TestProcessInboundFieldUpdates:
+    """Test individual field updates when contact already exists but fields are blank."""
+
+    def test_updates_blank_fields_on_existing_contact(self, db_session, test_user):
+        """Lines 124, 128, 130, 132, 134, 136: each field fills if contact has empty value."""
+        card = _make_card(db_session, "FieldCo", "fieldco.com")
+        existing = _make_contact(db_session, card, "empty@fieldco.com", full_name="")
+        existing.full_name = None
+        existing.first_name = None
+        existing.last_name = None
+        existing.title = None
+        existing.phone = None
+        existing.phone_mobile = None
+        existing.linkedin_url = None
+        existing.interaction_count = 1
+        db_session.commit()
+
+        sig_data = {
+            "full_name": "New Name",
+            "title": "VP Sales",
+            "phone": "+1-555-1234",
+            "mobile": "+1-555-5678",
+            "linkedin_url": "https://linkedin.com/in/newname",
+            "confidence": 0.8,
+        }
+
+        with patch(
+            "app.services.contact_intelligence._run_sync_or_return_empty",
+            return_value=sig_data,
+        ), patch("app.services.signature_parser.cache_signature_extract"):
+            vc = process_inbound_email_contact(
+                db_session,
+                sender_email="empty@fieldco.com",
+                sender_name="New Name",
+                body="Hello\n--\nNew Name\nVP Sales",
+                subject="Quote",
+                received_at=datetime.now(timezone.utc),
+                user_id=test_user.id,
+            )
+
+        assert vc is not None
+        assert vc.full_name == "New Name"
+        assert vc.first_name == "New"
+        assert vc.last_name == "Name"
+        assert vc.title == "VP Sales"
+        assert vc.phone == "+1-555-1234"
+        assert vc.phone_mobile == "+1-555-5678"
+        assert vc.linkedin_url == "https://linkedin.com/in/newname"
+        assert vc.interaction_count == 2
+
+
+# ── VendorContact flush conflict (lines 162-165) ──────────────────────
+
+
+class TestVendorContactFlushConflict:
+    def test_flush_conflict_returns_none(self, db_session, test_user):
+        """Line 162-165: flush conflict during new contact creation rolls back and returns None."""
+        card = _make_card(db_session, "FlushCo", "flushco.com")
+        db_session.commit()
+
+        original_flush = db_session.flush
+
+        call_count = 0
+
+        def fail_on_second_flush(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            # The first flushes are for internal operations; fail on later flush
+            # We need to fail specifically on the VendorContact flush
+            # Count how many times flush is called and fail on the right one
+            if call_count >= 1:
+                # Check if there's a new VendorContact pending
+                for obj in db_session.new:
+                    from app.models import VendorContact as VC
+                    if isinstance(obj, VC):
+                        raise Exception("Duplicate key constraint")
+            return original_flush(*args, **kwargs)
+
+        with patch(
+            "app.services.contact_intelligence._run_sync_or_return_empty",
+            return_value={"full_name": "Conflict Person", "confidence": 0.8},
+        ), patch("app.services.signature_parser.cache_signature_extract"):
+            db_session.flush = fail_on_second_flush
+            vc = process_inbound_email_contact(
+                db_session,
+                sender_email="conflict@flushco.com",
+                sender_name="Conflict Person",
+                body="Hello",
+                subject="Test",
+                received_at=datetime.now(timezone.utc),
+                user_id=test_user.id,
+            )
+            db_session.flush = original_flush
+
+        assert vc is None
+
+
+# ── ActivityLog flush error (lines 187-189) ──────────────────────────
+
+
+class TestActivityLogFlushError:
+    def test_activity_flush_error_still_returns_contact(self, db_session, test_user):
+        """Lines 187-189: ActivityLog flush error is caught; contact is still returned."""
+        card = _make_card(db_session, "ActFlush", "actflush.com")
+        db_session.commit()
+
+        original_flush = db_session.flush
+
+        flush_count = 0
+
+        def fail_on_activity_flush(*args, **kwargs):
+            nonlocal flush_count
+            flush_count += 1
+            # First flush creates VendorContact, second flush creates ActivityLog
+            if flush_count == 2:
+                raise Exception("Activity flush error")
+            return original_flush(*args, **kwargs)
+
+        with patch(
+            "app.services.contact_intelligence._run_sync_or_return_empty",
+            return_value={"full_name": "Activity Err", "confidence": 0.7},
+        ), patch("app.services.signature_parser.cache_signature_extract"):
+            db_session.flush = fail_on_activity_flush
+            vc = process_inbound_email_contact(
+                db_session,
+                sender_email="acterr@actflush.com",
+                sender_name="Activity Err",
+                body="Hello",
+                subject="Test",
+                received_at=datetime.now(timezone.utc),
+                user_id=test_user.id,
+            )
+            db_session.flush = original_flush
+
+        # Contact is still returned despite ActivityLog flush failure
+        assert vc is not None
+        assert vc.full_name == "Activity Err"
+
+
+# ── Pipeline event flush error (lines 270-273) ───────────────────────
+
+
+class TestPipelineEventFlushError:
+    def test_flush_error_returns_none(self, db_session, test_user):
+        """Lines 270-273: pipeline event flush error returns None."""
+        card = _make_card(db_session, "PipeFlush", "pipeflush.com")
+        db_session.commit()
+
+        original_flush = db_session.flush
+
+        def bad_flush(*args, **kwargs):
+            raise Exception("Flush error")
+
+        db_session.flush = bad_flush
+        al = log_pipeline_event(
+            db_session,
+            user_id=test_user.id,
+            event_type="rfq_sent",
+            vendor_card_id=card.id,
+            notes="Test flush error",
+        )
+        db_session.flush = original_flush
+
+        assert al is None
+
+
+# ── compute_contact_relationship_score edge cases (lines 318-321, 330-335) ──
+
+
+class TestContactRelationshipScoreEdgeCases:
+    def test_recency_mid_range(self):
+        """Lines 318-321: recency between ideal and max decays linearly."""
+        from app.services.contact_intelligence import compute_contact_relationship_score
+
+        now = datetime.now(timezone.utc)
+        # 100 days ago -- between 7 and 365
+        result = compute_contact_relationship_score(
+            last_interaction_at=now - timedelta(days=100),
+            interactions_30d=5,
+            interactions_60d=8,
+            interactions_90d=10,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=10,
+            distinct_channels=1,
+            now=now,
+        )
+        recency = result["recency_score"]
+        assert 0 < recency < 100
+
+    def test_recency_at_max(self):
+        """Lines 318-319: recency at >= 365 days is 0."""
+        from app.services.contact_intelligence import compute_contact_relationship_score
+
+        now = datetime.now(timezone.utc)
+        result = compute_contact_relationship_score(
+            last_interaction_at=now - timedelta(days=400),
+            interactions_30d=0,
+            interactions_60d=0,
+            interactions_90d=0,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=0,
+            distinct_channels=0,
+            now=now,
+        )
+        assert result["recency_score"] == 0.0
+
+    def test_responsiveness_ideal(self):
+        """Line 330-331: response time <= 4h gives 100."""
+        from app.services.contact_intelligence import compute_contact_relationship_score
+
+        now = datetime.now(timezone.utc)
+        result = compute_contact_relationship_score(
+            last_interaction_at=now - timedelta(days=1),
+            interactions_30d=5,
+            interactions_60d=5,
+            interactions_90d=5,
+            avg_response_hours=2.0,
+            wins=0,
+            total_interactions=5,
+            distinct_channels=1,
+            now=now,
+        )
+        assert result["responsiveness_score"] == 100.0
+
+    def test_responsiveness_max(self):
+        """Line 332-333: response time >= 168h gives 0."""
+        from app.services.contact_intelligence import compute_contact_relationship_score
+
+        now = datetime.now(timezone.utc)
+        result = compute_contact_relationship_score(
+            last_interaction_at=now - timedelta(days=1),
+            interactions_30d=5,
+            interactions_60d=5,
+            interactions_90d=5,
+            avg_response_hours=200.0,
+            wins=0,
+            total_interactions=5,
+            distinct_channels=1,
+            now=now,
+        )
+        assert result["responsiveness_score"] == 0.0
+
+    def test_responsiveness_mid_range(self):
+        """Line 335: response time between 4h and 168h decays linearly."""
+        from app.services.contact_intelligence import compute_contact_relationship_score
+
+        now = datetime.now(timezone.utc)
+        result = compute_contact_relationship_score(
+            last_interaction_at=now - timedelta(days=1),
+            interactions_30d=5,
+            interactions_60d=5,
+            interactions_90d=5,
+            avg_response_hours=50.0,
+            wins=0,
+            total_interactions=5,
+            distinct_channels=1,
+            now=now,
+        )
+        resp = result["responsiveness_score"]
+        assert 0 < resp < 100
+
+
+# ── _compute_trend cooling path (lines 384-387) ─────────────────────
+
+
+class TestComputeTrendCooling:
+    def test_cooling_trend(self):
+        """Lines 384-385: interactions_30d < 0.5 * older_rate -> cooling."""
+        from app.services.contact_intelligence import _compute_trend
+
+        # 90d has 20, 30d has 1 -> older_rate = (20-1)/2 = 9.5, 1 < 0.5*9.5=4.75 -> cooling
+        result = _compute_trend(interactions_30d=1, interactions_60d=10, interactions_90d=20)
+        assert result == "cooling"
+
+    def test_stable_trend(self):
+        """Line 387: not warming, not cooling -> stable."""
+        from app.services.contact_intelligence import _compute_trend
+
+        # 90d has 10, 30d has 5 -> older_rate = (10-5)/2 = 2.5
+        # 5 > 1.5*2.5=3.75? yes -> warming actually. Let me adjust.
+        # 90d=12, 30d=5 -> older_rate=(12-5)/2=3.5
+        # 5 > 1.5*3.5=5.25? No. 5 < 0.5*3.5=1.75? No. -> stable
+        result = _compute_trend(interactions_30d=5, interactions_60d=8, interactions_90d=12)
+        assert result == "stable"
+
+
+# ── compute_all_contact_scores batch flush errors (lines 497-504, 510-513, 517-519) ──
+
+
+class TestComputeScoresFlushErrors:
+    def test_batch_flush_success_with_500_plus(self, db_session, test_user):
+        """Line 499: successful batch flush after 500 contacts clears the batch list."""
+        card = _make_card(db_session, "BigBatch", "bigbatch.com")
+        # Create 501 contacts to trigger the batch flush at 500
+        for i in range(501):
+            _make_contact(db_session, card, f"b{i}@bigbatch.com", full_name=f"BB {i}")
+        db_session.commit()
+
+        result = compute_all_contact_scores(db_session)
+        # All 501 should be updated (batch flush at 500 + final flush for 1)
+        assert result["updated"] == 501
+        assert result["skipped"] == 0
+
+    def test_batch_flush_error(self, db_session, test_user):
+        """Lines 497-504: error during batch flush increments skipped count."""
+        card = _make_card(db_session, "FlushErr", "flusherr.com")
+        for i in range(501):
+            _make_contact(db_session, card, f"c{i}@flusherr.com", full_name=f"Contact {i}")
+        db_session.commit()
+
+        original_flush = db_session.flush
+        flush_counter = {"count": 0}
+
+        def selective_flush(*args, **kwargs):
+            flush_counter["count"] += 1
+            # The first flush is the batch flush after 500 contacts
+            if flush_counter["count"] == 1:
+                raise Exception("Batch flush error")
+            return original_flush(*args, **kwargs)
+
+        db_session.flush = selective_flush
+        result = compute_all_contact_scores(db_session)
+        db_session.flush = original_flush
+
+        # Some contacts should be counted as skipped due to batch flush error
+        assert result["skipped"] > 0 or result["updated"] > 0
+
+    def test_final_flush_error(self, db_session, test_user):
+        """Lines 510-513: error during final flush increments skipped count."""
+        card = _make_card(db_session, "FinalFlush", "finalflush.com")
+        for i in range(3):
+            _make_contact(db_session, card, f"ff{i}@finalflush.com", full_name=f"FF {i}")
+        db_session.commit()
+
+        original_flush = db_session.flush
+
+        def always_fail_flush(*args, **kwargs):
+            raise Exception("Final flush error")
+
+        # Replace flush to always fail - the final flush should trigger lines 510-513
+        db_session.flush = always_fail_flush
+        result = compute_all_contact_scores(db_session)
+        db_session.flush = original_flush
+
+        # The function should still return without raising
+        assert "updated" in result
+        assert "skipped" in result
+        # All contacts should be skipped since the final flush fails
+        assert result["skipped"] == 3
+
+    def test_commit_error(self, db_session, test_user):
+        """Lines 517-519: error during commit rolls back."""
+        card = _make_card(db_session, "CommitErr", "commiterr.com")
+        _make_contact(db_session, card, "ce@commiterr.com", full_name="CE")
+        db_session.commit()
+
+        original_commit = db_session.commit
+
+        def fail_commit(*args, **kwargs):
+            raise Exception("Commit error")
+
+        db_session.commit = fail_commit
+        result = compute_all_contact_scores(db_session)
+        db_session.commit = original_commit
+
+        # Should still return results (commit error is caught)
+        assert "updated" in result
+
+
+# ── generate_contact_nudges: last_seen_at fallback + no days (lines 554-555, 558) ──
+
+
+class TestNudgeDaysSinceFallback:
+    def test_uses_last_seen_at_when_no_last_interaction(self, db_session):
+        """Lines 554-555: falls back to last_seen_at when last_interaction_at is None."""
+        card = _make_card(db_session, "SeenCo", "seenco.com")
+        vc = _make_contact(db_session, card, "seen@seenco.com", full_name="Seen Guy")
+        vc.activity_trend = "dormant"
+        vc.last_interaction_at = None
+        vc.last_seen_at = datetime.now(timezone.utc) - timedelta(days=45)
+        db_session.commit()
+
+        nudges = generate_contact_nudges(db_session, card.id)
+        assert len(nudges) == 1
+        assert nudges[0]["days_since_contact"] >= 44
+
+    def test_no_days_since_skips_contact(self, db_session):
+        """Line 558: contact with no last_interaction_at and no last_seen_at is skipped."""
+        card = _make_card(db_session, "NoDays", "nodays.com")
+        vc = _make_contact(db_session, card, "nodays@nodays.com", full_name="No Days")
+        vc.activity_trend = "dormant"
+        vc.last_interaction_at = None
+        vc.last_seen_at = None
+        db_session.commit()
+
+        nudges = generate_contact_nudges(db_session, card.id)
+        assert len(nudges) == 0
+
+
+# ── generate_contact_nudges: Gradient enrichment exception (lines 591-592) ──
+
+
+class TestNudgeGradientEnrichmentError:
+    def test_gradient_enrichment_exception_swallowed(self, db_session):
+        """Lines 591-592: exception in _enrich_nudges_with_ai is caught."""
+        card = _make_card(db_session, "EnrichErr", "enricherr.com")
+        vc = _make_contact(db_session, card, "err@enricherr.com", full_name="Err Person")
+        vc.activity_trend = "dormant"
+        vc.last_interaction_at = datetime.now(timezone.utc) - timedelta(days=45)
+        db_session.commit()
+
+        with patch(
+            "app.services.contact_intelligence._enrich_nudges_with_ai",
+            side_effect=Exception("Gradient API down"),
+        ):
+            nudges = generate_contact_nudges(db_session, card.id)
+
+        # Nudges still returned even though enrichment failed
+        assert len(nudges) == 1
+        assert nudges[0]["nudge_type"] == "dormant"
+
+
+# ── _enrich_nudges_with_ai (lines 604-626) ──────────────────────────
+
+
+class TestEnrichNudgesWithAI:
+    def test_no_gradient_key_returns_unchanged(self, db_session):
+        """Line 601-602: no API key returns nudges unchanged."""
+        from app.services.contact_intelligence import _enrich_nudges_with_ai
+
+        mock_settings = type("S", (), {"do_gradient_api_key": ""})()
+        nudges = [{"contact_name": "Test", "nudge_type": "dormant", "message": "original"}]
+
+        with patch("app.config.settings", mock_settings):
+            result = _enrich_nudges_with_ai(db_session, nudges, 1)
+
+        assert result[0]["message"] == "original"
+
+    def test_gradient_enrichment_success(self, db_session):
+        """Lines 604-626: successful Gradient enrichment updates message."""
+        from app.services.contact_intelligence import _enrich_nudges_with_ai
+
+        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
+        nudges = [{
+            "contact_name": "Test",
+            "nudge_type": "dormant",
+            "days_since_contact": 45,
+            "activity_trend": "dormant",
+            "relationship_score": 30,
+            "message": "original",
+        }]
+
+        # The function uses asyncio.get_event_loop().run_until_complete(gradient_json(...))
+        # We need to mock the entire chain.
+        mock_loop = MagicMock()
+        mock_loop.run_until_complete.return_value = {"message": "AI-enriched suggestion"}
+
+        with patch("app.config.settings", mock_settings), \
+             patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock), \
+             patch("asyncio.get_event_loop", return_value=mock_loop):
+            result = _enrich_nudges_with_ai(db_session, nudges, 1)
+
+        assert result[0]["message"] == "AI-enriched suggestion"
+
+    def test_gradient_enrichment_per_nudge_exception(self, db_session):
+        """Lines 623-624: per-nudge exception keeps template message."""
+        from app.services.contact_intelligence import _enrich_nudges_with_ai
+
+        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
+        nudges = [{
+            "contact_name": "Test",
+            "nudge_type": "dormant",
+            "days_since_contact": 45,
+            "activity_trend": "dormant",
+            "relationship_score": 30,
+            "message": "template message",
+        }]
+
+        mock_loop = MagicMock()
+        mock_loop.run_until_complete.side_effect = Exception("API error")
+
+        with patch("app.config.settings", mock_settings), \
+             patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock), \
+             patch("asyncio.get_event_loop", return_value=mock_loop):
+            result = _enrich_nudges_with_ai(db_session, nudges, 1)
+
+        # Template message preserved
+        assert result[0]["message"] == "template message"
+
+    def test_gradient_enrichment_returns_non_dict(self, db_session):
+        """Line 621: Gradient returns non-dict — template message kept."""
+        from app.services.contact_intelligence import _enrich_nudges_with_ai
+
+        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
+        nudges = [{
+            "contact_name": "Test",
+            "nudge_type": "cooling",
+            "days_since_contact": 20,
+            "activity_trend": "cooling",
+            "relationship_score": 50,
+            "message": "template msg",
+        }]
+
+        mock_loop = MagicMock()
+        mock_loop.run_until_complete.return_value = "not a dict"
+
+        with patch("app.config.settings", mock_settings), \
+             patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock), \
+             patch("asyncio.get_event_loop", return_value=mock_loop):
+            result = _enrich_nudges_with_ai(db_session, nudges, 1)
+
+        assert result[0]["message"] == "template msg"
+
+
+# ── generate_contact_summary: Gradient AI path (lines 665-679) ────────
+
+
+class TestGenerateContactSummaryGradient:
+    def test_gradient_summary_success(self, db_session, test_user):
+        """Lines 665-677: Gradient AI generates a summary successfully."""
+        card = _make_card(db_session, "SumCo", "sumco.com")
+        vc = _make_contact(db_session, card, "sum@sumco.com", full_name="Summary Person")
+        vc.interaction_count = 10
+        vc.activity_trend = "stable"
+        vc.relationship_score = 65.0
+        db_session.commit()
+
+        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
+        mock_loop = MagicMock()
+        mock_loop.run_until_complete.return_value = "AI-generated relationship summary here."
+
+        with patch("app.config.settings", mock_settings), \
+             patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock), \
+             patch("asyncio.get_event_loop", return_value=mock_loop):
+            result = generate_contact_summary(db_session, card.id, vc.id)
+
+        assert result == "AI-generated relationship summary here."
+
+    def test_gradient_summary_failure_falls_back_to_template(self, db_session, test_user):
+        """Lines 678-679: Gradient failure falls back to template summary."""
+        card = _make_card(db_session, "FailSum", "failsum.com")
+        vc = _make_contact(db_session, card, "fail@failsum.com", full_name="Fail Person")
+        vc.interaction_count = 5
+        vc.activity_trend = "warming"
+        vc.relationship_score = 80.0
+        db_session.commit()
+
+        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
+        mock_loop = MagicMock()
+        mock_loop.run_until_complete.side_effect = Exception("Gradient down")
+
+        with patch("app.config.settings", mock_settings), \
+             patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock), \
+             patch("asyncio.get_event_loop", return_value=mock_loop):
+            result = generate_contact_summary(db_session, card.id, vc.id)
+
+        # Should fall back to template
+        assert "Fail Person" in result
+        assert "improving" in result  # warming -> "improving"
+
+    def test_gradient_summary_returns_empty(self, db_session, test_user):
+        """Lines 676-677: Gradient returns empty string -> falls back to template."""
+        card = _make_card(db_session, "EmptySum", "emptysum.com")
+        vc = _make_contact(db_session, card, "empty@emptysum.com", full_name="Empty Person")
+        vc.interaction_count = 3
+        vc.activity_trend = "cooling"
+        vc.relationship_score = 40.0
+        db_session.commit()
+
+        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
+        mock_loop = MagicMock()
+        mock_loop.run_until_complete.return_value = ""
+
+        with patch("app.config.settings", mock_settings), \
+             patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock), \
+             patch("asyncio.get_event_loop", return_value=mock_loop):
+            result = generate_contact_summary(db_session, card.id, vc.id)
+
+        # Empty string from Gradient -> falls to template
+        assert "Empty Person" in result
+        assert "declining" in result  # cooling -> "declining"

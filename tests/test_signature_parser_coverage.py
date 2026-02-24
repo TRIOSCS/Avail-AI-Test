@@ -11,6 +11,7 @@ from app.services.signature_parser import (
     _extract_signature_block,
     parse_signature_regex,
     parse_signature_ai,
+    parse_signature_gradient,
     extract_signature,
     cache_signature_extract,
 )
@@ -243,6 +244,172 @@ class TestParseSignatureAI:
         with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=ai_response):
             result = await parse_signature_ai(body, "John", "")
         assert result["email"] is None
+
+
+class TestParseSignatureGradient:
+    """Tests for parse_signature_gradient (lines 257-303)."""
+
+    @pytest.mark.asyncio
+    async def test_empty_body_returns_zero(self):
+        with patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock):
+            result = await parse_signature_gradient("")
+        assert result == {"confidence": 0.0}
+
+    @pytest.mark.asyncio
+    async def test_successful_gradient_parse(self):
+        body = "Hello.\n\n---\nJohn Doe\nCEO, Acme Corp\njohn@acme.com\n"
+        gradient_response = {
+            "full_name": "John Doe", "title": "CEO",
+            "company_name": "Acme Corp", "phone": "555-123-4567",
+            "mobile": None, "website": "acme.com",
+            "linkedin_url": None, "address": "123 Main St",
+        }
+        with patch(
+            "app.services.gradient_service.gradient_json",
+            new_callable=AsyncMock,
+            return_value=gradient_response,
+        ):
+            result = await parse_signature_gradient(body, "John Doe", "john@acme.com")
+        assert result["full_name"] == "John Doe"
+        assert result["title"] == "CEO"
+        assert result["company_name"] == "Acme Corp"
+        assert result["email"] == "john@acme.com"
+        assert result["confidence"] > 0.5
+
+    @pytest.mark.asyncio
+    async def test_gradient_returns_none(self):
+        body = "Hello.\n\n---\nJohn Doe\nCEO\n"
+        with patch(
+            "app.services.gradient_service.gradient_json",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await parse_signature_gradient(body)
+        assert result == {"confidence": 0.0}
+
+    @pytest.mark.asyncio
+    async def test_gradient_returns_non_dict(self):
+        body = "Hello.\n\n---\nJohn Doe\nCEO\n"
+        with patch(
+            "app.services.gradient_service.gradient_json",
+            new_callable=AsyncMock,
+            return_value="not a dict",
+        ):
+            result = await parse_signature_gradient(body)
+        assert result == {"confidence": 0.0}
+
+    @pytest.mark.asyncio
+    async def test_gradient_exception(self):
+        body = "Hello.\n\n---\nJohn Doe\nCEO\n"
+        with patch(
+            "app.services.gradient_service.gradient_json",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("API error"),
+        ):
+            result = await parse_signature_gradient(body)
+        assert result == {"confidence": 0.0}
+
+    @pytest.mark.asyncio
+    async def test_gradient_confidence_capped_at_095(self):
+        body = "Hello.\n\n---\nJohn Doe\nCEO\n"
+        gradient_response = {
+            "full_name": "John Doe", "title": "CEO",
+            "company_name": "Acme", "phone": "555-123-4567",
+            "mobile": "555-987-6543", "website": "acme.com",
+            "linkedin_url": "https://linkedin.com/in/jd", "address": "123 Main St",
+        }
+        with patch(
+            "app.services.gradient_service.gradient_json",
+            new_callable=AsyncMock,
+            return_value=gradient_response,
+        ):
+            result = await parse_signature_gradient(body, "John Doe", "john@acme.com")
+        assert result["confidence"] == 0.95
+
+    @pytest.mark.asyncio
+    async def test_gradient_no_sender_email_yields_none(self):
+        body = "Hello.\n\n---\nJohn Doe\nCEO\n"
+        gradient_response = {
+            "full_name": "John", "title": None, "company_name": None,
+            "phone": None, "mobile": None, "website": None,
+            "linkedin_url": None, "address": None,
+        }
+        with patch(
+            "app.services.gradient_service.gradient_json",
+            new_callable=AsyncMock,
+            return_value=gradient_response,
+        ):
+            result = await parse_signature_gradient(body, "John", "")
+        assert result["email"] is None
+
+
+class TestExtractSignatureGradientPath:
+    """Tests for Gradient path in extract_signature (lines 319-324)."""
+
+    @pytest.mark.asyncio
+    async def test_gradient_beats_regex(self):
+        """When Gradient confidence > regex confidence, Gradient is returned."""
+        low_regex = {"full_name": "John", "confidence": 0.4}
+        gradient_result = {"full_name": "John Doe", "title": "CEO", "confidence": 0.85}
+        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
+
+        with patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex), \
+             patch("app.services.signature_parser.parse_signature_gradient",
+                   new_callable=AsyncMock, return_value=gradient_result), \
+             patch("app.services.signature_parser.parse_signature_ai",
+                   new_callable=AsyncMock, return_value={"confidence": 0.3}), \
+             patch("app.config.settings", mock_settings):
+            result = await extract_signature("body", "John", "john@acme.com")
+        assert result["extraction_method"] == "gradient_ai"
+        assert result["confidence"] == 0.85
+
+    @pytest.mark.asyncio
+    async def test_gradient_lower_than_regex_falls_through(self):
+        """When Gradient confidence < regex confidence, falls through to Claude."""
+        low_regex = {"full_name": "John", "confidence": 0.5}
+        gradient_result = {"full_name": "John", "confidence": 0.3}
+        higher_ai = {"full_name": "John Doe", "confidence": 0.8}
+        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
+
+        with patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex), \
+             patch("app.services.signature_parser.parse_signature_gradient",
+                   new_callable=AsyncMock, return_value=gradient_result), \
+             patch("app.services.signature_parser.parse_signature_ai",
+                   new_callable=AsyncMock, return_value=higher_ai), \
+             patch("app.config.settings", mock_settings):
+            result = await extract_signature("body", "John", "john@acme.com")
+        assert result["extraction_method"] == "claude_ai"
+
+    @pytest.mark.asyncio
+    async def test_gradient_exception_falls_through_to_ai(self):
+        """When Gradient raises, falls through to Claude AI."""
+        low_regex = {"full_name": "John", "confidence": 0.4}
+        higher_ai = {"full_name": "John Doe", "confidence": 0.8}
+        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
+
+        with patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex), \
+             patch("app.services.signature_parser.parse_signature_gradient",
+                   new_callable=AsyncMock, side_effect=RuntimeError("Gradient down")), \
+             patch("app.services.signature_parser.parse_signature_ai",
+                   new_callable=AsyncMock, return_value=higher_ai), \
+             patch("app.config.settings", mock_settings):
+            result = await extract_signature("body", "John", "john@acme.com")
+        assert result["extraction_method"] == "claude_ai"
+
+    @pytest.mark.asyncio
+    async def test_no_gradient_key_skips_gradient(self):
+        """When do_gradient_api_key is empty, Gradient is skipped."""
+        low_regex = {"full_name": "John", "confidence": 0.4}
+        higher_ai = {"full_name": "John Doe", "confidence": 0.8}
+        mock_settings = type("S", (), {"do_gradient_api_key": ""})()
+
+        with patch("app.services.signature_parser.parse_signature_regex", return_value=low_regex), \
+             patch("app.services.signature_parser.parse_signature_ai",
+                   new_callable=AsyncMock, return_value=higher_ai), \
+             patch("app.config.settings", mock_settings):
+            result = await extract_signature("body", "John", "john@acme.com")
+        # Should go to claude_ai, not gradient
+        assert result["extraction_method"] == "claude_ai"
 
 
 class TestExtractSignature:

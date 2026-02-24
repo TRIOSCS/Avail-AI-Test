@@ -21,7 +21,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import BuyPlan, Requisition, VendorCard
+from app.models import ActivityLog, BuyPlan, Requisition, VendorCard
 from app.scheduler import _utc, configure_scheduler, scheduler
 
 # ── Fixtures ───────────────────────────────────────────────────────────
@@ -3536,3 +3536,312 @@ def test_download_and_import_stock_list_card_flush_conflict(scheduler_db, test_u
             )
         )
         scheduler_db.flush = original_flush
+
+
+# ===========================================================================
+# _job_token_refresh: Redis lock paths (lines 296-299, 306-309)
+# ===========================================================================
+
+
+def test_token_refresh_redis_lock_acquired(scheduler_db, test_user):
+    """Token refresh acquires Redis lock and refreshes user."""
+    test_user.refresh_token = "rt_lock"
+    test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.access_token = "old_token"
+    scheduler_db.commit()
+
+    mock_redis = MagicMock()
+    mock_redis.set.return_value = True  # Lock acquired
+
+    with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh, \
+         patch("app.cache.intel_cache._get_redis", return_value=mock_redis):
+        from app.scheduler import _job_token_refresh
+        asyncio.run(_job_token_refresh())
+        mock_refresh.assert_called_once()
+        mock_redis.set.assert_called_once()
+        mock_redis.delete.assert_called_once()
+
+
+def test_token_refresh_redis_lock_not_acquired(scheduler_db, test_user):
+    """Token refresh skipped when Redis lock is held by another process."""
+    test_user.refresh_token = "rt_lock_held"
+    test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.access_token = "old_token"
+    scheduler_db.commit()
+
+    mock_redis = MagicMock()
+    mock_redis.set.return_value = False  # Lock NOT acquired
+
+    with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh, \
+         patch("app.cache.intel_cache._get_redis", return_value=mock_redis):
+        from app.scheduler import _job_token_refresh
+        asyncio.run(_job_token_refresh())
+        mock_refresh.assert_not_called()  # Skipped due to lock
+
+
+def test_token_refresh_redis_delete_exception(scheduler_db, test_user):
+    """Redis lock delete exception in finally block is swallowed."""
+    test_user.refresh_token = "rt_lock_del_err"
+    test_user.token_expires_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.access_token = "old_token"
+    scheduler_db.commit()
+
+    mock_redis = MagicMock()
+    mock_redis.set.return_value = True  # Lock acquired
+    mock_redis.delete.side_effect = Exception("Redis connection lost")
+
+    with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh, \
+         patch("app.cache.intel_cache._get_redis", return_value=mock_redis):
+        from app.scheduler import _job_token_refresh
+        # Should not raise — exception in finally is swallowed
+        asyncio.run(_job_token_refresh())
+        mock_refresh.assert_called_once()
+
+
+# ===========================================================================
+# _job_site_ownership_sweep (lines 521-531)
+# ===========================================================================
+
+
+def test_site_ownership_sweep_delegates(scheduler_db):
+    """Site ownership sweep delegates to run_site_ownership_sweep."""
+    with patch(
+        "app.services.ownership_service.run_site_ownership_sweep"
+    ) as mock_sweep:
+        from app.scheduler import _job_site_ownership_sweep
+        asyncio.run(_job_site_ownership_sweep())
+        mock_sweep.assert_called_once_with(scheduler_db)
+
+
+def test_site_ownership_sweep_error_handling(scheduler_db):
+    """Site ownership sweep handles errors gracefully."""
+    with patch(
+        "app.services.ownership_service.run_site_ownership_sweep",
+        side_effect=Exception("Sweep failed"),
+    ):
+        from app.scheduler import _job_site_ownership_sweep
+        # Should not raise
+        asyncio.run(_job_site_ownership_sweep())
+
+
+# ===========================================================================
+# _job_contact_scoring (lines 828-849)
+# ===========================================================================
+
+
+def test_contact_scoring_runs_successfully(scheduler_db):
+    """Contact scoring job delegates to compute_all_contact_scores."""
+    with patch(
+        "app.services.contact_intelligence.compute_all_contact_scores"
+    ) as mock_compute:
+        mock_compute.return_value = {"updated": 10, "skipped": 0}
+        from app.scheduler import _job_contact_scoring
+        asyncio.run(_job_contact_scoring())
+        mock_compute.assert_called_once_with(scheduler_db)
+
+
+def test_contact_scoring_timeout(scheduler_db):
+    """Contact scoring handles TimeoutError gracefully."""
+    async def _mock_wait_for(coro, timeout=None):
+        try:
+            coro.close()
+        except Exception:
+            pass
+        raise asyncio.TimeoutError()
+
+    with patch(
+        "app.services.contact_intelligence.compute_all_contact_scores"
+    ), patch("asyncio.wait_for", side_effect=_mock_wait_for):
+        from app.scheduler import _job_contact_scoring
+        # Should not raise
+        asyncio.run(_job_contact_scoring())
+
+
+def test_contact_scoring_general_error(scheduler_db):
+    """Contact scoring handles general exceptions gracefully."""
+    with patch(
+        "app.services.contact_intelligence.compute_all_contact_scores",
+        side_effect=Exception("Scoring crashed"),
+    ):
+        from app.scheduler import _job_contact_scoring
+        # Should not raise
+        asyncio.run(_job_contact_scoring())
+
+
+# ===========================================================================
+# _job_contact_status_compute: 7-30 day continue + error (lines 1459, 1479-1481)
+# ===========================================================================
+
+
+def test_contact_status_compute_7_to_30_day_window(scheduler_db, test_user, test_company, test_customer_site):
+    """Contacts with last activity 7-30 days ago keep current status (no downgrade)."""
+    from app.models import SiteContact
+
+    sc = SiteContact(
+        customer_site_id=test_customer_site.id,
+        full_name="Seven Day Contact",
+        is_active=True,
+        contact_status="active",
+    )
+    scheduler_db.add(sc)
+    scheduler_db.flush()
+
+    # Create an activity log 15 days ago for this site contact
+    activity = ActivityLog(
+        user_id=test_user.id,
+        activity_type="email_sent",
+        channel="outlook",
+        site_contact_id=sc.id,
+        auto_logged=True,
+        occurred_at=datetime.now(timezone.utc) - timedelta(days=15),
+        created_at=datetime.now(timezone.utc) - timedelta(days=15),
+    )
+    scheduler_db.add(activity)
+    scheduler_db.commit()
+
+    from app.scheduler import _job_contact_status_compute
+    asyncio.run(_job_contact_status_compute())
+
+    scheduler_db.refresh(sc)
+    assert sc.contact_status == "active"  # Not downgraded in 7-30 day window
+
+
+def test_contact_status_compute_champion_not_downgraded(scheduler_db, test_user, test_company, test_customer_site):
+    """Line 1450: Champion contacts are never downgraded."""
+    from app.models import SiteContact
+
+    sc = SiteContact(
+        customer_site_id=test_customer_site.id,
+        full_name="Champion Contact",
+        is_active=True,
+        contact_status="champion",
+    )
+    scheduler_db.add(sc)
+    scheduler_db.commit()
+
+    from app.scheduler import _job_contact_status_compute
+    asyncio.run(_job_contact_status_compute())
+
+    scheduler_db.refresh(sc)
+    assert sc.contact_status == "champion"
+
+
+def test_contact_status_compute_active_recent(scheduler_db, test_user, test_company, test_customer_site):
+    """Line 1456: contact with activity <= 7 days ago -> active."""
+    from app.models import SiteContact
+
+    sc = SiteContact(
+        customer_site_id=test_customer_site.id,
+        full_name="Recent Contact",
+        is_active=True,
+        contact_status="new",
+    )
+    scheduler_db.add(sc)
+    scheduler_db.flush()
+
+    activity = ActivityLog(
+        user_id=test_user.id,
+        activity_type="email_sent",
+        channel="outlook",
+        site_contact_id=sc.id,
+        auto_logged=True,
+        occurred_at=datetime.now(timezone.utc) - timedelta(days=3),
+        created_at=datetime.now(timezone.utc) - timedelta(days=3),
+    )
+    scheduler_db.add(activity)
+    scheduler_db.commit()
+
+    from app.scheduler import _job_contact_status_compute
+    asyncio.run(_job_contact_status_compute())
+
+    scheduler_db.refresh(sc)
+    assert sc.contact_status == "active"
+
+
+def test_contact_status_compute_quiet_and_inactive(scheduler_db, test_user, test_company, test_customer_site):
+    """Lines 1460-1463: 30-90 days -> quiet, >90 days -> inactive."""
+    from app.models import SiteContact
+
+    quiet_sc = SiteContact(
+        customer_site_id=test_customer_site.id,
+        full_name="Quiet Contact",
+        is_active=True,
+        contact_status="active",
+    )
+    inactive_sc = SiteContact(
+        customer_site_id=test_customer_site.id,
+        full_name="Inactive Contact",
+        is_active=True,
+        contact_status="active",
+    )
+    scheduler_db.add_all([quiet_sc, inactive_sc])
+    scheduler_db.flush()
+
+    # Activity 60 days ago -> quiet
+    quiet_activity = ActivityLog(
+        user_id=test_user.id,
+        activity_type="email_sent",
+        channel="outlook",
+        site_contact_id=quiet_sc.id,
+        auto_logged=True,
+        occurred_at=datetime.now(timezone.utc) - timedelta(days=60),
+        created_at=datetime.now(timezone.utc) - timedelta(days=60),
+    )
+    # Activity 120 days ago -> inactive
+    inactive_activity = ActivityLog(
+        user_id=test_user.id,
+        activity_type="email_sent",
+        channel="outlook",
+        site_contact_id=inactive_sc.id,
+        auto_logged=True,
+        occurred_at=datetime.now(timezone.utc) - timedelta(days=120),
+        created_at=datetime.now(timezone.utc) - timedelta(days=120),
+    )
+    scheduler_db.add_all([quiet_activity, inactive_activity])
+    scheduler_db.commit()
+
+    from app.scheduler import _job_contact_status_compute
+    asyncio.run(_job_contact_status_compute())
+
+    scheduler_db.refresh(quiet_sc)
+    scheduler_db.refresh(inactive_sc)
+    assert quiet_sc.contact_status == "quiet"
+    assert inactive_sc.contact_status == "inactive"
+
+
+def test_contact_status_compute_no_activity_old_created(scheduler_db, test_user, test_company, test_customer_site):
+    """Lines 1465-1471: no activity + created >90 days ago -> inactive; recent created -> keep 'new'."""
+    from app.models import SiteContact
+
+    old_sc = SiteContact(
+        customer_site_id=test_customer_site.id,
+        full_name="Old No Activity",
+        is_active=True,
+        contact_status="new",
+        created_at=datetime.now(timezone.utc) - timedelta(days=120),
+    )
+    new_sc = SiteContact(
+        customer_site_id=test_customer_site.id,
+        full_name="New No Activity",
+        is_active=True,
+        contact_status="new",
+        created_at=datetime.now(timezone.utc) - timedelta(days=30),
+    )
+    scheduler_db.add_all([old_sc, new_sc])
+    scheduler_db.commit()
+
+    from app.scheduler import _job_contact_status_compute
+    asyncio.run(_job_contact_status_compute())
+
+    scheduler_db.refresh(old_sc)
+    scheduler_db.refresh(new_sc)
+    assert old_sc.contact_status == "inactive"
+    assert new_sc.contact_status == "new"  # Kept as-is
+
+
+def test_contact_status_compute_error_handler(scheduler_db):
+    """Exception in _job_contact_status_compute is caught and rolled back."""
+    with patch.object(scheduler_db, "query", side_effect=Exception("DB crash")):
+        from app.scheduler import _job_contact_status_compute
+        # Should not raise
+        asyncio.run(_job_contact_status_compute())

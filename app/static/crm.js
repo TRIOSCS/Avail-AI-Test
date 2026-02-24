@@ -4579,7 +4579,8 @@ let _sourcesSearchTimer = null;
 let _sourcesShowPlanned = false;
 
 function _isPlannedSource(s) {
-    // Sources with no env_vars are always "planned" regardless of status
+    // Use is_active flag from API if available, fall back to env_vars check
+    if (typeof s.is_active === 'boolean') return !s.is_active;
     return !(s.env_vars && s.env_vars.length);
 }
 
@@ -4738,6 +4739,10 @@ function _renderSourceCard(s, canToggle, isPlanned) {
         ? `<button class="btn btn-ghost btn-sm" id="test-btn-${s.id}" onclick="testSourceCred(${s.id})">Test</button>`
         : '';
 
+    const activeToggleHtml = canToggle
+        ? `<button class="btn btn-ghost btn-sm" onclick="toggleSourceActive(${s.id})" style="font-size:10px;color:${s.is_active?'var(--green)':'var(--amber)'}">${s.is_active ? '● Active' : '○ Planned'}</button>`
+        : '';
+
     const cardCls = isPlanned ? 'card s-card s-card-planned' : 'card s-card';
 
     return `<div class="${cardCls}" style="max-width:none">
@@ -4748,6 +4753,7 @@ function _renderSourceCard(s, canToggle, isPlanned) {
                 <span class="s-hint">${s.source_type}</span>
             </div>
             <div class="s-row" style="gap:8px">
+                ${activeToggleHtml}
                 ${toggleHtml}
                 ${testHtml}
             </div>
@@ -4911,6 +4917,16 @@ async function toggleSourceStatus(sourceId, currentStatus) {
         loadSettingsSources();
     } catch (e) {
         showToast('Failed to toggle source: ' + (e.message || e), 'error');
+    }
+}
+
+async function toggleSourceActive(sourceId) {
+    try {
+        const data = await apiFetch(`/api/sources/${sourceId}/activate`, { method: 'PUT' });
+        showToast(`Source marked ${data.is_active ? 'Active' : 'Planned'}`, 'success');
+        loadSettingsSources();
+    } catch (e) {
+        showToast('Failed to toggle active state: ' + (e.message || e), 'error');
     }
 }
 

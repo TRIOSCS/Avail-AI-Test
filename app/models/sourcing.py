@@ -53,6 +53,9 @@ class Requisition(Base):
     requirements = relationship(
         "Requirement", back_populates="requisition", cascade="all, delete-orphan"
     )
+    attachments = relationship(
+        "RequisitionAttachment", back_populates="requisition", cascade="all, delete-orphan"
+    )
     contacts = relationship(
         "Contact", back_populates="requisition", cascade="all, delete-orphan"
     )
@@ -87,6 +90,9 @@ class Requirement(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="requirements")
+    attachments = relationship(
+        "RequirementAttachment", back_populates="requirement", cascade="all, delete-orphan"
+    )
     sightings = relationship(
         "Sighting", back_populates="requirement", cascade="all, delete-orphan"
     )
@@ -142,3 +148,45 @@ class Sighting(Base):
         Index("ix_sightings_req_vendor", "requirement_id", "vendor_name"),
         Index("ix_sightings_req_score", "requirement_id", score.desc()),
     )
+
+
+class RequisitionAttachment(Base):
+    """File attachment on a requisition (stored in OneDrive)."""
+
+    __tablename__ = "requisition_attachments"
+    id = Column(Integer, primary_key=True)
+    requisition_id = Column(
+        Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
+    )
+    file_name = Column(String(500), nullable=False)
+    onedrive_item_id = Column(String(500))
+    onedrive_url = Column(Text)
+    thumbnail_url = Column(Text)
+    content_type = Column(String(100))
+    size_bytes = Column(Integer)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    requisition = relationship("Requisition", back_populates="attachments")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
+
+
+class RequirementAttachment(Base):
+    """File attachment on a requirement (stored in OneDrive)."""
+
+    __tablename__ = "requirement_attachments"
+    id = Column(Integer, primary_key=True)
+    requirement_id = Column(
+        Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False
+    )
+    file_name = Column(String(500), nullable=False)
+    onedrive_item_id = Column(String(500))
+    onedrive_url = Column(Text)
+    thumbnail_url = Column(Text)
+    content_type = Column(String(100))
+    size_bytes = Column(Integer)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    requirement = relationship("Requirement", back_populates="attachments")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])

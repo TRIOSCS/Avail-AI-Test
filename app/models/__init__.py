@@ -54,8 +54,14 @@ from .pipeline import ColumnMappingCache, PendingBatch, ProcessedMessage, SyncSt
 # Quotes & Buy Plans
 from .quotes import BuyPlan, Quote  # noqa: F401
 
-# Core: Requisitions & Requirements
-from .sourcing import Requirement, Requisition, Sighting  # noqa: F401
+# Core: Requisitions, Requirements & Attachments
+from .sourcing import (  # noqa: F401
+    Requirement,
+    RequirementAttachment,
+    Requisition,
+    RequisitionAttachment,
+    Sighting,
+)
 
 # Sync
 from .sync import SyncLog  # noqa: F401

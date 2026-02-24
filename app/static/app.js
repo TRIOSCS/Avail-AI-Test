@@ -636,6 +636,20 @@ async function checkM365Status() {
 const _m365Timer = setInterval(checkM365Status, 300000);
 window.addEventListener('beforeunload', () => clearInterval(_m365Timer));
 
+// ── API Health Polling ──────────────────────────────────────────────────
+window._apiHealthErrors = [];
+async function pollApiHealth() {
+    try {
+        const data = await apiFetch('/api/sources/health-summary');
+        window._apiHealthErrors = data.errored_sources || [];
+        const icon = document.getElementById('subbarHealthWarn');
+        if (icon) icon.style.display = window._apiHealthErrors.length > 0 ? 'inline-flex' : 'none';
+    } catch(e) { /* silent */ }
+}
+pollApiHealth();
+const _healthTimer = setInterval(pollApiHealth, 60000);
+window.addEventListener('beforeunload', () => clearInterval(_healthTimer));
+
 // ── Role-Based UI Gating ────────────────────────────────────────────────
 function applyRoleGating() {
     const role = window.userRole;
@@ -1564,9 +1578,9 @@ window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
-    if (mainView === 'sourcing') return ['details', 'sightings', 'activity', 'offers'];
-    if (mainView === 'archive') return ['parts'];
-    return ['parts', 'offers', 'quotes']; // rfq tab
+    if (mainView === 'sourcing') return ['details', 'sightings', 'activity', 'offers', 'files'];
+    if (mainView === 'archive') return ['parts', 'files'];
+    return ['parts', 'offers', 'quotes', 'files']; // rfq tab
 }
 
 function _ddDefaultTab(mainView) {
@@ -1574,7 +1588,7 @@ function _ddDefaultTab(mainView) {
 }
 
 function _ddTabLabel(tab) {
-    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes'};
+    const map = {details:'Details', sightings:'Sightings', activity:'Activity', offers:'Offers', parts:'Parts', quotes:'Quotes', files:'Files'};
     return map[tab] || tab;
 }
 
@@ -1665,6 +1679,9 @@ async function _loadDdSubTab(reqId, tabName, panel) {
             case 'quotes':
                 data = await apiFetch(`/api/requisitions/${reqId}/quotes`);
                 break;
+            case 'files':
+                data = await apiFetch(`/api/requisitions/${reqId}/attachments`);
+                break;
         }
         _ddTabCache[reqId][tabName] = data;
         _renderDdTab(reqId, tabName, data, panel);
@@ -1687,6 +1704,7 @@ function _renderDdTab(reqId, tabName, data, panel) {
             break;
         case 'offers': _renderDdOffers(reqId, data, panel); break;
         case 'quotes': _renderDdQuotes(reqId, data, panel); break;
+        case 'files': _renderDdFiles(reqId, data, panel); break;
         default: panel.innerHTML = '';
     }
 }
@@ -1931,20 +1949,22 @@ async function _autoPollReplies(reqId, currentData, panel) {
     const vendors = (currentData && currentData.vendors) || [];
     const hasSent = vendors.some(v => (v.contacts || []).length > 0);
     if (!hasSent) return;
+    if (_pollAbort) try { _pollAbort.abort(); } catch(e){}
+    _pollAbort = new AbortController();
     try {
-        const result = await apiFetch(`/api/requisitions/${reqId}/poll`, { method: 'POST' });
+        const result = await apiFetch(`/api/requisitions/${reqId}/poll`, { method: 'POST', signal: _pollAbort.signal });
         if (currentReqId !== reqId) return; // Stale — user navigated away
         const newCount = (result.responses || []).length;
         if (newCount > 0) {
             // New replies found — refresh activity tab
             if (_ddTabCache[reqId]) delete _ddTabCache[reqId].activity;
-            const freshData = await apiFetch(`/api/requisitions/${reqId}/activity`);
+            const freshData = await apiFetch(`/api/requisitions/${reqId}/activity`, { signal: _pollAbort.signal });
             if (currentReqId !== reqId) return; // Stale check after second fetch
             if (_ddTabCache[reqId]) _ddTabCache[reqId].activity = freshData;
             _renderDdActivity(reqId, freshData, panel);
         }
     } catch (e) {
-        // Silent — auto-poll failures shouldn't disrupt the UI
+        // Silent — auto-poll failures and aborts shouldn't disrupt the UI
     }
 }
 
@@ -2709,6 +2729,79 @@ function _renderDdQuotes(reqId, data, panel) {
     }
     html += `</tbody></table>`;
     panel.innerHTML = html;
+}
+
+// ── Files Tab ────────────────────────────────────────────────────────────
+function _renderDdFiles(reqId, data, panel) {
+    const files = Array.isArray(data) ? data : [];
+    let html = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:12px;font-weight:600">Attachments (${files.length})</span>
+        <label class="btn btn-ghost btn-sm" style="cursor:pointer;font-size:11px">
+            <input type="file" style="display:none" onchange="uploadReqAttachment(${reqId},this)"> + Upload File
+        </label>
+    </div>`;
+    if (!files.length) {
+        html += '<span style="font-size:11px;color:var(--muted)">No files attached yet</span>';
+    } else {
+        for (const f of files) {
+            const size = f.size_bytes ? (f.size_bytes < 1024 ? f.size_bytes + ' B' : (f.size_bytes / 1024).toFixed(1) + ' KB') : '';
+            html += `<div class="att-row">
+                <div style="display:flex;align-items:center;gap:8px;min-width:0;flex:1">
+                    <span style="font-size:13px">${_fileIcon(f.content_type)}</span>
+                    <a href="${f.onedrive_url || '#'}" target="_blank" style="font-size:12px;color:var(--blue);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(f.file_name)}</a>
+                </div>
+                <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+                    <span style="font-size:10px;color:var(--muted)">${size}</span>
+                    <span style="font-size:10px;color:var(--muted)">${f.uploaded_by || ''}</span>
+                    <span style="font-size:10px;color:var(--muted)">${f.created_at ? fmtRelative(f.created_at) : ''}</span>
+                    <button class="btn btn-ghost btn-sm" style="font-size:10px;color:var(--red)" onclick="deleteReqAttachment(${reqId},${f.id})">Remove</button>
+                </div>
+            </div>`;
+        }
+    }
+    panel.innerHTML = html;
+}
+
+function _fileIcon(contentType) {
+    if (!contentType) return '\u{1F4CE}';
+    if (contentType.includes('pdf')) return '\u{1F4C4}';
+    if (contentType.includes('image')) return '\u{1F5BC}';
+    if (contentType.includes('spreadsheet') || contentType.includes('excel') || contentType.includes('csv')) return '\u{1F4CA}';
+    return '\u{1F4CE}';
+}
+
+async function uploadReqAttachment(reqId, input) {
+    if (!input.files || !input.files.length) return;
+    const file = input.files[0];
+    if (file.size > 10 * 1024 * 1024) { showToast('File too large (max 10 MB)', 'error'); return; }
+    const formData = new FormData();
+    formData.append('file', file);
+    try {
+        await apiFetch(`/api/requisitions/${reqId}/attachments`, { method: 'POST', body: formData, raw: true });
+        showToast('File uploaded', 'success');
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].files;
+        const panel = input.closest('.dd-panel') || input.closest('[class*="panel"]');
+        if (panel) await _loadDdSubTab(reqId, 'files', panel);
+    } catch(e) {
+        showToast('Upload failed: ' + (e.message || e), 'error');
+    }
+    input.value = '';
+}
+
+async function deleteReqAttachment(reqId, attId) {
+    if (!confirm('Remove this file?')) return;
+    try {
+        await apiFetch(`/api/requisition-attachments/${attId}`, { method: 'DELETE' });
+        showToast('File removed', 'success');
+        if (_ddTabCache[reqId]) delete _ddTabCache[reqId].files;
+        // Re-render files tab
+        const data = await apiFetch(`/api/requisitions/${reqId}/attachments`);
+        if (_ddTabCache[reqId]) _ddTabCache[reqId].files = data;
+        const panel = document.querySelector('.dd-panel') || document.querySelector('[class*="dd-sub-content"]');
+        if (panel) _renderDdFiles(reqId, data, panel);
+    } catch(e) {
+        showToast('Delete failed: ' + (e.message || e), 'error');
+    }
 }
 
 // Expand/collapse a single quote detail row
@@ -4098,6 +4191,7 @@ function _buildEffortTip(score, color, signals) {
 // ── Sourcing Drill-Down (sightings view) ────────────────────────────────
 // Cache for per-requirement sourcing scores
 const _ddScoreCache = {};
+let _ddScoreAborts = {};  // reqId → AbortController for score fetches
 
 // ── Sighting filters ─────────────────────────────────────────────────────
 const _ddSightingFilters = {};
@@ -4272,7 +4366,11 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
 
     // Fetch per-requirement scores if not cached
     if (!_ddScoreCache[reqId]) {
-        apiFetch(`/api/requisitions/${reqId}/sourcing-score`).then(scores => {
+        if (_ddScoreAborts[reqId]) try { _ddScoreAborts[reqId].abort(); } catch(e){}
+        const ctrl = new AbortController();
+        _ddScoreAborts[reqId] = ctrl;
+        apiFetch(`/api/requisitions/${reqId}/sourcing-score`, { signal: ctrl.signal }).then(scores => {
+            if (_currentMainView !== 'sourcing') return; // stale — user left tab
             _ddScoreCache[reqId] = {};
             for (const rs of (scores.requirements || [])) {
                 _ddScoreCache[reqId][rs.requirement_id] = rs;
@@ -4798,6 +4896,8 @@ function renderReqList() {
     const thClass = (col) => _reqSortCol === col ? ' class="sorted"' : '';
     const sa = (col) => `<span class="sort-arrow">${_sortArrow(col)}</span>`;
     const v = _currentMainView;
+    const _healthWarnHtml = `<button class="subbar-icon-btn subbar-health-warn" id="subbarHealthWarn" style="display:${window._apiHealthErrors.length?'inline-flex':'none'}" onmouseenter="showHealthTooltip(event)" onmouseleave="hideHealthTooltip()" title="API errors detected"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></button>`;
+    const _thIcons = `<th style="width:90px;text-align:right">${_healthWarnHtml}<button class="subbar-icon-btn${_myReqsOnly?' on':''}" id="myAccountsBtn" onclick="toggleMyAccounts(this)" title="My Accounts"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button><button class="subbar-icon-btn subbar-trouble" onclick="openTroubleChat()" title="Trouble Ticket"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></button></th>`;
     let thead;
     if (v === 'sourcing') {
         thead = `<thead><tr>
@@ -4812,7 +4912,7 @@ function renderReqList() {
             <th onclick="sortReqList('resp')"${thClass('resp')}>Resp % ${sa('resp')}</th>
             <th onclick="sortReqList('searched')"${thClass('searched')}>Searched ${sa('searched')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
-            <th style="width:100px"></th>
+            ${_thIcons}
         </tr></thead>`;
     } else if (v === 'archive') {
         thead = `<thead><tr>
@@ -4824,7 +4924,7 @@ function renderReqList() {
             <th onclick="sortReqList('matches')"${thClass('matches')}>Matches ${sa('matches')}</th>
             <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
-            <th style="width:90px"></th>
+            ${_thIcons}
         </tr></thead>`;
     } else {
         thead = `<thead><tr>
@@ -4837,7 +4937,7 @@ function renderReqList() {
             <th onclick="sortReqList('sales')"${thClass('sales')}>Sales ${sa('sales')}</th>
             <th onclick="sortReqList('age')"${thClass('age')}>Age ${sa('age')}</th>
             <th onclick="sortReqList('deadline')"${thClass('deadline')}>Bid Due ${sa('deadline')}</th>
-            <th style="width:60px"></th>
+            ${_thIcons}
         </tr></thead>`;
     }
 
@@ -5307,6 +5407,26 @@ function toggleMyAccounts(btn) {
     renderReqList();
 }
 
+// ── API Health Tooltip ──────────────────────────────────────────────────
+function showHealthTooltip(e) {
+    hideHealthTooltip();
+    const errs = window._apiHealthErrors || [];
+    if (!errs.length) return;
+    const tip = document.createElement('div');
+    tip.id = 'healthTooltip';
+    tip.className = 'health-tooltip';
+    tip.innerHTML = '<div style="font-weight:600;margin-bottom:4px;font-size:11px">API Errors</div>' +
+        errs.map(s => `<div style="font-size:11px;margin-bottom:2px"><strong>${s.display_name}</strong>: ${s.last_error || 'Unknown error'}</div>`).join('');
+    document.body.appendChild(tip);
+    const r = e.target.closest('button').getBoundingClientRect();
+    tip.style.top = (r.bottom + 6) + 'px';
+    tip.style.right = (window.innerWidth - r.right) + 'px';
+}
+function hideHealthTooltip() {
+    const t = document.getElementById('healthTooltip');
+    if (t) t.remove();
+}
+
 function clearAllFilters() {
     _activeFilters = {};
     _myReqsOnly = false;
@@ -5366,7 +5486,31 @@ function applyDropdownFilters(data) {
 }
 
 // ── v7 Main View Switcher ───────────────────────────────────────────────
+let _archiveAbort = null;   // AbortController for archive fetch
+let _followUpsAbort = null; // AbortController for follow-ups fetch
+let _pollAbort = null;      // AbortController for auto-poll replies
+
+function _cancelTabInflight() {
+    // Cancel in-flight requests from previous tab
+    if (_archiveAbort) { try { _archiveAbort.abort(); } catch(e){} _archiveAbort = null; }
+    if (_followUpsAbort) { try { _followUpsAbort.abort(); } catch(e){} _followUpsAbort = null; }
+    if (_pollAbort) { try { _pollAbort.abort(); } catch(e){} _pollAbort = null; }
+    // Cancel in-flight score fetches
+    for (const k of Object.keys(_ddScoreAborts)) {
+        try { _ddScoreAborts[k].abort(); } catch(e){}
+    }
+    _ddScoreAborts = {};
+    // Cancel pending filter debounce timers
+    for (const k of Object.keys(_ddFilterTimers)) {
+        clearTimeout(_ddFilterTimers[k]);
+        delete _ddFilterTimers[k];
+    }
+}
+
 function setMainView(view, btn) {
+    // Cancel any in-flight requests from previous tab
+    _cancelTabInflight();
+
     _currentMainView = view;
     // Reset per-RFQ active tab so each view opens its own default sub-tab
     for (const k of Object.keys(_ddActiveTab)) delete _ddActiveTab[k];
@@ -5403,13 +5547,15 @@ function setMainView(view, btn) {
     } else if (view === 'archive') {
         _reqStatusFilter = 'archive';
         _serverSearchActive = false;
-        apiFetch('/api/requisitions?status=archive')
+        _archiveAbort = new AbortController();
+        apiFetch('/api/requisitions?status=archive', { signal: _archiveAbort.signal })
             .then(resp => {
+                if (_currentMainView !== 'archive') return; // stale
                 _reqListData = resp.requisitions || resp;
                 _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
                 renderReqList();
             })
-            .catch(() => showToast('Failed to load archived requisitions', 'error'));
+            .catch(e => { if (e.name !== 'AbortError') showToast('Failed to load archived requisitions', 'error'); });
     }
     buildFilterGroups();
 }
@@ -5615,8 +5761,11 @@ async function loadFollowUpsPanel() {
     const panel = document.getElementById('followUpsPanel');
     if (!panel) return;
     if (_currentMainView !== 'sourcing') { panel.style.display = 'none'; return; }
+    if (_followUpsAbort) try { _followUpsAbort.abort(); } catch(e){}
+    _followUpsAbort = new AbortController();
     try {
-        const data = await apiFetch('/api/follow-ups');
+        const data = await apiFetch('/api/follow-ups', { signal: _followUpsAbort.signal });
+        if (_currentMainView !== 'sourcing') return; // stale — user switched tabs
         const followUps = data.follow_ups || [];
         if (!followUps.length) { panel.style.display = 'none'; return; }
         // Group by requisition
@@ -5646,7 +5795,7 @@ async function loadFollowUpsPanel() {
         html += '</div>';
         panel.innerHTML = html;
         panel.style.display = '';
-    } catch { panel.style.display = 'none'; }
+    } catch(e) { if (e.name !== 'AbortError') panel.style.display = 'none'; }
 }
 
 async function createRequisition() {

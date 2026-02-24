@@ -141,15 +141,12 @@ def compute_vendor_scorecard(
         # Build lookup on demand if not pre-loaded (single-vendor call)
         if quoted_offer_ids is None:
             quoted_offer_ids = set()
-            all_quotes = (
-                db.query(Quote)
-                .filter(
-                    Quote.status.in_(["sent", "won", "lost"]),
-                )
+            for (items,) in (
+                db.query(Quote.line_items)
+                .filter(Quote.status.in_(["sent", "won", "lost"]))
                 .all()
-            )
-            for q in all_quotes:
-                for item in q.line_items or []:
+            ):
+                for item in items or []:
                     oid = item.get("offer_id")
                     if oid:
                         quoted_offer_ids.add(oid)
@@ -166,15 +163,12 @@ def compute_vendor_scorecard(
         # Build lookup on demand if not pre-loaded (single-vendor call)
         if po_offer_ids is None:
             po_offer_ids = set()
-            po_plans = (
-                db.query(BuyPlan)
-                .filter(
-                    BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]),
-                )
+            for (items,) in (
+                db.query(BuyPlan.line_items)
+                .filter(BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]))
                 .all()
-            )
-            for bp in po_plans:
-                for item in bp.line_items or []:
+            ):
+                for item in items or []:
                     oid = item.get("offer_id")
                     if oid:
                         po_offer_ids.add(oid)
@@ -264,26 +258,25 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
     skipped = 0
 
     # ── Preload quote and buy-plan offer-id lookups ONCE ──
+    # Load only the JSON column (not full ORM objects) to reduce memory
     quoted_offer_ids: set[int] = set()
-    all_quotes = (
-        db.query(Quote)
+    for (items,) in (
+        db.query(Quote.line_items)
         .filter(Quote.status.in_(["sent", "won", "lost"]))
         .all()
-    )
-    for q in all_quotes:
-        for item in q.line_items or []:
+    ):
+        for item in items or []:
             oid = item.get("offer_id")
             if oid:
                 quoted_offer_ids.add(oid)
 
     po_offer_ids: set[int] = set()
-    po_plans = (
-        db.query(BuyPlan)
+    for (items,) in (
+        db.query(BuyPlan.line_items)
         .filter(BuyPlan.status.in_(["po_entered", "po_confirmed", "complete"]))
         .all()
-    )
-    for bp in po_plans:
-        for item in bp.line_items or []:
+    ):
+        for item in items or []:
             oid = item.get("offer_id")
             if oid:
                 po_offer_ids.add(oid)
@@ -517,31 +510,29 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     buyers = db.query(User).filter(User.role.in_(["buyer", "trader"])).all()
 
     # Collect all offer_ids that appear in quotes and buy plans (for status checks)
-    # Quotes: line_items JSON contains offer_id
-    all_quotes = (
-        db.query(Quote)
-        .filter(
-            Quote.status.in_(["sent", "won", "lost"]),
-        )
-        .all()
-    )
+    # Load only needed columns to reduce memory
     quoted_offer_ids = set()
-    for q in all_quotes:
-        for item in q.line_items or []:
+    for (items,) in (
+        db.query(Quote.line_items)
+        .filter(Quote.status.in_(["sent", "won", "lost"]))
+        .all()
+    ):
+        for item in items or []:
             oid = item.get("offer_id")
             if oid:
                 quoted_offer_ids.add(oid)
 
     # Buy plans: line_items JSON contains offer_id
-    all_buyplans = db.query(BuyPlan).all()
     buyplan_offer_ids = set()
     po_confirmed_offer_ids = set()
-    for bp in all_buyplans:
-        for item in bp.line_items or []:
+    for bp_status, items in (
+        db.query(BuyPlan.status, BuyPlan.line_items).all()
+    ):
+        for item in items or []:
             oid = item.get("offer_id")
             if oid:
                 buyplan_offer_ids.add(oid)
-                if bp.status in ("po_confirmed", "complete"):
+                if bp_status in ("po_confirmed", "complete"):
                     po_confirmed_offer_ids.add(oid)
 
     # Batch-fetch all offers and stock counts to avoid N+1 per buyer

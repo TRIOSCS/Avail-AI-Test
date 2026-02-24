@@ -2292,3 +2292,89 @@ def test_create_sightings_with_all_optional_fields():
     assert added.manufacturer == "Texas Instruments"
     assert added.confidence == 0.7
     assert added.source_type == "email_attachment"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# API Health: is_active flag, activate toggle, health-summary
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_source_is_active_in_response(sources_client: TestClient, _api_source: ApiSource):
+    """GET /api/sources includes is_active field for each source."""
+    resp = sources_client.get("/api/sources")
+    assert resp.status_code == 200
+    sources = resp.json()["sources"]
+    src = next((s for s in sources if s["name"] == "test_source"), None)
+    assert src is not None
+    assert "is_active" in src
+    assert src["is_active"] is False
+
+
+def test_toggle_source_active(sources_client: TestClient, _api_source: ApiSource):
+    """PUT /api/sources/{id}/activate toggles is_active on/off."""
+    # First toggle: False → True
+    resp = sources_client.put(f"/api/sources/{_api_source.id}/activate")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["is_active"] is True
+
+    # Second toggle: True → False
+    resp = sources_client.put(f"/api/sources/{_api_source.id}/activate")
+    assert resp.status_code == 200
+    assert resp.json()["is_active"] is False
+
+
+def test_toggle_source_active_not_found(sources_client: TestClient):
+    """PUT /api/sources/999/activate returns 404."""
+    resp = sources_client.put("/api/sources/999/activate")
+    assert resp.status_code == 404
+
+
+def test_health_summary_no_errors(sources_client: TestClient, db_session: Session):
+    """Health summary returns no errors when no active sources have error status."""
+    src = ApiSource(
+        name="healthy_src", display_name="Healthy", category="api",
+        source_type="api", status="live", is_active=True, env_vars=[],
+    )
+    db_session.add(src)
+    db_session.commit()
+    resp = sources_client.get("/api/sources/health-summary")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["has_errors"] is False
+    assert data["errored_sources"] == []
+
+
+def test_health_summary_with_active_error(sources_client: TestClient, db_session: Session):
+    """Health summary returns errored active sources."""
+    src = ApiSource(
+        name="broken_src", display_name="Broken API", category="api",
+        source_type="api", status="error", is_active=True, env_vars=["KEY"],
+        last_error="Connection timeout",
+    )
+    db_session.add(src)
+    db_session.commit()
+    resp = sources_client.get("/api/sources/health-summary")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["has_errors"] is True
+    assert len(data["errored_sources"]) == 1
+    assert data["errored_sources"][0]["display_name"] == "Broken API"
+    assert data["errored_sources"][0]["last_error"] == "Connection timeout"
+
+
+def test_health_summary_ignores_planned(sources_client: TestClient, db_session: Session):
+    """Health summary ignores sources where is_active=False even if status=error."""
+    src = ApiSource(
+        name="planned_err", display_name="Planned Error", category="api",
+        source_type="api", status="error", is_active=False, env_vars=[],
+        last_error="Not configured",
+    )
+    db_session.add(src)
+    db_session.commit()
+    resp = sources_client.get("/api/sources/health-summary")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["has_errors"] is False
+    assert data["errored_sources"] == []

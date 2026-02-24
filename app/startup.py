@@ -82,6 +82,8 @@ def _add_missing_columns(conn) -> None:
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS brand_tags JSON DEFAULT '[]'",
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS commodity_tags JSON DEFAULT '[]'",
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS material_tags_updated_at TIMESTAMP",
+        # API health: active/planned classification
+        "ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
@@ -149,6 +151,9 @@ def _add_missing_columns(conn) -> None:
 
     # Backfill site_contacts.is_active
     _exec(conn, "UPDATE site_contacts SET is_active = TRUE WHERE is_active IS NULL")
+
+    # Backfill api_sources.is_active from status
+    _exec(conn, "UPDATE api_sources SET is_active = TRUE WHERE status = 'live' AND is_active = FALSE")
 
 
 def _exec(conn, stmt: str, params: dict | None = None) -> None:
@@ -448,3 +453,23 @@ def _create_perf_indexes(conn) -> None:
     _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_vendor_name ON offers (vendor_name)")
     _exec(conn, "CREATE INDEX IF NOT EXISTS ix_vendor_cards_created_at ON vendor_cards (created_at)")
     _exec(conn, "CREATE INDEX IF NOT EXISTS ix_vendor_cards_score_computed_at ON vendor_cards (vendor_score_computed_at)")
+
+    # GIN indexes on FTS search_vector columns
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_vendor_cards_search_vector
+        ON vendor_cards USING GIN (search_vector)
+    """)
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_material_cards_search_vector
+        ON material_cards USING GIN (search_vector)
+    """)
+
+    # Index on vendor_contacts.phone for activity_service lookups
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_vendor_contacts_phone ON vendor_contacts (phone) WHERE phone IS NOT NULL")
+
+    # FK indexes — prevent slow JOINs / cascade deletes
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_activity_log_customer_site_id ON activity_log (customer_site_id)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_activity_log_site_contact_id ON activity_log (site_contact_id)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_requisitions_updated_by_id ON requisitions (updated_by_id)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_approved_by_id ON offers (approved_by_id)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_updated_by_id ON offers (updated_by_id)")
