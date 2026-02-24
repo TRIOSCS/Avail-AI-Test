@@ -1202,9 +1202,10 @@ body.sb-open .sb-rail svg{transform:rotate(180deg)}
 .sidebar .sb-group-header{display:none}
 .sidebar .sb-group-items{max-height:none!important;opacity:1;pointer-events:auto}
 .sidebar .sb-top-gradient{display:none}
-.sidebar .sidebar-nav{padding:8px 4px;gap:1px;scrollbar-width:none}
+.sidebar .sidebar-nav{padding:8px 0;gap:1px;scrollbar-width:none;justify-content:center;align-items:center}
 .sidebar .sidebar-nav::-webkit-scrollbar{display:none}
-.sidebar .sidebar-nav button{justify-content:center;padding:10px 0;gap:0;overflow:hidden;font-size:0;color:transparent}
+.sidebar .sidebar-nav button{justify-content:center;align-items:center;padding:10px 0;gap:0;overflow:hidden;font-size:0;color:transparent;width:100%}
+.sidebar .sb-nav-group{width:100%}
 .sidebar .sb-nav-icon{width:24px;height:24px;color:var(--text2);transition:color .15s,filter .15s}.sidebar .sb-nav-icon svg{width:18px;height:18px}
 .sidebar .sidebar-nav button.active .sb-nav-icon{color:var(--blue)}
 [data-section="sourcing"] .sb-nav-btn.active .sb-nav-icon{color:var(--sourcing-color)}
