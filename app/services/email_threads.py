@@ -269,37 +269,39 @@ async def fetch_threads_for_requirement(
             except Exception as e:
                 log.warning(f"Graph query failed for VR conversationId: {e}")
 
-    # ── Tier 2: Subject [AVAIL-{req_id}] token ──
-    avail_token = f"[AVAIL-{requirement.requisition_id}]"
-    try:
-        subject_msgs = await gc.get_all_pages(
-            "/me/messages",
-            params={
-                "$search": f'"subject:{avail_token}"',
-                "$select": "id,subject,from,toRecipients,bodyPreview,receivedDateTime,conversationId",
-                "$top": "50",
-            },
-            max_items=50,
-        )
-        # Group by conversationId
-        by_conv: dict[str, list[dict]] = {}
-        for m in subject_msgs:
-            cid = m.get("conversationId", "")
-            if cid and cid not in threads:
-                by_conv.setdefault(cid, []).append(m)
+    # ── Tier 2: Subject [ref:{req_id}] token (also legacy [AVAIL-{req_id}]) ──
+    req_id = requirement.requisition_id
+    avail_tokens = [f"[ref:{req_id}]", f"[AVAIL-{req_id}]"]
+    for avail_token in avail_tokens:
+        try:
+            subject_msgs = await gc.get_all_pages(
+                "/me/messages",
+                params={
+                    "$search": f'"subject:{avail_token}"',
+                    "$select": "id,subject,from,toRecipients,bodyPreview,receivedDateTime,conversationId",
+                    "$top": "50",
+                },
+                max_items=50,
+            )
+            # Group by conversationId
+            by_conv: dict[str, list[dict]] = {}
+            for m in subject_msgs:
+                cid = m.get("conversationId", "")
+                if cid and cid not in threads:
+                    by_conv.setdefault(cid, []).append(m)
 
-        for cid, msgs in by_conv.items():
-            external_msgs = [
-                m for m in msgs
-                if not _is_internal_message(
-                    m.get("from", {}).get("emailAddress", {}).get("address", ""),
-                    [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
-                )
-            ]
-            if external_msgs:
-                threads[cid] = _build_thread_summary(cid, external_msgs, "subject_token")
-    except Exception as e:
-        log.warning(f"Graph subject search failed for {avail_token}: {e}")
+            for cid, msgs in by_conv.items():
+                external_msgs = [
+                    m for m in msgs
+                    if not _is_internal_message(
+                        m.get("from", {}).get("emailAddress", {}).get("address", ""),
+                        [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
+                    )
+                ]
+                if external_msgs:
+                    threads[cid] = _build_thread_summary(cid, external_msgs, "subject_token")
+        except Exception as e:
+            log.warning(f"Graph subject search failed for {avail_token}: {e}")
 
     # ── Tier 3: Part number match ──
     part_number = requirement.primary_mpn
@@ -426,8 +428,8 @@ def _build_thread_summary(
     )
     latest = sorted_msgs[0]
     subject = latest.get("subject", "(No Subject)")
-    # Strip [AVAIL-xxx] prefix for cleaner display
-    clean_subject = re.sub(r"\[AVAIL-\d+\]\s*", "", subject)
+    # Strip [ref:xxx] or legacy [AVAIL-xxx] tag for cleaner display
+    clean_subject = re.sub(r"\s*\[(?:ref:|AVAIL-)\d+\]\s*", " ", subject).strip()
 
     return {
         "conversation_id": conversation_id,

@@ -113,10 +113,13 @@ class VendorContact(Base):
     )
     contact_type = Column(String(20), default="company")
     full_name = Column(String(255))
+    first_name = Column(String(100))
+    last_name = Column(String(100))
     title = Column(String(255))
     label = Column(String(100))
     email = Column(String(255))
     phone = Column(String(100))
+    phone_mobile = Column(String(100))
     phone_type = Column(String(20))
     linkedin_url = Column(String(500))
     source = Column(String(50), nullable=False)
@@ -126,6 +129,11 @@ class VendorContact(Base):
     last_interaction_at = Column(DateTime)
     first_seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     last_seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # Contact intelligence (computed nightly)
+    relationship_score = Column(Float)        # 0-100
+    activity_trend = Column(String(20))       # warming/stable/cooling/dormant
+    score_computed_at = Column(DateTime)
 
     vendor_card = relationship("VendorCard", back_populates="vendor_contacts")
 

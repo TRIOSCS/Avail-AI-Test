@@ -873,3 +873,7 @@ app.include_router(documents_router)
 from .routers.error_reports import router as error_reports_router
 
 app.include_router(error_reports_router)
+
+from .routers.command_center import router as command_center_router
+
+app.include_router(command_center_router)

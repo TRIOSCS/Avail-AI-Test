@@ -3,7 +3,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
-from sqlalchemy import func as sqlfunc
+from sqlalchemy import String, func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ...config import settings
@@ -24,6 +24,7 @@ async def list_companies(
     search: str = "",
     owner_id: int = 0,
     unassigned: int = 0,
+    tag: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -39,6 +40,12 @@ async def list_companies(
     if search.strip():
         safe = search.strip().replace("%", r"\%").replace("_", r"\_")
         query = query.filter(Company.name.ilike(f"%{safe}%"))
+    if tag.strip():
+        safe_tag = tag.strip().lower()
+        query = query.filter(
+            sqlfunc.lower(sqlfunc.cast(Company.brand_tags, String)).contains(safe_tag)
+            | sqlfunc.lower(sqlfunc.cast(Company.commodity_tags, String)).contains(safe_tag)
+        )
     if unassigned:
         query = query.filter(Company.account_owner_id == None)  # noqa: E711
     companies = query.order_by(Company.name).limit(500).all()
@@ -116,6 +123,8 @@ async def list_companies(
                 "currency": c.currency,
                 "preferred_carrier": c.preferred_carrier,
                 "is_strategic": c.is_strategic,
+                "brand_tags": c.brand_tags or [],
+                "commodity_tags": c.commodity_tags or [],
                 "account_owner_id": c.account_owner_id,
                 "account_owner_name": (c.account_owner.name if c.account_owner else None) if c.account_owner_id else None,
                 "site_count": len(sites),
@@ -326,3 +335,25 @@ async def update_company(
         setattr(company, field, value)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/api/companies/{company_id}/analyze-tags")
+async def analyze_company_tags(
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Trigger AI analysis of customer's requisition history to generate brand/commodity tags."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    from ...services.customer_analysis_service import analyze_customer_materials
+
+    await analyze_customer_materials(company_id, db_session=db)
+    db.refresh(company)
+    return {
+        "ok": True,
+        "brand_tags": company.brand_tags or [],
+        "commodity_tags": company.commodity_tags or [],
+    }

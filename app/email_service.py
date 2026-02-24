@@ -53,7 +53,7 @@ async def send_batch_rfq(
             log.warning(f"AI rephrase failed, using original bodies: {e}")
 
     # Build payloads and send all emails in parallel
-    avail_token = f"[AVAIL-{requisition_id}]"
+    avail_token = f"[ref:{requisition_id}]"
     send_tasks = []
     send_groups = []  # Track which groups we're sending for
 
@@ -64,7 +64,7 @@ async def send_batch_rfq(
 
         html_body = _build_html_body(group["body"])
         raw_subject = group["subject"]
-        tagged_subject = f"{avail_token} {raw_subject}" if avail_token not in raw_subject else raw_subject
+        tagged_subject = f"{raw_subject} {avail_token}" if avail_token not in raw_subject else raw_subject
         group["_tagged_subject"] = tagged_subject
 
         payload = {
@@ -325,8 +325,8 @@ async def poll_inbox(
                     if domain not in NOISE_DOMAINS:
                         domain_map[domain] = c
 
-    # Subject token pattern: [AVAIL-{req_id}]
-    avail_token_re = re.compile(r"\[AVAIL-(\d+)\]")
+    # Subject token pattern: [ref:{req_id}] (new) or [AVAIL-{req_id}] (legacy)
+    avail_token_re = re.compile(r"\[(?:ref:|AVAIL-)(\d+)\]")
 
     results = []
     pending_parse = []  # VendorResponse objects awaiting AI parsing

@@ -689,7 +689,8 @@ class TestRequisitionCreateRequirements:
             json=[{"primary_mpn": "ABC123", "target_qty": 100, "substitutes": ["DEF456", "def456", "DEF-456", "GHI789"]}],
         )
         assert resp.status_code == 200
-        assert len(resp.json()) >= 1
+        data = resp.json()
+        assert len(data["created"]) >= 1
 
     def test_add_requirements_teams_hot_alert(self, client, db_session, test_requisition, test_customer_site):
         test_requisition.customer_site_id = test_customer_site.id
@@ -710,6 +711,32 @@ class TestRequisitionCreateRequirements:
             json=[{"primary_mpn": "SAFE-001", "target_qty": 10}],
         )
         assert resp.status_code == 200
+
+    def test_add_requirements_duplicate_detection(self, client, db_session, test_customer_site):
+        """Adding MPN that was recently quoted for same customer shows duplicate warning."""
+        from app.models import Requisition, Requirement
+        # Create first requisition with an MPN for this customer
+        req1 = Requisition(name="First-Req", customer_site_id=test_customer_site.id, status="active", created_by=1)
+        db_session.add(req1)
+        db_session.flush()
+        r1 = Requirement(requisition_id=req1.id, primary_mpn="DUP-MPN-001", normalized_mpn="dupmpn001", target_qty=10)
+        db_session.add(r1)
+        db_session.commit()
+        # Create second requisition for same customer
+        req2 = Requisition(name="Second-Req", customer_site_id=test_customer_site.id, status="draft", created_by=1)
+        db_session.add(req2)
+        db_session.commit()
+        # Add same MPN — should trigger duplicate warning
+        resp = client.post(
+            f"/api/requisitions/{req2.id}/requirements",
+            json=[{"primary_mpn": "DUP-MPN-001", "target_qty": 5}],
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["created"]) == 1
+        assert len(data["duplicates"]) >= 1
+        assert data["duplicates"][0]["mpn"] == "DUP-MPN-001"
+        assert data["duplicates"][0]["req_id"] == req1.id
 
 
 class TestRequisitionUploadExtended:

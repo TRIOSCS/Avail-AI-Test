@@ -135,8 +135,8 @@ def test_add_requirement_teams_alert_exception(client, db_session, test_requisit
             )
             assert resp.status_code == 200
             data = resp.json()
-            assert len(data) >= 1
-            assert data[0]["primary_mpn"] == "TEST-HOT-001"
+            assert len(data["created"]) >= 1
+            assert data["created"][0]["primary_mpn"] == "TEST-HOT-001"
 
 
 # ── 3. Skip empty row in upload requirements (requisitions.py line 779) ──
@@ -803,7 +803,7 @@ def test_add_requirement_teams_alert_attribute_error(client, db_session, test_us
             )
             assert resp.status_code == 200
             data = resp.json()
-            assert len(data) >= 1
+            assert len(data["created"]) >= 1
 
 
 # ── 18. Upload with substitutes containing empty MPN (line 779) ──

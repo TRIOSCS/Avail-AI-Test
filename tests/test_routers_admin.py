@@ -535,6 +535,71 @@ class TestAdminVendorDedup:
         count_high = resp_high.json()["count"]
         assert count_low >= count_high
 
+    def test_merge_vendors(self, admin_client, db_session):
+        """Merge two vendor cards — keep the one with more sightings."""
+        v1 = VendorCard(
+            normalized_name="acme supply",
+            display_name="Acme Supply",
+            emails=["a@acme.com"],
+            phones=["111"],
+            sighting_count=10,
+        )
+        v2 = VendorCard(
+            normalized_name="acme supply inc",
+            display_name="Acme Supply Inc",
+            emails=["b@acme.com"],
+            phones=["111", "222"],
+            sighting_count=3,
+        )
+        db_session.add_all([v1, v2])
+        db_session.commit()
+        keep_id, remove_id = v1.id, v2.id
+
+        resp = admin_client.post(
+            "/api/admin/vendor-merge",
+            json={"keep_id": keep_id, "remove_id": remove_id},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["kept"] == keep_id
+        assert data["removed"] == remove_id
+
+        # Kept card should have merged data
+        db_session.expire_all()
+        kept = db_session.get(VendorCard, keep_id)
+        assert kept is not None
+        assert "a@acme.com" in kept.emails
+        assert "b@acme.com" in kept.emails
+        assert kept.sighting_count == 13
+        assert "Acme Supply Inc" in (kept.alternate_names or [])
+
+        # Removed card should be gone
+        assert db_session.get(VendorCard, remove_id) is None
+
+    def test_merge_vendors_not_found(self, admin_client):
+        """Merge with invalid IDs returns 404."""
+        resp = admin_client.post(
+            "/api/admin/vendor-merge",
+            json={"keep_id": 99999, "remove_id": 99998},
+        )
+        assert resp.status_code == 404
+
+    def test_merge_vendors_same_id(self, admin_client, db_session):
+        """Cannot merge a vendor with itself."""
+        v = VendorCard(
+            normalized_name="self merge test",
+            display_name="Self Merge Test",
+            sighting_count=1,
+        )
+        db_session.add(v)
+        db_session.commit()
+        resp = admin_client.post(
+            "/api/admin/vendor-merge",
+            json={"keep_id": v.id, "remove_id": v.id},
+        )
+        assert resp.status_code == 400
+
 
 # ── Additional coverage tests ─────────────────────────────────────────
 

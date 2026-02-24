@@ -88,7 +88,7 @@ def _create_req_with_requirement(client):
     items = client.post(f"/api/requisitions/{req['id']}/requirements", json=[
         {"primary_mpn": "LM317T", "target_qty": 100},
     ]).json()
-    return req["id"], items[0]["id"]
+    return req["id"], items["created"][0]["id"]
 
 
 def test_create_offer(client):

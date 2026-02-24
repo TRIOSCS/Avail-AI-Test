@@ -57,8 +57,8 @@ WEBSITE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Subject token pattern: [AVAIL-{req_id}]
-AVAIL_TOKEN_RE = re.compile(r"\[AVAIL-(\d+)\]")
+# Subject token pattern: [ref:{req_id}] (new) or [AVAIL-{req_id}] (legacy)
+AVAIL_TOKEN_RE = re.compile(r"\[(?:ref:|AVAIL-)(\d+)\]")
 
 # Fields requested from Graph API for messages
 MSG_SELECT = "id,subject,from,receivedDateTime,body,hasAttachments,conversationId"

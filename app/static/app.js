@@ -123,6 +123,7 @@ function _rebuildSightingIndex() {
 }
 
 // ── Shared Helpers ──────────────────────────────────────────────────────
+const _apiFetchInflight = {}; // URL+method → Promise (dedup guard)
 export async function apiFetch(url, opts = {}) {
     // CSRF: include double-submit cookie value as header
     const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
@@ -132,29 +133,40 @@ export async function apiFetch(url, opts = {}) {
         opts.body = JSON.stringify(opts.body);
     }
     const method = (opts.method || 'GET').toUpperCase();
-    const maxRetries = method === 'GET' ? 2 : 0;
-    let lastErr;
-    for (let attempt = 0; attempt <= maxRetries; attempt++) {
-        if (attempt > 0) {
-            await new Promise(r => setTimeout(r, Math.pow(2, attempt - 1) * 1000));
-        }
-        const res = await fetch(url, opts);
-        if (!res.ok) {
-            const msg = await res.text().catch(() => res.statusText);
-            lastErr = Object.assign(new Error(msg), {status: res.status});
-            // Session expired — redirect to login
-            if (res.status === 401) {
-                showToast('Session expired — redirecting to login…', 'error');
-                setTimeout(() => { window.location.href = '/login'; }, 1500);
+    // Request deduplication for GET requests — return in-flight promise if identical
+    const dedupeKey = method === 'GET' ? method + ':' + url : null;
+    if (dedupeKey && _apiFetchInflight[dedupeKey]) return _apiFetchInflight[dedupeKey];
+    const doFetch = async () => {
+        const maxRetries = method === 'GET' ? 2 : 0;
+        let lastErr;
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            if (attempt > 0) {
+                await new Promise(r => setTimeout(r, Math.pow(2, attempt - 1) * 1000));
+            }
+            const res = await fetch(url, opts);
+            if (!res.ok) {
+                const msg = await res.text().catch(() => res.statusText);
+                lastErr = Object.assign(new Error(msg), {status: res.status});
+                // Session expired — redirect to login
+                if (res.status === 401) {
+                    showToast('Session expired — redirecting to login…', 'error');
+                    setTimeout(() => { window.location.href = '/login'; }, 1500);
+                    throw lastErr;
+                }
+                if (res.status >= 500 && attempt < maxRetries) continue;
                 throw lastErr;
             }
-            if (res.status >= 500 && attempt < maxRetries) continue;
-            throw lastErr;
+            const ct = res.headers.get('content-type') || '';
+            return ct.includes('json') ? res.json() : res.text();
         }
-        const ct = res.headers.get('content-type') || '';
-        return ct.includes('json') ? res.json() : res.text();
+        throw lastErr;
+    };
+    if (dedupeKey) {
+        const p = doFetch().finally(() => { delete _apiFetchInflight[dedupeKey]; });
+        _apiFetchInflight[dedupeKey] = p;
+        return p;
     }
-    throw lastErr;
+    return doFetch();
 }
 
 export function debounce(fn, ms = 300) {
@@ -309,7 +321,7 @@ export function ownerAvatar(name, size = 'md') {
 
 export function factorBar(label, value) {
     const color = value >= 70 ? 'green' : value >= 40 ? 'amber' : 'red';
-    return `<div class="factor-bar">
+    return `<div class="factor-bar-inline">
         <span class="factor-bar-label">${esc(label)}</span>
         <div class="factor-bar-track"><div class="factor-bar-fill factor-bar-fill-${color}" style="width:${Math.min(100, Math.max(0, value))}%"></div></div>
         <span class="factor-bar-value">${Math.round(value)}</span>
@@ -334,13 +346,12 @@ export function relationshipHealthBar(lastContactedDays, windowDays = 30) {
 
 const CONTACT_STATUS = {
     champion:    { label:'Champion',    color:'#16a34a', bg:'#dcfce7' },
-    engaged:     { label:'Engaged',     color:'#7c3aed', bg:'#ede9fe' },
-    qualified:   { label:'Qualified',   color:'#1d4ed8', bg:'#dbeafe' },
-    researching: { label:'Researching', color:'#d97706', bg:'#fef3c7' },
-    new:         { label:'New',         color:'#2563eb', bg:'#dbeafe' },
-    dead_end:    { label:'Dead End',    color:'#64748b', bg:'#e2e8f0' },
+    active:      { label:'Active',      color:'#2563eb', bg:'#dbeafe' },
+    quiet:       { label:'Quiet',       color:'#d97706', bg:'#fef3c7' },
+    new:         { label:'New',         color:'#64748b', bg:'#e2e8f0' },
+    inactive:    { label:'Inactive',    color:'#dc2626', bg:'#fee2e2' },
 };
-const CONTACT_STATUS_ORDER = ['champion','engaged','qualified','researching','new','dead_end'];
+const CONTACT_STATUS_ORDER = ['champion','active','quiet','new','inactive'];
 
 export function contactStatusBar(contacts, statusOverrides = {}) {
     if (!contacts || !contacts.length) return '';
@@ -511,9 +522,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             'view-proactive': () => window.showProactiveOffers(),
             'view-performance': () => window.showPerformance(),
             'view-settings': () => window.showSettings(),
+            'view-prospecting': () => window.showProspecting(),
         };
         if (initRoutes[initView]) initRoutes[initView]();
-        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-performance':'navScorecards','view-settings':'navSettings'};
+        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-performance':'navScorecards','view-settings':'navSettings','view-prospecting':'navProspecting'};
         const navBtn = document.getElementById(sidebarMap[initView]);
         if (navBtn) navHighlight(navBtn);
         _navFromPopstate = false;
@@ -673,10 +685,10 @@ export async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-performance', 'view-settings', 'view-contacts', 'view-dashboard'];
+const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-performance', 'view-settings', 'view-contacts', 'view-dashboard', 'view-prospecting'];
 
 // Hash-based routing for browser back/forward
-const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-performance':'performance','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard'};
+const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-performance':'performance','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-prospecting':'prospecting'};
 const _hashToView = Object.fromEntries(Object.entries(_viewToHash).map(([k,v])=>[v,k]));
 let _navFromPopstate = false;
 
@@ -727,10 +739,11 @@ window.addEventListener('popstate', (e) => {
         'view-settings': () => window.showSettings(),
         'view-contacts': () => showContacts(),
         'view-dashboard': () => showDashboard(),
+        'view-prospecting': () => window.showProspecting(),
     };
     if (routes[viewId]) routes[viewId]();
     // Highlight correct sidebar button
-    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-performance':'navScorecards','view-settings':'navSettings','view-contacts':'navContacts','view-dashboard':'navDashboard'};
+    const sidebarMap = {'view-list':'navReqs','view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-performance':'navScorecards','view-settings':'navSettings','view-contacts':'navContacts','view-dashboard':'navDashboard','view-prospecting':'navProspecting'};
     const navBtn = document.getElementById(sidebarMap[viewId]);
     if (navBtn) navHighlight(navBtn);
     _navFromPopstate = false;
@@ -843,44 +856,73 @@ async function loadContacts() {
     list.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading contacts\u2026</div>';
 
     try {
-        // Step 1: get all vendors
-        const resp = await apiFetch('/api/vendors?limit=500');
-        const vendors = resp.vendors || resp || [];
-        if (!Array.isArray(vendors) || !vendors.length) {
-            list.innerHTML = '<p class="empty">No vendors found.</p>';
-            return;
+        const people = [];
+
+        // Fetch vendor contacts and customer contacts in parallel
+        const [vendorResp, customerContacts] = await Promise.all([
+            apiFetch('/api/vendors?limit=500').catch(() => []),
+            apiFetch('/api/customer-contacts').catch(() => []),
+        ]);
+
+        // Step 1: Vendor contacts (existing logic)
+        const vendors = vendorResp.vendors || vendorResp || [];
+        if (Array.isArray(vendors) && vendors.length) {
+            const batchSize = 20;
+            for (let i = 0; i < vendors.length; i += batchSize) {
+                const batch = vendors.slice(i, i + batchSize);
+                const results = await Promise.allSettled(
+                    batch.map(v => apiFetch(`/api/vendors/${v.id}/contacts`).then(contacts => ({ v, contacts })))
+                );
+                for (const r of results) {
+                    if (r.status !== 'fulfilled') continue;
+                    const { v, contacts } = r.value;
+                    if (!Array.isArray(contacts)) continue;
+                    for (const c of contacts) {
+                        if (!c.full_name && !c.email) continue;
+                        people.push({
+                            id: c.id,
+                            vendor_id: v.id,
+                            vendor_name: v.display_name || 'Unknown',
+                            company_name: v.display_name || 'Unknown',
+                            full_name: c.full_name || '',
+                            title: c.title || '',
+                            email: c.email || '',
+                            phone: c.phone || '',
+                            source: c.source || '',
+                            is_verified: c.is_verified || false,
+                            confidence: c.confidence || 0,
+                            interaction_count: c.interaction_count || 0,
+                            last_interaction_at: c.last_interaction_at || null,
+                            first_seen_at: c.first_seen_at || null,
+                            contact_type: 'vendor',
+                        });
+                    }
+                }
+            }
         }
 
-        // Step 2: fetch contacts for each vendor in parallel (batches of 20)
-        const people = [];
-        const batchSize = 20;
-        for (let i = 0; i < vendors.length; i += batchSize) {
-            const batch = vendors.slice(i, i + batchSize);
-            const results = await Promise.allSettled(
-                batch.map(v => apiFetch(`/api/vendors/${v.id}/contacts`).then(contacts => ({ v, contacts })))
-            );
-            for (const r of results) {
-                if (r.status !== 'fulfilled') continue;
-                const { v, contacts } = r.value;
-                if (!Array.isArray(contacts)) continue;
-                for (const c of contacts) {
-                    if (!c.full_name && !c.email) continue;
-                    people.push({
-                        id: c.id,
-                        vendor_id: v.id,
-                        vendor_name: v.display_name || 'Unknown',
-                        full_name: c.full_name || '',
-                        title: c.title || '',
-                        email: c.email || '',
-                        phone: c.phone || '',
-                        source: c.source || '',
-                        is_verified: c.is_verified || false,
-                        confidence: c.confidence || 0,
-                        interaction_count: c.interaction_count || 0,
-                        last_interaction_at: c.last_interaction_at || null,
-                        first_seen_at: c.first_seen_at || null,
-                    });
-                }
+        // Step 2: Customer contacts
+        if (Array.isArray(customerContacts)) {
+            for (const c of customerContacts) {
+                if (!c.full_name && !c.email) continue;
+                people.push({
+                    id: c.id,
+                    company_id: c.company_id,
+                    site_id: c.site_id,
+                    vendor_name: c.company_name || 'Unknown',
+                    company_name: c.company_name || 'Unknown',
+                    full_name: c.full_name || '',
+                    title: c.title || '',
+                    email: c.email || '',
+                    phone: c.phone || '',
+                    source: 'customer',
+                    is_verified: true,
+                    confidence: 100,
+                    interaction_count: 0,
+                    last_interaction_at: null,
+                    first_seen_at: c.created_at || null,
+                    contact_type: 'customer',
+                });
             }
         }
 
@@ -917,7 +959,7 @@ function renderContacts(q) {
         contacts = contacts.filter(c =>
             (c.full_name || '').toLowerCase().includes(lq) ||
             (c.email || '').toLowerCase().includes(lq) ||
-            (c.vendor_name || '').toLowerCase().includes(lq) ||
+            (c.company_name || c.vendor_name || '').toLowerCase().includes(lq) ||
             (c.title || '').toLowerCase().includes(lq)
         );
     }
@@ -925,12 +967,12 @@ function renderContacts(q) {
     // Status filter
     contacts = contacts.filter(c => {
         if (_contactStatusFilter === 'all') return true;
-        if (_contactStatusFilter === 'customer') return c.contact_type === 'customer';
         if (_contactStatusFilter === 'vendor') return c.contact_type !== 'customer';
-        const days = daysSince(c.last_interaction_at || c.first_seen_at);
-        if (_contactStatusFilter === 'active') return days <= 7;
-        if (_contactStatusFilter === 'stale') return days > 14;
-        if (_contactStatusFilter === 'new') return days <= 3 && c.interaction_count === 0;
+        // Status-based filters match on contact_status field
+        if (_contactStatusFilter === 'champion') return (c.contact_status || 'new') === 'champion';
+        if (_contactStatusFilter === 'active') return (c.contact_status || 'new') === 'active';
+        if (_contactStatusFilter === 'quiet') return (c.contact_status || 'new') === 'quiet';
+        if (_contactStatusFilter === 'inactive') return (c.contact_status || 'new') === 'inactive';
         return true;
     });
 
@@ -940,7 +982,7 @@ function renderContacts(q) {
             let va, vb;
             switch (_contactSortCol) {
                 case 'name': va = (a.full_name || ''); vb = (b.full_name || ''); break;
-                case 'company': va = (a.vendor_name || ''); vb = (b.vendor_name || ''); break;
+                case 'company': va = (a.company_name || a.vendor_name || ''); vb = (b.company_name || b.vendor_name || ''); break;
                 case 'interactions': va = (a.interaction_count || 0); vb = (b.interaction_count || 0); break;
                 default: va = 0; vb = 0;
             }
@@ -970,6 +1012,8 @@ function renderContacts(q) {
         <thead><tr>
             ${thSort('name', 'Name')}
             ${thSort('company', 'Company')}
+            <th>Type</th>
+            <th>Status</th>
             <th>Title</th>
             <th>Email</th>
             <th>Phone</th>
@@ -982,15 +1026,33 @@ function renderContacts(q) {
         const lastLabel = c.last_interaction_at ? getRelativeTime(c.last_interaction_at) : '—';
         const verifiedBadge = c.is_verified ? ' <span style="color:var(--green);font-size:9px">✓</span>' : '';
         const healthColor = days <= 7 ? 'green' : days <= 30 ? 'amber' : 'red';
+        const isCustomer = c.contact_type === 'customer';
+        const typeBadge = isCustomer
+            ? '<span style="background:var(--blue-bg,#e8f0fe);color:var(--blue,#1a73e8);padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">Customer</span>'
+            : '<span style="background:var(--green-bg,#e6f4ea);color:var(--green,#1e8e3e);padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">Vendor</span>';
+        const rowClick = isCustomer
+            ? `onclick="openCustDrawer(${c.company_id},'contacts')"`
+            : `onclick="openContactDrawer(${c.vendor_id}, ${c.id})"`;
+        const cStatus = c.contact_status || 'new';
+        const cStatusCfg = CONTACT_STATUS[cStatus] || CONTACT_STATUS.new;
+        const statusDropdown = isCustomer && c.site_contact_id
+            ? `<select class="contact-status-select" style="background:${cStatusCfg.bg};color:${cStatusCfg.color};border:none;border-radius:4px;font-size:10px;font-weight:600;padding:2px 6px;cursor:pointer" onchange="event.stopPropagation();updateContactStatus(${c.site_contact_id},this.value)" data-contact-id="${c.site_contact_id}">${CONTACT_STATUS_ORDER.map(s => '<option value="'+s+'"'+(s===cStatus?' selected':'')+' style="background:#fff;color:#333">'+CONTACT_STATUS[s].label+'</option>').join('')}</select>`
+            : `<span style="background:${cStatusCfg.bg};color:${cStatusCfg.color};padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600">${cStatusCfg.label}</span>`;
 
-        html += `<tr onclick="openContactDrawer(${c.vendor_id}, ${c.id})" style="cursor:pointer">
+        html += `<tr ${rowClick} style="cursor:pointer">
             <td>
                 <div style="display:flex;align-items:center;gap:8px">
                     <span class="health-dot health-dot-${healthColor}"></span>
                     <span style="font-weight:600">${esc(c.full_name || 'Unknown')}${verifiedBadge}</span>
                 </div>
             </td>
-            <td>${esc(c.vendor_name)}</td>
+            <td>${isCustomer && c.company_id
+                ? '<a onclick="event.stopPropagation();goToCompany('+c.company_id+')" style="cursor:pointer;color:var(--blue);text-decoration:none;font-weight:500">'+esc(c.company_name || '')+'</a>'
+                : c.vendor_id
+                    ? '<a onclick="event.stopPropagation();openVendorDrawer('+c.vendor_id+')" style="cursor:pointer;color:var(--blue);text-decoration:none;font-weight:500">'+esc(c.vendor_name || '')+'</a>'
+                    : esc(c.company_name || c.vendor_name || '')}</td>
+            <td>${typeBadge}</td>
+            <td>${statusDropdown}</td>
             <td class="muted-cell">${esc(c.title || '—')}</td>
             <td>${c.email ? '<a href="mailto:'+escAttr(c.email)+'" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none;font-size:12px">'+esc(c.email)+'</a>' : '<span class="muted-cell">—</span>'}</td>
             <td>${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" onclick="event.stopPropagation()" style="color:var(--blue);text-decoration:none;font-size:12px">'+esc(c.phone)+'</a>' : '<span class="muted-cell">—</span>'}</td>
@@ -1000,6 +1062,23 @@ function renderContacts(q) {
     }
     html += '</tbody></table>';
     list.innerHTML = html;
+}
+
+async function updateContactStatus(siteContactId, newStatus) {
+    try {
+        // Find the contact in cache to get site_id
+        const contact = _contactCache.find(c => c.site_contact_id === siteContactId);
+        if (!contact) { showToast('Contact not found', 'error'); return; }
+        await apiFetch(`/api/sites/${contact.customer_site_id}/contacts/${siteContactId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ contact_status: newStatus }),
+        });
+        // Update cache locally
+        contact.contact_status = newStatus;
+        showToast(`Status updated to ${(CONTACT_STATUS[newStatus] || {}).label || newStatus}`, 'success');
+    } catch (e) {
+        showToast('Failed to update status: ' + (e.message || 'unknown error'), 'error');
+    }
 }
 
 function openContactDrawer(vendorId, contactId) {
@@ -1083,17 +1162,23 @@ function showDashboard() {
     loadDashboard();
 }
 
+function goToReq(reqId) {
+    sidebarNav('reqs');
+    setTimeout(() => { if (typeof toggleDrillDown === 'function') toggleDrillDown(reqId); }, 300);
+}
+
 async function loadDashboard() {
     const el = document.getElementById('dashboardContent');
     if (!el) return;
-    el.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading dashboard\u2026</div>';
+    el.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading Command Center\u2026</div>';
 
     try {
         // Fetch data in parallel
-        const [companies, vendorResp, reqs] = await Promise.all([
+        const [companies, vendorResp, reqs, actionsResp] = await Promise.all([
             apiFetch('/api/companies').catch(() => []),
             apiFetch('/api/vendors?limit=100').catch(() => ({ vendors: [] })),
             apiFetch('/api/requisitions').catch(() => []),
+            apiFetch('/api/command-center/actions').catch(() => ({})),
         ]);
 
         const vendors = vendorResp.vendors || vendorResp || [];
@@ -1104,96 +1189,127 @@ async function loadDashboard() {
         const statusCounts = { open: 0, quoted: 0, won: 0, lost: 0 };
         for (const r of reqList) statusCounts[r.status] = (statusCounts[r.status] || 0) + 1;
 
-        // Stat cards
-        const statsHtml = `<div class="stat-grid" style="margin-bottom:16px">
-            ${statCard('Active Reqs', statusCounts.open + statusCounts.quoted)}
-            ${statCard('Companies', compList.length)}
-            ${statCard('Vendors', vendors.length)}
-            ${statCard('Won', statusCounts.won, { prefix: '', trendDir: 'trend-up' })}
-        </div>`;
+        // This week's data
+        const now = new Date();
+        const weekAgo = new Date(now - 7 * 86400000);
+        const twoWeeksAgo = new Date(now - 14 * 86400000);
+        const todayStr = now.toISOString().slice(0, 10);
+        const thisWeekReqs = reqList.filter(r => r.created_at && new Date(r.created_at) >= weekAgo);
+        const lastWeekReqs = reqList.filter(r => r.created_at && new Date(r.created_at) >= twoWeeksAgo && new Date(r.created_at) < weekAgo);
+        const thisWeekWon = thisWeekReqs.filter(r => r.status === 'won').length;
+        const lastWeekWon = lastWeekReqs.filter(r => r.status === 'won').length;
+        const thisWeekQuoted = thisWeekReqs.filter(r => r.status === 'quoted').length;
+        const lastWeekQuoted = lastWeekReqs.filter(r => r.status === 'quoted').length;
 
-        // Dashboard 6-card grid
-        let html = statsHtml + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">';
+        function trendArrow(curr, prev) {
+            if (curr > prev) return '<span style="color:var(--green);font-size:10px">&#9650;</span>';
+            if (curr < prev) return '<span style="color:var(--red);font-size:10px">&#9660;</span>';
+            return '<span style="color:var(--muted);font-size:10px">=</span>';
+        }
 
-        // Card 1: Pipeline Summary
-        const total = reqList.length || 1;
-        html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Pipeline Summary</h3>
-            <div style="display:flex;height:12px;border-radius:6px;overflow:hidden;margin-bottom:8px">
-                <div style="width:${(statusCounts.open/total*100).toFixed(1)}%;background:var(--amber)"></div>
-                <div style="width:${(statusCounts.quoted/total*100).toFixed(1)}%;background:var(--blue)"></div>
-                <div style="width:${(statusCounts.won/total*100).toFixed(1)}%;background:var(--green)"></div>
-                <div style="width:${(statusCounts.lost/total*100).toFixed(1)}%;background:var(--red)"></div>
-            </div>
-            <div style="display:flex;gap:12px;font-size:11px">
-                <span style="color:var(--amber)">Open ${statusCounts.open}</span>
-                <span style="color:var(--blue)">Quoted ${statusCounts.quoted}</span>
-                <span style="color:var(--green)">Won ${statusCounts.won}</span>
-                <span style="color:var(--red)">Lost ${statusCounts.lost}</span>
-            </div>
-        </div>`;
+        // Command Center 6-card grid
+        let html = '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px">';
 
-        // Card 2: Top Vendors by Score
-        const topVendors = [...vendors].sort((a, b) => (b.vendor_score ?? 0) - (a.vendor_score ?? 0)).slice(0, 5);
-        html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Top Vendors</h3>
-            ${topVendors.map(v => {
-                const s = v.vendor_score != null ? Math.round(v.vendor_score) : 0;
-                const rate = v.response_rate != null ? Math.round(v.response_rate) + '%' : '—';
-                return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
-                    ${engRing(s, 28)}
-                    <span style="flex:1;font-size:12px;font-weight:600">${esc(v.display_name)}</span>
-                    <span style="font-size:11px;color:var(--muted)">${rate}</span>
-                </div>`;
-            }).join('')}
-        </div>`;
-
-        // Card 3: Ownership Alerts (companies needing attention)
-        const staleCompanies = compList.filter(c => {
-            const d = daysSince(c.last_enriched_at);
-            return d > 30;
-        }).slice(0, 5);
+        // Card 1: Needs Action (top-left)
+        const staleRfqs = actionsResp.stale_rfqs || [];
+        const pendingQuotes = actionsResp.pending_quotes || [];
+        const pendingReviews = actionsResp.pending_reviews || [];
+        const actionItems = [
+            ...staleRfqs.map(r => ({ label: `Vendor RFQ #${r.id} — no response 48h+`, id: r.requisition_id || r.id, type: 'rfq' })),
+            ...pendingQuotes.map(q => ({ label: `Quote #${q.id} — pending ${q.days_pending || '5+'}d`, id: q.requisition_id || q.id, type: 'rfq' })),
+            ...pendingReviews.map(o => ({ label: `Offer #${o.id} — needs review`, id: o.requisition_id || o.id, type: 'rfq' })),
+        ].slice(0, 8);
         html += `<div class="card-v2" style="padding:16px">
             <h3 style="font-size:13px;font-weight:700;margin:0 0 10px;display:flex;align-items:center;gap:6px">
-                <span style="color:var(--amber)">⚠</span> Needs Attention
+                <span style="color:var(--red)">&#9888;</span> Needs Action
+                ${actionItems.length ? '<span style="background:var(--red);color:#fff;font-size:10px;padding:1px 6px;border-radius:8px;font-weight:700">'+actionItems.length+'</span>' : ''}
             </h3>
-            ${staleCompanies.length ? staleCompanies.map(c => {
-                const d = daysSince(c.last_enriched_at);
-                return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
-                    ${healthDot(recencyColor(d, [30, 90]))}
-                    <span style="flex:1;font-size:12px">${esc(c.name)}</span>
-                    <span style="font-size:10px;color:var(--muted)">${d < 900 ? d + 'd' : 'Never'}</span>
-                </div>`;
-            }).join('') : '<p style="font-size:12px;color:var(--muted)">All accounts are healthy</p>'}
+            ${actionItems.length ? actionItems.map(a => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
+                <span style="flex:1;font-size:12px">${esc(a.label)}</span>
+                <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 8px" onclick="goToReq(${a.id})">Go</button>
+            </div>`).join('') : '<p style="font-size:12px;color:var(--green)">All clear — nothing needs attention</p>'}
         </div>`;
 
-        // Card 4: Recent Requisitions
-        const recentReqs = [...reqList].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).slice(0, 5);
+        // Card 2: Today's Inbox (top-right)
+        const todayResps = actionsResp.today_responses || [];
+        const todayNewReqs = reqList.filter(r => r.created_at && r.created_at.slice(0, 10) === todayStr);
         html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Recent Requisitions</h3>
-            ${recentReqs.map(r => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
-                <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--blue)">REQ-${String(r.id).padStart(3, '0')}</span>
-                <span style="flex:1;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.name || '—')}</span>
-                <span class="status-badge status-${r.status}" style="font-size:9px">${r.status}</span>
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Today's Inbox</h3>
+            <div style="display:flex;gap:16px;margin-bottom:10px">
+                <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--blue)">${todayResps.length}</div><div style="font-size:10px;color:var(--muted)">Vendor Responses</div></div>
+                <div style="text-align:center"><div style="font-size:20px;font-weight:700;color:var(--amber)">${todayNewReqs.length}</div><div style="font-size:10px;color:var(--muted)">New RFQs</div></div>
+            </div>
+            ${todayResps.slice(0, 4).map(r => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0">
+                <span style="font-size:11px;font-weight:600">${esc(r.vendor_name || 'Unknown')}</span>
+                <span style="flex:1;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(r.subject || '')}</span>
+                ${r.confidence != null ? '<span style="font-size:10px;color:' + (r.confidence >= 0.8 ? 'var(--green)' : 'var(--amber)') + '">' + Math.round(r.confidence * 100) + '%</span>' : ''}
+            </div>`).join('')}
+            ${!todayResps.length && !todayNewReqs.length ? '<p style="font-size:12px;color:var(--muted)">No new activity today</p>' : ''}
+        </div>`;
+
+        // Card 3: This Week's Numbers (mid-left)
+        html += `<div class="card-v2" style="padding:16px">
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">This Week's Numbers</h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+                    <span style="font-size:12px">RFQs Received</span>
+                    <span style="font-weight:700;font-size:12px">${thisWeekReqs.length} ${trendArrow(thisWeekReqs.length, lastWeekReqs.length)}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+                    <span style="font-size:12px">Quotes Sent</span>
+                    <span style="font-weight:700;font-size:12px">${thisWeekQuoted} ${trendArrow(thisWeekQuoted, lastWeekQuoted)}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+                    <span style="font-size:12px">Won</span>
+                    <span style="font-weight:700;font-size:12px;color:var(--green)">${thisWeekWon} ${trendArrow(thisWeekWon, lastWeekWon)}</span>
+                </div>
+                <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+                    <span style="font-size:12px">Active Reqs</span>
+                    <span style="font-weight:700;font-size:12px">${statusCounts.open + statusCounts.quoted}</span>
+                </div>
+            </div>
+        </div>`;
+
+        // Card 4: Account Health (mid-right)
+        const unhealthyAccounts = compList
+            .map(c => ({ ...c, daysSinceActivity: daysSince(c.last_enriched_at), openReqs: (c.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0) }))
+            .filter(c => c.daysSinceActivity > 30)
+            .sort((a, b) => b.daysSinceActivity - a.daysSinceActivity)
+            .slice(0, 6);
+        html += `<div class="card-v2" style="padding:16px">
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Account Health</h3>
+            ${unhealthyAccounts.length ? unhealthyAccounts.map(c => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;cursor:pointer" onclick="goToCompany(${c.id})">
+                ${healthDot(recencyColor(c.daysSinceActivity, [30, 90]))}
+                <span style="flex:1;font-size:12px;font-weight:500">${esc(c.name)}</span>
+                <span style="font-size:10px;color:var(--muted)">${c.daysSinceActivity < 900 ? c.daysSinceActivity + 'd' : 'Never'}</span>
+                ${c.openReqs ? '<span style="font-size:10px;background:var(--blue-bg,#dbeafe);color:var(--blue);padding:1px 5px;border-radius:3px">' + c.openReqs + ' open</span>' : ''}
+            </div>`).join('') : '<p style="font-size:12px;color:var(--green)">All accounts are healthy</p>'}
+        </div>`;
+
+        // Card 5: Vendor Pulse (bottom-left)
+        const ghostVendors = [...vendors].filter(v => v.ghost_rate != null && v.ghost_rate > 0.3).sort((a, b) => (b.ghost_rate || 0) - (a.ghost_rate || 0)).slice(0, 3);
+        const topByVolume = [...vendors].sort((a, b) => (b.sighting_count || 0) - (a.sighting_count || 0)).slice(0, 5);
+        html += `<div class="card-v2" style="padding:16px">
+            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Vendor Pulse</h3>
+            ${ghostVendors.length ? '<div style="font-size:10px;font-weight:600;color:var(--red);margin-bottom:4px">Top Ghosting</div>' : ''}
+            ${ghostVendors.map(v => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer" onclick="openVendorDrawer(${v.id})">
+                <span style="flex:1;font-size:12px">${esc(v.display_name)}</span>
+                <span style="font-size:10px;color:var(--red);font-weight:600">${Math.round((v.ghost_rate || 0) * 100)}% ghost</span>
+            </div>`).join('')}
+            <div style="font-size:10px;font-weight:600;color:var(--muted);margin:8px 0 4px">Top by Volume</div>
+            ${topByVolume.map(v => `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;cursor:pointer" onclick="openVendorDrawer(${v.id})">
+                ${engRing(v.vendor_score != null ? Math.round(v.vendor_score) : 0, 22)}
+                <span style="flex:1;font-size:12px">${esc(v.display_name)}</span>
+                <span style="font-size:10px;color:var(--muted)">${v.sighting_count || 0} parts</span>
             </div>`).join('')}
         </div>`;
 
-        // Card 5: Unassigned Companies
-        const unassigned = compList.filter(c => !c.account_owner_id).slice(0, 5);
-        html += `<div class="card-v2" style="padding:16px">
-            <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Unassigned Accounts</h3>
-            ${unassigned.length ? unassigned.map(c => `<div style="display:flex;align-items:center;gap:8px;padding:4px 0">
-                <span style="flex:1;font-size:12px">${esc(c.name)}</span>
-                <span style="font-size:10px;color:var(--muted)">${c.site_count || 0} sites</span>
-            </div>`).join('') : '<p style="font-size:12px;color:var(--green)">All accounts assigned</p>'}
-        </div>`;
-
-        // Card 6: Quick Actions
+        // Card 6: Quick Actions (bottom-right)
         html += `<div class="card-v2" style="padding:16px">
             <h3 style="font-size:13px;font-weight:700;margin:0 0 10px">Quick Actions</h3>
             <div style="display:flex;flex-direction:column;gap:6px">
                 <button class="btn btn-primary btn-sm" onclick="openNewReqModal()" style="text-align:left">+ New Requisition</button>
-                <button class="btn btn-ghost btn-sm" onclick="openNewCompanyModal()" style="text-align:left">+ New Company</button>
+                <button class="btn btn-ghost btn-sm" onclick="openNewCompanyModal()" style="text-align:left">+ New Account</button>
                 <button class="btn btn-ghost btn-sm" onclick="sidebarNav('vendors')" style="text-align:left">Browse Vendors</button>
             </div>
         </div>`;
@@ -1202,7 +1318,7 @@ async function loadDashboard() {
         el.innerHTML = html;
     } catch (err) {
         console.error('loadDashboard error:', err);
-        el.innerHTML = '<p class="empty">Failed to load dashboard data.</p>';
+        el.innerHTML = '<p class="empty">Failed to load Command Center data.</p>';
     }
 }
 
@@ -1358,6 +1474,7 @@ function sortReqList(col) {
 
 // ── Drill-Down Sub-Tab State ────────────────────────────────────────────
 const _ddTabCache = {};   // reqId → { sightings: data, activity: data, offers: data, ... }
+window._ddTabCache = _ddTabCache; // Expose for cross-module cache invalidation
 const _ddActiveTab = {};  // reqId → current sub-tab name
 
 function _ddSubTabs(mainView) {
@@ -1730,11 +1847,13 @@ async function _autoPollReplies(reqId, currentData, panel) {
     if (!hasSent) return;
     try {
         const result = await apiFetch(`/api/requisitions/${reqId}/poll`, { method: 'POST' });
+        if (currentReqId !== reqId) return; // Stale — user navigated away
         const newCount = (result.responses || []).length;
         if (newCount > 0) {
             // New replies found — refresh activity tab
             if (_ddTabCache[reqId]) delete _ddTabCache[reqId].activity;
             const freshData = await apiFetch(`/api/requisitions/${reqId}/activity`);
+            if (currentReqId !== reqId) return; // Stale check after second fetch
             if (_ddTabCache[reqId]) _ddTabCache[reqId].activity = freshData;
             _renderDdActivity(reqId, freshData, panel);
         }
@@ -1859,12 +1978,22 @@ function _renderDdOffers(reqId, data, panel) {
             const oid = o.id || o.offer_id;
             const checked = sel.has(oid) ? 'checked' : '';
             const price = o.unit_price != null ? '$' + parseFloat(o.unit_price).toFixed(4) : '\u2014';
+            let offerPriceColor = 'var(--teal)';
+            let offerPriceTitle = '';
+            if (g.target_price != null && o.unit_price != null) {
+                const pctD = ((o.unit_price - g.target_price) / g.target_price) * 100;
+                offerPriceColor = pctD <= 0 ? 'var(--green)' : pctD <= 15 ? 'var(--amber)' : 'var(--red)';
+                offerPriceTitle = ` title="${pctD > 0 ? '+' : ''}${pctD.toFixed(0)}% vs target ($${Number(g.target_price).toFixed(4)})"`;
+            }
             const offeredMpn = o.mpn || o.offered_mpn || '';
             const isSub = reqMpn && offeredMpn && offeredMpn.trim().toUpperCase() !== reqMpn.trim().toUpperCase();
             const subBadge = isSub ? ' <span class="badge b-sub">SUB</span>' : '';
             const isPending = o.status === 'pending_review';
             const rowBg = isPending ? 'background:rgba(245,158,11,.06);border-left:2px dashed var(--amber);' : (isSub ? 'background:rgba(14,116,144,.04);' : '');
             const statusBadge = isPending ? ' <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">DRAFT</span>' : '';
+            // Staleness indicator: flag offers older than 7 days
+            const offerAgeDays = o.created_at ? Math.floor((Date.now() - new Date(o.created_at).getTime()) / 86400000) : 0;
+            const staleBadge = offerAgeDays > 14 ? ' <span class="badge" style="background:var(--red-light);color:var(--red);font-size:8px">STALE</span>' : offerAgeDays > 7 ? ' <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:8px">AGING</span>' : '';
             const quotedBadge = o.quoted_on ? ` <span class="badge b-quoted">${esc(o.quoted_on)}</span>` : '';
 
             // Edited-by info
@@ -1876,10 +2005,10 @@ function _renderDdOffers(reqId, data, panel) {
 
             html += `<tr class="ofr-row ${checked ? 'selected' : ''}" style="${rowBg}" data-oid="${oid}">
                 <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
-                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${subBadge}${statusBadge}${quotedBadge}${editedInfo}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${subBadge}${statusBadge}${staleBadge}${quotedBadge}${editedInfo}</td>
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'manufacturer',this)" style="font-size:10px">${esc(o.manufacturer || '\u2014')}</td>
                 <td class="req-edit-cell mono" onclick="ddInlineEditOffer(${reqId},${oid},'qty_available',this)">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '\u2014')}</td>
-                <td class="req-edit-cell mono" style="color:var(--teal)" onclick="ddInlineEditOffer(${reqId},${oid},'unit_price',this)">${price}</td>
+                <td class="req-edit-cell mono" style="color:${offerPriceColor}"${offerPriceTitle} onclick="ddInlineEditOffer(${reqId},${oid},'unit_price',this)">${price}</td>
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'lead_time',this)">${esc(o.lead_time || '\u2014')}</td>
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'condition',this)">${esc(o.condition || '\u2014')}</td>
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'date_code',this)" style="font-size:10px">${esc(o.date_code || '\u2014')}</td>
@@ -3482,8 +3611,13 @@ function editDrillCell(td, rfqId, reqId, field) {
     let _cancelled = false;
     const save = async () => {
         if (_cancelled) return;
+        _cancelled = true; // prevent double-fire
         const val = el.value.trim();
-        if (val === currentVal) { _renderDrillDownTable(rfqId); return; }
+        if (val === currentVal) {
+            // No change — just restore the cell display text without full re-render
+            _restoreDrillCell(td, r, field);
+            return;
+        }
         const body = {};
         if (field === 'target_price') body[field] = val ? parseFloat(val) : null;
         else if (field === 'target_qty') body[field] = parseInt(val) || 1;
@@ -3494,7 +3628,8 @@ function editDrillCell(td, rfqId, reqId, field) {
             const idx = reqs.findIndex(x => x.id === reqId);
             if (idx >= 0) Object.assign(reqs[idx], body);
         } catch(e) { logCatchError('editDrillCell', e); }
-        _renderDrillDownTable(rfqId);
+        // Update just this cell in-place instead of re-rendering entire table
+        _restoreDrillCell(td, r, field);
     };
 
     el.addEventListener('blur', save);
@@ -3503,8 +3638,29 @@ function editDrillCell(td, rfqId, reqId, field) {
     }
     el.addEventListener('keydown', e => {
         if (e.key === 'Enter' && field !== 'notes') { e.preventDefault(); el.blur(); }
-        if (e.key === 'Escape') { e.preventDefault(); _cancelled = true; _renderDrillDownTable(rfqId); }
+        if (e.key === 'Escape') { e.preventDefault(); _cancelled = true; _restoreDrillCell(td, r, field); }
     });
+}
+
+function _restoreDrillCell(td, r, field) {
+    // Restore cell display value without full table re-render
+    let display;
+    if (field === 'primary_mpn') display = esc(r.primary_mpn || '\u2014');
+    else if (field === 'target_qty') display = String(r.target_qty || 0);
+    else if (field === 'target_price') {
+        display = r.target_price != null ? '$' + parseFloat(r.target_price).toFixed(2) : '\u2014';
+        td.style.color = r.target_price ? 'var(--teal)' : 'var(--muted)';
+    }
+    else if (field === 'substitutes') display = esc((r.substitutes || []).length ? r.substitutes.join(', ') : '\u2014');
+    else if (field === 'notes') {
+        const notesTrunc = (r.notes || '').length > 30 ? r.notes.substring(0, 30) + '\u2026' : (r.notes || '\u2014');
+        display = (r.notes ? '\ud83d\udcdd ' : '') + esc(notesTrunc);
+        td.title = r.notes || '';
+        td.style.color = r.notes ? 'var(--blue)' : '';
+        td.style.fontWeight = r.notes ? '600' : '';
+    }
+    else display = esc(r[field] || '\u2014');
+    td.innerHTML = display;
 }
 
 function addDrillRow(rfqId) {
@@ -3606,7 +3762,13 @@ async function _saveAddRow(rfqId) {
     dd.querySelectorAll('.add-row input').forEach(inp => inp.disabled = true);
 
     try {
-        await apiFetch(`/api/requisitions/${rfqId}/requirements`, { method: 'POST', body });
+        const addResult = await apiFetch(`/api/requisitions/${rfqId}/requirements`, { method: 'POST', body });
+        // Show duplicate warnings if any
+        const dups = addResult && addResult.duplicates;
+        if (dups && dups.length) {
+            const dupMsg = dups.map(d => `${d.mpn} (RFQ-${d.req_id}: ${d.req_name})`).join(', ');
+            showToast('Duplicate alert: ' + dupMsg + ' quoted for this customer in last 30 days', 'warning');
+        }
         // Keep add row active so user can enter next part immediately
         delete _ddReqCache[rfqId];
         if (_ddTabCache[rfqId]) { delete _ddTabCache[rfqId].parts; delete _ddTabCache[rfqId].details; }
@@ -3786,7 +3948,13 @@ async function submitPastedRows() {
     btn.textContent = 'Adding…';
 
     try {
-        await apiFetch(`/api/requisitions/${rfqId}/requirements`, { method: 'POST', body: parts });
+        const pasteResult = await apiFetch(`/api/requisitions/${rfqId}/requirements`, { method: 'POST', body: parts });
+        // Show duplicate warnings if any
+        const pasteDups = pasteResult && pasteResult.duplicates;
+        if (pasteDups && pasteDups.length) {
+            const dupMsg = pasteDups.map(d => `${d.mpn} (RFQ-${d.req_id}: ${d.req_name})`).join(', ');
+            showToast('Duplicate alert: ' + dupMsg + ' quoted for this customer in last 30 days', 'warning');
+        }
         closeModal('pastePartsModal');
         delete _ddReqCache[rfqId];
         if (_ddTabCache[rfqId]) { delete _ddTabCache[rfqId].parts; delete _ddTabCache[rfqId].details; }
@@ -3847,6 +4015,11 @@ const _ddScoreCache = {};
 // ── Sighting filters ─────────────────────────────────────────────────────
 const _ddSightingFilters = {};
 const _ddFilterTimers = {};
+const _ddTypeFilter = {}; // reqId → 'all' | 'exact' | 'sub' | 'available' | 'na'
+function _ddSetTypeFilter(reqId, type) {
+    _ddTypeFilter[reqId] = type;
+    _renderSourcingDrillDown(reqId);
+}
 function _ddFilterSightings(reqId, field, value) {
     if (!_ddSightingFilters[reqId]) _ddSightingFilters[reqId] = {};
     _ddSightingFilters[reqId][field] = value;
@@ -3858,18 +4031,33 @@ function _ddFilterSightings(reqId, field, value) {
         if (inp) { inp.focus(); inp.selectionStart = inp.selectionEnd = inp.value.length; }
     }, 200);
 }
-function _ddApplyFilters(sightings, reqId) {
+function _ddApplyFilters(sightings, reqId, groupLabel) {
     const f = _ddSightingFilters[reqId];
-    if (!f) return sightings;
-    return sightings.filter(s => {
-        if (f.vendor && !(s.vendor_name || '').toLowerCase().includes(f.vendor.toLowerCase())) return false;
-        if (f.source && !(s.source_type || '').toLowerCase().includes(f.source.toLowerCase())) return false;
-        if (f.condition && !(s.condition || '').toLowerCase().includes(f.condition.toLowerCase())) return false;
-        return true;
-    });
+    const tf = _ddTypeFilter[reqId] || 'all';
+    let result = sightings;
+    if (f) {
+        result = result.filter(s => {
+            if (f.vendor && !(s.vendor_name || '').toLowerCase().includes(f.vendor.toLowerCase())) return false;
+            if (f.source && !(s.source_type || '').toLowerCase().includes(f.source.toLowerCase())) return false;
+            if (f.condition && !(s.condition || '').toLowerCase().includes(f.condition.toLowerCase())) return false;
+            return true;
+        });
+    }
+    if (tf !== 'all') {
+        result = result.filter(s => {
+            const isSub = groupLabel && s.mpn_matched && s.mpn_matched.trim().toUpperCase() !== groupLabel.trim().toUpperCase();
+            if (tf === 'exact') return !isSub;
+            if (tf === 'sub') return isSub;
+            if (tf === 'available') return !s.is_unavailable;
+            if (tf === 'na') return !!s.is_unavailable;
+            return true;
+        });
+    }
+    return result;
 }
 function _ddClearFilters(reqId) {
     delete _ddSightingFilters[reqId];
+    delete _ddTypeFilter[reqId];
     _renderSourcingDrillDown(reqId);
 }
 
@@ -3901,7 +4089,11 @@ function _ddVendorInlineBadges(s) {
     return html;
 }
 
-function _ddRenderTierRows(sightings, reqId, sel, groupLabel) {
+function _ddCopyContact(text, type) {
+    navigator.clipboard.writeText(text).then(() => showToast(type + ' copied', 'success')).catch(() => {});
+}
+
+function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice) {
     let html = '';
     for (const s of sightings) {
         // Historical offer rows — rendered at same size as regular sightings
@@ -3916,11 +4108,13 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel) {
             html += `<tr style="background:var(--blue-light,#f0f9ff)">
                 <td style="text-align:center"><span style="font-size:9px;padding:2px 5px;border-radius:3px;background:var(--blue,#0284c7);color:#fff;font-weight:700">HIST</span></td>
                 <td><a onclick="event.stopPropagation();openVendorPopup('${safeHVName}')" style="cursor:pointer;font-weight:600">${esc(ho.vendor_name || '\u2014')}</a>${hSub} <span style="color:var(--muted)">RFQ-${ho.from_requisition_id || '\u2014'}</span></td>
+                <td style="font-size:10px;color:var(--muted)">\u2014</td>
                 <td class="mono">${esc(ho.mpn || '\u2014')}</td>
                 <td class="mono">${hQty}</td>
                 <td class="mono" style="color:var(--teal)">${hPrice}</td>
-                <td>${esc(ho.lead_time || '\u2014')}</td>
+                <td style="font-size:10px">historical</td>
                 <td>${esc(ho.condition || '\u2014')}</td>
+                <td>${esc(ho.lead_time || '\u2014')}</td>
                 <td style="color:var(--muted)">${sAge}
                     <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;margin-left:4px" onclick="event.stopPropagation();ddReconfirmOffer(${ho.id},${reqId})" title="Mark as still valid">\u2713 Reconfirm</button>
                     <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;color:var(--teal)" onclick='event.stopPropagation();ddLogFromHistorical(${reqId},${hoJson})' title="Log as new offer on this RFQ">+ Log</button>
@@ -3930,8 +4124,8 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel) {
         }
         const hasEmail = !!(s.vendor_email || (s.vendor_card && s.vendor_card.has_emails));
         const checked = sel.has(s.id) ? 'checked' : '';
-        const dimStyle = !hasEmail ? 'opacity:.5' : '';
-        const disabledAttr = !hasEmail ? 'disabled title="No vendor email"' : '';
+        const dimStyle = !hasEmail ? 'opacity:.7' : '';
+        const disabledAttr = '';
         const price = s.unit_price != null ? '$' + parseFloat(s.unit_price).toFixed(2) : '\u2014';
         const qty = s.qty_available != null ? Number(s.qty_available).toLocaleString() : '\u2014';
         const safeVName = (s.vendor_name||'').replace(/'/g, "\\'");
@@ -3942,16 +4136,40 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel) {
         const sAge = s.created_at ? fmtRelative(s.created_at) : '\u2014';
         const isSub = groupLabel && s.mpn_matched && s.mpn_matched.trim().toUpperCase() !== groupLabel.trim().toUpperCase();
         const subBadge = isSub ? '<span class="badge b-sub">SUB</span> ' : '';
-        const rowBg = isSub ? 'background:rgba(14,116,144,.04)' : '';
+        const unavail = s.is_unavailable;
+        const unavailBadge = unavail ? ' <span class="badge b-unavail">NOT AVAIL</span>' : '';
+        const unavailBtn = s.id
+            ? `<button class="btn-unavail" onclick="event.stopPropagation();markUnavailable(${s.id},${!unavail},${reqId})" title="${unavail ? 'Mark available' : 'Mark as not available'}">${unavail ? '\u21a9 Avail' : '\u2715 N/A'}</button>`
+            : '';
+        // Contact info
+        const cEmail = s.vendor_email || (s.vendor_card && s.vendor_card.emails && s.vendor_card.emails[0]) || '';
+        const cPhone = s.vendor_phone || (s.vendor_card && s.vendor_card.phones && s.vendor_card.phones[0]) || '';
+        const truncEmail = cEmail.length > 20 ? cEmail.slice(0, 18) + '\u2026' : cEmail;
+        const truncPhone = cPhone.length > 20 ? cPhone.slice(0, 18) + '\u2026' : cPhone;
+        let contactHtml = '';
+        if (cEmail) contactHtml += `<a href="mailto:${escAttr(cEmail)}" onclick="event.stopPropagation();_ddCopyContact('${escAttr(cEmail)}','Email')" title="${escAttr(cEmail)}" style="color:var(--muted);text-decoration:none">${esc(truncEmail)}</a>`;
+        if (cEmail && cPhone) contactHtml += '<br>';
+        if (cPhone) contactHtml += `<a href="tel:${escAttr(cPhone)}" onclick="event.stopPropagation();_ddCopyContact('${escAttr(cPhone)}','Phone')" title="${escAttr(cPhone)}" style="color:var(--muted);text-decoration:none">${esc(truncPhone)}</a>`;
+        // Price color-coding vs target
+        let priceColor = s.unit_price ? 'var(--teal)' : 'var(--muted)';
+        let priceTitle = '';
+        if (targetPrice && s.unit_price) {
+            const pctDelta = ((s.unit_price - targetPrice) / targetPrice) * 100;
+            priceColor = pctDelta <= 0 ? 'var(--green)' : pctDelta <= 15 ? 'var(--amber)' : 'var(--red)';
+            priceTitle = ` title="${pctDelta > 0 ? '+' : ''}${pctDelta.toFixed(0)}% vs target ($${Number(targetPrice).toFixed(2)})"`;
+        }
+        const rowBg = unavail ? 'background:rgba(220,38,38,.04);opacity:.6' : isSub ? 'background:rgba(14,116,144,.04)' : '';
         html += `<tr style="${dimStyle}${rowBg ? ';' + rowBg : ''}">
             <td><input type="checkbox" ${checked} ${disabledAttr} onclick="event.stopPropagation();ddToggleSighting(${reqId},${s.id})"></td>
-            <td>${ring}${esc(s.vendor_name || '\u2014')}${inlineBadges}${linkPill}${needsEmail}</td>
+            <td>${ring}${s.vendor_card && s.vendor_card.id ? '<a onclick="event.stopPropagation();openVendorDrawer('+s.vendor_card.id+')" style="cursor:pointer;font-weight:600;color:var(--text);text-decoration:none" onmouseover="this.style.color=\'var(--blue)\'" onmouseout="this.style.color=\'var(--text)\'">' + esc(s.vendor_name || '\u2014') + '</a>' : esc(s.vendor_name || '\u2014')}${inlineBadges}${linkPill}${needsEmail}${unavailBadge}</td>
+            <td style="font-size:10px;color:var(--muted);max-width:140px;overflow:hidden;text-overflow:ellipsis">${contactHtml || '\u2014'}</td>
             <td class="mono">${subBadge}${esc(s.mpn_matched || '\u2014')}</td>
             <td class="mono">${qty}</td>
-            <td class="mono" style="color:${s.unit_price ? 'var(--teal)' : 'var(--muted)'}">${price}</td>
+            <td class="mono" style="color:${priceColor}"${priceTitle}>${price}</td>
             <td style="font-size:10px">${esc(s.source_type || '\u2014')}</td>
-            <td style="font-size:10px">${esc(s.condition || '\u2014')}</td>
-            <td style="font-size:10px;color:var(--muted)">${sAge}</td>
+            <td style="font-size:10px">${esc(s.condition || '\u2014')}${s.date_code ? ' <span style="color:var(--muted)">\u00b7 DC:' + esc(s.date_code) + '</span>' : ''}</td>
+            <td style="font-size:10px">${esc(s.lead_time || '\u2014')}</td>
+            <td style="font-size:10px;color:var(--muted)">${sAge} ${unavailBtn}${!s._historical && !unavail && hasEmail ? ` <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px;color:var(--teal)" onclick="event.stopPropagation();ddQuickRfq(${reqId},'${safeVName}','${escAttr(s.mpn_matched || '')}')" title="Send RFQ to this vendor">&#x2709;</button>` : ''}</td>
         </tr>`;
     }
     return html;
@@ -3981,10 +4199,15 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
     const DD_LIMIT = 100;
     const showAll = dd.dataset.showAll === '1';
     const f = _ddSightingFilters[reqId] || {};
-    const hasFilters = !!(f.vendor || f.source || f.condition);
+    const tf = _ddTypeFilter[reqId] || 'all';
+    const hasFilters = !!(f.vendor || f.source || f.condition || tf !== 'all');
+
+    // Type filter pills
+    const _tfPill = (val, label) => `<button class="src-type-pill${tf === val ? ' on' : ''}" onclick="event.stopPropagation();_ddSetTypeFilter(${reqId},'${val}')">${label}</button>`;
 
     // Filter bar
     let html = `<div style="display:flex;gap:6px;margin-bottom:8px;align-items:center;flex-wrap:wrap">
+        <div class="src-type-pills">${_tfPill('all','All')}${_tfPill('exact','Exact')}${_tfPill('sub','Substitute')}${_tfPill('available','Available')}${_tfPill('na','N/A')}</div>
         <input data-sfilter="${reqId}-vendor" placeholder="Filter vendor\u2026" value="${esc(f.vendor||'')}" oninput="_ddFilterSightings(${reqId},'vendor',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:130px;background:var(--card);color:var(--text)">
         <input data-sfilter="${reqId}-source" placeholder="Filter source\u2026" value="${esc(f.source||'')}" oninput="_ddFilterSightings(${reqId},'source',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:110px;background:var(--card);color:var(--text)">
         <input data-sfilter="${reqId}-condition" placeholder="Filter condition\u2026" value="${esc(f.condition||'')}" oninput="_ddFilterSightings(${reqId},'condition',this.value)" style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px;width:110px;background:var(--card);color:var(--text)">
@@ -4021,7 +4244,7 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         }
 
         // Apply filters
-        const filtered = _ddApplyFilters(sightings, reqId);
+        const filtered = _ddApplyFilters(sightings, reqId, label);
 
         // Sort by score descending (best sources first)
         filtered.sort((a, b) => {
@@ -4037,10 +4260,16 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
             const dotColor = rs.color === 'green' ? 'var(--green)' : rs.color === 'yellow' ? 'var(--amber)' : 'var(--red)';
             effortBadge = ` <span class="effort-wrap"><span class="effort-dot" style="background:${dotColor}"></span><span style="font-size:9px;color:var(--muted);margin-left:2px">${Math.round(rs.score)}</span>${_buildEffortTip(rs.score, rs.color, rs.signals)}</span>`;
         }
+        // Look up target price from requirement cache
+        const _reqs = _ddReqCache[reqId] || [];
+        const _req = _reqs.find(r => r.id == rId);
+        const groupTargetPrice = _req?.target_price ?? null;
+        const targetPriceLabel = groupTargetPrice != null ? ` \u00b7 target $${Number(groupTargetPrice).toFixed(2)}` : '';
+
         const filterNote = hasFilters ? ` <span style="font-size:10px;color:var(--blue)">(${filtered.length} of ${sightings.length} shown)</span>` : '';
         html += `<div style="margin-bottom:10px">
             <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-                <span style="font-size:11px;font-weight:700;color:var(--text2)">${esc(label)}${effortBadge} <span style="font-weight:400;color:var(--muted)">(${sightings.length} source${sightings.length !== 1 ? 's' : ''})</span>${filterNote}</span>
+                <span style="font-size:11px;font-weight:700;color:var(--text2)">${esc(label)}${effortBadge} <span style="font-weight:400;color:var(--muted)">(${sightings.length} source${sightings.length !== 1 ? 's' : ''})${targetPriceLabel}</span>${filterNote}</span>
                 <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 6px;margin-left:4px" onclick="event.stopPropagation();ddResearchPart(${reqId},${rId})" title="Re-search this part">\u21bb Search</button>
             </div>`;
 
@@ -4054,10 +4283,12 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         }
 
         const visible = showAll ? filtered : filtered.slice(0, DD_LIMIT);
+        const visibleIds = visible.filter(s => !s._historical && s.id).map(s => s.id);
+        const allChecked = visibleIds.length > 0 && visibleIds.every(id => sel.has(id));
         html += `<table class="dtbl" style="margin:0"><thead><tr>
-            <th style="width:24px"></th><th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Condition</th><th>Age</th>
+            <th style="width:24px"><input type="checkbox" ${allChecked ? 'checked' : ''} onchange="event.stopPropagation();ddToggleGroupSightings(${reqId},[${visibleIds.join(',')}],this.checked)" title="Select all in group"></th><th>Vendor</th><th>Contact</th><th>MPN</th><th>Qty</th><th>Price</th><th>Source</th><th>Condition</th><th>Lead</th><th>Age</th>
         </tr></thead><tbody>`;
-        html += _ddRenderTierRows(visible, reqId, sel, label);
+        html += _ddRenderTierRows(visible, reqId, sel, label, groupTargetPrice);
         html += '</tbody></table>';
         if (!showAll && filtered.length > DD_LIMIT) {
             html += `<a onclick="event.stopPropagation();this.closest('.dd-panel').dataset.showAll='1';_renderSourcingDrillDown(${reqId})" style="font-size:11px;color:var(--blue);cursor:pointer;display:inline-block;margin:2px 0 0 12px">Show all ${filtered.length} sources\u2026</a>`;
@@ -4066,6 +4297,21 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
         html += '</div>';
     }
     dd.innerHTML = html;
+}
+
+function ddToggleGroupSightings(reqId, ids, checked) {
+    const sel = _ddSelectedSightings[reqId];
+    if (!sel) return;
+    for (const id of ids) {
+        if (checked) sel.add(id); else sel.delete(id);
+    }
+    _renderSourcingDrillDown(reqId);
+    _updateDdBulkButton(reqId);
+}
+
+function ddQuickRfq(reqId, vendorName, mpn) {
+    setCurrentReqId(reqId);
+    openBatchRfqModal([{ vendor_name: vendorName, parts: [mpn] }]);
 }
 
 function ddToggleSighting(reqId, sightingId) {
@@ -5194,7 +5440,8 @@ export function sidebarNav(page, el) {
         performance: () => window.showPerformance(),
         settings: () => window.showSettings(),
         contacts: () => showContacts(),
-        dashboard: () => showDashboard()
+        dashboard: () => showDashboard(),
+        prospecting: () => window.showProspecting()
     };
     try { if (routes[page]) routes[page](); }
     catch(e) { console.error('sidebarNav error:', page, e); }
@@ -5260,7 +5507,7 @@ async function loadFollowUpsPanel() {
                     <span style="color:var(--muted)">${esc(fu.vendor_email || '')}</span>
                     <span style="color:${dayColor};font-weight:600">${fu.days_waiting}d</span>
                     ${fu.parts ? `<span style="color:var(--muted)">${esc(fu.parts)}</span>` : ''}
-                    ${fu.contact_id ? `<button class="btn btn-ghost btn-sm" onclick="sendFollowUp(${fu.contact_id},'${escAttr(fu.vendor_name)}')" style="padding:1px 6px;font-size:10px">Follow Up</button>` : ''}
+                    ${fu.contact_id ? `<button class="btn btn-ghost btn-sm" onclick="sendFollowUp(${fu.contact_id},'${escAttr(fu.vendor_name)}')" style="padding:1px 6px;font-size:10px">Send Now</button>` : ''}
                 </div>`;
             }
         }
@@ -6048,15 +6295,23 @@ function toggleSighting(key) {
 
 
 
-async function markUnavailable(sightingId, unavail) {
+async function markUnavailable(sightingId, unavail, reqId) {
     try {
         await apiFetch(`/api/sightings/${sightingId}/unavailable`, {
             method: 'PUT', body: { unavailable: unavail }
         });
-        // Update local state — use index for O(1) lookup
+        // Update local state — old sourcing panel index
         const ref = _sightingIndex[sightingId];
         if (ref) {
             ref.sighting.is_unavailable = unavail;
+        }
+        // Update drill-down sightings cache
+        if (reqId && _ddSightingsCache[reqId]) {
+            for (const group of Object.values(_ddSightingsCache[reqId])) {
+                const s = (group.sightings || []).find(s => s.id === sightingId);
+                if (s) { s.is_unavailable = unavail; break; }
+            }
+            _renderSourcingDrillDown(reqId);
         }
         renderSources();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
@@ -6424,7 +6679,7 @@ async function sendBatchRfq() {
         const sendable = rfqVendorData.filter(g => g.included && g.selected_email && _vendorHasPartsToSend(g));
         if (!sendable.length) { showToast('No vendors with email and new parts to send', 'error'); return; }
         const payload = sendable.map(g => {
-            const body = buildVendorBody(g);
+            const body = document.getElementById('rfqBody').value;
             // All parts being sent (for contact tracking)
             let sentParts = [...g.new_listing, ...g.new_other];
             if (g.include_repeats) sentParts = [...sentParts, ...g.repeat_listing, ...g.repeat_other];
@@ -6573,6 +6828,7 @@ export async function openVendorPopup(cardId) {
             </span>
         </div>
         <div id="vpContactsList"><p class="vp-muted" style="font-size:11px">Loading contacts...</p></div>
+        <div id="vpContactNudges"></div>
     </div>`;
 
     // Recent Activity (loaded async)
@@ -6846,27 +7102,102 @@ export async function loadVendorContacts(cardId) {
             const confClass = c.confidence >= 80 ? 'badge-green' : c.confidence >= 50 ? 'badge-yellow' : 'badge-gray';
             const confBadge = `<span class="badge ${confClass}" style="font-size:9px;padding:1px 6px">${c.confidence}%</span>`;
             const verBadge = c.is_verified ? '<span class="badge badge-green" style="font-size:9px;padding:1px 6px">Verified</span>' : '';
+            // Relationship score badge
+            const scoreBadge = c.relationship_score != null
+                ? `<span class="contact-score-badge ${c.relationship_score >= 70 ? 'score-green' : c.relationship_score >= 40 ? 'score-yellow' : 'score-gray'}">${Math.round(c.relationship_score)}</span>`
+                : '';
+            // Activity trend indicator
+            const trendIcons = { warming: '↗', stable: '→', cooling: '↘', dormant: '◯' };
+            const trendClasses = { warming: 'trend-warming', stable: 'trend-stable', cooling: 'trend-cooling', dormant: 'trend-dormant' };
+            const trendBadge = c.activity_trend
+                ? `<span class="contact-trend ${trendClasses[c.activity_trend] || 'trend-stable'}" title="${esc(c.activity_trend)}">${trendIcons[c.activity_trend] || '→'}</span>`
+                : '';
+            // Phone links — both office and mobile as click-to-call with logging
+            const phoneLink = c.phone ? '<a href="tel:' + escAttr(c.phone) + '" onclick="autoLogVendorCall(' + cardId + ',\'' + escAttr(c.phone) + '\')" title="Office">' + esc(c.phone) + '</a>' : '';
+            const mobileLink = c.phone_mobile ? '<a href="tel:' + escAttr(c.phone_mobile) + '" onclick="autoLogVendorCall(' + cardId + ',\'' + escAttr(c.phone_mobile) + '\')" title="Mobile">' + esc(c.phone_mobile) + '</a>' : '';
+            const phoneSep = phoneLink && mobileLink ? ' &middot; ' : '';
             return `<div class="si-contact" style="padding:6px 0;border-bottom:1px solid var(--border)">
                 <div class="si-contact-info" style="flex:1;min-width:0">
                     <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center">
                         <span class="si-contact-name">${esc(c.full_name || c.email)}</span>
-                        ${srcBadge} ${confBadge} ${verBadge}
+                        ${scoreBadge} ${trendBadge} ${srcBadge} ${confBadge} ${verBadge}
                     </div>
                     ${c.title ? '<div style="font-size:11px;color:var(--text2)">' + esc(c.title) + '</div>' : ''}
                     <div class="si-contact-meta">
                         ${c.email ? '<a href="mailto:' + escAttr(c.email) + '" onclick="autoLogEmail(\'' + escAttr(c.email) + '\',\'' + escAttr(c.full_name || '') + '\')">' + esc(c.email) + '</a>' : ''}
-                        ${c.email && c.phone ? ' &middot; ' : ''}
-                        ${c.phone ? '<a href="tel:' + escAttr(c.phone) + '" onclick="autoLogVendorCall(' + cardId + ',\'' + escAttr(c.phone) + '\')">' + esc(c.phone) + '</a>' : ''}
+                        ${c.email && (phoneLink || mobileLink) ? ' &middot; ' : ''}
+                        ${phoneLink}${phoneSep}${mobileLink}
                     </div>
                     ${c.label ? '<div style="font-size:10px;color:var(--muted)">' + esc(c.label) + '</div>' : ''}
                 </div>
                 <div class="si-contact-actions" style="display:flex;gap:4px;align-items:center;flex-shrink:0">
+                    <button class="btn btn-ghost btn-sm" onclick="openContactTimeline(${cardId},${c.id},'${escAttr(c.full_name || c.email)}')" title="Timeline">⏱</button>
                     <button class="btn btn-ghost btn-sm" onclick="openEditVendorContact(${cardId},${c.id})">Edit</button>
                     <button class="btn btn-danger btn-sm" onclick="deleteVendorContact(${cardId},${c.id},'${escAttr(c.full_name || c.email)}')">✕</button>
                 </div>
             </div>`;
         }).join('');
+        // Load nudges below contacts
+        loadContactNudges(cardId);
     } catch(e) { console.error('loadVendorContacts:', e); el.innerHTML = '<p class="vp-muted" style="font-size:11px">Error loading contacts</p>'; }
+}
+
+async function openContactTimeline(cardId, contactId, contactName) {
+    const html = `<h2>Timeline: ${esc(contactName)}</h2>
+        <div id="contactTimelineContent" style="max-height:400px;overflow-y:auto"><p class="vp-muted">Loading...</p></div>
+        <div class="mactions"><button class="btn btn-ghost" onclick="closeModal('contactTimelineModal')">Close</button></div>`;
+    let modal = document.getElementById('contactTimelineModal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'contactTimelineModal';
+        modal.className = 'modal-bg';
+        modal.onclick = function(e) { if (e.target === modal) closeModal('contactTimelineModal'); };
+        modal.innerHTML = '<div class="modal">' + html + '</div>';
+        document.body.appendChild(modal);
+    } else {
+        modal.querySelector('.modal').innerHTML = html;
+    }
+    openModal('contactTimelineModal');
+    try {
+        const events = await apiFetch(`/api/vendors/${cardId}/contacts/${contactId}/timeline`);
+        const el = document.getElementById('contactTimelineContent');
+        if (!events.length) { el.innerHTML = '<p class="vp-muted" style="font-size:11px">No activity recorded</p>'; return; }
+        el.innerHTML = '<div class="contact-timeline">' + events.map(e => {
+            const icon = { email_received: '📧', email_sent: '📤', rfq_sent: '📋', quote_received: '💰', po_issued: '✅', call_initiated: '📞', call_outbound: '📞', note: '📝' }[e.activity_type] || '📌';
+            const dt = e.occurred_at ? new Date(e.occurred_at).toLocaleString() : '';
+            return `<div class="timeline-item">
+                <span class="timeline-icon">${icon}</span>
+                <div class="timeline-content">
+                    <div class="timeline-type">${esc(e.activity_type.replace(/_/g, ' '))}${e.auto_logged ? ' <span class="badge badge-gray" style="font-size:8px">auto</span>' : ''}</div>
+                    ${e.subject ? '<div class="timeline-subject">' + esc(e.subject) + '</div>' : ''}
+                    ${e.notes ? '<div class="timeline-notes">' + esc(e.notes) + '</div>' : ''}
+                    <div class="timeline-date">${dt}${e.channel ? ' via ' + esc(e.channel) : ''}</div>
+                </div>
+            </div>`;
+        }).join('') + '</div>';
+    } catch(e) { document.getElementById('contactTimelineContent').innerHTML = '<p class="vp-muted">Error loading timeline</p>'; }
+}
+
+async function loadContactNudges(cardId) {
+    const container = document.getElementById('vpContactNudges');
+    if (!container) return;
+    try {
+        const nudges = await apiFetch(`/api/vendors/${cardId}/contact-nudges`);
+        if (!nudges.length) { container.innerHTML = ''; return; }
+        container.innerHTML = nudges.map(n => {
+            const typeColor = n.nudge_type === 'dormant' ? 'var(--red)' : 'var(--amber)';
+            return `<div class="nudge-banner" style="border-left:3px solid ${typeColor}">
+                <div style="display:flex;align-items:center;gap:6px">
+                    <span style="font-size:14px">${n.nudge_type === 'dormant' ? '💤' : '📉'}</span>
+                    <div>
+                        <div style="font-size:11px;font-weight:600;color:var(--text)">${esc(n.contact_name)}</div>
+                        <div style="font-size:10px;color:var(--text2)">${esc(n.message)}</div>
+                    </div>
+                </div>
+                <div style="font-size:9px;color:var(--muted);margin-top:2px">${n.days_since_contact}d ago${n.relationship_score != null ? ' · Score: ' + Math.round(n.relationship_score) : ''}</div>
+            </div>`;
+        }).join('');
+    } catch(e) { console.error('loadContactNudges:', e); }
 }
 
 function openAddVendorContact(cardId) {
@@ -7354,6 +7685,7 @@ function switchVendorDrawerTab(tab, btn) {
     if (!_selectedVendorId) return;
     if (tab === 'overview') _renderVendorDrawerOverview(_selectedVendorId);
     else if (tab === 'contacts') _renderVendorDrawerContacts(_selectedVendorId);
+    else if (tab === 'scorecard') _renderVendorDrawerScorecard(_selectedVendorId);
     else if (tab === 'parts') _renderVendorDrawerParts(_selectedVendorId);
     else if (tab === 'comms') _renderVendorDrawerComms(_selectedVendorId);
 }
@@ -7389,6 +7721,72 @@ function _renderVendorDrawerOverview(vendorId) {
     </div>`;
 
     body.innerHTML = html;
+}
+
+async function _renderVendorDrawerScorecard(vendorId) {
+    const body = document.getElementById('vendorDrawerBody');
+    if (!body) return;
+    body.innerHTML = '<div class="drawer-section"><p class="empty">Loading scorecard...</p></div>';
+
+    try {
+        const v = await apiFetch('/api/vendors/' + vendorId).catch(() => _vendorListData.find(x => x.id === vendorId));
+        if (!v) { body.innerHTML = '<p class="crm-empty">Vendor not found</p>'; return; }
+
+        // Compute factor scores (0-100)
+        const respVelocity = v.response_velocity_hours != null
+            ? Math.max(0, Math.min(100, Math.round(100 - (v.response_velocity_hours / 72) * 100)))
+            : null;
+        const ghostScore = v.ghost_rate != null
+            ? Math.round((1 - v.ghost_rate) * 100)
+            : null;
+        const pricingScore = v.overall_win_rate != null
+            ? Math.round(v.overall_win_rate * 100)
+            : null;
+        const volumeScore = v.sighting_count
+            ? Math.min(100, Math.round((v.sighting_count / 500) * 100))
+            : null;
+        const cancelRate = v.cancellation_rate || 0;
+        const rmaRate = v.rma_rate || 0;
+        const deliveryScore = Math.round((1 - Math.min(1, cancelRate + rmaRate)) * 100);
+
+        const factors = [
+            { label: 'Response Velocity', score: respVelocity, detail: v.response_velocity_hours != null ? Math.round(v.response_velocity_hours) + 'h avg' : 'No data' },
+            { label: 'Ghost Rate', score: ghostScore, detail: v.ghost_rate != null ? Math.round(v.ghost_rate * 100) + '% ghost' : 'No data' },
+            { label: 'Pricing Competitiveness', score: pricingScore, detail: v.overall_win_rate != null ? Math.round(v.overall_win_rate * 100) + '% win rate' : 'No data' },
+            { label: 'Volume Consistency', score: volumeScore, detail: (v.sighting_count || 0) + ' sightings' },
+            { label: 'Delivery Reliability', score: deliveryScore, detail: 'Cancel ' + Math.round(cancelRate * 100) + '% / RMA ' + Math.round(rmaRate * 100) + '%' },
+        ];
+
+        let html = '<div class="drawer-section">';
+        html += '<div class="drawer-section-title" style="margin-bottom:12px">Engagement Scorecard</div>';
+
+        for (const f of factors) {
+            const score = f.score != null ? f.score : 0;
+            const barColor = score >= 70 ? 'var(--green)' : score >= 40 ? 'var(--amber)' : 'var(--red)';
+            const hasData = f.score != null;
+            html += `<div style="margin-bottom:14px">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                    <span style="font-size:12px;font-weight:600">${f.label}</span>
+                    <span style="font-size:11px;color:var(--muted)">${f.detail}</span>
+                </div>
+                <div class="factor-bar">
+                    <div class="factor-bar-fill" style="width:${hasData ? score : 0}%;background:${hasData ? barColor : 'var(--muted)'}"></div>
+                </div>
+                ${hasData ? '<div style="text-align:right;font-size:10px;font-weight:700;color:' + barColor + '">' + score + '/100</div>' : '<div style="text-align:right;font-size:10px;color:var(--muted)">No data</div>'}
+            </div>`;
+        }
+
+        // Overall score
+        const overall = v.vendor_score != null ? Math.round(v.vendor_score) : 0;
+        html += `<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:8px;display:flex;align-items:center;justify-content:space-between">
+            <span style="font-size:13px;font-weight:700">Overall Score</span>
+            <span style="font-size:20px;font-weight:700;font-family:'JetBrains Mono',monospace;color:${overall >= 70 ? 'var(--green)' : overall >= 40 ? 'var(--amber)' : 'var(--red)'}">${overall}</span>
+        </div>`;
+        html += '</div>';
+        body.innerHTML = html;
+    } catch (err) {
+        body.innerHTML = '<p class="crm-empty">Failed to load scorecard</p>';
+    }
 }
 
 async function _renderVendorDrawerContacts(vendorId) {
@@ -9054,15 +9452,15 @@ function _showAiModal(title, contentHtml) {
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     // Public functions referenced in onclick/onchange/oninput/onkeydown handlers
-    addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies,
+    addDrillRow, archiveFromList, autoLogEmail, autoLogVendorCall, checkForReplies, openContactTimeline, loadContactNudges,
     cloneFromList, closeModal, ddApplyGlobalMarkup, ddApplyQuoteMarkup, ddBuildQuote,
     ddAddNewContact, ddConfirmBuildQuote, ddConfirmSendQuote, ddDeleteOffer, ddDeleteQuote, ddEditOffer, ddExpandQuote,
     ddFindContacts, ddMarkQuoteResult, ddOnContactSelect, ddOpenBuyPlanModal, ddPasteRows, ddPickEnrichedContact, ddRefreshPreview,
     ddSubmitBuyPlan, ddUpdateBpTotals, ddUpdateQuoteField,
     ddPromptVendorEmail, ddResearchAll, ddResearchPart, ddReviseQuote, ddSaveEditOffer, ddSaveQuoteDraft, ddSendBulkRfq, ddSendQuote,
     ddToggleAllOffers, ddToggleGroupOffers, ddToggleHistory, ddToggleHistorySightings,
-    ddToggleOffer, ddToggleSighting,
-    _ddFilterSightings, _ddClearFilters,
+    ddToggleOffer, ddToggleSighting, ddToggleGroupSightings, ddQuickRfq,
+    _ddCopyContact, _ddFilterSightings, _ddClearFilters, _ddSetTypeFilter,
     ddReconfirmOffer, ddLogFromHistorical,
     ddUploadFile, debounceOfferHistorySearch, debouncePartsSightingsSearch,
     deleteDrillRow, deleteMaterial, deleteReq, deleteVendor,
@@ -9123,7 +9521,7 @@ Object.assign(window, {
     statusPill, activityIcon, getRelativeTime, filterChip,
     CONTACT_STATUS, CONTACT_STATUS_ORDER,
     // Contact Intelligence view
-    debouncedLoadContacts, setContactStatusFilter, loadContacts, renderContacts, showContacts,
-    // Dashboard
-    setDashPeriod, showDashboard, loadDashboard,
+    debouncedLoadContacts, setContactStatusFilter, loadContacts, renderContacts, showContacts, updateContactStatus,
+    // Dashboard / Command Center
+    setDashPeriod, showDashboard, loadDashboard, goToReq,
 });

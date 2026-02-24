@@ -277,6 +277,7 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
 @router.get("/api/vendors", response_model=VendorListResponse, response_model_exclude_none=True)
 async def list_vendors(
     q: str = Query("", description="Vendor name search filter"),
+    tag: str = Query("", description="Filter by brand or commodity tag"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
@@ -285,6 +286,13 @@ async def list_vendors(
     """List vendor cards with search, pagination, and engagement scores."""
     q = q.strip().lower()
     query = db.query(VendorCard).order_by(VendorCard.display_name)
+    if tag.strip():
+        from sqlalchemy import String as SAString
+        safe_tag = tag.strip().lower()
+        query = query.filter(
+            sqlfunc.lower(sqlfunc.cast(VendorCard.brand_tags, SAString)).contains(safe_tag)
+            | sqlfunc.lower(sqlfunc.cast(VendorCard.commodity_tags, SAString)).contains(safe_tag)
+        )
     if q:
         if len(q) >= 3:
             # Full-text search for longer queries (faster + ranked)
@@ -869,15 +877,23 @@ async def list_vendor_contacts(
             "id": c.id,
             "contact_type": c.contact_type,
             "full_name": c.full_name,
+            "first_name": c.first_name,
+            "last_name": c.last_name,
             "title": c.title,
             "label": c.label,
             "email": c.email,
             "phone": c.phone,
+            "phone_mobile": c.phone_mobile,
             "phone_type": c.phone_type,
             "source": c.source,
             "is_verified": c.is_verified,
             "confidence": c.confidence,
             "interaction_count": c.interaction_count,
+            "relationship_score": c.relationship_score,
+            "activity_trend": c.activity_trend,
+            "score_computed_at": c.score_computed_at.isoformat()
+            if c.score_computed_at
+            else None,
             "last_interaction_at": c.last_interaction_at.isoformat()
             if c.last_interaction_at
             else None,
@@ -885,6 +901,115 @@ async def list_vendor_contacts(
         }
         for c in contacts
     ]
+
+
+@router.get("/api/vendors/{card_id}/contacts/{contact_id}/timeline")
+async def get_contact_timeline(
+    card_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Activity timeline for a specific vendor contact."""
+    from ..models import ActivityLog
+
+    vc = (
+        db.query(VendorContact).filter_by(id=contact_id, vendor_card_id=card_id).first()
+    )
+    if not vc:
+        raise HTTPException(404, "Contact not found")
+
+    activities = (
+        db.query(ActivityLog)
+        .filter(ActivityLog.vendor_contact_id == contact_id)
+        .order_by(ActivityLog.occurred_at.desc())
+        .limit(50)
+        .all()
+    )
+    return [
+        {
+            "id": a.id,
+            "activity_type": a.activity_type,
+            "channel": a.channel,
+            "subject": a.subject,
+            "notes": a.notes,
+            "duration_seconds": a.duration_seconds,
+            "auto_logged": a.auto_logged,
+            "occurred_at": a.occurred_at.isoformat() if a.occurred_at else (a.created_at.isoformat() if a.created_at else None),
+            "requisition_id": a.requisition_id,
+            "quote_id": a.quote_id,
+        }
+        for a in activities
+    ]
+
+
+@router.get("/api/vendors/{card_id}/contact-nudges")
+async def get_contact_nudges(
+    card_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get nudge suggestions for dormant/cooling contacts."""
+    card = db.get(VendorCard, card_id)
+    if not card:
+        raise HTTPException(404, "Vendor not found")
+
+    from ..services.contact_intelligence import generate_contact_nudges
+
+    return generate_contact_nudges(db, card_id)
+
+
+@router.get("/api/vendors/{card_id}/contacts/{contact_id}/summary")
+async def get_contact_summary(
+    card_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """AI-generated relationship summary for a contact."""
+    from ..services.contact_intelligence import generate_contact_summary
+
+    summary = generate_contact_summary(db, card_id, contact_id)
+    return {"summary": summary}
+
+
+@router.post("/api/vendors/{card_id}/contacts/{contact_id}/log-call")
+async def log_contact_call(
+    card_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a click-to-call event for a specific vendor contact."""
+    from ..models import ActivityLog
+
+    vc = (
+        db.query(VendorContact).filter_by(id=contact_id, vendor_card_id=card_id).first()
+    )
+    if not vc:
+        raise HTTPException(404, "Contact not found")
+
+    now = datetime.now(timezone.utc)
+    activity = ActivityLog(
+        user_id=user.id,
+        activity_type="call_initiated",
+        channel="phone",
+        vendor_card_id=card_id,
+        vendor_contact_id=contact_id,
+        contact_phone=vc.phone or vc.phone_mobile,
+        contact_name=vc.full_name,
+        auto_logged=True,
+        occurred_at=now,
+        created_at=now,
+    )
+    db.add(activity)
+
+    vc.interaction_count = (vc.interaction_count or 0) + 1
+    vc.last_interaction_at = now
+    vc.last_seen_at = now
+
+    db.commit()
+    return {"ok": True, "activity_id": activity.id}
 
 
 @router.post("/api/vendors/{card_id}/contacts")

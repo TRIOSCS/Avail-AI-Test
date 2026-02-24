@@ -180,6 +180,13 @@ class Settings:
     buyplan_auto_complete_tz: str = os.getenv("BUYPLAN_AUTO_COMPLETE_TZ", "America/New_York")
     po_verify_interval_min: int = int(os.getenv("PO_VERIFY_INTERVAL_MIN", "30"))
 
+    # Contact intelligence
+    contact_scoring_enabled: bool = (
+        os.getenv("CONTACT_SCORING_ENABLED", "true").lower() == "true"
+    )
+    contact_nudge_dormant_days: int = int(os.getenv("CONTACT_NUDGE_DORMANT_DAYS", "30"))
+    contact_nudge_cooling_days: int = int(os.getenv("CONTACT_NUDGE_COOLING_DAYS", "14"))
+
     # Own company domains — used to filter internal emails from vendor threads
     own_domains: frozenset = frozenset(
         d.strip().lower()

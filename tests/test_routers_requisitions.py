@@ -176,8 +176,8 @@ def test_add_requirement(client, test_requisition):
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 1
-    assert data[0]["primary_mpn"] == "NE555P"
+    assert len(data["created"]) == 1
+    assert data["created"][0]["primary_mpn"] == "NE555P"
 
 
 def test_add_requirement_batch(client, test_requisition):
@@ -190,7 +190,7 @@ def test_add_requirement_batch(client, test_requisition):
         ],
     )
     assert resp.status_code == 200
-    assert len(resp.json()) == 2
+    assert len(resp.json()["created"]) == 2
 
 
 def test_add_requirement_skips_invalid(client, test_requisition):
@@ -204,8 +204,8 @@ def test_add_requirement_skips_invalid(client, test_requisition):
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 1
-    assert data[0]["primary_mpn"] == "TL431"
+    assert len(data["created"]) == 1
+    assert data["created"][0]["primary_mpn"] == "TL431"
 
 
 def test_add_requirement_not_found(client):

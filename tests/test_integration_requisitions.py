@@ -89,7 +89,7 @@ def test_add_requirement(client):
         {"primary_mpn": "LM317T", "target_qty": 500},
     ])
     assert resp.status_code == 200
-    assert resp.json()[0]["primary_mpn"] == "LM317T"
+    assert resp.json()["created"][0]["primary_mpn"] == "LM317T"
 
 
 def test_add_multiple_requirements(client):
@@ -101,7 +101,7 @@ def test_add_multiple_requirements(client):
         {"primary_mpn": "LM7805", "target_qty": 300},
     ])
     assert resp.status_code == 200
-    assert len(resp.json()) == 3
+    assert len(resp.json()["created"]) == 3
 
 
 def test_add_requirement_skips_blank_mpn(client):
@@ -112,8 +112,8 @@ def test_add_requirement_skips_blank_mpn(client):
         {"primary_mpn": "VALID-MPN", "target_qty": 20},
     ])
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
-    assert resp.json()[0]["primary_mpn"] == "VALID-MPN"
+    assert len(resp.json()["created"]) == 1
+    assert resp.json()["created"][0]["primary_mpn"] == "VALID-MPN"
 
 
 def test_list_requirements(client):
@@ -135,7 +135,7 @@ def test_delete_requirement(client):
     items = client.post(f"/api/requisitions/{req_id}/requirements", json=[
         {"primary_mpn": "TMP123", "target_qty": 10},
     ]).json()
-    item_id = items[0]["id"]
+    item_id = items["created"][0]["id"]
 
     resp = client.delete(f"/api/requirements/{item_id}")
     assert resp.status_code == 200
@@ -150,7 +150,7 @@ def test_update_requirement(client):
     items = client.post(f"/api/requisitions/{req_id}/requirements", json=[
         {"primary_mpn": "OLD-MPN", "target_qty": 10},
     ]).json()
-    item_id = items[0]["id"]
+    item_id = items["created"][0]["id"]
 
     resp = client.put(f"/api/requirements/{item_id}", json={
         "primary_mpn": "NEW-MPN", "target_qty": 999,

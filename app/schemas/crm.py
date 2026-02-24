@@ -257,6 +257,7 @@ class SiteContactUpdate(BaseModel):
     phone: str | None = None
     notes: str | None = None
     is_primary: bool | None = None
+    is_active: bool | None = None
 
     @field_validator("phone")
     @classmethod

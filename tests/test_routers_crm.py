@@ -309,6 +309,27 @@ class TestSites:
         assert resp.status_code == 200
         assert isinstance(resp.json(), list)
 
+    def test_list_customer_contacts(self, client, db_session, test_customer_site):
+        from app.models import SiteContact
+
+        sc = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Jane Doe",
+            email="jane@acme.com",
+            title="VP Sales",
+        )
+        db_session.add(sc)
+        db_session.commit()
+        resp = client.get("/api/customer-contacts")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert isinstance(data, list)
+        assert any(c["full_name"] == "Jane Doe" for c in data)
+        match = next(c for c in data if c["full_name"] == "Jane Doe")
+        assert match["contact_type"] == "customer"
+        assert match["email"] == "jane@acme.com"
+        assert "company_name" in match
+
     def test_add_site_contact(self, client, db_session, test_customer_site):
         resp = client.post(
             f"/api/sites/{test_customer_site.id}/contacts",
@@ -2965,3 +2986,368 @@ class TestHistoricalOffersSubstitutes:
             hist_offers.extend(g.get("historical_offers", []))
         if hist_offers:
             assert any(h.get("is_substitute") for h in hist_offers)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Contact Note Log Tests
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestContactNotes:
+    def test_post_contact_note(self, client, db_session, test_customer_site):
+        """POST a note on a site contact."""
+        contact = SiteContact(
+            customer_site_id=test_customer_site.id, full_name="Note Contact"
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.post(
+            f"/api/sites/{test_customer_site.id}/contacts/{contact.id}/notes",
+            json={"notes": "Called about order status"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "logged"
+        assert "activity_id" in data
+
+    def test_get_contact_notes(self, client, db_session, test_customer_site):
+        """GET note history returns logged notes."""
+        contact = SiteContact(
+            customer_site_id=test_customer_site.id, full_name="History Contact"
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        # Log two notes
+        client.post(
+            f"/api/sites/{test_customer_site.id}/contacts/{contact.id}/notes",
+            json={"notes": "First note"},
+        )
+        client.post(
+            f"/api/sites/{test_customer_site.id}/contacts/{contact.id}/notes",
+            json={"notes": "Second note"},
+        )
+
+        resp = client.get(
+            f"/api/sites/{test_customer_site.id}/contacts/{contact.id}/notes"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data) == 2
+        assert data[0]["notes"] == "Second note"  # most recent first
+        assert "user_name" in data[0]
+        assert "created_at" in data[0]
+
+    def test_post_note_bad_contact(self, client, db_session, test_customer_site):
+        """404 when contact doesn't exist."""
+        resp = client.post(
+            f"/api/sites/{test_customer_site.id}/contacts/99999/notes",
+            json={"notes": "Should fail"},
+        )
+        assert resp.status_code == 404
+
+    def test_post_note_wrong_site(self, client, db_session, test_company, test_customer_site):
+        """404 when contact belongs to a different site."""
+        other_site = CustomerSite(
+            company_id=test_company.id, site_name="Other Site"
+        )
+        db_session.add(other_site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=other_site.id, full_name="Other Contact"
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.post(
+            f"/api/sites/{test_customer_site.id}/contacts/{contact.id}/notes",
+            json={"notes": "Wrong site"},
+        )
+        assert resp.status_code == 404
+
+    def test_get_notes_bad_site(self, client):
+        """404 when site doesn't exist."""
+        resp = client.get("/api/sites/99999/contacts/1/notes")
+        assert resp.status_code == 404
+
+    def test_get_notes_bad_contact(self, client, db_session, test_customer_site):
+        """404 when contact doesn't exist."""
+        resp = client.get(
+            f"/api/sites/{test_customer_site.id}/contacts/99999/notes"
+        )
+        assert resp.status_code == 404
+
+    def test_post_note_bad_site(self, client):
+        """404 when site doesn't exist."""
+        resp = client.post(
+            "/api/sites/99999/contacts/1/notes",
+            json={"notes": "Bad site"},
+        )
+        assert resp.status_code == 404
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Archive Contacts Tests
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestArchiveContacts:
+    def test_archive_contact(self, client, db_session, test_customer_site):
+        """Archive a contact via PUT is_active=false."""
+        contact = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Archive Me",
+            is_active=True,
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.put(
+            f"/api/sites/{test_customer_site.id}/contacts/{contact.id}",
+            json={"is_active": False},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(contact)
+        assert contact.is_active is False
+
+    def test_restore_contact(self, client, db_session, test_customer_site):
+        """Restore an archived contact via PUT is_active=true."""
+        contact = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Restore Me",
+            is_active=False,
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.put(
+            f"/api/sites/{test_customer_site.id}/contacts/{contact.id}",
+            json={"is_active": True},
+        )
+        assert resp.status_code == 200
+        db_session.refresh(contact)
+        assert contact.is_active is True
+
+    def test_list_contacts_excludes_archived(self, client, db_session, test_customer_site):
+        """By default, listing contacts excludes archived."""
+        active = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Active User",
+            is_active=True,
+        )
+        archived = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Archived User",
+            is_active=False,
+        )
+        db_session.add_all([active, archived])
+        db_session.commit()
+
+        resp = client.get(f"/api/sites/{test_customer_site.id}/contacts")
+        assert resp.status_code == 200
+        data = resp.json()
+        names = [c["full_name"] for c in data]
+        assert "Active User" in names
+        assert "Archived User" not in names
+
+    def test_list_contacts_includes_archived(self, client, db_session, test_customer_site):
+        """With include_archived=true, archived contacts are included."""
+        active = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Active User2",
+            is_active=True,
+        )
+        archived = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Archived User2",
+            is_active=False,
+        )
+        db_session.add_all([active, archived])
+        db_session.commit()
+
+        resp = client.get(
+            f"/api/sites/{test_customer_site.id}/contacts",
+            params={"include_archived": "true"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        names = [c["full_name"] for c in data]
+        assert "Active User2" in names
+        assert "Archived User2" in names
+
+    def test_customer_contacts_excludes_archived(self, client, db_session, test_customer_site):
+        """The unified contacts view excludes archived by default."""
+        active = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="CC Active",
+            is_active=True,
+        )
+        archived = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="CC Archived",
+            is_active=False,
+        )
+        db_session.add_all([active, archived])
+        db_session.commit()
+
+        resp = client.get("/api/customer-contacts")
+        assert resp.status_code == 200
+        data = resp.json()
+        names = [c["full_name"] for c in data]
+        assert "CC Active" in names
+        assert "CC Archived" not in names
+
+    def test_customer_contacts_includes_archived(self, client, db_session, test_customer_site):
+        """Unified contacts with include_archived returns archived too."""
+        active = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="CC Active2",
+            is_active=True,
+        )
+        archived = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="CC Archived2",
+            is_active=False,
+        )
+        db_session.add_all([active, archived])
+        db_session.commit()
+
+        resp = client.get("/api/customer-contacts", params={"include_archived": "true"})
+        assert resp.status_code == 200
+        data = resp.json()
+        names = [c["full_name"] for c in data]
+        assert "CC Active2" in names
+        assert "CC Archived2" in names
+
+    def test_get_site_includes_is_active(self, client, db_session, test_customer_site):
+        """GET /api/sites/{id} returns is_active in contact dicts."""
+        contact = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="WithActive",
+            is_active=True,
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.get(f"/api/sites/{test_customer_site.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        match = [c for c in data["contacts"] if c["full_name"] == "WithActive"]
+        assert len(match) == 1
+        assert match[0]["is_active"] is True
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Customer Tag Analysis Tests
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestCompanyTags:
+    def test_list_companies_includes_tags(self, client, db_session, test_company):
+        """brand_tags and commodity_tags are returned in list response."""
+        test_company.brand_tags = ["IBM", "HP"]
+        test_company.commodity_tags = ["Server"]
+        db_session.commit()
+
+        resp = client.get("/api/companies")
+        assert resp.status_code == 200
+        data = resp.json()
+        comp = [c for c in data if c["name"] == "Acme Electronics"][0]
+        assert comp["brand_tags"] == ["IBM", "HP"]
+        assert comp["commodity_tags"] == ["Server"]
+
+    def test_list_companies_tag_filter(self, client, db_session, test_company):
+        """tag query param filters companies by brand/commodity tags."""
+        test_company.brand_tags = ["IBM", "HP"]
+        test_company.commodity_tags = ["Server"]
+        db_session.commit()
+
+        # Should match
+        resp = client.get("/api/companies", params={"tag": "IBM"})
+        assert resp.status_code == 200
+        names = [c["name"] for c in resp.json()]
+        assert "Acme Electronics" in names
+
+    def test_list_companies_tag_filter_no_match(self, client, db_session, test_company):
+        """tag filter with non-matching value returns empty."""
+        test_company.brand_tags = ["IBM"]
+        db_session.commit()
+
+        resp = client.get("/api/companies", params={"tag": "Nexperia"})
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    def test_list_companies_tag_filter_commodity(self, client, db_session, test_company):
+        """tag filter matches commodity_tags too."""
+        test_company.commodity_tags = ["Networking"]
+        db_session.commit()
+
+        resp = client.get("/api/companies", params={"tag": "network"})
+        assert resp.status_code == 200
+        names = [c["name"] for c in resp.json()]
+        assert "Acme Electronics" in names
+
+    @patch(
+        "app.utils.claude_client.claude_json",
+        new_callable=AsyncMock,
+    )
+    def test_analyze_tags_endpoint(self, mock_claude, client, db_session, test_company):
+        """POST /api/companies/{id}/analyze-tags triggers analysis."""
+        mock_claude.return_value = {
+            "brands": ["IBM", "HP"],
+            "commodities": ["Server", "Networking"],
+        }
+        # Need a site + requisition with requirements for data
+        site = CustomerSite(
+            company_id=test_company.id,
+            site_name="Tag Test Site",
+            is_active=True,
+        )
+        db_session.add(site)
+        db_session.flush()
+
+        req = Requisition(
+            name="TAG-REQ-001",
+            customer_site_id=site.id,
+            status="open",
+        )
+        db_session.add(req)
+        db_session.flush()
+
+        from app.models import Requirement as Req
+
+        item = Req(
+            requisition_id=req.id,
+            primary_mpn="7945-AC1",
+            brand="IBM",
+        )
+        db_session.add(item)
+        db_session.commit()
+
+        resp = client.post(f"/api/companies/{test_company.id}/analyze-tags")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["brand_tags"] == ["IBM", "HP"]
+        assert data["commodity_tags"] == ["Server", "Networking"]
+
+    def test_analyze_tags_not_found(self, client, db_session):
+        """POST /api/companies/999999/analyze-tags returns 404."""
+        resp = client.post("/api/companies/999999/analyze-tags")
+        assert resp.status_code == 404
+
+    @patch(
+        "app.utils.claude_client.claude_json",
+        new_callable=AsyncMock,
+    )
+    def test_analyze_tags_no_requisitions(self, mock_claude, client, db_session, test_company):
+        """Analysis with no requisition data should not call Claude."""
+        resp = client.post(f"/api/companies/{test_company.id}/analyze-tags")
+        assert resp.status_code == 200
+        # Claude should not have been called (no parts data)
+        mock_claude.assert_not_called()
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["brand_tags"] == []
+        assert data["commodity_tags"] == []

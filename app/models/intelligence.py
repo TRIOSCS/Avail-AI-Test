@@ -208,6 +208,11 @@ class ActivityLog(Base):
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"))
     vendor_contact_id = Column(Integer, ForeignKey("vendor_contacts.id"))
     requisition_id = Column(Integer, ForeignKey("requisitions.id"))
+    quote_id = Column(Integer, ForeignKey("quotes.id"))
+    customer_site_id = Column(Integer, ForeignKey("customer_sites.id"))
+    site_contact_id = Column(
+        Integer, ForeignKey("site_contacts.id", ondelete="SET NULL")
+    )
 
     # Contact snapshot
     contact_email = Column(String(255))
@@ -220,6 +225,8 @@ class ActivityLog(Base):
     external_id = Column(String(255))
     notes = Column(Text)
     dismissed_at = Column(DateTime)
+    auto_logged = Column(Boolean, default=False)
+    occurred_at = Column(DateTime)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -228,6 +235,9 @@ class ActivityLog(Base):
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
     vendor_contact = relationship("VendorContact", foreign_keys=[vendor_contact_id])
     requisition = relationship("Requisition", foreign_keys=[requisition_id])
+    quote = relationship("Quote", foreign_keys=[quote_id])
+    customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
+    site_contact = relationship("SiteContact", foreign_keys=[site_contact_id])
 
     __table_args__ = (
         Index(
@@ -247,6 +257,12 @@ class ActivityLog(Base):
             "vendor_contact_id",
             "created_at",
             postgresql_where=Column("vendor_contact_id").isnot(None),
+        ),
+        Index(
+            "ix_activity_site_contact",
+            "site_contact_id",
+            "created_at",
+            postgresql_where=Column("site_contact_id").isnot(None),
         ),
         Index("ix_activity_user", "user_id", "created_at"),
         Index(

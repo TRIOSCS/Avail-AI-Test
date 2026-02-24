@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models import ActivityLog, Company, CustomerSite, VendorCard, VendorContact
+from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
 
 log = logging.getLogger("avail.activity")
 
@@ -44,7 +44,7 @@ def match_email_to_entity(email_addr: str, db: Session) -> dict | None:
         .first()
     )
     if site:
-        return {"type": "company", "id": site.company_id, "name": site.site_name}
+        return {"type": "company", "id": site.company_id, "name": site.site_name, "site_id": site.id}
 
     # 2. Check vendor_contacts table (exact match)
     vc = (
@@ -117,7 +117,7 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
     for site in sites:
         site_digits = "".join(c for c in (site.contact_phone or "") if c.isdigit())
         if site_digits and site_digits[-10:] == suffix:
-            return {"type": "company", "id": site.company_id, "name": site.site_name}
+            return {"type": "company", "id": site.company_id, "name": site.site_name, "site_id": site.id}
 
     # Check vendor_contacts — batch VendorCard lookup to avoid N+1
     try:
@@ -185,6 +185,7 @@ def log_email_activity(
         company_id=match["id"] if match and match["type"] == "company" else None,
         vendor_card_id=match["id"] if match and match["type"] == "vendor" else None,
         vendor_contact_id=match.get("vendor_contact_id") if match and match["type"] == "vendor" else None,
+        customer_site_id=match.get("site_id") if match and match["type"] == "company" else None,
         contact_email=email_addr,
         contact_name=contact_name,
         subject=subject,
@@ -236,6 +237,7 @@ def log_call_activity(
         company_id=match["id"] if match and match["type"] == "company" else None,
         vendor_card_id=match["id"] if match and match["type"] == "vendor" else None,
         vendor_contact_id=match.get("vendor_contact_id") if match and match["type"] == "vendor" else None,
+        customer_site_id=match.get("site_id") if match and match["type"] == "company" else None,
         contact_phone=phone,
         contact_name=contact_name,
         duration_seconds=duration_seconds,
@@ -323,13 +325,19 @@ def days_since_last_activity(company_id: int, db: Session) -> int | None:
 def _update_last_activity(match: dict, db: Session, user_id: int | None = None):
     """Update last_activity_at on the matched company or vendor.
 
-    For companies: also triggers open pool claim check if user_id provided.
+    For companies: also updates site last_activity_at and triggers open pool claim.
     """
     now = datetime.now(timezone.utc)
     if match["type"] == "company":
         db.query(Company).filter(Company.id == match["id"]).update(
             {"last_activity_at": now}, synchronize_session=False
         )
+        # Also update the matched site's last_activity_at
+        site_id = match.get("site_id")
+        if site_id:
+            db.query(CustomerSite).filter(CustomerSite.id == site_id).update(
+                {"last_activity_at": now}, synchronize_session=False
+            )
         # Auto-claim open pool account if unowned
         if user_id:
             from app.services.ownership_service import check_and_claim_open_account
@@ -404,6 +412,61 @@ def log_company_note(
     )
     log.info(f"Activity logged: note -> company {company_id} by user {user_id}")
     return record
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  SITE-CONTACT NOTE LOGGING
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def log_site_contact_note(
+    user_id: int,
+    site_contact_id: int,
+    customer_site_id: int,
+    company_id: int,
+    notes: str,
+    db: Session,
+) -> ActivityLog:
+    """Log a manual note against a site contact."""
+    contact = db.get(SiteContact, site_contact_id)
+    record = ActivityLog(
+        user_id=user_id,
+        activity_type="note",
+        channel="manual",
+        company_id=company_id,
+        customer_site_id=customer_site_id,
+        site_contact_id=site_contact_id,
+        contact_name=contact.full_name if contact else None,
+        notes=notes,
+    )
+    db.add(record)
+    db.flush()
+
+    now = datetime.now(timezone.utc)
+    db.query(Company).filter(Company.id == company_id).update(
+        {"last_activity_at": now}, synchronize_session=False
+    )
+    db.query(CustomerSite).filter(CustomerSite.id == customer_site_id).update(
+        {"last_activity_at": now}, synchronize_session=False
+    )
+    log.info(f"Activity logged: note -> site_contact {site_contact_id} by user {user_id}")
+    return record
+
+
+def get_site_contact_notes(
+    site_contact_id: int, db: Session, limit: int = 50
+) -> list[ActivityLog]:
+    """Get recent notes for a site contact."""
+    return (
+        db.query(ActivityLog)
+        .filter(
+            ActivityLog.site_contact_id == site_contact_id,
+            ActivityLog.activity_type == "note",
+        )
+        .order_by(ActivityLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
 
 
 # ═══════════════════════════════════════════════════════════════════════

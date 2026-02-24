@@ -60,6 +60,28 @@ def _add_missing_columns(conn) -> None:
         "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS advancement_score FLOAT",
         "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS is_new_vendor BOOLEAN DEFAULT TRUE",
         "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS vendor_score_computed_at TIMESTAMP",
+        # Contact intelligence columns on vendor_contacts
+        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS first_name VARCHAR(100)",
+        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS last_name VARCHAR(100)",
+        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS phone_mobile VARCHAR(100)",
+        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS relationship_score FLOAT",
+        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS activity_trend VARCHAR(20)",
+        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS score_computed_at TIMESTAMP",
+        # Activity log additions
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS quote_id INTEGER",
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS auto_logged BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS occurred_at TIMESTAMP",
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS customer_site_id INTEGER REFERENCES customer_sites(id)",
+        # Prospecting pool: site-level ownership columns
+        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP",
+        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS ownership_cleared_at TIMESTAMP",
+        # Contact archive + note log columns
+        "ALTER TABLE site_contacts ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS site_contact_id INTEGER REFERENCES site_contacts(id)",
+        # Customer AI material tags (mirrors vendor_cards pattern)
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS brand_tags JSON DEFAULT '[]'",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS commodity_tags JSON DEFAULT '[]'",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS material_tags_updated_at TIMESTAMP",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
@@ -72,6 +94,36 @@ def _add_missing_columns(conn) -> None:
             is_new_vendor = CASE WHEN engagement_score IS NULL THEN TRUE ELSE FALSE END
         WHERE vendor_score IS NULL AND engagement_score IS NOT NULL
     """)
+
+    # Backfill first_name/last_name from full_name
+    _exec(conn, """
+        UPDATE vendor_contacts
+        SET first_name = SPLIT_PART(full_name, ' ', 1),
+            last_name = CASE
+                WHEN POSITION(' ' IN full_name) > 0
+                THEN SUBSTRING(full_name FROM POSITION(' ' IN full_name) + 1)
+                ELSE NULL
+            END
+        WHERE full_name IS NOT NULL AND first_name IS NULL
+    """)
+
+    # Backfill occurred_at from created_at
+    _exec(conn, """
+        UPDATE activity_log SET occurred_at = created_at WHERE occurred_at IS NULL
+    """)
+
+    # Backfill customer_sites.last_activity_at from parent company
+    _exec(conn, """
+        UPDATE customer_sites cs
+        SET last_activity_at = c.last_activity_at
+        FROM companies c
+        WHERE cs.company_id = c.id
+          AND cs.last_activity_at IS NULL
+          AND c.last_activity_at IS NOT NULL
+    """)
+
+    # Backfill site_contacts.is_active
+    _exec(conn, "UPDATE site_contacts SET is_active = TRUE WHERE is_active IS NULL")
 
 
 def _exec(conn, stmt: str, params: dict | None = None) -> None:

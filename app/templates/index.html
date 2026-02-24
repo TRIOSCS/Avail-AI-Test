@@ -46,6 +46,10 @@
             <button type="button" class="fp fp-sm" data-sf="draft" onclick="setStatusFilter('draft',this)">Draft</button>
             <button type="button" class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
         </div>
+        <div id="topBreadcrumb" class="top-breadcrumb" style="display:none">
+            <button class="breadcrumb-back" onclick="closeCustDrawer();closeProspectDrawer()" title="Back">&larr;</button>
+            <span class="breadcrumb-text" id="topBreadcrumbText"></span>
+        </div>
         <div class="tb-group">
             <a class="bug-link" onclick="openTroubleChat()">Trouble</a>
             <span class="tb-sep"></span>
@@ -107,21 +111,21 @@
 <aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
     <nav class="sidebar-nav">
         <div class="nav-group">
-            <span class="nav-group-label">Opportunity Management</span>
+            <span class="nav-group-label">Sourcing</span>
             <button type="button" class="active" id="navReqs" onclick="sidebarNav('reqs',this)"><span class="ni">&#x1f4cb;</span> RFQs</button>
             <button type="button" id="navProactive" onclick="sidebarNav('proactive',this)"><span class="ni">&#x2b50;</span> Proactive</button>
             <button type="button" id="navMaterials" onclick="sidebarNav('materials',this)"><span class="ni">&#x1f527;</span> Materials</button>
             <button type="button" id="navBuyPlans" onclick="sidebarNav('buyplans',this)"><span class="ni">&#x1f4e6;</span> Buy Plans</button>
         </div>
         <div class="nav-group">
-            <span class="nav-group-label">CRM</span>
-            <button type="button" id="navCustomers" onclick="sidebarNav('customers',this)"><span class="ni">&#x1f3e2;</span> Customers</button>
-            <button type="button" id="navContacts" onclick="sidebarNav('contacts',this)"><span class="ni">&#x1f465;</span> Contacts</button>
+            <span class="nav-group-label">Relationships</span>
+            <button type="button" id="navCustomers" onclick="sidebarNav('customers',this)"><span class="ni">&#x1f3e2;</span> Accounts</button>
             <button type="button" id="navVendors" onclick="sidebarNav('vendors',this)"><span class="ni">&#x1f91d;</span> Vendors</button>
+            <button type="button" id="navContacts" onclick="sidebarNav('contacts',this)"><span class="ni">&#x1f465;</span> Contacts</button>
         </div>
         <div class="nav-group">
-            <span class="nav-group-label">Dashboard</span>
-            <button type="button" id="navDashboard" onclick="sidebarNav('dashboard',this)"><span class="ni">&#x1f4ca;</span> Overview</button>
+            <span class="nav-group-label">Insights</span>
+            <button type="button" id="navDashboard" onclick="sidebarNav('dashboard',this)"><span class="ni">&#x1f4ca;</span> Command Center</button>
             <button type="button" id="navScorecards" onclick="sidebarNav('performance',this)"><span class="ni">&#x1f3c6;</span> Scorecards</button>
         </div>
         <div class="nav-group nav-group-bottom">
@@ -226,16 +230,18 @@
             <input class="sbox" id="custFilter" placeholder="Search accounts…" oninput="debouncedLoadCustomers()" style="flex:1;min-width:140px" aria-label="Search companies">
             <div class="chip-row" style="margin:0">
                 <span class="chip on" data-value="all" onclick="setCustFilter('all',this)">All</span>
+                <span class="chip" data-value="my-accounts" onclick="setCustFilter('my-accounts',this)">My Accounts</span>
                 <span class="chip" data-value="strategic" onclick="setCustFilter('strategic',this)">Strategic</span>
-                <span class="chip" data-value="healthy" onclick="setCustFilter('healthy',this)">Healthy</span>
-                <span class="chip" data-value="at-risk" onclick="setCustFilter('at-risk',this)">At Risk</span>
-                <span class="chip" data-value="unassigned" onclick="setCustFilter('unassigned',this)">Unassigned</span>
+                <span class="chip" data-value="at-risk" onclick="setCustFilter('at-risk',this)">Needs Attention</span>
+                <span class="chip" data-value="stale" onclick="setCustFilter('stale',this)">No Recent Activity</span>
             </div>
             <span id="custListCount" style="font-size:11px;color:var(--muted);white-space:nowrap"></span>
         </div>
         <div class="crm-table-wrap" id="custTableWrap">
             <div id="custList" aria-live="polite"><p class="empty">Loading…</p></div>
         </div>
+        <!-- Mini account list for split-pane layout -->
+        <div class="cust-mini-list" id="custMiniList"></div>
         <!-- Account detail drawer -->
         <div class="drawer-backdrop" id="custDrawerBackdrop" onclick="closeCustDrawer()"></div>
         <div class="drawer" id="custDrawer">
@@ -245,7 +251,8 @@
             </div>
             <div class="drawer-tabs" id="custDrawerTabs">
                 <button class="drawer-tab active" onclick="switchCustDrawerTab('overview',this)">Overview</button>
-                <button class="drawer-tab" onclick="switchCustDrawerTab('sites',this)">Sites &amp; Contacts</button>
+                <button class="drawer-tab" onclick="switchCustDrawerTab('contacts',this)">Contacts</button>
+                <button class="drawer-tab" onclick="switchCustDrawerTab('sites',this)">Sites</button>
                 <button class="drawer-tab" onclick="switchCustDrawerTab('activity',this)">Activity</button>
                 <button class="drawer-tab" onclick="switchCustDrawerTab('pipeline',this)">Pipeline</button>
             </div>
@@ -257,6 +264,43 @@
             <button onclick="bulkAssignOwner()">Assign Owner</button>
             <button onclick="bulkExportAccounts()">Export</button>
             <button class="bulk-bar-close" onclick="clearCustSelection()">&times;</button>
+        </div>
+    </div>
+
+    <!-- VIEW: Prospecting Pool (site-level ownership) -->
+    <div id="view-prospecting" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+        <div class="crm-header">
+            <h2>Prospecting Pool</h2>
+        </div>
+        <div class="crm-toolbar">
+            <input class="sbox" id="prospectingFilter" placeholder="Search sites…" oninput="debouncedLoadProspecting()" style="flex:1;min-width:140px" aria-label="Search prospecting sites">
+            <div class="chip-row" style="margin:0" id="prospectingPills">
+                <span class="chip on" data-value="pool" onclick="setProspectingTab('pool',this)">Open Pool</span>
+                <span class="chip" data-value="my-sites" onclick="setProspectingTab('my-sites',this)">My Sites</span>
+                <span class="chip" data-value="at-risk" onclick="setProspectingTab('at-risk',this)">At Risk</span>
+            </div>
+        </div>
+        <div class="crm-table-wrap" id="prospectTableWrap" style="flex:1;overflow-y:auto">
+            <table class="crm-table">
+                <thead><tr id="prospectingHead"></tr></thead>
+                <tbody id="prospectingBody"></tbody>
+            </table>
+        </div>
+        <!-- Mini site list for split-pane layout -->
+        <div class="prospect-mini-list" id="prospectMiniList"></div>
+        <!-- Site detail drawer -->
+        <div class="drawer-backdrop" id="prospectDrawerBackdrop" onclick="closeProspectDrawer()"></div>
+        <div class="drawer" id="prospectDrawer">
+            <div class="drawer-header">
+                <h3 id="prospectDrawerTitle">Site</h3>
+                <button class="drawer-close" onclick="closeProspectDrawer()">&times;</button>
+            </div>
+            <div class="drawer-tabs" id="prospectDrawerTabs">
+                <button class="drawer-tab active" onclick="switchProspectDrawerTab('overview',this)">Overview</button>
+                <button class="drawer-tab" onclick="switchProspectDrawerTab('contacts',this)">Contacts</button>
+                <button class="drawer-tab" onclick="switchProspectDrawerTab('activity',this)">Activity</button>
+            </div>
+            <div class="drawer-body" id="prospectDrawerBody"></div>
         </div>
     </div>
 
@@ -289,8 +333,9 @@
             <div class="drawer-tabs" id="vendorDrawerTabs">
                 <button class="drawer-tab active" onclick="switchVendorDrawerTab('overview',this)">Overview</button>
                 <button class="drawer-tab" onclick="switchVendorDrawerTab('contacts',this)">Contacts</button>
+                <button class="drawer-tab" onclick="switchVendorDrawerTab('scorecard',this)">Scorecard</button>
                 <button class="drawer-tab" onclick="switchVendorDrawerTab('parts',this)">Parts</button>
-                <button class="drawer-tab" onclick="switchVendorDrawerTab('comms',this)">Communications</button>
+                <button class="drawer-tab" onclick="switchVendorDrawerTab('comms',this)">Comms</button>
             </div>
             <div class="drawer-body" id="vendorDrawerBody"></div>
         </div>
@@ -338,6 +383,7 @@
                 <button type="button" class="fp" data-bp-status="cancelled" onclick="setBpFilter('cancelled',this)">Cancelled</button>
             </div>
             <input class="sbox sbox-med" id="bpSearch" placeholder="Search buy plans…" aria-label="Search buy plans" oninput="renderBuyPlansList()">
+            <label style="display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;cursor:pointer"><input type="checkbox" id="bpMyOnly" onchange="toggleBpMyOnly(this.checked)"> My Tasks</label>
         </div>
         <div id="buyPlansList"><p class="empty">Loading…</p></div>
     </div>
@@ -862,11 +908,11 @@
             <input class="sbox" id="contactFilter" placeholder="Search contacts by name, email, company, title…" oninput="debouncedLoadContacts()" style="flex:1;min-width:140px" aria-label="Search contacts">
             <div class="chip-row" style="margin:0" id="contactStatusPills">
                 <span class="chip on" onclick="setContactStatusFilter('all',this)">All</span>
-                <span class="chip" onclick="setContactStatusFilter('customer',this)">Customer</span>
+                <span class="chip" onclick="setContactStatusFilter('champion',this)">Champion</span>
+                <span class="chip" onclick="setContactStatusFilter('active',this)">Active</span>
+                <span class="chip" onclick="setContactStatusFilter('quiet',this)">Quiet</span>
+                <span class="chip" onclick="setContactStatusFilter('inactive',this)">Inactive</span>
                 <span class="chip" onclick="setContactStatusFilter('vendor',this)">Vendor</span>
-                <span class="chip" onclick="setContactStatusFilter('active',this)">Recent</span>
-                <span class="chip" onclick="setContactStatusFilter('stale',this)">Needs Follow-up</span>
-                <span class="chip" onclick="setContactStatusFilter('new',this)">New</span>
             </div>
         </div>
         <div class="crm-table-wrap" id="contactTableWrap">
@@ -886,7 +932,7 @@
     <!-- VIEW: Dashboard Overview -->
     <div id="view-dashboard" style="display:none">
         <div style="padding:16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
-            <h2 style="margin:0;font-size:18px">Dashboard</h2>
+            <h2 style="margin:0;font-size:18px">Command Center</h2>
             <div class="chip-row" style="margin:0" id="dashPeriodPills">
                 <span class="chip on" onclick="setDashPeriod('7d',this)">7 Days</span>
                 <span class="chip" onclick="setDashPeriod('30d',this)">30 Days</span>
@@ -931,6 +977,7 @@
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('teams',this)">Teams Integration</button>
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('import',this)">Import</button>
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('tickets',this)">Trouble Tickets</button>
+            <button type="button" class="tab" onclick="switchSettingsTab('vendor-dedup',this)">Vendor Dedup</button>
         </div>
 
         <div id="settings-users" class="settings-panel">
@@ -1104,6 +1151,16 @@
                     <div><button type="button" class="btn btn-primary" onclick="createUser()">Create User</button></div>
                 </div>
             </div>
+        </div>
+
+        <div id="settings-vendor-dedup" class="settings-panel" style="display:none">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                <label style="font-size:11px;color:var(--muted)">Threshold:</label>
+                <input type="number" id="dedupThreshold" value="85" min="70" max="100" style="width:60px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px">
+                <button type="button" class="btn btn-primary btn-sm" onclick="loadVendorDedupSuggestions()">Scan for Duplicates</button>
+                <span id="dedupStatus" style="font-size:11px;color:var(--muted)"></span>
+            </div>
+            <div id="dedupResults"><p class="empty">Click "Scan for Duplicates" to find potential duplicate vendor cards</p></div>
         </div>
 
     </div><!-- end view-settings -->

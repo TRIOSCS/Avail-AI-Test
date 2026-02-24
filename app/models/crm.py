@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import relationship
 
 from .base import Base
@@ -43,6 +43,11 @@ class Company(Base):
     tax_id = Column(String(100))  # EIN / VAT ID
     currency = Column(String(10), default="USD")
     preferred_carrier = Column(String(100))  # FedEx, UPS, DHL, etc.
+
+    # AI-generated material intelligence (mirrors VendorCard pattern)
+    brand_tags = Column(JSON, default=list)
+    commodity_tags = Column(JSON, default=list)
+    material_tags_updated_at = Column(DateTime)
 
     # Deep enrichment tracking
     deep_enrichment_at = Column(DateTime)
@@ -104,6 +109,11 @@ class CustomerSite(Base):
 
     notes = Column(Text)
     is_active = Column(Boolean, default=True)
+
+    # v2.10: Prospecting pool fields
+    last_activity_at = Column(DateTime)
+    ownership_cleared_at = Column(DateTime)
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,
@@ -137,6 +147,8 @@ class SiteContact(Base):
     phone = Column(String(100))
     notes = Column(Text)
     is_primary = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=True)
+    contact_status = Column(String(20), default="new")
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,

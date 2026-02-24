@@ -21,7 +21,7 @@ from ..config import settings
 from ..database import get_db
 from ..dependencies import is_admin as _is_admin
 from ..dependencies import require_admin, require_user
-from ..models import ActivityLog, Company, User, VendorCard
+from ..models import ActivityLog, Company, CustomerSite, User, VendorCard
 from ..rate_limit import limiter
 from ..schemas.v13_features import (
     ActivityAttributeRequest,
@@ -95,6 +95,7 @@ def _activity_to_dict(a) -> dict:
         "company_id": a.company_id,
         "vendor_card_id": a.vendor_card_id,
         "vendor_contact_id": getattr(a, "vendor_contact_id", None),
+        "site_contact_id": getattr(a, "site_contact_id", None),
         "contact_email": a.contact_email,
         "contact_phone": a.contact_phone,
         "contact_name": a.contact_name,
@@ -637,5 +638,100 @@ async def mark_all_notifications_read(
     )
     db.commit()
     return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  PROSPECTING POOL — Site-Level Ownership
+# ═══════════════════════════════════════════════════════════════════════
+
+
+@router.get("/api/prospecting/pool")
+async def prospecting_pool(
+    user: User = Depends(require_user), db: Session = Depends(get_db)
+):
+    """Get all unowned active sites available for claiming."""
+    from app.services.ownership_service import get_open_pool_sites
+
+    return get_open_pool_sites(db)
+
+
+@router.post("/api/prospecting/claim/{site_id}")
+async def prospecting_claim(
+    site_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+):
+    """Claim an unowned site for the current user."""
+    if user.role not in ("sales", "trader"):
+        raise HTTPException(403, "Only sales/trader users can claim sites")
+
+    site = db.get(CustomerSite, site_id)
+    if not site:
+        raise HTTPException(404, "Site not found")
+    if site.owner_id is not None:
+        owner = db.get(User, site.owner_id)
+        owner_name = owner.name if owner else "Unknown"
+        raise HTTPException(409, f"Site already owned by {owner_name}")
+
+    from app.services.ownership_service import claim_site
+
+    claimed = claim_site(site_id, user.id, db)
+    if not claimed:
+        raise HTTPException(409, "Site could not be claimed")
+
+    db.commit()
+    return {"status": "claimed", "site_id": site_id, "site_name": site.site_name}
+
+
+@router.get("/api/prospecting/my-sites")
+async def prospecting_my_sites(
+    user: User = Depends(require_user), db: Session = Depends(get_db)
+):
+    """Get sites owned by the current user with health status."""
+    from app.services.ownership_service import get_my_sites
+
+    return get_my_sites(user.id, db)
+
+
+@router.get("/api/prospecting/at-risk")
+async def prospecting_at_risk(
+    user: User = Depends(require_user), db: Session = Depends(get_db)
+):
+    """Get owned sites approaching inactivity limit."""
+    from app.services.ownership_service import get_sites_at_risk
+
+    return get_sites_at_risk(db)
+
+
+@router.put("/api/prospecting/sites/{site_id}/owner")
+async def prospecting_assign_owner(
+    site_id: int,
+    request: Request,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Admin-only: assign/reassign a site to a specific user."""
+    site = db.get(CustomerSite, site_id)
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    body = await request.json()
+    new_owner_id = body.get("owner_id")
+
+    if new_owner_id is not None:
+        target = db.get(User, new_owner_id)
+        if not target:
+            raise HTTPException(404, "User not found")
+
+    site.owner_id = new_owner_id
+    if new_owner_id is None:
+        site.ownership_cleared_at = datetime.now(timezone.utc)
+    else:
+        site.ownership_cleared_at = None
+    db.commit()
+
+    return {
+        "ok": True,
+        "site_id": site_id,
+        "owner_id": new_owner_id,
+    }
 
 

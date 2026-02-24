@@ -671,7 +671,36 @@ async def add_requirements(
     except (AttributeError, ValueError, RuntimeError):
         logger.debug("Teams hot-requirement alert failed", exc_info=True)
 
-    return [{"id": r.id, "primary_mpn": r.primary_mpn} for r in created]
+    # Duplicate detection: check if any of these MPNs were quoted for the same customer recently
+    duplicates = []
+    if req.customer_site_id and created:
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        mpn_keys = [r.normalized_mpn for r in created if r.normalized_mpn]
+        if mpn_keys:
+            dup_rows = (
+                db.query(Requirement.primary_mpn, Requisition.id, Requisition.name)
+                .join(Requisition, Requirement.requisition_id == Requisition.id)
+                .filter(
+                    Requirement.normalized_mpn.in_(mpn_keys),
+                    Requisition.customer_site_id == req.customer_site_id,
+                    Requisition.id != req_id,
+                    Requisition.created_at >= cutoff,
+                    Requisition.status.notin_(["archived"]),
+                )
+                .all()
+            )
+            seen = set()
+            for mpn, rid, rname in dup_rows:
+                key = f"{mpn}:{rid}"
+                if key not in seen:
+                    seen.add(key)
+                    duplicates.append({"mpn": mpn, "req_id": rid, "req_name": rname})
+
+    return {
+        "created": [{"id": r.id, "primary_mpn": r.primary_mpn} for r in created],
+        "duplicates": duplicates,
+    }
 
 
 @router.post("/api/requisitions/{req_id}/upload")

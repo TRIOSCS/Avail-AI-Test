@@ -188,6 +188,8 @@ def configure_scheduler():
                           id="webhook_subs", name="Webhook subscriptions")
         scheduler.add_job(_job_ownership_sweep, IntervalTrigger(hours=12),
                           id="ownership_sweep", name="Ownership sweep")
+        scheduler.add_job(_job_site_ownership_sweep, CronTrigger(hour=3, minute=0),
+                          id="site_ownership_sweep", name="Site ownership sweep")
 
     # Buy plan jobs
     scheduler.add_job(_job_po_verification, IntervalTrigger(minutes=settings.po_verify_interval_min),
@@ -213,6 +215,15 @@ def configure_scheduler():
     if settings.deep_enrichment_enabled:
         scheduler.add_job(_job_deep_enrichment, IntervalTrigger(hours=12),
                           id="deep_enrichment", name="Deep enrichment sweep")
+
+    # Contact scoring (nightly at 2am UTC)
+    if settings.contact_scoring_enabled:
+        scheduler.add_job(_job_contact_scoring, CronTrigger(hour=2, minute=0),
+                          id="contact_scoring", name="Contact relationship scoring")
+
+    # Contact status auto-compute (nightly at 3am UTC)
+    scheduler.add_job(_job_contact_status_compute, CronTrigger(hour=3, minute=0),
+                      id="contact_status_compute", name="Contact status auto-compute")
 
     # Cache cleanup
     scheduler.add_job(_job_cache_cleanup, IntervalTrigger(hours=24),
@@ -485,6 +496,22 @@ async def _job_ownership_sweep():
         await run_ownership_sweep(db)
     except Exception as e:
         logger.error(f"Ownership sweep error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_site_ownership_sweep():
+    """Run site-level ownership sweep (prospecting pool)."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .services.ownership_service import run_site_ownership_sweep
+        run_site_ownership_sweep(db)
+    except Exception as e:
+        logger.error(f"Site ownership sweep error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -776,6 +803,33 @@ async def _job_deep_enrichment():
         )
     except Exception as e:
         logger.error(f"Deep enrichment sweep error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_contact_scoring():
+    """Nightly: compute relationship scores for all vendor contacts."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .services.contact_intelligence import compute_all_contact_scores
+
+        loop = asyncio.get_running_loop()
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, compute_all_contact_scores, db),
+            timeout=300,
+        )
+        logger.info(
+            f"Contact scoring: {result['updated']} updated, {result['skipped']} skipped"
+        )
+    except asyncio.TimeoutError:
+        logger.error("Contact scoring timed out after 300s")
+        db.rollback()
+    except Exception as e:
+        logger.error(f"Contact scoring error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -1332,3 +1386,84 @@ async def _sync_user_contacts(user, db):
     except Exception as e:
         logger.error(f"Contacts sync commit failed: {e}")
         db.rollback()
+
+
+@_traced_job
+async def _job_contact_status_compute():
+    """Auto-compute contact_status for SiteContacts based on activity history.
+
+    Rules:
+      - Never downgrade 'champion' (manual designation only)
+      - Last activity ≤7 days → 'active'
+      - Last activity 7-30 days → keep current (no auto-downgrade from active)
+      - Last activity 30-90 days → 'quiet'
+      - Last activity >90 days → 'inactive'
+      - No activity ever → keep 'new' or set 'inactive' if created >90 days ago
+    """
+    from sqlalchemy import func, case
+
+    from .database import SessionLocal
+    from .models import SiteContact
+    from .models.intelligence import ActivityLog
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+
+        # Subquery: most recent activity per site_contact_id
+        last_activity_sq = (
+            db.query(
+                ActivityLog.site_contact_id,
+                func.max(ActivityLog.created_at).label("last_at"),
+            )
+            .filter(ActivityLog.site_contact_id.isnot(None))
+            .group_by(ActivityLog.site_contact_id)
+            .subquery()
+        )
+
+        # Fetch all active site contacts with their last activity
+        contacts = (
+            db.query(SiteContact, last_activity_sq.c.last_at)
+            .outerjoin(last_activity_sq, SiteContact.id == last_activity_sq.c.site_contact_id)
+            .filter(SiteContact.is_active.is_(True))
+            .all()
+        )
+
+        updated = 0
+        for sc, last_at in contacts:
+            # Never downgrade champion
+            if sc.contact_status == "champion":
+                continue
+
+            if last_at is not None:
+                last_at = _utc(last_at)
+                days = (now - last_at).days
+                if days <= 7:
+                    new_status = "active"
+                elif days <= 30:
+                    # Don't auto-downgrade active contacts in the 7-30 day window
+                    continue
+                elif days <= 90:
+                    new_status = "quiet"
+                else:
+                    new_status = "inactive"
+            else:
+                # No activity ever
+                created = _utc(sc.created_at) if sc.created_at else now
+                days_since_created = (now - created).days
+                if days_since_created > 90:
+                    new_status = "inactive"
+                else:
+                    continue  # Keep 'new' status
+
+            if sc.contact_status != new_status:
+                sc.contact_status = new_status
+                updated += 1
+
+        db.commit()
+        logger.info(f"Contact status compute: {updated} contacts updated out of {len(contacts)}")
+    except Exception as e:
+        logger.error(f"Contact status compute error: {e}")
+        db.rollback()
+    finally:
+        db.close()
