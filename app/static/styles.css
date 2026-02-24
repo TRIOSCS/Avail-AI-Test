@@ -1209,7 +1209,7 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 .sidebar .sidebar-nav::-webkit-scrollbar{display:none}
 .sidebar .sidebar-nav button{justify-content:center;align-items:center;padding:7px 0;gap:0;overflow:hidden;font-size:0;color:transparent;width:100%}
 .sidebar .sb-nav-group{width:100%}
-.sidebar .sb-nav-icon{width:24px;height:24px;color:var(--blue);transition:color .15s,filter .15s}.sidebar .sb-nav-icon svg{width:18px;height:18px}
+.sidebar .sb-nav-icon{width:28px;height:28px;color:var(--blue);transition:color .15s,filter .15s}.sidebar .sb-nav-icon svg{width:22px;height:22px}
 .sidebar .sidebar-nav button.active .sb-nav-icon{color:var(--blue)}
 [data-section="sourcing"] .sb-nav-btn.active .sb-nav-icon{color:var(--sourcing-color)}
 [data-section="relationships"] .sb-nav-btn.active .sb-nav-icon{color:var(--relationships-color)}
