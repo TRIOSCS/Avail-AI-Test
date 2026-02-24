@@ -1267,7 +1267,7 @@ body.sb-open .sidebar .sidebar-footer .un,.sb-open .sidebar .sidebar-footer .rb,
 body.sb-open .sidebar .sidebar-footer,.sidebar:hover .sidebar-footer{justify-content:flex-start;padding:10px 16px}
 .sidebar:hover .sb-user-menu:hover .sb-user-popover{opacity:1;visibility:visible;transform:translateY(0)}
 /* Expanded: colored divider lines between groups */
-body.sb-open .sidebar .sb-nav-group[data-section="sourcing"]::after,.sidebar:hover .sb-nav-group[data-section="sourcing"]::after{content:'';display:block;height:2px;background:var(--blue);margin:6px 8px 2px;border-radius:1px}
+body.sb-open .sidebar .sb-nav-group[data-section="sourcing"]::after,.sidebar:hover .sb-nav-group[data-section="sourcing"]::after{content:none}
 body.sb-open .sidebar .sb-nav-group[data-section="relationships"]::before,.sidebar:hover .sb-nav-group[data-section="relationships"]::before{content:'';display:block;height:2px;background:var(--relationships-color);margin:2px 8px 6px;border-radius:1px}
 body.sb-open .sidebar .sb-nav-group[data-section="insights"]::before,.sidebar:hover .sb-nav-group[data-section="insights"]::before{content:'';display:block;height:2px;background:var(--insights-color);margin:2px 8px 6px;border-radius:1px}
 
