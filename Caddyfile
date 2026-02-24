@@ -1,5 +1,5 @@
 app.availai.net {
-    encode gzip
+    encode gzip zstd
 
     header {
         Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
