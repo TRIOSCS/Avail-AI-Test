@@ -63,19 +63,16 @@ async def clone_requisition(
         )
         db.add(new_r)
     db.flush()
-    # Map old requirement IDs → new for offer cloning
-    req_map: dict[int, int] = {}
-    for old_r in req.requirements:
-        new_r = (
-            db.query(Requirement)
-            .filter(
-                Requirement.requisition_id == new_req.id,
-                Requirement.primary_mpn == old_r.primary_mpn,
-            )
-            .first()
-        )
-        if new_r:
-            req_map[old_r.id] = new_r.id
+    # Map old requirement IDs → new for offer cloning (batch query)
+    new_reqs = db.query(Requirement).filter(
+        Requirement.requisition_id == new_req.id
+    ).all()
+    mpn_to_new_id = {r.primary_mpn: r.id for r in new_reqs}
+    req_map = {
+        old_r.id: mpn_to_new_id[old_r.primary_mpn]
+        for old_r in req.requirements
+        if old_r.primary_mpn in mpn_to_new_id
+    }
     for o in req.offers:
         if o.status in ("active", "selected"):
             new_o = Offer(
