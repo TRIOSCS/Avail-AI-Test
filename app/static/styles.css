@@ -1267,7 +1267,7 @@ body.sb-open .sidebar .sidebar-footer .un,.sb-open .sidebar .sidebar-footer .rb,
 body.sb-open .sidebar .sidebar-footer,.sidebar:hover .sidebar-footer{justify-content:flex-start;padding:10px 16px}
 .sidebar:hover .sb-user-menu:hover .sb-user-popover{opacity:1;visibility:visible;transform:translateY(0)}
 /* Expanded: colored divider lines between groups */
-body.sb-open .sidebar .sb-nav-group[data-section="sourcing"]::after,.sidebar:hover .sb-nav-group[data-section="sourcing"]::after{content:none}
+body.sb-open .sidebar .sb-nav-group[data-section="sourcing"]::after,.sidebar:hover .sb-nav-group[data-section="sourcing"]::after{content:'';display:block;height:2px;background:var(--blue);margin:6px 8px 2px;border-radius:1px}
 body.sb-open .sidebar .sb-nav-group[data-section="relationships"]::before,.sidebar:hover .sb-nav-group[data-section="relationships"]::before{content:'';display:block;height:2px;background:var(--relationships-color);margin:2px 8px 6px;border-radius:1px}
 body.sb-open .sidebar .sb-nav-group[data-section="insights"]::before,.sidebar:hover .sb-nav-group[data-section="insights"]::before{content:'';display:block;height:2px;background:var(--insights-color);margin:2px 8px 6px;border-radius:1px}
 
@@ -1287,8 +1287,7 @@ body.sb-open .toparea{margin-left:var(--sbw)}
 /* Pills */
 .fpills{display:flex;gap:2px;background:var(--white);border-radius:var(--radius);padding:4px;border:1px solid rgba(0,0,0,.04);box-shadow:var(--shadow-sm)}
 .fp{padding:6px 16px;border-radius:var(--radius-sm);border:none;background:transparent;color:var(--muted);font-size:12px;font-weight:500;cursor:pointer;transition:all var(--speed);font-family:inherit}
-.fp.on{background:var(--blue-lt,rgba(59,110,168,.1));color:var(--blue);font-weight:600}
-.fp.on:hover{background:linear-gradient(135deg,var(--blue),var(--blue-dk));color:#fff;box-shadow:0 2px 4px rgba(59,110,168,.2)}
+.fp.on{background:linear-gradient(135deg,var(--blue),var(--blue-dk));color:#fff;box-shadow:0 2px 4px rgba(59,110,168,.2)}
 .fp:not(.on):hover{color:var(--text);background:var(--surface)}
 
 /* Smaller variant pills for status toggle */
