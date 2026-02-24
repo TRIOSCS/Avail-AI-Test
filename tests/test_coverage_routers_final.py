@@ -1140,7 +1140,7 @@ async def test_vendor_search_fts_returns_results(db_session, test_user):
     mock_db = MagicMock()
     mock_db.query = mock_query_fn
 
-    result = await list_vendors(q="fts test vendor", limit=200, offset=0,
+    result = await list_vendors(q="fts test vendor", tag="", limit=200, offset=0,
                                 user=test_user, db=mock_db)
     assert result["total"] == 1
     assert len(result["vendors"]) == 1
@@ -1193,7 +1193,7 @@ async def test_vendor_search_fts_zero_results(db_session, test_user):
     mock_db = MagicMock()
     mock_db.query = mock_query_fn
 
-    result = await list_vendors(q="ilike fallback", limit=200, offset=0,
+    result = await list_vendors(q="ilike fallback", tag="", limit=200, offset=0,
                                 user=test_user, db=mock_db)
     assert result["total"] == 1
 

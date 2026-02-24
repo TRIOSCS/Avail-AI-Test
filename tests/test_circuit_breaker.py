@@ -106,7 +106,7 @@ def test_breaker_defaults():
 def test_connector_success_keeps_breaker_closed():
     """Successful connector call keeps breaker closed."""
     conn = _FakeConnector(fail=False)
-    result = asyncio.get_event_loop().run_until_complete(conn.search("LM317T"))
+    result = asyncio.run(conn.search("LM317T"))
     assert len(result) == 1
     assert conn._breaker.current_state == "closed"
 
@@ -116,7 +116,7 @@ def test_connector_opens_breaker_after_failures():
     conn = _FakeConnector(fail=True)
     for _ in range(5):
         try:
-            asyncio.get_event_loop().run_until_complete(conn.search("LM317T"))
+            asyncio.run(conn.search("LM317T"))
         except ConnectionError:
             pass
     assert conn._breaker.current_state == "open"
@@ -128,7 +128,7 @@ def test_open_breaker_skips_calls():
     # Trip the breaker (fail_max=5, max_retries=0 → 5 search calls)
     for _ in range(5):
         try:
-            asyncio.get_event_loop().run_until_complete(conn.search("LM317T"))
+            asyncio.run(conn.search("LM317T"))
         except ConnectionError:
             pass
     assert conn._breaker.current_state == "open"
@@ -137,6 +137,6 @@ def test_open_breaker_skips_calls():
     conn.call_count = 0
     conn._fail = False
 
-    result = asyncio.get_event_loop().run_until_complete(conn.search("LM317T"))
+    result = asyncio.run(conn.search("LM317T"))
     assert result == []
     assert conn.call_count == 0  # _do_search was never called

@@ -392,7 +392,7 @@ class TestSendProactiveOffer:
     def test_send_no_matches(self, db_session, test_user):
         """Empty match_ids raises ValueError."""
         with pytest.raises(ValueError, match="No valid matches"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 send_proactive_offer(
                     db=db_session,
                     user=test_user,
@@ -423,7 +423,7 @@ class TestSendProactiveOffer:
         db_session.commit()
 
         with pytest.raises(ValueError, match="No valid contacts"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 send_proactive_offer(
                     db=db_session,
                     user=test_user,

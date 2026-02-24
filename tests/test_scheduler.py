@@ -153,7 +153,7 @@ def test_auto_archive_archives_stale(scheduler_db, test_user):
     scheduler_db.commit()
 
     from app.scheduler import _job_auto_archive
-    asyncio.get_event_loop().run_until_complete(_job_auto_archive())
+    asyncio.run(_job_auto_archive())
 
     scheduler_db.refresh(old)
     assert old.status == "archived"
@@ -171,7 +171,7 @@ def test_auto_archive_skips_recent(scheduler_db, test_user):
     scheduler_db.commit()
 
     from app.scheduler import _job_auto_archive
-    asyncio.get_event_loop().run_until_complete(_job_auto_archive())
+    asyncio.run(_job_auto_archive())
 
     scheduler_db.refresh(recent)
     assert recent.status == "active"
@@ -189,7 +189,7 @@ def test_auto_archive_skips_never_searched(scheduler_db, test_user):
     scheduler_db.commit()
 
     from app.scheduler import _job_auto_archive
-    asyncio.get_event_loop().run_until_complete(_job_auto_archive())
+    asyncio.run(_job_auto_archive())
 
     scheduler_db.refresh(unsearched)
     assert unsearched.status == "active"
@@ -202,7 +202,7 @@ def test_cache_cleanup_calls_cleanup_expired():
     """Cache cleanup job delegates to intel_cache.cleanup_expired."""
     with patch("app.cache.intel_cache.cleanup_expired") as mock_cleanup:
         from app.scheduler import _job_cache_cleanup
-        asyncio.get_event_loop().run_until_complete(_job_cache_cleanup())
+        asyncio.run(_job_cache_cleanup())
         mock_cleanup.assert_called_once()
 
 
@@ -219,7 +219,7 @@ def test_token_refresh_refreshes_expired(scheduler_db, test_user):
     with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.return_value = "new_token"
         from app.scheduler import _job_token_refresh
-        asyncio.get_event_loop().run_until_complete(_job_token_refresh())
+        asyncio.run(_job_token_refresh())
         mock_refresh.assert_called_once()
 
 
@@ -232,7 +232,7 @@ def test_token_refresh_skips_valid(scheduler_db, test_user):
 
     with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         from app.scheduler import _job_token_refresh
-        asyncio.get_event_loop().run_until_complete(_job_token_refresh())
+        asyncio.run(_job_token_refresh())
         mock_refresh.assert_not_called()
 
 
@@ -244,7 +244,7 @@ def test_batch_results_calls_process(scheduler_db):
     with patch("app.email_service.process_batch_results", new_callable=AsyncMock) as mock_pbr:
         mock_pbr.return_value = 5
         from app.scheduler import _job_batch_results
-        asyncio.get_event_loop().run_until_complete(_job_batch_results())
+        asyncio.run(_job_batch_results())
         mock_pbr.assert_called_once_with(scheduler_db)
 
 
@@ -257,7 +257,7 @@ def test_engagement_scoring_runs_when_stale(scheduler_db):
         "app.scheduler._compute_vendor_scores_job", new_callable=AsyncMock
     ) as mock_compute:
         from app.scheduler import _job_engagement_scoring
-        asyncio.get_event_loop().run_until_complete(_job_engagement_scoring())
+        asyncio.run(_job_engagement_scoring())
         mock_compute.assert_called_once()
 
 
@@ -277,7 +277,7 @@ def test_engagement_scoring_skips_when_recent(scheduler_db):
         "app.scheduler._compute_vendor_scores_job", new_callable=AsyncMock
     ) as mock_compute:
         from app.scheduler import _job_engagement_scoring
-        asyncio.get_event_loop().run_until_complete(_job_engagement_scoring())
+        asyncio.run(_job_engagement_scoring())
         mock_compute.assert_not_called()
 
 
@@ -291,7 +291,7 @@ def test_proactive_matching_calls_scan(scheduler_db):
     ) as mock_scan:
         mock_scan.return_value = {"matches_created": 3, "scanned": 10}
         from app.scheduler import _job_proactive_matching
-        asyncio.get_event_loop().run_until_complete(_job_proactive_matching())
+        asyncio.run(_job_proactive_matching())
         mock_scan.assert_called_once_with(scheduler_db)
 
 
@@ -308,7 +308,7 @@ def test_performance_tracking_calls_services(scheduler_db):
         mock_vs.return_value = {"updated": 5, "skipped_cold_start": 2}
         mock_bl.return_value = {"entries": 3}
         from app.scheduler import _job_performance_tracking
-        asyncio.get_event_loop().run_until_complete(_job_performance_tracking())
+        asyncio.run(_job_performance_tracking())
         mock_vs.assert_called_once_with(scheduler_db)
         assert mock_bl.call_count >= 1  # At least current month
 
@@ -330,7 +330,7 @@ def test_performance_tracking_recomputes_previous_month_in_grace_period(schedule
         mock_vs.return_value = {"updated": 5, "skipped_cold_start": 2}
         mock_bl.return_value = {"entries": 3}
         from app.scheduler import _job_performance_tracking
-        asyncio.get_event_loop().run_until_complete(_job_performance_tracking())
+        asyncio.run(_job_performance_tracking())
         # Should be called twice: current month + previous month
         assert mock_bl.call_count == 2
 
@@ -343,7 +343,7 @@ def test_performance_tracking_error_handling(scheduler_db):
         mock_vs.side_effect = Exception("DB error")
         from app.scheduler import _job_performance_tracking
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_performance_tracking())
+        asyncio.run(_job_performance_tracking())
 
 
 # ── get_valid_token() ──────────────────────────────────────────────────
@@ -356,7 +356,7 @@ def test_get_valid_token_returns_current_when_valid(db_session, test_user):
     db_session.commit()
 
     from app.scheduler import get_valid_token
-    token = asyncio.get_event_loop().run_until_complete(
+    token = asyncio.run(
         get_valid_token(test_user, db_session)
     )
     assert token == "valid_token_abc"
@@ -372,7 +372,7 @@ def test_get_valid_token_refreshes_when_near_expiry(db_session, test_user):
     with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.return_value = "fresh_token_xyz"
         from app.scheduler import get_valid_token
-        token = asyncio.get_event_loop().run_until_complete(
+        token = asyncio.run(
             get_valid_token(test_user, db_session)
         )
         mock_refresh.assert_called_once_with(test_user, db_session)
@@ -391,7 +391,7 @@ def test_get_valid_token_refreshes_when_expired(db_session, test_user):
     with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.return_value = "new_token"
         from app.scheduler import get_valid_token
-        token = asyncio.get_event_loop().run_until_complete(
+        token = asyncio.run(
             get_valid_token(test_user, db_session)
         )
         assert token == "new_token"
@@ -407,7 +407,7 @@ def test_get_valid_token_sets_error_when_refresh_fails(db_session, test_user):
     with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.return_value = None
         from app.scheduler import get_valid_token
-        token = asyncio.get_event_loop().run_until_complete(
+        token = asyncio.run(
             get_valid_token(test_user, db_session)
         )
         assert token is None
@@ -424,7 +424,7 @@ def test_get_valid_token_no_token_no_expiry(db_session, test_user):
     with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.return_value = "brand_new_token"
         from app.scheduler import get_valid_token
-        token = asyncio.get_event_loop().run_until_complete(
+        token = asyncio.run(
             get_valid_token(test_user, db_session)
         )
         assert token == "brand_new_token"
@@ -443,7 +443,7 @@ def test_refresh_user_token_success(db_session, test_user):
     with patch("app.scheduler._refresh_access_token", new_callable=AsyncMock) as mock_aat:
         mock_aat.return_value = ("new_access_token", "new_refresh_token")
         from app.scheduler import refresh_user_token
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             refresh_user_token(test_user, db_session)
         )
         assert result == "new_access_token"
@@ -459,7 +459,7 @@ def test_refresh_user_token_no_refresh_token(db_session, test_user):
     db_session.commit()
 
     from app.scheduler import refresh_user_token
-    result = asyncio.get_event_loop().run_until_complete(
+    result = asyncio.run(
         refresh_user_token(test_user, db_session)
     )
     assert result is None
@@ -474,7 +474,7 @@ def test_refresh_user_token_failure_disconnects_user(db_session, test_user):
     with patch("app.scheduler._refresh_access_token", new_callable=AsyncMock) as mock_aat:
         mock_aat.return_value = None
         from app.scheduler import refresh_user_token
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             refresh_user_token(test_user, db_session)
         )
         assert result is None
@@ -489,7 +489,7 @@ def test_refresh_user_token_keeps_old_refresh_when_none_returned(db_session, tes
     with patch("app.scheduler._refresh_access_token", new_callable=AsyncMock) as mock_aat:
         mock_aat.return_value = ("new_at", None)  # no new refresh token
         from app.scheduler import refresh_user_token
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             refresh_user_token(test_user, db_session)
         )
         assert result == "new_at"
@@ -511,7 +511,7 @@ def test_refresh_access_token_success():
     with patch("app.scheduler.http") as mock_http:
         mock_http.post = AsyncMock(return_value=mock_response)
         from app.scheduler import _refresh_access_token
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             _refresh_access_token("rt_old", "client_id", "client_secret", "tenant_id")
         )
         assert result == ("at_new", "rt_new")
@@ -526,7 +526,7 @@ def test_refresh_access_token_failure_returns_none():
     with patch("app.scheduler.http") as mock_http:
         mock_http.post = AsyncMock(return_value=mock_response)
         from app.scheduler import _refresh_access_token
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             _refresh_access_token("rt_bad", "cid", "cs", "tid")
         )
         assert result is None
@@ -537,7 +537,7 @@ def test_refresh_access_token_exception_returns_none():
     with patch("app.scheduler.http") as mock_http:
         mock_http.post = AsyncMock(side_effect=Exception("Connection refused"))
         from app.scheduler import _refresh_access_token
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             _refresh_access_token("rt", "cid", "cs", "tid")
         )
         assert result is None
@@ -556,7 +556,7 @@ def test_token_refresh_refreshes_user_without_access_token(scheduler_db, test_us
     with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.return_value = "new_token"
         from app.scheduler import _job_token_refresh
-        asyncio.get_event_loop().run_until_complete(_job_token_refresh())
+        asyncio.run(_job_token_refresh())
         mock_refresh.assert_called_once()
 
 
@@ -571,7 +571,7 @@ def test_token_refresh_handles_error_per_user(scheduler_db, test_user):
         mock_refresh.side_effect = Exception("Unexpected error")
         from app.scheduler import _job_token_refresh
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_token_refresh())
+        asyncio.run(_job_token_refresh())
 
 
 # ── _job_inbox_scan() ──────────────────────────────────────────────────
@@ -589,7 +589,7 @@ def test_inbox_scan_scans_connected_user(scheduler_db, test_user):
          patch("app.config.settings") as mock_settings:
         mock_settings.inbox_scan_interval_min = 30
         from app.scheduler import _job_inbox_scan
-        asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+        asyncio.run(_job_inbox_scan())
         mock_scan.assert_called_once()
 
 
@@ -605,7 +605,7 @@ def test_inbox_scan_skips_disconnected_user(scheduler_db, test_user):
          patch("app.config.settings") as mock_settings:
         mock_settings.inbox_scan_interval_min = 30
         from app.scheduler import _job_inbox_scan
-        asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+        asyncio.run(_job_inbox_scan())
         mock_scan.assert_not_called()
 
 
@@ -621,7 +621,7 @@ def test_inbox_scan_skips_user_without_access_token(scheduler_db, test_user):
          patch("app.config.settings") as mock_settings:
         mock_settings.inbox_scan_interval_min = 30
         from app.scheduler import _job_inbox_scan
-        asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+        asyncio.run(_job_inbox_scan())
         mock_scan.assert_not_called()
 
 
@@ -637,7 +637,7 @@ def test_inbox_scan_scans_user_with_no_previous_scan(scheduler_db, test_user):
          patch("app.config.settings") as mock_settings:
         mock_settings.inbox_scan_interval_min = 30
         from app.scheduler import _job_inbox_scan
-        asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+        asyncio.run(_job_inbox_scan())
         mock_scan.assert_called_once()
 
 
@@ -653,7 +653,7 @@ def test_inbox_scan_skips_recently_scanned_user(scheduler_db, test_user):
          patch("app.config.settings") as mock_settings:
         mock_settings.inbox_scan_interval_min = 30
         from app.scheduler import _job_inbox_scan
-        asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+        asyncio.run(_job_inbox_scan())
         mock_scan.assert_not_called()
 
 
@@ -673,7 +673,7 @@ def test_inbox_scan_handles_timeout(scheduler_db, test_user):
          patch("asyncio.wait_for", new_callable=AsyncMock, side_effect=asyncio.TimeoutError()):
         mock_settings.inbox_scan_interval_min = 30
         from app.scheduler import _job_inbox_scan
-        asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+        asyncio.run(_job_inbox_scan())
         # User should have an error set
         assert test_user.m365_error_reason == "Inbox scan timed out"
 
@@ -691,7 +691,7 @@ def test_contacts_sync_syncs_eligible_user(scheduler_db, test_user):
 
     with patch("app.scheduler._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
         from app.scheduler import _job_contacts_sync
-        asyncio.get_event_loop().run_until_complete(_job_contacts_sync())
+        asyncio.run(_job_contacts_sync())
         mock_sync.assert_called_once()
 
 
@@ -705,7 +705,7 @@ def test_contacts_sync_skips_recently_synced(scheduler_db, test_user):
 
     with patch("app.scheduler._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
         from app.scheduler import _job_contacts_sync
-        asyncio.get_event_loop().run_until_complete(_job_contacts_sync())
+        asyncio.run(_job_contacts_sync())
         mock_sync.assert_not_called()
 
 
@@ -719,7 +719,7 @@ def test_contacts_sync_skips_disconnected_user(scheduler_db, test_user):
 
     with patch("app.scheduler._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
         from app.scheduler import _job_contacts_sync
-        asyncio.get_event_loop().run_until_complete(_job_contacts_sync())
+        asyncio.run(_job_contacts_sync())
         mock_sync.assert_not_called()
 
 
@@ -735,7 +735,7 @@ def test_contacts_sync_handles_per_user_error(scheduler_db, test_user):
         mock_sync.side_effect = Exception("Graph API down")
         from app.scheduler import _job_contacts_sync
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_contacts_sync())
+        asyncio.run(_job_contacts_sync())
 
 
 def test_contacts_sync_syncs_stale_user(scheduler_db, test_user):
@@ -748,7 +748,7 @@ def test_contacts_sync_syncs_stale_user(scheduler_db, test_user):
 
     with patch("app.scheduler._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
         from app.scheduler import _job_contacts_sync
-        asyncio.get_event_loop().run_until_complete(_job_contacts_sync())
+        asyncio.run(_job_contacts_sync())
         mock_sync.assert_called_once()
 
 
@@ -765,7 +765,7 @@ def test_webhook_subscriptions_delegates(scheduler_db):
         new_callable=AsyncMock,
     ) as mock_ensure:
         from app.scheduler import _job_webhook_subscriptions
-        asyncio.get_event_loop().run_until_complete(_job_webhook_subscriptions())
+        asyncio.run(_job_webhook_subscriptions())
         mock_renew.assert_called_once_with(scheduler_db)
         mock_ensure.assert_called_once_with(scheduler_db)
 
@@ -779,7 +779,7 @@ def test_webhook_subscriptions_error_handling(scheduler_db):
     ):
         from app.scheduler import _job_webhook_subscriptions
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_webhook_subscriptions())
+        asyncio.run(_job_webhook_subscriptions())
 
 
 # ── _job_ownership_sweep() ────────────────────────────────────────────
@@ -792,7 +792,7 @@ def test_ownership_sweep_delegates(scheduler_db):
         new_callable=AsyncMock,
     ) as mock_sweep:
         from app.scheduler import _job_ownership_sweep
-        asyncio.get_event_loop().run_until_complete(_job_ownership_sweep())
+        asyncio.run(_job_ownership_sweep())
         mock_sweep.assert_called_once_with(scheduler_db)
 
 
@@ -805,7 +805,7 @@ def test_ownership_sweep_error_handling(scheduler_db):
     ):
         from app.scheduler import _job_ownership_sweep
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_ownership_sweep())
+        asyncio.run(_job_ownership_sweep())
 
 
 # ── _job_po_verification() ────────────────────────────────────────────
@@ -830,7 +830,7 @@ def test_po_verification_verifies_po_entered_plans(
         new_callable=AsyncMock,
     ) as mock_verify:
         from app.scheduler import _job_po_verification
-        asyncio.get_event_loop().run_until_complete(_job_po_verification())
+        asyncio.run(_job_po_verification())
         mock_verify.assert_called_once()
         call_args = mock_verify.call_args
         assert call_args[0][0].id == plan.id
@@ -843,7 +843,7 @@ def test_po_verification_skips_when_no_plans(scheduler_db):
         new_callable=AsyncMock,
     ) as mock_verify:
         from app.scheduler import _job_po_verification
-        asyncio.get_event_loop().run_until_complete(_job_po_verification())
+        asyncio.run(_job_po_verification())
         mock_verify.assert_not_called()
 
 
@@ -868,7 +868,7 @@ def test_po_verification_handles_per_plan_error(
     ):
         from app.scheduler import _job_po_verification
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_po_verification())
+        asyncio.run(_job_po_verification())
 
 
 # ── _job_stock_autocomplete() ─────────────────────────────────────────
@@ -881,7 +881,7 @@ def test_stock_autocomplete_delegates(scheduler_db):
     ) as mock_complete:
         mock_complete.return_value = 5
         from app.scheduler import _job_stock_autocomplete
-        asyncio.get_event_loop().run_until_complete(_job_stock_autocomplete())
+        asyncio.run(_job_stock_autocomplete())
         mock_complete.assert_called_once_with(scheduler_db)
 
 
@@ -892,7 +892,7 @@ def test_stock_autocomplete_handles_zero(scheduler_db):
     ) as mock_complete:
         mock_complete.return_value = 0
         from app.scheduler import _job_stock_autocomplete
-        asyncio.get_event_loop().run_until_complete(_job_stock_autocomplete())
+        asyncio.run(_job_stock_autocomplete())
         mock_complete.assert_called_once()
 
 
@@ -904,7 +904,7 @@ def test_stock_autocomplete_error_handling(scheduler_db):
     ):
         from app.scheduler import _job_stock_autocomplete
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_stock_autocomplete())
+        asyncio.run(_job_stock_autocomplete())
 
 
 # ── _job_batch_results() additional cases ─────────────────────────────
@@ -922,7 +922,7 @@ def test_batch_results_handles_timeout(scheduler_db):
     ):
         from app.scheduler import _job_batch_results
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_batch_results())
+        asyncio.run(_job_batch_results())
 
 
 def test_batch_results_handles_error(scheduler_db):
@@ -934,7 +934,7 @@ def test_batch_results_handles_error(scheduler_db):
     ):
         from app.scheduler import _job_batch_results
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_batch_results())
+        asyncio.run(_job_batch_results())
 
 
 # ── _job_proactive_matching() additional cases ────────────────────────
@@ -947,7 +947,7 @@ def test_proactive_matching_no_matches(scheduler_db):
     ) as mock_scan:
         mock_scan.return_value = {"matches_created": 0, "scanned": 5}
         from app.scheduler import _job_proactive_matching
-        asyncio.get_event_loop().run_until_complete(_job_proactive_matching())
+        asyncio.run(_job_proactive_matching())
         mock_scan.assert_called_once()
 
 
@@ -959,7 +959,7 @@ def test_proactive_matching_error_handling(scheduler_db):
     ):
         from app.scheduler import _job_proactive_matching
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_proactive_matching())
+        asyncio.run(_job_proactive_matching())
 
 
 # ── _job_deep_email_mining() ──────────────────────────────────────────
@@ -984,7 +984,7 @@ def test_deep_email_mining_scans_eligible_user(scheduler_db, test_user):
          patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance), \
          patch("app.services.deep_enrichment_service.link_contact_to_entities"):
         from app.scheduler import _job_deep_email_mining
-        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+        asyncio.run(_job_deep_email_mining())
         mock_miner_instance.deep_scan_inbox.assert_called_once()
         # User should have last_deep_email_scan updated
         assert test_user.last_deep_email_scan is not None
@@ -1004,7 +1004,7 @@ def test_deep_email_mining_skips_recently_scanned(scheduler_db, test_user):
     with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
          patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance):
         from app.scheduler import _job_deep_email_mining
-        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+        asyncio.run(_job_deep_email_mining())
         mock_miner_instance.deep_scan_inbox.assert_not_called()
 
 
@@ -1022,7 +1022,7 @@ def test_deep_email_mining_skips_disconnected_user(scheduler_db, test_user):
     with patch("app.scheduler.get_valid_token", new_callable=AsyncMock), \
          patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance):
         from app.scheduler import _job_deep_email_mining
-        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+        asyncio.run(_job_deep_email_mining())
         mock_miner_instance.deep_scan_inbox.assert_not_called()
 
 
@@ -1040,7 +1040,7 @@ def test_deep_email_mining_skips_when_no_valid_token(scheduler_db, test_user):
     with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None), \
          patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance):
         from app.scheduler import _job_deep_email_mining
-        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+        asyncio.run(_job_deep_email_mining())
         mock_miner_instance.deep_scan_inbox.assert_not_called()
 
 
@@ -1068,7 +1068,7 @@ def test_deep_email_mining_links_contacts(scheduler_db, test_user):
          patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance), \
          patch("app.services.deep_enrichment_service.link_contact_to_entities") as mock_link:
         from app.scheduler import _job_deep_email_mining
-        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+        asyncio.run(_job_deep_email_mining())
         # Should be called for each email in per_domain
         assert mock_link.call_count == 2
 
@@ -1102,7 +1102,7 @@ def test_deep_enrichment_enriches_stale_vendors(scheduler_db):
          ):
         mock_settings.deep_enrichment_stale_days = 30
         from app.scheduler import _job_deep_enrichment
-        asyncio.get_event_loop().run_until_complete(_job_deep_enrichment())
+        asyncio.run(_job_deep_enrichment())
         mock_enrich_v.assert_called_once_with(card.id, scheduler_db)
 
 
@@ -1122,7 +1122,7 @@ def test_deep_enrichment_enriches_stale_companies(scheduler_db, test_company):
          ) as mock_enrich_c:
         mock_settings.deep_enrichment_stale_days = 30
         from app.scheduler import _job_deep_enrichment
-        asyncio.get_event_loop().run_until_complete(_job_deep_enrichment())
+        asyncio.run(_job_deep_enrichment())
         mock_enrich_c.assert_called_once_with(test_company.id, scheduler_db)
 
 
@@ -1150,7 +1150,7 @@ def test_deep_enrichment_skips_recently_enriched(scheduler_db):
          ):
         mock_settings.deep_enrichment_stale_days = 30
         from app.scheduler import _job_deep_enrichment
-        asyncio.get_event_loop().run_until_complete(_job_deep_enrichment())
+        asyncio.run(_job_deep_enrichment())
         mock_enrich_v.assert_not_called()
 
 
@@ -1179,7 +1179,7 @@ def test_deep_enrichment_enriches_new_vendors(scheduler_db):
          ):
         mock_settings.deep_enrichment_stale_days = 30
         from app.scheduler import _job_deep_enrichment
-        asyncio.get_event_loop().run_until_complete(_job_deep_enrichment())
+        asyncio.run(_job_deep_enrichment())
         # Called at least once (may appear in stale OR recent query)
         assert mock_enrich_v.call_count >= 1
 
@@ -1210,7 +1210,7 @@ def test_deep_enrichment_error_handling(scheduler_db):
         mock_settings.deep_enrichment_stale_days = 30
         from app.scheduler import _job_deep_enrichment
         # Should not raise (errors are caught per-vendor)
-        asyncio.get_event_loop().run_until_complete(_job_deep_enrichment())
+        asyncio.run(_job_deep_enrichment())
 
 
 # ── _compute_vendor_scores_job() ──────────────────────────────────
@@ -1224,7 +1224,7 @@ def test_compute_engagement_scores_job_delegates(db_session):
     ) as mock_compute:
         mock_compute.return_value = {"updated": 10, "skipped": 2}
         from app.scheduler import _compute_vendor_scores_job
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _compute_vendor_scores_job(db_session)
         )
         mock_compute.assert_called_once_with(db_session)
@@ -1239,7 +1239,7 @@ def test_compute_engagement_scores_job_handles_error(db_session):
     ):
         from app.scheduler import _compute_vendor_scores_job
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _compute_vendor_scores_job(db_session)
         )
 
@@ -1256,7 +1256,7 @@ def test_engagement_scoring_error_handling(scheduler_db):
     ):
         from app.scheduler import _job_engagement_scoring
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_engagement_scoring())
+        asyncio.run(_job_engagement_scoring())
 
 
 def test_engagement_scoring_runs_when_old_computation(scheduler_db):
@@ -1275,7 +1275,7 @@ def test_engagement_scoring_runs_when_old_computation(scheduler_db):
         "app.scheduler._compute_vendor_scores_job", new_callable=AsyncMock
     ) as mock_compute:
         from app.scheduler import _job_engagement_scoring
-        asyncio.get_event_loop().run_until_complete(_job_engagement_scoring())
+        asyncio.run(_job_engagement_scoring())
         mock_compute.assert_called_once()
 
 
@@ -1302,7 +1302,7 @@ def test_auto_archive_only_archives_active_status(scheduler_db, test_user):
     scheduler_db.commit()
 
     from app.scheduler import _job_auto_archive
-    asyncio.get_event_loop().run_until_complete(_job_auto_archive())
+    asyncio.run(_job_auto_archive())
 
     scheduler_db.refresh(already_archived)
     scheduler_db.refresh(open_req)
@@ -1316,7 +1316,7 @@ def test_auto_archive_error_handling(scheduler_db):
     with patch.object(scheduler_db, "query", side_effect=Exception("DB locked")):
         from app.scheduler import _job_auto_archive
         # Should not raise — error is caught internally
-        asyncio.get_event_loop().run_until_complete(_job_auto_archive())
+        asyncio.run(_job_auto_archive())
 
 
 # ── _job_cache_cleanup() additional cases ─────────────────────────────
@@ -1330,7 +1330,7 @@ def test_cache_cleanup_handles_error():
     ):
         from app.scheduler import _job_cache_cleanup
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_cache_cleanup())
+        asyncio.run(_job_cache_cleanup())
 
 
 # ── configure_scheduler() additional cases ────────────────────────────
@@ -1424,7 +1424,7 @@ def test_traced_job_exception_is_reraised():
         raise RuntimeError("kaboom")
 
     with pytest.raises(RuntimeError, match="kaboom"):
-        asyncio.get_event_loop().run_until_complete(boom())
+        asyncio.run(boom())
 
 
 # ===========================================================================
@@ -1437,7 +1437,7 @@ def test_token_refresh_outer_exception(scheduler_db):
     with patch.object(scheduler_db, "query", side_effect=Exception("DB crash")):
         from app.scheduler import _job_token_refresh
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_token_refresh())
+        asyncio.run(_job_token_refresh())
 
 
 # ===========================================================================
@@ -1452,7 +1452,7 @@ def test_inbox_scan_error_in_user_gathering(scheduler_db):
         mock_settings.inbox_scan_interval_min = 30
         from app.scheduler import _job_inbox_scan
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+        asyncio.run(_job_inbox_scan())
 
 
 # ===========================================================================
@@ -1488,7 +1488,7 @@ def test_inbox_scan_safe_scan_timeout(scheduler_db, test_user):
 
         with patch("asyncio.wait_for", side_effect=_mock_wait_for):
             from app.scheduler import _job_inbox_scan
-            asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+            asyncio.run(_job_inbox_scan())
 
     scheduler_db.refresh(test_user)
     assert test_user.m365_error_reason == "Inbox scan timed out"
@@ -1508,7 +1508,7 @@ def test_inbox_scan_safe_scan_exception(scheduler_db, test_user):
         mock_settings.inbox_scan_interval_min = 30
         from app.scheduler import _job_inbox_scan
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+        asyncio.run(_job_inbox_scan())
 
 
 # ===========================================================================
@@ -1521,7 +1521,7 @@ def test_contacts_sync_error_in_user_gathering(scheduler_db):
     with patch.object(scheduler_db, "query", side_effect=Exception("DB error")):
         from app.scheduler import _job_contacts_sync
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_contacts_sync())
+        asyncio.run(_job_contacts_sync())
 
 
 # ===========================================================================
@@ -1548,7 +1548,7 @@ def test_contacts_sync_timeout(scheduler_db, test_user):
          patch("app.scheduler._sync_user_contacts", new_callable=AsyncMock):
         from app.scheduler import _job_contacts_sync
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_contacts_sync())
+        asyncio.run(_job_contacts_sync())
 
 
 # ===========================================================================
@@ -1561,7 +1561,7 @@ def test_po_verification_outer_exception(scheduler_db):
     with patch.object(scheduler_db, "query", side_effect=Exception("DB crash")):
         from app.scheduler import _job_po_verification
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_po_verification())
+        asyncio.run(_job_po_verification())
 
 
 # ===========================================================================
@@ -1582,7 +1582,7 @@ def test_stock_autocomplete_timeout(scheduler_db):
          patch("asyncio.wait_for", side_effect=_mock_wait_for):
         from app.scheduler import _job_stock_autocomplete
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_stock_autocomplete())
+        asyncio.run(_job_stock_autocomplete())
 
 
 # ===========================================================================
@@ -1603,7 +1603,7 @@ def test_proactive_matching_timeout(scheduler_db):
          patch("asyncio.wait_for", side_effect=_mock_wait_for):
         from app.scheduler import _job_proactive_matching
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_proactive_matching())
+        asyncio.run(_job_proactive_matching())
 
 
 # ===========================================================================
@@ -1625,7 +1625,7 @@ def test_performance_tracking_timeout(scheduler_db):
          patch("asyncio.wait_for", side_effect=_mock_wait_for):
         from app.scheduler import _job_performance_tracking
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_performance_tracking())
+        asyncio.run(_job_performance_tracking())
 
 
 # ===========================================================================
@@ -1659,7 +1659,7 @@ def test_deep_email_mining_link_contact_exception(scheduler_db, test_user):
                side_effect=Exception("link error")):
         from app.scheduler import _job_deep_email_mining
         # Should not raise — the exception is caught with bare except+pass
-        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+        asyncio.run(_job_deep_email_mining())
         # User should still get updated
         assert test_user.last_deep_email_scan is not None
 
@@ -1684,7 +1684,7 @@ def test_deep_email_mining_per_user_timeout(scheduler_db, test_user):
          patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance):
         from app.scheduler import _job_deep_email_mining
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+        asyncio.run(_job_deep_email_mining())
 
 
 # ===========================================================================
@@ -1707,7 +1707,7 @@ def test_deep_email_mining_per_user_exception(scheduler_db, test_user):
          patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance):
         from app.scheduler import _job_deep_email_mining
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+        asyncio.run(_job_deep_email_mining())
 
 
 # ===========================================================================
@@ -1720,7 +1720,7 @@ def test_deep_email_mining_outer_exception(scheduler_db):
     with patch.object(scheduler_db, "query", side_effect=Exception("DB crash")):
         from app.scheduler import _job_deep_email_mining
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+        asyncio.run(_job_deep_email_mining())
 
 
 # ===========================================================================
@@ -1755,7 +1755,7 @@ def test_deep_enrichment_per_vendor_error_with_savepoint(scheduler_db):
         mock_settings.deep_enrichment_stale_days = 30
         from app.scheduler import _job_deep_enrichment
         # Should not raise (errors caught per-vendor with savepoint rollback)
-        asyncio.get_event_loop().run_until_complete(_job_deep_enrichment())
+        asyncio.run(_job_deep_enrichment())
 
 
 def test_deep_enrichment_per_company_error_with_savepoint(scheduler_db, test_company):
@@ -1776,7 +1776,7 @@ def test_deep_enrichment_per_company_error_with_savepoint(scheduler_db, test_com
         mock_settings.deep_enrichment_stale_days = 30
         from app.scheduler import _job_deep_enrichment
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_deep_enrichment())
+        asyncio.run(_job_deep_enrichment())
 
 
 def test_deep_enrichment_outer_exception(scheduler_db):
@@ -1786,7 +1786,7 @@ def test_deep_enrichment_outer_exception(scheduler_db):
         mock_settings.deep_enrichment_stale_days = 30
         from app.scheduler import _job_deep_enrichment
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(_job_deep_enrichment())
+        asyncio.run(_job_deep_enrichment())
 
 
 # ===========================================================================
@@ -1809,7 +1809,7 @@ def test_scan_user_inbox_first_time_backfill(scheduler_db, test_user):
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _scan_user_inbox
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_user_inbox(test_user, scheduler_db)
         )
 
@@ -1836,7 +1836,7 @@ def test_scan_user_inbox_not_backfill(scheduler_db, test_user):
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _scan_user_inbox
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_user_inbox(test_user, scheduler_db)
         )
 
@@ -1858,7 +1858,7 @@ def test_scan_user_inbox_no_valid_token(scheduler_db, test_user):
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _scan_user_inbox
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_user_inbox(test_user, scheduler_db)
         )
 
@@ -1881,7 +1881,7 @@ def test_scan_user_inbox_poll_exception(scheduler_db, test_user):
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _scan_user_inbox
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_user_inbox(test_user, scheduler_db)
         )
 
@@ -1910,7 +1910,7 @@ def test_scan_user_inbox_sub_operation_exceptions(scheduler_db, test_user):
 
         from app.scheduler import _scan_user_inbox
         # Should not raise — errors are caught per-sub-operation
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_user_inbox(test_user, scheduler_db)
         )
 
@@ -1934,7 +1934,7 @@ def test_scan_stock_list_attachments_no_emails(scheduler_db, test_user):
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _scan_stock_list_attachments
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_stock_list_attachments(test_user, scheduler_db, is_backfill=False)
         )
 
@@ -1966,7 +1966,7 @@ def test_scan_stock_list_attachments_with_files(scheduler_db, test_user):
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _scan_stock_list_attachments
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_stock_list_attachments(test_user, scheduler_db, is_backfill=True)
         )
 
@@ -2002,7 +2002,7 @@ def test_scan_stock_list_attachments_import_error(scheduler_db, test_user):
 
         from app.scheduler import _scan_stock_list_attachments
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_stock_list_attachments(test_user, scheduler_db, is_backfill=False)
         )
 
@@ -2023,7 +2023,7 @@ def test_download_and_import_stock_list_attachment_download_fails(scheduler_db, 
     with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
          patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2044,7 +2044,7 @@ def test_download_and_import_stock_list_error_in_att_data(scheduler_db, test_use
     with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
          patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2065,7 +2065,7 @@ def test_download_and_import_stock_list_no_content_bytes(scheduler_db, test_user
     with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
          patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2090,7 +2090,7 @@ def test_download_and_import_stock_list_file_validation_fails(scheduler_db, test
          patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
          patch("app.utils.file_validation.validate_file", return_value=(False, "application/octet-stream")):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2116,7 +2116,7 @@ def test_download_and_import_stock_list_no_rows(scheduler_db, test_user):
          patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")), \
          patch("app.services.attachment_parser.parse_attachment", new_callable=AsyncMock, return_value=[]):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2148,7 +2148,7 @@ def test_download_and_import_stock_list_ai_parser_fallback(scheduler_db, test_us
          patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"), \
          patch("app.services.activity_service.match_email_to_entity", return_value=None):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2185,7 +2185,7 @@ def test_download_and_import_stock_list_creates_cards_and_mvh(scheduler_db, test
          patch("app.services.activity_service.match_email_to_entity", return_value=None), \
          patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2252,7 +2252,7 @@ def test_download_and_import_stock_list_updates_existing_mvh(scheduler_db, test_
          patch("app.services.activity_service.match_email_to_entity", return_value=None), \
          patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2295,7 +2295,7 @@ def test_download_and_import_stock_list_excess_list(scheduler_db, test_user, tes
          }), \
          patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2337,7 +2337,7 @@ def test_download_and_import_stock_list_skips_short_mpn(scheduler_db, test_user)
          patch("app.services.activity_service.match_email_to_entity", return_value=None), \
          patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2386,7 +2386,7 @@ def test_download_and_import_stock_list_commit_fails(scheduler_db, test_user):
          patch("app.services.activity_service.match_email_to_entity", return_value=None):
         scheduler_db.commit = _failing_commit
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2420,7 +2420,7 @@ def test_download_and_import_stock_list_no_vendor_email(scheduler_db, test_user)
          patch("app.vendor_utils.normalize_vendor_name", return_value="unknown"), \
          patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2475,7 +2475,7 @@ def test_download_and_import_stock_list_price_field_fallback(scheduler_db, test_
          patch("app.services.activity_service.match_email_to_entity", return_value=None), \
          patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2515,7 +2515,7 @@ def test_download_and_import_stock_list_teams_alert(
          patch("app.services.activity_service.match_email_to_entity", return_value=None), \
          patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock) as mock_alert:
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2555,7 +2555,7 @@ def test_download_and_import_stock_list_teams_alert_exception(
                side_effect=Exception("Teams error")):
         from app.scheduler import _download_and_import_stock_list
         # Should not raise
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2576,7 +2576,7 @@ def test_download_and_import_stock_list_null_att_data(scheduler_db, test_user):
     with patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="token"), \
          patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",
@@ -2605,7 +2605,7 @@ def test_mine_vendor_contacts_no_contacts(scheduler_db, test_user):
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _mine_vendor_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _mine_vendor_contacts(test_user, scheduler_db, is_backfill=False)
         )
 
@@ -2636,7 +2636,7 @@ def test_mine_vendor_contacts_creates_new_card(scheduler_db, test_user):
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _mine_vendor_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _mine_vendor_contacts(test_user, scheduler_db, is_backfill=True)
         )
 
@@ -2670,7 +2670,7 @@ def test_mine_vendor_contacts_updates_existing_card(scheduler_db, test_user, tes
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _mine_vendor_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _mine_vendor_contacts(test_user, scheduler_db, is_backfill=False)
         )
 
@@ -2697,7 +2697,7 @@ def test_mine_vendor_contacts_skips_empty_vendor_name(scheduler_db, test_user):
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _mine_vendor_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _mine_vendor_contacts(test_user, scheduler_db, is_backfill=False)
         )
 
@@ -2740,7 +2740,7 @@ def test_mine_vendor_contacts_commit_error(scheduler_db, test_user):
 
         scheduler_db.commit = _failing_commit
         from app.scheduler import _mine_vendor_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _mine_vendor_contacts(test_user, scheduler_db, is_backfill=False)
         )
         scheduler_db.commit = original_commit
@@ -2768,7 +2768,7 @@ def test_scan_outbound_rfqs_no_vendors(scheduler_db, test_user):
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _scan_outbound_rfqs
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_outbound_rfqs(test_user, scheduler_db, is_backfill=False)
         )
 
@@ -2792,7 +2792,7 @@ def test_scan_outbound_rfqs_updates_vendor_card(scheduler_db, test_user, test_ve
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _scan_outbound_rfqs
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_outbound_rfqs(test_user, scheduler_db, is_backfill=False)
         )
 
@@ -2818,7 +2818,7 @@ def test_scan_outbound_rfqs_unmatched_domain(scheduler_db, test_user):
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _scan_outbound_rfqs
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_outbound_rfqs(test_user, scheduler_db, is_backfill=False)
         )
 
@@ -2851,7 +2851,7 @@ def test_scan_outbound_rfqs_commit_error(scheduler_db, test_user, test_vendor_ca
 
         scheduler_db.commit = _failing_commit
         from app.scheduler import _scan_outbound_rfqs
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_outbound_rfqs(test_user, scheduler_db, is_backfill=True)
         )
         scheduler_db.commit = original_commit
@@ -2876,7 +2876,7 @@ def test_scan_outbound_rfqs_fallback_name_match(scheduler_db, test_user, test_ve
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _scan_outbound_rfqs
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_outbound_rfqs(test_user, scheduler_db, is_backfill=False)
         )
 
@@ -2900,7 +2900,7 @@ def test_sync_user_contacts_empty(scheduler_db, test_user):
 
     with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
         from app.scheduler import _sync_user_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _sync_user_contacts(test_user, scheduler_db)
         )
 
@@ -2928,7 +2928,7 @@ def test_sync_user_contacts_creates_vendor_card(scheduler_db, test_user):
          patch("app.vendor_utils.merge_emails_into_card", return_value=1) as mock_merge_e, \
          patch("app.vendor_utils.merge_phones_into_card") as mock_merge_p:
         from app.scheduler import _sync_user_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _sync_user_contacts(test_user, scheduler_db)
         )
 
@@ -2960,7 +2960,7 @@ def test_sync_user_contacts_uses_display_name_fallback(scheduler_db, test_user):
          patch("app.vendor_utils.merge_emails_into_card", return_value=0), \
          patch("app.vendor_utils.merge_phones_into_card"):
         from app.scheduler import _sync_user_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _sync_user_contacts(test_user, scheduler_db)
         )
 
@@ -2984,7 +2984,7 @@ def test_sync_user_contacts_skips_short_company(scheduler_db, test_user):
     with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
          patch("app.vendor_utils.merge_emails_into_card") as mock_merge:
         from app.scheduler import _sync_user_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _sync_user_contacts(test_user, scheduler_db)
         )
 
@@ -3001,7 +3001,7 @@ def test_sync_user_contacts_graph_error(scheduler_db, test_user):
 
     with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
         from app.scheduler import _sync_user_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _sync_user_contacts(test_user, scheduler_db)
         )
 
@@ -3040,7 +3040,7 @@ def test_sync_user_contacts_commit_error(scheduler_db, test_user):
          patch("app.vendor_utils.merge_phones_into_card"):
         scheduler_db.commit = _failing_commit
         from app.scheduler import _sync_user_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _sync_user_contacts(test_user, scheduler_db)
         )
         scheduler_db.commit = original_commit
@@ -3071,7 +3071,7 @@ def test_sync_user_contacts_flush_conflict(scheduler_db, test_user):
          patch("app.vendor_utils.normalize_vendor_name", return_value="conflict co"):
         scheduler_db.flush = _failing_flush
         from app.scheduler import _sync_user_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _sync_user_contacts(test_user, scheduler_db)
         )
         scheduler_db.flush = original_flush
@@ -3098,7 +3098,7 @@ def test_sync_user_contacts_existing_card(scheduler_db, test_user, test_vendor_c
          patch("app.vendor_utils.merge_emails_into_card", return_value=1) as mock_merge_e, \
          patch("app.vendor_utils.merge_phones_into_card") as mock_merge_p:
         from app.scheduler import _sync_user_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _sync_user_contacts(test_user, scheduler_db)
         )
 
@@ -3128,7 +3128,7 @@ def test_engagement_scoring_naive_datetime(scheduler_db):
         "app.scheduler._compute_vendor_scores_job", new_callable=AsyncMock
     ) as mock_compute:
         from app.scheduler import _job_engagement_scoring
-        asyncio.get_event_loop().run_until_complete(_job_engagement_scoring())
+        asyncio.run(_job_engagement_scoring())
         # Naive datetime should be made UTC-aware; 2h old = skip
         mock_compute.assert_not_called()
 
@@ -3168,7 +3168,7 @@ def test_mine_vendor_contacts_flush_conflict(scheduler_db, test_user):
 
         scheduler_db.flush = _failing_flush
         from app.scheduler import _mine_vendor_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _mine_vendor_contacts(test_user, scheduler_db, is_backfill=False)
         )
         scheduler_db.flush = original_flush
@@ -3203,7 +3203,7 @@ def test_deep_email_mining_empty_sender_names(scheduler_db, test_user):
          patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner_instance), \
          patch("app.services.deep_enrichment_service.link_contact_to_entities") as mock_link:
         from app.scheduler import _job_deep_email_mining
-        asyncio.get_event_loop().run_until_complete(_job_deep_email_mining())
+        asyncio.run(_job_deep_email_mining())
         mock_link.assert_called_once()
         # full_name should be None when sender_names is empty
         call_kwargs = mock_link.call_args[0][2]
@@ -3249,7 +3249,7 @@ def test_inbox_scan_safe_scan_user_not_found(scheduler_db, test_user):
         # Temporarily override get
         scheduler_db.get = _get_none_second_time
         from app.scheduler import _job_inbox_scan
-        asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+        asyncio.run(_job_inbox_scan())
         scheduler_db.get = original_get
 
         # _scan_user_inbox should NOT have been called
@@ -3314,7 +3314,7 @@ def test_inbox_scan_safe_scan_timeout_commit_exception(scheduler_db, test_user):
 
         with patch("asyncio.wait_for", side_effect=_mock_wait_for):
             from app.scheduler import _job_inbox_scan
-            asyncio.get_event_loop().run_until_complete(_job_inbox_scan())
+            asyncio.run(_job_inbox_scan())
 
         scheduler_db.commit = original_commit
 
@@ -3345,7 +3345,7 @@ def test_contacts_sync_user_not_found(scheduler_db, test_user):
     with patch("app.scheduler._sync_user_contacts", new_callable=AsyncMock) as mock_sync:
         scheduler_db.get = _get_none_on_second
         from app.scheduler import _job_contacts_sync
-        asyncio.get_event_loop().run_until_complete(_job_contacts_sync())
+        asyncio.run(_job_contacts_sync())
         scheduler_db.get = original_get
 
         mock_sync.assert_not_called()
@@ -3386,7 +3386,7 @@ def test_download_and_import_stock_list_final_commit_fails(scheduler_db, test_us
          patch("app.vendor_utils.normalize_vendor_name", return_value="arrow"), \
          patch("app.services.activity_service.match_email_to_entity", return_value=None):
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, mock_db,
                 message_id="msg1", attachment_id="att1",
@@ -3439,7 +3439,7 @@ def test_mine_vendor_contacts_final_commit_error(scheduler_db, test_user):
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _mine_vendor_contacts
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _mine_vendor_contacts(mock_user, mock_db, is_backfill=False)
         )
         mock_db.rollback.assert_called()
@@ -3483,7 +3483,7 @@ def test_scan_outbound_rfqs_final_commit_error(scheduler_db, test_user, test_ven
         mock_settings.inbox_backfill_days = 180
 
         from app.scheduler import _scan_outbound_rfqs
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _scan_outbound_rfqs(mock_user, mock_db, is_backfill=False)
         )
         mock_db.rollback.assert_called()
@@ -3527,7 +3527,7 @@ def test_download_and_import_stock_list_card_flush_conflict(scheduler_db, test_u
          patch("app.services.teams.send_stock_match_alert", new_callable=AsyncMock):
         scheduler_db.flush = _sometimes_failing_flush
         from app.scheduler import _download_and_import_stock_list
-        asyncio.get_event_loop().run_until_complete(
+        asyncio.run(
             _download_and_import_stock_list(
                 test_user, scheduler_db,
                 message_id="msg1", attachment_id="att1",

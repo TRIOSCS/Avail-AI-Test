@@ -1336,7 +1336,7 @@ class TestDeepEnrichCompany:
 
     @pytest.mark.asyncio
     async def test_deep_enrich_company_contact_discovery(self, db_session, enrichable_company):
-        """Mock contact finder creates SiteContacts for the company."""
+        """Mock contact finder queues contacts via route_enrichment."""
         mock_contacts = [
             {
                 "full_name": "New Company Contact",
@@ -1346,26 +1346,20 @@ class TestDeepEnrichCompany:
             },
         ]
         with _company_enrich_patches(contacts_return=mock_contacts):
-            result = await deep_enrich_company(enrichable_company.id, db_session)
+            with patch(
+                "app.services.deep_enrichment_service.route_enrichment",
+                return_value="pending",
+            ) as mock_route:
+                result = await deep_enrich_company(enrichable_company.id, db_session)
 
         assert result["status"] == "completed"
-        assert any("contact:newcontact@deepco.com" in f for f in result["enriched_fields"])
-
-        site = (
-            db_session.query(CustomerSite)
-            .filter(CustomerSite.company_id == enrichable_company.id)
-            .first()
-        )
-        sc = (
-            db_session.query(SiteContact)
-            .filter(
-                SiteContact.customer_site_id == site.id,
-                SiteContact.email == "newcontact@deepco.com",
-            )
-            .first()
-        )
-        assert sc is not None
-        assert sc.full_name == "New Company Contact"
+        assert any("contact_queued:newcontact@deepco.com" in f for f in result["enriched_fields"])
+        mock_route.assert_called_once()
+        call_args = mock_route.call_args
+        assert call_args[0][0] == db_session  # db
+        assert call_args[0][1] == "company"  # entity_type
+        assert call_args[0][2] == enrichable_company.id  # entity_id
+        assert "newcontact@deepco.com" in call_args[0][3]  # field_name
 
     @pytest.mark.asyncio
     async def test_deep_enrich_company_contact_discovery_error(self, db_session, enrichable_company):
