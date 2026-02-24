@@ -109,10 +109,7 @@
 
 <!-- SIDEBAR — v7 slide-out -->
 <aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
-    <div class="sb-logo" onclick="sidebarNav('reqs',document.getElementById('navReqs'))" style="cursor:pointer">
-        <img src="/static/avail_logo.png" alt="AVAIL" class="sb-logo-full">
-        <span class="sb-logo-letter">A</span>
-    </div>
+    <button type="button" class="sb-scroll-arrow sb-scroll-up" id="sbScrollUp" onclick="document.querySelector('.sidebar-nav').scrollBy({top:-80,behavior:'smooth'})" aria-label="Scroll up"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="18 15 12 9 6 15"/></svg></button>
     <nav class="sidebar-nav">
         <div class="sb-top-gradient" data-section="sourcing"></div>
         <div class="sb-nav-group" data-section="sourcing" style="--section-color:var(--sourcing-color);--section-dot:var(--sourcing-dot);--section-border:var(--sourcing-border)">
@@ -155,16 +152,20 @@
                 <button type="button" class="sb-nav-btn" id="navScorecards" data-tip="Scorecards" onclick="sidebarNav('performance',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="6"/><path d="M15.477 12.89L17 22l-5-3-5 3 1.523-9.11"/></svg></span> Scorecards</button>
             </div>
         </div>
-        <div class="sb-nav-group nav-group-bottom">
-            <button type="button" class="sb-nav-btn" id="navSettings" data-tip="Settings" onclick="sidebarNav('settings',this)" style="display:none"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings</button>
-            <button type="button" class="sb-nav-btn nav-logout" data-tip="Logout" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></span> Logout</button>
-        </div>
     </nav>
+    <button type="button" class="sb-scroll-arrow sb-scroll-down" id="sbScrollDown" onclick="document.querySelector('.sidebar-nav').scrollBy({top:80,behavior:'smooth'})" aria-label="Scroll down"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg></button>
     <div class="sidebar-footer">
-        <span class="ui">{{ user_name[:2]|upper if user_name else 'U' }}</span>
-        <span class="un">{{ user_name }}</span>
-        <span id="roleBadge" style="display:none"></span>
-        {% if is_admin %}<span class="rb">Admin</span>{% endif %}
+        <div class="sb-user-menu">
+            <span class="ui">{{ user_name[:2]|upper if user_name else 'U' }}</span>
+            <span class="un">{{ user_name }}</span>
+            <span id="roleBadge" style="display:none"></span>
+            {% if is_admin %}<span class="rb">Admin</span>{% endif %}
+            <div class="sb-user-popover">
+                <div class="sb-user-popover-name">{{ user_name }}{% if is_admin %} <span class="rb">Admin</span>{% endif %}</div>
+                <button type="button" id="navSettings" onclick="sidebarNav('settings',this)" style="display:none"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Settings</button>
+                <button type="button" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Logout</button>
+            </div>
+        </div>
         <span id="m365Status" style="display:none;font-size:10px;padding:4px 8px"><span id="m365Dot"></span><span id="m365Label"></span></span>
     </div>
 </aside>

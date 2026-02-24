@@ -5462,6 +5462,22 @@ function triggerMainSearch() {
 }
 
 // ── v7 Sidebar Navigation ───────────────────────────────────────────────
+function _updateSbScrollArrows() {
+    var nav = document.querySelector('.sidebar-nav');
+    var up = document.getElementById('sbScrollUp');
+    var down = document.getElementById('sbScrollDown');
+    if (!nav || !up || !down) return;
+    up.classList.toggle('visible', nav.scrollTop > 4);
+    down.classList.toggle('visible', nav.scrollTop + nav.clientHeight < nav.scrollHeight - 4);
+}
+(function() {
+    var nav = document.querySelector('.sidebar-nav');
+    if (nav) {
+        nav.addEventListener('scroll', _updateSbScrollArrows);
+        new ResizeObserver(_updateSbScrollArrows).observe(nav);
+    }
+})();
+
 function toggleSidebar() {
     document.body.classList.toggle('sb-open');
 }
