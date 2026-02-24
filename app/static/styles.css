@@ -121,7 +121,7 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 #reqList .card{padding:8px 14px;margin-bottom:4px}
 #reqList .req-row{margin-bottom:0}
 /* 8-column requisition grid */
-.col-headers{display:grid;grid-template-columns:180px 1fr 70px 80px 60px 90px 110px 70px;gap:0 8px;padding:4px 14px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:2}
+.col-headers{display:grid;grid-template-columns:180px 1fr 70px 80px 60px 90px 110px 70px;gap:0 8px;padding:4px 14px;font-size:10px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;border-bottom:1px solid #f0f2f5;position:sticky;top:0;background:var(--bg);z-index:2}
 .req-row{display:grid;grid-template-columns:180px 1fr 70px 80px 60px 90px 110px 70px;gap:0 8px;align-items:center;padding:7px 14px;border-bottom:1px solid rgba(0,0,0,.04);cursor:pointer;transition:all var(--speed-fast);border-left:3px solid transparent;font-size:12px}
 .req-row:hover{background:var(--blue-lt)}
 .c-id{font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1151,7 +1151,7 @@ h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color
 /* ── v7 Prototype Styles ────────────────────────────── */
 
 /* Top area — clean white header */
-.toparea{display:flex;align-items:center;gap:14px;padding:2px 20px;position:relative;z-index:200;transition:margin-left var(--speed-slow);background:var(--white);border-bottom:1px solid var(--border);box-shadow:none;margin-left:var(--sidebar-collapsed)}
+.toparea{display:flex;align-items:center;gap:14px;padding:2px 20px;position:relative;z-index:200;transition:margin-left var(--speed-slow);background:var(--white);border-bottom:1px solid #f0f2f5;box-shadow:none;margin-left:var(--sidebar-collapsed)}
 .toparea img{height:71px;width:calc(var(--sbw) - 16px);object-fit:contain;object-position:left center;flex-shrink:0}
 .topcontrols{display:flex;align-items:center;gap:12px;flex:1;min-width:0}
 .tb-group{display:flex;align-items:center;gap:6px;margin-left:auto;flex-shrink:0}
