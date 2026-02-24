@@ -549,6 +549,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (navBtn) navHighlight(navBtn);
         _navFromPopstate = false;
     }
+    // Set initial section gradient color from active nav button
+    var _initActiveBtn = document.querySelector('.sb-nav-btn.active');
+    if (_initActiveBtn) {
+        var _initSection = _initActiveBtn.closest('[data-section]');
+        var _initGradient = document.querySelector('.sb-top-gradient');
+        if (_initSection && _initGradient) _initGradient.dataset.section = _initSection.dataset.section;
+    }
     await loadRequisitions();
     // Restore drill-down from URL hash (e.g. #rfqs/123) or localStorage fallback
     if (!initView || initView === 'view-list') {
@@ -5460,9 +5467,33 @@ function toggleSidebar() {
     document.body.classList.toggle('sb-open');
 }
 
+function toggleSidebarGroup(headerEl) {
+    var group = headerEl.closest('.sb-nav-group');
+    if (!group) return;
+    var items = group.querySelector('.sb-group-items');
+    if (!items) return;
+    if (group.classList.contains('collapsed')) {
+        group.classList.remove('collapsed');
+        items.style.maxHeight = items.scrollHeight + 'px';
+        items.style.opacity = '1';
+        setTimeout(function() { items.style.maxHeight = 'none'; }, 260);
+    } else {
+        items.style.maxHeight = items.scrollHeight + 'px';
+        items.offsetHeight; // force reflow
+        items.style.maxHeight = '0';
+        items.style.opacity = '0';
+        group.classList.add('collapsed');
+    }
+}
+
 export function sidebarNav(page, el) {
-    document.querySelectorAll('.sidebar-nav button').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.sb-nav-btn').forEach(i => i.classList.remove('active'));
     if (el) el.classList.add('active');
+    var section = el && el.closest('[data-section]');
+    if (section) {
+        var gradient = document.querySelector('.sb-top-gradient');
+        if (gradient) gradient.dataset.section = section.dataset.section;
+    }
     // Close sidebar on mobile
     const sb = document.getElementById('sidebar');
     if (sb && sb.classList.contains('mobile-open')) toggleMobileSidebar();
@@ -5489,8 +5520,13 @@ export function sidebarNav(page, el) {
 }
 
 export function navHighlight(btn) {
-    document.querySelectorAll('.sidebar-nav button').forEach(i => i.classList.remove('active'));
+    document.querySelectorAll('.sb-nav-btn').forEach(i => i.classList.remove('active'));
     if (btn) btn.classList.add('active');
+    var section = btn && btn.closest('[data-section]');
+    if (section) {
+        var gradient = document.querySelector('.sb-top-gradient');
+        if (gradient) gradient.dataset.section = section.dataset.section;
+    }
     document.body.classList.remove('sb-open');
 }
 
@@ -9174,7 +9210,7 @@ function _gatherBugContext() {
     try {
         var onPill = document.querySelector('#mainPills .fp.on');
         if (onPill) activeView = onPill.dataset.view || onPill.textContent.trim();
-        var activeSidebar = document.querySelector('.sidebar-nav button.active');
+        var activeSidebar = document.querySelector('.sb-nav-btn.active');
         if (activeSidebar) activeView = activeSidebar.textContent.trim().replace(/^[\s\S]/, '').trim() + '/' + activeView;
     } catch(e) {}
     return {
@@ -9554,7 +9590,7 @@ Object.assign(window, {
     saveVendorLogCall, saveVendorLogNote, sendBatchRfq, setMainView,
     setRfqCondition, setStatusFilter, setVendorTier, showFileReady,
     submitLogOffer, submitPastedRows, submitTrouble, toggleMobileSidebar,
-    toggleMyAccounts, toggleNotifications, toggleSidebar, toggleStockImport,
+    toggleMyAccounts, toggleNotifications, toggleSidebar, toggleSidebarGroup, toggleStockImport,
     triggerMainSearch,
     // AI feature functions
     aiDraftRfq, ddAiCompare, aiNormalizeParts, aiParseReply,
