@@ -277,34 +277,14 @@ async def create_company(
                             apply_enrichment_to_company(c, enrichment)
                             s.commit()
 
-                    # Auto-discover contacts and attach to default site
+                    # Discover contacts but do NOT auto-add — let user review
                     from ...enrichment_service import find_suggested_contacts
-                    from ...models import SiteContact
                     contacts = await find_suggested_contacts(d, n)
                     if contacts:
-                        existing_emails = {
-                            sc.email.lower()
-                            for sc in s.query(SiteContact).filter(
-                                SiteContact.customer_site_id == sid,
-                                SiteContact.email.isnot(None),
-                            ).all()
-                        }
-                        added = 0
-                        for ct in contacts:
-                            email = (ct.get("email") or "").lower()
-                            if email and email not in existing_emails:
-                                s.add(SiteContact(
-                                    customer_site_id=sid,
-                                    full_name=ct.get("full_name"),
-                                    title=ct.get("title"),
-                                    email=email,
-                                    phone=ct.get("phone"),
-                                ))
-                                existing_emails.add(email)
-                                added += 1
-                        if added:
-                            s.commit()
-                            logger.info("Auto-discovered %d contacts for company %d", added, cid)
+                        logger.info(
+                            "Discovered %d suggested contacts for company %d — pending user review",
+                            len(contacts), cid,
+                        )
                 finally:
                     s.close()
             except Exception:

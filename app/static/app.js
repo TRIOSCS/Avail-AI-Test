@@ -775,6 +775,13 @@ export function showView(viewId) {
     // Toggle body class so CSS can adjust sidebar for settings view
     const isSettings = viewId === 'view-settings';
     document.body.classList.toggle('on-settings', isSettings);
+    // Close any open CRM drawers, reset split-pane state, and cancel in-flight fetches
+    if (typeof closeCustDrawer === 'function') try { closeCustDrawer(); } catch(e) {}
+    if (typeof closeProspectDrawer === 'function') try { closeProspectDrawer(); } catch(e) {}
+    if (typeof _abortAllCrmFetches === 'function') try { _abortAllCrmFetches(); } catch(e) {}
+    // Clear top breadcrumb when switching views (CRM views will re-set it)
+    const topBc = document.getElementById('topBreadcrumb');
+    if (topBc) topBc.style.display = 'none';
     // Hide topcontrols on settings; show pills/search/filters only on list view
     const topcontrols = document.getElementById('topcontrols');
     if (topcontrols) {

@@ -78,14 +78,13 @@ def link_contact_to_entities(db, sender_email: str, signature_data: dict) -> Non
                 )
                 db.add(contact)
 
-    # Try matching to Company by domain
+    # Try matching to Company by domain — route through enrichment queue for review
     companies = (
         db.query(Company)
         .filter(Company.domain == domain)
         .all()
     )
     for company in companies:
-        # Find any site for this company to attach the contact
         site = (
             db.query(CustomerSite)
             .filter(CustomerSite.company_id == company.id)
@@ -101,14 +100,23 @@ def link_contact_to_entities(db, sender_email: str, signature_data: dict) -> Non
                 .first()
             )
             if not existing:
-                sc = SiteContact(
-                    customer_site_id=site.id,
-                    full_name=full_name,
-                    title=title,
-                    email=sender_email.lower(),
-                    phone=phone,
+                contact_data = {
+                    "full_name": full_name,
+                    "title": title,
+                    "email": sender_email.lower(),
+                    "phone": phone,
+                    "source": "email_signature",
+                }
+                sig_conf = float(signature_data.get("confidence", 0.5))
+                route_enrichment(
+                    db, "company", company.id,
+                    f"new_contact:{sender_email.lower()}",
+                    None,
+                    json.dumps(contact_data),
+                    confidence=sig_conf,
+                    source="email_signature",
+                    enrichment_type="contact_info",
                 )
-                db.add(sc)
 
     try:
         db.flush()
@@ -187,6 +195,11 @@ def _apply_field_update(db, entity_type: str, entity_id: int, field_name: str, v
     """Apply a single field update to an entity."""
     from ..models import Company, VendorCard, VendorContact
 
+    # Handle contact creation for new_contact:email fields
+    if field_name.startswith("new_contact:"):
+        _apply_contact_creation(db, entity_type, entity_id, value)
+        return
+
     model_map = {
         "vendor_card": VendorCard,
         "company": Company,
@@ -210,6 +223,64 @@ def _apply_field_update(db, entity_type: str, entity_id: int, field_name: str, v
         setattr(entity, field_name, value)
     else:
         setattr(entity, field_name, value)
+
+
+def _apply_contact_creation(db, entity_type: str, entity_id: int, value) -> None:
+    """Create a contact from an approved enrichment queue item."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return
+    if not isinstance(value, dict):
+        return
+
+    email = (value.get("email") or "").lower()
+    if not email:
+        return
+
+    if entity_type == "vendor_card":
+        from ..models import VendorCard, VendorContact
+        card = db.get(VendorCard, entity_id)
+        if not card:
+            return
+        existing = db.query(VendorContact).filter(
+            VendorContact.vendor_card_id == entity_id,
+            VendorContact.email == email,
+        ).first()
+        if not existing:
+            db.add(VendorContact(
+                vendor_card_id=entity_id,
+                full_name=value.get("full_name"),
+                title=value.get("title"),
+                email=email,
+                phone=value.get("phone"),
+                linkedin_url=value.get("linkedin_url"),
+                source=value.get("source", "enrichment"),
+                confidence=70,
+                contact_type="individual",
+            ))
+            if email not in (card.emails or []):
+                card.emails = (card.emails or []) + [email]
+    elif entity_type == "company":
+        from ..models import CustomerSite, SiteContact
+        site = db.query(CustomerSite).filter(
+            CustomerSite.company_id == entity_id,
+        ).first()
+        if not site:
+            return
+        existing = db.query(SiteContact).filter(
+            SiteContact.customer_site_id == site.id,
+            SiteContact.email == email,
+        ).first()
+        if not existing:
+            db.add(SiteContact(
+                customer_site_id=site.id,
+                full_name=value.get("full_name"),
+                title=value.get("title"),
+                email=email,
+                phone=value.get("phone"),
+            ))
 
 
 def apply_queue_item(db, queue_item, user_id: int | None = None) -> bool:
@@ -522,12 +593,11 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
         except Exception as e:
             errors.append(f"clearbit: {e}")
 
-        # Contact discovery for company
+        # Contact discovery for company — route through enrichment queue for review
         try:
             from ..enrichment_service import find_suggested_contacts
             new_contacts = await find_suggested_contacts(domain, company.name)
             from ..models import CustomerSite, SiteContact
-            # Find a site to attach contacts to
             site = db.query(CustomerSite).filter(
                 CustomerSite.company_id == company_id
             ).first()
@@ -542,16 +612,24 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
                 for contact_data in new_contacts:
                     email = (contact_data.get("email") or "").lower()
                     if email and email not in existing_emails:
-                        sc = SiteContact(
-                            customer_site_id=site.id,
-                            full_name=contact_data.get("full_name"),
-                            title=contact_data.get("title"),
-                            email=email,
-                            phone=contact_data.get("phone"),
+                        confidence = 0.7
+                        src = contact_data.get("source", "unknown")
+                        if src == "apollo":
+                            confidence = 0.85
+                        elif src in ("hunter", "rocketreach", "clearbit"):
+                            confidence = 0.8
+                        route_enrichment(
+                            db, "company", company_id,
+                            f"new_contact:{email}",
+                            None,
+                            json.dumps(contact_data),
+                            confidence=confidence,
+                            source=src,
+                            enrichment_type="contact_info",
+                            job_id=job_id,
                         )
-                        db.add(sc)
                         existing_emails.add(email)
-                        enriched_fields.append(f"contact:{email}")
+                        enriched_fields.append(f"contact_queued:{email}")
         except Exception as e:
             errors.append(f"contact_discovery: {e}")
 

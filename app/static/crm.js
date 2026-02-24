@@ -51,6 +51,34 @@ function autoLogCrmCall(phone, companyId) {
     }).catch(function(e) { logCatchError('autoLogCrmCall', e); });
 }
 
+// ── Top bar view label ────────────────────────────────────────────────
+
+function _setTopViewLabel(label) {
+    const bc = document.getElementById('topBreadcrumb');
+    const bcText = document.getElementById('topBreadcrumbText');
+    const bcBack = bc?.querySelector('.breadcrumb-back');
+    if (bc) bc.style.display = label ? 'flex' : 'none';
+    if (bcText) bcText.textContent = label || '';
+    // Hide back button when just showing view name (not drilled down)
+    if (bcBack) bcBack.style.display = 'none';
+}
+
+function _setTopDrillLabel(label) {
+    const bc = document.getElementById('topBreadcrumb');
+    const bcText = document.getElementById('topBreadcrumbText');
+    const bcBack = bc?.querySelector('.breadcrumb-back');
+    if (bc) bc.style.display = 'flex';
+    if (bcText) bcText.textContent = label || '';
+    // Show back button when drilled into a record
+    if (bcBack) bcBack.style.display = '';
+}
+
+// ── Abort all CRM fetches (called from showView on tab switch) ────────
+function _abortAllCrmFetches() {
+    if (_custAbort) { try { _custAbort.abort(); } catch(e){} _custAbort = null; }
+    if (typeof _prospectAbort !== 'undefined' && _prospectAbort) { try { _prospectAbort.abort(); } catch(e){} _prospectAbort = null; }
+}
+
 // ── Customer Filter / Sort / Drawer Helpers ───────────────────────────
 
 let _custFilterMode = 'all';
@@ -74,6 +102,12 @@ async function showCustomers() {
     const viewEl = document.getElementById('view-customers');
     if (viewEl) viewEl.style.display = 'flex';
     setCurrentReqId(null);
+    // Reset stale state from previous session
+    _selectedCustId = null;
+    _custFilterMode = 'all';
+    document.querySelectorAll('#view-customers .chip-row .chip').forEach(c => c.classList.toggle('on', c.dataset.value === 'all'));
+    // Show view indicator in top bar
+    _setTopViewLabel('Accounts');
     // Role-based account filtering
     const isManagerOrAdmin = window.__isAdmin || ['manager','trader'].includes(window.userRole);
     const isSalesOnly = window.userRole === 'sales';
@@ -382,12 +416,9 @@ async function openCustDrawer(companyId, tab) {
         if (backdrop) backdrop.classList.add('open');
     }
     if (drawer) drawer.classList.add('open');
-    // Show breadcrumb in top bar
-    const bc = document.getElementById('topBreadcrumb');
-    const bcText = document.getElementById('topBreadcrumbText');
+    // Show drill-down breadcrumb in top bar
     const comp = crmCustomers.find(x => x.id === companyId);
-    if (bc) bc.style.display = 'flex';
-    if (bcText) bcText.textContent = comp ? comp.name.replace(/\s*(bucket|pass)\s*$/i, '').trim() : 'Account';
+    _setTopDrillLabel(comp ? comp.name.replace(/\s*(bucket|pass)\s*$/i, '').trim() : 'Account');
     // Ensure company data is loaded (may be called from Contacts view before CRM tab)
     if (!crmCustomers.find(x => x.id === companyId)) {
         try {
@@ -500,9 +531,8 @@ function closeCustDrawer() {
     if (viewEl) viewEl.classList.remove('cust-split-active');
     if (tableWrap) tableWrap.style.display = '';
     document.querySelectorAll('#custList tbody tr').forEach(r => r.classList.remove('active-row'));
-    // Hide breadcrumb
-    const bc = document.getElementById('topBreadcrumb');
-    if (bc) bc.style.display = 'none';
+    // Restore view label
+    _setTopViewLabel('Accounts');
 }
 
 async function analyzeCustomerTags(companyId) {
@@ -3227,8 +3257,21 @@ async function unifiedEnrichCompany(companyId) {
             body: { force: true },
         });
         if (res.status === 'completed') {
-            const n = (res.enriched_fields || []).length;
-            showToast(`Enrichment complete — ${n} field${n !== 1 ? 's' : ''} updated`, 'success');
+            const fields = res.enriched_fields || [];
+            const contactQueued = fields.filter(f => f.startsWith('contact_queued:')).length;
+            const dataFields = fields.filter(f => !f.startsWith('contact_queued:')).length;
+            let msg = `Enrichment complete — ${dataFields} field${dataFields !== 1 ? 's' : ''} updated`;
+            if (contactQueued) msg += `, ${contactQueued} contact${contactQueued !== 1 ? 's' : ''} pending review`;
+            showToast(msg, 'success');
+            // If contacts were queued, prompt user to review via suggested contacts modal
+            if (contactQueued) {
+                const c = crmCustomers.find(x => x.id === companyId);
+                if (c && c.domain) {
+                    setTimeout(() => openSuggestedContacts('site',
+                        (c.sites && c.sites[0]) ? c.sites[0].id : 0,
+                        c.domain, c.name), 500);
+                }
+            }
         } else {
             showToast('Enrichment: ' + (res.status || 'done'));
         }
@@ -5977,19 +6020,27 @@ async function showProspecting() {
     const viewEl = document.getElementById('view-prospecting');
     if (viewEl) viewEl.style.display = 'flex';
     setCurrentReqId(null);
+    // Reset stale state from previous session
+    _selectedProspectSiteId = null;
+    _prospectingData = [];
+    _setTopViewLabel('Prospecting');
     await loadProspecting();
 }
 
+let _prospectAbort = null;
 async function loadProspecting() {
+    if (_prospectAbort) { try { _prospectAbort.abort(); } catch(e){} }
+    _prospectAbort = new AbortController();
     const body = document.getElementById('prospectingBody');
-    if (body && !_prospectingData.length) body.innerHTML = '<tr><td colspan="7" class="empty"><div class="spinner"></div> Loading…</td></tr>';
+    if (body) body.innerHTML = '<tr><td colspan="7" class="empty"><div class="spinner"></div> Loading…</td></tr>';
     try {
         const endpoint = _prospectingTab === 'my-sites' ? '/api/prospecting/my-sites'
             : _prospectingTab === 'at-risk' ? '/api/prospecting/at-risk'
             : '/api/prospecting/pool';
-        _prospectingData = await apiFetch(endpoint) || [];
+        _prospectingData = await apiFetch(endpoint, {signal: _prospectAbort.signal}) || [];
         renderProspecting();
     } catch (e) {
+        if (e.name === 'AbortError') return;
         showToast('Failed to load prospecting data', 'error');
         console.error(e);
     }
@@ -6153,12 +6204,9 @@ async function openProspectDrawer(siteId) {
     }
     if (drawer) drawer.classList.add('open');
 
-    // Show breadcrumb
-    const bc = document.getElementById('topBreadcrumb');
-    const bcText = document.getElementById('topBreadcrumbText');
+    // Show drill-down breadcrumb
     const site = _prospectingData.find(s => s.site_id === siteId);
-    if (bc) bc.style.display = 'flex';
-    if (bcText) bcText.textContent = site ? (site.site_name || site.company_name || 'Site') : 'Site';
+    _setTopDrillLabel(site ? (site.site_name || site.company_name || 'Site') : 'Site');
 
     switchProspectDrawerTab('overview');
     document.querySelectorAll('#prospectDrawerTabs .drawer-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
@@ -6176,9 +6224,8 @@ function closeProspectDrawer() {
     if (miniList) miniList.classList.remove('open');
     if (viewEl) viewEl.classList.remove('prospect-split-active');
     if (tableWrap) tableWrap.style.display = '';
-    // Hide breadcrumb
-    const bc = document.getElementById('topBreadcrumb');
-    if (bc) bc.style.display = 'none';
+    // Restore view label
+    _setTopViewLabel('Prospecting');
 }
 
 function switchProspectDrawerTab(tab, btn) {
@@ -6342,6 +6389,7 @@ Object.assign(window, {
     selectCustomer, renderCustomerDetail, switchCustTab, cycleCustSort, saveCustNotes,
     logCustNote, saveContactNotes, logContactNote, _loadContactRecentNotes, toggleContactArchive,
     toggleStrategic, _renderMiniList, _renderMiniListFromSearch, _miniListKeyNav,
+    _setTopViewLabel, _setTopDrillLabel, _abortAllCrmFetches,
     analyzeCustomerTags, setCustFilter, openCustDrawer, closeCustDrawer, switchCustDrawerTab,
     toggleCustCheckbox, toggleAllCustCheckboxes, clearCustSelection,
     bulkAssignOwner, bulkExportAccounts, toggleSiteAccordion,
