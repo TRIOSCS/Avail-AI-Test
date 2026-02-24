@@ -380,3 +380,287 @@ def hot_offers(
         })
 
     return results
+
+
+@router.get("/buyer-brief")
+def buyer_brief(
+    days: int = Query(default=7, ge=1, le=90),
+    scope: str = Query(default="my", pattern="^(my|team)$"),
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    """Buyer Command Center data: KPIs, priority tiles, follow-up tiles.
+
+    scope='my' filters to current user's work; scope='team' shows all.
+    """
+    from ..models.offers import Contact, Offer
+    from ..models.quotes import BuyPlan, Quote
+    from ..models.sourcing import Requisition
+
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=days)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # ── Scope filter helper ──
+    def _user_filter(col):
+        """Return filter clause: restrict to user if scope='my'."""
+        if scope == "my":
+            return col == user.id
+        return col.isnot(None)  # team: all non-null
+
+    # ── KPI 1: Sourcing Ratio (reqs with ≥1 offer / total reqs this month) ──
+    total_reqs_q = (
+        db.query(func.count(Requisition.id))
+        .filter(Requisition.created_at >= month_start, _user_filter(Requisition.created_by))
+        .scalar()
+    ) or 0
+
+    sourced_reqs_q = 0
+    if total_reqs_q:
+        sourced_reqs_q = (
+            db.query(func.count(Requisition.id.distinct()))
+            .join(Offer, Offer.requisition_id == Requisition.id)
+            .filter(
+                Requisition.created_at >= month_start,
+                _user_filter(Requisition.created_by),
+            )
+            .scalar()
+        ) or 0
+
+    sourcing_ratio = round(sourced_reqs_q / total_reqs_q * 100) if total_reqs_q else 0
+
+    # ── KPI 2: Offer→Quote Rate (offers converted / total offers) ──
+    total_offers_month = (
+        db.query(func.count(Offer.id))
+        .filter(Offer.created_at >= month_start, _user_filter(Offer.entered_by_id))
+        .scalar()
+    ) or 0
+
+    quoted_offers_month = (
+        db.query(func.count(Offer.id))
+        .filter(
+            Offer.created_at >= month_start,
+            _user_filter(Offer.entered_by_id),
+            Offer.attribution_status == "converted",
+        )
+        .scalar()
+    ) or 0
+
+    offer_quote_rate = round(quoted_offers_month / total_offers_month * 100) if total_offers_month else 0
+
+    # ── KPI 3: Quote→Win Rate ──
+    won_quotes = (
+        db.query(func.count(Quote.id))
+        .filter(Quote.result == "won", Quote.result_at >= month_start, _user_filter(Quote.created_by_id))
+        .scalar()
+    ) or 0
+    lost_quotes = (
+        db.query(func.count(Quote.id))
+        .filter(Quote.result == "lost", Quote.result_at >= month_start, _user_filter(Quote.created_by_id))
+        .scalar()
+    ) or 0
+    quote_win_rate = round(won_quotes / (won_quotes + lost_quotes) * 100) if (won_quotes + lost_quotes) else 0
+
+    # ── KPI 4: Buy Plan→PO Rate ──
+    approved_bps = (
+        db.query(func.count(BuyPlan.id))
+        .filter(
+            BuyPlan.submitted_at >= month_start,
+            _user_filter(BuyPlan.submitted_by_id),
+            BuyPlan.status.in_(("approved", "po_entered", "po_confirmed", "complete")),
+        )
+        .scalar()
+    ) or 0
+    total_bps = (
+        db.query(func.count(BuyPlan.id))
+        .filter(BuyPlan.submitted_at >= month_start, _user_filter(BuyPlan.submitted_by_id))
+        .scalar()
+    ) or 0
+    po_confirmed_bps = (
+        db.query(func.count(BuyPlan.id))
+        .filter(
+            BuyPlan.submitted_at >= month_start,
+            _user_filter(BuyPlan.submitted_by_id),
+            BuyPlan.status.in_(("po_confirmed", "complete")),
+        )
+        .scalar()
+    ) or 0
+    buyplan_po_rate = round(po_confirmed_bps / total_bps * 100) if total_bps else 0
+
+    # ── Tile 1: New Requirements (active reqs in window, check for offers) ──
+    new_reqs_q = (
+        db.query(Requisition)
+        .filter(
+            Requisition.created_at >= cutoff,
+            Requisition.status.in_(("open", "active")),
+            _user_filter(Requisition.created_by),
+        )
+        .order_by(Requisition.created_at.desc())
+        .limit(15)
+        .all()
+    )
+    new_req_ids = [r.id for r in new_reqs_q]
+    reqs_with_offers = set()
+    if new_req_ids:
+        rows = (
+            db.query(Offer.requisition_id)
+            .filter(Offer.requisition_id.in_(new_req_ids))
+            .distinct()
+            .all()
+        )
+        reqs_with_offers = {r.requisition_id for r in rows}
+
+    new_requirements = []
+    for r in new_reqs_q:
+        age_hours = (now - _ensure_aware(r.created_at)).total_seconds() / 3600 if r.created_at else 0
+        new_requirements.append({
+            "id": r.id,
+            "name": r.name,
+            "customer_name": r.customer_name,
+            "has_offers": r.id in reqs_with_offers,
+            "deadline": r.deadline,
+            "age_label": _age_label(age_hours),
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        })
+
+    # ── Tile 2: Offers to Review (needs_review status) ──
+    review_offers = (
+        db.query(Offer)
+        .filter(Offer.status == "needs_review")
+        .order_by(Offer.created_at.desc())
+        .limit(15)
+        .all()
+    )
+    offers_to_review = []
+    for o in review_offers:
+        age_hours = (now - _ensure_aware(o.created_at)).total_seconds() / 3600 if o.created_at else 0
+        offers_to_review.append({
+            "id": o.id,
+            "requisition_id": o.requisition_id,
+            "vendor_name": o.vendor_name,
+            "mpn": o.mpn,
+            "unit_price": float(o.unit_price) if o.unit_price else None,
+            "source": o.source,
+            "age_label": _age_label(age_hours),
+        })
+
+    # ── Tile 3: Awaiting Vendor Response (contacts sent, no response) ──
+    awaiting_q = (
+        db.query(Contact)
+        .filter(
+            Contact.status == "sent",
+            Contact.created_at >= cutoff,
+            _user_filter(Contact.user_id),
+        )
+        .order_by(Contact.created_at.asc())
+        .limit(15)
+        .all()
+    )
+    awaiting_vendor = []
+    for c in awaiting_q:
+        wait_hours = (now - _ensure_aware(c.created_at)).total_seconds() / 3600 if c.created_at else 0
+        awaiting_vendor.append({
+            "id": c.id,
+            "requisition_id": c.requisition_id,
+            "vendor_name": c.vendor_name,
+            "contact_type": c.contact_type,
+            "wait_label": _age_label(wait_hours),
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        })
+
+    # ── Tile 4: Quotes Due Soon (approaching deadlines) ──
+    deadline_reqs = (
+        db.query(Requisition)
+        .filter(
+            Requisition.deadline.isnot(None),
+            Requisition.status.in_(("open", "active", "sourcing")),
+            _user_filter(Requisition.created_by),
+        )
+        .all()
+    )
+    quotes_due_soon = []
+    for r in deadline_reqs:
+        dl = r.deadline
+        if dl == "ASAP":
+            urgency = "critical"
+            days_left = 0
+        else:
+            try:
+                from datetime import date as date_type
+
+                dl_date = datetime.fromisoformat(dl).date() if "T" in dl else date_type.fromisoformat(dl)
+                days_left = (dl_date - now.date()).days
+                if days_left <= 0:
+                    urgency = "critical"
+                elif days_left <= 3:
+                    urgency = "warning"
+                else:
+                    urgency = "normal"
+            except (ValueError, TypeError):
+                continue
+        quotes_due_soon.append({
+            "id": r.id,
+            "name": r.name,
+            "deadline": dl,
+            "days_left": days_left,
+            "urgency": urgency,
+        })
+    quotes_due_soon.sort(key=lambda x: x["days_left"])
+    quotes_due_soon = quotes_due_soon[:15]
+
+    # ── Tile 5: Pipeline Summary ──
+    pipeline_active = (
+        db.query(func.count(Requisition.id))
+        .filter(Requisition.status.in_(("open", "active", "sourcing")), _user_filter(Requisition.created_by))
+        .scalar()
+    ) or 0
+    pipeline_quoted = (
+        db.query(func.count(Quote.id))
+        .filter(Quote.status == "sent", Quote.result.is_(None), _user_filter(Quote.created_by_id))
+        .scalar()
+    ) or 0
+    pipeline_won = won_quotes
+    pipeline_buyplans = approved_bps
+
+    return {
+        "kpis": {
+            "sourcing_ratio": sourcing_ratio,
+            "total_reqs": total_reqs_q,
+            "sourced_reqs": sourced_reqs_q,
+            "offer_quote_rate": offer_quote_rate,
+            "total_offers": total_offers_month,
+            "quoted_offers": quoted_offers_month,
+            "quote_win_rate": quote_win_rate,
+            "won": won_quotes,
+            "lost": lost_quotes,
+            "buyplan_po_rate": buyplan_po_rate,
+            "total_buyplans": total_bps,
+            "confirmed_pos": po_confirmed_bps,
+        },
+        "new_requirements": new_requirements,
+        "offers_to_review": offers_to_review,
+        "awaiting_vendor": awaiting_vendor,
+        "quotes_due_soon": quotes_due_soon,
+        "pipeline": {
+            "active_reqs": pipeline_active,
+            "quotes_out": pipeline_quoted,
+            "won_this_month": pipeline_won,
+            "buyplans_approved": pipeline_buyplans,
+        },
+    }
+
+
+def _ensure_aware(dt):
+    """Ensure a datetime is timezone-aware (SQLite strips tzinfo)."""
+    if dt and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _age_label(hours: float) -> str:
+    """Convert hours-old to human-readable label."""
+    if hours < 1:
+        return "just now"
+    if hours < 24:
+        return f"{int(hours)}h ago"
+    return f"{int(hours / 24)}d ago"

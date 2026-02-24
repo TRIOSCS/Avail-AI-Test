@@ -1765,8 +1765,23 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .cc-card-scroll::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 .cc-view-all{padding:6px 4px 2px;border-top:1px solid var(--border);margin-top:4px}
 .cc-urgency-red{color:var(--red)}.cc-urgency-amber{color:var(--amber)}.cc-urgency-blue{color:var(--blue)}
+/* Command Center perspective toggle (Sales ↔ Purchasing for multi-role) */
+.cc-persp-toggle{display:inline-flex;gap:2px;background:var(--surface);border-radius:var(--radius);padding:2px;margin-left:12px;border:1px solid var(--border)}
+.cc-persp-btn{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;border:none;border-radius:calc(var(--radius) - 2px);background:transparent;font-size:11px;font-weight:600;color:var(--text2);cursor:pointer;transition:all .15s;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.cc-persp-btn:hover{color:var(--text);background:rgba(0,0,0,.03)}
+.cc-persp-btn.on{color:var(--white);box-shadow:0 1px 3px rgba(0,0,0,.12)}
+.cc-persp-purchasing.on{background:var(--sourcing-color)}
+.cc-persp-sales.on{background:var(--blue)}
+/* Buyer Command Center extras */
+.cc-stat-row-buyer .cc-stat{position:relative}
+.cc-stat-sub{font-size:9px;color:var(--muted);margin-top:1px;text-align:center}
+.cc-pipeline-bar{display:flex;align-items:center;gap:6px;padding:8px 12px;margin-bottom:10px;background:var(--surface);border-radius:var(--radius);font-size:12px;color:var(--text2)}
+.cc-pipe-item{display:flex;align-items:center;gap:3px}
+.cc-pipe-num{font-weight:700;color:var(--text);font-size:14px}
+.cc-pipe-sep{color:var(--muted);font-size:10px}
+.cc-badge-green{background:var(--green-lt,#e6f7ee);color:var(--green)}
 @media(max-width:1100px){.cc-cards-grid{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:768px){.cc-stat-row{flex-wrap:wrap}.cc-stat{min-width:calc(50% - 4px)}.cc-cards-grid{grid-template-columns:1fr}}
+@media(max-width:768px){.cc-stat-row{flex-wrap:wrap}.cc-stat{min-width:calc(50% - 4px)}.cc-cards-grid{grid-template-columns:1fr}.cc-pipeline-bar{flex-wrap:wrap}}
 
 /* ── Engagement Ring (SVG) ───────────────────────────────── */
 .eng-ring{width:44px;height:44px;flex-shrink:0}

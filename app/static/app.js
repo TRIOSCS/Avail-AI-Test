@@ -525,8 +525,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         initBaseHash = 'rfqs';
     }
     const initView = _hashToView[initBaseHash];
-    // Default sales users to dashboard when no hash specified
-    const shouldDefaultDashboard = !initHash && window.userRole === 'sales';
+    // Auto-load Command Center on first visit or after 3+ hours of inactivity
+    const _lastActivity = parseInt(localStorage.getItem('_lastActivityTs') || '0');
+    const _inactiveHours = (Date.now() - _lastActivity) / 3600000;
+    const shouldDefaultDashboard = !initHash && (_lastActivity === 0 || _inactiveHours >= 3);
+    localStorage.setItem('_lastActivityTs', String(Date.now()));
     const effectiveView = shouldDefaultDashboard ? 'view-dashboard' : initView;
     if (effectiveView && effectiveView !== 'view-list') {
         _navFromPopstate = true;
@@ -1208,6 +1211,8 @@ function showContacts() {
 }
 
 let _dashPeriod = '7d';
+let _buyerScope = 'my';
+let _dashPerspective = null; // 'sales' or 'purchasing' — null = auto from role
 
 function setDashPeriod(period, btn) {
     _dashPeriod = period;
@@ -1216,8 +1221,69 @@ function setDashPeriod(period, btn) {
     loadDashboard();
 }
 
+function setBuyerScope(scope, btn) {
+    _buyerScope = scope;
+    document.querySelectorAll('#buyerScopePills .chip').forEach(b => b.classList.remove('on'));
+    if (btn) btn.classList.add('on');
+    loadDashboard();
+}
+
+function setDashPerspective(p, btn) {
+    _dashPerspective = p;
+    document.querySelectorAll('#ccPerspectivePills .cc-persp-btn').forEach(b => b.classList.remove('on'));
+    if (btn) btn.classList.add('on');
+    // Remove scope toggle when switching — it gets rebuilt if needed
+    const scopePills = document.getElementById('buyerScopePills');
+    if (scopePills) scopePills.remove();
+    loadDashboard();
+}
+
+function _isMultiRole() {
+    return ['trader','manager','admin'].includes(window.userRole) || window.__isAdmin;
+}
+
+function _effectivePerspective() {
+    if (_dashPerspective) return _dashPerspective;
+    // Auto: buyer→purchasing, sales→sales, multi-role→purchasing
+    return window.userRole === 'sales' ? 'sales' : 'purchasing';
+}
+
 function showDashboard() {
     showView('view-dashboard');
+    const header = document.querySelector('#view-dashboard > div:first-child');
+    if (!header) { loadDashboard(); return; }
+
+    // Build perspective toggle for multi-role users (trader/manager/admin)
+    if (_isMultiRole()) {
+        let toggle = document.getElementById('ccPerspectivePills');
+        if (!toggle) {
+            toggle = document.createElement('div');
+            toggle.className = 'cc-persp-toggle';
+            toggle.id = 'ccPerspectivePills';
+            const eff = _effectivePerspective();
+            toggle.innerHTML = `<button class="cc-persp-btn cc-persp-purchasing ${eff==='purchasing'?'on':''}" onclick="setDashPerspective('purchasing',this)"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> Purchasing</button><button class="cc-persp-btn cc-persp-sales ${eff==='sales'?'on':''}" onclick="setDashPerspective('sales',this)"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Sales</button>`;
+            const h2 = header.querySelector('h2');
+            if (h2) h2.after(toggle);
+        }
+    }
+
+    // Build scope toggle (My Work / Team) for purchasing perspective
+    if (_effectivePerspective() === 'purchasing') {
+        let scopePills = document.getElementById('buyerScopePills');
+        if (!scopePills) {
+            scopePills = document.createElement('div');
+            scopePills.className = 'chip-row';
+            scopePills.id = 'buyerScopePills';
+            scopePills.style.cssText = 'margin:0';
+            scopePills.innerHTML = `<span class="chip ${_buyerScope==='my'?'on':''}" onclick="setBuyerScope('my',this)">My Work</span><span class="chip ${_buyerScope==='team'?'on':''}" onclick="setBuyerScope('team',this)">Team</span>`;
+            const periodPills = document.getElementById('dashPeriodPills');
+            if (periodPills) periodPills.parentElement.insertBefore(scopePills, periodPills);
+        }
+    } else {
+        const scopePills = document.getElementById('buyerScopePills');
+        if (scopePills) scopePills.remove();
+    }
+
     loadDashboard();
 }
 
@@ -1242,6 +1308,11 @@ async function loadDashboard() {
     const el = document.getElementById('dashboardContent');
     if (!el) return;
     el.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading Command Center\u2026</div>';
+
+    // Route based on perspective (purchasing = buyer CC, sales = sales CC)
+    if (_effectivePerspective() === 'purchasing') {
+        return loadBuyerDashboard(el);
+    }
 
     try {
         const daysParam = _dashPeriod === '30d' ? 30 : _dashPeriod === '90d' ? 90 : 7;
@@ -1452,6 +1523,181 @@ async function loadDashboard() {
     } catch (err) {
         console.error('loadDashboard error:', err);
         el.innerHTML = '<p class="empty">Failed to load Command Center data.</p>';
+    }
+}
+
+async function loadBuyerDashboard(el) {
+    try {
+        const daysParam = _dashPeriod === '30d' ? 30 : _dashPeriod === '90d' ? 90 : 7;
+        const [brief, hotOffers] = await Promise.all([
+            apiFetch(`/api/dashboard/buyer-brief?days=${daysParam}&scope=${_buyerScope}`).catch(() => null),
+            apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(() => []),
+        ]);
+
+        if (!brief) {
+            el.innerHTML = '<p class="empty">Failed to load buyer data.</p>';
+            return;
+        }
+
+        const kpis = brief.kpis || {};
+        const pipeline = brief.pipeline || {};
+        const newReqs = brief.new_requirements || [];
+        const reviewOffers = brief.offers_to_review || [];
+        const awaitingVendor = brief.awaiting_vendor || [];
+        const quotesDue = brief.quotes_due_soon || [];
+        const hotList = Array.isArray(hotOffers) ? hotOffers : [];
+
+        let html = '';
+
+        // ── KPI Stat Row ──
+        html += `<div class="cc-stat-row cc-stat-row-buyer">
+            <div class="cc-stat">
+                <div class="cc-stat-num" style="color:var(--sourcing-color)">${kpis.sourcing_ratio || 0}%</div>
+                <div class="cc-stat-label">Sourcing Ratio</div>
+                <div class="cc-stat-sub">${kpis.sourced_reqs || 0}/${kpis.total_reqs || 0} reqs</div>
+            </div>
+            <div class="cc-stat">
+                <div class="cc-stat-num" style="color:var(--blue)">${kpis.offer_quote_rate || 0}%</div>
+                <div class="cc-stat-label">Offer&rarr;Quote</div>
+                <div class="cc-stat-sub">${kpis.quoted_offers || 0}/${kpis.total_offers || 0} offers</div>
+            </div>
+            <div class="cc-stat">
+                <div class="cc-stat-num" style="color:var(--green)">${kpis.quote_win_rate || 0}%</div>
+                <div class="cc-stat-label">Win Rate</div>
+                <div class="cc-stat-sub">${kpis.won || 0}W / ${kpis.lost || 0}L</div>
+            </div>
+            <div class="cc-stat">
+                <div class="cc-stat-num" style="color:var(--purple)">${kpis.buyplan_po_rate || 0}%</div>
+                <div class="cc-stat-label">BP&rarr;PO</div>
+                <div class="cc-stat-sub">${kpis.confirmed_pos || 0}/${kpis.total_buyplans || 0} plans</div>
+            </div>
+        </div>`;
+
+        // ── Pipeline Summary Bar ──
+        html += `<div class="cc-pipeline-bar">
+            <span class="cc-pipe-item"><span class="cc-pipe-num">${pipeline.active_reqs || 0}</span> Active</span>
+            <span class="cc-pipe-sep">&rarr;</span>
+            <span class="cc-pipe-item"><span class="cc-pipe-num">${pipeline.quotes_out || 0}</span> Quoted</span>
+            <span class="cc-pipe-sep">&rarr;</span>
+            <span class="cc-pipe-item" style="color:var(--green)"><span class="cc-pipe-num">${pipeline.won_this_month || 0}</span> Won</span>
+            <span class="cc-pipe-sep">&rarr;</span>
+            <span class="cc-pipe-item" style="color:var(--purple)"><span class="cc-pipe-num">${pipeline.buyplans_approved || 0}</span> Buy Plans</span>
+        </div>`;
+
+        // ── Cards Grid ──
+        html += '<div class="cc-cards-grid">';
+
+        // Card 1: New Requirements
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--blue)">&#9679;</span> New Requirements <span class="cc-card-count">${newReqs.length}</span></h3>`;
+        if (newReqs.length) {
+            html += '<div class="cc-card-scroll">';
+            html += newReqs.map(r => {
+                const dotColor = r.deadline === 'ASAP' ? 'var(--red)' : r.has_offers ? 'var(--green)' : 'var(--amber)';
+                const badge = r.has_offers ? '<span class="cc-row-badge cc-badge-green">has offers</span>' : '';
+                return `<div class="cc-row" onclick="goToReq(${r.id})">
+                    <span class="cc-dot" style="background:${dotColor}"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
+                        <span class="cc-row-detail">${r.customer_name ? esc(r.customer_name) + ' &middot; ' : ''}${r.age_label}${r.deadline ? ' &middot; ' + esc(r.deadline) : ''}</span>
+                    </div>
+                    ${badge}
+                </div>`;
+            }).join('');
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No new requirements.</p>';
+        }
+        html += '</div>';
+
+        // Card 2: Offers to Review
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--amber)">&#9679;</span> Offers to Review <span class="cc-card-count">${reviewOffers.length}</span></h3>`;
+        if (reviewOffers.length) {
+            html += '<div class="cc-card-scroll">';
+            html += reviewOffers.map(o => {
+                const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
+                return `<div class="cc-row" onclick="goToReq(${o.requisition_id})">
+                    <span class="cc-dot" style="background:var(--amber)"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(o.vendor_name)}</span>
+                        <span class="cc-row-detail"><span class="mono">${esc(o.mpn)}</span> &middot; ${price} &middot; ${o.age_label}</span>
+                    </div>
+                    <span class="cc-row-badge">${o.source || 'manual'}</span>
+                </div>`;
+            }).join('');
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No offers pending review.</p>';
+        }
+        html += '</div>';
+
+        // Card 3: Awaiting Vendor Response
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Awaiting Vendor Response <span class="cc-card-count">${awaitingVendor.length}</span></h3>`;
+        if (awaitingVendor.length) {
+            html += '<div class="cc-card-scroll">';
+            html += awaitingVendor.map(c => {
+                const waitH = c.wait_label || '';
+                const dotColor = waitH.includes('d ago') ? 'var(--red)' : 'var(--amber)';
+                return `<div class="cc-row" onclick="goToReq(${c.requisition_id})">
+                    <span class="cc-dot" style="background:${dotColor}"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(c.vendor_name)}</span>
+                        <span class="cc-row-detail">${c.contact_type || 'RFQ'} &middot; sent ${waitH}</span>
+                    </div>
+                </div>`;
+            }).join('');
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No pending vendor responses.</p>';
+        }
+        html += '</div>';
+
+        // Card 4: Quotes Due Soon
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Quotes Due Soon <span class="cc-card-count">${quotesDue.length}</span></h3>`;
+        if (quotesDue.length) {
+            html += '<div class="cc-card-scroll">';
+            html += quotesDue.map(r => {
+                const dotColor = r.urgency === 'critical' ? 'var(--red)' : r.urgency === 'warning' ? 'var(--amber)' : 'var(--green)';
+                const dlLabel = r.deadline === 'ASAP' ? 'ASAP' : r.days_left <= 0 ? Math.abs(r.days_left) + 'd overdue' : r.days_left + 'd left';
+                return `<div class="cc-row" onclick="goToReq(${r.id})">
+                    <span class="cc-dot" style="background:${dotColor}"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
+                        <span class="cc-row-detail">${dlLabel}</span>
+                    </div>
+                </div>`;
+            }).join('');
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No upcoming deadlines.</p>';
+        }
+        html += '</div>';
+
+        // Card 5: Hot Offers
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--green)">&#9679;</span> Hot Offers <span class="cc-card-count">${hotList.length}</span></h3>`;
+        if (hotList.length) {
+            html += '<div class="cc-card-scroll">';
+            html += hotList.map(o => {
+                const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
+                return `<div class="cc-row" onclick="goToReq(${o.requisition_id})">
+                    <span class="cc-dot" style="background:var(--green)"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(o.vendor_name)}</span>
+                        <span class="cc-row-detail"><span class="mono">${esc(o.mpn)}</span> &middot; ${price} &middot; ${o.age_label}</span>
+                    </div>
+                </div>`;
+            }).join('');
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No new offers.</p>';
+        }
+        html += '</div>';
+
+        html += '</div>'; // close cc-cards-grid
+
+        el.innerHTML = html;
+    } catch (err) {
+        console.error('loadBuyerDashboard error:', err);
+        el.innerHTML = '<p class="empty">Failed to load Buyer Command Center data.</p>';
     }
 }
 
@@ -5722,8 +5968,17 @@ function toggleSidebarGroup(headerEl) {
 }
 
 export function sidebarNav(page, el) {
+    // Track activity for auto-dashboard on return
+    localStorage.setItem('_lastActivityTs', String(Date.now()));
     document.querySelectorAll('.sb-nav-btn').forEach(i => i.classList.remove('active'));
     if (el) el.classList.add('active');
+    // Highlight both Command Center (top) and Dashboard (insight) for dashboard view
+    if (page === 'dashboard') {
+        const ccBtn = document.getElementById('navCmdCenter');
+        const dbBtn = document.getElementById('navDashboard');
+        if (ccBtn) ccBtn.classList.add('active');
+        if (dbBtn) dbBtn.classList.add('active');
+    }
     var section = el && el.closest('[data-section]');
     if (section) {
         var gradient = document.querySelector('.sb-top-gradient');
