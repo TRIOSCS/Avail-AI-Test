@@ -1291,7 +1291,7 @@ async function loadDashboard() {
         // Card 1: Needs Attention (revenue-enhanced)
         html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Needs Attention <span class="cc-card-count">${attnList.length}</span></h3>`;
         if (attnList.length) {
-            html += attnList.slice(0, 8).map(a => {
+            html += attnList.slice(0, 5).map(a => {
                 const hasQuote = a.open_quote_value > 0;
                 const neverContacted = !a.last_outreach_at;
                 const dotColor = (neverContacted || (hasQuote && a.days_since_contact >= 5)) ? 'var(--red)' : 'var(--amber)';
@@ -1317,7 +1317,7 @@ async function loadDashboard() {
         const awaitingQuotes = quoteList.filter(q => q.status === 'sent' && !q.result).sort((a, b) => new Date(a.sent_at || 0) - new Date(b.sent_at || 0));
         html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--amber)">&#9679;</span> Quotes Awaiting Response <span class="cc-card-count">${awaitingQuotes.length}</span></h3>`;
         if (awaitingQuotes.length) {
-            html += awaitingQuotes.slice(0, 6).map(q => {
+            html += awaitingQuotes.slice(0, 5).map(q => {
                 const daysSent = q.sent_at ? Math.floor((now - new Date(q.sent_at)) / 86400000) : 0;
                 const dotColor = daysSent >= 7 ? 'var(--red)' : daysSent >= 3 ? 'var(--amber)' : 'var(--green)';
                 return `<div class="cc-row" onclick="goToReq(${q.requisition_id || q.id})">
@@ -1337,7 +1337,7 @@ async function loadDashboard() {
         const readyToQuote = myReqs.filter(r => ['open','active','sourcing'].includes(r.status) && (r.offer_count || 0) > 0 && (r.quote_count || 0) === 0);
         html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--blue)">&#9679;</span> Ready to Quote <span class="cc-card-count">${readyToQuote.length}</span></h3>`;
         if (readyToQuote.length) {
-            html += readyToQuote.slice(0, 6).map(r => `<div class="cc-row" onclick="goToReq(${r.id})">
+            html += readyToQuote.slice(0, 5).map(r => `<div class="cc-row" onclick="goToReq(${r.id})">
                 <span class="cc-dot" style="background:var(--blue)"></span>
                 <div class="cc-row-body">
                     <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
@@ -1358,7 +1358,7 @@ async function loadDashboard() {
         });
         html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Upcoming Deadlines <span class="cc-card-count">${withDeadline.length}</span></h3>`;
         if (withDeadline.length) {
-            html += withDeadline.slice(0, 6).map(r => {
+            html += withDeadline.slice(0, 5).map(r => {
                 let dotColor = 'var(--green)';
                 let deadlineLabel = r.deadline;
                 if (r.deadline === 'ASAP') {
@@ -1383,13 +1383,11 @@ async function loadDashboard() {
         }
         html += '</div>';
 
-        html += '</div>'; // close cc-cards-grid
-
-        // ── Proactive Intelligence ──
+        // Card 5: Proactive Intelligence (inside grid)
         if (scorecard) {
             const sc = scorecard;
             const rate = sc.conversion_rate != null ? Math.round(sc.conversion_rate) : 0;
-            html += `<div class="card-v2 cc-card cc-proactive-card">
+            html += `<div class="card-v2 cc-card">
                 <h3 class="cc-card-title"><span style="color:var(--sourcing-color)">&#9679;</span> Proactive Intelligence</h3>
                 <div class="cc-proactive-stats">
                     <span class="cc-pill">Sent: <b>${sc.total_sent || 0}</b></span>
@@ -1397,9 +1395,11 @@ async function loadDashboard() {
                     <span class="cc-pill">POs: <b>${sc.total_po || 0}</b></span>
                     <span class="cc-pill">Rate: <b>${rate}%</b></span>
                 </div>
-                <div style="margin-top:8px"><a class="cc-link" onclick="sidebarNav('proactive',document.getElementById('navProactive'))">View all matches &rarr;</a></div>
+                <div style="margin-top:6px"><a class="cc-link" onclick="sidebarNav('proactive',document.getElementById('navProactive'))">View all matches &rarr;</a></div>
             </div>`;
         }
+
+        html += '</div>'; // close cc-cards-grid
 
         el.innerHTML = html;
     } catch (err) {
