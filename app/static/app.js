@@ -526,7 +526,10 @@ document.addEventListener('DOMContentLoaded', async () => {
         initBaseHash = 'rfqs';
     }
     const initView = _hashToView[initBaseHash];
-    if (initView && initView !== 'view-list') {
+    // Default sales users to dashboard when no hash specified
+    const shouldDefaultDashboard = !initHash && window.userRole === 'sales';
+    const effectiveView = shouldDefaultDashboard ? 'view-dashboard' : initView;
+    if (effectiveView && effectiveView !== 'view-list') {
         _navFromPopstate = true;
         const initRoutes = {
             'view-vendors': () => showVendors(),
@@ -537,10 +540,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             'view-performance': () => window.showPerformance(),
             'view-settings': () => window.showSettings(),
             'view-prospecting': () => window.showProspecting(),
+            'view-dashboard': () => showDashboard(),
+            'view-contacts': () => showContacts(),
         };
-        if (initRoutes[initView]) initRoutes[initView]();
-        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-performance':'navScorecards','view-settings':'navSettings','view-prospecting':'navProspecting'};
-        const navBtn = document.getElementById(sidebarMap[initView]);
+        if (initRoutes[effectiveView]) initRoutes[effectiveView]();
+        const sidebarMap = {'view-vendors':'navVendors','view-materials':'navMaterials','view-customers':'navCustomers','view-buyplans':'navBuyPlans','view-proactive':'navProactive','view-performance':'navScorecards','view-settings':'navSettings','view-prospecting':'navProspecting','view-dashboard':'navDashboard','view-contacts':'navContacts'};
+        const navBtn = document.getElementById(sidebarMap[effectiveView]);
         if (navBtn) navHighlight(navBtn);
         _navFromPopstate = false;
     }
@@ -670,7 +675,18 @@ function applyRoleGating() {
         if (navCustomers) navCustomers.style.display = 'none';
     }
 
-    // ── Dashboard ──
+    // ── Prospecting: sales/trader/manager/admin only ──
+    const navProspecting = document.getElementById('navProspecting');
+    if (navProspecting) {
+        const canProspect = isAdmin || ['sales','trader','manager','admin'].includes(role);
+        navProspecting.style.display = canProspect ? '' : 'none';
+    }
+
+    // ── Dashboard: hide Command Center from buyers ──
+    const navDashboard = document.getElementById('navDashboard');
+    if (navDashboard) {
+        navDashboard.style.display = role === 'buyer' ? 'none' : '';
+    }
     const perfNav = document.getElementById('navScorecards');
     if (perfNav) perfNav.style.display = '';
 

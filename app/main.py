@@ -877,3 +877,6 @@ app.include_router(error_reports_router)
 from .routers.command_center import router as command_center_router
 
 app.include_router(command_center_router)
+from .routers.dashboard import router as dashboard_router
+
+app.include_router(dashboard_router)
