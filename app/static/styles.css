@@ -1219,6 +1219,14 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 [data-section="insights"] .sb-nav-btn.active{background:linear-gradient(135deg,rgba(139,92,246,.1),rgba(139,92,246,.04));color:var(--insights-color);box-shadow:inset 3px 0 0 var(--insights-accent)}
 /* Command Center button — pinned above sections */
 .sb-cc-btn{width:100%;margin-bottom:4px}
+/* Trio honeycomb icon — larger than standard nav icons */
+.sb-cc-icon{width:32px!important;height:32px!important;transition:color .15s,filter .15s,transform .4s ease}.sb-cc-icon svg{width:26px!important;height:26px!important;fill:currentColor;stroke:none!important;opacity:.85;transition:opacity .3s}
+.sb-cc-btn.active .sb-cc-icon{width:36px!important;height:36px!important;transform:rotate(60deg);filter:drop-shadow(0 0 8px var(--blue))}.sb-cc-btn.active .sb-cc-icon svg{width:30px!important;height:30px!important;opacity:1}
+@keyframes cc-spin-in{from{transform:rotate(0deg)}to{transform:rotate(60deg)}}
+.sb-cc-btn.active .sb-cc-icon{animation:cc-spin-in .5s ease-out forwards}
+/* Expanded sidebar: honeycomb stays a bit larger than other icons */
+body.sb-open .sb-cc-icon,.sidebar:hover .sb-cc-icon{width:24px!important;height:24px!important}.sb-cc-btn.active .sb-cc-icon{width:28px!important;height:28px!important}
+body.sb-open .sb-cc-icon svg,.sidebar:hover .sb-cc-icon svg{width:20px!important;height:20px!important}body.sb-open .sb-cc-btn.active .sb-cc-icon svg,.sidebar:hover .sb-cc-btn.active .sb-cc-icon svg{width:24px!important;height:24px!important}
 /* Top gradient bar — always brand gold, sits above OPPORTUNITY */
 .sb-top-gradient{height:2px;flex-shrink:0;background:#C4941D;transition:background .4s ease;margin:-12px -10px 8px;width:calc(100% + 20px)}
 /* Sidebar scroll arrows — appear when nav overflows */
