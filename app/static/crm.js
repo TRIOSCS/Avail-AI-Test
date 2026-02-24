@@ -3813,10 +3813,8 @@ function switchProactiveTab(tab, btn) {
     });
     document.getElementById('proactiveMatchesPanel').style.display = tab === 'matches' ? '' : 'none';
     document.getElementById('proactiveSentPanel').style.display = tab === 'sent' ? '' : 'none';
-    document.getElementById('proactiveScorecardPanel').style.display = tab === 'scorecard' ? '' : 'none';
     if (tab === 'matches') loadProactiveMatches();
     else if (tab === 'sent') loadProactiveSent();
-    else if (tab === 'scorecard') loadProactiveScorecard();
 }
 
 async function loadProactiveMatches() {
