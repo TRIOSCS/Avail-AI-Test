@@ -1287,7 +1287,8 @@ body.sb-open .toparea{margin-left:var(--sbw)}
 /* Pills */
 .fpills{display:flex;gap:2px;background:var(--white);border-radius:var(--radius);padding:4px;border:1px solid rgba(0,0,0,.04);box-shadow:var(--shadow-sm)}
 .fp{padding:6px 16px;border-radius:var(--radius-sm);border:none;background:transparent;color:var(--muted);font-size:12px;font-weight:500;cursor:pointer;transition:all var(--speed);font-family:inherit}
-.fp.on{background:linear-gradient(135deg,var(--blue),var(--blue-dk));color:#fff;box-shadow:0 2px 4px rgba(59,110,168,.2)}
+.fp.on{background:var(--blue-lt,rgba(59,110,168,.1));color:var(--blue);font-weight:600}
+.fp.on:hover{background:linear-gradient(135deg,var(--blue),var(--blue-dk));color:#fff;box-shadow:0 2px 4px rgba(59,110,168,.2)}
 .fp:not(.on):hover{color:var(--text);background:var(--surface)}
 
 /* Smaller variant pills for status toggle */
