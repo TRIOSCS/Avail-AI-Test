@@ -35,6 +35,7 @@ from .intelligence import (  # noqa: F401
     ActivityLog,
     ChangeLog,
     MaterialCard,
+    MaterialCardAudit,
     MaterialVendorHistory,
     ProactiveMatch,
     ProactiveOffer,

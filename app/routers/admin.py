@@ -285,6 +285,51 @@ def api_integrity_check(
     return run_integrity_check(db)
 
 
+@router.get("/api/admin/material-audit")
+@limiter.limit("10/minute")
+def api_material_audit(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """View recent material card audit log entries."""
+    from ..models import MaterialCardAudit
+
+    card_id = request.query_params.get("card_id")
+    action = request.query_params.get("action")
+    limit = min(int(request.query_params.get("limit", "100")), 500)
+    offset = max(int(request.query_params.get("offset", "0")), 0)
+
+    query = db.query(MaterialCardAudit)
+    if card_id:
+        query = query.filter(MaterialCardAudit.material_card_id == int(card_id))
+    if action:
+        query = query.filter(MaterialCardAudit.action == action)
+    total = query.count()
+    entries = query.order_by(MaterialCardAudit.created_at.desc()).offset(offset).limit(limit).all()
+    return {
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "entries": [
+            {
+                "id": e.id,
+                "material_card_id": e.material_card_id,
+                "action": e.action,
+                "entity_type": e.entity_type,
+                "entity_id": e.entity_id,
+                "old_card_id": e.old_card_id,
+                "new_card_id": e.new_card_id,
+                "normalized_mpn": e.normalized_mpn,
+                "details": e.details,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+                "created_by": e.created_by,
+            }
+            for e in entries
+        ],
+    }
+
+
 # ── Vendor Dedup Suggestions (admin) ──────────────────────────────────
 
 

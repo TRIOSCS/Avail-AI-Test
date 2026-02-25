@@ -1114,7 +1114,7 @@ async def _download_and_import_stock_list(
         # Batch in chunks of 500 to keep IN clause manageable
         for i in range(0, len(valid_mpns), 500):
             chunk = valid_mpns[i:i + 500]
-            for c in db.query(MaterialCard).filter(MaterialCard.normalized_mpn.in_(chunk)).all():
+            for c in db.query(MaterialCard).filter(MaterialCard.normalized_mpn.in_(chunk), MaterialCard.deleted_at.is_(None)).all():
                 card_map[c.normalized_mpn] = c
         # Pre-load existing MVH entries for this vendor
         existing_card_ids = [c.id for c in card_map.values()]

@@ -44,6 +44,8 @@ class MaterialCard(Base):
     enrichment_source = Column(String(50))  # "gradient_agent", "manual", etc.
     enriched_at = Column(DateTime)
 
+    deleted_at = Column(DateTime, nullable=True)  # NULL = active, non-NULL = soft-deleted
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,
@@ -83,6 +85,27 @@ class MaterialVendorHistory(Base):
     __table_args__ = (
         Index("ix_mvh_card_vendor", "material_card_id", "vendor_name", unique=True),
         Index("ix_mvh_vendor", "vendor_name"),
+    )
+
+
+class MaterialCardAudit(Base):
+    """Audit log for material card lifecycle events."""
+
+    __tablename__ = "material_card_audit"
+    id = Column(Integer, primary_key=True)
+    material_card_id = Column(Integer, index=True)  # No FK — survives card deletion
+    action = Column(String(50), nullable=False)  # created, linked, unlinked, deleted, merged, healed, restored
+    entity_type = Column(String(50))  # requirement, sighting, offer
+    entity_id = Column(Integer)
+    old_card_id = Column(Integer)
+    new_card_id = Column(Integer)
+    normalized_mpn = Column(String(255), index=True)
+    details = Column(JSON)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_by = Column(String(255))  # system, user email, scheduler
+
+    __table_args__ = (
+        Index("ix_mca_card_action", "material_card_id", "action"),
     )
 
 

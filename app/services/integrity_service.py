@@ -17,8 +17,9 @@ from datetime import datetime, timezone
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from ..models import MaterialCard, MaterialVendorHistory, Offer, Requirement, Sighting
+from ..models import MaterialCard, MaterialCardAudit, MaterialVendorHistory, Offer, Requirement, Sighting
 from ..utils.normalization import normalize_mpn_key
+from .audit_service import log_audit
 
 log = logging.getLogger(__name__)
 
@@ -159,6 +160,9 @@ def heal_orphaned_records(db: Session, batch_size: int = 500) -> dict:
             if card:
                 r.material_card_id = card.id
                 healed["requirements"] += 1
+                log_audit(db, material_card_id=card.id, action="healed",
+                          entity_type="requirement", entity_id=r.id,
+                          normalized_mpn=card.normalized_mpn, created_by="scheduler")
         except Exception as e:
             log.warning("INTEGRITY_HEAL_FAIL: requirement id=%s mpn=%s error=%s", r.id, r.primary_mpn, e)
             db.rollback()
@@ -180,6 +184,9 @@ def heal_orphaned_records(db: Session, batch_size: int = 500) -> dict:
             if card:
                 s.material_card_id = card.id
                 healed["sightings"] += 1
+                log_audit(db, material_card_id=card.id, action="healed",
+                          entity_type="sighting", entity_id=s.id,
+                          normalized_mpn=card.normalized_mpn, created_by="scheduler")
         except Exception as e:
             log.warning("INTEGRITY_HEAL_FAIL: sighting id=%s mpn=%s error=%s", s.id, s.mpn_matched, e)
             db.rollback()
@@ -201,6 +208,9 @@ def heal_orphaned_records(db: Session, batch_size: int = 500) -> dict:
             if card:
                 o.material_card_id = card.id
                 healed["offers"] += 1
+                log_audit(db, material_card_id=card.id, action="healed",
+                          entity_type="offer", entity_id=o.id,
+                          normalized_mpn=card.normalized_mpn, created_by="scheduler")
         except Exception as e:
             log.warning("INTEGRITY_HEAL_FAIL: offer id=%s mpn=%s error=%s", o.id, o.mpn, e)
             db.rollback()

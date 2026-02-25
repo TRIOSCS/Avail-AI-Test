@@ -514,7 +514,7 @@ class TestGetMaterialHistory:
         db_session.commit()
 
         fresh_vendors = {"mouser"}  # Arrow not in fresh
-        result = _get_material_history(["LM317T"], fresh_vendors, db_session)
+        result = _get_material_history([card.id], fresh_vendors, db_session)
         assert len(result) == 1
         assert result[0]["vendor_name"] == "Arrow"
         assert result[0]["currency"] == "EUR"
@@ -538,19 +538,19 @@ class TestGetMaterialHistory:
         db_session.commit()
 
         fresh_vendors = {"arrow"}  # Arrow IS in fresh
-        result = _get_material_history(["LM317T"], fresh_vendors, db_session)
+        result = _get_material_history([card.id], fresh_vendors, db_session)
         assert len(result) == 0
 
-    def test_empty_pns(self, db_session):
+    def test_empty_card_ids(self, db_session):
         result = _get_material_history([], set(), db_session)
         assert result == []
 
     def test_no_cards_found(self, db_session):
-        result = _get_material_history(["NONEXISTENT"], set(), db_session)
+        result = _get_material_history([999999], set(), db_session)
         assert result == []
 
-    def test_dedup_vendor_history(self, db_session):
-        """Multiple vendor history entries for same vendor (across cards) are deduped."""
+    def test_all_vendor_touchpoints_shown(self, db_session):
+        """Multiple vendor history entries for same vendor (across cards) are all shown."""
         card1 = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", search_count=1)
         card2 = MaterialCard(normalized_mpn="lm7805", display_mpn="LM7805", search_count=1)
         db_session.add_all([card1, card2])
@@ -568,14 +568,9 @@ class TestGetMaterialHistory:
             db_session.add(vh)
         db_session.commit()
 
-        result = _get_material_history(["LM317T", "LM7805"], set(), db_session)
-        # "arrow" appears twice but dedup by seen set should keep only one
-        assert len(result) == 1
-
-    def test_pns_with_empty_normalized_key(self, db_session):
-        """PNs that normalize to empty key should be filtered."""
-        result = _get_material_history(["", "   "], set(), db_session)
-        assert result == []
+        result = _get_material_history([card1.id, card2.id], set(), db_session)
+        # Both vendor history rows should be returned (no dedup)
+        assert len(result) == 2
 
     def test_none_times_seen(self, db_session):
         """times_seen=None should default to 1 in the output."""
@@ -593,7 +588,7 @@ class TestGetMaterialHistory:
         db_session.add(vh)
         db_session.commit()
 
-        result = _get_material_history(["LM317T"], set(), db_session)
+        result = _get_material_history([card.id], set(), db_session)
         assert result[0]["times_seen"] == 1
 
     def test_none_is_authorized(self, db_session):
@@ -613,7 +608,7 @@ class TestGetMaterialHistory:
         db_session.add(vh)
         db_session.commit()
 
-        result = _get_material_history(["LM317T"], set(), db_session)
+        result = _get_material_history([card.id], set(), db_session)
         assert result[0]["is_authorized"] is False
 
 

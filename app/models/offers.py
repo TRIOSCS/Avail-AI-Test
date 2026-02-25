@@ -36,6 +36,7 @@ class Offer(Base):
     vendor_name = Column(String(255), nullable=False)
 
     mpn = Column(String(255), nullable=False)
+    normalized_mpn = Column(String(255), index=True)
     manufacturer = Column(String(255))
     qty_available = Column(Integer)
     unit_price = Column(Numeric(12, 4))

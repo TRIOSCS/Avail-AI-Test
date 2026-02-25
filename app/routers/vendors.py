@@ -1411,7 +1411,7 @@ async def list_materials(
     q = request.query_params.get("q", "").strip().lower()
     limit = min(int(request.query_params.get("limit", "200")), 1000)
     offset = max(int(request.query_params.get("offset", "0")), 0)
-    query = db.query(MaterialCard).order_by(MaterialCard.last_searched_at.desc())
+    query = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None)).order_by(MaterialCard.last_searched_at.desc())
     if q:
         safe_q = q.replace("%", r"\%").replace("_", r"\_")
         query = query.filter(MaterialCard.normalized_mpn.ilike(f"{safe_q}%"))
@@ -1459,7 +1459,7 @@ async def get_material(
     card_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     card = db.get(MaterialCard, card_id)
-    if not card:
+    if not card or card.deleted_at is not None:
         raise HTTPException(404, "Material not found")
     return material_card_to_dict(card, db)
 
@@ -1470,7 +1470,7 @@ async def get_material_by_mpn(
 ):
     """Look up a material card by MPN."""
     norm = normalize_mpn_key(mpn)
-    card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
+    card = db.query(MaterialCard).filter_by(normalized_mpn=norm).filter(MaterialCard.deleted_at.is_(None)).first()
     if not card:
         raise HTTPException(404, "No material card found for this MPN")
     return material_card_to_dict(card, db)
@@ -1484,7 +1484,7 @@ async def update_material(
     db: Session = Depends(get_db),
 ):
     card = db.get(MaterialCard, card_id)
-    if not card:
+    if not card or card.deleted_at is not None:
         raise HTTPException(404, "Material not found")
     if data.manufacturer is not None:
         card.manufacturer = data.manufacturer
@@ -1542,10 +1542,39 @@ async def enrich_material(
 async def delete_material(
     card_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)
 ):
+    """Soft-delete a material card. Sets deleted_at timestamp; records are preserved."""
+    from datetime import datetime, timezone
+    from ..services.audit_service import log_audit
+
     card = db.get(MaterialCard, card_id)
     if not card:
         raise HTTPException(404, "Material not found")
-    db.delete(card)
+    if card.deleted_at is not None:
+        raise HTTPException(400, "Card is already deleted")
+    card.deleted_at = datetime.now(timezone.utc)
+    log_audit(db, material_card_id=card.id, action="soft_deleted",
+              normalized_mpn=card.normalized_mpn,
+              created_by=user.email if hasattr(user, "email") else "admin")
+    db.commit()
+    return {"ok": True, "deleted_at": card.deleted_at.isoformat()}
+
+
+@router.post("/api/materials/{card_id}/restore")
+async def restore_material(
+    card_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)
+):
+    """Restore a soft-deleted material card."""
+    from ..services.audit_service import log_audit
+
+    card = db.get(MaterialCard, card_id)
+    if not card:
+        raise HTTPException(404, "Material not found")
+    if card.deleted_at is None:
+        raise HTTPException(400, "Card is not deleted")
+    card.deleted_at = None
+    log_audit(db, material_card_id=card.id, action="restored",
+              normalized_mpn=card.normalized_mpn,
+              created_by=user.email if hasattr(user, "email") else "admin")
     db.commit()
     return {"ok": True}
 
@@ -1649,7 +1678,25 @@ async def merge_material_cards(
         if getattr(target, field) is None and getattr(source, field) is not None:
             setattr(target, field, getattr(source, field))
 
-    # 4. Delete source card
+    # 4. Audit log
+    from ..services.audit_service import log_audit
+    log_audit(
+        db,
+        material_card_id=target_id,
+        action="merged",
+        old_card_id=source_id,
+        new_card_id=target_id,
+        normalized_mpn=target.normalized_mpn,
+        details={
+            "source_mpn": source.normalized_mpn,
+            "reassigned": reassigned,
+            "vh_merged": vh_merged,
+            "vh_moved": vh_moved,
+        },
+        created_by=user.email if hasattr(user, "email") else "admin",
+    )
+
+    # 5. Delete source card
     db.delete(source)
     db.commit()
 
@@ -1833,7 +1880,10 @@ async def get_vendor_offer_history(
     query = (
         db.query(MaterialVendorHistory, MaterialCard)
         .join(MaterialCard, MaterialVendorHistory.material_card_id == MaterialCard.id)
-        .filter(MaterialVendorHistory.vendor_name == card.normalized_name)
+        .filter(
+            MaterialVendorHistory.vendor_name == card.normalized_name,
+            MaterialCard.deleted_at.is_(None),
+        )
     )
     if q:
         safe_q = q.replace("%", r"\%").replace("_", r"\_")

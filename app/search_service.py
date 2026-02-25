@@ -616,7 +616,7 @@ def _get_material_history(
 
     cards = (
         db.query(MaterialCard)
-        .filter(MaterialCard.id.in_(material_card_ids))
+        .filter(MaterialCard.id.in_(material_card_ids), MaterialCard.deleted_at.is_(None))
         .all()
     )
     if not cards:
@@ -713,6 +713,16 @@ def _history_to_result(h: dict, now: datetime) -> dict:
     }
 
 
+def _audit_card_created(db: Session, card: MaterialCard) -> None:
+    """Log a 'created' audit entry for a new material card."""
+    try:
+        from .services.audit_service import log_audit
+        log_audit(db, material_card_id=card.id, action="created",
+                  normalized_mpn=card.normalized_mpn, created_by="system")
+    except Exception:
+        pass  # Audit should never break card creation
+
+
 def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
     """Find or create a MaterialCard for the given MPN.
 
@@ -727,7 +737,9 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
         return None
 
     # Fast path — card already exists (no write, cheapest possible check)
-    card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
+    card = db.query(MaterialCard).filter_by(normalized_mpn=norm).filter(
+        MaterialCard.deleted_at.is_(None)
+    ).first()
     if card:
         log.debug("MC_METRIC: action=resolved mpn=%s card_id=%d", norm, card.id)
         return card
@@ -745,14 +757,20 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
         ).on_conflict_do_nothing(index_elements=["normalized_mpn"])
         result = db.execute(stmt)
         db.flush()
-        # Re-fetch — guaranteed to exist now (either we inserted or another txn did)
+        # Re-fetch (unfiltered — may be soft-deleted and needs restoring)
         card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
         if card is None:
             log.error("MATERIAL_CARD_RESOLVE_FAIL: card missing after ON CONFLICT for mpn=%s", norm)
+        elif card.deleted_at is not None:
+            # Restore soft-deleted card
+            card.deleted_at = None
+            log.info("MC_METRIC: action=restored mpn=%s card_id=%d", norm, card.id)
+            _audit_card_created(db, card)
         elif result.rowcount == 0:
             log.info("MC_METRIC: action=race_resolved mpn=%s card_id=%d", norm, card.id)
         else:
             log.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
+            _audit_card_created(db, card)
         return card
     else:
         # SQLite / test fallback — use try/except on IntegrityError
@@ -763,11 +781,17 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
             db.add(card)
             db.flush()
             log.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
+            _audit_card_created(db, card)
             return card
         except IntegrityError:
             db.rollback()
             log.info("MC_METRIC: action=race_resolved mpn=%s", norm)
             card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
+            # Restore if soft-deleted
+            if card and card.deleted_at is not None:
+                card.deleted_at = None
+                db.flush()
+                log.info("MC_METRIC: action=restored mpn=%s card_id=%d", norm, card.id)
             return card
 
 
@@ -844,10 +868,12 @@ def _upsert_material_card(
             db.add(new_vh)
             existing_vh[vn_key] = new_vh  # Prevent dupe inserts within batch
 
-    # Link sightings to material card
+    # Link sightings to material card + populate normalized_mpn
     for s in pn_sightings:
         if not s.material_card_id:
             s.material_card_id = card.id
+        if not s.normalized_mpn and s.mpn_matched:
+            s.normalized_mpn = normalize_mpn_key(s.mpn_matched)
 
     db.commit()
     return card

@@ -37,7 +37,10 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
             .join(
                 MaterialCard, MaterialVendorHistory.material_card_id == MaterialCard.id
             )
-            .filter(MaterialVendorHistory.vendor_name == card.normalized_name)
+            .filter(
+                MaterialVendorHistory.vendor_name == card.normalized_name,
+                MaterialCard.deleted_at.is_(None),
+            )
             .order_by(MaterialVendorHistory.times_seen.desc())
             .limit(150)
             .all()

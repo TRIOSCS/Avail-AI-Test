@@ -326,6 +326,7 @@ async def create_offer(
             )
     # Resolve material card for this MPN
     from ...search_service import resolve_material_card
+    from ...utils.normalization import normalize_mpn_key
 
     mat_card = resolve_material_card(payload.mpn, db)
 
@@ -333,6 +334,7 @@ async def create_offer(
         requisition_id=req_id,
         requirement_id=payload.requirement_id,
         material_card_id=mat_card.id if mat_card else None,
+        normalized_mpn=normalize_mpn_key(payload.mpn) if payload.mpn else None,
         vendor_card_id=card.id,
         vendor_name=card.display_name,
         mpn=payload.mpn,

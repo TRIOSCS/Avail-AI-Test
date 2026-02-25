@@ -43,6 +43,7 @@ def run_startup_migrations() -> None:
         _create_perf_indexes(conn)
 
     _backfill_normalized_mpn()
+    _backfill_sighting_offer_normalized_mpn()
     log.info("Startup migrations complete")
 
 
@@ -463,3 +464,62 @@ def _create_perf_indexes(conn) -> None:
     _exec(conn, "CREATE INDEX IF NOT EXISTS ix_requisitions_updated_by_id ON requisitions (updated_by_id)")
     _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_approved_by_id ON offers (approved_by_id)")
     _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_updated_by_id ON offers (updated_by_id)")
+
+    # Phase 3: soft-delete column for material cards
+    _exec(conn, "ALTER TABLE material_cards ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP")
+
+
+def _backfill_sighting_offer_normalized_mpn() -> None:
+    """One-time backfill: populate sightings.normalized_mpn and offers.normalized_mpn."""
+    import re
+    _nonalnum = re.compile(r"[^a-z0-9]")
+
+    def _key(raw):
+        if not raw:
+            return ""
+        return _nonalnum.sub("", str(raw).strip().lower())
+
+    with engine.connect() as conn:
+        # Sightings: compute from mpn_matched
+        try:
+            rows = conn.execute(
+                sqltext(
+                    "SELECT id, mpn_matched FROM sightings "
+                    "WHERE normalized_mpn IS NULL AND mpn_matched IS NOT NULL"
+                )
+            ).fetchall()
+            if rows:
+                for r in rows:
+                    nk = _key(r[1])
+                    if nk:
+                        conn.execute(
+                            sqltext("UPDATE sightings SET normalized_mpn = :nk WHERE id = :id"),
+                            {"nk": nk, "id": r[0]},
+                        )
+                conn.commit()
+                log.info("Backfilled normalized_mpn on %d sightings", len(rows))
+        except Exception as e:
+            log.warning("Backfill sightings.normalized_mpn failed: %s", e)
+            conn.rollback()
+
+        # Offers: compute from mpn
+        try:
+            rows = conn.execute(
+                sqltext(
+                    "SELECT id, mpn FROM offers "
+                    "WHERE normalized_mpn IS NULL AND mpn IS NOT NULL"
+                )
+            ).fetchall()
+            if rows:
+                for r in rows:
+                    nk = _key(r[1])
+                    if nk:
+                        conn.execute(
+                            sqltext("UPDATE offers SET normalized_mpn = :nk WHERE id = :id"),
+                            {"nk": nk, "id": r[0]},
+                        )
+                conn.commit()
+                log.info("Backfilled normalized_mpn on %d offers", len(rows))
+        except Exception as e:
+            log.warning("Backfill offers.normalized_mpn failed: %s", e)
+            conn.rollback()

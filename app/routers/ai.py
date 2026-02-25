@@ -465,6 +465,7 @@ async def save_parsed_offers(
 
         # Resolve material card
         from app.search_service import resolve_material_card
+        from app.utils.normalization import normalize_mpn_key
 
         mat_card = resolve_material_card(o.mpn, db) if o.mpn else None
 
@@ -472,6 +473,7 @@ async def save_parsed_offers(
             requisition_id=requisition_id,
             requirement_id=req_id,
             material_card_id=mat_card.id if mat_card else None,
+            normalized_mpn=normalize_mpn_key(o.mpn) if o.mpn else None,
             vendor_name=o.vendor_name,
             mpn=o.mpn,
             manufacturer=o.manufacturer,

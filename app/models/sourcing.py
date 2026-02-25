@@ -118,6 +118,7 @@ class Sighting(Base):
     vendor_email = Column(String(255))
     vendor_phone = Column(String(100))
     mpn_matched = Column(String(255))
+    normalized_mpn = Column(String(255), index=True)
     manufacturer = Column(String(255))
     qty_available = Column(Integer)
     unit_price = Column(Numeric(12, 4))
