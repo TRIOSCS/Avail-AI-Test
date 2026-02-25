@@ -44,23 +44,27 @@ def sales_client(db_session: Session, sales_user: User) -> TestClient:
 # ── Matches ──────────────────────────────────────────────────────────
 
 
-@patch("app.services.proactive_service.get_matches_for_user", return_value=[])
-def test_matches_empty(mock_fn, client):
-    """No matches -> empty list."""
-    resp = client.get("/api/proactive/matches")
-    assert resp.status_code == 200
-    assert resp.json() == []
-
-
 @patch("app.services.proactive_service.get_matches_for_user",
-       return_value=[{"site": "Acme", "matches": []}])
-def test_matches_with_data(mock_fn, client):
-    """Returns grouped matches."""
+       return_value={"groups": [], "stats": {"total": 0, "avg_score": 0, "avg_margin": None, "high_margin_count": 0}})
+def test_matches_empty(mock_fn, client):
+    """No matches -> empty groups with stats."""
     resp = client.get("/api/proactive/matches")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 1
-    assert data[0]["site"] == "Acme"
+    assert data["groups"] == []
+    assert data["stats"]["total"] == 0
+
+
+@patch("app.services.proactive_service.get_matches_for_user",
+       return_value={"groups": [{"site": "Acme", "matches": []}], "stats": {"total": 1, "avg_score": 80, "avg_margin": 25.0, "high_margin_count": 0}})
+def test_matches_with_data(mock_fn, client):
+    """Returns grouped matches with stats."""
+    resp = client.get("/api/proactive/matches")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["groups"]) == 1
+    assert data["groups"][0]["site"] == "Acme"
+    assert data["stats"]["avg_score"] == 80
 
 
 # ── Count ────────────────────────────────────────────────────────────
@@ -281,7 +285,8 @@ class TestScorecardExtended:
 
 
 class TestMatchesStatusFilter:
-    @patch("app.services.proactive_service.get_matches_for_user", return_value=[])
+    @patch("app.services.proactive_service.get_matches_for_user",
+           return_value={"groups": [], "stats": {"total": 0, "avg_score": 0, "avg_margin": None, "high_margin_count": 0}})
     def test_matches_sent_status(self, mock_fn, client):
         """Matches with status=sent filter."""
         resp = client.get("/api/proactive/matches?status=sent")
@@ -299,6 +304,32 @@ class TestConvertExtended:
         """Already-converted offer -> 400."""
         resp = client.post("/api/proactive/convert/1")
         assert resp.status_code == 400
+
+
+class TestRefresh:
+    @patch("app.services.proactive_matching.run_proactive_scan",
+           return_value={"scanned_offers": 2, "scanned_sightings": 0, "matches_created": 1})
+    @patch("app.services.proactive_service.scan_new_offers_for_matches",
+           return_value={"scanned": 3, "matches_created": 2})
+    def test_refresh_success(self, mock_legacy, mock_cph, client):
+        """Refresh triggers both scans and returns combined count."""
+        resp = client.post("/api/proactive/refresh")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["legacy_matches"] == 2
+        assert data["cph_matches"] == 1
+        assert data["total_new"] == 3
+
+    @patch("app.services.proactive_matching.run_proactive_scan",
+           side_effect=Exception("CPH scan failed"))
+    @patch("app.services.proactive_service.scan_new_offers_for_matches",
+           return_value={"scanned": 1, "matches_created": 0})
+    def test_refresh_cph_failure_graceful(self, mock_legacy, mock_cph, client):
+        """CPH scan failure doesn't break the endpoint."""
+        resp = client.post("/api/proactive/refresh")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cph_matches"] == 0
 
 
 class TestContactsExtended:

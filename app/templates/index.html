@@ -456,13 +456,19 @@
     <div id="view-proactive" style="display:none">
         <div class="vendor-header">
             <h2>Proactive Offers</h2>
+            <div style="display:flex;gap:8px;align-items:center">
+                <button type="button" class="btn btn-ghost btn-sm" id="proactiveRefreshBtn" onclick="refreshProactiveMatches()">Refresh Matches</button>
+            </div>
         </div>
+        <div id="proactiveStatsBar" style="display:none;margin:0 16px 12px"></div>
         <div class="tabs" id="proactiveTabs">
             <button type="button" class="tab on" onclick="switchProactiveTab('matches',this)">Matches</button>
             <button type="button" class="tab" onclick="switchProactiveTab('sent',this)">Sent</button>
+            <button type="button" class="tab" onclick="switchProactiveTab('scorecard',this)">Scorecard</button>
         </div>
         <div id="proactiveMatchesPanel"><p class="empty">Loading…</p></div>
         <div id="proactiveSentPanel" style="display:none"><p class="empty">Loading…</p></div>
+        <div id="proactiveScorecardPanel" style="display:none"><p class="empty">Loading…</p></div>
     </div>
 
 <!-- New Requisition Modal -->
@@ -924,31 +930,32 @@
 <div id="proactiveSendModal" class="modal-bg" onclick="if(event.target===this)closeModal('proactiveSendModal')">
     <div class="modal" style="max-width:680px">
         <h2>Send Proactive Offer</h2>
-        <p id="psmCustomer" style="font-size:13px;color:var(--text2);margin-bottom:12px"></p>
+        <input type="hidden" id="psSiteId">
+        <p id="psCustomer" style="font-size:13px;color:var(--text2);margin-bottom:12px"></p>
 
         <div class="u-mb-md">
             <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Selected Items</label>
             <table class="offer-table" style="width:100%;font-size:12px">
-                <thead><tr><th>MPN</th><th>Vendor</th><th>Qty</th><th>Cost</th><th>Sell Price</th><th>Condition</th></tr></thead>
-                <tbody id="psmItems"></tbody>
+                <thead><tr><th>MPN</th><th>Vendor</th><th>Qty</th><th>Cost</th><th>Sell Price</th><th>Margin</th></tr></thead>
+                <tbody id="psItems"></tbody>
             </table>
         </div>
 
-        <div class="send-preview" id="psmPreview"></div>
+        <div class="send-preview" id="psPreview"></div>
 
         <div class="u-mt-md">
             <label style="font-size:12px;font-weight:600;margin-bottom:4px;display:block">Contacts</label>
-            <div id="psmContacts" style="font-size:12px"><span class="empty">Loading contacts…</span></div>
+            <div id="psContacts" style="font-size:12px"><span class="empty">Loading contacts…</span></div>
         </div>
 
         <div class="field u-mt-md">
-            <label for="psmSubject">Subject</label>
-            <input id="psmSubject" placeholder="Parts Available — Company">
+            <label for="psSubject">Subject</label>
+            <input id="psSubject" placeholder="Parts Available — Company">
         </div>
 
         <div class="field" style="margin-top:8px">
-            <label for="psmNotes">Notes (optional)</label>
-            <textarea id="psmNotes" rows="3" placeholder="Add a personal message…" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical"></textarea>
+            <label for="psNotes">Notes (optional)</label>
+            <textarea id="psNotes" rows="3" placeholder="Add a personal message…" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;resize:vertical"></textarea>
         </div>
 
         <div class="mactions">

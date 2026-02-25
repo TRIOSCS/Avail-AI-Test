@@ -3819,7 +3819,8 @@ async function saveLogNote() {
 
 // ── Proactive Offers ──────────────────────────────────────────────────
 
-let _proactiveMatches = [];
+let _proactiveGroups = [];
+let _proactiveStats = {};
 let _proactiveSent = [];
 let _proactiveTab = 'matches';
 let _proactiveSendSiteId = null;
@@ -3841,37 +3842,90 @@ function switchProactiveTab(tab, btn) {
     });
     document.getElementById('proactiveMatchesPanel').style.display = tab === 'matches' ? '' : 'none';
     document.getElementById('proactiveSentPanel').style.display = tab === 'sent' ? '' : 'none';
+    document.getElementById('proactiveScorecardPanel').style.display = tab === 'scorecard' ? '' : 'none';
     if (tab === 'matches') loadProactiveMatches();
     else if (tab === 'sent') loadProactiveSent();
+    else if (tab === 'scorecard') loadProactiveScorecard();
 }
 
 async function loadProactiveMatches() {
     try {
-        _proactiveMatches = await apiFetch('/api/proactive/matches');
+        const resp = await apiFetch('/api/proactive/matches');
+        _proactiveGroups = resp.groups || [];
+        _proactiveStats = resp.stats || {};
+        renderProactiveStatsBar();
         renderProactiveMatches();
     } catch (e) { showToast('Failed to load matches', 'error'); }
 }
 
+function _marginColor(pct) {
+    if (pct == null) return 'var(--muted)';
+    if (pct > 30) return 'var(--green)';
+    if (pct >= 15) return 'var(--amber)';
+    return 'var(--red)';
+}
+
+function _scoreBadge(score) {
+    let bg = 'var(--muted)';
+    if (score >= 80) bg = 'var(--green)';
+    else if (score >= 60) bg = 'var(--teal)';
+    else if (score >= 40) bg = 'var(--amber)';
+    else bg = 'var(--red)';
+    return `<span style="display:inline-block;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:700;color:#fff;background:${bg}">${score}</span>`;
+}
+
+function _fmtDaysAgo(isoDate) {
+    if (!isoDate) return '—';
+    const days = Math.floor((Date.now() - new Date(isoDate).getTime()) / 86400000);
+    if (days <= 0) return 'Today';
+    if (days === 1) return '1d ago';
+    if (days < 30) return days + 'd ago';
+    if (days < 365) return Math.floor(days / 30) + 'mo ago';
+    return Math.floor(days / 365) + 'y ago';
+}
+
+function renderProactiveStatsBar() {
+    const el = document.getElementById('proactiveStatsBar');
+    if (!el) return;
+    const s = _proactiveStats;
+    if (!s.total) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.innerHTML = `<div style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 12px;background:var(--bg2);border-radius:8px;font-size:12px">
+        <div><span style="font-weight:700;font-size:18px;color:var(--teal)">${s.total}</span> <span style="color:var(--muted)">Matches</span></div>
+        <div><span style="font-weight:700;font-size:18px">${s.avg_score || 0}</span> <span style="color:var(--muted)">Avg Score</span></div>
+        <div><span style="font-weight:700;font-size:18px;color:${_marginColor(s.avg_margin)}">${s.avg_margin != null ? s.avg_margin + '%' : '—'}</span> <span style="color:var(--muted)">Avg Margin</span></div>
+        <div><span style="font-weight:700;font-size:18px;color:var(--green)">${s.high_margin_count}</span> <span style="color:var(--muted)">&gt;30% Margin</span></div>
+    </div>`;
+}
+
 function renderProactiveMatches() {
     const el = document.getElementById('proactiveMatchesPanel');
-    if (!_proactiveMatches.length) {
+    if (!_proactiveGroups.length) {
         el.innerHTML = '<p class="empty">No proactive matches yet. When buyers log offers for parts your archived customers needed, matches will appear here.</p>';
         return;
     }
-    el.innerHTML = _proactiveMatches.map(group => {
-        const matchRows = group.matches.map(m => `
-            <tr>
-                <td><input type="checkbox" class="pm-check" data-id="${m.id}" data-site="${group.customer_site_id}" checked></td>
+    el.innerHTML = _proactiveGroups.map(group => {
+        const matchRows = group.matches.map(m => {
+            const marginStr = m.margin_pct != null ? m.margin_pct.toFixed(1) + '%' : '—';
+            const marginClr = _marginColor(m.margin_pct);
+            const costStr = m.our_cost != null ? '$' + Number(m.our_cost).toFixed(4) : '—';
+            const theirPrice = m.customer_last_price != null ? '$' + Number(m.customer_last_price).toFixed(4) : '—';
+            return `
+            <tr class="pm-row" data-id="${m.id}" data-site="${group.customer_site_id}" onclick="toggleProactiveDetail(this,${m.id},${group.customer_site_id})" style="cursor:pointer">
+                <td onclick="event.stopPropagation()"><input type="checkbox" class="pm-check" data-id="${m.id}" data-site="${group.customer_site_id}" checked></td>
+                <td>${_scoreBadge(m.match_score)}</td>
                 <td><strong>${esc(m.mpn)}</strong></td>
-                <td>${esc(m.manufacturer || '')}</td>
-                <td>${esc(m.vendor_name)}</td>
                 <td>${(m.qty_available||0).toLocaleString()}</td>
-                <td>${m.unit_price != null ? '$' + Number(m.unit_price).toFixed(4) : '—'}</td>
-                <td>${esc(m.condition || '')}</td>
-                <td>${esc(m.lead_time || '')}</td>
-                <td style="font-size:10px;color:var(--muted)">${esc(m.original_req_name || '')}</td>
-            </tr>
-        `).join('');
+                <td>${costStr}</td>
+                <td><strong>${esc(group.company_name)}</strong></td>
+                <td>${_fmtDaysAgo(m.customer_last_purchased_at)}</td>
+                <td>${m.customer_purchase_count || 0}x</td>
+                <td>${theirPrice}</td>
+                <td style="font-weight:600;color:${marginClr}">${marginStr}</td>
+                <td>${esc(m.vendor_name)}</td>
+                <td onclick="event.stopPropagation()"><button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:10px" onclick="dismissSingleMatch(${m.id})">Dismiss</button></td>
+            </tr>`;
+        }).join('');
         return `
         <div class="card-v2" style="margin-bottom:12px">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
@@ -3882,20 +3936,76 @@ function renderProactiveMatches() {
                 </div>
                 <div style="display:flex;gap:6px">
                     <button class="btn btn-primary btn-sm" onclick="openProactiveSendModal(${group.customer_site_id})">Send to Customer</button>
-                    <button class="btn btn-ghost btn-sm" onclick="dismissProactiveGroup(${group.customer_site_id})">Dismiss</button>
+                    <button class="btn btn-ghost btn-sm" onclick="dismissProactiveGroup(${group.customer_site_id})">Dismiss All</button>
                 </div>
             </div>
-            <table class="tbl">
-                <thead><tr><th></th><th>MPN</th><th>Mfr</th><th>Vendor</th><th>Qty</th><th>Price</th><th>Cond</th><th>Lead</th><th>Orig. Req</th></tr></thead>
+            <div style="overflow-x:auto">
+            <table class="tbl" style="font-size:12px">
+                <thead><tr>
+                    <th style="width:30px"></th>
+                    <th>Score</th>
+                    <th>Part</th>
+                    <th style="text-align:right">Qty</th>
+                    <th style="text-align:right">Our Cost</th>
+                    <th>Customer</th>
+                    <th>Last Bought</th>
+                    <th>Times</th>
+                    <th style="text-align:right">Their Price</th>
+                    <th style="text-align:right">Margin</th>
+                    <th>Source</th>
+                    <th></th>
+                </tr></thead>
                 <tbody>${matchRows}</tbody>
             </table>
+            </div>
         </div>`;
     }).join('');
 }
 
+function toggleProactiveDetail(tr, matchId, siteId) {
+    const existing = tr.nextElementSibling;
+    if (existing && existing.classList.contains('pm-detail-row')) {
+        existing.remove();
+        return;
+    }
+    // Find the match data
+    let match = null;
+    for (const g of _proactiveGroups) {
+        match = g.matches.find(m => m.id === matchId);
+        if (match) break;
+    }
+    if (!match) return;
+
+    const cols = tr.querySelectorAll('td').length;
+    const detailRow = document.createElement('tr');
+    detailRow.className = 'pm-detail-row';
+    detailRow.innerHTML = `<td colspan="${cols}" style="background:var(--bg2);padding:10px 16px;font-size:11px;border-left:3px solid var(--teal)">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px">
+            <div><span style="color:var(--muted)">Manufacturer:</span> ${esc(match.manufacturer || '—')}</div>
+            <div><span style="color:var(--muted)">Condition:</span> ${esc(match.condition || '—')}</div>
+            <div><span style="color:var(--muted)">Lead Time:</span> ${esc(match.lead_time || '—')}</div>
+            <div><span style="color:var(--muted)">Offer Date:</span> ${match.offer_created_at ? fmtDateTime(match.offer_created_at) : '—'}</div>
+            <div><span style="color:var(--muted)">Original RFQ:</span> ${esc(match.original_req_name || '—')}</div>
+            <div><span style="color:var(--muted)">Match Created:</span> ${match.created_at ? fmtDateTime(match.created_at) : '—'}</div>
+            <div><span style="color:var(--muted)">Customer Purchase Count:</span> ${match.customer_purchase_count || 0}</div>
+            <div><span style="color:var(--muted)">Customer Last Paid:</span> ${match.customer_last_price != null ? '$' + Number(match.customer_last_price).toFixed(4) : '—'}</div>
+        </div>
+    </td>`;
+    tr.after(detailRow);
+}
+
+async function dismissSingleMatch(matchId) {
+    try {
+        await apiFetch('/api/proactive/dismiss', { method: 'POST', body: { match_ids: [matchId] } });
+        showToast('Match dismissed');
+        loadProactiveMatches();
+        if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
+    } catch (e) { showToast('Failed to dismiss', 'error'); }
+}
+
 async function dismissProactiveGroup(siteId) {
     const ids = [];
-    _proactiveMatches.forEach(g => {
+    _proactiveGroups.forEach(g => {
         if (g.customer_site_id === siteId) g.matches.forEach(m => ids.push(m.id));
     });
     if (!ids.length) return;
@@ -3905,6 +4015,19 @@ async function dismissProactiveGroup(siteId) {
         loadProactiveMatches();
         if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
     } catch (e) { showToast('Failed to dismiss', 'error'); }
+}
+
+async function refreshProactiveMatches() {
+    const btn = document.getElementById('proactiveRefreshBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Scanning…'; }
+    try {
+        const result = await apiFetch('/api/proactive/refresh', { method: 'POST' });
+        const total = result.total_new || 0;
+        showToast(total ? `Found ${total} new match${total !== 1 ? 'es' : ''}` : 'No new matches found');
+        loadProactiveMatches();
+        if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
+    } catch (e) { showToast('Scan failed', 'error'); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = 'Refresh Matches'; } }
 }
 
 async function openProactiveSendModal(siteId) {
@@ -3920,7 +4043,7 @@ async function openProactiveSendModal(siteId) {
     } catch (e) { logCatchError('proactiveContacts', e); _proactiveSiteContacts = []; }
 
     // Find group for company name
-    const group = _proactiveMatches.find(g => g.customer_site_id === siteId);
+    const group = _proactiveGroups.find(g => g.customer_site_id === siteId);
     const companyName = group ? group.company_name : '';
 
     // Populate modal
@@ -3951,12 +4074,12 @@ async function openProactiveSendModal(siteId) {
         });
     }
     itemsEl.innerHTML = selectedMatches.map(m => {
-        const defaultSell = m.unit_price ? (m.unit_price * 1.3).toFixed(4) : '0';
+        const defaultSell = m.our_cost ? (m.our_cost * 1.3).toFixed(4) : (m.unit_price ? (m.unit_price * 1.3).toFixed(4) : '0');
         return `<tr>
             <td>${esc(m.mpn)}</td>
             <td>${esc(m.vendor_name)}</td>
             <td>${(m.qty_available||0).toLocaleString()}</td>
-            <td>$${m.unit_price != null ? Number(m.unit_price).toFixed(4) : '—'}</td>
+            <td>$${m.our_cost != null ? Number(m.our_cost).toFixed(4) : (m.unit_price != null ? Number(m.unit_price).toFixed(4) : '—')}</td>
             <td><input type="number" step="0.0001" class="ps-sell" data-id="${m.id}" value="${defaultSell}" style="width:90px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px" oninput="_debouncedUpdateProactivePreview()"></td>
             <td class="ps-margin" data-id="${m.id}"></td>
         </tr>`;
@@ -3971,9 +4094,9 @@ function updateProactivePreview() {
     document.querySelectorAll('.ps-sell').forEach(input => {
         const id = input.dataset.id;
         const sell = parseFloat(input.value) || 0;
-        const group = _proactiveMatches.find(g => g.customer_site_id === _proactiveSendSiteId);
+        const group = _proactiveGroups.find(g => g.customer_site_id === _proactiveSendSiteId);
         const match = group ? group.matches.find(m => m.id === parseInt(id)) : null;
-        const cost = match ? (match.unit_price || 0) : 0;
+        const cost = match ? (match.our_cost || match.unit_price || 0) : 0;
         const qty = match ? (match.qty_available || 0) : 0;
         const margin = sell > 0 ? ((sell - cost) / sell * 100).toFixed(1) : '0.0';
         const marginEl = document.querySelector(`.ps-margin[data-id="${id}"]`);
@@ -6754,4 +6877,9 @@ Object.assign(window, {
     // Cross-file calls from app.js
     goToCompany, showBuyPlans, showCustomers, showPerformance,
     showProactiveOffers, showSettings,
+    // Proactive UI functions called from HTML onclick
+    switchProactiveTab, openProactiveSendModal, dismissProactiveGroup,
+    dismissSingleMatch, toggleProactiveDetail, refreshProactiveMatches,
+    sendProactiveOffer, convertProactiveOffer, updateProactivePreview,
+    loadProactiveScorecard,
 });

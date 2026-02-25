@@ -151,22 +151,31 @@ def scan_new_offers_for_matches(db: Session) -> dict:
 # ── Match Retrieval ──────────────────────────────────────────────────────
 
 
-def get_matches_for_user(db: Session, user_id: int, status: str = "new") -> list[dict]:
-    """Get proactive matches grouped by customer site for a salesperson."""
-    query = db.query(ProactiveMatch).filter(
-        ProactiveMatch.salesperson_id == user_id,
-    )
+def get_matches_for_user(
+    db: Session, user_id: int, status: str = "new", *, admin_all: bool = False,
+) -> dict:
+    """Get proactive matches grouped by customer site, with stats.
+
+    Returns {"groups": [...], "stats": {...}}.
+    """
+    query = db.query(ProactiveMatch)
+    if not admin_all:
+        query = query.filter(ProactiveMatch.salesperson_id == user_id)
     if status:
         query = query.filter(ProactiveMatch.status == status)
     query = query.options(
         joinedload(ProactiveMatch.offer),
         joinedload(ProactiveMatch.requisition),
         joinedload(ProactiveMatch.customer_site).joinedload(CustomerSite.company),
-    ).order_by(ProactiveMatch.created_at.desc())
+    ).order_by(ProactiveMatch.match_score.desc(), ProactiveMatch.created_at.desc())
     matches = query.all()
 
     # Group by customer site
     groups: dict[int, dict] = {}
+    all_scores = []
+    all_margins = []
+    high_margin_count = 0
+
     for m in matches:
         site_id = m.customer_site_id
         if site_id not in groups:
@@ -181,6 +190,14 @@ def get_matches_for_user(db: Session, user_id: int, status: str = "new") -> list
                 "matches": [],
             }
         offer = m.offer
+        score = m.match_score or 0
+        margin = m.margin_pct
+        all_scores.append(score)
+        if margin is not None:
+            all_margins.append(margin)
+            if margin > 30:
+                high_margin_count += 1
+
         groups[site_id]["matches"].append(
             {
                 "id": m.id,
@@ -200,10 +217,30 @@ def get_matches_for_user(db: Session, user_id: int, status: str = "new") -> list
                 "original_req_name": m.requisition.name if m.requisition else "",
                 "status": m.status,
                 "created_at": m.created_at.isoformat() if m.created_at else None,
+                # CPH-enriched fields
+                "match_score": score,
+                "margin_pct": margin,
+                "our_cost": m.our_cost,
+                "customer_purchase_count": m.customer_purchase_count or 0,
+                "customer_last_price": float(m.customer_last_price)
+                if m.customer_last_price
+                else None,
+                "customer_last_purchased_at": m.customer_last_purchased_at.isoformat()
+                if m.customer_last_purchased_at
+                else None,
             }
         )
 
-    return list(groups.values())
+    total = len(matches)
+    return {
+        "groups": list(groups.values()),
+        "stats": {
+            "total": total,
+            "avg_score": round(sum(all_scores) / total, 1) if total else 0,
+            "avg_margin": round(sum(all_margins) / len(all_margins), 1) if all_margins else None,
+            "high_margin_count": high_margin_count,
+        },
+    }
 
 
 def get_match_count(db: Session, user_id: int) -> int:
