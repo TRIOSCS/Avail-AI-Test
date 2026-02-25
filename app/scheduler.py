@@ -254,6 +254,11 @@ def configure_scheduler():
     scheduler.add_job(_job_integrity_check, IntervalTrigger(hours=6),
                       id="integrity_check", name="Material card integrity check")
 
+    # Material card AI enrichment (descriptions + commodity classification)
+    if settings.material_enrichment_enabled:
+        scheduler.add_job(_job_material_enrichment, IntervalTrigger(hours=6),
+                          id="material_enrichment", name="Material card AI enrichment")
+
     job_count = len(scheduler.get_jobs())
     logger.info(f"APScheduler configured with {job_count} jobs")
 
@@ -1620,5 +1625,26 @@ async def _job_integrity_check():
         )
     except Exception:
         logger.exception("Integrity check failed")
+    finally:
+        db.close()
+
+
+async def _job_material_enrichment():
+    """Every 6h — AI-enrich material cards missing descriptions/categories."""
+    from .config import settings
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .services.material_enrichment_service import enrich_pending_cards
+        result = await enrich_pending_cards(
+            db, limit=settings.material_enrichment_batch_size
+        )
+        logger.info(
+            "Material enrichment: enriched=%d errors=%d pending=%d",
+            result["enriched"], result["errors"], result.get("pending", 0),
+        )
+    except Exception:
+        logger.exception("Material enrichment job failed")
     finally:
         db.close()

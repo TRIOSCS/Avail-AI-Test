@@ -371,15 +371,15 @@ def _add_check_constraints(conn) -> None:
         ("sightings", "chk_sight_confidence", "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)"),
         ("sightings", "chk_sight_score", "score IS NULL OR score >= 0"),
         ("sightings", "chk_sight_lead_time", "lead_time_days IS NULL OR lead_time_days >= 0"),
-        ("sightings", "chk_sight_condition", "condition IS NULL OR condition IN ('new','refurb','used')"),
-        ("sightings", "chk_sight_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape')"),
+        ("sightings", "chk_sight_condition", "condition IS NULL OR condition IN ('new','refurb','used','other')"),
+        ("sightings", "chk_sight_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape','bag','box','each','strip','other')"),
         # ── offers ──
         ("offers", "chk_offer_qty", "qty_available IS NULL OR qty_available > 0"),
         ("offers", "chk_offer_price", "unit_price IS NULL OR unit_price > 0"),
         ("offers", "chk_offer_moq", "moq IS NULL OR moq > 0"),
-        ("offers", "chk_offer_condition", "condition IS NULL OR condition IN ('new','refurb','used')"),
+        ("offers", "chk_offer_condition", "condition IS NULL OR condition IN ('new','refurb','used','other')"),
         ("offers", "chk_offer_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape','bag','box','each','strip','other')"),
-        ("offers", "chk_offer_status", "status IN ('active','expired','won','lost','pending_review')"),
+        ("offers", "chk_offer_status", "status IN ('active','expired','won','lost','pending_review','rejected')"),
     ]
     # NOTE: table/constraint names are hardcoded literals above — not user input.
     # DDL identifiers cannot use bind params. This is safe as-is.

@@ -113,6 +113,14 @@ class Settings:
         os.getenv("DEEP_ENRICHMENT_STALE_DAYS", "30")
     )
 
+    # Material card AI enrichment
+    material_enrichment_enabled: bool = (
+        os.getenv("MATERIAL_ENRICHMENT_ENABLED", "true").lower() == "true"
+    )
+    material_enrichment_batch_size: int = int(
+        os.getenv("MATERIAL_ENRICHMENT_BATCH_SIZE", "300")
+    )
+
     # AI Features (Definitive Spec)
     ai_features_enabled: str = os.getenv(
         "AI_FEATURES_ENABLED", "mike_only"
