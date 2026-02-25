@@ -45,6 +45,9 @@ from .intelligence import (  # noqa: F401
 # Offers, Contacts, Vendor Responses
 from .offers import Contact, Offer, OfferAttachment, VendorResponse  # noqa: F401
 
+# Purchase History (Proactive matching backbone)
+from .purchase_history import CustomerPartHistory  # noqa: F401
+
 # Performance Tracking
 from .performance import (  # noqa: F401
     BuyerLeaderboardSnapshot,
