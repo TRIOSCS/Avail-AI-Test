@@ -203,5 +203,19 @@ class Settings:
         if d.strip()
     )
 
+    # Prospecting module (Phase 8)
+    prospecting_enabled: bool = (
+        os.getenv("PROSPECTING_ENABLED", "true").lower() == "true"
+    )
+    prospecting_min_fit_for_contacts: int = int(
+        os.getenv("PROSPECTING_MIN_FIT_FOR_CONTACTS", "60")
+    )
+    prospecting_expire_days: int = int(
+        os.getenv("PROSPECTING_EXPIRE_DAYS", "90")
+    )
+    prospecting_resurface_days: int = int(
+        os.getenv("PROSPECTING_RESURFACE_DAYS", "180")
+    )
+
 
 settings = Settings()
