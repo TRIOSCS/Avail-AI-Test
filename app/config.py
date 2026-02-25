@@ -79,8 +79,15 @@ class Settings:
     # Agent service-to-service auth
     agent_api_key: str = os.getenv("AGENT_API_KEY", "")
 
+    # Explorium / Vibe Prospecting API
+    explorium_api_key: str = os.getenv("EXPLORIUM_API_KEY", "")
+    explorium_api_base_url: str = os.getenv(
+        "EXPLORIUM_API_BASE_URL", "https://api.explorium.ai"
+    )
+
     # Enrichment APIs
     apollo_api_key: str = os.getenv("APOLLO_API_KEY", "")
+    apollo_rate_limit_per_min: int = int(os.getenv("APOLLO_RATE_LIMIT_PER_MIN", "5"))
 
     # Deep Enrichment APIs
     hunter_api_key: str = os.getenv("HUNTER_API_KEY", "")
