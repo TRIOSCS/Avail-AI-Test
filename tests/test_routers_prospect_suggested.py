@@ -1,17 +1,29 @@
-"""Tests for the prospect_suggested router — Suggested Accounts (Phase 6).
+"""Tests for the prospect_suggested router — Suggested Accounts (Phase 6+7).
 
 Covers: list_suggested, suggested_stats, get_suggested_detail,
-        claim_suggested, dismiss_suggested.
+        claim_suggested (enhanced), dismiss_suggested,
+        enrichment_status, add_prospect, list_batches,
+        prospect_claim service (claim, reveal_contacts, briefing, manual add).
 """
 
 import json
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Company, User
+from app.models.crm import CustomerSite, SiteContact
+from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
+from app.services.prospect_claim import (
+    add_prospect_manually,
+    check_enrichment_status,
+    claim_prospect,
+    reveal_contacts,
+    _template_briefing,
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -334,6 +346,8 @@ class TestClaimSuggested:
         assert data["status"] == "claimed"
         assert data["company_name"] == "New Disc"
         assert data["company_id"] is not None
+        assert data["path"] == "new_company"
+        assert data["enrichment_status"] == "pending"
 
         # Verify prospect updated
         db_session.refresh(p)
@@ -362,6 +376,7 @@ class TestClaimSuggested:
         p = _make_prospect(db_session, name="SF Co", domain="sfco.com", company_id=company.id)
         resp = client.post(f"/api/prospects/suggested/{p.id}/claim")
         assert resp.status_code == 200
+        assert resp.json()["path"] == "existing_company"
 
         db_session.refresh(company)
         assert company.account_owner_id == test_user.id
@@ -382,6 +397,7 @@ class TestClaimSuggested:
         db_session.refresh(p)
         company = db_session.get(Company, p.company_id)
         assert company.hq_city == "Austin"
+        assert company.hq_state == "TX"
 
     def test_claim_no_comma_in_hq(self, client, db_session):
         """When hq_location has no comma, hq_city is None."""
@@ -390,6 +406,42 @@ class TestClaimSuggested:
         db_session.refresh(p)
         company = db_session.get(Company, p.company_id)
         assert company.hq_city is None
+
+    def test_claim_domain_collision(self, client, db_session, test_user):
+        """If Company with same domain exists, link to it instead of creating new."""
+        existing = Company(
+            name="Existing Corp",
+            domain="collision.com",
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(existing)
+        db_session.commit()
+
+        p = _make_prospect(db_session, name="New Corp", domain="collision.com")
+        resp = client.post(f"/api/prospects/suggested/{p.id}/claim")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["path"] == "domain_collision"
+        assert data["company_id"] == existing.id
+        assert "warning" in data
+
+        db_session.refresh(existing)
+        assert existing.account_owner_id == test_user.id
+
+    def test_claim_dismissed_prospect(self, client, db_session):
+        """Cannot claim a dismissed prospect."""
+        p = _make_prospect(db_session, name="Dismissed", domain="dismissed.com", status="dismissed")
+        resp = client.post(f"/api/prospects/suggested/{p.id}/claim")
+        assert resp.status_code == 409
+
+    def test_claim_sets_enrichment_pending(self, client, db_session):
+        """After claim, enrichment_data has claim_enrichment_status=pending."""
+        p = _make_prospect(db_session, name="Enrich", domain="enrich.com")
+        client.post(f"/api/prospects/suggested/{p.id}/claim")
+        db_session.refresh(p)
+        ed = p.enrichment_data or {}
+        assert ed.get("claim_enrichment_status") == "pending"
 
 
 # ── dismiss_suggested ────────────────────────────────────────────────────
@@ -517,3 +569,559 @@ class TestSerializationEdgeCases:
         item = resp.json()["items"][0]
         assert item["contacts_count"] == 0
         assert item["contacts_preview"] == []
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Phase 7 Tests — Claim Service, Contact Reveal, Enrichment, Briefing
+# ══════════════════════════════════════════════════════════════════════
+
+
+# ── claim_prospect service ───────────────────────────────────────────
+
+class TestClaimProspectService:
+
+    def test_claim_new_company_path(self, db_session, test_user):
+        p = _make_prospect(db_session, name="Svc Test", domain="svctest.com", industry="Tech")
+        result = claim_prospect(p.id, test_user.id, db_session)
+        assert result["path"] == "new_company"
+        assert result["status"] == "claimed"
+        assert result["enrichment_status"] == "pending"
+        assert result["company_id"] is not None
+
+    def test_claim_existing_company_path(self, db_session, test_user):
+        co = Company(name="Existing", domain="existing.com", is_active=True, created_at=datetime.now(timezone.utc))
+        db_session.add(co)
+        db_session.flush()
+        p = _make_prospect(db_session, name="Existing", domain="existing.com", company_id=co.id)
+        result = claim_prospect(p.id, test_user.id, db_session)
+        assert result["path"] == "existing_company"
+
+    def test_claim_domain_collision_path(self, db_session, test_user):
+        co = Company(name="Old Corp", domain="dup.com", is_active=True, created_at=datetime.now(timezone.utc))
+        db_session.add(co)
+        db_session.commit()
+        p = _make_prospect(db_session, name="New Corp", domain="dup.com")
+        result = claim_prospect(p.id, test_user.id, db_session)
+        assert result["path"] == "domain_collision"
+        assert result["company_id"] == co.id
+        assert "warning" in result
+
+    def test_claim_already_claimed_raises(self, db_session, test_user):
+        p = _make_prospect(db_session, name="Dup", domain="dup-claim.com", status="claimed")
+        with pytest.raises(ValueError, match="Already claimed"):
+            claim_prospect(p.id, test_user.id, db_session)
+
+    def test_claim_dismissed_raises(self, db_session, test_user):
+        p = _make_prospect(db_session, name="Dis", domain="dis.com", status="dismissed")
+        with pytest.raises(ValueError, match="Cannot claim"):
+            claim_prospect(p.id, test_user.id, db_session)
+
+    def test_claim_not_found_raises(self, db_session, test_user):
+        with pytest.raises(LookupError, match="Prospect not found"):
+            claim_prospect(99999, test_user.id, db_session)
+
+    def test_claim_user_not_found_raises(self, db_session):
+        p = _make_prospect(db_session, name="NoUser", domain="nouser.com")
+        with pytest.raises(LookupError, match="User not found"):
+            claim_prospect(p.id, 99999, db_session)
+
+    def test_claim_sets_hq_state(self, db_session, test_user):
+        p = _make_prospect(db_session, name="State", domain="state.com", hq_location="Dallas, TX")
+        claim_prospect(p.id, test_user.id, db_session)
+        db_session.refresh(p)
+        co = db_session.get(Company, p.company_id)
+        assert co.hq_city == "Dallas"
+        assert co.hq_state == "TX"
+
+    def test_claim_sets_employee_size(self, db_session, test_user):
+        p = _make_prospect(db_session, name="Sized", domain="sized.com", employee_count_range="51-200")
+        claim_prospect(p.id, test_user.id, db_session)
+        db_session.refresh(p)
+        co = db_session.get(Company, p.company_id)
+        assert co.employee_size == "51-200"
+
+    def test_claim_no_domain_skips_collision_check(self, db_session, test_user):
+        """If domain is empty, no collision check is done."""
+        p = ProspectAccount(
+            name="No Domain", domain="nodomain.com",
+            discovery_source="manual", status="suggested",
+        )
+        db_session.add(p)
+        db_session.commit()
+        db_session.refresh(p)
+        result = claim_prospect(p.id, test_user.id, db_session)
+        assert result["path"] == "new_company"
+
+
+# ── reveal_contacts service ──────────────────────────────────────────
+
+class TestRevealContacts:
+
+    def test_reveal_creates_site_and_contacts(self, db_session, test_user):
+        co = Company(name="Rev Co", domain="rev.com", is_active=True, created_at=datetime.now(timezone.utc))
+        db_session.add(co)
+        db_session.flush()
+        p = _make_prospect(
+            db_session, name="Rev Co", domain="rev.com", company_id=co.id,
+            enrichment_data={
+                "contacts_full": [
+                    {"name": "Jane VP", "title": "VP Procurement", "email": "jane@rev.com", "verified": True, "seniority": "decision_maker"},
+                    {"name": "Bob Buyer", "title": "Buyer", "email": "bob@rev.com", "verified": True, "seniority": "executor"},
+                ],
+            },
+        )
+        created = reveal_contacts(p, db_session)
+        assert len(created) == 2
+        assert created[0]["email"] == "jane@rev.com"
+        assert created[0]["seniority"] == "decision_maker"
+
+        # Verify DB records
+        site = db_session.query(CustomerSite).filter_by(company_id=co.id).first()
+        assert site is not None
+        assert "HQ" in site.site_name
+        contacts = db_session.query(SiteContact).filter_by(customer_site_id=site.id).all()
+        assert len(contacts) == 2
+        assert contacts[0].is_primary is True
+        assert contacts[1].is_primary is False
+
+    def test_reveal_no_company_id(self, db_session):
+        p = _make_prospect(db_session, name="No Co", domain="noco.com")
+        result = reveal_contacts(p, db_session)
+        assert result == []
+
+    def test_reveal_no_contacts_full(self, db_session, test_user):
+        co = Company(name="Empty Co", domain="empty.com", is_active=True, created_at=datetime.now(timezone.utc))
+        db_session.add(co)
+        db_session.flush()
+        p = _make_prospect(db_session, name="Empty Co", domain="empty.com", company_id=co.id, enrichment_data={})
+        result = reveal_contacts(p, db_session)
+        assert result == []
+
+    def test_reveal_deduplicates_emails(self, db_session, test_user):
+        co = Company(name="Dedup Co", domain="dedup.com", is_active=True, created_at=datetime.now(timezone.utc))
+        db_session.add(co)
+        db_session.flush()
+
+        # Pre-create a site with existing contact
+        site = CustomerSite(company_id=co.id, site_name="Dedup Co - HQ", is_active=True)
+        db_session.add(site)
+        db_session.flush()
+        sc = SiteContact(customer_site_id=site.id, full_name="Jane VP", email="jane@dedup.com")
+        db_session.add(sc)
+        db_session.commit()
+
+        p = _make_prospect(
+            db_session, name="Dedup Co", domain="dedup.com", company_id=co.id,
+            enrichment_data={
+                "contacts_full": [
+                    {"name": "Jane VP", "email": "jane@dedup.com", "verified": True},
+                    {"name": "New Person", "email": "new@dedup.com", "verified": True},
+                ],
+            },
+        )
+        created = reveal_contacts(p, db_session)
+        assert len(created) == 1
+        assert created[0]["email"] == "new@dedup.com"
+
+    def test_reveal_uses_existing_site(self, db_session, test_user):
+        co = Company(name="Site Co", domain="site.com", is_active=True, created_at=datetime.now(timezone.utc))
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="Existing Site", is_active=True)
+        db_session.add(site)
+        db_session.commit()
+
+        p = _make_prospect(
+            db_session, name="Site Co", domain="site.com", company_id=co.id,
+            enrichment_data={
+                "contacts_full": [{"name": "Test", "email": "test@site.com", "verified": True}],
+            },
+        )
+        reveal_contacts(p, db_session)
+        sites = db_session.query(CustomerSite).filter_by(company_id=co.id).all()
+        assert len(sites) == 1  # Didn't create a duplicate
+
+    def test_reveal_skips_empty_emails(self, db_session, test_user):
+        co = Company(name="Skip Co", domain="skip.com", is_active=True, created_at=datetime.now(timezone.utc))
+        db_session.add(co)
+        db_session.flush()
+        p = _make_prospect(
+            db_session, name="Skip Co", domain="skip.com", company_id=co.id,
+            enrichment_data={
+                "contacts_full": [
+                    {"name": "No Email", "email": "", "verified": False},
+                    {"name": "Null Email", "email": None, "verified": False},
+                    {"name": "Has Email", "email": "has@skip.com", "verified": True},
+                ],
+            },
+        )
+        created = reveal_contacts(p, db_session)
+        assert len(created) == 1
+        assert created[0]["email"] == "has@skip.com"
+
+
+# ── enrichment_status endpoint ───────────────────────────────────────
+
+class TestEnrichmentStatus:
+
+    def test_status_none(self, client, db_session):
+        p = _make_prospect(db_session, name="NoEnrich", domain="noenrich.com")
+        resp = client.get(f"/api/prospects/suggested/{p.id}/enrichment")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "none"
+        assert data["contacts_created"] == 0
+        assert data["briefing_ready"] is False
+
+    def test_status_pending(self, client, db_session, test_user):
+        p = _make_prospect(
+            db_session, name="Pending", domain="pending.com",
+            enrichment_data={"claim_enrichment_status": "pending"},
+        )
+        resp = client.get(f"/api/prospects/suggested/{p.id}/enrichment")
+        assert resp.json()["status"] == "pending"
+
+    def test_status_complete(self, client, db_session):
+        p = _make_prospect(
+            db_session, name="Done", domain="done.com",
+            enrichment_data={
+                "claim_enrichment_status": "complete",
+                "contacts_created_count": 3,
+                "briefing": "Full briefing text here.",
+            },
+        )
+        resp = client.get(f"/api/prospects/suggested/{p.id}/enrichment")
+        data = resp.json()
+        assert data["status"] == "complete"
+        assert data["contacts_created"] == 3
+        assert data["briefing_ready"] is True
+
+    def test_status_failed(self, client, db_session):
+        p = _make_prospect(
+            db_session, name="Failed", domain="failed.com",
+            enrichment_data={
+                "claim_enrichment_status": "failed",
+                "enrichment_error": "API timeout",
+            },
+        )
+        resp = client.get(f"/api/prospects/suggested/{p.id}/enrichment")
+        data = resp.json()
+        assert data["status"] == "failed"
+        assert data["error"] == "API timeout"
+
+    def test_status_not_found(self, client, db_session):
+        resp = client.get("/api/prospects/suggested/99999/enrichment")
+        assert resp.status_code == 404
+
+
+# ── check_enrichment_status service ──────────────────────────────────
+
+class TestCheckEnrichmentStatusService:
+
+    def test_not_found_raises(self, db_session):
+        with pytest.raises(LookupError):
+            check_enrichment_status(99999, db_session)
+
+    def test_returns_correct_fields(self, db_session):
+        p = _make_prospect(
+            db_session, name="Check", domain="check.com",
+            enrichment_data={
+                "claim_enrichment_status": "enriching",
+                "contacts_created_count": 2,
+                "briefing": "Some text",
+            },
+        )
+        result = check_enrichment_status(p.id, db_session)
+        assert result["status"] == "enriching"
+        assert result["contacts_created"] == 2
+        assert result["briefing_ready"] is True
+        assert result["error"] is None
+
+
+# ── add_prospect endpoint ────────────────────────────────────────────
+
+class TestAddProspect:
+
+    def test_add_new_domain(self, client, db_session):
+        resp = client.post("/api/prospects/add", json={"domain": "newcompany.com"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["is_new"] is True
+        assert data["domain"] == "newcompany.com"
+        assert data["status"] == "suggested"
+        assert data["name"] == "Newcompany"
+
+    def test_add_duplicate_domain(self, client, db_session):
+        _make_prospect(db_session, name="Existing", domain="existingdomain.com")
+        resp = client.post("/api/prospects/add", json={"domain": "existingdomain.com"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["is_new"] is False
+        assert data["name"] == "Existing"
+
+    def test_add_empty_domain(self, client, db_session):
+        resp = client.post("/api/prospects/add", json={"domain": ""})
+        assert resp.status_code == 400
+
+    def test_add_no_domain_key(self, client, db_session):
+        resp = client.post("/api/prospects/add", json={})
+        assert resp.status_code == 400
+
+    def test_add_normalizes_domain(self, client, db_session):
+        resp = client.post("/api/prospects/add", json={"domain": "  MyCompany.COM  "})
+        assert resp.status_code == 200
+        assert resp.json()["domain"] == "mycompany.com"
+
+    def test_add_stores_submitted_by(self, client, db_session, test_user):
+        resp = client.post("/api/prospects/add", json={"domain": "submitted.com"})
+        assert resp.status_code == 200
+        p = db_session.query(ProspectAccount).filter_by(domain="submitted.com").first()
+        ed = p.enrichment_data or {}
+        assert ed.get("submitted_by") == test_user.id
+
+
+# ── add_prospect_manually service ────────────────────────────────────
+
+class TestAddProspectManuallyService:
+
+    def test_creates_prospect(self, db_session, test_user):
+        result = add_prospect_manually("brand-new.com", test_user.id, db_session)
+        assert result["is_new"] is True
+        assert result["domain"] == "brand-new.com"
+        assert result["name"] == "Brand New"
+
+    def test_deduplicates(self, db_session, test_user):
+        _make_prospect(db_session, name="Dupe", domain="dupetest.com")
+        result = add_prospect_manually("dupetest.com", test_user.id, db_session)
+        assert result["is_new"] is False
+
+    def test_empty_domain_raises(self, db_session, test_user):
+        with pytest.raises(ValueError, match="Domain is required"):
+            add_prospect_manually("", test_user.id, db_session)
+
+    def test_whitespace_only_raises(self, db_session, test_user):
+        with pytest.raises(ValueError, match="Domain is required"):
+            add_prospect_manually("   ", test_user.id, db_session)
+
+
+# ── list_batches endpoint ────────────────────────────────────────────
+
+class TestListBatches:
+
+    def test_empty_batches(self, client, db_session):
+        resp = client.get("/api/prospects/batches")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["items"] == []
+        assert data["total"] == 0
+
+    def test_returns_batches(self, client, db_session):
+        b = DiscoveryBatch(
+            batch_id="batch-001",
+            source="explorium",
+            segment="Aerospace",
+            regions=["US"],
+            status="complete",
+            prospects_found=10,
+            prospects_new=8,
+            credits_used=5,
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
+        )
+        db_session.add(b)
+        db_session.commit()
+
+        resp = client.get("/api/prospects/batches")
+        data = resp.json()
+        assert data["total"] == 1
+        item = data["items"][0]
+        assert item["batch_id"] == "batch-001"
+        assert item["source"] == "explorium"
+        assert item["prospects_found"] == 10
+
+    def test_batches_pagination(self, client, db_session):
+        for i in range(5):
+            b = DiscoveryBatch(
+                batch_id=f"batch-{i:03d}",
+                source="explorium",
+                status="complete",
+                started_at=datetime.now(timezone.utc),
+            )
+            db_session.add(b)
+        db_session.commit()
+
+        resp = client.get("/api/prospects/batches?page=1&per_page=2")
+        data = resp.json()
+        assert data["total"] == 5
+        assert len(data["items"]) == 2
+        assert data["page"] == 1
+
+
+# ── template_briefing ────────────────────────────────────────────────
+
+class TestTemplateBriefing:
+
+    def test_basic_briefing(self, db_session):
+        p = _make_prospect(
+            db_session, name="Brief Co", domain="brief.com",
+            industry="Aerospace", employee_count_range="201-500",
+            hq_location="Phoenix, AZ", fit_score=80, readiness_score=65,
+            ai_writeup="Good ICP match.",
+        )
+        signals = {"intent": {"strength": "strong"}, "hiring": {"type": "engineering"}}
+        similar = [{"name": "Boeing"}, {"name": "Raytheon"}]
+        result = _template_briefing(p, signals, similar)
+        assert "Brief Co" in result
+        assert "Aerospace" in result
+        assert "strong" in result
+        assert "engineering" in result
+        assert "Boeing" in result
+
+    def test_briefing_with_empty_signals(self, db_session):
+        p = _make_prospect(db_session, name="Minimal", domain="minimal.com")
+        result = _template_briefing(p, {}, [])
+        assert "Minimal" in result
+        assert "Not specified" in result
+
+    def test_briefing_with_ai_writeup(self, db_session):
+        p = _make_prospect(
+            db_session, name="Writeup Co", domain="writeup.com",
+            ai_writeup="This is a detailed analysis.",
+        )
+        result = _template_briefing(p, {}, [])
+        assert "detailed analysis" in result
+
+
+# ── generate_account_briefing (async, mocked AI) ────────────────────
+
+class TestGenerateAccountBriefing:
+
+    @pytest.mark.asyncio
+    async def test_ai_briefing_success(self, db_session):
+        from app.services.prospect_claim import generate_account_briefing
+
+        p = _make_prospect(
+            db_session, name="AI Co", domain="aico.com",
+            industry="Electronics", fit_score=80, readiness_score=70,
+        )
+        with patch(
+            "app.utils.claude_client.claude_text",
+            new_callable=AsyncMock,
+            return_value="AI-generated briefing for AI Co.",
+        ):
+            result = await generate_account_briefing(p.id, db_session)
+        assert result == "AI-generated briefing for AI Co."
+
+    @pytest.mark.asyncio
+    async def test_ai_briefing_fallback(self, db_session):
+        from app.services.prospect_claim import generate_account_briefing
+
+        p = _make_prospect(
+            db_session, name="Fallback Co", domain="fallback.com",
+            industry="Aerospace", fit_score=60, readiness_score=40,
+        )
+        with patch(
+            "app.utils.claude_client.claude_text",
+            new_callable=AsyncMock,
+            side_effect=Exception("API error"),
+        ):
+            result = await generate_account_briefing(p.id, db_session)
+        assert "Fallback Co" in result
+        assert "Aerospace" in result
+
+    @pytest.mark.asyncio
+    async def test_ai_briefing_returns_none_for_missing(self, db_session):
+        from app.services.prospect_claim import generate_account_briefing
+        result = await generate_account_briefing(99999, db_session)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_ai_briefing_null_return_fallback(self, db_session):
+        from app.services.prospect_claim import generate_account_briefing
+
+        p = _make_prospect(
+            db_session, name="Null AI", domain="nullai.com",
+        )
+        with patch(
+            "app.utils.claude_client.claude_text",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = await generate_account_briefing(p.id, db_session)
+        assert "Null AI" in result
+
+
+# ── trigger_deep_enrichment_bg (async background) ───────────────────
+
+class TestTriggerDeepEnrichmentBg:
+
+    @pytest.mark.asyncio
+    async def test_enrichment_completes(self, db_session, test_user):
+        from app.services.prospect_claim import trigger_deep_enrichment_bg
+
+        co = Company(name="Deep Co", domain="deep.com", is_active=True, created_at=datetime.now(timezone.utc))
+        db_session.add(co)
+        db_session.flush()
+        p = _make_prospect(
+            db_session, name="Deep Co", domain="deep.com", company_id=co.id,
+            enrichment_data={
+                "claim_enrichment_status": "pending",
+                "contacts_full": [
+                    {"name": "Jane", "email": "jane@deep.com", "verified": True, "seniority": "decision_maker", "title": "VP"},
+                ],
+            },
+        )
+        pid = p.id
+
+        with patch(
+            "app.database.SessionLocal",
+            return_value=db_session,
+        ), patch.object(db_session, "close"):
+            with patch(
+                "app.utils.claude_client.claude_text",
+                new_callable=AsyncMock,
+                return_value="Great prospect briefing.",
+            ):
+                await trigger_deep_enrichment_bg(pid)
+
+        db_session.refresh(p)
+        ed = p.enrichment_data or {}
+        assert ed["claim_enrichment_status"] == "complete"
+        assert ed["contacts_created_count"] == 1
+        assert ed["briefing"] == "Great prospect briefing."
+
+    @pytest.mark.asyncio
+    async def test_enrichment_handles_error(self, db_session, test_user):
+        from app.services.prospect_claim import trigger_deep_enrichment_bg
+
+        p = _make_prospect(
+            db_session, name="Error Co", domain="error.com",
+            enrichment_data={"claim_enrichment_status": "pending"},
+        )
+        pid = p.id
+
+        with patch(
+            "app.database.SessionLocal",
+            return_value=db_session,
+        ), patch.object(db_session, "close"):
+            with patch(
+                "app.services.prospect_claim.reveal_contacts",
+                side_effect=Exception("DB crash"),
+            ):
+                await trigger_deep_enrichment_bg(pid)
+
+        db_session.refresh(p)
+        ed = p.enrichment_data or {}
+        assert ed["claim_enrichment_status"] == "failed"
+        assert "DB crash" in ed.get("enrichment_error", "")
+
+    @pytest.mark.asyncio
+    async def test_enrichment_not_found(self, db_session):
+        from app.services.prospect_claim import trigger_deep_enrichment_bg
+
+        with patch(
+            "app.database.SessionLocal",
+            return_value=db_session,
+        ), patch.object(db_session, "close"):
+            # Should not raise, just log
+            await trigger_deep_enrichment_bg(99999)

@@ -1,10 +1,10 @@
 """Prospect suggested accounts router — browse, claim, dismiss from prospect_accounts.
 
 Phase 6: replaces the old Company-based pool with the unified prospect_accounts table.
-Serves enriched prospect cards with fit/readiness scores, signals, contacts preview,
-AI writeups, and similar customers.
+Phase 7: enhanced claim with deep enrichment, AI briefing, manual submission.
 """
 
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,7 +15,14 @@ from sqlalchemy.orm import Session
 from ..database import get_db
 from ..dependencies import require_user
 from ..models import Company, User
+from ..models.discovery_batch import DiscoveryBatch
 from ..models.prospect_account import ProspectAccount
+from ..services.prospect_claim import (
+    add_prospect_manually,
+    check_enrichment_status,
+    claim_prospect,
+    trigger_deep_enrichment_bg,
+)
 
 router = APIRouter()
 
@@ -165,52 +172,25 @@ async def claim_suggested(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Claim a prospect account.
+    """Claim a prospect account with deep enrichment.
 
     SF-migrated (company_id set): update Company.account_owner_id.
     New discovery (company_id NULL): create Company record, link it.
+    Domain collision: if Company with same domain exists, link to it.
+
+    Triggers background deep enrichment (contact reveal + AI briefing).
     """
-    prospect = db.get(ProspectAccount, prospect_id)
-    if not prospect:
-        raise HTTPException(404, "Prospect not found")
+    try:
+        result = claim_prospect(prospect_id, user.id, db)
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except ValueError as e:
+        raise HTTPException(409, str(e))
 
-    if prospect.status == "claimed":
-        raise HTTPException(409, "Already claimed")
+    # Trigger deep enrichment in background
+    asyncio.create_task(trigger_deep_enrichment_bg(prospect_id))
 
-    if prospect.company_id:
-        # SF-migrated: update existing Company
-        company = db.get(Company, prospect.company_id)
-        if company:
-            company.account_owner_id = user.id
-    else:
-        # New discovery: create Company record
-        company = Company(
-            name=prospect.name,
-            domain=prospect.domain,
-            website=prospect.website,
-            industry=prospect.industry,
-            hq_city=prospect.hq_location.split(",")[0].strip() if prospect.hq_location and "," in prospect.hq_location else None,
-            is_active=True,
-            account_owner_id=user.id,
-            source="prospecting",
-        )
-        db.add(company)
-        db.flush()
-        prospect.company_id = company.id
-
-    prospect.status = "claimed"
-    prospect.claimed_by = user.id
-    prospect.claimed_at = datetime.now(timezone.utc)
-    db.commit()
-
-    logger.info("User {} claimed prospect {} ({})", user.name, prospect.name, prospect.id)
-
-    return {
-        "prospect_id": prospect.id,
-        "company_id": prospect.company_id,
-        "company_name": prospect.name,
-        "status": "claimed",
-    }
+    return result
 
 
 @router.post("/api/prospects/suggested/{prospect_id}/dismiss")
@@ -242,6 +222,86 @@ async def dismiss_suggested(
         "prospect_id": prospect.id,
         "company_name": prospect.name,
         "status": "dismissed",
+    }
+
+
+# ── Phase 7 Endpoints ───────────────────────────────────────────────
+
+
+@router.get("/api/prospects/suggested/{prospect_id}/enrichment")
+async def get_enrichment_status(
+    prospect_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Poll enrichment status after a claim."""
+    try:
+        return check_enrichment_status(prospect_id, db)
+    except LookupError:
+        raise HTTPException(404, "Prospect not found")
+
+
+@router.post("/api/prospects/add")
+async def add_prospect(
+    payload: dict,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Submit a domain manually for prospecting.
+
+    Body: {"domain": "company.com"}
+    Deduplicates against existing prospect_accounts.
+    """
+    domain = (payload.get("domain") or "").strip()
+    if not domain:
+        raise HTTPException(400, "Domain is required")
+
+    try:
+        return add_prospect_manually(domain, user.id, db)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.get("/api/prospects/batches")
+async def list_batches(
+    page: int = 1,
+    per_page: int = 20,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List discovery batch history (admin view)."""
+    page = max(1, page)
+    per_page = min(max(1, per_page), 50)
+
+    total = db.query(func.count(DiscoveryBatch.id)).scalar() or 0
+    batches = (
+        db.query(DiscoveryBatch)
+        .order_by(DiscoveryBatch.created_at.desc())
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+        .all()
+    )
+
+    return {
+        "items": [
+            {
+                "id": b.id,
+                "batch_id": b.batch_id,
+                "source": b.source,
+                "segment": b.segment,
+                "regions": b.regions or [],
+                "status": b.status,
+                "prospects_found": b.prospects_found,
+                "prospects_new": b.prospects_new,
+                "credits_used": b.credits_used,
+                "started_at": b.started_at.isoformat() if b.started_at else None,
+                "completed_at": b.completed_at.isoformat() if b.completed_at else None,
+            }
+            for b in batches
+        ],
+        "total": total,
+        "page": page,
+        "per_page": per_page,
     }
 
 
