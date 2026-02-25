@@ -4,6 +4,7 @@ Covers: rotation logic, kill switch, expire/resurface logic,
         score refresh, health report, and job isolation.
 """
 
+import sys
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -530,3 +531,142 @@ class TestJobErrorHandling:
         ):
             result = await job_pool_health_report()
         assert "error" in result
+
+
+# ── Scheduler Happy-Path Tests (coverage gap-fill) ─────────────────
+
+
+class TestDiscoverProspectsJob:
+    """Happy-path tests for job_discover_prospects — the most complex job."""
+
+    @pytest.mark.asyncio
+    async def test_discover_happy_path(self, db_session):
+        """Full discovery job with mocked external services."""
+        from app.schemas.prospect_account import ProspectAccountCreate
+
+        mock_explorium_result = ProspectAccountCreate(
+            name="Discovered Corp",
+            domain="discovered.com",
+            industry="Aerospace",
+            region="US",
+            discovery_source="explorium",
+        )
+
+        mock_email_result = ProspectAccountCreate(
+            name="Email Corp",
+            domain="emailcorp.com",
+            industry="Electronics",
+            region="EU",
+            discovery_source="email_history",
+        )
+
+        mock_graph = MagicMock()
+        mock_run_explorium = AsyncMock(return_value=[mock_explorium_result])
+        mock_run_email = AsyncMock(return_value=[mock_email_result])
+
+        with patch("app.database.SessionLocal", return_value=db_session), \
+             patch.object(db_session, "close"), \
+             patch.dict("sys.modules", {
+                 "app.services.prospect_discovery_explorium": MagicMock(
+                     run_explorium_discovery_batch=mock_run_explorium,
+                 ),
+                 "app.services.prospect_discovery_email": MagicMock(
+                     run_email_mining_batch=mock_run_email,
+                 ),
+                 "app.utils.graph_client": MagicMock(
+                     get_graph_client=MagicMock(return_value=mock_graph),
+                 ),
+             }):
+            result = await job_discover_prospects()
+
+        assert result["explorium_count"] == 1
+        assert result["email_count"] == 1
+        assert "batch_id" in result
+
+    @pytest.mark.asyncio
+    async def test_discover_explorium_fails_email_continues(self, db_session):
+        """Explorium failure doesn't block email mining."""
+        from app.schemas.prospect_account import ProspectAccountCreate
+
+        mock_email_result = ProspectAccountCreate(
+            name="Email Only",
+            domain="emailonly.com",
+            discovery_source="email_history",
+        )
+
+        mock_graph = MagicMock()
+        mock_run_explorium = AsyncMock(side_effect=Exception("Explorium down"))
+        mock_run_email = AsyncMock(return_value=[mock_email_result])
+
+        with patch("app.database.SessionLocal", return_value=db_session), \
+             patch.object(db_session, "close"), \
+             patch.dict("sys.modules", {
+                 "app.services.prospect_discovery_explorium": MagicMock(
+                     run_explorium_discovery_batch=mock_run_explorium,
+                 ),
+                 "app.services.prospect_discovery_email": MagicMock(
+                     run_email_mining_batch=mock_run_email,
+                 ),
+                 "app.utils.graph_client": MagicMock(
+                     get_graph_client=MagicMock(return_value=mock_graph),
+                 ),
+             }):
+            result = await job_discover_prospects()
+
+        assert result["explorium_count"] == 0
+        assert result["email_count"] == 1
+
+    @pytest.mark.asyncio
+    async def test_discover_both_fail_still_completes(self, db_session):
+        """Both sources fail — batch still completes with 0 results."""
+        mock_run_explorium = AsyncMock(side_effect=Exception("Explorium down"))
+
+        with patch("app.database.SessionLocal", return_value=db_session), \
+             patch.object(db_session, "close"), \
+             patch.dict("sys.modules", {
+                 "app.services.prospect_discovery_explorium": MagicMock(
+                     run_explorium_discovery_batch=mock_run_explorium,
+                 ),
+                 "app.utils.graph_client": MagicMock(
+                     get_graph_client=MagicMock(side_effect=Exception("No graph token")),
+                 ),
+             }):
+            result = await job_discover_prospects()
+
+        assert result["explorium_count"] == 0
+        assert result["email_count"] == 0
+
+
+class TestEnrichPoolJob:
+    """Happy-path for job_enrich_pool."""
+
+    @pytest.mark.asyncio
+    async def test_enrich_happy_path(self):
+        mock_result = {"enriched": 10, "errors": 0}
+
+        with patch(
+            "app.services.prospect_signals.run_signal_enrichment_batch",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await job_enrich_pool()
+
+        assert result == mock_result
+
+
+class TestFindContactsJob:
+    """Happy-path for job_find_contacts."""
+
+    @pytest.mark.asyncio
+    async def test_contacts_happy_path(self):
+        mock_result = {"prospects_processed": 5, "total_verified": 12}
+
+        with patch(
+            "app.services.prospect_contacts.run_contact_enrichment_batch",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            result = await job_find_contacts()
+
+        assert result["prospects_processed"] == 5
+        assert result["total_verified"] == 12

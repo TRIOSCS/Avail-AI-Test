@@ -143,7 +143,7 @@ async def job_discover_prospects() -> dict:
             }
             results = await run_explorium_discovery_batch(batch_id, existing_domains)
             for r in results:
-                pa = ProspectAccount(**r.dict() if hasattr(r, "dict") else r)
+                pa = ProspectAccount(**r.model_dump() if hasattr(r, "model_dump") else r)
                 pa.discovery_batch_id = batch.id
                 db.add(pa)
             explorium_count = len(results)
@@ -160,7 +160,7 @@ async def job_discover_prospects() -> dict:
             graph = get_graph_client()
             email_results = await run_email_mining_batch(batch_id, graph, db)
             for r in email_results:
-                pa = ProspectAccount(**r.dict() if hasattr(r, "dict") else r)
+                pa = ProspectAccount(**r.model_dump() if hasattr(r, "model_dump") else r)
                 pa.discovery_batch_id = batch.id
                 db.add(pa)
             email_count = len(email_results)

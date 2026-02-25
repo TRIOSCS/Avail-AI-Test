@@ -303,6 +303,7 @@ def calculate_readiness_score(
     """
     breakdown = {}
     total = 0
+    signals = signals or {}
 
     # 1. Active buying intent for components (0-35)
     intent = signals.get("intent", {})

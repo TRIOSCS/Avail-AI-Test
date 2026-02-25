@@ -717,3 +717,276 @@ class TestGracefulDegradation:
         )
 
         assert results == []  # empty, not crashed
+
+
+# ── Apollo Helper Function Coverage ─────────────────────────────────
+
+
+class TestApolloFullName:
+    """Coverage for _full_name edge cases."""
+
+    def test_both_names(self):
+        from app.services.prospect_discovery_apollo import _full_name
+        assert _full_name({"first_name": "Jane", "last_name": "Doe"}) == "Jane Doe"
+
+    def test_only_first_name(self):
+        from app.services.prospect_discovery_apollo import _full_name
+        assert _full_name({"first_name": "Jane"}) == "Jane"
+
+    def test_only_last_name(self):
+        from app.services.prospect_discovery_apollo import _full_name
+        assert _full_name({"last_name": "Doe"}) == "Doe"
+
+    def test_only_name_field(self):
+        from app.services.prospect_discovery_apollo import _full_name
+        assert _full_name({"name": "Jane Doe"}) == "Jane Doe"
+
+    def test_all_empty(self):
+        from app.services.prospect_discovery_apollo import _full_name
+        assert _full_name({}) == "Unknown"
+
+    def test_none_values(self):
+        from app.services.prospect_discovery_apollo import _full_name
+        assert _full_name({"first_name": None, "last_name": None}) == "Unknown"
+
+    def test_whitespace_only(self):
+        from app.services.prospect_discovery_apollo import _full_name
+        assert _full_name({"first_name": "  ", "last_name": "  "}) == "Unknown"
+
+
+class TestApolloFormatSize:
+    """Coverage for _format_size employee count bucketing."""
+
+    def test_none(self):
+        from app.services.prospect_discovery_apollo import _format_size
+        assert _format_size(None) is None
+
+    def test_small(self):
+        from app.services.prospect_discovery_apollo import _format_size
+        assert _format_size(10) == "1-50"
+        assert _format_size(50) == "1-50"
+
+    def test_medium_small(self):
+        from app.services.prospect_discovery_apollo import _format_size
+        assert _format_size(51) == "51-200"
+        assert _format_size(200) == "51-200"
+
+    def test_medium(self):
+        from app.services.prospect_discovery_apollo import _format_size
+        assert _format_size(201) == "201-500"
+        assert _format_size(500) == "201-500"
+
+    def test_medium_large(self):
+        from app.services.prospect_discovery_apollo import _format_size
+        assert _format_size(501) == "501-1000"
+        assert _format_size(1000) == "501-1000"
+
+    def test_large(self):
+        from app.services.prospect_discovery_apollo import _format_size
+        assert _format_size(1001) == "1001-5000"
+        assert _format_size(5000) == "1001-5000"
+
+    def test_very_large(self):
+        from app.services.prospect_discovery_apollo import _format_size
+        assert _format_size(5001) == "5001-10000"
+        assert _format_size(10000) == "5001-10000"
+
+    def test_enterprise(self):
+        from app.services.prospect_discovery_apollo import _format_size
+        assert _format_size(10001) == "10001+"
+        assert _format_size(100000) == "10001+"
+
+    def test_string_input(self):
+        from app.services.prospect_discovery_apollo import _format_size
+        assert _format_size("500") == "201-500"
+
+    def test_invalid_string(self):
+        from app.services.prospect_discovery_apollo import _format_size
+        assert _format_size("unknown") == "unknown"
+
+    def test_empty_string(self):
+        from app.services.prospect_discovery_apollo import _format_size
+        assert _format_size("") is None
+
+    def test_zero(self):
+        from app.services.prospect_discovery_apollo import _format_size
+        assert _format_size(0) == "1-50"
+
+
+class TestApolloDetectRegion:
+    """Coverage for _detect_region_from_country."""
+
+    def test_us_variants(self):
+        from app.services.prospect_discovery_apollo import _detect_region_from_country
+        assert _detect_region_from_country("US") == "US"
+        assert _detect_region_from_country("USA") == "US"
+        assert _detect_region_from_country("United States") == "US"
+
+    def test_eu_countries(self):
+        from app.services.prospect_discovery_apollo import _detect_region_from_country
+        for country in ["Germany", "UK", "United Kingdom", "France", "Netherlands",
+                        "Sweden", "Italy", "Spain", "Switzerland", "Austria", "Belgium"]:
+            assert _detect_region_from_country(country) == "EU", f"{country} should be EU"
+
+    def test_asian_countries(self):
+        from app.services.prospect_discovery_apollo import _detect_region_from_country
+        for country in ["China", "Japan", "South Korea", "Taiwan", "Singapore", "India"]:
+            assert _detect_region_from_country(country) == "Asia", f"{country} should be Asia"
+
+    def test_unknown_country(self):
+        from app.services.prospect_discovery_apollo import _detect_region_from_country
+        assert _detect_region_from_country("Brazil") is None
+        assert _detect_region_from_country("Australia") is None
+
+    def test_none(self):
+        from app.services.prospect_discovery_apollo import _detect_region_from_country
+        assert _detect_region_from_country(None) is None
+
+    def test_case_insensitive(self):
+        from app.services.prospect_discovery_apollo import _detect_region_from_country
+        assert _detect_region_from_country("germany") == "EU"
+        assert _detect_region_from_country("JAPAN") == "Asia"
+
+
+class TestApolloCompanyEnrichEdgeCases:
+    """Additional edge cases for enrich_company_apollo."""
+
+    @pytest.mark.asyncio
+    async def test_no_organization_in_response(self):
+        from app.services.prospect_discovery_apollo import enrich_company_apollo
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"organization": None}
+
+        with patch("app.services.prospect_discovery_apollo._get_api_key", return_value="key"):
+            with patch("app.services.prospect_discovery_apollo.http") as mock_http:
+                mock_http.get = AsyncMock(return_value=mock_resp)
+                result = await enrich_company_apollo("ghost.com")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_exception_returns_none(self):
+        from app.services.prospect_discovery_apollo import enrich_company_apollo
+
+        with patch("app.services.prospect_discovery_apollo._get_api_key", return_value="key"):
+            with patch("app.services.prospect_discovery_apollo.http") as mock_http:
+                mock_http.get = AsyncMock(side_effect=Exception("connection timeout"))
+                result = await enrich_company_apollo("timeout.com")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_missing_fields_in_org(self):
+        """Organization response with minimal fields."""
+        from app.services.prospect_discovery_apollo import enrich_company_apollo
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "organization": {
+                "name": "Minimal Corp",
+                # No domain, no employees, no location
+            },
+        }
+
+        with patch("app.services.prospect_discovery_apollo._get_api_key", return_value="key"):
+            with patch("app.services.prospect_discovery_apollo.http") as mock_http:
+                mock_http.get = AsyncMock(return_value=mock_resp)
+                result = await enrich_company_apollo("minimal.com")
+
+        assert result is not None
+        assert result["name"] == "Minimal Corp"
+        assert result["domain"] == "minimal.com"  # falls back to input domain
+        assert result["employee_count_range"] is None
+        assert result["region"] is None
+        assert result["hq_location"] is None
+
+    @pytest.mark.asyncio
+    async def test_partial_location(self):
+        """Organization with only city, no state/country."""
+        from app.services.prospect_discovery_apollo import enrich_company_apollo
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "organization": {
+                "name": "City Only Corp",
+                "city": "Austin",
+            },
+        }
+
+        with patch("app.services.prospect_discovery_apollo._get_api_key", return_value="key"):
+            with patch("app.services.prospect_discovery_apollo.http") as mock_http:
+                mock_http.get = AsyncMock(return_value=mock_resp)
+                result = await enrich_company_apollo("cityonly.com")
+
+        assert result["hq_location"] == "Austin"
+
+
+class TestApolloBatchEdgeCases:
+    """Edge cases for run_people_check_batch."""
+
+    @pytest.mark.asyncio
+    async def test_batch_skips_missing_prospect(self, db_session):
+        from app.services.prospect_discovery_apollo import run_people_check_batch
+
+        with patch("app.services.prospect_discovery_apollo._get_api_key", return_value="key"):
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                result = await run_people_check_batch([99999], db_session)
+
+        assert result["checked"] == 0
+
+    @pytest.mark.asyncio
+    async def test_batch_skips_prospect_without_domain(self, db_session):
+        from app.services.prospect_discovery_apollo import run_people_check_batch
+
+        pa = ProspectAccount(name="No Domain", domain="", discovery_source="manual")
+        db_session.add(pa)
+        db_session.commit()
+        db_session.refresh(pa)
+
+        with patch("app.services.prospect_discovery_apollo._get_api_key", return_value="key"):
+            with patch("asyncio.sleep", new_callable=AsyncMock):
+                result = await run_people_check_batch([pa.id], db_session)
+
+        assert result["checked"] == 0
+
+    @pytest.mark.asyncio
+    async def test_batch_handles_check_exception(self, db_session):
+        from app.services.prospect_discovery_apollo import run_people_check_batch
+
+        pa = ProspectAccount(name="Error Corp", domain="errorcorp.com", discovery_source="explorium")
+        db_session.add(pa)
+        db_session.commit()
+        db_session.refresh(pa)
+
+        with patch("app.services.prospect_discovery_apollo._get_api_key", return_value="key"):
+            with patch("app.services.prospect_discovery_apollo.check_people_signals",
+                       new_callable=AsyncMock, side_effect=Exception("API crashed")):
+                with patch("asyncio.sleep", new_callable=AsyncMock):
+                    result = await run_people_check_batch([pa.id], db_session)
+
+        assert result["errors"] == 1
+
+    @pytest.mark.asyncio
+    async def test_batch_no_staff_result(self, db_session):
+        from app.services.prospect_discovery_apollo import run_people_check_batch
+
+        pa = ProspectAccount(name="No Staff Corp", domain="nostaff.com", discovery_source="explorium")
+        db_session.add(pa)
+        db_session.commit()
+        db_session.refresh(pa)
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"people": []}
+
+        with patch("app.services.prospect_discovery_apollo._get_api_key", return_value="key"):
+            with patch("app.services.prospect_discovery_apollo.http") as mock_http:
+                mock_http.post = AsyncMock(return_value=mock_resp)
+                with patch("asyncio.sleep", new_callable=AsyncMock):
+                    result = await run_people_check_batch([pa.id], db_session)
+
+        assert result["no_staff"] == 1
