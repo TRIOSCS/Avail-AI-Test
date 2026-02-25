@@ -267,6 +267,7 @@ async def send_proactive_offer(
     sell_prices: dict,
     subject: str | None = None,
     notes: str | None = None,
+    email_html: str | None = None,
 ) -> dict:
     """Send a proactive offer email to a customer. Returns the created ProactiveOffer dict."""
     # Load and validate matches
@@ -336,49 +337,54 @@ async def send_proactive_offer(
     if not subject:
         subject = f"Parts Available — {company_name}"
 
-    rows_html = ""
-    for item in line_items:
-        rows_html += f"""<tr>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item["mpn"]))}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("manufacturer", "")))}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right">{item["qty"]:,}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right">${item["sell_price"]:.4f}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("condition", "")))}</td>
-            <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("lead_time", "")))}</td>
-        </tr>"""
+    if email_html:
+        # Use AI-drafted or user-edited HTML
+        html_body = email_html
+    else:
+        # Fallback: build template HTML
+        rows_html = ""
+        for item in line_items:
+            rows_html += f"""<tr>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item["mpn"]))}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("manufacturer", "")))}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right">{item["qty"]:,}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb;text-align:right">${item["sell_price"]:.4f}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("condition", "")))}</td>
+                <td style="padding:6px 10px;border:1px solid #e5e7eb">{html.escape(str(item.get("lead_time", "")))}</td>
+            </tr>"""
 
-    contact_names = ", ".join(c.full_name for c in contacts if c.full_name)
-    greeting = (
-        f"Hi {html.escape(str(contacts[0].full_name))},"
-        if len(contacts) == 1 and contacts[0].full_name
-        else f"Hi {html.escape(str(contact_names))},"
-        if contact_names
-        else "Hello,"
-    )
+        contact_names = ", ".join(c.full_name for c in contacts if c.full_name)
+        greeting = (
+            f"Hi {html.escape(str(contacts[0].full_name))},"
+            if len(contacts) == 1 and contacts[0].full_name
+            else f"Hi {html.escape(str(contact_names))},"
+            if contact_names
+            else "Hello,"
+        )
 
-    notes_html = f'<p style="margin-top:12px">{html.escape(str(notes))}</p>' if notes else ""
-    salesperson_name = user.name or user.email.split("@")[0]
+        notes_html = f'<p style="margin-top:12px">{html.escape(str(notes))}</p>' if notes else ""
+        salesperson_name = user.name or user.email.split("@")[0]
 
-    html_body = f"""
-    <div style="font-family:Arial,sans-serif;max-width:700px">
-        <p>{greeting}</p>
-        <p>We have the following parts available that may be of interest based on your previous requirements:</p>
-        <table style="border-collapse:collapse;width:100%;margin:16px 0">
-            <thead><tr style="background:#f3f4f6">
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Part Number</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Manufacturer</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty Available</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Price</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Condition</th>
-                <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead Time</th>
-            </tr></thead>
-            <tbody>{rows_html}</tbody>
-        </table>
-        {notes_html}
-        <p>Please reply to this email if you'd like to place an order or need more details on any of these items.</p>
-        <p>Best regards,<br>{html.escape(str(salesperson_name))}<br>Trio Supply Chain Solutions</p>
-    </div>
-    """
+        html_body = f"""
+        <div style="font-family:Arial,sans-serif;max-width:700px">
+            <p>{greeting}</p>
+            <p>We have the following parts available that may be of interest based on your previous requirements:</p>
+            <table style="border-collapse:collapse;width:100%;margin:16px 0">
+                <thead><tr style="background:#f3f4f6">
+                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Part Number</th>
+                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Manufacturer</th>
+                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Qty Available</th>
+                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:right">Unit Price</th>
+                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Condition</th>
+                    <th style="padding:8px 10px;border:1px solid #e5e7eb;text-align:left">Lead Time</th>
+                </tr></thead>
+                <tbody>{rows_html}</tbody>
+            </table>
+            {notes_html}
+            <p>Please reply to this email if you'd like to place an order or need more details on any of these items.</p>
+            <p>Best regards,<br>{html.escape(str(salesperson_name))}<br>Trio Supply Chain Solutions</p>
+        </div>
+        """
 
     # Create ProactiveOffer record first to get ID for subject tag
     po = ProactiveOffer(

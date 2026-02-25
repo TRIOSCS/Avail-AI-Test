@@ -4086,7 +4086,59 @@ async function openProactiveSendModal(siteId) {
     }).join('');
     updateProactivePreview();
 
+    // Reset draft preview
+    const draftPreview = document.getElementById('psDraftPreview');
+    if (draftPreview) draftPreview.innerHTML = '<p style="color:var(--muted);font-style:italic">Click "AI Draft" to generate a personalized email, or type your own message here.</p>';
+    const draftStatus = document.getElementById('psDraftStatus');
+    if (draftStatus) draftStatus.textContent = '';
+    _proactiveDraftHtml = null;
+
     openModal('proactiveSendModal');
+}
+
+let _proactiveDraftHtml = null;
+
+async function generateProactiveDraft() {
+    const btn = document.getElementById('psDraftBtn');
+    const status = document.getElementById('psDraftStatus');
+    const preview = document.getElementById('psDraftPreview');
+    if (!btn || !preview) return;
+
+    const contactIds = Array.from(document.querySelectorAll('.ps-contact:checked')).map(c => parseInt(c.value));
+    const sellPrices = {};
+    document.querySelectorAll('.ps-sell').forEach(input => {
+        sellPrices[input.dataset.id] = parseFloat(input.value) || 0;
+    });
+
+    btn.disabled = true;
+    btn.textContent = 'Drafting…';
+    if (status) status.textContent = '';
+
+    try {
+        const result = await apiFetch('/api/proactive/draft', {
+            method: 'POST',
+            body: {
+                match_ids: _proactiveSendMatchIds,
+                contact_ids: contactIds,
+                sell_prices: sellPrices,
+                notes: document.getElementById('psNotes').value.trim() || null,
+            }
+        });
+        if (result.html) {
+            preview.innerHTML = result.html;
+            _proactiveDraftHtml = result.html;
+        }
+        if (result.subject) {
+            document.getElementById('psSubject').value = result.subject;
+        }
+        if (status) status.textContent = 'Draft generated — edit as needed';
+    } catch (e) {
+        logCatchError('proactiveDraft', e);
+        if (status) status.textContent = 'Draft failed — send will use default template';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'AI Draft';
+    }
 }
 
 function updateProactivePreview() {
@@ -4119,6 +4171,14 @@ async function sendProactiveOffer() {
         sellPrices[input.dataset.id] = parseFloat(input.value) || 0;
     });
 
+    // Capture email HTML from draft preview (if user edited or AI-drafted)
+    const draftPreview = document.getElementById('psDraftPreview');
+    let emailHtml = null;
+    if (draftPreview && _proactiveDraftHtml) {
+        // Use current content of the editable preview (may have been hand-edited)
+        emailHtml = draftPreview.innerHTML;
+    }
+
     await guardBtn(btn, 'Sending…', async () => {
         try {
             await apiFetch('/api/proactive/send', {
@@ -4129,6 +4189,7 @@ async function sendProactiveOffer() {
                     sell_prices: sellPrices,
                     subject: document.getElementById('psSubject').value.trim(),
                     notes: document.getElementById('psNotes').value.trim() || null,
+                    email_html: emailHtml,
                 }
             });
             showToast('Proactive offer sent!', 'success');
@@ -6880,6 +6941,6 @@ Object.assign(window, {
     // Proactive UI functions called from HTML onclick
     switchProactiveTab, openProactiveSendModal, dismissProactiveGroup,
     dismissSingleMatch, toggleProactiveDetail, refreshProactiveMatches,
-    sendProactiveOffer, convertProactiveOffer, updateProactivePreview,
+    sendProactiveOffer, convertProactiveOffer, updateProactivePreview, generateProactiveDraft,
     loadProactiveScorecard,
 });

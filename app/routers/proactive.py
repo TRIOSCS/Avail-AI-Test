@@ -16,7 +16,7 @@ from ..database import get_db
 from ..dependencies import require_user
 from ..models import ProactiveMatch, SiteContact, User
 from ..scheduler import get_valid_token
-from ..schemas.proactive import DismissMatches, SendProactive
+from ..schemas.proactive import DismissMatches, DraftProactive, SendProactive
 
 router = APIRouter()
 
@@ -93,6 +93,80 @@ async def dismiss_matches(
     return {"dismissed": updated}
 
 
+@router.post("/api/proactive/draft")
+async def draft_proactive_email(
+    body: DraftProactive,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """AI-draft a proactive offer email for review before sending."""
+    from ..models import CustomerSite, Offer
+    from ..services.proactive_email import draft_proactive_email as _draft
+
+    match_ids = body.match_ids
+    if not match_ids:
+        raise HTTPException(400, "Select at least one match")
+
+    matches = (
+        db.query(ProactiveMatch)
+        .filter(
+            ProactiveMatch.id.in_(match_ids),
+            ProactiveMatch.salesperson_id == user.id,
+        )
+        .all()
+    )
+    if not matches:
+        raise HTTPException(400, "No valid matches found")
+
+    site_id = matches[0].customer_site_id
+    site = db.get(CustomerSite, site_id)
+    company = site.company if site else None
+    company_name = company.name if company else "Customer"
+
+    # Resolve contact name
+    contact_name = None
+    if body.contact_ids:
+        primary = db.get(SiteContact, body.contact_ids[0])
+        if primary and primary.full_name:
+            contact_name = primary.full_name.split()[0]  # First name
+
+    # Build parts list for AI
+    parts = []
+    for m in matches:
+        offer = m.offer
+        cost = float(offer.unit_price) if offer and offer.unit_price else 0
+        sell = body.sell_prices.get(str(m.id), cost * 1.3)
+        parts.append({
+            "mpn": m.mpn,
+            "manufacturer": offer.manufacturer if offer else "",
+            "qty": offer.qty_available if offer else 0,
+            "sell_price": float(sell),
+            "condition": offer.condition if offer else "",
+            "lead_time": offer.lead_time if offer else "",
+            "customer_purchase_count": m.customer_purchase_count or 0,
+            "customer_last_purchased_at": (
+                m.customer_last_purchased_at.strftime("%b %Y")
+                if m.customer_last_purchased_at
+                else None
+            ),
+        })
+
+    salesperson_name = user.name or user.email.split("@")[0]
+
+    result = await _draft(
+        company_name=company_name,
+        contact_name=contact_name,
+        parts=parts,
+        salesperson_name=salesperson_name,
+        notes=body.notes,
+    )
+
+    if not result:
+        raise HTTPException(500, "Failed to generate email draft")
+
+    return result
+
+
 @router.post("/api/proactive/send")
 async def send_proactive(
     body: SendProactive,
@@ -127,6 +201,7 @@ async def send_proactive(
             sell_prices,
             subject,
             notes,
+            email_html=body.email_html,
         )
         return result
     except ValueError as e:

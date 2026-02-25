@@ -332,6 +332,78 @@ class TestRefresh:
         assert data["cph_matches"] == 0
 
 
+class TestDraftEndpoint:
+    @patch("app.services.proactive_email.draft_proactive_email", new_callable=AsyncMock,
+           return_value={"subject": "Parts for You", "body": "Great deal!", "html": "<p>Great deal!</p>"})
+    def test_draft_success(self, mock_draft, client, db_session, test_user, test_requisition, test_offer, test_customer_site):
+        """AI draft returns subject + body + html."""
+        from app.models import Company
+        match = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=test_requisition.id,
+            requisition_id=test_requisition.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="LM317T",
+            status="new",
+        )
+        db_session.add(match)
+        db_session.commit()
+        resp = client.post("/api/proactive/draft", json={
+            "match_ids": [match.id],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["subject"] == "Parts for You"
+        assert "html" in data
+
+    def test_draft_empty_match_ids(self, client):
+        """Empty match_ids -> 400."""
+        resp = client.post("/api/proactive/draft", json={"match_ids": []})
+        assert resp.status_code == 400
+
+    @patch("app.services.proactive_email.draft_proactive_email", new_callable=AsyncMock,
+           return_value=None)
+    def test_draft_ai_failure(self, mock_draft, client, db_session, test_user, test_requisition, test_offer, test_customer_site):
+        """AI returns None -> 500."""
+        match = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=test_requisition.id,
+            requisition_id=test_requisition.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="LM317T",
+            status="new",
+        )
+        db_session.add(match)
+        db_session.commit()
+        resp = client.post("/api/proactive/draft", json={
+            "match_ids": [match.id],
+        })
+        assert resp.status_code == 500
+
+    def test_draft_no_valid_matches(self, client):
+        """Non-existent match_ids -> 400."""
+        resp = client.post("/api/proactive/draft", json={"match_ids": [99999]})
+        assert resp.status_code == 400
+
+    @patch("app.services.proactive_service.send_proactive_offer", new_callable=AsyncMock,
+           return_value={"ok": True, "sent_to": 1})
+    @patch("app.routers.proactive.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
+    def test_send_with_email_html(self, mock_token, mock_send, client):
+        """Send with email_html passes it through to service."""
+        resp = client.post("/api/proactive/send", json={
+            "match_ids": [1],
+            "contact_ids": [1],
+            "email_html": "<p>Custom email body</p>",
+        })
+        assert resp.status_code == 200
+        # Verify email_html was passed to the service
+        call_kwargs = mock_send.call_args
+        assert call_kwargs[1].get("email_html") == "<p>Custom email body</p>" or \
+               (len(call_kwargs[0]) > 8 and call_kwargs[0][8] == "<p>Custom email body</p>")
+
+
 class TestContactsExtended:
     def test_contacts_multiple_for_site(self, client, db_session, test_customer_site):
         """Multiple contacts ordered by is_primary desc, then full_name."""
