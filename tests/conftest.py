@@ -64,11 +64,12 @@ TEST_DB_URL = "sqlite://"  # in-memory, fresh per session
 
 
 def _patch_types_for_sqlite():
-    """Register ARRAY → JSON and TSVECTOR → TEXT type adapters so models work on SQLite."""
+    """Register ARRAY → JSON, TSVECTOR → TEXT, JSONB → JSON type adapters so models work on SQLite."""
     from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
 
     SQLiteTypeCompiler.visit_ARRAY = lambda self, type_, **kw: "JSON"
     SQLiteTypeCompiler.visit_TSVECTOR = lambda self, type_, **kw: "TEXT"
+    SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "JSON"
 
 
 _patch_types_for_sqlite()

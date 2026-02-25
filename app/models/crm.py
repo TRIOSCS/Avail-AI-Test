@@ -49,6 +49,9 @@ class Company(Base):
     commodity_tags = Column(JSON, default=list)
     material_tags_updated_at = Column(DateTime)
 
+    # Record origin tracking
+    source = Column(String(50), default="manual")
+
     # Salesforce import fields
     sf_account_id = Column(String(255), unique=True)
     import_priority = Column(String(20))  # "priority", "standard", "dismissed"

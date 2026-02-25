@@ -84,6 +84,8 @@ def _add_missing_columns(conn) -> None:
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS material_tags_updated_at TIMESTAMP",
         # API health: active/planned classification
         "ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE",
+        # Prospecting module: company record origin
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'manual'",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
