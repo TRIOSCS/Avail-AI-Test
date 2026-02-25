@@ -911,5 +911,7 @@ from .routers.dashboard import router as dashboard_router
 
 app.include_router(dashboard_router)
 from .routers.prospect_pool import router as prospect_pool_router
+from .routers.prospect_suggested import router as prospect_suggested_router
 
 app.include_router(prospect_pool_router)
+app.include_router(prospect_suggested_router)

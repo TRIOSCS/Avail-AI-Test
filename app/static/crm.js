@@ -6119,16 +6119,16 @@ async function mergeCompanies(keepId, removeId, btn) {
 }
 
 
-/// ── Suggested Accounts (Company-Level Prospect Pool) ────────────────────
+/// ── Suggested Accounts (Prospect Pool from prospect_accounts) ───────────
 
 let _suggestedPage = 1;
-let _suggestedPriority = '';
+let _suggestedReadiness = '';
 let _suggestedAbort = null;
 
 const debouncedLoadSuggested = debounce(() => { _suggestedPage = 1; loadSuggested(); }, 300);
 
-function setSuggestedPriority(val, btn) {
-    _suggestedPriority = val;
+function setSuggestedReadiness(val, btn) {
+    _suggestedReadiness = val;
     document.querySelectorAll('#suggestedPills .chip').forEach(c => c.classList.toggle('on', c.dataset.value === val));
     _suggestedPage = 1;
     loadSuggested();
@@ -6140,10 +6140,14 @@ async function showSuggested() {
     if (viewEl) viewEl.style.display = 'flex';
     setCurrentReqId(null);
     _suggestedPage = 1;
-    _suggestedPriority = '';
+    _suggestedReadiness = '';
     document.querySelectorAll('#suggestedPills .chip').forEach(c => c.classList.toggle('on', c.dataset.value === ''));
     const search = document.getElementById('suggestedSearch');
     if (search) search.value = '';
+    const region = document.getElementById('suggestedRegion');
+    if (region) region.value = '';
+    const sort = document.getElementById('suggestedSort');
+    if (sort) sort.value = 'readiness_desc';
     _setTopViewLabel('Suggested');
     await loadSuggested();
 }
@@ -6155,14 +6159,17 @@ async function loadSuggested() {
     if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner"></div> Loading…</div>';
 
     const search = (document.getElementById('suggestedSearch')?.value || '').trim();
-    const params = new URLSearchParams({ page: _suggestedPage, per_page: 20 });
+    const region = document.getElementById('suggestedRegion')?.value || '';
+    const sort = document.getElementById('suggestedSort')?.value || 'readiness_desc';
+    const params = new URLSearchParams({ page: _suggestedPage, per_page: 20, sort });
     if (search) params.set('search', search);
-    if (_suggestedPriority) params.set('import_priority', _suggestedPriority);
+    if (_suggestedReadiness) params.set('readiness_level', _suggestedReadiness);
+    if (region) params.set('region', region);
 
     try {
         const [data, stats] = await Promise.all([
-            apiFetch('/api/prospects/pool?' + params, { signal: _suggestedAbort.signal }),
-            apiFetch('/api/prospects/pool/stats', { signal: _suggestedAbort.signal }),
+            apiFetch('/api/prospects/suggested?' + params, { signal: _suggestedAbort.signal }),
+            apiFetch('/api/prospects/suggested/stats', { signal: _suggestedAbort.signal }),
         ]);
         renderSuggestedStats(stats);
         renderSuggestedGrid(data);
@@ -6178,8 +6185,9 @@ function renderSuggestedStats(stats) {
     if (!el) return;
     el.innerHTML = `
         <span class="stat-item"><span class="stat-val">${stats.total_available}</span> available</span>
-        <span class="stat-item"><span class="stat-val">${stats.priority_count}</span> priority</span>
-        <span class="stat-item"><span class="stat-val">${stats.standard_count}</span> standard</span>
+        <span class="stat-item"><span class="stat-val">${stats.call_now_count}</span> call now</span>
+        <span class="stat-item"><span class="stat-val">${stats.nurture_count}</span> nurture</span>
+        <span class="stat-item"><span class="stat-val">${stats.high_fit_count}</span> high fit</span>
         <span class="stat-item"><span class="stat-val">${stats.claimed_this_month}</span> claimed this month</span>
     `;
 }
@@ -6196,20 +6204,62 @@ function renderSuggestedGrid(data) {
     }
 
     grid.innerHTML = data.items.map(a => {
-        const priBadge = a.import_priority === 'priority'
-            ? '<span class="suggested-badge priority">Priority</span>'
-            : a.import_priority === 'standard'
-            ? '<span class="suggested-badge standard">Standard</span>'
-            : '';
-        const sfBadge = a.sf_account_id ? '<span class="suggested-badge sf">SF</span>' : '';
+        // Readiness tier badge
+        const tierLabels = { call_now: 'Call Now', nurture: 'Nurture', monitor: 'Monitor' };
+        const tierBadge = `<span class="suggested-badge ${a.readiness_tier}">${tierLabels[a.readiness_tier] || a.readiness_tier}</span>`;
+        const sfBadge = a.company_id ? '<span class="suggested-badge sf">SF</span>' : '';
+
+        // Domain link
         const domainLink = a.domain
             ? `<a class="suggested-card-domain" href="https://${escAttr(a.domain)}" target="_blank" rel="noopener">${esc(a.domain)}</a>`
             : '';
+
+        // Meta info
         const meta = [];
         if (a.industry) meta.push('<span>' + esc(a.industry) + '</span>');
-        if (a.phone) meta.push('<span>' + esc(a.phone) + '</span>');
-        const loc = [a.hq_city, a.hq_state, a.hq_country].filter(Boolean).join(', ');
-        if (loc) meta.push('<span>' + esc(loc) + '</span>');
+        if (a.employee_count_range) meta.push('<span>' + esc(a.employee_count_range) + ' emp</span>');
+        if (a.hq_location) meta.push('<span>' + esc(a.hq_location) + '</span>');
+
+        // Score bars
+        const fitPct = Math.min(a.fit_score, 100);
+        const readPct = Math.min(a.readiness_score, 100);
+        const scoreBars = `<div class="suggested-scores">
+            <div class="score-bar"><div class="score-bar-label"><span>Fit</span><span>${a.fit_score}</span></div><div class="score-bar-track"><div class="score-bar-fill fit" style="width:${fitPct}%"></div></div></div>
+            <div class="score-bar"><div class="score-bar-label"><span>Readiness</span><span>${a.readiness_score}</span></div><div class="score-bar-track"><div class="score-bar-fill readiness" style="width:${readPct}%"></div></div></div>
+        </div>`;
+
+        // Signal tags
+        let signalHtml = '';
+        if (a.signal_tags && a.signal_tags.length) {
+            signalHtml = '<div class="suggested-signals">' +
+                a.signal_tags.map(s => `<span class="signal-tag ${s.type}">${esc(s.label)}</span>`).join('') +
+                '</div>';
+        }
+
+        // Contacts preview
+        let contactsHtml = '';
+        if (a.contacts_count > 0) {
+            const avatars = (a.contacts_preview || []).slice(0, 3).map(c => {
+                const initials = (c.name || '?').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+                return `<span class="contact-avatar" title="${escAttr(c.name || '')}">${initials}</span>`;
+            }).join('');
+            contactsHtml = `<div class="suggested-contacts">
+                <div class="contacts-avatars">${avatars}</div>
+                <span class="contacts-summary">${a.contacts_count} contacts &middot; ${a.contacts_verified} verified &middot; ${a.contacts_decision_makers} DMs</span>
+            </div>`;
+        }
+
+        // Similar customers
+        let similarHtml = '';
+        if (a.similar_customers && a.similar_customers.length) {
+            const names = a.similar_customers.map(s => esc(s.name || s)).join(', ');
+            similarHtml = `<div class="suggested-similar">Similar to: <strong>${names}</strong></div>`;
+        }
+
+        // AI writeup snippet
+        const writeupHtml = a.ai_writeup
+            ? `<div class="suggested-writeup">${esc(a.ai_writeup)}</div>`
+            : '';
 
         return `<div class="suggested-card" id="sg-card-${a.id}">
             <div class="suggested-card-header">
@@ -6217,9 +6267,14 @@ function renderSuggestedGrid(data) {
                     <div class="suggested-card-name">${esc(a.name)}</div>
                     ${domainLink}
                 </div>
-                <div class="suggested-card-badges">${priBadge}${sfBadge}</div>
+                <div class="suggested-card-badges">${tierBadge}${sfBadge}</div>
             </div>
             ${meta.length ? '<div class="suggested-card-meta">' + meta.join(' &middot; ') + '</div>' : ''}
+            ${scoreBars}
+            ${signalHtml}
+            ${contactsHtml}
+            ${similarHtml}
+            ${writeupHtml}
             <div class="suggested-card-actions">
                 <button class="btn-claim" onclick="claimSuggestedAccount(${a.id},'${escAttr(a.name)}')">Claim</button>
                 <select class="dismiss-select" onchange="dismissSuggestedAccount(${a.id},'${escAttr(a.name)}',this.value);this.selectedIndex=0">
@@ -6250,7 +6305,6 @@ function renderSuggestedGrid(data) {
 function suggestedGoPage(page) {
     _suggestedPage = page;
     loadSuggested();
-    // Scroll to top of grid
     const wrap = document.querySelector('.suggested-grid-wrap');
     if (wrap) wrap.scrollTop = 0;
 }
@@ -6258,14 +6312,12 @@ function suggestedGoPage(page) {
 async function claimSuggestedAccount(id, name) {
     if (!confirm('Claim "' + name + '"? It will be added to your Accounts list.')) return;
     try {
-        const result = await apiFetch('/api/prospects/pool/' + id + '/claim', { method: 'POST' });
+        const result = await apiFetch('/api/prospects/suggested/' + id + '/claim', { method: 'POST' });
         showToast('Claimed: ' + (result.company_name || name), 'success');
-        // Remove card with fade
         const card = document.getElementById('sg-card-' + id);
         if (card) { card.style.opacity = '0'; card.style.transition = 'opacity .3s'; setTimeout(() => card.remove(), 300); }
-        // Refresh stats
         try {
-            const stats = await apiFetch('/api/prospects/pool/stats');
+            const stats = await apiFetch('/api/prospects/suggested/stats');
             renderSuggestedStats(stats);
         } catch(e) {}
     } catch (e) {
@@ -6277,12 +6329,12 @@ async function claimSuggestedAccount(id, name) {
 async function dismissSuggestedAccount(id, name, reason) {
     if (!reason) return;
     try {
-        await apiFetch('/api/prospects/pool/' + id + '/dismiss', { method: 'POST', body: { reason: reason } });
+        await apiFetch('/api/prospects/suggested/' + id + '/dismiss', { method: 'POST', body: { reason: reason } });
         showToast('Dismissed: ' + name, 'info');
         const card = document.getElementById('sg-card-' + id);
         if (card) { card.style.opacity = '0'; card.style.transition = 'opacity .3s'; setTimeout(() => card.remove(), 300); }
         try {
-            const stats = await apiFetch('/api/prospects/pool/stats');
+            const stats = await apiFetch('/api/prospects/suggested/stats');
             renderSuggestedStats(stats);
         } catch(e) {}
     } catch (e) {
