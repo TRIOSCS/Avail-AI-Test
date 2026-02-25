@@ -9,13 +9,15 @@ Called by: app/static/app.js (loadDashboard)
 Depends on: models/crm.py, models/intelligence.py, models/quotes.py
 """
 
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func
+from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
+from ..cache.decorators import cached_endpoint
 from ..database import get_db
 from ..dependencies import require_user
 
@@ -25,6 +27,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
 @router.get("/needs-attention")
+@cached_endpoint(prefix="needs_attention", ttl_hours=0.5, key_params=["days"])
 def needs_attention(
     days: int = Query(default=7, ge=0, le=90),
     db: Session = Depends(get_db),
@@ -44,11 +47,17 @@ def needs_attention(
     now = datetime.now(timezone.utc)
     cutoff = now - timedelta(days=days)
 
-    # Get all active companies owned by this user
+    # Get all active companies where user owns at least one site
+    owned_company_ids = (
+        db.query(CustomerSite.company_id)
+        .filter(CustomerSite.owner_id == user.id)
+        .distinct()
+        .subquery()
+    )
     companies = (
         db.query(Company)
         .filter(
-            Company.account_owner_id == user.id,
+            Company.id.in_(owned_company_ids),
             Company.is_active.is_(True),
         )
         .all()
@@ -59,36 +68,43 @@ def needs_attention(
 
     company_ids = [c.id for c in companies]
 
-    # Batch: latest activity per company (outbound only — email_sent, call_outbound)
+    # Batch: latest activity + channel per company (outbound only)
+    # Uses subquery for max(created_at) then joins back to get the channel
     outbound_types = ("email_sent", "call_outbound")
-    latest_activity_q = (
+    latest_sub = (
         db.query(
             ActivityLog.company_id,
-            func.max(ActivityLog.created_at).label("last_at"),
+            func.max(ActivityLog.created_at).label("max_at"),
         )
         .filter(
             ActivityLog.company_id.in_(company_ids),
             ActivityLog.activity_type.in_(outbound_types),
         )
         .group_by(ActivityLog.company_id)
-        .all()
+        .subquery()
     )
-    last_outreach_map = {row.company_id: row.last_at for row in latest_activity_q}
-
-    # Batch: last channel per company (most recent outbound activity)
-    last_channel_q = (
-        db.query(ActivityLog)
-        .filter(
-            ActivityLog.company_id.in_(company_ids),
-            ActivityLog.activity_type.in_(outbound_types),
+    latest_rows = (
+        db.query(
+            latest_sub.c.company_id,
+            latest_sub.c.max_at.label("last_at"),
+            ActivityLog.channel,
         )
-        .order_by(ActivityLog.created_at.desc())
+        .join(
+            ActivityLog,
+            and_(
+                ActivityLog.company_id == latest_sub.c.company_id,
+                ActivityLog.created_at == latest_sub.c.max_at,
+            ),
+        )
+        .filter(ActivityLog.activity_type.in_(outbound_types))
         .all()
     )
+    last_outreach_map = {}
     last_channel_map = {}
-    for act in last_channel_q:
-        if act.company_id not in last_channel_map:
-            last_channel_map[act.company_id] = act.channel
+    for row in latest_rows:
+        if row.company_id not in last_outreach_map:
+            last_outreach_map[row.company_id] = row.last_at
+            last_channel_map[row.company_id] = row.channel
 
     # Batch: open req count per company (via customer_site)
     site_ids_q = (
@@ -177,7 +193,8 @@ def needs_attention(
 
 
 @router.get("/morning-brief")
-async def morning_brief(
+@cached_endpoint(prefix="morning_brief", ttl_hours=1, key_params=[])
+def morning_brief(
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
@@ -197,10 +214,16 @@ async def morning_brief(
     # ── Gather stats ──
 
     # Stale accounts (no outbound activity in 7 days)
+    owned_company_ids_sub = (
+        db.query(CustomerSite.company_id)
+        .filter(CustomerSite.owner_id == user.id)
+        .distinct()
+        .subquery()
+    )
     owned_companies = (
         db.query(Company)
         .filter(
-            Company.account_owner_id == user.id,
+            Company.id.in_(owned_company_ids_sub),
             Company.is_active.is_(True),
         )
         .all()
@@ -233,17 +256,25 @@ async def morning_brief(
         )
         site_ids = [s.id for s in sites]
 
+    # Quote stats: awaiting + won/lost this week (single query with case())
     quotes_awaiting = 0
+    won_this_week = 0
+    lost_this_week = 0
     if site_ids:
-        quotes_awaiting = (
-            db.query(func.count(Quote.id))
-            .filter(
-                Quote.customer_site_id.in_(site_ids),
-                Quote.status == "sent",
-                Quote.result.is_(None),
-            )
-            .scalar()
-        ) or 0
+        quote_stats = db.query(
+            func.count(case(
+                (and_(Quote.status == "sent", Quote.result.is_(None)), Quote.id),
+            )).label("awaiting"),
+            func.count(case(
+                (and_(Quote.result == "won", Quote.result_at >= week_ago), Quote.id),
+            )).label("won"),
+            func.count(case(
+                (and_(Quote.result == "lost", Quote.result_at >= week_ago), Quote.id),
+            )).label("lost"),
+        ).filter(Quote.customer_site_id.in_(site_ids)).first()
+        quotes_awaiting = quote_stats.awaiting or 0
+        won_this_week = quote_stats.won or 0
+        lost_this_week = quote_stats.lost or 0
 
     # New proactive matches
     new_proactive_matches = (
@@ -254,30 +285,6 @@ async def morning_brief(
         )
         .scalar()
     ) or 0
-
-    # Won/lost this week
-    won_this_week = 0
-    lost_this_week = 0
-    if site_ids:
-        won_this_week = (
-            db.query(func.count(Quote.id))
-            .filter(
-                Quote.customer_site_id.in_(site_ids),
-                Quote.result == "won",
-                Quote.result_at >= week_ago,
-            )
-            .scalar()
-        ) or 0
-
-        lost_this_week = (
-            db.query(func.count(Quote.id))
-            .filter(
-                Quote.customer_site_id.in_(site_ids),
-                Quote.result == "lost",
-                Quote.result_at >= week_ago,
-            )
-            .scalar()
-        ) or 0
 
     stats = {
         "stale_accounts": stale_count,
@@ -308,14 +315,14 @@ async def morning_brief(
             "properties": {"text": {"type": "string"}},
             "required": ["text"],
         }
-        result = await claude_structured(
+        result = asyncio.run(claude_structured(
             prompt=prompt,
             schema=schema,
             system="You write concise sales briefings. Be specific about numbers. No fluff.",
             model_tier="fast",
             max_tokens=256,
             timeout=10,
-        )
+        ))
         if result and result.get("text"):
             brief_text = result["text"]
     except Exception as e:
@@ -383,6 +390,7 @@ def hot_offers(
 
 
 @router.get("/buyer-brief")
+@cached_endpoint(prefix="buyer_brief", ttl_hours=0.25, key_params=["days", "scope"])
 def buyer_brief(
     days: int = Query(default=7, ge=1, le=90),
     scope: str = Query(default="my", pattern="^(my|team)$"),
@@ -429,62 +437,39 @@ def buyer_brief(
 
     sourcing_ratio = round(sourced_reqs_q / total_reqs_q * 100) if total_reqs_q else 0
 
-    # ── KPI 2: Offer→Quote Rate (offers converted / total offers) ──
-    total_offers_month = (
-        db.query(func.count(Offer.id))
-        .filter(Offer.created_at >= month_start, _user_filter(Offer.entered_by_id))
-        .scalar()
-    ) or 0
-
-    quoted_offers_month = (
-        db.query(func.count(Offer.id))
-        .filter(
-            Offer.created_at >= month_start,
-            _user_filter(Offer.entered_by_id),
-            Offer.attribution_status == "converted",
-        )
-        .scalar()
-    ) or 0
-
+    # ── KPI 2: Offer→Quote Rate (offers converted / total offers) — single query ──
+    offer_stats = db.query(
+        func.count(Offer.id).label("total"),
+        func.count(case(
+            (Offer.attribution_status == "converted", Offer.id),
+        )).label("quoted"),
+    ).filter(Offer.created_at >= month_start, _user_filter(Offer.entered_by_id)).first()
+    total_offers_month = offer_stats.total or 0
+    quoted_offers_month = offer_stats.quoted or 0
     offer_quote_rate = round(quoted_offers_month / total_offers_month * 100) if total_offers_month else 0
 
-    # ── KPI 3: Quote→Win Rate ──
-    won_quotes = (
-        db.query(func.count(Quote.id))
-        .filter(Quote.result == "won", Quote.result_at >= month_start, _user_filter(Quote.created_by_id))
-        .scalar()
-    ) or 0
-    lost_quotes = (
-        db.query(func.count(Quote.id))
-        .filter(Quote.result == "lost", Quote.result_at >= month_start, _user_filter(Quote.created_by_id))
-        .scalar()
-    ) or 0
+    # ── KPI 3: Quote→Win Rate — single query ──
+    quote_stats = db.query(
+        func.count(case((Quote.result == "won", Quote.id))).label("won"),
+        func.count(case((Quote.result == "lost", Quote.id))).label("lost"),
+    ).filter(Quote.result_at >= month_start, _user_filter(Quote.created_by_id)).first()
+    won_quotes = quote_stats.won or 0
+    lost_quotes = quote_stats.lost or 0
     quote_win_rate = round(won_quotes / (won_quotes + lost_quotes) * 100) if (won_quotes + lost_quotes) else 0
 
-    # ── KPI 4: Buy Plan→PO Rate ──
-    approved_bps = (
-        db.query(func.count(BuyPlan.id))
-        .filter(
-            BuyPlan.submitted_at >= month_start,
-            _user_filter(BuyPlan.submitted_by_id),
-            BuyPlan.status.in_(("approved", "po_entered", "po_confirmed", "complete")),
-        )
-        .scalar()
-    ) or 0
-    total_bps = (
-        db.query(func.count(BuyPlan.id))
-        .filter(BuyPlan.submitted_at >= month_start, _user_filter(BuyPlan.submitted_by_id))
-        .scalar()
-    ) or 0
-    po_confirmed_bps = (
-        db.query(func.count(BuyPlan.id))
-        .filter(
-            BuyPlan.submitted_at >= month_start,
-            _user_filter(BuyPlan.submitted_by_id),
-            BuyPlan.status.in_(("po_confirmed", "complete")),
-        )
-        .scalar()
-    ) or 0
+    # ── KPI 4: Buy Plan→PO Rate — single query ──
+    bp_stats = db.query(
+        func.count(BuyPlan.id).label("total"),
+        func.count(case(
+            (BuyPlan.status.in_(("approved", "po_entered", "po_confirmed", "complete")), BuyPlan.id),
+        )).label("approved"),
+        func.count(case(
+            (BuyPlan.status.in_(("po_confirmed", "complete")), BuyPlan.id),
+        )).label("confirmed"),
+    ).filter(BuyPlan.submitted_at >= month_start, _user_filter(BuyPlan.submitted_by_id)).first()
+    total_bps = bp_stats.total or 0
+    approved_bps = bp_stats.approved or 0
+    po_confirmed_bps = bp_stats.confirmed or 0
     buyplan_po_rate = round(po_confirmed_bps / total_bps * 100) if total_bps else 0
 
     # ── Tile 1: New Requirements (active reqs in window, check for offers) ──

@@ -42,6 +42,11 @@ def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | N
             else:
                 key_dict = {k: v for k, v in kwargs.items() if k not in excluded}
 
+            # Include user.id in key for per-user caching
+            user = kwargs.get("user")
+            if user and hasattr(user, "id"):
+                key_dict["_uid"] = user.id
+
             # Deterministic key: sort dict and hash
             key_str = json.dumps(key_dict, sort_keys=True, default=str)
             key_hash = hashlib.md5(key_str.encode(), usedforsecurity=False).hexdigest()[:12]
@@ -63,7 +68,7 @@ def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | N
             # Only cache dict/list results (not Response objects)
             if isinstance(result, (dict, list)):
                 try:
-                    set_cached(cache_key, result, ttl_days=max(1, int(ttl_days)) if ttl_days >= 1 else 1)
+                    set_cached(cache_key, result, ttl_days=ttl_days)
                 except Exception as e:
                     log.warning("Cache write failed for %s: %s", cache_key, e)
 

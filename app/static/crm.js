@@ -237,7 +237,7 @@ function renderCustomers() {
 
     // Apply view filters
     let filtered = [...crmCustomers];
-    if (_custFilterMode === 'my-accounts') filtered = filtered.filter(c => c.account_owner_id && c.account_owner_id === window.userId);
+    if (_custFilterMode === 'my-accounts') filtered = filtered.filter(c => c.sites && c.sites.some(s => s.owner_id === window.userId));
     if (_custFilterMode === 'strategic') filtered = filtered.filter(c => c.is_strategic);
     if (_custFilterMode === 'at-risk') filtered = filtered.filter(c => _custHealthColor(c) === 'red');
     if (_custFilterMode === 'stale') {
@@ -4567,6 +4567,7 @@ function switchSettingsTab(name, btn) {
     else if (name === 'enrichment') { loadEnrichmentQueue(); loadEnrichmentStats(); }
     else if (name === 'tickets') loadTroubleTickets();
     else if (name === 'vendor-dedup') loadVendorDedupSuggestions();
+    else if (name === 'company-dedup') loadCompanyDedupSuggestions();
 }
 
 // Keep backward compat for dropdown links
@@ -5438,6 +5439,10 @@ async function testTeamsPost() {
 let _eqSelectedIds = new Set();
 let _bfPollInterval = null;
 
+window.addEventListener('beforeunload', () => {
+    if (_bfPollInterval) { clearInterval(_bfPollInterval); _bfPollInterval = null; }
+});
+
 function switchEnrichTab(tab, btn) {
     document.querySelectorAll('#enrichTabs .tab').forEach(t => t.classList.remove('on'));
     btn.classList.add('on');
@@ -6013,6 +6018,251 @@ async function mergeVendors(keepId, removeId, btn) {
 }
 
 
+// ── Company Dedup ─────────────────────────────────────────────────────
+
+async function loadCompanyDedupSuggestions() {
+    const el = document.getElementById('companyDedupResults');
+    const status = document.getElementById('companyDedupStatus');
+    if (!el) return;
+    const threshold = (document.getElementById('companyDedupThreshold') || {}).value || 85;
+    el.innerHTML = '<p class="empty">Scanning companies...</p>';
+    if (status) status.textContent = 'Scanning...';
+    try {
+        const data = await apiFetch(`/api/admin/company-dedup-suggestions?threshold=${threshold}&limit=100`);
+        if (status) status.textContent = data.count + ' potential duplicate' + (data.count !== 1 ? 's' : '') + ' found';
+        if (!data.count) {
+            el.innerHTML = '<p class="empty">No duplicate companies found at this threshold</p>';
+            return;
+        }
+        let html = '<table class="tbl"><thead><tr><th>Score</th><th>Company A</th><th>Sites</th><th>Company B</th><th>Sites</th><th></th></tr></thead><tbody>';
+        for (const c of data.candidates) {
+            const keepId = c.auto_keep_id;
+            const removeId = keepId === c.company_a.id ? c.company_b.id : c.company_a.id;
+            const scoreColor = c.score >= 95 ? 'var(--red)' : c.score >= 90 ? 'var(--amber)' : 'var(--muted)';
+            const aIsKeep = c.company_a.id === keepId;
+            html += `<tr id="cdedup-row-${c.company_a.id}-${c.company_b.id}">
+                <td style="font-weight:700;color:${scoreColor}">${c.score}%</td>
+                <td>${esc(c.company_a.name)}${aIsKeep ? ' <span style="font-size:9px;color:var(--green);font-weight:600">KEEP</span>' : ''}</td>
+                <td class="mono">${c.company_a.site_count}</td>
+                <td>${esc(c.company_b.name)}${!aIsKeep ? ' <span style="font-size:9px;color:var(--green);font-weight:600">KEEP</span>' : ''}</td>
+                <td class="mono">${c.company_b.site_count}</td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="previewCompanyMerge(${keepId},${removeId},this)" title="Preview merge impact">Merge</button>
+                    <button class="btn btn-sm btn-ghost" onclick="this.closest('tr').remove()" title="Dismiss">Skip</button>
+                </td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<p class="empty" style="color:var(--red)">Failed to load: ' + esc(e.message) + '</p>';
+        if (status) status.textContent = '';
+    }
+}
+
+async function previewCompanyMerge(keepId, removeId, btn) {
+    await guardBtn(btn, 'Loading...', async () => {
+        const preview = await apiFetch(`/api/admin/company-merge-preview?keep_id=${keepId}&remove_id=${removeId}`);
+        const parts = [];
+        if (preview.sites_to_move) parts.push(`${preview.sites_to_move} site(s) moved`);
+        if (preview.sites_to_delete) parts.push(`${preview.sites_to_delete} empty HQ site(s) deleted`);
+        if (preview.activities_to_reassign) parts.push(`${preview.activities_to_reassign} activities reassigned`);
+        if (preview.fields_to_fill.length) parts.push(`${preview.fields_to_fill.length} fields filled`);
+        if (preview.tags_to_merge) parts.push(`${preview.tags_to_merge} new tags`);
+        const summary = parts.length ? parts.join(', ') : 'No data to move';
+        if (!confirm(`Merge "${preview.remove.name}" into "${preview.keep.name}"?\n\n${summary}\n\nThis cannot be undone.`)) return;
+        await mergeCompanies(keepId, removeId, btn);
+    });
+}
+
+async function mergeCompanies(keepId, removeId, btn) {
+    await guardBtn(btn, 'Merging...', async () => {
+        const result = await apiFetch('/api/admin/company-merge', {
+            method: 'POST',
+            body: { keep_id: keepId, remove_id: removeId },
+        });
+        showToast(`Merged! ${result.sites_moved} sites moved, ${result.reassigned} records reassigned`, 'success');
+        const row = btn.closest('tr');
+        if (row) row.remove();
+        const remaining = document.querySelectorAll('#companyDedupResults tbody tr').length;
+        const cStatus = document.getElementById('companyDedupStatus');
+        if (cStatus) cStatus.textContent = remaining + ' remaining';
+    });
+}
+
+
+/// ── Suggested Accounts (Company-Level Prospect Pool) ────────────────────
+
+let _suggestedPage = 1;
+let _suggestedPriority = '';
+let _suggestedAbort = null;
+
+const debouncedLoadSuggested = debounce(() => { _suggestedPage = 1; loadSuggested(); }, 300);
+
+function setSuggestedPriority(val, btn) {
+    _suggestedPriority = val;
+    document.querySelectorAll('#suggestedPills .chip').forEach(c => c.classList.toggle('on', c.dataset.value === val));
+    _suggestedPage = 1;
+    loadSuggested();
+}
+
+async function showSuggested() {
+    showView('view-suggested');
+    const viewEl = document.getElementById('view-suggested');
+    if (viewEl) viewEl.style.display = 'flex';
+    setCurrentReqId(null);
+    _suggestedPage = 1;
+    _suggestedPriority = '';
+    document.querySelectorAll('#suggestedPills .chip').forEach(c => c.classList.toggle('on', c.dataset.value === ''));
+    const search = document.getElementById('suggestedSearch');
+    if (search) search.value = '';
+    _setTopViewLabel('Suggested');
+    await loadSuggested();
+}
+
+async function loadSuggested() {
+    if (_suggestedAbort) { try { _suggestedAbort.abort(); } catch(e){} }
+    _suggestedAbort = new AbortController();
+    const grid = document.getElementById('suggestedGrid');
+    if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner"></div> Loading…</div>';
+
+    const search = (document.getElementById('suggestedSearch')?.value || '').trim();
+    const params = new URLSearchParams({ page: _suggestedPage, per_page: 20 });
+    if (search) params.set('search', search);
+    if (_suggestedPriority) params.set('import_priority', _suggestedPriority);
+
+    try {
+        const [data, stats] = await Promise.all([
+            apiFetch('/api/prospects/pool?' + params, { signal: _suggestedAbort.signal }),
+            apiFetch('/api/prospects/pool/stats', { signal: _suggestedAbort.signal }),
+        ]);
+        renderSuggestedStats(stats);
+        renderSuggestedGrid(data);
+    } catch (e) {
+        if (e.name === 'AbortError') return;
+        showToast('Failed to load suggested accounts', 'error');
+        console.error(e);
+    }
+}
+
+function renderSuggestedStats(stats) {
+    const el = document.getElementById('suggestedStats');
+    if (!el) return;
+    el.innerHTML = `
+        <span class="stat-item"><span class="stat-val">${stats.total_available}</span> available</span>
+        <span class="stat-item"><span class="stat-val">${stats.priority_count}</span> priority</span>
+        <span class="stat-item"><span class="stat-val">${stats.standard_count}</span> standard</span>
+        <span class="stat-item"><span class="stat-val">${stats.claimed_this_month}</span> claimed this month</span>
+    `;
+}
+
+function renderSuggestedGrid(data) {
+    const grid = document.getElementById('suggestedGrid');
+    const pager = document.getElementById('suggestedPager');
+    if (!grid) return;
+
+    if (!data.items.length) {
+        grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">No accounts match your filters</div>';
+        if (pager) pager.innerHTML = '';
+        return;
+    }
+
+    grid.innerHTML = data.items.map(a => {
+        const priBadge = a.import_priority === 'priority'
+            ? '<span class="suggested-badge priority">Priority</span>'
+            : a.import_priority === 'standard'
+            ? '<span class="suggested-badge standard">Standard</span>'
+            : '';
+        const sfBadge = a.sf_account_id ? '<span class="suggested-badge sf">SF</span>' : '';
+        const domainLink = a.domain
+            ? `<a class="suggested-card-domain" href="https://${escAttr(a.domain)}" target="_blank" rel="noopener">${esc(a.domain)}</a>`
+            : '';
+        const meta = [];
+        if (a.industry) meta.push('<span>' + esc(a.industry) + '</span>');
+        if (a.phone) meta.push('<span>' + esc(a.phone) + '</span>');
+        const loc = [a.hq_city, a.hq_state, a.hq_country].filter(Boolean).join(', ');
+        if (loc) meta.push('<span>' + esc(loc) + '</span>');
+
+        return `<div class="suggested-card" id="sg-card-${a.id}">
+            <div class="suggested-card-header">
+                <div>
+                    <div class="suggested-card-name">${esc(a.name)}</div>
+                    ${domainLink}
+                </div>
+                <div class="suggested-card-badges">${priBadge}${sfBadge}</div>
+            </div>
+            ${meta.length ? '<div class="suggested-card-meta">' + meta.join(' &middot; ') + '</div>' : ''}
+            <div class="suggested-card-actions">
+                <button class="btn-claim" onclick="claimSuggestedAccount(${a.id},'${escAttr(a.name)}')">Claim</button>
+                <select class="dismiss-select" onchange="dismissSuggestedAccount(${a.id},'${escAttr(a.name)}',this.value);this.selectedIndex=0">
+                    <option value="">Dismiss…</option>
+                    <option value="not_relevant">Not relevant</option>
+                    <option value="competitor">Competitor</option>
+                    <option value="too_small">Too small</option>
+                    <option value="too_large">Too large</option>
+                    <option value="duplicate">Duplicate</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+        </div>`;
+    }).join('');
+
+    // Pagination
+    if (pager) {
+        const totalPages = Math.ceil(data.total / data.per_page);
+        if (totalPages <= 1) { pager.innerHTML = ''; return; }
+        let html = '';
+        if (_suggestedPage > 1) html += `<button class="btn btn-ghost btn-sm" onclick="suggestedGoPage(${_suggestedPage - 1})">&laquo; Prev</button> `;
+        html += `<span style="font-size:12px;color:var(--muted)">Page ${data.page} of ${totalPages} (${data.total} accounts)</span>`;
+        if (_suggestedPage < totalPages) html += ` <button class="btn btn-ghost btn-sm" onclick="suggestedGoPage(${_suggestedPage + 1})">Next &raquo;</button>`;
+        pager.innerHTML = html;
+    }
+}
+
+function suggestedGoPage(page) {
+    _suggestedPage = page;
+    loadSuggested();
+    // Scroll to top of grid
+    const wrap = document.querySelector('.suggested-grid-wrap');
+    if (wrap) wrap.scrollTop = 0;
+}
+
+async function claimSuggestedAccount(id, name) {
+    if (!confirm('Claim "' + name + '"? It will be added to your Accounts list.')) return;
+    try {
+        const result = await apiFetch('/api/prospects/pool/' + id + '/claim', { method: 'POST' });
+        showToast('Claimed: ' + (result.company_name || name), 'success');
+        // Remove card with fade
+        const card = document.getElementById('sg-card-' + id);
+        if (card) { card.style.opacity = '0'; card.style.transition = 'opacity .3s'; setTimeout(() => card.remove(), 300); }
+        // Refresh stats
+        try {
+            const stats = await apiFetch('/api/prospects/pool/stats');
+            renderSuggestedStats(stats);
+        } catch(e) {}
+    } catch (e) {
+        if (e.message && e.message.includes('409')) showToast('Already claimed by another user', 'error');
+        else showToast(e.message || 'Failed to claim account', 'error');
+    }
+}
+
+async function dismissSuggestedAccount(id, name, reason) {
+    if (!reason) return;
+    try {
+        await apiFetch('/api/prospects/pool/' + id + '/dismiss', { method: 'POST', body: { reason: reason } });
+        showToast('Dismissed: ' + name, 'info');
+        const card = document.getElementById('sg-card-' + id);
+        if (card) { card.style.opacity = '0'; card.style.transition = 'opacity .3s'; setTimeout(() => card.remove(), 300); }
+        try {
+            const stats = await apiFetch('/api/prospects/pool/stats');
+            renderSuggestedStats(stats);
+        } catch(e) {}
+    } catch (e) {
+        showToast(e.message || 'Failed to dismiss account', 'error');
+    }
+}
+
+
 /// ── Prospecting Pool ───────────────────────────────────────────────────
 
 let _prospectingTab = 'pool';
@@ -6409,6 +6659,9 @@ Object.assign(window, {
     analyzeCustomerTags, setCustFilter, openCustDrawer, closeCustDrawer, switchCustDrawerTab,
     toggleCustCheckbox, toggleAllCustCheckboxes, clearCustSelection,
     bulkAssignOwner, bulkExportAccounts, toggleSiteAccordion,
+    // Suggested accounts (company-level pool)
+    showSuggested, loadSuggested, debouncedLoadSuggested, setSuggestedPriority,
+    claimSuggestedAccount, dismissSuggestedAccount, suggestedGoPage,
     // Prospecting pool + drawer
     showProspecting, loadProspecting, claimSite, setProspectingTab,
     debouncedLoadProspecting,
@@ -6416,6 +6669,8 @@ Object.assign(window, {
     _renderProspectMiniListFromSearch, _prospectMiniListKeyNav,
     // Vendor dedup
     loadVendorDedupSuggestions, mergeVendors,
+    // Company dedup
+    loadCompanyDedupSuggestions, previewCompanyMerge, mergeCompanies,
     // Cross-file calls from app.js
     goToCompany, showBuyPlans, showCustomers, showPerformance,
     showProactiveOffers, showSettings,

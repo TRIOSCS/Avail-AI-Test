@@ -18,6 +18,7 @@ export default defineConfig({
     emptyOutDir: true,
     manifest: true,
     sourcemap: false,
+    minify: "terser",
     chunkSizeWarningLimit: 500,
     rollupOptions: {
       input: {

@@ -264,6 +264,16 @@ class TestDashboardTimezoneAware:
         db_session.add(co)
         db_session.flush()
 
+        # Create a site with owner_id so site-level ownership queries find it
+        site = CustomerSite(
+            company_id=co.id,
+            site_name="HQ",
+            owner_id=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(site)
+        db_session.flush()
+
         # Create activity so company appears in the query
         activity = ActivityLog(
             user_id=test_user.id,

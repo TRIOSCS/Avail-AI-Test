@@ -17,7 +17,17 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import ApiSource, Company, SystemConfig, User, VendorCard
+from app.models import (
+    ActivityLog,
+    ApiSource,
+    Company,
+    CustomerSite,
+    EnrichmentQueue,
+    SiteContact,
+    SystemConfig,
+    User,
+    VendorCard,
+)
 from app.rate_limit import limiter
 
 # ── Admin client fixture ────────────────────────────────────────────
@@ -898,3 +908,268 @@ class TestAdminTeamsConfigEdgeCases:
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "saved"
+
+
+# ── Company Dedup ────────────────────────────────────────────────────
+
+
+class TestCompanyDedup:
+    """Tests for company dedup suggestions and merge endpoints."""
+
+    def _make_company(self, db, name, sites=0, owner_id=None, is_strategic=False, **kw):
+        c = Company(
+            name=name, is_active=True, account_owner_id=owner_id,
+            is_strategic=is_strategic, created_at=datetime.now(timezone.utc), **kw,
+        )
+        db.add(c)
+        db.flush()
+        for i in range(sites):
+            s = CustomerSite(
+                company_id=c.id, site_name=f"Site {i+1}",
+                owner_id=owner_id, created_at=datetime.now(timezone.utc),
+            )
+            db.add(s)
+        db.flush()
+        return c
+
+    def test_company_dedup_suggestions_empty(self, admin_client):
+        resp = admin_client.get("/api/admin/company-dedup-suggestions")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["candidates"] == []
+        assert data["count"] == 0
+
+    def test_company_dedup_suggestions_with_data(self, admin_client, db_session):
+        self._make_company(db_session, "Arrow Electronics")
+        self._make_company(db_session, "Arrow Electronic")
+        self._make_company(db_session, "Totally Different Corp")
+        db_session.commit()
+
+        resp = admin_client.get("/api/admin/company-dedup-suggestions?threshold=80")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["count"] >= 1
+        names = set()
+        for c in data["candidates"]:
+            names.add(c["company_a"]["name"])
+            names.add(c["company_b"]["name"])
+        assert "Arrow Electronics" in names
+        assert "Arrow Electronic" in names
+
+    def test_company_merge_preview(self, admin_client, db_session, admin_user):
+        keep = self._make_company(db_session, "Keep Corp", sites=2, owner_id=admin_user.id)
+        remove = self._make_company(db_session, "Remove Corp", sites=1, owner_id=admin_user.id,
+                                    domain="remove.com")
+        db_session.commit()
+
+        resp = admin_client.get(f"/api/admin/company-merge-preview?keep_id={keep.id}&remove_id={remove.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["keep"]["id"] == keep.id
+        assert data["remove"]["id"] == remove.id
+        assert data["sites_to_move"] >= 1
+        assert "domain" in data["fields_to_fill"]
+
+    def test_merge_companies_basic(self, admin_client, db_session, admin_user):
+        keep = self._make_company(db_session, "Keep Corp", sites=1, owner_id=admin_user.id)
+        remove = self._make_company(db_session, "Remove Corp", sites=2, owner_id=admin_user.id)
+        db_session.commit()
+
+        resp = admin_client.post("/api/admin/company-merge", json={
+            "keep_id": keep.id, "remove_id": remove.id,
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["kept"] == keep.id
+        assert data["removed"] == remove.id
+        assert data["sites_moved"] == 2
+
+        # Removed company gone
+        db_session.expire_all()
+        assert db_session.get(Company, remove.id) is None
+        # Sites now under keep
+        sites = db_session.query(CustomerSite).filter(CustomerSite.company_id == keep.id).all()
+        assert len(sites) >= 3  # 1 original + 2 moved
+
+    def test_merge_companies_empty_hq_deleted(self, admin_client, db_session, admin_user):
+        keep = self._make_company(db_session, "Keep Corp")
+        remove = Company(
+            name="Remove Corp", is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(remove)
+        db_session.flush()
+        # Empty HQ site: name=HQ, no contact info, no site contacts, no reqs
+        empty_hq = CustomerSite(
+            company_id=remove.id, site_name="HQ",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(empty_hq)
+        db_session.commit()
+
+        resp = admin_client.post("/api/admin/company-merge", json={
+            "keep_id": keep.id, "remove_id": remove.id,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["sites_deleted"] == 1
+        assert resp.json()["sites_moved"] == 0
+
+    def test_merge_companies_not_found(self, admin_client):
+        resp = admin_client.post("/api/admin/company-merge", json={
+            "keep_id": 99999, "remove_id": 99998,
+        })
+        assert resp.status_code == 404
+
+    def test_merge_companies_same_id(self, admin_client, db_session):
+        c = self._make_company(db_session, "Self Corp")
+        db_session.commit()
+        resp = admin_client.post("/api/admin/company-merge", json={
+            "keep_id": c.id, "remove_id": c.id,
+        })
+        assert resp.status_code == 400
+
+    def test_merge_enrichment_fields(self, admin_client, db_session):
+        keep = self._make_company(db_session, "Keep Corp")
+        remove = self._make_company(db_session, "Remove Corp",
+                                    domain="remove.com", website="https://remove.com")
+        db_session.commit()
+
+        resp = admin_client.post("/api/admin/company-merge", json={
+            "keep_id": keep.id, "remove_id": remove.id,
+        })
+        assert resp.status_code == 200
+        db_session.expire_all()
+        kept = db_session.get(Company, keep.id)
+        assert kept.domain == "remove.com"
+        assert kept.website == "https://remove.com"
+
+    def test_merge_json_tags(self, admin_client, db_session):
+        keep = self._make_company(db_session, "Keep Corp")
+        keep.brand_tags = ["Vishay"]
+        remove = self._make_company(db_session, "Remove Corp")
+        remove.brand_tags = ["Vishay", "Texas Instruments"]
+        db_session.commit()
+
+        resp = admin_client.post("/api/admin/company-merge", json={
+            "keep_id": keep.id, "remove_id": remove.id,
+        })
+        assert resp.status_code == 200
+        db_session.expire_all()
+        kept = db_session.get(Company, keep.id)
+        assert "Vishay" in kept.brand_tags
+        assert "Texas Instruments" in kept.brand_tags
+        # No duplicates
+        assert kept.brand_tags.count("Vishay") == 1
+
+    def test_merge_notes_appended(self, admin_client, db_session):
+        keep = self._make_company(db_session, "Keep Corp")
+        keep.notes = "Keep notes"
+        remove = self._make_company(db_session, "Remove Corp")
+        remove.notes = "Remove notes"
+        db_session.commit()
+
+        resp = admin_client.post("/api/admin/company-merge", json={
+            "keep_id": keep.id, "remove_id": remove.id,
+        })
+        assert resp.status_code == 200
+        db_session.expire_all()
+        kept = db_session.get(Company, keep.id)
+        assert "Keep notes" in kept.notes
+        assert "Remove notes" in kept.notes
+        assert "Merged from Remove Corp" in kept.notes
+
+    def test_merge_is_strategic(self, admin_client, db_session):
+        keep = self._make_company(db_session, "Keep Corp", is_strategic=False)
+        remove = self._make_company(db_session, "Remove Corp", is_strategic=True)
+        db_session.commit()
+
+        resp = admin_client.post("/api/admin/company-merge", json={
+            "keep_id": keep.id, "remove_id": remove.id,
+        })
+        assert resp.status_code == 200
+        db_session.expire_all()
+        kept = db_session.get(Company, keep.id)
+        assert kept.is_strategic is True
+
+    def test_merge_reassigns_activities(self, admin_client, db_session, admin_user):
+        keep = self._make_company(db_session, "Keep Corp")
+        remove = self._make_company(db_session, "Remove Corp")
+        act = ActivityLog(
+            user_id=admin_user.id, activity_type="note", channel="manual",
+            company_id=remove.id, created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(act)
+        db_session.commit()
+        act_id = act.id
+
+        resp = admin_client.post("/api/admin/company-merge", json={
+            "keep_id": keep.id, "remove_id": remove.id,
+        })
+        assert resp.status_code == 200
+        assert resp.json()["reassigned"] >= 1
+        db_session.expire_all()
+        assert db_session.get(ActivityLog, act_id).company_id == keep.id
+
+    def test_merge_site_name_collision(self, admin_client, db_session, admin_user):
+        keep = self._make_company(db_session, "Keep Corp")
+        # Add a site named "Main" to keep
+        s1 = CustomerSite(
+            company_id=keep.id, site_name="Main",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(s1)
+        remove = self._make_company(db_session, "Remove Corp")
+        # Add a site named "Main" to remove — will collide
+        s2 = CustomerSite(
+            company_id=remove.id, site_name="Main",
+            contact_name="Someone",  # not empty so it won't be deleted
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(s2)
+        db_session.commit()
+        s2_id = s2.id
+
+        resp = admin_client.post("/api/admin/company-merge", json={
+            "keep_id": keep.id, "remove_id": remove.id,
+        })
+        assert resp.status_code == 200
+        db_session.expire_all()
+        moved = db_session.get(CustomerSite, s2_id)
+        assert moved.company_id == keep.id
+        assert "Remove Corp" in moved.site_name  # renamed to avoid collision
+
+    def test_merge_preserves_site_owners(self, admin_client, db_session, admin_user):
+        # Create a second user as site owner
+        user2 = User(
+            email="siteowner@trioscs.com", name="Site Owner", role="sales",
+            azure_id="az-siteowner", created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(user2)
+        db_session.flush()
+
+        keep = self._make_company(db_session, "Keep Corp", sites=0)
+        s_keep = CustomerSite(
+            company_id=keep.id, site_name="Keep Site",
+            owner_id=admin_user.id, created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(s_keep)
+
+        remove = self._make_company(db_session, "Remove Corp", sites=0)
+        s_remove = CustomerSite(
+            company_id=remove.id, site_name="Remove Site",
+            owner_id=user2.id, contact_name="X",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(s_remove)
+        db_session.commit()
+        s_remove_id = s_remove.id
+
+        resp = admin_client.post("/api/admin/company-merge", json={
+            "keep_id": keep.id, "remove_id": remove.id,
+        })
+        assert resp.status_code == 200
+        db_session.expire_all()
+        # Both site owners retained
+        assert db_session.get(CustomerSite, s_keep.id).owner_id == admin_user.id
+        assert db_session.get(CustomerSite, s_remove_id).owner_id == user2.id

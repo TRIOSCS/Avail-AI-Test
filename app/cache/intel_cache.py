@@ -91,9 +91,9 @@ def get_cached(cache_key: str) -> dict | None:
     return None
 
 
-def set_cached(cache_key: str, data: dict, ttl_days: int = 7) -> None:
+def set_cached(cache_key: str, data: dict, ttl_days: float = 7) -> None:
     """Store data in cache with TTL."""
-    ttl_seconds = ttl_days * 86400
+    ttl_seconds = int(ttl_days * 86400)
 
     # Try Redis first
     r = _get_redis()

@@ -49,6 +49,11 @@ class Company(Base):
     commodity_tags = Column(JSON, default=list)
     material_tags_updated_at = Column(DateTime)
 
+    # Salesforce import fields
+    sf_account_id = Column(String(255), unique=True)
+    import_priority = Column(String(20))  # "priority", "standard", "dismissed"
+    ownership_cooldown_until = Column(DateTime)
+
     # Deep enrichment tracking
     deep_enrichment_at = Column(DateTime)
 
@@ -68,6 +73,7 @@ class Company(Base):
         Index("ix_companies_name", "name"),
         Index("ix_companies_account_owner", "account_owner_id"),
         Index("ix_companies_owner_created", "account_owner_id", "created_at"),
+        Index("ix_companies_sf_account_id", "sf_account_id", unique=True),
     )
 
 

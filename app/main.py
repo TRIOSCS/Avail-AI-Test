@@ -910,3 +910,6 @@ app.include_router(command_center_router)
 from .routers.dashboard import router as dashboard_router
 
 app.include_router(dashboard_router)
+from .routers.prospect_pool import router as prospect_pool_router
+
+app.include_router(prospect_pool_router)

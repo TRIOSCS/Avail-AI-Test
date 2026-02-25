@@ -109,7 +109,7 @@
         <div class="sb-nav-group sb-cc-group" data-section="cc" style="--section-color:var(--blue);--section-dot:linear-gradient(135deg,#3b6ea8,#1e3a5f);--section-border:rgba(59,110,168,.18)">
             <div class="sb-section-dot"></div>
             <div class="sb-group-header sb-cc-header" id="navCmdCenter" onclick="sidebarNav('dashboard',this)" data-tip="Command Center">
-                <span class="sb-group-icon"><svg viewBox="0 0 24 24"><polygon points="8,2.5 11,4.25 11,7.75 8,9.5 5,7.75 5,4.25"/><polygon points="16,2.5 19,4.25 19,7.75 16,9.5 13,7.75 13,4.25"/><polygon points="12,8.5 15,10.25 15,13.75 12,15.5 9,13.75 9,10.25"/></svg></span>
+                <span class="sb-group-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg></span>
                 <span class="sb-group-label">Command Center</span>
             </div>
         </div>
@@ -139,6 +139,7 @@
                 <button type="button" class="sb-nav-btn" id="navCustomers" data-tip="Accounts" onclick="sidebarNav('customers',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span> Accounts</button>
                 <button type="button" class="sb-nav-btn" id="navVendors" data-tip="Vendors" onclick="sidebarNav('vendors',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M6 2L3 7v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-3-5z"/><line x1="3" y1="7" x2="21" y2="7"/><path d="M16 11a4 4 0 0 1-8 0"/></svg></span> Vendors</button>
                 <button type="button" class="sb-nav-btn" id="navContacts" data-tip="Contacts" onclick="sidebarNav('contacts',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></svg></span> Contacts</button>
+                <button type="button" class="sb-nav-btn" id="navSuggested" data-tip="Suggested" onclick="sidebarNav('suggested',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span> Suggested</button>
                 <button type="button" class="sb-nav-btn" id="navProspecting" data-tip="Prospecting" onclick="sidebarNav('prospecting',this)" style="display:none"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span> Prospecting</button>
             </div>
         </div>
@@ -330,6 +331,26 @@
                 <button class="drawer-tab" onclick="switchProspectDrawerTab('activity',this)">Activity</button>
             </div>
             <div class="drawer-body" id="prospectDrawerBody"></div>
+        </div>
+    </div>
+
+    <!-- VIEW: Suggested (company-level prospect pool) -->
+    <div id="view-suggested" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+        <div class="crm-header">
+            <h2>Suggested Accounts</h2>
+        </div>
+        <div id="suggestedStats" class="suggested-stats"></div>
+        <div class="crm-toolbar">
+            <input class="sbox" id="suggestedSearch" placeholder="Search by name or domain…" oninput="debouncedLoadSuggested()" style="flex:1;min-width:140px" aria-label="Search suggested accounts">
+            <div class="chip-row" style="margin:0" id="suggestedPills">
+                <span class="chip on" data-value="" onclick="setSuggestedPriority('',this)">All</span>
+                <span class="chip" data-value="priority" onclick="setSuggestedPriority('priority',this)">Priority</span>
+                <span class="chip" data-value="standard" onclick="setSuggestedPriority('standard',this)">Standard</span>
+            </div>
+        </div>
+        <div class="suggested-grid-wrap" style="flex:1;overflow-y:auto;padding:0 20px 20px">
+            <div class="suggested-grid" id="suggestedGrid"></div>
+            <div id="suggestedPager" style="text-align:center;padding:16px 0"></div>
         </div>
     </div>
 
@@ -1005,6 +1026,7 @@
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('import',this)">Import</button>
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('tickets',this)">Trouble Tickets</button>
             <button type="button" class="tab" onclick="switchSettingsTab('vendor-dedup',this)">Vendor Dedup</button>
+            <button type="button" class="tab" onclick="switchSettingsTab('company-dedup',this)">Company Dedup</button>
         </div>
 
         <div id="settings-users" class="settings-panel">
@@ -1188,6 +1210,16 @@
                 <span id="dedupStatus" style="font-size:11px;color:var(--muted)"></span>
             </div>
             <div id="dedupResults"><p class="empty">Click "Scan for Duplicates" to find potential duplicate vendor cards</p></div>
+        </div>
+
+        <div id="settings-company-dedup" class="settings-panel" style="display:none">
+            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+                <label style="font-size:11px;color:var(--muted)">Threshold:</label>
+                <input type="number" id="companyDedupThreshold" value="85" min="70" max="100" style="width:60px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px">
+                <button type="button" class="btn btn-primary btn-sm" onclick="loadCompanyDedupSuggestions()">Scan for Duplicates</button>
+                <span id="companyDedupStatus" style="font-size:11px;color:var(--muted)"></span>
+            </div>
+            <div id="companyDedupResults"><p class="empty">Click "Scan for Duplicates" to find potential duplicate companies</p></div>
         </div>
 
     </div><!-- end view-settings -->

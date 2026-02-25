@@ -1218,24 +1218,24 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 [data-section="relationships"] .sb-nav-btn.active{background:linear-gradient(135deg,rgba(20,184,166,.1),rgba(20,184,166,.04));color:var(--relationships-color);box-shadow:inset 3px 0 0 var(--relationships-accent)}
 [data-section="insights"] .sb-nav-btn.active{background:linear-gradient(135deg,rgba(139,92,246,.1),rgba(139,92,246,.04));color:var(--insights-color);box-shadow:inset 3px 0 0 var(--insights-accent)}
 /* ── Command Center — section header style ── */
-.sb-cc-group{margin-bottom:0}
+.sb-cc-group{margin-bottom:4px}
 .sb-cc-header{cursor:pointer;pointer-events:auto!important;transition:all var(--speed) cubic-bezier(.4,0,.2,1)}
 .sb-cc-header:hover{background:rgba(59,110,168,.06)}
 /* Active highlight — matches section-colored active states */
 .sb-cc-header.active{background:linear-gradient(135deg,rgba(59,110,168,.12),rgba(59,110,168,.04));box-shadow:inset 3px 0 0 var(--blue);border-radius:var(--radius-sm)}
 .sb-cc-header.active .sb-group-label{color:var(--blue)}
-/* Honeycomb icon: rotate on active */
+/* Icon: rotate on active */
 .sb-cc-header .sb-group-icon{transition:transform .5s cubic-bezier(.34,1.56,.64,1),box-shadow .3s}
-.sb-cc-header.active .sb-group-icon{transform:rotate(60deg);box-shadow:0 0 12px rgba(59,110,168,.35)}
+.sb-cc-header.active .sb-group-icon{transform:rotate(90deg)}
 /* Collapsed: tooltip like other icons */
 .sidebar .sb-cc-header{position:relative}
 .sidebar .sb-cc-header::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%);background:var(--navy-900);color:#fff;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:600;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s;z-index:999}
 .sidebar .sb-cc-header:hover::after{opacity:1}
 /* Hover glow on icon */
 .sb-cc-header:hover .sb-group-icon{filter:drop-shadow(0 0 6px var(--blue));transform:scale(1.1)}
-.sb-cc-header.active:hover .sb-group-icon{transform:rotate(60deg) scale(1.1)}
+.sb-cc-header.active:hover .sb-group-icon{transform:rotate(90deg) scale(1.1)}
 /* Top gradient bar — always brand gold, sits above OPPORTUNITY */
-.sb-top-gradient{height:2px;flex-shrink:0;background:#C4941D;transition:background .4s ease;margin:-12px -10px 8px;width:calc(100% + 20px)}
+.sb-top-gradient{height:2px;flex-shrink:0;background:#C4941D;transition:background .4s ease;margin:4px -10px 8px;width:calc(100% + 20px)}
 /* Sidebar scroll arrows — appear when nav overflows */
 .sb-scroll-arrow{display:none;width:100%;padding:4px 0;border:none;background:linear-gradient(to bottom,#f0f2f5,rgba(240,242,245,.7));cursor:pointer;color:var(--muted);flex-shrink:0;align-items:center;justify-content:center;transition:color .15s}
 .sb-scroll-arrow:hover{color:var(--blue)}
@@ -1297,6 +1297,7 @@ body.sb-open .sidebar .sidebar-footer,.sidebar:hover .sidebar-footer{justify-con
 .sidebar:hover .sb-user-menu:hover .sb-user-popover{opacity:1;visibility:visible;transform:translateY(0)}
 /* Expanded: colored divider lines between groups — no line between OPPORTUNITY and RELATIONSHIPS */
 body.sb-open .sidebar .sb-nav-group[data-section="insights"]::before,.sidebar:hover .sb-nav-group[data-section="insights"]::before{content:'';display:block;height:2px;background:var(--insights-color);margin:2px 8px 6px;border-radius:1px}
+/* Expanded: Command Center header overrides — inherits from .sb-group-header expanded rules */
 
 /* v7 Sidebar footer sub-elements */
 .sidebar-footer .ui{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--blue-dk));color:#fff;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;box-shadow:0 2px 4px rgba(59,110,168,.2);transition:box-shadow .15s}
@@ -2242,4 +2243,30 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .timeline-date{font-size:9px;color:var(--muted);margin-top:2px}
 
 .nudge-banner{background:var(--surface);border-radius:var(--radius-sm);padding:8px 12px;margin-top:6px;font-size:11px}
+
+/* ── Suggested Accounts (Prospect Pool) ───────────────────────────── */
+.suggested-stats{display:flex;gap:16px;padding:8px 20px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);flex-wrap:wrap}
+.suggested-stats .stat-item{display:flex;align-items:center;gap:4px}
+.suggested-stats .stat-val{font-weight:700;color:var(--text)}
+.suggested-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px;padding-top:8px}
+.suggested-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:16px;transition:box-shadow var(--speed-fast),border-color var(--speed-fast)}
+.suggested-card:hover{border-color:var(--blue);box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.suggested-card-header{display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px}
+.suggested-card-name{font-size:14px;font-weight:700;color:var(--text);line-height:1.3}
+.suggested-card-domain{font-size:11px;color:var(--blue);text-decoration:none}
+.suggested-card-domain:hover{text-decoration:underline}
+.suggested-card-badges{display:flex;gap:4px;flex-shrink:0}
+.suggested-badge{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:2px 7px;border-radius:999px}
+.suggested-badge.priority{background:var(--teal-lt,#ccfbf1);color:var(--teal,#0d9488)}
+.suggested-badge.standard{background:var(--surface);color:var(--muted)}
+.suggested-badge.sf{background:#e0e7ff;color:#4338ca;margin-left:2px}
+.suggested-card-meta{font-size:12px;color:var(--text2);line-height:1.6}
+.suggested-card-meta span{display:inline-flex;align-items:center;gap:3px}
+.suggested-card-actions{display:flex;gap:6px;margin-top:10px;align-items:center}
+.suggested-card-actions .btn-claim{background:var(--teal,#0d9488);color:#fff;border:none;padding:6px 14px;border-radius:var(--radius-sm);font-size:12px;font-weight:600;cursor:pointer;transition:background var(--speed-fast)}
+.suggested-card-actions .btn-claim:hover{background:#0f766e}
+.suggested-card-actions .btn-dismiss{background:transparent;border:1px solid var(--border);padding:5px 10px;border-radius:var(--radius-sm);font-size:11px;color:var(--muted);cursor:pointer;transition:all var(--speed-fast)}
+.suggested-card-actions .btn-dismiss:hover{border-color:var(--red);color:var(--red)}
+.suggested-card-actions select.dismiss-select{font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--muted);background:var(--white);cursor:pointer}
+@media(max-width:700px){.suggested-grid{grid-template-columns:1fr}}
 

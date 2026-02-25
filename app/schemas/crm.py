@@ -542,3 +542,11 @@ class OneDriveAttach(BaseModel):
 class QuoteSendOverride(BaseModel):
     to_email: str | None = None
     to_name: str | None = None
+
+
+# ── Company Dedup ──────────────────────────────────────────────────
+
+
+class CompanyMergeRequest(BaseModel):
+    keep_id: int
+    remove_id: int

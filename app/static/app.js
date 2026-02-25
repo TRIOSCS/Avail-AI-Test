@@ -740,7 +740,7 @@ export async function refreshProactiveBadge() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────────────
-const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-performance', 'view-settings', 'view-contacts', 'view-dashboard', 'view-prospecting'];
+const ALL_VIEWS = ['view-list', 'view-vendors', 'view-materials', 'view-customers', 'view-buyplans', 'view-proactive', 'view-performance', 'view-settings', 'view-contacts', 'view-dashboard', 'view-prospecting', 'view-suggested'];
 
 // Hash-based routing for browser back/forward
 const _viewToHash = {'view-list':'rfqs','view-vendors':'vendors','view-materials':'materials','view-customers':'customers','view-buyplans':'buyplans','view-proactive':'proactive','view-performance':'performance','view-settings':'settings','view-contacts':'contacts','view-dashboard':'dashboard','view-prospecting':'prospecting'};
@@ -6027,7 +6027,8 @@ export function sidebarNav(page, el) {
         settings: () => window.showSettings(),
         contacts: () => showContacts(),
         dashboard: () => showDashboard(),
-        prospecting: () => window.showProspecting()
+        prospecting: () => window.showProspecting(),
+        suggested: () => window.showSuggested()
     };
     try { if (routes[page]) routes[page](); }
     catch(e) { console.error('sidebarNav error:', page, e); }

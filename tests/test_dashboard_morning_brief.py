@@ -31,12 +31,22 @@ class TestMorningBrief:
         )
         db.add(c)
         db.flush()
+        # Create a site with owner_id so site-level ownership queries find it
+        s = CustomerSite(
+            company_id=c.id,
+            site_name="HQ",
+            owner_id=owner.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(s)
+        db.flush()
         return c
 
-    def _make_site(self, db: Session, company: Company, name="HQ"):
+    def _make_site(self, db: Session, company: Company, name="HQ", owner_id=None):
         s = CustomerSite(
             company_id=company.id,
             site_name=name,
+            owner_id=owner_id,
             created_at=datetime.now(timezone.utc),
         )
         db.add(s)

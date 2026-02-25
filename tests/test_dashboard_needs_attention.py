@@ -30,12 +30,22 @@ class TestNeedsAttention:
         )
         db.add(c)
         db.flush()
+        # Create a site with owner_id so site-level ownership queries find it
+        s = CustomerSite(
+            company_id=c.id,
+            site_name="HQ",
+            owner_id=owner.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db.add(s)
+        db.flush()
         return c
 
-    def _make_site(self, db, company, name="HQ"):
+    def _make_site(self, db, company, name="HQ", owner_id=None):
         s = CustomerSite(
             company_id=company.id,
             site_name=name,
+            owner_id=owner_id,
             created_at=datetime.now(timezone.utc),
         )
         db.add(s)
@@ -201,8 +211,34 @@ class TestNeedsAttention:
         assert len(data) == 1
         assert data[0]["company_name"] == "Acme Corp"
 
+    # 12. Site-owner-only visibility: user owns site but not company.account_owner_id
+    def test_site_owner_visibility(self, client, db_session, test_user, sales_user):
+        """User who owns a site (but not company.account_owner_id) sees company."""
+        c = Company(
+            name="Shared Corp",
+            is_active=True,
+            account_owner_id=sales_user.id,  # company owned by someone else
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(c)
+        db_session.flush()
+        # test_user owns a site under this company
+        s = CustomerSite(
+            company_id=c.id,
+            site_name="Branch A",
+            owner_id=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        resp = client.get("/api/dashboard/needs-attention")
+        data = resp.json()
+        assert len(data) == 1
+        assert data[0]["company_name"] == "Shared Corp"
+
     def test_stale_company_tz_aware_outreach(self, db_session, test_user, client):
-        """When last outreach already has tzinfo (line 153: else branch).
+        """When last outreach already has tzinfo (else branch in tz handling).
 
         Directly calls needs_attention() with a mock db that returns
         tz-aware datetimes from the activity query, bypassing SQLite's
@@ -217,8 +253,8 @@ class TestNeedsAttention:
         assert aware_dt.tzinfo is not None  # sanity check
 
         company = SimpleNamespace(id=1, name="TZ Corp", is_active=True, is_strategic=False)
-        activity_row = SimpleNamespace(company_id=1, last_at=aware_dt)
-        channel_row = SimpleNamespace(company_id=1, channel="email")
+        # Combined row from subquery join: company_id, last_at, channel
+        combined_row = SimpleNamespace(company_id=1, last_at=aware_dt, channel="email")
 
         # Build mock query chains for each db.query() call
         def make_chain(result):
@@ -226,15 +262,18 @@ class TestNeedsAttention:
             q.filter.return_value = q
             q.group_by.return_value = q
             q.order_by.return_value = q
+            q.subquery.return_value = MagicMock(c=MagicMock())
+            q.join.return_value = q
             q.all.return_value = result
             return q
 
         mock_db = MagicMock()
         mock_db.query.side_effect = [
-            make_chain([company]),       # Company query
-            make_chain([activity_row]),   # Activity (outreach) query
-            make_chain([channel_row]),    # Channel query
-            make_chain([]),              # Site query (empty)
+            make_chain([]),               # CustomerSite subquery (owned_company_ids)
+            make_chain([company]),        # Company query
+            make_chain([]),               # Subquery (latest_sub) — returns subquery obj
+            make_chain([combined_row]),   # Join query (latest_rows) — last_at + channel
+            make_chain([]),               # Site query (empty)
         ]
 
         result = needs_attention(days=30, db=mock_db, user=SimpleNamespace(id=1))
