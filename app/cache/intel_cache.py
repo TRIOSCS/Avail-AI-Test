@@ -152,6 +152,45 @@ def invalidate(cache_key: str) -> None:
         log.debug("Cache invalidate error for %s: %s", cache_key, e)
 
 
+def flush_enrichment_cache() -> int:
+    """Flush all enrichment cache entries to force re-query with fresh API credits.
+
+    Called monthly when provider credit limits reset (Clay, Apollo, etc.).
+    Removes all 'enrich:*' keys from both Redis and PostgreSQL.
+    """
+    count = 0
+
+    # Redis: scan and delete enrich:* keys
+    r = _get_redis()
+    if r:
+        try:
+            cursor = 0
+            while True:
+                cursor, keys = r.scan(cursor, match=f"{_REDIS_PREFIX}enrich:*", count=500)
+                if keys:
+                    r.delete(*keys)
+                    count += len(keys)
+                if cursor == 0:
+                    break
+        except Exception as e:
+            log.debug("Redis flush enrich error: %s", e)
+
+    # PostgreSQL: delete all enrich:* entries
+    try:
+        with SessionLocal() as db:
+            result = db.execute(
+                text("DELETE FROM intel_cache WHERE cache_key LIKE 'enrich:%'"),
+            )
+            db.commit()
+            count += result.rowcount
+    except Exception as e:
+        log.warning("Cache flush enrich error: %s", e)
+
+    if count:
+        log.info("Flushed %d enrichment cache entries for monthly refresh", count)
+    return count
+
+
 def cleanup_expired() -> int:
     """Remove expired cache entries in batches. Returns count deleted.
 

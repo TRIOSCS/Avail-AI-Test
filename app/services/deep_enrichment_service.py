@@ -716,7 +716,7 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
         error_count = 0
         error_log = []
 
-        # Process vendors
+        # Process vendors — prioritize most recently active accounts first
         if "vendor" in entity_types:
             vendors = (
                 db.query(VendorCard)
@@ -724,7 +724,10 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                     (VendorCard.deep_enrichment_at.is_(None)) |
                     (VendorCard.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
                 )
-                .order_by(VendorCard.sighting_count.desc().nullslast())
+                .order_by(
+                    VendorCard.last_activity_at.desc().nullslast(),
+                    VendorCard.sighting_count.desc().nullslast(),
+                )
                 .limit(max_items)
                 .all()
             )
@@ -778,7 +781,7 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                 # Rate limiting between batches
                 await asyncio.sleep(1)
 
-        # Process companies
+        # Process companies — prioritize most recently active accounts first
         if "company" in entity_types:
             remaining = max_items - processed
             if remaining > 0:
@@ -787,6 +790,9 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                     .filter(
                         (Company.deep_enrichment_at.is_(None)) |
                         (Company.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
+                    )
+                    .order_by(
+                        Company.last_activity_at.desc().nullslast(),
                     )
                     .limit(remaining)
                     .all()

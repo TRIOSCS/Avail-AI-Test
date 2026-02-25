@@ -229,6 +229,12 @@ def configure_scheduler():
     scheduler.add_job(_job_cache_cleanup, IntervalTrigger(hours=24),
                       id="cache_cleanup", name="Cache cleanup")
 
+    # Monthly full enrichment refresh — runs on 1st when API credits reset
+    # Uses all available providers (Clay, Apollo, Gradient, Hunter, AI)
+    if settings.deep_enrichment_enabled:
+        scheduler.add_job(_job_monthly_enrichment_refresh, CronTrigger(day=1, hour=4, minute=0),
+                          id="monthly_enrichment_refresh", name="Monthly enrichment refresh (credit reset)")
+
     # Prospecting module (Phase 8) — monthly cycle
     if settings.prospecting_enabled:
         scheduler.add_job(_job_pool_health_report, CronTrigger(day=1, hour=8, minute=0),
@@ -754,14 +760,17 @@ async def _job_deep_enrichment():
         now = datetime.now(timezone.utc)
         from .services.deep_enrichment_service import deep_enrich_company, deep_enrich_vendor
 
-        # Enrich up to 50 vendors per sweep
+        # Enrich up to 50 vendors per sweep — most active first
         stale_vendors = (
             db.query(VendorCard.id)
             .filter(
                 (VendorCard.deep_enrichment_at.is_(None)) |
                 (VendorCard.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
             )
-            .order_by(VendorCard.sighting_count.desc().nullslast())
+            .order_by(
+                VendorCard.last_activity_at.desc().nullslast(),
+                VendorCard.sighting_count.desc().nullslast(),
+            )
             .limit(50)
             .all()
         )
@@ -777,13 +786,14 @@ async def _job_deep_enrichment():
             .all()
         )
 
-        # Enrich up to 20 companies
+        # Enrich up to 20 companies — most active first
         stale_companies = (
             db.query(Company.id)
             .filter(
                 (Company.deep_enrichment_at.is_(None)) |
                 (Company.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
             )
+            .order_by(Company.last_activity_at.desc().nullslast())
             .limit(20)
             .all()
         )
@@ -833,6 +843,51 @@ async def _job_deep_enrichment():
     except Exception as e:
         logger.error(f"Deep enrichment sweep error: {e}")
         db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_monthly_enrichment_refresh():
+    """1st of month 4AM UTC — full enrichment refresh when API credits reset.
+
+    Runs a large backfill (2000 items) using all available providers:
+    Clay, Apollo, Gradient, Hunter, Anthropic AI. Entities are prioritized
+    by most recent activity so the most-used accounts get fresh data first.
+    Force-refreshes entities whose enrichment data is older than 30 days.
+    """
+    from .database import SessionLocal
+    from .models import EnrichmentJob
+    from .services.deep_enrichment_service import run_backfill_job
+
+    db = SessionLocal()
+    try:
+        # Skip if there's already a running job
+        running = db.query(EnrichmentJob).filter(
+            EnrichmentJob.status == "running"
+        ).first()
+        if running:
+            logger.info(f"Monthly enrichment skipped — job #{running.id} already running")
+            return
+
+        # Flush enrichment cache so providers are re-queried with fresh credits
+        from .cache.intel_cache import flush_enrichment_cache
+        cleared = flush_enrichment_cache()
+        logger.info(f"Monthly enrichment: cleared {cleared} expired cache entries")
+
+        job_id = await run_backfill_job(
+            db,
+            started_by_id=1,  # System/admin
+            scope={
+                "entity_types": ["vendor", "company"],
+                "max_items": 2000,
+                "include_deep_email": True,
+                "lookback_days": 365,
+            },
+        )
+        logger.info(f"Monthly enrichment refresh started: job #{job_id}")
+    except Exception as e:
+        logger.error(f"Monthly enrichment refresh error: {e}")
     finally:
         db.close()
 
