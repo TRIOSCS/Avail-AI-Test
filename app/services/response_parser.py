@@ -299,7 +299,7 @@ def extract_draft_offers(result: dict, vendor_name: str) -> list[dict]:
                 "lead_time": part.get("lead_time"),
                 "date_code": part.get("date_code"),
                 "condition": part.get("condition_normalized") or part.get("condition"),
-                "packaging": part.get("packaging_normalized") or part.get("packaging"),
+                "packaging": part.get("packaging_normalized"),
                 "moq": part.get("moq"),
                 "valid_days": part.get("valid_days"),
                 "notes": part.get("notes"),

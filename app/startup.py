@@ -377,7 +377,7 @@ def _add_check_constraints(conn) -> None:
         ("offers", "chk_offer_price", "unit_price IS NULL OR unit_price > 0"),
         ("offers", "chk_offer_moq", "moq IS NULL OR moq > 0"),
         ("offers", "chk_offer_condition", "condition IS NULL OR condition IN ('new','refurb','used')"),
-        ("offers", "chk_offer_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape')"),
+        ("offers", "chk_offer_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape','bag','box','each','strip','other')"),
         ("offers", "chk_offer_status", "status IN ('active','expired','won','lost','pending_review')"),
     ]
     # NOTE: table/constraint names are hardcoded literals above — not user input.
@@ -436,10 +436,7 @@ def _create_perf_indexes(conn) -> None:
         CREATE INDEX IF NOT EXISTS ix_requirements_primary_mpn
         ON requirements (LOWER(primary_mpn))
     """)
-    _exec(conn, """
-        CREATE INDEX IF NOT EXISTS ix_sightings_mpn_matched
-        ON sightings (mpn_matched) WHERE mpn_matched IS NOT NULL
-    """)
+    # ix_sightings_mpn_matched removed — 0 scans, not worth the write overhead
     _exec(conn, """
         CREATE INDEX IF NOT EXISTS ix_offers_vendor_card
         ON offers (vendor_card_id) WHERE vendor_card_id IS NOT NULL
@@ -453,21 +450,12 @@ def _create_perf_indexes(conn) -> None:
         ON vendor_responses (vendor_name) WHERE vendor_name IS NOT NULL
     """)
     _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_vendor_name ON offers (vendor_name)")
-    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_vendor_cards_created_at ON vendor_cards (created_at)")
+    # ix_vendor_cards_created_at removed — 0 scans
     _exec(conn, "CREATE INDEX IF NOT EXISTS ix_vendor_cards_score_computed_at ON vendor_cards (vendor_score_computed_at)")
 
-    # GIN indexes on FTS search_vector columns
-    _exec(conn, """
-        CREATE INDEX IF NOT EXISTS ix_vendor_cards_search_vector
-        ON vendor_cards USING GIN (search_vector)
-    """)
-    _exec(conn, """
-        CREATE INDEX IF NOT EXISTS ix_material_cards_search_vector
-        ON material_cards USING GIN (search_vector)
-    """)
+    # GIN FTS indexes removed — 0 scans, 146 MB combined. Re-add if FTS search is implemented.
 
-    # Index on vendor_contacts.phone for activity_service lookups
-    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_vendor_contacts_phone ON vendor_contacts (phone) WHERE phone IS NOT NULL")
+    # ix_vendor_contacts_phone removed — 0 scans
 
     # FK indexes — prevent slow JOINs / cascade deletes
     _exec(conn, "CREATE INDEX IF NOT EXISTS ix_activity_log_customer_site_id ON activity_log (customer_site_id)")

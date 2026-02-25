@@ -1,4 +1,7 @@
-"""One-time migration: copy unowned Salesforce companies into prospect_accounts.
+"""One-time migration: copy unowned companies into prospect_accounts.
+
+A company is "unowned" if NONE of its customer_sites have an owner_id set.
+Companies consolidated by account — each site can have its own account manager.
 
 Usage:
     python scripts/migrate_sf_pool.py --dry-run   # Preview without writing
@@ -13,12 +16,14 @@ import sys
 from datetime import datetime, timezone
 
 from loguru import logger
+from sqlalchemy import exists, and_
 
 # Add project root to path for imports
 sys.path.insert(0, "/root/availai")
 
 from app.database import SessionLocal
 from app.models import Company
+from app.models.crm import CustomerSite
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
 
@@ -35,18 +40,33 @@ def normalize_domain(raw: str | None) -> str | None:
 
 
 def migrate(dry_run: bool = False) -> dict:
-    """Migrate unowned SF companies into prospect_accounts.
+    """Migrate unowned companies into prospect_accounts.
 
-    Returns summary dict: {migrated, skipped_no_domain, skipped_duplicate, total_pool}.
+    A company is unowned if no CustomerSite under it has an owner_id.
+    This handles the consolidated account model where each site has
+    its own account manager.
+
+    Returns summary dict: {migrated, skipped_no_domain, skipped_duplicate, skipped_has_owner, total_candidates}.
     """
     db = SessionLocal()
     try:
-        # Pool = unowned, active, not dismissed
+        # Subquery: companies that have at least one site with an owner
+        has_owned_site = (
+            exists()
+            .where(
+                and_(
+                    CustomerSite.company_id == Company.id,
+                    CustomerSite.owner_id.isnot(None),
+                )
+            )
+        )
+
+        # Pool = active companies where NO site has an owner, not dismissed
         pool_companies = (
             db.query(Company)
             .filter(
-                Company.account_owner_id.is_(None),
                 Company.is_active.is_(True),
+                ~has_owned_site,
                 (Company.import_priority != "dismissed") | (Company.import_priority.is_(None)),
             )
             .all()
