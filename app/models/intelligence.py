@@ -65,6 +65,7 @@ class MaterialVendorHistory(Base):
     id = Column(Integer, primary_key=True)
     material_card_id = Column(Integer, ForeignKey("material_cards.id"), nullable=False)
     vendor_name = Column(String(255), nullable=False)
+    vendor_name_normalized = Column(String(255))
     source_type = Column(String(50))
     is_authorized = Column(Boolean, default=False)
     first_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -85,6 +86,7 @@ class MaterialVendorHistory(Base):
     __table_args__ = (
         Index("ix_mvh_card_vendor", "material_card_id", "vendor_name", unique=True),
         Index("ix_mvh_vendor", "vendor_name"),
+        Index("ix_mvh_vendor_norm", "vendor_name_normalized"),
     )
 
 

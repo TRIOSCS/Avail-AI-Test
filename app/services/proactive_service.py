@@ -17,6 +17,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
+from ..vendor_utils import normalize_vendor_name
 from ..models import (
     ActivityLog,
     BuyPlan,
@@ -509,6 +510,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
             requisition_id=req.id,
             requirement_id=requirement.id,
             vendor_name=item.get("vendor_name", ""),
+            vendor_name_normalized=normalize_vendor_name(item.get("vendor_name", "")),
             mpn=item["mpn"],
             manufacturer=item.get("manufacturer", ""),
             qty_available=item.get("qty", 0),

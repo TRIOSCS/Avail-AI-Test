@@ -80,6 +80,7 @@ async def clone_requisition(
                 requirement_id=req_map.get(o.requirement_id),
                 vendor_card_id=o.vendor_card_id,
                 vendor_name=o.vendor_name,
+                vendor_name_normalized=o.vendor_name_normalized,
                 mpn=o.mpn,
                 manufacturer=o.manufacturer,
                 qty_available=o.qty_available,

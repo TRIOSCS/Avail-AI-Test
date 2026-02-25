@@ -338,6 +338,7 @@ async def create_offer(
         normalized_mpn=normalize_mpn_key(payload.mpn) if payload.mpn else None,
         vendor_card_id=card.id,
         vendor_name=card.display_name,
+        vendor_name_normalized=card.normalized_name,
         mpn=payload.mpn,
         manufacturer=payload.manufacturer,
         qty_available=payload.qty_available,

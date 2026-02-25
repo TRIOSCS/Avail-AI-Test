@@ -547,7 +547,7 @@ async def list_requirements(
             db.query(
                 Sighting.requirement_id,
                 sqlfunc.count(
-                    sqlfunc.distinct(sqlfunc.coalesce(Sighting.vendor_name_normalized, sqlfunc.lower(Sighting.vendor_name)))
+                    sqlfunc.distinct(Sighting.vendor_name_normalized)
                 ),
             )
             .filter(

@@ -64,12 +64,15 @@ def _make_offers(db, card_id, vendor_name, count):
     db.add(req)
     db.flush()
 
+    from app.vendor_utils import normalize_vendor_name
+
     offers = []
     for i in range(count):
         o = Offer(
             requisition_id=req.id,
             vendor_card_id=card_id,
             vendor_name=vendor_name,
+            vendor_name_normalized=normalize_vendor_name(vendor_name),
             mpn=f"MPN-{i}",
             qty_available=100,
             unit_price=1.00,
@@ -264,6 +267,7 @@ class TestComputeSingleVendorScore:
                 requisition_id=req.id,
                 vendor_card_id=None,  # No card link
                 vendor_name="fallback vendor",
+                vendor_name_normalized="fallback vendor",
                 mpn=f"FB-{i}",
                 qty_available=100,
                 unit_price=1.00,
@@ -390,7 +394,9 @@ class TestComputeAllVendorScores:
         for i in range(6):
             db_session.add(Offer(
                 requisition_id=req.id, vendor_card_id=None,
-                vendor_name="name match vendor", mpn=f"NMV-{i}",
+                vendor_name="name match vendor",
+                vendor_name_normalized="name match vendor",
+                mpn=f"NMV-{i}",
                 qty_available=100, unit_price=1.00, entered_by_id=user.id,
                 status="active", created_at=datetime.now(timezone.utc),
             ))

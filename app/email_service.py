@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from .models import ActivityLog, Contact, Offer, PendingBatch, ProcessedMessage, Requirement, Requisition, VendorResponse
 from .services.credential_service import get_credential_cached
+from .vendor_utils import normalize_vendor_name
 
 log = logging.getLogger(__name__)
 
@@ -103,7 +104,9 @@ async def send_batch_rfq(
 
         contact = Contact(
             requisition_id=requisition_id, user_id=user_id, contact_type="email",
-            vendor_name=group["vendor_name"], vendor_contact=email,
+            vendor_name=group["vendor_name"],
+            vendor_name_normalized=normalize_vendor_name(group["vendor_name"] or ""),
+            vendor_contact=email,
             parts_included=group.get("parts", []), subject=tagged_subject,
             details=group["body"], status="sent",
             status_updated_at=datetime.now(timezone.utc),
@@ -166,6 +169,7 @@ def log_phone_contact(
         user_id=user_id,
         contact_type="phone",
         vendor_name=vendor_name,
+        vendor_name_normalized=normalize_vendor_name(vendor_name or ""),
         vendor_contact=vendor_phone,
         parts_included=parts,
         subject=f"Call to {vendor_name}",
@@ -847,6 +851,7 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                     requirement_id=mpn_to_req_id.get(mpn_key),
                     material_card_id=card_id,
                     vendor_name=draft.get("vendor_name", ""),
+                    vendor_name_normalized=normalize_vendor_name(draft.get("vendor_name", "")),
                     mpn=draft.get("mpn", ""),
                     manufacturer=draft.get("manufacturer"),
                     qty_available=draft.get("qty_available"),

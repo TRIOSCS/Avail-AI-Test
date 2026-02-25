@@ -129,10 +129,20 @@ async def create_quote(
                     "hardware_code": o.hardware_code,
                     "packaging": o.packaging,
                     "offer_id": o.id,
+                    "material_card_id": o.material_card_id,
                     "target_price": target,
                     "last_quoted_price": last_q_price,
                 }
             )
+    # Resolve material_card_id for line items that don't have one
+    from ...search_service import resolve_material_card
+
+    for li in line_items or []:
+        if not li.get("material_card_id") and li.get("mpn"):
+            card = resolve_material_card(li["mpn"], db)
+            if card:
+                li["material_card_id"] = card.id
+
     site = db.get(CustomerSite, req.customer_site_id)
     total_sell = sum(
         (item.get("qty") or 0) * (item.get("sell_price") or 0)

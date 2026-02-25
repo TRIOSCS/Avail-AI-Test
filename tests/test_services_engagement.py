@@ -271,11 +271,13 @@ def _make_requisition(db: Session, user_id: int):
 def _make_contact(db: Session, requisition_id: int, user_id: int, vendor_name: str, status="sent"):
     """Create a Contact record (outreach event)."""
     from app.models import Contact
+    from app.vendor_utils import normalize_vendor_name
 
     c = Contact(
         requisition_id=requisition_id,
         user_id=user_id,
         vendor_name=vendor_name,
+        vendor_name_normalized=normalize_vendor_name(vendor_name),
         contact_type="email",
         status=status,
         created_at=datetime.now(timezone.utc),

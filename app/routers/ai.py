@@ -469,12 +469,15 @@ async def save_parsed_offers(
 
         mat_card = resolve_material_card(o.mpn, db) if o.mpn else None
 
+        from app.vendor_utils import normalize_vendor_name
+
         offer = Offer(
             requisition_id=requisition_id,
             requirement_id=req_id,
             material_card_id=mat_card.id if mat_card else None,
             normalized_mpn=normalize_mpn_key(o.mpn) if o.mpn else None,
             vendor_name=o.vendor_name,
+            vendor_name_normalized=normalize_vendor_name(o.vendor_name or ""),
             mpn=o.mpn,
             manufacturer=o.manufacturer,
             qty_available=o.qty_available,

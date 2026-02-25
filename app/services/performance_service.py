@@ -91,7 +91,7 @@ def compute_vendor_scorecard(
         db.query(sqlfunc.count(Contact.id))
         .filter(
             or_(
-                sqlfunc.lower(sqlfunc.trim(Contact.vendor_name)) == norm,
+                Contact.vendor_name_normalized == norm,
                 Contact.vendor_name == disp,
             ),
             Contact.contact_type == "email",

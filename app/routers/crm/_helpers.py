@@ -81,8 +81,23 @@ def _preload_last_quoted_prices(db: Session) -> dict[str, dict]:
     return result
 
 
-def quote_to_dict(q: Quote) -> dict:
+def quote_to_dict(q: Quote, db=None) -> dict:
     """Serialize a Quote to API response dict."""
+    enriched_items = q.line_items or []
+    if db and enriched_items:
+        card_ids = [li.get("material_card_id") for li in enriched_items if li.get("material_card_id")]
+        if card_ids:
+            from ...models import MaterialCard
+
+            cards = {c.id: c for c in db.query(MaterialCard).filter(MaterialCard.id.in_(card_ids)).all()}
+            enriched_items = []
+            for li in q.line_items or []:
+                item = dict(li)
+                card = cards.get(li.get("material_card_id"))
+                if card:
+                    item.setdefault("description", card.description)
+                    item.setdefault("category", card.category)
+                enriched_items.append(item)
     return {
         "id": q.id,
         "requisition_id": q.requisition_id,

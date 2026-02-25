@@ -95,7 +95,7 @@ def compute_single_vendor_score(db: Session, vendor_card_id: int) -> dict:
         norm = card.normalized_name
         offers = (
             db.query(Offer.id)
-            .filter(func.lower(Offer.vendor_name) == norm)
+            .filter(Offer.vendor_name_normalized == norm)
             .all()
         )
         offer_ids = {o.id for o in offers}

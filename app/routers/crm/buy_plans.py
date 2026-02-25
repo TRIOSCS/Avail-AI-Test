@@ -70,7 +70,7 @@ def _buyplan_to_dict(bp: BuyPlan, db=None) -> dict:
         vendor_names.discard("")
         if vendor_names:
             cards = db.query(VendorCard).filter(
-                sqlfunc.lower(VendorCard.normalized_name).in_(vendor_names)
+                VendorCard.normalized_name.in_(vendor_names)
             ).all()
             score_map = {
                 c.normalized_name: {

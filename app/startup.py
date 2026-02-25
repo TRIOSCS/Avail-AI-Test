@@ -414,13 +414,11 @@ def _add_check_constraints(conn) -> None:
 def _create_perf_indexes(conn) -> None:
     """Create functional/composite indexes for hot query paths."""
     _exec(conn, """
-        CREATE INDEX IF NOT EXISTS ix_sightings_vendor_lower
-        ON sightings (LOWER(TRIM(vendor_name)))
-    """)
-    _exec(conn, """
         CREATE INDEX IF NOT EXISTS ix_sightings_vendor_norm
         ON sightings (vendor_name_normalized)
     """)
+    # Drop legacy expression index — vendor_name_normalized index handles all queries now
+    _exec(conn, "DROP INDEX IF EXISTS ix_sightings_vendor_lower")
     # pg_trgm for fast ILIKE search on requisitions + requirements
     _exec(conn, "CREATE EXTENSION IF NOT EXISTS pg_trgm")
     _exec(conn, """
@@ -548,7 +546,7 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
 
 
 def _backfill_sighting_vendor_normalized() -> None:
-    """One-time backfill: populate sightings.vendor_name_normalized from vendor_name."""
+    """Backfill sightings.vendor_name_normalized from vendor_name until none remain."""
     from .vendor_utils import normalize_vendor_name
 
     with engine.connect() as conn:
@@ -559,29 +557,34 @@ def _backfill_sighting_vendor_normalized() -> None:
             conn.rollback()
             return  # Column not yet created
 
-        try:
-            rows = conn.execute(
-                sqltext(
-                    "SELECT id, vendor_name FROM sightings "
-                    "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
-                    "LIMIT 50000"
-                )
-            ).fetchall()
-            if not rows:
-                return
-            batch = []
-            for r in rows:
-                nv = normalize_vendor_name(r[1])
-                if nv:
-                    batch.append({"nv": nv, "id": r[0]})
-            if batch:
-                for b in batch:
-                    conn.execute(
-                        sqltext("UPDATE sightings SET vendor_name_normalized = :nv WHERE id = :id"),
-                        b,
+        total = 0
+        while True:
+            try:
+                rows = conn.execute(
+                    sqltext(
+                        "SELECT id, vendor_name FROM sightings "
+                        "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
+                        "LIMIT 10000"
                     )
-                conn.commit()
-            log.info("Backfilled vendor_name_normalized on %d sightings", len(batch))
-        except Exception as e:
-            log.warning("Backfill sightings.vendor_name_normalized failed: %s", e)
-            conn.rollback()
+                ).fetchall()
+                if not rows:
+                    break
+                batch = []
+                for r in rows:
+                    nv = normalize_vendor_name(r[1])
+                    if nv:
+                        batch.append({"nv": nv, "id": r[0]})
+                if batch:
+                    for b in batch:
+                        conn.execute(
+                            sqltext("UPDATE sightings SET vendor_name_normalized = :nv WHERE id = :id"),
+                            b,
+                        )
+                    conn.commit()
+                total += len(batch)
+            except Exception as e:
+                log.warning("Backfill sightings.vendor_name_normalized failed: %s", e)
+                conn.rollback()
+                break
+        if total:
+            log.info("Backfilled vendor_name_normalized on %d sightings", total)

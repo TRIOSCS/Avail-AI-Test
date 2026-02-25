@@ -1202,6 +1202,7 @@ async def _download_and_import_stock_list(
             mvh = MaterialVendorHistory(
                 material_card_id=card.id,
                 vendor_name=norm_vendor,
+                vendor_name_normalized=norm_vendor,
                 source_type="excess_list" if is_excess_list else "email_auto_import",
                 last_qty=row.get("qty"),
                 last_price=row.get("unit_price") or row.get("price"),

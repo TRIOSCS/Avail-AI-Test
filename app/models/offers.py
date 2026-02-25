@@ -34,6 +34,7 @@ class Offer(Base):
 
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"))
     vendor_name = Column(String(255), nullable=False)
+    vendor_name_normalized = Column(String(255))
 
     mpn = Column(String(255), nullable=False)
     normalized_mpn = Column(String(255), index=True)
@@ -97,6 +98,7 @@ class Offer(Base):
         Index("ix_offers_entered_created", "entered_by_id", "created_at"),
         Index("ix_offers_req_created", "requisition_id", "created_at"),
         Index("ix_offers_vendor_name", "vendor_name"),
+        Index("ix_offers_vendor_norm", "vendor_name_normalized"),
         Index("ix_offers_material_card", "material_card_id"),
     )
 
@@ -131,6 +133,7 @@ class Contact(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     contact_type = Column(String(20), nullable=False)
     vendor_name = Column(String(255), nullable=False)
+    vendor_name_normalized = Column(String(255))
     vendor_contact = Column(String(255))
     parts_included = Column(JSON, default=list)
     subject = Column(String(500))
@@ -152,6 +155,7 @@ class Contact(Base):
         Index("ix_contact_status", "status"),
         Index("ix_contact_user_status", "user_id", "status", "created_at"),
         Index("ix_contact_vendor_name", "vendor_name"),
+        Index("ix_contacts_vendor_norm", "vendor_name_normalized"),
         Index("ix_contact_type_created", "contact_type", "created_at"),
         Index("ix_contact_type_vendor", "contact_type", "vendor_name"),
     )

@@ -852,9 +852,11 @@ def _upsert_material_card(
             if raw.get("vendor_sku"):
                 vh.vendor_sku = raw["vendor_sku"]
         else:
+            vn_norm = _nvn(s.vendor_name) or s.vendor_name
             new_vh = MaterialVendorHistory(
                 material_card_id=card.id,
-                vendor_name=_nvn(s.vendor_name) or s.vendor_name,
+                vendor_name=vn_norm,
+                vendor_name_normalized=vn_norm,
                 source_type=s.source_type,
                 is_authorized=s.is_authorized or False,
                 first_seen=now,
