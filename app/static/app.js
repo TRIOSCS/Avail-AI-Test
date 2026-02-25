@@ -2381,7 +2381,7 @@ function _renderDdOffers(reqId, data, panel) {
         html += `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">`;
         html += `<table class="dtbl"><thead><tr>
             <th style="width:28px"><input type="checkbox" onchange="ddToggleGroupOffers(${reqId},${gi},this.checked)" ${groupSelCount === offers.length ? 'checked' : ''}></th>
-            <th>Vendor</th><th>Mfr</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th>DC</th><th>Pkg</th><th>MOQ</th><th>Warranty</th><th>Source</th><th>Status</th><th>By</th><th>Notes</th><th style="width:80px"></th>
+            <th>Vendor</th><th>MPN</th><th>Mfr</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th>DC</th><th>Pkg</th><th>MOQ</th><th>Warranty</th><th>Source</th><th>Status</th><th>By</th><th>Notes</th><th style="width:80px"></th>
         </tr></thead><tbody>`;
 
         for (const o of offers) {
@@ -2397,7 +2397,7 @@ function _renderDdOffers(reqId, data, panel) {
             }
             const offeredMpn = o.mpn || o.offered_mpn || '';
             const isSub = reqMpn && offeredMpn && offeredMpn.trim().toUpperCase() !== reqMpn.trim().toUpperCase();
-            const subBadge = isSub ? ' <span class="badge b-sub">SUB</span>' : '';
+            const subBadge = isSub ? '<span class="badge b-sub">SUB</span> ' : '';
             const isPending = o.status === 'pending_review';
             const rowBg = isPending ? 'background:rgba(245,158,11,.06);border-left:2px dashed var(--amber);' : (isSub ? 'background:rgba(14,116,144,.04);' : '');
             const statusBadge = isPending ? ' <span class="badge" style="background:var(--amber-light);color:var(--amber);font-size:9px">DRAFT</span>' : '';
@@ -2415,7 +2415,8 @@ function _renderDdOffers(reqId, data, panel) {
 
             html += `<tr class="ofr-row ${checked ? 'selected' : ''}" style="${rowBg}" data-oid="${oid}">
                 <td><input type="checkbox" ${checked} onclick="event.stopPropagation();ddToggleOffer(${reqId},${oid},event)" data-oid="${oid}"></td>
-                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${subBadge}${statusBadge}${staleBadge}${quotedBadge}${editedInfo}</td>
+                <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'vendor_name',this)">${esc(o.vendor_name || '')}${statusBadge}${staleBadge}${quotedBadge}${editedInfo}</td>
+                <td class="mono req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'mpn',this)">${subBadge}${esc(offeredMpn || '\u2014')}</td>
                 <td class="req-edit-cell" onclick="ddInlineEditOffer(${reqId},${oid},'manufacturer',this)" style="font-size:10px">${esc(o.manufacturer || '\u2014')}</td>
                 <td class="req-edit-cell mono" onclick="ddInlineEditOffer(${reqId},${oid},'qty_available',this)">${o.qty_available != null ? Number(o.qty_available).toLocaleString() : (o.quantity || '\u2014')}</td>
                 <td class="req-edit-cell mono" style="color:${offerPriceColor}"${offerPriceTitle} onclick="ddInlineEditOffer(${reqId},${oid},'unit_price',this)">${price}</td>
@@ -2446,14 +2447,15 @@ function _renderDdOffers(reqId, data, panel) {
             if (expanded) {
                 html += `<div style="overflow-x:auto;-webkit-overflow-scrolling:touch;margin-top:4px">`;
                 html += `<table class="dtbl"><thead><tr>
-                    <th>Vendor</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th>Date</th><th>Source</th><th>Source Req</th>
+                    <th>Vendor</th><th>MPN</th><th>Qty</th><th>Price</th><th>Lead</th><th>Cond</th><th>Date</th><th>Source</th><th>Source Req</th>
                 </tr></thead><tbody>`;
                 for (const ho of histOffers) {
                     const hPrice = ho.unit_price != null ? '$' + parseFloat(ho.unit_price).toFixed(4) : '\u2014';
                     const hDate = ho.created_at ? new Date(ho.created_at).toLocaleDateString() : '\u2014';
-                    const hSub = ho.is_substitute ? ' <span class="badge b-sub">SUB</span>' : '';
+                    const hSub = ho.is_substitute ? '<span class="badge b-sub">SUB</span> ' : '';
                     html += `<tr style="color:var(--muted)">
-                        <td>${esc(ho.vendor_name || '')}${hSub}</td>
+                        <td>${esc(ho.vendor_name || '')}</td>
+                        <td class="mono">${hSub}${esc(ho.mpn || '\u2014')}</td>
                         <td class="mono">${ho.qty_available != null ? Number(ho.qty_available).toLocaleString() : '\u2014'}</td>
                         <td class="mono" style="color:var(--teal)">${hPrice}</td>
                         <td>${esc(ho.lead_time || '\u2014')}</td>
@@ -4585,16 +4587,16 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice) {
         if (s._historical) {
             const ho = s._ho;
             const hPrice = ho.unit_price != null ? '$' + parseFloat(ho.unit_price).toFixed(4) : '\u2014';
-            const hSub = ho.is_substitute ? ' <span class="badge b-sub">SUB</span>' : '';
+            const hSub = ho.is_substitute ? '<span class="badge b-sub">SUB</span> ' : '';
             const sAge = ho.created_at ? fmtRelative(ho.created_at) : '\u2014';
             const hQty = ho.qty_available != null ? Number(ho.qty_available).toLocaleString() : '\u2014';
             const hoJson = esc(JSON.stringify(ho));
             const safeHVName = (ho.vendor_name||'').replace(/'/g, "\\'");
             html += `<tr style="background:var(--blue-light,#f0f9ff)">
                 <td style="text-align:center"><span style="font-size:9px;padding:2px 5px;border-radius:3px;background:var(--blue,#0284c7);color:#fff;font-weight:700">HIST</span></td>
-                <td><a onclick="event.stopPropagation();openVendorPopup('${safeHVName}')" style="cursor:pointer;font-weight:600">${esc(ho.vendor_name || '\u2014')}</a>${hSub} <span style="color:var(--muted)">RFQ-${ho.from_requisition_id || '\u2014'}</span></td>
+                <td><a onclick="event.stopPropagation();openVendorPopup('${safeHVName}')" style="cursor:pointer;font-weight:600">${esc(ho.vendor_name || '\u2014')}</a> <span style="color:var(--muted)">RFQ-${ho.from_requisition_id || '\u2014'}</span></td>
                 <td style="font-size:10px;color:var(--muted)">\u2014</td>
-                <td class="mono">${esc(ho.mpn || '\u2014')}</td>
+                <td class="mono">${hSub}${esc(ho.mpn || '\u2014')}</td>
                 <td class="mono">${hQty}</td>
                 <td class="mono" style="color:var(--teal)">${hPrice}</td>
                 <td style="font-size:10px">historical</td>
