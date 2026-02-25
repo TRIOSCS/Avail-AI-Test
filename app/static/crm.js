@@ -82,12 +82,38 @@ function _abortAllCrmFetches() {
 // ── Customer Filter / Sort / Drawer Helpers ───────────────────────────
 
 let _custFilterMode = 'all';
+let _custOwnerFilterId = null;  // null = all, number = specific user
 let _custSelectedIds = new Set();
 
 function setCustFilter(mode, btn) {
     _custFilterMode = mode;
     document.querySelectorAll('#view-customers .chip-row .chip').forEach(c => c.classList.toggle('on', c.dataset.value === mode));
     renderCustomers();
+}
+
+function setCustOwnerFilter(val) {
+    _custOwnerFilterId = val ? parseInt(val) : null;
+    renderCustomers();
+}
+
+async function _populateCustOwnerDropdown() {
+    const sel = document.getElementById('custOwnerFilter');
+    if (!sel) return;
+    try {
+        if (!_userListCache) {
+            try { _userListCache = await apiFetch('/api/users/list'); } catch(e) { _userListCache = []; }
+        }
+        const roles = ['sales', 'trader', 'manager', 'admin'];
+        const users = _userListCache.filter(u => roles.includes(u.role));
+        sel.innerHTML = '<option value="">All Accounts</option>' +
+            users.map(u => '<option value="' + u.id + '"' +
+                (u.id === window.userId ? ' selected' : '') +
+                '>' + esc(u.name) + '</option>').join('');
+        // Default to current user
+        if (window.userId) {
+            _custOwnerFilterId = window.userId;
+        }
+    } catch(e) { /* ignore */ }
 }
 
 function toggleCustUnassigned(btn) {
@@ -106,6 +132,8 @@ async function showCustomers() {
     _selectedCustId = null;
     _custFilterMode = 'all';
     document.querySelectorAll('#view-customers .chip-row .chip').forEach(c => c.classList.toggle('on', c.dataset.value === 'all'));
+    // Populate owner filter dropdown
+    _populateCustOwnerDropdown();
     // Show view indicator in top bar
     _setTopViewLabel('Accounts');
     // Role-based account filtering
@@ -237,7 +265,7 @@ function renderCustomers() {
 
     // Apply view filters
     let filtered = [...crmCustomers];
-    if (_custFilterMode === 'my-accounts') filtered = filtered.filter(c => c.sites && c.sites.some(s => s.owner_id === window.userId));
+    if (_custOwnerFilterId) filtered = filtered.filter(c => c.sites && c.sites.some(s => s.owner_id === _custOwnerFilterId));
     if (_custFilterMode === 'strategic') filtered = filtered.filter(c => c.is_strategic);
     if (_custFilterMode === 'at-risk') filtered = filtered.filter(c => _custHealthColor(c) === 'red');
     if (_custFilterMode === 'stale') {
@@ -6656,7 +6684,7 @@ Object.assign(window, {
     logCustNote, saveContactNotes, logContactNote, _loadContactRecentNotes, toggleContactArchive,
     toggleStrategic, _renderMiniList, _renderMiniListFromSearch, _miniListKeyNav,
     _setTopViewLabel, _setTopDrillLabel, _abortAllCrmFetches,
-    analyzeCustomerTags, setCustFilter, openCustDrawer, closeCustDrawer, switchCustDrawerTab,
+    analyzeCustomerTags, setCustFilter, setCustOwnerFilter, openCustDrawer, closeCustDrawer, switchCustDrawerTab,
     toggleCustCheckbox, toggleAllCustCheckboxes, clearCustSelection,
     bulkAssignOwner, bulkExportAccounts, toggleSiteAccordion,
     // Suggested accounts (company-level pool)

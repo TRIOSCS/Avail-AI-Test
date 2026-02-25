@@ -259,8 +259,9 @@
         <div class="crm-toolbar">
             <input class="sbox" id="custFilter" placeholder="Search accounts…" oninput="debouncedLoadCustomers()" style="flex:1;min-width:140px" aria-label="Search companies">
             <div class="chip-row" style="margin:0">
-                <span class="chip on" data-value="all" onclick="setCustFilter('all',this)">All</span>
-                <span class="chip" data-value="my-accounts" onclick="setCustFilter('my-accounts',this)">My Accounts</span>
+                <select id="custOwnerFilter" onchange="setCustOwnerFilter(this.value)" class="s-select" style="padding:4px 8px;font-size:11px;border-radius:4px;min-width:120px">
+                    <option value="">All Accounts</option>
+                </select>
                 <span class="chip" data-value="strategic" onclick="setCustFilter('strategic',this)">Strategic</span>
                 <span class="chip" data-value="at-risk" onclick="setCustFilter('at-risk',this)">Needs Attention</span>
                 <span class="chip" data-value="stale" onclick="setCustFilter('stale',this)">No Recent Activity</span>

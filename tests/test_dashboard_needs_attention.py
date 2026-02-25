@@ -262,6 +262,8 @@ class TestNeedsAttention:
             q.filter.return_value = q
             q.group_by.return_value = q
             q.order_by.return_value = q
+            q.distinct.return_value = q
+            q.scalar_subquery.return_value = MagicMock()
             q.subquery.return_value = MagicMock(c=MagicMock())
             q.join.return_value = q
             q.all.return_value = result

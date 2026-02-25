@@ -52,12 +52,11 @@ def needs_attention(
         db.query(CustomerSite.company_id)
         .filter(CustomerSite.owner_id == user.id)
         .distinct()
-        .subquery()
     )
     companies = (
         db.query(Company)
         .filter(
-            Company.id.in_(owned_company_ids),
+            Company.id.in_(owned_company_ids.scalar_subquery()),
             Company.is_active.is_(True),
         )
         .all()
@@ -218,12 +217,11 @@ def morning_brief(
         db.query(CustomerSite.company_id)
         .filter(CustomerSite.owner_id == user.id)
         .distinct()
-        .subquery()
     )
     owned_companies = (
         db.query(Company)
         .filter(
-            Company.id.in_(owned_company_ids_sub),
+            Company.id.in_(owned_company_ids_sub.scalar_subquery()),
             Company.is_active.is_(True),
         )
         .all()
