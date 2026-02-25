@@ -87,6 +87,16 @@ def _add_missing_columns(conn) -> None:
         "ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE",
         # Prospecting module: company record origin
         "ALTER TABLE companies ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'manual'",
+        # Proactive matching: CPH-enriched columns on proactive_matches
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS material_card_id INTEGER REFERENCES material_cards(id) ON DELETE SET NULL",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS match_score INTEGER DEFAULT 0",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS margin_pct FLOAT",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS customer_purchase_count INTEGER DEFAULT 0",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS customer_last_price FLOAT",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS customer_last_purchased_at TIMESTAMP",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS our_cost FLOAT",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS dismiss_reason VARCHAR(255)",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
@@ -464,6 +474,11 @@ def _create_perf_indexes(conn) -> None:
     _exec(conn, "CREATE INDEX IF NOT EXISTS ix_requisitions_updated_by_id ON requisitions (updated_by_id)")
     _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_approved_by_id ON offers (approved_by_id)")
     _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_updated_by_id ON offers (updated_by_id)")
+
+    # Proactive matching indexes
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_pm_material_card ON proactive_matches (material_card_id)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_pm_score ON proactive_matches (match_score)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_pm_status_sales ON proactive_matches (status, salesperson_id)")
 
     # Phase 3: soft-delete column for material cards
     _exec(conn, "ALTER TABLE material_cards ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP")

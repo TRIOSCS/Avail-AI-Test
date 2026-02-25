@@ -127,6 +127,18 @@ class ProactiveMatch(Base):
     salesperson_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     mpn = Column(String(255), nullable=False)
     status = Column(String(20), default="new")  # new | sent | dismissed | converted
+
+    # CPH-enriched fields (populated by matching engine)
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
+    match_score = Column(Integer, default=0)  # 0-100 composite score
+    margin_pct = Column(Float)  # Potential margin %
+    customer_purchase_count = Column(Integer, default=0)
+    customer_last_price = Column(Float)
+    customer_last_purchased_at = Column(DateTime)
+    our_cost = Column(Float)
+    dismiss_reason = Column(String(255))
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     offer = relationship("Offer", foreign_keys=[offer_id])
@@ -134,6 +146,7 @@ class ProactiveMatch(Base):
     requisition = relationship("Requisition", foreign_keys=[requisition_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
     salesperson = relationship("User", foreign_keys=[salesperson_id])
+    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
 
     __table_args__ = (
         Index("ix_pm_offer", "offer_id"),
@@ -142,6 +155,9 @@ class ProactiveMatch(Base):
         Index("ix_pm_sales", "salesperson_id"),
         Index("ix_pm_status", "status"),
         Index("ix_pm_mpn_site", "mpn", "customer_site_id"),
+        Index("ix_pm_material_card", "material_card_id"),
+        Index("ix_pm_score", "match_score"),
+        Index("ix_pm_status_sales", "status", "salesperson_id"),
     )
 
 

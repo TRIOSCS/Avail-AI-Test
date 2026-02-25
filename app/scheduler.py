@@ -617,21 +617,41 @@ async def _job_stock_autocomplete():
 
 @_traced_job
 async def _job_proactive_matching():
-    """Scan new offers for proactive matching."""
+    """Scan new offers/sightings for proactive matching via CPH + archived reqs."""
     from .database import SessionLocal
 
     db = SessionLocal()
     try:
+        from .services.proactive_matching import expire_old_matches, run_proactive_scan
         from .services.proactive_service import scan_new_offers_for_matches
+
         loop = asyncio.get_running_loop()
+
+        # Legacy scan (archived requisitions)
         result = await asyncio.wait_for(
             loop.run_in_executor(None, scan_new_offers_for_matches, db),
             timeout=300,
         )
         if result.get("matches_created"):
             logger.info(
-                f"Proactive matching: {result['matches_created']} new matches from {result['scanned']} offers"
+                f"Proactive matching (legacy): {result['matches_created']} new matches from {result['scanned']} offers"
             )
+
+        # CPH-based scan (purchase history)
+        cph_result = await asyncio.wait_for(
+            loop.run_in_executor(None, run_proactive_scan, db),
+            timeout=300,
+        )
+        if cph_result.get("matches_created"):
+            logger.info(
+                f"Proactive matching (CPH): {cph_result['matches_created']} new matches "
+                f"from {cph_result['scanned_offers']} offers + {cph_result['scanned_sightings']} sightings"
+            )
+
+        # Expire stale matches
+        expired = await loop.run_in_executor(None, expire_old_matches, db)
+        if expired:
+            logger.info(f"Proactive matching: expired {expired} old matches")
     except asyncio.TimeoutError:
         logger.error("Proactive matching timed out after 300s")
         db.rollback()
