@@ -91,6 +91,8 @@ class Settings:
 
     # Deep Enrichment APIs
     hunter_api_key: str = os.getenv("HUNTER_API_KEY", "")
+    hunter_monthly_search_limit: int = int(os.getenv("HUNTER_MONTHLY_SEARCH_LIMIT", "25"))
+    hunter_monthly_verify_limit: int = int(os.getenv("HUNTER_MONTHLY_VERIFY_LIMIT", "50"))
     rocketreach_api_key: str = os.getenv("ROCKETREACH_API_KEY", "")
     clearbit_api_key: str = os.getenv("CLEARBIT_API_KEY", "")
 
