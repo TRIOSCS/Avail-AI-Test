@@ -196,6 +196,19 @@ export function escAttr(s) {
 }
 export function logCatchError(ctx, err) { if (err) console.warn('[' + ctx + ']', err); }
 
+/** Unified loading spinner HTML */
+export function stateLoading(msg = 'Loading\u2026') {
+    return `<div class="spinner-row"><div class="spinner"></div>${esc(msg)}</div>`;
+}
+/** Unified empty state HTML */
+export function stateEmpty(msg, hint) {
+    return `<div class="state-empty"><div class="state-empty-icon">\u{1F4CB}</div>${esc(msg)}${hint ? `<div class="state-empty-hint">${hint}</div>` : ''}</div>`;
+}
+/** Unified error state HTML */
+export function stateError(msg, hint) {
+    return `<div class="state-error">${esc(msg)}${hint ? `<div class="state-error-hint">${hint}</div>` : ''}</div>`;
+}
+
 var _modalStack = [];
 export function openModal(id, focusId) {
     var el = document.getElementById(id);
@@ -733,7 +746,8 @@ export async function refreshProactiveBadge() {
         const data = await apiFetch('/api/proactive/count');
         const badge = document.getElementById('proactiveBadge');
         if (badge) {
-            if (data.count > 0) { badge.textContent = data.count; badge.style.display = ''; }
+            const c = data.count || 0;
+            if (c > 0) { badge.textContent = c > 99 ? '99+' : c; badge.style.display = ''; }
             else { badge.style.display = 'none'; }
         }
     } catch (e) { logCatchError('proactiveBadge', e); }
@@ -6554,7 +6568,7 @@ function renderSources() {
     const el = document.getElementById('sourceResults');
     const keys = Object.keys(searchResults);
     if (!keys.length) {
-        el.innerHTML = '<p class="empty">No results found — try a different part number or check spelling</p>';
+        el.innerHTML = stateEmpty('No results found', 'Try a different part number or check spelling');
         document.getElementById('srcFilterCount').textContent = '';
         document.getElementById('collapsedMatchHint')?.classList.add('hidden');
         return;
@@ -8197,7 +8211,7 @@ function filterVendorList() {
 
     const el = document.getElementById('vendorList');
     if (!filtered.length) {
-        el.innerHTML = `<p class="crm-empty">${_vendorListData.length ? 'No vendors match filters' : 'No vendors yet — they\'ll appear after your first search'}</p>`;
+        el.innerHTML = _vendorListData.length ? stateEmpty('No vendors match filters', 'Try adjusting your search or filter criteria') : stateEmpty('No vendors yet', 'They\'ll appear automatically after your first search');
         return;
     }
 
@@ -8514,7 +8528,7 @@ function renderMaterialList() {
     const q = (document.getElementById('materialSearch') || {}).value || '';
     const el = document.getElementById('materialList');
     if (!data.length) {
-        el.innerHTML = `<p class="empty">${q ? 'No materials match your search' : 'No material cards yet \u2014 they\'ll build automatically as you search'}</p>`;
+        el.innerHTML = q ? stateEmpty('No materials match your search', 'Try a different part number') : stateEmpty('No material cards yet', 'They\'ll build automatically as you search');
         return;
     }
 
@@ -8580,6 +8594,14 @@ async function openMaterialPopup(cardId) {
     try { pricingHistory = await apiFetch(`/api/pricing-history/${encodeURIComponent(mpn)}`); }
     catch { pricingHistory = { history: [] }; }
 
+    // Compute hub stats
+    const offers = card.offers || [];
+    const sightings = card.sightings || [];
+    const allPrices = [...offers, ...sightings].map(r => r.unit_price).filter(p => p != null && p > 0);
+    const uniqueVendors = new Set([...offers, ...sightings].map(r => (r.vendor_name || '').toLowerCase()).filter(Boolean));
+    const priceMin = allPrices.length ? Math.min(...allPrices) : null;
+    const priceMax = allPrices.length ? Math.max(...allPrices) : null;
+
     let html = `<div class="mp-header">
         <h2 onclick="editMaterialField(${card.id},'display_mpn',this)" style="cursor:pointer" title="Click to edit MPN">${esc(card.display_mpn)}</h2>
         <div class="mp-header-meta">
@@ -8589,10 +8611,17 @@ async function openMaterialPopup(cardId) {
         </div>
     </div>`;
 
+    // Material Card Hub — summary stats
+    html += `<div class="mp-hub">
+        <div class="mp-hub-stat"><span class="mp-hub-val">${offers.length}</span><span class="mp-hub-lbl">Offers</span></div>
+        <div class="mp-hub-stat"><span class="mp-hub-val">${sightings.length}</span><span class="mp-hub-lbl">Sightings</span></div>
+        <div class="mp-hub-stat"><span class="mp-hub-val">${uniqueVendors.size}</span><span class="mp-hub-lbl">Vendors</span></div>
+        <div class="mp-hub-stat"><span class="mp-hub-val">${priceMin != null ? '$' + priceMin.toFixed(2) + (priceMax !== priceMin ? '–$' + priceMax.toFixed(2) : '') : '—'}</span><span class="mp-hub-lbl">Price Range</span></div>
+    </div>`;
+
     html += `<div class="mp-section"><div class="mp-label">Description</div><div onclick="editMaterialField(${card.id},'description',this)" style="font-size:12px;cursor:pointer" title="Click to edit">${card.description ? esc(card.description) : '<span style="color:var(--muted)">+ Add description</span>'}</div></div>`;
 
     // ── Offers section ──
-    const offers = card.offers || [];
     html += `<div class="mp-section"><div class="mp-label">Offers (${offers.length})</div>`;
     if (offers.length) {
         html += '<div class="mp-table-wrap"><table class="mp-tbl"><thead><tr><th>Vendor</th><th>Qty</th><th>Price</th><th>Lead Time</th><th>Condition</th><th>Status</th><th>Date</th></tr></thead><tbody>';
@@ -8615,7 +8644,6 @@ async function openMaterialPopup(cardId) {
     html += '</div>';
 
     // ── Sightings section ──
-    const sightings = card.sightings || [];
     html += `<div class="mp-section"><div class="mp-label">Sightings (${sightings.length})</div>`;
     if (sightings.length) {
         html += '<div class="mp-table-wrap"><table class="mp-tbl"><thead><tr><th>Vendor</th><th>Qty</th><th>Price</th><th>Source</th><th>Auth</th><th>Condition</th><th>Date</th></tr></thead><tbody>';
@@ -10121,4 +10149,6 @@ Object.assign(window, {
     debouncedLoadContacts, setContactStatusFilter, loadContacts, renderContacts, showContacts, updateContactStatus,
     // Dashboard / Command Center
     setDashPeriod, setBuyerScope, setDashPerspective, showDashboard, loadDashboard, loadBuyerDashboard, goToReq,
+    // Unified state helpers
+    stateLoading, stateEmpty, stateError,
 });

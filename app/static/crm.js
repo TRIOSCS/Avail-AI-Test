@@ -1554,7 +1554,7 @@ function _sortOffers(offers) {
 function renderOffers() {
     const el = document.getElementById('offersContent');
     if (!crmOffers.length) {
-        el.innerHTML = '<p class="empty">No offers yet — log vendor offers as they come in</p>';
+        el.innerHTML = stateEmpty('No offers yet', 'Log vendor offers as they come in');
         return;
     }
     const filterBar = `<div id="offerFilterBar" class="offer-filter-bar">
@@ -2762,7 +2762,7 @@ function renderBuyPlansList() {
     }
 
     if (!data.length) {
-        el.innerHTML = '<p class="empty">No buy plans found</p>';
+        el.innerHTML = stateEmpty('No buy plans found', 'Create a buy plan from the offers tab on any requisition');
         return;
     }
 
@@ -3825,6 +3825,9 @@ let _proactiveSent = [];
 let _proactiveTab = 'matches';
 let _proactiveSendSiteId = null;
 let _proactiveSendMatchIds = [];
+
+// Proactive badge auto-refresh every 5 minutes
+setInterval(() => { if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge(); }, 5 * 60 * 1000);
 let _proactiveSiteContacts = [];
 
 async function showProactiveOffers() {
