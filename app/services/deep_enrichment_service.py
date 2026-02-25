@@ -716,45 +716,42 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
         error_count = 0
         error_log = []
 
-        # Process vendors — prioritize most recently active accounts first
-        if "vendor" in entity_types:
-            vendors = (
-                db.query(VendorCard)
+        # Process companies FIRST — customer accounts are highest priority
+        if "company" in entity_types:
+            companies = (
+                db.query(Company)
                 .filter(
-                    (VendorCard.deep_enrichment_at.is_(None)) |
-                    (VendorCard.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
+                    (Company.deep_enrichment_at.is_(None)) |
+                    (Company.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
                 )
                 .order_by(
-                    VendorCard.last_activity_at.desc().nullslast(),
-                    VendorCard.sighting_count.desc().nullslast(),
+                    Company.last_activity_at.desc().nullslast(),
                 )
                 .limit(max_items)
                 .all()
             )
 
             batch_size = 20
-            sem = asyncio.Semaphore(5)
+            co_sem = asyncio.Semaphore(5)
 
-            for i in range(0, len(vendors), batch_size):
-                batch = vendors[i:i + batch_size]
+            for i in range(0, len(companies), batch_size):
+                batch = companies[i:i + batch_size]
 
-                # Check if job was cancelled
                 db.refresh(job)
                 if job.status == "cancelled":
                     job.completed_at = datetime.now(timezone.utc)
                     db.commit()
                     return
 
-                async def _enrich_vendor(card):
-                    async with sem:
+                async def _enrich_co(company):
+                    async with co_sem:
                         try:
-                            result = await deep_enrich_vendor(card.id, db, job_id=job.id)
-                            return result
+                            return await deep_enrich_company(company.id, db, job_id=job.id)
                         except Exception as e:
-                            return {"status": "error", "error": f"vendor_{card.id}: {str(e)[:100]}"}
+                            return {"status": "error", "error": f"company_{company.id}: {str(e)[:100]}"}
 
                 batch_results = await asyncio.gather(
-                    *[_enrich_vendor(c) for c in batch], return_exceptions=True
+                    *[_enrich_co(c) for c in batch], return_exceptions=True
                 )
 
                 for r in batch_results:
@@ -772,37 +769,35 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                             error_log.append(r["error"])
                     processed += 1
 
-                # Update progress
                 job.processed_items = processed
                 job.enriched_items = enriched
                 job.error_count = error_count
                 db.commit()
-
-                # Rate limiting between batches
                 await asyncio.sleep(1)
 
-        # Process companies — prioritize most recently active accounts first
-        if "company" in entity_types:
+        # Process vendors second — most recently active first
+        if "vendor" in entity_types:
             remaining = max_items - processed
             if remaining > 0:
-                companies = (
-                    db.query(Company)
+                vendors = (
+                    db.query(VendorCard)
                     .filter(
-                        (Company.deep_enrichment_at.is_(None)) |
-                        (Company.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
+                        (VendorCard.deep_enrichment_at.is_(None)) |
+                        (VendorCard.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
                     )
                     .order_by(
-                        Company.last_activity_at.desc().nullslast(),
+                        VendorCard.last_activity_at.desc().nullslast(),
+                        VendorCard.sighting_count.desc().nullslast(),
                     )
                     .limit(remaining)
                     .all()
                 )
 
                 batch_size = 20
-                co_sem = asyncio.Semaphore(5)
+                sem = asyncio.Semaphore(5)
 
-                for i in range(0, len(companies), batch_size):
-                    batch = companies[i:i + batch_size]
+                for i in range(0, len(vendors), batch_size):
+                    batch = vendors[i:i + batch_size]
 
                     db.refresh(job)
                     if job.status == "cancelled":
@@ -810,15 +805,16 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                         db.commit()
                         return
 
-                    async def _enrich_co(company):
-                        async with co_sem:
+                    async def _enrich_vendor(card):
+                        async with sem:
                             try:
-                                return await deep_enrich_company(company.id, db, job_id=job.id)
+                                result = await deep_enrich_vendor(card.id, db, job_id=job.id)
+                                return result
                             except Exception as e:
-                                return {"status": "error", "error": f"company_{company.id}: {str(e)[:100]}"}
+                                return {"status": "error", "error": f"vendor_{card.id}: {str(e)[:100]}"}
 
                     batch_results = await asyncio.gather(
-                        *[_enrich_co(c) for c in batch], return_exceptions=True
+                        *[_enrich_vendor(c) for c in batch], return_exceptions=True
                     )
 
                     for r in batch_results:

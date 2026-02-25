@@ -750,7 +750,7 @@ async def _job_deep_email_mining():
 
 @_traced_job
 async def _job_deep_enrichment():
-    """Deep enrichment sweep for vendors and companies."""
+    """Deep enrichment sweep — companies first, then vendors."""
     from .config import settings
     from .database import SessionLocal
     from .models import Company, VendorCard
@@ -760,7 +760,45 @@ async def _job_deep_enrichment():
         now = datetime.now(timezone.utc)
         from .services.deep_enrichment_service import deep_enrich_company, deep_enrich_vendor
 
-        # Enrich up to 50 vendors per sweep — most active first
+        async def _safe_enrich_company(cid):
+            try:
+                db.begin_nested()
+                await deep_enrich_company(cid, db)
+                db.commit()
+            except Exception as e:
+                logger.warning(f"Enrichment sweep company {cid} error: {e}")
+                db.rollback()
+
+        async def _safe_enrich_vendor(vid):
+            try:
+                db.begin_nested()
+                await deep_enrich_vendor(vid, db)
+                db.commit()
+            except Exception as e:
+                logger.warning(f"Enrichment sweep vendor {vid} error: {e}")
+                db.rollback()
+
+        # Companies FIRST — customer accounts are highest priority (up to 50)
+        stale_companies = (
+            db.query(Company.id)
+            .filter(
+                (Company.deep_enrichment_at.is_(None)) |
+                (Company.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
+            )
+            .order_by(Company.last_activity_at.desc().nullslast())
+            .limit(50)
+            .all()
+        )
+
+        if stale_companies:
+            for i in range(0, len(stale_companies), 10):
+                batch = [cid for (cid,) in stale_companies[i:i + 10]]
+                await asyncio.wait_for(
+                    asyncio.gather(*[_safe_enrich_company(cid) for cid in batch], return_exceptions=True),
+                    timeout=300,
+                )
+
+        # Vendors second — most active first (up to 50)
         stale_vendors = (
             db.query(VendorCard.id)
             .filter(
@@ -775,7 +813,7 @@ async def _job_deep_enrichment():
             .all()
         )
 
-        # Enrich recently created entities (last 24h with no enrichment)
+        # Recently created vendors (last 24h, no enrichment yet)
         recent_vendors = (
             db.query(VendorCard.id)
             .filter(
@@ -786,59 +824,17 @@ async def _job_deep_enrichment():
             .all()
         )
 
-        # Enrich up to 20 companies — most active first
-        stale_companies = (
-            db.query(Company.id)
-            .filter(
-                (Company.deep_enrichment_at.is_(None)) |
-                (Company.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
-            )
-            .order_by(Company.last_activity_at.desc().nullslast())
-            .limit(20)
-            .all()
-        )
-
-        # Run all enrichments concurrently in batches of 10
-        async def _safe_enrich_vendor(vid):
-            try:
-                db.begin_nested()  # SAVEPOINT for per-vendor isolation
-                await deep_enrich_vendor(vid, db)
-                db.commit()  # release savepoint
-            except Exception as e:
-                logger.warning(f"Enrichment sweep vendor {vid} error: {e}")
-                db.rollback()  # rollback to savepoint only
-
-        async def _safe_enrich_company(cid):
-            try:
-                db.begin_nested()  # SAVEPOINT for per-company isolation
-                await deep_enrich_company(cid, db)
-                db.commit()  # release savepoint
-            except Exception as e:
-                logger.warning(f"Enrichment sweep company {cid} error: {e}")
-                db.rollback()  # rollback to savepoint only
-
         all_vendor_ids = [vid for (vid,) in stale_vendors] + [vid for (vid,) in recent_vendors]
-        # Process in batches of 10 to avoid overwhelming external APIs
         for i in range(0, len(all_vendor_ids), 10):
             batch = all_vendor_ids[i:i + 10]
-            tasks = [_safe_enrich_vendor(vid) for vid in batch]
             await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=300,
-            )
-
-        if stale_companies:
-            await asyncio.wait_for(
-                asyncio.gather(
-                    *[_safe_enrich_company(cid) for (cid,) in stale_companies],
-                    return_exceptions=True,
-                ),
+                asyncio.gather(*[_safe_enrich_vendor(vid) for vid in batch], return_exceptions=True),
                 timeout=300,
             )
 
         logger.info(
-            f"Deep enrichment sweep: {len(stale_vendors)} vendors, "
-            f"{len(recent_vendors)} new vendors, {len(stale_companies)} companies"
+            f"Deep enrichment sweep: {len(stale_companies)} companies, "
+            f"{len(stale_vendors)} vendors, {len(recent_vendors)} new vendors"
         )
     except Exception as e:
         logger.error(f"Deep enrichment sweep error: {e}")
