@@ -177,6 +177,7 @@ class Settings:
     )
     proactive_archive_age_days: int = int(os.getenv("PROACTIVE_ARCHIVE_AGE_DAYS", "30"))
     proactive_throttle_days: int = int(os.getenv("PROACTIVE_THROTTLE_DAYS", "21"))
+    proactive_scan_interval_hours: int = int(os.getenv("PROACTIVE_SCAN_INTERVAL_HOURS", "4"))
     proactive_min_margin_pct: float = float(os.getenv("PROACTIVE_MIN_MARGIN_PCT", "10.0"))
     proactive_match_expiry_days: int = int(os.getenv("PROACTIVE_MATCH_EXPIRY_DAYS", "30"))
 

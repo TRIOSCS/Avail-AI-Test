@@ -83,6 +83,7 @@ def _mock_settings(**overrides):
         contacts_sync_enabled=False,
         activity_tracking_enabled=False,
         proactive_matching_enabled=False,
+        proactive_scan_interval_hours=4,
         deep_email_mining_enabled=False,
         deep_enrichment_enabled=False,
         po_verify_interval_min=30,
@@ -960,6 +961,58 @@ def test_proactive_matching_error_handling(scheduler_db):
         from app.scheduler import _job_proactive_matching
         # Should not raise
         asyncio.run(_job_proactive_matching())
+
+
+def test_proactive_matching_configurable_interval():
+    """Proactive matching interval is configurable via proactive_scan_interval_hours."""
+    with patch("app.config.settings", _mock_settings(
+        proactive_matching_enabled=True,
+        proactive_scan_interval_hours=6,
+    )):
+        configure_scheduler()
+
+    job = scheduler.get_job("proactive_matching")
+    assert job is not None
+    # Check the trigger interval is 6 hours
+    trigger = job.trigger
+    assert trigger.interval.total_seconds() == 6 * 3600
+
+
+def test_proactive_matching_interval_minimum_1h():
+    """Interval is clamped to at least 1 hour."""
+    with patch("app.config.settings", _mock_settings(
+        proactive_matching_enabled=True,
+        proactive_scan_interval_hours=0,
+    )):
+        configure_scheduler()
+
+    job = scheduler.get_job("proactive_matching")
+    assert job is not None
+    trigger = job.trigger
+    assert trigger.interval.total_seconds() == 1 * 3600
+
+
+def test_proactive_matching_logs_summary(scheduler_db):
+    """Proactive matching logs a summary with new matches and total pending."""
+    with patch(
+        "app.services.proactive_service.scan_new_offers_for_matches"
+    ) as mock_legacy, \
+         patch(
+        "app.services.proactive_matching.run_proactive_scan"
+    ) as mock_cph, \
+         patch(
+        "app.services.proactive_matching.expire_old_matches"
+    ) as mock_expire, \
+         patch("app.scheduler.logger") as mock_logger:
+        mock_legacy.return_value = {"matches_created": 2, "scanned": 10}
+        mock_cph.return_value = {"matches_created": 1, "scanned_offers": 5, "scanned_sightings": 3}
+        mock_expire.return_value = 0
+        from app.scheduler import _job_proactive_matching
+        asyncio.run(_job_proactive_matching())
+        # Check summary log was called with "new matches" and "pending"
+        log_calls = [str(c) for c in mock_logger.info.call_args_list]
+        summary_found = any("3 new matches" in c and "pending" in c for c in log_calls)
+        assert summary_found, f"Expected summary log with '3 new matches' and 'pending', got: {log_calls}"
 
 
 # ── _job_deep_email_mining() ──────────────────────────────────────────

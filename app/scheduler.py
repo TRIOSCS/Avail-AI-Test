@@ -15,7 +15,7 @@ Job overview:
   - Routing expiration: every 12h
   - PO verification: configurable (default 30 min)
   - Stock sale auto-complete: daily at configured hour
-  - Proactive matching: every 5 min
+  - Proactive matching: configurable (default 4h)
   - Performance tracking: every 12h
   - Deep email mining: every 4h
   - Deep enrichment sweep: every 12h
@@ -201,7 +201,8 @@ def configure_scheduler():
 
     # Proactive matching
     if settings.proactive_matching_enabled:
-        scheduler.add_job(_job_proactive_matching, IntervalTrigger(minutes=5),
+        interval_h = max(1, settings.proactive_scan_interval_hours)
+        scheduler.add_job(_job_proactive_matching, IntervalTrigger(hours=interval_h),
                           id="proactive_matching", name="Proactive matching")
 
     # Performance tracking
@@ -622,6 +623,7 @@ async def _job_proactive_matching():
 
     db = SessionLocal()
     try:
+        from .models import ProactiveMatch
         from .services.proactive_matching import expire_old_matches, run_proactive_scan
         from .services.proactive_service import scan_new_offers_for_matches
 
@@ -652,6 +654,15 @@ async def _job_proactive_matching():
         expired = await loop.run_in_executor(None, expire_old_matches, db)
         if expired:
             logger.info(f"Proactive matching: expired {expired} old matches")
+
+        # Summary log with total pending
+        new_matches = result.get("matches_created", 0) + cph_result.get("matches_created", 0)
+        total_pending = db.query(ProactiveMatch).filter(
+            ProactiveMatch.status == "new"
+        ).count()
+        logger.info(
+            f"Proactive scan complete: {new_matches} new matches, {total_pending} pending"
+        )
     except asyncio.TimeoutError:
         logger.error("Proactive matching timed out after 300s")
         db.rollback()
