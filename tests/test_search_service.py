@@ -651,7 +651,7 @@ class TestUpsertMaterialCard:
 
         vh = db_session.query(MaterialVendorHistory).filter_by(material_card_id=card.id).first()
         assert vh is not None
-        assert vh.vendor_name == "Arrow"
+        assert vh.vendor_name == "arrow"  # Stored normalized since Phase 2
         assert vh.times_seen == 1
         assert vh.is_authorized is True
         assert vh.vendor_sku == "ARR-001"
@@ -805,7 +805,7 @@ class TestUpsertMaterialCard:
         _upsert_material_card("LM317T", [s], db_session, now)
 
         vh_mouser = db_session.query(MaterialVendorHistory).filter_by(
-            material_card_id=card.id, vendor_name="Mouser"
+            material_card_id=card.id, vendor_name="mouser"
         ).first()
         assert vh_mouser is not None
         assert vh_mouser.times_seen == 1

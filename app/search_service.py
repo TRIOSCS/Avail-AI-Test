@@ -629,9 +629,11 @@ def _get_material_history(
         .all()
     )
 
+    from .vendor_utils import normalize_vendor_name as _nvn
+
     rows = []
     for vh in all_vh:
-        vk = vh.vendor_name.lower()
+        vk = _nvn(vh.vendor_name) or vh.vendor_name.lower()
         if vk in fresh_vendors:
             continue
         card = card_map[vh.material_card_id]
@@ -727,6 +729,7 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
     # Fast path — card already exists (no write, cheapest possible check)
     card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
     if card:
+        log.debug("MC_METRIC: action=resolved mpn=%s card_id=%d", norm, card.id)
         return card
 
     display = normalize_mpn(mpn) or mpn.strip()
@@ -740,12 +743,16 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
             display_mpn=display,
             search_count=0,
         ).on_conflict_do_nothing(index_elements=["normalized_mpn"])
-        db.execute(stmt)
+        result = db.execute(stmt)
         db.flush()
         # Re-fetch — guaranteed to exist now (either we inserted or another txn did)
         card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
         if card is None:
             log.error("MATERIAL_CARD_RESOLVE_FAIL: card missing after ON CONFLICT for mpn=%s", norm)
+        elif result.rowcount == 0:
+            log.info("MC_METRIC: action=race_resolved mpn=%s card_id=%d", norm, card.id)
+        else:
+            log.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
         return card
     else:
         # SQLite / test fallback — use try/except on IntegrityError
@@ -755,10 +762,11 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
             card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0)
             db.add(card)
             db.flush()
+            log.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
             return card
         except IntegrityError:
             db.rollback()
-            log.info("MATERIAL_CARD_RACE: concurrent create for mpn=%s, resolved via retry", norm)
+            log.info("MC_METRIC: action=race_resolved mpn=%s", norm)
             card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
             return card
 
@@ -785,9 +793,12 @@ def _upsert_material_card(
                 card.manufacturer = s.manufacturer
                 break
 
-    # Batch fetch all existing vendor histories for this card (avoids N+1)
+    # Batch fetch all existing vendor histories for this card (avoids N+1).
+    # Key by normalized vendor name so "ARROW", "Arrow", "arrow" all match.
+    from .vendor_utils import normalize_vendor_name as _nvn
+
     existing_vh = {
-        vh.vendor_name: vh
+        _nvn(vh.vendor_name): vh
         for vh in db.query(MaterialVendorHistory)
         .filter_by(material_card_id=card.id)
         .all()
@@ -797,7 +808,8 @@ def _upsert_material_card(
         if not s.vendor_name:
             continue
         raw = s.raw_data or {}
-        vh = existing_vh.get(s.vendor_name)
+        vn_key = _nvn(s.vendor_name)
+        vh = existing_vh.get(vn_key)
 
         if vh:
             vh.last_seen = now
@@ -817,7 +829,7 @@ def _upsert_material_card(
         else:
             new_vh = MaterialVendorHistory(
                 material_card_id=card.id,
-                vendor_name=s.vendor_name,
+                vendor_name=_nvn(s.vendor_name) or s.vendor_name,
                 source_type=s.source_type,
                 is_authorized=s.is_authorized or False,
                 first_seen=now,
@@ -830,7 +842,7 @@ def _upsert_material_card(
                 vendor_sku=raw.get("vendor_sku"),
             )
             db.add(new_vh)
-            existing_vh[s.vendor_name] = new_vh  # Prevent dupe inserts within batch
+            existing_vh[vn_key] = new_vh  # Prevent dupe inserts within batch
 
     # Link sightings to material card
     for s in pn_sightings:

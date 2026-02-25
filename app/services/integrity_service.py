@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
-from ..models import MaterialCard, Offer, Requirement, Sighting
+from ..models import MaterialCard, MaterialVendorHistory, Offer, Requirement, Sighting
 from ..utils.normalization import normalize_mpn_key
 
 log = logging.getLogger(__name__)
@@ -98,6 +98,33 @@ def check_duplicate_cards(db: Session) -> int:
         .all()
     )
     return len(rows)
+
+
+def check_vendor_history_duplicates(db: Session) -> int:
+    """Count material cards that have vendor history entries which would
+    collide under normalized vendor names.
+
+    E.g. card 42 has vendor_name="ARROW" and vendor_name="Arrow" — these
+    should be a single record.
+    """
+    from ..vendor_utils import normalize_vendor_name
+
+    # Pull all vendor histories grouped by card
+    all_vh = (
+        db.query(
+            MaterialVendorHistory.material_card_id,
+            MaterialVendorHistory.vendor_name,
+        )
+        .all()
+    )
+
+    # Group by (card_id, normalized_vendor_name)
+    groups: dict[tuple, int] = {}
+    for card_id, vendor_name in all_vh:
+        key = (card_id, normalize_vendor_name(vendor_name))
+        groups[key] = groups.get(key, 0) + 1
+
+    return sum(1 for count in groups.values() if count > 1)
 
 
 # ── Self-Healing Re-Linker ───────────────────────────────────────────
@@ -243,23 +270,31 @@ def run_integrity_check(db: Session) -> dict:
     orphaned_offer = check_orphaned_offers(db)
     dangling = check_dangling_fks(db)
     dup_cards = check_duplicate_cards(db)
+    vh_dupes = check_vendor_history_duplicates(db)
 
     total_orphaned = orphaned_req + orphaned_sight + orphaned_offer
     total_dangling = sum(dangling.values())
 
-    # --- Log check results ---
+    # --- Log check results (structured metrics) ---
+    log.info(
+        "MC_METRIC: action=integrity_check orphaned_req=%d orphaned_sight=%d "
+        "orphaned_offer=%d dangling_total=%d dup_cards=%d vh_dupes=%d",
+        orphaned_req, orphaned_sight, orphaned_offer,
+        total_dangling, dup_cards, vh_dupes,
+    )
+
     if total_orphaned == 0 and total_dangling == 0 and dup_cards == 0:
         log.info("INTEGRITY_CHECK: all checks passed")
     else:
         level = "critical" if (total_orphaned > 50 or total_dangling > 0 or dup_cards > 0) else "warning"
         msg = (
             "INTEGRITY_ALERT: orphaned_req=%d orphaned_sight=%d orphaned_offer=%d "
-            "dangling_req=%d dangling_sight=%d dangling_offer=%d dup_cards=%d"
+            "dangling_req=%d dangling_sight=%d dangling_offer=%d dup_cards=%d vh_dupes=%d"
         )
         args = (
             orphaned_req, orphaned_sight, orphaned_offer,
             dangling["requirements"], dangling["sightings"], dangling["offers"],
-            dup_cards,
+            dup_cards, vh_dupes,
         )
         if level == "critical":
             log.critical(msg, *args)
@@ -279,6 +314,9 @@ def run_integrity_check(db: Session) -> dict:
 
     # --- Compute linkage percentages ---
     linkage = _compute_linkage_coverage(db)
+    for entity, cov in linkage.items():
+        log.info("MC_METRIC: action=linkage_pct entity=%s pct=%s total=%d linked=%d",
+                 entity, cov["pct"], cov["total"], cov["linked"])
 
     # --- Determine overall status ---
     residual_orphans = (
@@ -304,6 +342,7 @@ def run_integrity_check(db: Session) -> dict:
             "dangling_sightings": dangling["sightings"],
             "dangling_offers": dangling["offers"],
             "duplicate_cards": dup_cards,
+            "vendor_history_duplicates": vh_dupes,
         },
         "healed": heal_result,
         "cleared_dangling": clear_result,

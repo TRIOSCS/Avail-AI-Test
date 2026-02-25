@@ -1550,6 +1550,125 @@ async def delete_material(
     return {"ok": True}
 
 
+# ── Material Card Merge ───────────────────────────────────────────────
+
+
+@router.post("/api/materials/merge")
+async def merge_material_cards(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Merge two material cards: move all linked records from source to target, then delete source.
+
+    Body: {"source_card_id": int, "target_card_id": int}
+
+    All requirements, sightings, and offers pointing to source_card_id are re-pointed
+    to target_card_id.  Vendor histories are merged (combine counts, keep earliest
+    first_seen, latest last_seen).  The source card is deleted after merge.
+    """
+    body = await request.json()
+    source_id = body.get("source_card_id")
+    target_id = body.get("target_card_id")
+    if not source_id or not target_id:
+        raise HTTPException(400, "source_card_id and target_card_id are required")
+    if source_id == target_id:
+        raise HTTPException(400, "Cannot merge a card with itself")
+
+    source = db.get(MaterialCard, source_id)
+    target = db.get(MaterialCard, target_id)
+    if not source:
+        raise HTTPException(404, f"Source card {source_id} not found")
+    if not target:
+        raise HTTPException(404, f"Target card {target_id} not found")
+
+    # 1. Re-point requirements, sightings, offers
+    reassigned = {}
+    for model, name in [(Requirement, "requirements"), (Sighting, "sightings"), (Offer, "offers")]:
+        count = (
+            db.query(model)
+            .filter(model.material_card_id == source_id)
+            .update({model.material_card_id: target_id}, synchronize_session="fetch")
+        )
+        reassigned[name] = count
+
+    # 2. Merge vendor histories
+    source_vhs = (
+        db.query(MaterialVendorHistory)
+        .filter_by(material_card_id=source_id)
+        .all()
+    )
+    target_vhs = {
+        normalize_vendor_name(vh.vendor_name): vh
+        for vh in db.query(MaterialVendorHistory)
+        .filter_by(material_card_id=target_id)
+        .all()
+    }
+
+    vh_merged = 0
+    vh_moved = 0
+    for svh in source_vhs:
+        vn_key = normalize_vendor_name(svh.vendor_name)
+        tvh = target_vhs.get(vn_key)
+        if tvh:
+            # Merge into existing target record
+            tvh.times_seen = (tvh.times_seen or 1) + (svh.times_seen or 1)
+            if svh.first_seen and (not tvh.first_seen or svh.first_seen < tvh.first_seen):
+                tvh.first_seen = svh.first_seen
+            if svh.last_seen and (not tvh.last_seen or svh.last_seen > tvh.last_seen):
+                tvh.last_seen = svh.last_seen
+                # Update "last" fields from the more recent record
+                if svh.last_qty is not None:
+                    tvh.last_qty = svh.last_qty
+                if svh.last_price is not None:
+                    tvh.last_price = svh.last_price
+                if svh.last_currency:
+                    tvh.last_currency = svh.last_currency
+                if svh.last_manufacturer:
+                    tvh.last_manufacturer = svh.last_manufacturer
+                if svh.vendor_sku:
+                    tvh.vendor_sku = svh.vendor_sku
+            if svh.is_authorized:
+                tvh.is_authorized = True
+            db.delete(svh)
+            vh_merged += 1
+        else:
+            # Move to target card
+            svh.material_card_id = target_id
+            vh_moved += 1
+
+    # 3. Merge card metadata
+    target.search_count = (target.search_count or 0) + (source.search_count or 0)
+    if not target.manufacturer and source.manufacturer:
+        target.manufacturer = source.manufacturer
+    if not target.description and source.description:
+        target.description = source.description
+    # Enrichment: keep target's if present, else take source's
+    for field in ("lifecycle_status", "package_type", "category", "rohs_status",
+                  "pin_count", "datasheet_url", "specs_summary"):
+        if getattr(target, field) is None and getattr(source, field) is not None:
+            setattr(target, field, getattr(source, field))
+
+    # 4. Delete source card
+    db.delete(source)
+    db.commit()
+
+    logger.info(
+        "MC_METRIC: action=merged source_id=%d target_id=%d source_mpn=%s target_mpn=%s "
+        "reassigned=%s vh_merged=%d vh_moved=%d",
+        source_id, target_id, source.normalized_mpn, target.normalized_mpn,
+        reassigned, vh_merged, vh_moved,
+    )
+    return {
+        "ok": True,
+        "target_card_id": target_id,
+        "source_card_id": source_id,
+        "reassigned": reassigned,
+        "vendor_histories_merged": vh_merged,
+        "vendor_histories_moved": vh_moved,
+    }
+
+
 # ── Standalone Stock Import ────────────────────────────────────────────
 
 
