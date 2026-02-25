@@ -685,13 +685,13 @@ async def add_requirements(
     if req.customer_site_id and created:
         from datetime import timedelta
         cutoff = datetime.now(timezone.utc) - timedelta(days=30)
-        mpn_keys = [r.normalized_mpn for r in created if r.normalized_mpn]
-        if mpn_keys:
+        card_ids = [r.material_card_id for r in created if r.material_card_id]
+        if card_ids:
             dup_rows = (
                 db.query(Requirement.primary_mpn, Requisition.id, Requisition.name)
                 .join(Requisition, Requirement.requisition_id == Requisition.id)
                 .filter(
-                    Requirement.normalized_mpn.in_(mpn_keys),
+                    Requirement.material_card_id.in_(card_ids),
                     Requisition.customer_site_id == req.customer_site_id,
                     Requisition.id != req_id,
                     Requisition.created_at >= cutoff,

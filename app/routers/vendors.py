@@ -1297,66 +1297,58 @@ def material_card_to_dict(card: MaterialCard, db: Session) -> dict:
         .all()
     )
 
-    # Find sightings and offers for this MPN via requirements
-    mpn = card.display_mpn or card.normalized_mpn
-    req_ids = [
-        r.id
-        for r in db.query(Requirement.id)
-        .filter(sqlfunc.lower(Requirement.primary_mpn) == mpn.lower())
-        .all()
-    ]
-
+    # Find sightings and offers for this material card via FK
     sightings_list = []
     offers_list = []
-    if req_ids:
-        sightings = (
-            db.query(Sighting)
-            .filter(Sighting.requirement_id.in_(req_ids))
-            .order_by(Sighting.created_at.desc())
-            .limit(50)
-            .all()
-        )
-        sightings_list = [
-            {
-                "id": s.id,
-                "vendor_name": s.vendor_name,
-                "qty_available": s.qty_available,
-                "unit_price": s.unit_price,
-                "currency": s.currency or "USD",
-                "source_type": s.source_type,
-                "is_authorized": s.is_authorized,
-                "date_code": s.date_code,
-                "condition": s.condition,
-                "lead_time": s.lead_time,
-                "created_at": s.created_at.isoformat() if s.created_at else None,
-            }
-            for s in sightings
-            if not s.is_unavailable
-        ]
 
-        offers = (
-            db.query(Offer)
-            .filter(Offer.requirement_id.in_(req_ids))
-            .order_by(Offer.created_at.desc())
-            .limit(50)
-            .all()
-        )
-        offers_list = [
-            {
-                "id": o.id,
-                "vendor_name": o.vendor_name,
-                "qty_available": o.qty_available,
-                "unit_price": float(o.unit_price) if o.unit_price else None,
-                "currency": o.currency or "USD",
-                "lead_time": o.lead_time,
-                "date_code": o.date_code,
-                "condition": o.condition,
-                "status": o.status,
-                "source": o.source,
-                "created_at": o.created_at.isoformat() if o.created_at else None,
-            }
-            for o in offers
-        ]
+    sightings = (
+        db.query(Sighting)
+        .filter(Sighting.material_card_id == card.id)
+        .order_by(Sighting.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    sightings_list = [
+        {
+            "id": s.id,
+            "vendor_name": s.vendor_name,
+            "qty_available": s.qty_available,
+            "unit_price": s.unit_price,
+            "currency": s.currency or "USD",
+            "source_type": s.source_type,
+            "is_authorized": s.is_authorized,
+            "date_code": s.date_code,
+            "condition": s.condition,
+            "lead_time": s.lead_time,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        }
+        for s in sightings
+        if not s.is_unavailable
+    ]
+
+    offers = (
+        db.query(Offer)
+        .filter(Offer.material_card_id == card.id)
+        .order_by(Offer.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    offers_list = [
+        {
+            "id": o.id,
+            "vendor_name": o.vendor_name,
+            "qty_available": o.qty_available,
+            "unit_price": float(o.unit_price) if o.unit_price else None,
+            "currency": o.currency or "USD",
+            "lead_time": o.lead_time,
+            "date_code": o.date_code,
+            "condition": o.condition,
+            "status": o.status,
+            "source": o.source,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+        }
+        for o in offers
+    ]
 
     return {
         "id": card.id,

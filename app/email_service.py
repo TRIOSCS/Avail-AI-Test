@@ -809,16 +809,24 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
             if req and req.created_by:
                 owner_id = req.created_by
 
-            # Build a map of MPN → requirement_id for linking
+            # Build maps for linking: MPN → requirement_id, MPN → material_card_id
+            from .search_service import resolve_material_card
+            from .utils.normalization import normalize_mpn_key
+
             req_obj = db.get(Requisition, vr.requisition_id)
             mpn_to_req_id: dict[str, int] = {}
+            mpn_to_card_id: dict[str, int] = {}
             if req_obj:
                 for r in db.query(Requirement).filter(Requirement.requisition_id == vr.requisition_id).all():
                     if r.primary_mpn:
-                        mpn_to_req_id[r.primary_mpn.upper().strip()] = r.id
+                        key = normalize_mpn_key(r.primary_mpn) or r.primary_mpn.upper().strip()
+                        mpn_to_req_id[key] = r.id
+                        if r.material_card_id:
+                            mpn_to_card_id[key] = r.material_card_id
 
             for draft in draft_offers:
-                mpn = (draft.get("mpn") or "").upper().strip()
+                raw_mpn = draft.get("mpn") or ""
+                mpn_key = normalize_mpn_key(raw_mpn) or raw_mpn.upper().strip()
                 # Dedup: check if offer already exists from this vendor response
                 existing = db.query(Offer.id).filter(
                     Offer.vendor_response_id == vr.id,
@@ -827,9 +835,17 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                 if existing:
                     continue
 
+                # Resolve material card — use requirement's card or find/create
+                card_id = mpn_to_card_id.get(mpn_key)
+                if not card_id and raw_mpn.strip():
+                    card = resolve_material_card(raw_mpn, db)
+                    if card:
+                        card_id = card.id
+
                 offer = Offer(
                     requisition_id=vr.requisition_id,
-                    requirement_id=mpn_to_req_id.get(mpn),
+                    requirement_id=mpn_to_req_id.get(mpn_key),
+                    material_card_id=card_id,
                     vendor_name=draft.get("vendor_name", ""),
                     mpn=draft.get("mpn", ""),
                     manufacturer=draft.get("manufacturer"),

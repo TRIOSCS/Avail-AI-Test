@@ -14,7 +14,6 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
@@ -68,19 +67,20 @@ def scan_new_offers_for_matches(db: Session) -> dict:
 
     matches_created = 0
     for offer in new_offers:
-        offer_mpn = (offer.mpn or "").strip().upper()
-        if not offer_mpn or len(offer_mpn) < 3:
+        if not offer.material_card_id:
             continue
 
-        # Find archived requirements with matching MPN
+        offer_mpn = (offer.mpn or "").strip().upper()
+
+        # Find archived requirements with matching material card
         candidates = (
             db.query(Requirement, Requisition)
             .join(Requisition, Requirement.requisition_id == Requisition.id)
             .filter(
-                sqlfunc.upper(sqlfunc.btrim(Requirement.primary_mpn)) == offer_mpn,
+                Requirement.material_card_id == offer.material_card_id,
                 Requisition.status.in_(["archived", "won", "lost"]),
                 Requisition.customer_site_id.isnot(None),
-                Requisition.id != offer.requisition_id,  # Don't self-match
+                Requisition.id != offer.requisition_id,
                 Requisition.created_at < archive_cutoff,
             )
             .all()
