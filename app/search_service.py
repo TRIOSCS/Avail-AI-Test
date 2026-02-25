@@ -174,16 +174,19 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     log.info(f"Req {req.id} ({pns[0]}): {len(sightings)} fresh sightings")
 
     # 3. Material card upsert (errors won't break search)
+    card_ids = set()
     for pn in pns:
         try:
-            _upsert_material_card(pn, sightings, db, now)
+            card = _upsert_material_card(pn, sightings, db, now)
+            if card:
+                card_ids.add(card.id)
         except Exception as e:
             log.error(f"Material card upsert failed for '{pn}': {e}")
             db.rollback()
 
     # 4. Historical vendors from material cards
     fresh_vendors = {s.vendor_name.lower() for s in sightings}
-    history = _get_material_history(pns, fresh_vendors, db)
+    history = _get_material_history(list(card_ids), fresh_vendors, db)
 
     # 5. Combine + sort
     results = []
@@ -605,37 +608,32 @@ def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
 
 
 def _get_material_history(
-    pns: list[str], fresh_vendors: set, db: Session
+    material_card_ids: list[int], fresh_vendors: set, db: Session
 ) -> list[dict]:
-    """Vendors from material cards NOT in fresh results."""
-    if not pns:
+    """All vendor touchpoints from material cards, excluding vendors with fresh sightings."""
+    if not material_card_ids:
         return []
 
-    # Batch fetch all material cards for these PNs (1 query instead of N)
-    norm_pns = [normalize_mpn_key(pn) for pn in pns if normalize_mpn_key(pn)]
-    if not norm_pns:
-        return []
     cards = (
-        db.query(MaterialCard).filter(MaterialCard.normalized_mpn.in_(norm_pns)).all()
+        db.query(MaterialCard)
+        .filter(MaterialCard.id.in_(material_card_ids))
+        .all()
     )
     if not cards:
         return []
 
-    # Batch fetch all vendor histories for these cards (1 query instead of N lazy loads)
     card_map = {c.id: c for c in cards}
     all_vh = (
         db.query(MaterialVendorHistory)
-        .filter(MaterialVendorHistory.material_card_id.in_(card_map.keys()))
+        .filter(MaterialVendorHistory.material_card_id.in_(material_card_ids))
         .all()
     )
 
     rows = []
-    seen = set()
     for vh in all_vh:
         vk = vh.vendor_name.lower()
-        if vk in fresh_vendors or vk in seen:
+        if vk in fresh_vendors:
             continue
-        seen.add(vk)
         card = card_map[vh.material_card_id]
         rows.append(
             {
@@ -713,23 +711,36 @@ def _history_to_result(h: dict, now: datetime) -> dict:
     }
 
 
+def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
+    """Find or create a MaterialCard for the given MPN.
+
+    Returns the card (flushed, with id set) or None if MPN is too short.
+    """
+    norm = normalize_mpn_key(mpn)
+    if not norm:
+        return None
+    card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
+    if not card:
+        display = normalize_mpn(mpn) or mpn.strip()
+        card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0)
+        db.add(card)
+        db.flush()
+    return card
+
+
 def _upsert_material_card(
     pn: str, sightings: list[Sighting], db: Session, now: datetime
-):
-    """Upsert material card. Raises on error — caller handles rollback."""
+) -> MaterialCard | None:
+    """Upsert material card + link sightings. Raises on error — caller handles rollback."""
     norm = normalize_mpn_key(pn)
     if not norm:
-        return
+        return None
     pn_key = normalize_mpn_key(pn)
     pn_sightings = [s for s in sightings if normalize_mpn_key(s.mpn_matched or "") == pn_key]
     if not pn_sightings:
-        return
+        return None
 
-    card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
-    if not card:
-        card = MaterialCard(normalized_mpn=norm, display_mpn=pn, search_count=0)
-        db.add(card)
-        db.flush()
+    card = resolve_material_card(pn, db)
 
     card.search_count = (card.search_count or 0) + 1
     card.last_searched_at = now
@@ -785,7 +796,14 @@ def _upsert_material_card(
             )
             db.add(new_vh)
             existing_vh[s.vendor_name] = new_vh  # Prevent dupe inserts within batch
+
+    # Link sightings to material card
+    for s in pn_sightings:
+        if not s.material_card_id:
+            s.material_card_id = card.id
+
     db.commit()
+    return card
 
 
 def sighting_to_dict(s: Sighting) -> dict:

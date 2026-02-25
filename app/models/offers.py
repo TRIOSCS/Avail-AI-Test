@@ -30,6 +30,7 @@ class Offer(Base):
         Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
     )
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"))
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
 
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"))
     vendor_name = Column(String(255), nullable=False)
@@ -76,6 +77,7 @@ class Offer(Base):
 
     requisition = relationship("Requisition", back_populates="offers")
     requirement = relationship("Requirement", back_populates="offers")
+    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
     entered_by = relationship("User", foreign_keys=[entered_by_id])
     updated_by = relationship("User", foreign_keys=[updated_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])
@@ -94,6 +96,7 @@ class Offer(Base):
         Index("ix_offers_entered_created", "entered_by_id", "created_at"),
         Index("ix_offers_req_created", "requisition_id", "created_at"),
         Index("ix_offers_vendor_name", "vendor_name"),
+        Index("ix_offers_material_card", "material_card_id"),
     )
 
 

@@ -463,9 +463,15 @@ async def save_parsed_offers(
                     req_id = r.id
                     break
 
+        # Resolve material card
+        from app.search_service import resolve_material_card
+
+        mat_card = resolve_material_card(o.mpn, db) if o.mpn else None
+
         offer = Offer(
             requisition_id=requisition_id,
             requirement_id=req_id,
+            material_card_id=mat_card.id if mat_card else None,
             vendor_name=o.vendor_name,
             mpn=o.mpn,
             manufacturer=o.manufacturer,

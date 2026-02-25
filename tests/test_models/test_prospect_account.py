@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.models import Company, User
+from app.models import Company, CustomerSite, User
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
 
@@ -367,8 +367,16 @@ class TestMigrationScript:
             name="Owned Co",
             domain="owned.com",
             is_active=True,
-            account_owner_id=user.id,
         )
+        db_session.add_all([co1, co2, co_owned])
+        db_session.flush()
+        # Create a CustomerSite with an owner so co_owned is excluded
+        site = CustomerSite(
+            company_id=co_owned.id,
+            site_name="Owned Site",
+            owner_id=user.id,
+        )
+        db_session.add(site)
         # Dismissed company — should NOT be migrated
         co_dismissed = Company(
             name="Dismissed Co",
@@ -382,7 +390,7 @@ class TestMigrationScript:
             domain=None,
             is_active=True,
         )
-        db_session.add_all([co1, co2, co_owned, co_dismissed, co_no_domain])
+        db_session.add_all([co_dismissed, co_no_domain])
         db_session.commit()
 
         # Patch SessionLocal to return our test session

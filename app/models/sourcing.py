@@ -71,6 +71,7 @@ class Requirement(Base):
     __tablename__ = "requirements"
     id = Column(Integer, primary_key=True)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
     primary_mpn = Column(String(255))
     normalized_mpn = Column(String(255), index=True)
     oem_pn = Column(String(255))
@@ -90,6 +91,7 @@ class Requirement(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="requirements")
+    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
     attachments = relationship(
         "RequirementAttachment", back_populates="requirement", cascade="all, delete-orphan"
     )
@@ -103,6 +105,7 @@ class Requirement(Base):
     __table_args__ = (
         Index("ix_req_requisition", "requisition_id"),
         Index("ix_req_primary_mpn", "primary_mpn"),
+        Index("ix_requirements_material_card", "material_card_id"),
     )
 
 
@@ -110,6 +113,7 @@ class Sighting(Base):
     __tablename__ = "sightings"
     id = Column(Integer, primary_key=True)
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
     vendor_name = Column(String(255), nullable=False)
     vendor_email = Column(String(255))
     vendor_phone = Column(String(100))
@@ -139,6 +143,7 @@ class Sighting(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requirement = relationship("Requirement", back_populates="sightings")
+    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
     source_company = relationship("Company", foreign_keys=[source_company_id])
 
     __table_args__ = (
@@ -147,6 +152,7 @@ class Sighting(Base):
         Index("ix_sightings_source_company", "source_company_id"),
         Index("ix_sightings_req_vendor", "requirement_id", "vendor_name"),
         Index("ix_sightings_req_score", "requirement_id", score.desc()),
+        Index("ix_sightings_material_card", "material_card_id"),
     )
 
 

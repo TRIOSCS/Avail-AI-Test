@@ -324,9 +324,15 @@ async def create_offer(
             asyncio.create_task(
                 _background_enrich_vendor(card.id, domain, card.display_name)
             )
+    # Resolve material card for this MPN
+    from ...search_service import resolve_material_card
+
+    mat_card = resolve_material_card(payload.mpn, db)
+
     offer = Offer(
         requisition_id=req_id,
         requirement_id=payload.requirement_id,
+        material_card_id=mat_card.id if mat_card else None,
         vendor_card_id=card.id,
         vendor_name=card.display_name,
         mpn=payload.mpn,

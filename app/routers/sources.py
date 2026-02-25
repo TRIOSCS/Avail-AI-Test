@@ -338,8 +338,14 @@ def _create_sightings_from_attachment(
         if existing:
             continue
 
+        # Resolve material card
+        from ..search_service import resolve_material_card
+
+        mat_card = resolve_material_card(mpn, db)
+
         sighting = Sighting(
             requirement_id=matched_req.id,
+            material_card_id=mat_card.id if mat_card else None,
             vendor_name=vr.vendor_name or "",
             vendor_email=vr.vendor_email,
             mpn_matched=normalize_mpn(mpn) or mpn,

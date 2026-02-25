@@ -30,6 +30,7 @@ from ..models import (
     ChangeLog,
     Contact,
     CustomerSite,
+    MaterialCard,
     Offer,
     ProactiveMatch,
     Quote,
@@ -641,10 +642,16 @@ async def add_requirements(
             if key and key not in seen_keys:
                 seen_keys.add(key)
                 deduped_subs.append(s)
+        # Resolve material card
+        from ..search_service import resolve_material_card
+
+        mat_card = resolve_material_card(parsed.primary_mpn, db)
+
         r = Requirement(
             requisition_id=req_id,
             primary_mpn=parsed.primary_mpn,
             normalized_mpn=normalize_mpn_key(parsed.primary_mpn),
+            material_card_id=mat_card.id if mat_card else None,
             target_qty=parsed.target_qty,
             target_price=parsed.target_price,
             substitutes=deduped_subs[:20],
@@ -783,10 +790,16 @@ async def upload_requirements(
         target_price_raw = row.get("target_price") or row.get("price") or ""
         target_price = normalize_price(target_price_raw)
 
+        # Resolve material card
+        from ..search_service import resolve_material_card
+
+        mat_card = resolve_material_card(mpn, db)
+
         r = Requirement(
             requisition_id=req_id,
             primary_mpn=mpn,
             normalized_mpn=normalize_mpn_key(mpn),
+            material_card_id=mat_card.id if mat_card else None,
             target_qty=qty,
             target_price=target_price,
             substitutes=deduped_subs[:20],
@@ -839,6 +852,11 @@ async def update_requirement(
     if data.primary_mpn is not None:
         r.primary_mpn = normalize_mpn(data.primary_mpn) or data.primary_mpn.strip()
         r.normalized_mpn = normalize_mpn_key(data.primary_mpn)
+        # Re-resolve material card for new MPN
+        from ..search_service import resolve_material_card
+
+        mat_card = resolve_material_card(data.primary_mpn, db)
+        r.material_card_id = mat_card.id if mat_card else None
     if data.target_qty is not None:
         r.target_qty = data.target_qty
     if data.substitutes is not None:
@@ -1003,30 +1021,36 @@ async def get_saved_sightings(
     for s in all_sightings:
         sightings_by_req.setdefault(s.requirement_id, []).append(s)
 
-    # ── Cross-requisition historical offers ──────────────────────────
-    req_mpn_map: dict[int, set[str]] = {}
-    all_mpns: set[str] = set()
-    primary_mpns: set[str] = set()
+    # ── Cross-requisition historical offers (via material_card_id FK) ──
+    req_card_map: dict[int, set[int]] = {}
+    all_card_ids: set[int] = set()
+    primary_card_ids: dict[int, int | None] = {}
     for r in req.requirements:
-        mpns: set[str] = set()
-        p = (r.primary_mpn or "").upper().strip()
-        if p:
-            mpns.add(p)
-            primary_mpns.add(p)
+        card_ids: set[int] = set()
+        if r.material_card_id:
+            card_ids.add(r.material_card_id)
+            primary_card_ids[r.id] = r.material_card_id
+        else:
+            primary_card_ids[r.id] = None
+        # Resolve substitute MPNs to material card IDs
         for sub in r.substitutes or []:
-            s_norm = (sub if isinstance(sub, str) else "").upper().strip()
-            if s_norm:
-                mpns.add(s_norm)
-        req_mpn_map[r.id] = mpns
-        all_mpns |= mpns
+            sub_str = (sub if isinstance(sub, str) else "").strip()
+            if sub_str:
+                sub_key = normalize_mpn_key(sub_str)
+                if sub_key:
+                    sub_card = db.query(MaterialCard.id).filter_by(normalized_mpn=sub_key).first()
+                    if sub_card:
+                        card_ids.add(sub_card[0])
+        req_card_map[r.id] = card_ids
+        all_card_ids |= card_ids
 
     hist_by_req: dict[int, list] = {}
-    if all_mpns:
+    if all_card_ids:
         hist_query = (
             db.query(Offer)
             .filter(
                 Offer.requisition_id != req_id,
-                sqlfunc.upper(Offer.mpn).in_(all_mpns),
+                Offer.material_card_id.in_(all_card_ids),
                 Offer.status.in_(["active", "won"]),
             )
             .options(joinedload(Offer.entered_by))
@@ -1035,12 +1059,11 @@ async def get_saved_sightings(
             .all()
         )
         for ho in hist_query:
-            ho_mpn = (ho.mpn or "").upper().strip()
             for r in req.requirements:
-                if ho_mpn in req_mpn_map.get(r.id, set()):
+                if ho.material_card_id in req_card_map.get(r.id, set()):
                     if r.id not in hist_by_req:
                         hist_by_req[r.id] = []
-                    is_sub = ho_mpn != (r.primary_mpn or "").upper().strip()
+                    is_sub = ho.material_card_id != primary_card_ids.get(r.id)
                     hist_by_req[r.id].append(
                         {
                             "id": ho.id,
@@ -1073,9 +1096,8 @@ async def get_saved_sightings(
 
         # Append material history (vendors seen before but not in fresh results)
         fresh_vendors = {s.vendor_name.lower() for s in rows}
-        pns = [r.primary_mpn] + (r.substitutes or [])
-        pns = [p for p in pns if p]
-        history = _get_material_history(pns, fresh_vendors, db)
+        card_ids = list(req_card_map.get(r.id, set()))
+        history = _get_material_history(card_ids, fresh_vendors, db)
         for h in history:
             sighting_dicts.append(_history_to_result(h, now))
 
@@ -1179,8 +1201,14 @@ async def import_stock_list(
 
         display_mpn = normalize_mpn(mpn) or mpn
 
+        # Resolve material card
+        from ..search_service import resolve_material_card
+
+        mat_card = resolve_material_card(mpn, db)
+
         s = Sighting(
             requirement_id=r.id,
+            material_card_id=mat_card.id if mat_card else None,
             vendor_name=vendor_name.strip(),
             mpn_matched=display_mpn,
             manufacturer=parsed.get("manufacturer"),
