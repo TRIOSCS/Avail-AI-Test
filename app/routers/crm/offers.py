@@ -12,6 +12,7 @@ from ...dependencies import require_buyer, require_user
 from ...models import (
     ActivityLog,
     ChangeLog,
+    MaterialCard,
     Offer,
     OfferAttachment,
     Quote,
@@ -157,31 +158,35 @@ async def list_offers(
     # Preload quoted prices ONCE instead of per-requirement DB call
     quoted_prices = _preload_last_quoted_prices(db)
 
-    # ── Cross-requisition historical offers ──────────────────────────
-    # Collect all MPNs (primary + substitutes) per requirement
-    req_mpn_map: dict[int, set[str]] = {}  # requirement_id → set of normalized MPNs
-    all_mpns: set[str] = set()
-    primary_mpns: set[str] = set()
+    # ── Cross-requisition historical offers (via material_card_id FK) ──
+    req_card_map: dict[int, set[int]] = {}
+    all_card_ids: set[int] = set()
+    primary_card_ids: dict[int, int | None] = {}
     for r in req.requirements:
-        mpns: set[str] = set()
-        p = (r.primary_mpn or "").upper().strip()
-        if p:
-            mpns.add(p)
-            primary_mpns.add(p)
-        for s in r.substitutes or []:
-            s_norm = (s if isinstance(s, str) else "").upper().strip()
-            if s_norm:
-                mpns.add(s_norm)
-        req_mpn_map[r.id] = mpns
-        all_mpns |= mpns
+        r_card_ids: set[int] = set()
+        if r.material_card_id:
+            r_card_ids.add(r.material_card_id)
+            primary_card_ids[r.id] = r.material_card_id
+        else:
+            primary_card_ids[r.id] = None
+        for sub in r.substitutes or []:
+            sub_str = (sub if isinstance(sub, str) else "").strip()
+            if sub_str:
+                sub_key = normalize_mpn_key(sub_str)
+                if sub_key:
+                    sub_card = db.query(MaterialCard.id).filter_by(normalized_mpn=sub_key).first()
+                    if sub_card:
+                        r_card_ids.add(sub_card[0])
+        req_card_map[r.id] = r_card_ids
+        all_card_ids |= r_card_ids
 
     hist_by_req: dict[int, list] = {}
-    if all_mpns:
+    if all_card_ids:
         hist_query = (
             db.query(Offer)
             .filter(
                 Offer.requisition_id != req_id,
-                sqlfunc.upper(Offer.mpn).in_(all_mpns),
+                Offer.material_card_id.in_(all_card_ids),
                 Offer.status.in_(["active", "won"]),
             )
             .options(joinedload(Offer.entered_by))
@@ -189,16 +194,12 @@ async def list_offers(
             .limit(100)
             .all()
         )
-        # Bucket historical offers into requirement groups
         for ho in hist_query:
-            ho_mpn = (ho.mpn or "").upper().strip()
             for r in req.requirements:
-                if ho_mpn in req_mpn_map.get(r.id, set()):
+                if ho.material_card_id in req_card_map.get(r.id, set()):
                     if r.id not in hist_by_req:
                         hist_by_req[r.id] = []
-                    is_sub = ho_mpn not in primary_mpns or (
-                        ho_mpn != (r.primary_mpn or "").upper().strip()
-                    )
+                    is_sub = ho.material_card_id != primary_card_ids.get(r.id)
                     hist_by_req[r.id].append(
                         {
                             "id": ho.id,
@@ -219,7 +220,7 @@ async def list_offers(
                             "is_substitute": is_sub,
                         }
                     )
-                    break  # assign to first matching requirement only
+                    break
 
     result = []
     for r in req.requirements:
