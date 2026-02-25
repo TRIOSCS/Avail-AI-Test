@@ -44,6 +44,7 @@ def run_startup_migrations() -> None:
 
     _backfill_normalized_mpn()
     _backfill_sighting_offer_normalized_mpn()
+    _backfill_sighting_vendor_normalized()
     log.info("Startup migrations complete")
 
 
@@ -537,4 +538,44 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
                 log.info("Backfilled normalized_mpn on %d offers", len(rows))
         except Exception as e:
             log.warning("Backfill offers.normalized_mpn failed: %s", e)
+            conn.rollback()
+
+
+def _backfill_sighting_vendor_normalized() -> None:
+    """One-time backfill: populate sightings.vendor_name_normalized from vendor_name."""
+    from .vendor_utils import normalize_vendor_name
+
+    with engine.connect() as conn:
+        # Check column exists first
+        try:
+            conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings LIMIT 0"))
+        except Exception:
+            conn.rollback()
+            return  # Column not yet created
+
+        try:
+            rows = conn.execute(
+                sqltext(
+                    "SELECT id, vendor_name FROM sightings "
+                    "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
+                    "LIMIT 50000"
+                )
+            ).fetchall()
+            if not rows:
+                return
+            batch = []
+            for r in rows:
+                nv = normalize_vendor_name(r[1])
+                if nv:
+                    batch.append({"nv": nv, "id": r[0]})
+            if batch:
+                for b in batch:
+                    conn.execute(
+                        sqltext("UPDATE sightings SET vendor_name_normalized = :nv WHERE id = :id"),
+                        b,
+                    )
+                conn.commit()
+            log.info("Backfilled vendor_name_normalized on %d sightings", len(batch))
+        except Exception as e:
+            log.warning("Backfill sightings.vendor_name_normalized failed: %s", e)
             conn.rollback()

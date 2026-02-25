@@ -115,6 +115,7 @@ class Sighting(Base):
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
     vendor_name = Column(String(255), nullable=False)
+    vendor_name_normalized = Column(String(255), index=True)
     vendor_email = Column(String(255))
     vendor_phone = Column(String(100))
     mpn_matched = Column(String(255))
@@ -149,6 +150,7 @@ class Sighting(Base):
 
     __table_args__ = (
         Index("ix_sightings_vendor_name", "vendor_name"),
+        Index("ix_sightings_vendor_norm", "vendor_name_normalized"),
         Index("ix_sight_req", "requirement_id"),
         Index("ix_sightings_source_company", "source_company_id"),
         Index("ix_sightings_req_vendor", "requirement_id", "vendor_name"),

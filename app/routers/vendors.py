@@ -175,7 +175,7 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
             sqltext("""
             SELECT manufacturer, SUM(cnt) as total FROM (
                 SELECT manufacturer, COUNT(*) as cnt FROM sightings
-                WHERE LOWER(TRIM(vendor_name)) = :norm
+                WHERE COALESCE(vendor_name_normalized, LOWER(TRIM(vendor_name))) = :norm
                   AND manufacturer IS NOT NULL AND manufacturer != ''
                 GROUP BY manufacturer
                 UNION ALL
@@ -195,7 +195,7 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
                 sqltext("""
             SELECT COUNT(*) FROM (
                 SELECT DISTINCT mpn_matched as mpn FROM sightings
-                WHERE LOWER(TRIM(vendor_name)) = :norm AND mpn_matched IS NOT NULL
+                WHERE COALESCE(vendor_name_normalized, LOWER(TRIM(vendor_name))) = :norm AND mpn_matched IS NOT NULL
                 UNION
                 SELECT DISTINCT mc.normalized_mpn as mpn FROM material_vendor_history mvh
                 JOIN material_cards mc ON mc.id = mvh.material_card_id
@@ -2015,7 +2015,7 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
                 (array_agg(unit_price ORDER BY created_at DESC))[1] as last_price,
                 (array_agg(qty_available ORDER BY created_at DESC))[1] as last_qty
             FROM sightings
-            WHERE LOWER(TRIM(vendor_name)) = :norm
+            WHERE COALESCE(vendor_name_normalized, LOWER(TRIM(vendor_name))) = :norm
               AND mpn_matched IS NOT NULL AND mpn_matched != ''
             GROUP BY COALESCE(mpn_matched, '')
             UNION ALL
@@ -2047,7 +2047,7 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
             sqltext(f"""
         SELECT COUNT(*) FROM (
             SELECT DISTINCT COALESCE(mpn_matched, '') as mpn FROM sightings
-            WHERE LOWER(TRIM(vendor_name)) = :norm AND mpn_matched IS NOT NULL AND mpn_matched != ''
+            WHERE COALESCE(vendor_name_normalized, LOWER(TRIM(vendor_name))) = :norm AND mpn_matched IS NOT NULL AND mpn_matched != ''
             UNION
             SELECT DISTINCT mc.display_mpn as mpn FROM material_vendor_history mvh
             JOIN material_cards mc ON mc.id = mvh.material_card_id

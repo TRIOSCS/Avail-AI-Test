@@ -343,10 +343,13 @@ def _create_sightings_from_attachment(
 
         mat_card = resolve_material_card(mpn, db)
 
+        from ..vendor_utils import normalize_vendor_name as _nvn
+
         sighting = Sighting(
             requirement_id=matched_req.id,
             material_card_id=mat_card.id if mat_card else None,
             vendor_name=vr.vendor_name or "",
+            vendor_name_normalized=_nvn(vr.vendor_name or ""),
             vendor_email=vr.vendor_email,
             mpn_matched=normalize_mpn(mpn) or mpn,
             manufacturer=row.get("manufacturer", ""),

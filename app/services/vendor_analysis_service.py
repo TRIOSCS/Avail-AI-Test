@@ -57,7 +57,7 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
         sighting_rows = (
             db.query(Sighting.mpn_matched, Sighting.manufacturer)
             .filter(
-                sqlfunc.lower(sqlfunc.trim(Sighting.vendor_name))
+                sqlfunc.coalesce(Sighting.vendor_name_normalized, sqlfunc.lower(Sighting.vendor_name))
                 == card.normalized_name
             )
             .filter(Sighting.mpn_matched.isnot(None), Sighting.mpn_matched != "")

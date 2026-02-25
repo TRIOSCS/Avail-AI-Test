@@ -495,6 +495,7 @@ def _save_sightings(
         s = Sighting(
             requirement_id=req.id,
             vendor_name=clean_vendor,
+            vendor_name_normalized=normalize_vendor_name(clean_vendor),
             vendor_email=r.get("vendor_email"),
             vendor_phone=r.get("vendor_phone"),
             mpn_matched=clean_mpn,

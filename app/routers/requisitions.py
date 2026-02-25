@@ -68,6 +68,7 @@ from ..utils.normalization import (
     normalize_quantity,
 )
 from .rfq import _enrich_with_vendor_cards
+from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["requisitions"])
 
@@ -546,7 +547,7 @@ async def list_requirements(
             db.query(
                 Sighting.requirement_id,
                 sqlfunc.count(
-                    sqlfunc.distinct(sqlfunc.lower(sqlfunc.trim(Sighting.vendor_name)))
+                    sqlfunc.distinct(sqlfunc.coalesce(Sighting.vendor_name_normalized, sqlfunc.lower(Sighting.vendor_name)))
                 ),
             )
             .filter(
@@ -1210,6 +1211,7 @@ async def import_stock_list(
             requirement_id=r.id,
             material_card_id=mat_card.id if mat_card else None,
             vendor_name=vendor_name.strip(),
+            vendor_name_normalized=normalize_vendor_name(vendor_name),
             mpn_matched=display_mpn,
             manufacturer=parsed.get("manufacturer"),
             qty_available=parsed.get("qty"),

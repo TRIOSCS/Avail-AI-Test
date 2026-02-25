@@ -951,8 +951,37 @@ class TestSaveSightings:
         assert len(result) == 1
         s = result[0]
         assert s.vendor_name == "Arrow Electronics"
+        assert s.vendor_name_normalized == "arrow electronics"
         assert s.confidence == 0.8  # 4 / 5.0
         assert s.score == 100.0  # is_authorized => 100
+
+    def test_vendor_name_normalized_populated(self, db_session):
+        """Sighting creation populates vendor_name_normalized."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        fresh = [
+            {
+                "vendor_name": "Mouser Electronics, Inc.",
+                "mpn_matched": "NE555P",
+                "qty_available": 500,
+                "unit_price": 0.30,
+                "source_type": "nexar",
+            },
+            {
+                "vendor_name": "  DigiKey Corp.  ",
+                "mpn_matched": "LM7805",
+                "qty_available": 200,
+                "unit_price": 0.75,
+                "source_type": "nexar",
+            },
+        ]
+        result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
+        assert len(result) == 2
+        norms = {s.vendor_name_normalized for s in result}
+        assert "mouser electronics" in norms
+        assert "digikey" in norms
 
     def test_connector_aware_delete(self, db_session):
         """Only sightings from succeeded sources are deleted."""
