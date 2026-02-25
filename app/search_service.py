@@ -181,7 +181,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             if card:
                 card_ids.add(card.id)
         except Exception as e:
-            log.error(f"Material card upsert failed for '{pn}': {e}")
+            log.error("MATERIAL_CARD_UPSERT_FAIL: mpn=%s error=%s", pn, e)
             db.rollback()
 
     # 4. Historical vendors from material cards
@@ -715,17 +715,52 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
     """Find or create a MaterialCard for the given MPN.
 
     Returns the card (flushed, with id set) or None if MPN is too short.
+
+    Uses atomic INSERT ... ON CONFLICT DO NOTHING on PostgreSQL to eliminate
+    race conditions when concurrent requests create the same card.  Falls back
+    to try/except for SQLite (tests).
     """
     norm = normalize_mpn_key(mpn)
     if not norm:
         return None
+
+    # Fast path — card already exists (no write, cheapest possible check)
     card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
-    if not card:
-        display = normalize_mpn(mpn) or mpn.strip()
-        card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0)
-        db.add(card)
+    if card:
+        return card
+
+    display = normalize_mpn(mpn) or mpn.strip()
+
+    dialect = db.bind.dialect.name if db.bind else ""
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        stmt = pg_insert(MaterialCard).values(
+            normalized_mpn=norm,
+            display_mpn=display,
+            search_count=0,
+        ).on_conflict_do_nothing(index_elements=["normalized_mpn"])
+        db.execute(stmt)
         db.flush()
-    return card
+        # Re-fetch — guaranteed to exist now (either we inserted or another txn did)
+        card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
+        if card is None:
+            log.error("MATERIAL_CARD_RESOLVE_FAIL: card missing after ON CONFLICT for mpn=%s", norm)
+        return card
+    else:
+        # SQLite / test fallback — use try/except on IntegrityError
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0)
+            db.add(card)
+            db.flush()
+            return card
+        except IntegrityError:
+            db.rollback()
+            log.info("MATERIAL_CARD_RACE: concurrent create for mpn=%s, resolved via retry", norm)
+            card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
+            return card
 
 
 def _upsert_material_card(

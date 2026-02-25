@@ -250,6 +250,10 @@ def configure_scheduler():
         scheduler.add_job(_job_expire_and_resurface, CronTrigger(day="last", hour=21, minute=0),
                           id="expire_and_resurface", name="Expire and resurface prospects")
 
+    # Material card integrity check + self-healing (every 6 hours)
+    scheduler.add_job(_job_integrity_check, IntervalTrigger(hours=6),
+                      id="integrity_check", name="Material card integrity check")
+
     job_count = len(scheduler.get_jobs())
     logger.info(f"APScheduler configured with {job_count} jobs")
 
@@ -1592,3 +1596,29 @@ async def _job_expire_and_resurface():
     """Last day of month 9PM — expire stale, resurface refreshed."""
     from .services.prospect_scheduler import job_expire_and_resurface
     await job_expire_and_resurface()
+
+
+# ── Material Card Integrity ──────────────────────────────────────────
+
+
+@_traced_job
+async def _job_integrity_check():
+    """Every 6h — check material card linkage integrity and self-heal."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .services.integrity_service import run_integrity_check
+        report = run_integrity_check(db)
+        logger.info(
+            "Integrity check complete: status=%s cards=%d healed=(%d/%d/%d)",
+            report["status"],
+            report["material_cards_total"],
+            report["healed"]["requirements"],
+            report["healed"]["sightings"],
+            report["healed"]["offers"],
+        )
+    except Exception:
+        logger.exception("Integrity check failed")
+    finally:
+        db.close()

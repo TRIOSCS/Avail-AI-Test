@@ -269,6 +269,22 @@ def api_delete_credential(
     return {"status": "removed" if removed else "not_found"}
 
 
+# ── Material Card Integrity (admin) ──────────────────────────────────
+
+
+@router.get("/api/admin/integrity")
+@limiter.limit("10/minute")
+def api_integrity_check(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Run material card integrity checks and return health report."""
+    from ..services.integrity_service import run_integrity_check
+
+    return run_integrity_check(db)
+
+
 # ── Vendor Dedup Suggestions (admin) ──────────────────────────────────
 
 
