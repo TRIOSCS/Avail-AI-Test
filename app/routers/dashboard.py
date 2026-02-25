@@ -527,29 +527,113 @@ def buyer_brief(
             "age_label": _age_label(age_hours),
         })
 
-    # ── Tile 3: Awaiting Vendor Response (contacts sent, no response) ──
-    awaiting_q = (
+    # ── Tile 3a: Stale RFQs — Need Follow-Up (sent 48h+ with no response) ──
+    stale_cutoff = now - timedelta(hours=48)
+    stale_q = (
         db.query(Contact)
         .filter(
             Contact.status == "sent",
             Contact.created_at >= cutoff,
+            Contact.created_at <= stale_cutoff,
             _user_filter(Contact.user_id),
         )
         .order_by(Contact.created_at.asc())
         .limit(15)
         .all()
     )
-    awaiting_vendor = []
-    for c in awaiting_q:
+    stale_rfqs = []
+    for c in stale_q:
         wait_hours = (now - _ensure_aware(c.created_at)).total_seconds() / 3600 if c.created_at else 0
-        awaiting_vendor.append({
+        stale_rfqs.append({
             "id": c.id,
             "requisition_id": c.requisition_id,
             "vendor_name": c.vendor_name,
             "contact_type": c.contact_type,
-            "wait_label": _age_label(wait_hours),
+            "wait_days": round(wait_hours / 24, 1),
             "created_at": c.created_at.isoformat() if c.created_at else None,
         })
+
+    # ── Tile 3b: Requisitions at Risk ──
+    # Active reqs where: deadline ≤7 days away with no offers, OR no offers
+    # at all after 48h, OR only 1 offer (no competitive options)
+    at_risk_reqs = (
+        db.query(Requisition)
+        .filter(
+            Requisition.status.in_(("open", "active", "sourcing")),
+            _user_filter(Requisition.created_by),
+        )
+        .all()
+    )
+    # Batch-load offer counts for these reqs
+    at_risk_ids = [r.id for r in at_risk_reqs]
+    offer_counts = {}
+    if at_risk_ids:
+        oc_rows = (
+            db.query(Offer.requisition_id, func.count(Offer.id))
+            .filter(Offer.requisition_id.in_(at_risk_ids))
+            .group_by(Offer.requisition_id)
+            .all()
+        )
+        offer_counts = {rid: cnt for rid, cnt in oc_rows}
+
+    reqs_at_risk = []
+    for r in at_risk_reqs:
+        num_offers = offer_counts.get(r.id, 0)
+        age_hours = (now - _ensure_aware(r.created_at)).total_seconds() / 3600 if r.created_at else 0
+        risk_reasons = []
+        urgency = "normal"
+
+        # Check deadline proximity with no/few offers
+        if r.deadline:
+            dl = r.deadline
+            if dl == "ASAP":
+                if num_offers == 0:
+                    risk_reasons.append("ASAP — no offers")
+                    urgency = "critical"
+            else:
+                try:
+                    from datetime import date as date_type
+                    dl_date = datetime.fromisoformat(dl).date() if "T" in dl else date_type.fromisoformat(dl)
+                    days_left = (dl_date - now.date()).days
+                    if days_left <= 0 and num_offers == 0:
+                        risk_reasons.append(f"{abs(days_left)}d overdue — no offers")
+                        urgency = "critical"
+                    elif days_left <= 3 and num_offers == 0:
+                        risk_reasons.append(f"{days_left}d left — no offers")
+                        urgency = "critical"
+                    elif days_left <= 7 and num_offers == 0:
+                        risk_reasons.append(f"{days_left}d left — no offers")
+                        urgency = "warning"
+                    elif days_left <= 3 and num_offers == 1:
+                        risk_reasons.append(f"{days_left}d left — only 1 offer")
+                        urgency = "warning"
+                except (ValueError, TypeError):
+                    pass
+
+        # Old req with zero offers (no deadline needed)
+        if not risk_reasons and num_offers == 0 and age_hours >= 48:
+            risk_reasons.append(f"no offers after {int(age_hours / 24)}d")
+            urgency = "warning"
+
+        # Only 1 offer after 72h+ (no competitive options)
+        if not risk_reasons and num_offers == 1 and age_hours >= 72:
+            risk_reasons.append(f"only 1 offer after {int(age_hours / 24)}d")
+            urgency = "normal"
+
+        if risk_reasons:
+            reqs_at_risk.append({
+                "id": r.id,
+                "name": r.name,
+                "customer_name": r.customer_name,
+                "num_offers": num_offers,
+                "risk": risk_reasons[0],
+                "urgency": urgency,
+            })
+
+    # Sort: critical first, then warning, then normal
+    urgency_order = {"critical": 0, "warning": 1, "normal": 2}
+    reqs_at_risk.sort(key=lambda x: urgency_order.get(x["urgency"], 3))
+    reqs_at_risk = reqs_at_risk[:15]
 
     # ── Tile 4: Quotes Due Soon (approaching deadlines) ──
     deadline_reqs = (
@@ -642,7 +726,8 @@ def buyer_brief(
         },
         "new_requirements": new_requirements,
         "offers_to_review": offers_to_review,
-        "awaiting_vendor": awaiting_vendor,
+        "stale_rfqs": stale_rfqs,
+        "reqs_at_risk": reqs_at_risk,
         "quotes_due_soon": quotes_due_soon,
         "top_vendors": top_vendors,
         "pipeline": {

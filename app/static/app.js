@@ -1559,7 +1559,8 @@ async function loadBuyerDashboard(el) {
         const pipeline = brief.pipeline || {};
         const newReqs = brief.new_requirements || [];
         const reviewOffers = brief.offers_to_review || [];
-        const awaitingVendor = brief.awaiting_vendor || [];
+        const staleRfqs = brief.stale_rfqs || [];
+        const reqsAtRisk = brief.reqs_at_risk || [];
         const quotesDue = brief.quotes_due_soon || [];
         const topVendors = brief.top_vendors || [];
         const hotList = Array.isArray(hotOffers) ? hotOffers : [];
@@ -1647,24 +1648,45 @@ async function loadBuyerDashboard(el) {
         }
         html += '</div>';
 
-        // Card 3: Awaiting Vendor Response
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Awaiting Vendor Response <span class="cc-card-count">${awaitingVendor.length}</span></h3>`;
-        if (awaitingVendor.length) {
+        // Card 3a: Stale RFQs — Need Follow-Up
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Stale RFQs &mdash; Follow Up <span class="cc-card-count">${staleRfqs.length}</span></h3>`;
+        if (staleRfqs.length) {
             html += '<div class="cc-card-scroll">';
-            html += awaitingVendor.map(c => {
-                const waitH = c.wait_label || '';
-                const dotColor = waitH.includes('d ago') ? 'var(--red)' : 'var(--amber)';
+            html += staleRfqs.map(c => {
+                const days = c.wait_days || 0;
+                const dotColor = days >= 5 ? 'var(--red)' : 'var(--amber)';
                 return `<div class="cc-row" onclick="goToReq(${c.requisition_id})">
                     <span class="cc-dot" style="background:${dotColor}"></span>
                     <div class="cc-row-body">
                         <span class="cc-row-name">${esc(c.vendor_name)}</span>
-                        <span class="cc-row-detail">${c.contact_type || 'RFQ'} &middot; sent ${waitH}</span>
+                        <span class="cc-row-detail">${c.contact_type || 'RFQ'} &middot; no reply ${days}d</span>
                     </div>
                 </div>`;
             }).join('');
             html += '</div>';
         } else {
-            html += '<p class="cc-empty">No pending vendor responses.</p>';
+            html += '<p class="cc-empty">All vendors responded within 48h.</p>';
+        }
+        html += '</div>';
+
+        // Card 3b: Requisitions at Risk
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Reqs at Risk <span class="cc-card-count">${reqsAtRisk.length}</span></h3>`;
+        if (reqsAtRisk.length) {
+            html += '<div class="cc-card-scroll">';
+            html += reqsAtRisk.map(r => {
+                const dotColor = r.urgency === 'critical' ? 'var(--red)' : r.urgency === 'warning' ? 'var(--amber)' : 'var(--text-muted)';
+                return `<div class="cc-row" onclick="goToReq(${r.id})">
+                    <span class="cc-dot" style="background:${dotColor}"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
+                        <span class="cc-row-detail">${r.customer_name ? esc(r.customer_name) + ' &middot; ' : ''}${esc(r.risk)}</span>
+                    </div>
+                    <span class="cc-row-badge">${r.num_offers} offer${r.num_offers !== 1 ? 's' : ''}</span>
+                </div>`;
+            }).join('');
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No requisitions at risk.</p>';
         }
         html += '</div>';
 

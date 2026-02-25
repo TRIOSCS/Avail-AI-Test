@@ -69,7 +69,8 @@ class TestBuyerBrief:
         assert data["kpis"]["buyplan_po_rate"] == 0
         assert data["new_requirements"] == []
         assert data["offers_to_review"] == []
-        assert data["awaiting_vendor"] == []
+        assert data["stale_rfqs"] == []
+        assert data["reqs_at_risk"] == []
         assert data["quotes_due_soon"] == []
         assert data["top_vendors"] == []
         assert data["pipeline"]["active_reqs"] == 0
@@ -158,17 +159,86 @@ class TestBuyerBrief:
         assert len(data["offers_to_review"]) == 1
         assert data["offers_to_review"][0]["vendor_name"] == "Arrow"
 
-    # 7. Awaiting vendor response tile
-    def test_awaiting_vendor(self, client, db_session, test_user):
+    # 7a. Stale RFQs — only contacts sent 48h+ ago
+    def test_stale_rfqs(self, client, db_session, test_user):
         r1 = self._make_req(db_session, test_user)
-        self._make_contact(db_session, r1, test_user, status="sent", days_ago=2)
-        self._make_contact(db_session, r1, test_user, status="responded", days_ago=1)
+        # Stale: sent 3 days ago, still "sent"
+        self._make_contact(db_session, r1, test_user, status="sent", days_ago=3)
+        # Not stale: sent 1 day ago
+        self._make_contact(db_session, r1, test_user, status="sent", days_ago=1)
+        # Responded: should be excluded
+        self._make_contact(db_session, r1, test_user, status="responded", days_ago=4)
         db_session.commit()
 
         resp = client.get("/api/dashboard/buyer-brief?days=7")
         data = resp.json()
-        assert len(data["awaiting_vendor"]) == 1
-        assert data["awaiting_vendor"][0]["vendor_name"] == "Mouser"
+        assert len(data["stale_rfqs"]) == 1
+        assert data["stale_rfqs"][0]["vendor_name"] == "Mouser"
+        assert data["stale_rfqs"][0]["wait_days"] >= 2.9
+
+    # 7b. Reqs at Risk — no offers after 48h
+    def test_reqs_at_risk_no_offers(self, client, db_session, test_user):
+        # Old req with no offers → at risk
+        self._make_req(db_session, test_user, name="STALLED", days_ago=3)
+        # Fresh req with no offers → NOT at risk (too new)
+        self._make_req(db_session, test_user, name="FRESH", days_ago=0)
+        # Old req WITH offers → NOT at risk
+        r3 = self._make_req(db_session, test_user, name="SOURCED", days_ago=3)
+        self._make_offer(db_session, r3, test_user)
+        self._make_offer(db_session, r3, test_user)
+        db_session.commit()
+
+        resp = client.get("/api/dashboard/buyer-brief?days=7")
+        data = resp.json()
+        names = [r["name"] for r in data["reqs_at_risk"]]
+        assert "STALLED" in names
+        assert "FRESH" not in names
+        assert "SOURCED" not in names
+
+    # 7c. Reqs at Risk — deadline approaching with no offers
+    def test_reqs_at_risk_deadline(self, client, db_session, test_user):
+        from datetime import date
+        soon = (date.today() + timedelta(days=2)).isoformat()
+        # Deadline soon + no offers → critical
+        self._make_req(db_session, test_user, name="URGENT-BARE", deadline=soon, days_ago=0)
+        # Deadline soon + has offers → NOT at risk
+        r2 = self._make_req(db_session, test_user, name="URGENT-OK", deadline=soon, days_ago=0)
+        self._make_offer(db_session, r2, test_user)
+        self._make_offer(db_session, r2, test_user)
+        db_session.commit()
+
+        resp = client.get("/api/dashboard/buyer-brief?days=7")
+        data = resp.json()
+        names = [r["name"] for r in data["reqs_at_risk"]]
+        assert "URGENT-BARE" in names
+        urgent = [r for r in data["reqs_at_risk"] if r["name"] == "URGENT-BARE"][0]
+        assert urgent["urgency"] == "critical"
+        assert "URGENT-OK" not in names
+
+    # 7d. Reqs at Risk — ASAP deadline with no offers
+    def test_reqs_at_risk_asap(self, client, db_session, test_user):
+        self._make_req(db_session, test_user, name="ASAP-BARE", deadline="ASAP", days_ago=0)
+        db_session.commit()
+
+        resp = client.get("/api/dashboard/buyer-brief?days=7")
+        data = resp.json()
+        names = [r["name"] for r in data["reqs_at_risk"]]
+        assert "ASAP-BARE" in names
+        asap = [r for r in data["reqs_at_risk"] if r["name"] == "ASAP-BARE"][0]
+        assert asap["urgency"] == "critical"
+
+    # 7e. Reqs at Risk — only 1 offer after 72h
+    def test_reqs_at_risk_single_offer(self, client, db_session, test_user):
+        r1 = self._make_req(db_session, test_user, name="LONELY", days_ago=4)
+        self._make_offer(db_session, r1, test_user)
+        db_session.commit()
+
+        resp = client.get("/api/dashboard/buyer-brief?days=7")
+        data = resp.json()
+        names = [r["name"] for r in data["reqs_at_risk"]]
+        assert "LONELY" in names
+        lonely = [r for r in data["reqs_at_risk"] if r["name"] == "LONELY"][0]
+        assert "only 1 offer" in lonely["risk"]
 
     # 8. Quotes due soon tile with ASAP deadline
     def test_quotes_due_soon_asap(self, client, db_session, test_user):
