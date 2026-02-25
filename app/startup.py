@@ -98,6 +98,8 @@ def _add_missing_columns(conn) -> None:
         "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS customer_last_purchased_at TIMESTAMP",
         "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS our_cost FLOAT",
         "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS dismiss_reason VARCHAR(255)",
+        # Vendor name normalization on sightings
+        "ALTER TABLE sightings ADD COLUMN IF NOT EXISTS vendor_name_normalized VARCHAR(255)",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
@@ -414,6 +416,10 @@ def _create_perf_indexes(conn) -> None:
     _exec(conn, """
         CREATE INDEX IF NOT EXISTS ix_sightings_vendor_lower
         ON sightings (LOWER(TRIM(vendor_name)))
+    """)
+    _exec(conn, """
+        CREATE INDEX IF NOT EXISTS ix_sightings_vendor_norm
+        ON sightings (vendor_name_normalized)
     """)
     # pg_trgm for fast ILIKE search on requisitions + requirements
     _exec(conn, "CREATE EXTENSION IF NOT EXISTS pg_trgm")
