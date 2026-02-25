@@ -323,14 +323,10 @@ def apply_queue_item(db, queue_item, user_id: int | None = None) -> bool:
 async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None, force: bool = False) -> dict:
     """Deep enrich a vendor card with all available sources.
 
-    1. Skip if recently enriched (unless force=True)
-    2. Company enrichment via existing enrich_entity()
-    3. Email verification via Hunter.io
-    4. Contact discovery: Apollo → Hunter → RocketReach → Clearbit → dedupe
-    5. Specialty detection
-    6. AI material analysis
-    7. Confidence routing per field
-    8. Update deep_enrichment_at timestamp
+    Priority order:
+    1. Contact discovery (emails + direct dials) — highest priority
+    2. Email verification via Hunter.io
+    3. Company firmographics + specialty detection + material analysis
     """
     from ..config import settings
     from ..models import VendorCard, VendorContact
@@ -354,64 +350,8 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
     enriched_fields = []
     errors = []
 
-    # 1. Company enrichment via existing waterfall
+    # ── PRIORITY 1: Contact discovery (emails + direct dial phones) ──
     if card.domain:
-        try:
-            from ..enrichment_service import enrich_entity
-            data = await enrich_entity(card.domain, card.display_name)
-            if data:
-                for field in ("legal_name", "industry", "employee_size", "hq_city",
-                              "hq_state", "hq_country", "linkedin_url", "website"):
-                    proposed = data.get(field)
-                    current = getattr(card, field, None)
-                    if proposed and not current:
-                        result = route_enrichment(
-                            db, "vendor_card", card.id, field,
-                            current, proposed,
-                            confidence=0.85,
-                            source=data.get("source", "enrichment"),
-                            enrichment_type="company_info",
-                            job_id=job_id,
-                        )
-                        if result == "auto_applied":
-                            enriched_fields.append(field)
-        except Exception as e:
-            errors.append(f"company_enrichment: {e}")
-            log.warning("Company enrichment failed for vendor %d: %s", vendor_card_id, e)
-
-    # 2. Email verification via Hunter.io (parallel across contacts)
-    try:
-        from ..connectors.hunter_client import verify_email
-        contacts = db.query(VendorContact).filter(
-            VendorContact.vendor_card_id == vendor_card_id,
-            VendorContact.email.isnot(None),
-        ).limit(20).all()
-
-        async def _verify_one(contact):
-            try:
-                result = await verify_email(contact.email)
-                if result and result.get("status") in ("valid", "accept_all"):
-                    if not contact.is_verified:
-                        contact.is_verified = True
-                        return f"verified:{contact.email}"
-            except Exception:
-                pass
-            return None
-
-        verify_results = await asyncio.gather(*[_verify_one(c) for c in contacts])
-        enriched_fields.extend(r for r in verify_results if r)
-    except Exception as e:
-        errors.append(f"email_verification: {e}")
-
-    # 3-5: Run contact discovery, specialty detection, and AI analysis in parallel
-    _contact_errors = []
-    _specialty_result = {}
-    _material_ok = False
-
-    async def _contact_discovery():
-        nonlocal _contact_errors
-        if not card.domain:
-            return
         try:
             from ..enrichment_service import find_suggested_contacts
             new_contacts = await find_suggested_contacts(
@@ -444,8 +384,63 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
                         job_id=job_id,
                     )
                     existing_emails.add(email)
+                    enriched_fields.append(f"contact:{email}")
         except Exception as e:
-            _contact_errors.append(f"contact_discovery: {e}")
+            errors.append(f"contact_discovery: {e}")
+
+    # ── PRIORITY 2: Email verification via Hunter.io ──
+    try:
+        from ..connectors.hunter_client import verify_email
+        contacts = db.query(VendorContact).filter(
+            VendorContact.vendor_card_id == vendor_card_id,
+            VendorContact.email.isnot(None),
+        ).limit(20).all()
+
+        async def _verify_one(contact):
+            try:
+                result = await verify_email(contact.email)
+                if result and result.get("status") in ("valid", "accept_all"):
+                    if not contact.is_verified:
+                        contact.is_verified = True
+                        return f"verified:{contact.email}"
+            except Exception:
+                pass
+            return None
+
+        verify_results = await asyncio.gather(*[_verify_one(c) for c in contacts])
+        enriched_fields.extend(r for r in verify_results if r)
+    except Exception as e:
+        errors.append(f"email_verification: {e}")
+
+    # ── PRIORITY 3: Firmographics, specialty, material tags (concurrent) ──
+    _p3_errors = []
+    _specialty_result = {}
+    _material_ok = False
+
+    async def _company_enrichment():
+        if not card.domain:
+            return
+        try:
+            from ..enrichment_service import enrich_entity
+            data = await enrich_entity(card.domain, card.display_name)
+            if data:
+                for field in ("legal_name", "industry", "employee_size", "hq_city",
+                              "hq_state", "hq_country", "linkedin_url", "website"):
+                    proposed = data.get(field)
+                    current = getattr(card, field, None)
+                    if proposed and not current:
+                        result = route_enrichment(
+                            db, "vendor_card", card.id, field,
+                            current, proposed,
+                            confidence=0.85,
+                            source=data.get("source", "enrichment"),
+                            enrichment_type="company_info",
+                            job_id=job_id,
+                        )
+                        if result == "auto_applied":
+                            enriched_fields.append(field)
+        except Exception as e:
+            _p3_errors.append(f"company_enrichment: {e}")
 
     async def _specialty_detection():
         nonlocal _specialty_result
@@ -456,7 +451,7 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
                 None, analyze_vendor_specialties, vendor_card_id, db
             )
         except Exception as e:
-            _contact_errors.append(f"specialty_detection: {e}")
+            _p3_errors.append(f"specialty_detection: {e}")
 
     async def _material_analysis():
         nonlocal _material_ok
@@ -465,15 +460,15 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
             await _analyze_vendor_materials(vendor_card_id, db_session=db)
             _material_ok = True
         except Exception as e:
-            _contact_errors.append(f"material_analysis: {e}")
+            _p3_errors.append(f"material_analysis: {e}")
 
     await asyncio.gather(
-        _contact_discovery(),
+        _company_enrichment(),
         _specialty_detection(),
         _material_analysis(),
     )
 
-    errors.extend(_contact_errors)
+    errors.extend(_p3_errors)
     specialties = _specialty_result
     if _material_ok:
         enriched_fields.append("material_tags")
@@ -520,7 +515,12 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
 
 
 async def deep_enrich_company(company_id: int, db, job_id: int | None = None, force: bool = False) -> dict:
-    """Deep enrich a company with all available sources."""
+    """Deep enrich a company with all available sources.
+
+    Priority order:
+    1. Contact discovery (emails + direct dials) — highest priority
+    2. Company firmographics (enrich_entity waterfall + Clearbit)
+    """
     from ..config import settings
     from ..models import Company
 
@@ -550,50 +550,8 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
         if m:
             domain = m.group(1).lower()
 
+    # ── PRIORITY 1: Contact discovery (emails + direct dial phones) ──
     if domain:
-        try:
-            from ..enrichment_service import enrich_entity
-            data = await enrich_entity(domain, company.name)
-            if data:
-                for field in ("legal_name", "industry", "employee_size", "hq_city",
-                              "hq_state", "hq_country", "linkedin_url", "website", "domain"):
-                    proposed = data.get(field)
-                    current = getattr(company, field, None)
-                    if proposed and not current:
-                        result = route_enrichment(
-                            db, "company", company.id, field,
-                            current, proposed,
-                            confidence=0.85,
-                            source=data.get("source", "enrichment"),
-                            enrichment_type="company_info",
-                            job_id=job_id,
-                        )
-                        if result == "auto_applied":
-                            enriched_fields.append(field)
-        except Exception as e:
-            errors.append(f"company_enrichment: {e}")
-
-        # Clearbit company enrichment for extra firmographics
-        try:
-            from ..connectors.clearbit_client import enrich_company as clearbit_enrich
-            cb = await clearbit_enrich(domain)
-            if cb:
-                for field in ("industry", "employee_size", "hq_city", "hq_state", "hq_country"):
-                    proposed = cb.get(field)
-                    current = getattr(company, field, None)
-                    if proposed and not current:
-                        route_enrichment(
-                            db, "company", company.id, field,
-                            current, proposed,
-                            confidence=0.8,
-                            source="clearbit",
-                            enrichment_type="company_info",
-                            job_id=job_id,
-                        )
-        except Exception as e:
-            errors.append(f"clearbit: {e}")
-
-        # Contact discovery for company — route through enrichment queue for review
         try:
             from ..enrichment_service import find_suggested_contacts
             new_contacts = await find_suggested_contacts(domain, company.name)
@@ -629,9 +587,53 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
                             job_id=job_id,
                         )
                         existing_emails.add(email)
-                        enriched_fields.append(f"contact_queued:{email}")
+                        enriched_fields.append(f"contact:{email}")
         except Exception as e:
             errors.append(f"contact_discovery: {e}")
+
+    # ── PRIORITY 2: Company firmographics ──
+    if domain:
+        try:
+            from ..enrichment_service import enrich_entity
+            data = await enrich_entity(domain, company.name)
+            if data:
+                for field in ("legal_name", "industry", "employee_size", "hq_city",
+                              "hq_state", "hq_country", "linkedin_url", "website", "domain"):
+                    proposed = data.get(field)
+                    current = getattr(company, field, None)
+                    if proposed and not current:
+                        result = route_enrichment(
+                            db, "company", company.id, field,
+                            current, proposed,
+                            confidence=0.85,
+                            source=data.get("source", "enrichment"),
+                            enrichment_type="company_info",
+                            job_id=job_id,
+                        )
+                        if result == "auto_applied":
+                            enriched_fields.append(field)
+        except Exception as e:
+            errors.append(f"company_enrichment: {e}")
+
+        # Clearbit firmographics
+        try:
+            from ..connectors.clearbit_client import enrich_company as clearbit_enrich
+            cb = await clearbit_enrich(domain)
+            if cb:
+                for field in ("industry", "employee_size", "hq_city", "hq_state", "hq_country"):
+                    proposed = cb.get(field)
+                    current = getattr(company, field, None)
+                    if proposed and not current:
+                        route_enrichment(
+                            db, "company", company.id, field,
+                            current, proposed,
+                            confidence=0.8,
+                            source="clearbit",
+                            enrichment_type="company_info",
+                            job_id=job_id,
+                        )
+        except Exception as e:
+            errors.append(f"clearbit: {e}")
 
     company.deep_enrichment_at = datetime.now(timezone.utc)
 
