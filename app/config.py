@@ -2,7 +2,7 @@
 
 import os
 
-APP_VERSION = "2.9.1"
+APP_VERSION = "3.0.0"
 
 
 class Settings:
@@ -79,11 +79,20 @@ class Settings:
     # Agent service-to-service auth
     agent_api_key: str = os.getenv("AGENT_API_KEY", "")
 
+    # Explorium / Vibe Prospecting API
+    explorium_api_key: str = os.getenv("EXPLORIUM_API_KEY", "")
+    explorium_api_base_url: str = os.getenv(
+        "EXPLORIUM_API_BASE_URL", "https://api.explorium.ai"
+    )
+
     # Enrichment APIs
     apollo_api_key: str = os.getenv("APOLLO_API_KEY", "")
+    apollo_rate_limit_per_min: int = int(os.getenv("APOLLO_RATE_LIMIT_PER_MIN", "5"))
 
     # Deep Enrichment APIs
     hunter_api_key: str = os.getenv("HUNTER_API_KEY", "")
+    hunter_monthly_search_limit: int = int(os.getenv("HUNTER_MONTHLY_SEARCH_LIMIT", "25"))
+    hunter_monthly_verify_limit: int = int(os.getenv("HUNTER_MONTHLY_VERIFY_LIMIT", "50"))
     rocketreach_api_key: str = os.getenv("ROCKETREACH_API_KEY", "")
     clearbit_api_key: str = os.getenv("CLEARBIT_API_KEY", "")
 
@@ -192,6 +201,20 @@ class Settings:
         d.strip().lower()
         for d in os.getenv("OWN_DOMAINS", "trioscs.com").split(",")
         if d.strip()
+    )
+
+    # Prospecting module (Phase 8)
+    prospecting_enabled: bool = (
+        os.getenv("PROSPECTING_ENABLED", "true").lower() == "true"
+    )
+    prospecting_min_fit_for_contacts: int = int(
+        os.getenv("PROSPECTING_MIN_FIT_FOR_CONTACTS", "60")
+    )
+    prospecting_expire_days: int = int(
+        os.getenv("PROSPECTING_EXPIRE_DAYS", "90")
+    )
+    prospecting_resurface_days: int = int(
+        os.getenv("PROSPECTING_RESURFACE_DAYS", "180")
     )
 
 

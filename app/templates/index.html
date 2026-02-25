@@ -335,19 +335,32 @@
         </div>
     </div>
 
-    <!-- VIEW: Suggested (company-level prospect pool) -->
+    <!-- VIEW: Suggested (unified prospect pool from prospect_accounts) -->
     <div id="view-suggested" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
         <div class="crm-header">
             <h2>Suggested Accounts</h2>
         </div>
         <div id="suggestedStats" class="suggested-stats"></div>
-        <div class="crm-toolbar">
-            <input class="sbox" id="suggestedSearch" placeholder="Search by name or domain…" oninput="debouncedLoadSuggested()" style="flex:1;min-width:140px" aria-label="Search suggested accounts">
+        <div class="crm-toolbar" style="flex-wrap:wrap;gap:8px">
+            <input class="sbox" id="suggestedSearch" placeholder="Search name, domain, industry…" oninput="debouncedLoadSuggested()" style="flex:1;min-width:140px" aria-label="Search suggested accounts">
             <div class="chip-row" style="margin:0" id="suggestedPills">
-                <span class="chip on" data-value="" onclick="setSuggestedPriority('',this)">All</span>
-                <span class="chip" data-value="priority" onclick="setSuggestedPriority('priority',this)">Priority</span>
-                <span class="chip" data-value="standard" onclick="setSuggestedPriority('standard',this)">Standard</span>
+                <span class="chip on" data-value="" onclick="setSuggestedReadiness('',this)">All</span>
+                <span class="chip" data-value="call_now" onclick="setSuggestedReadiness('call_now',this)">Call Now</span>
+                <span class="chip" data-value="nurture" onclick="setSuggestedReadiness('nurture',this)">Nurture</span>
+                <span class="chip" data-value="monitor" onclick="setSuggestedReadiness('monitor',this)">Monitor</span>
             </div>
+            <select id="suggestedRegion" onchange="debouncedLoadSuggested()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="">All Regions</option>
+                <option value="US">US</option>
+                <option value="EU">EU</option>
+                <option value="Asia">Asia</option>
+            </select>
+            <select id="suggestedSort" onchange="debouncedLoadSuggested()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="readiness_desc">Sort: Readiness</option>
+                <option value="fit_desc">Sort: Fit Score</option>
+                <option value="composite_desc">Sort: Composite</option>
+                <option value="name_asc">Sort: Name</option>
+            </select>
         </div>
         <div class="suggested-grid-wrap" style="flex:1;overflow-y:auto;padding:0 20px 20px">
             <div class="suggested-grid" id="suggestedGrid"></div>

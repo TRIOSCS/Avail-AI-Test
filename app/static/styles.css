@@ -2270,3 +2270,41 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .suggested-card-actions select.dismiss-select{font-size:11px;padding:4px 6px;border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--muted);background:var(--white);cursor:pointer}
 @media(max-width:700px){.suggested-grid{grid-template-columns:1fr}}
 
+/* Score bars */
+.suggested-scores{display:flex;gap:12px;margin:8px 0 6px}
+.score-bar{flex:1;display:flex;flex-direction:column;gap:2px}
+.score-bar-label{font-size:10px;color:var(--muted);display:flex;justify-content:space-between}
+.score-bar-track{height:6px;background:var(--surface);border-radius:3px;overflow:hidden}
+.score-bar-fill{height:100%;border-radius:3px;transition:width .4s ease}
+.score-bar-fill.fit{background:var(--blue)}
+.score-bar-fill.readiness{background:var(--teal,#0d9488)}
+
+/* Readiness tier badges */
+.suggested-badge.call_now{background:#dcfce7;color:#166534;font-weight:700}
+.suggested-badge.nurture{background:#fef3c7;color:#92400e}
+.suggested-badge.monitor{background:var(--surface);color:var(--muted)}
+
+/* Signal tags */
+.suggested-signals{display:flex;flex-wrap:wrap;gap:4px;margin:6px 0}
+.signal-tag{font-size:10px;padding:2px 6px;border-radius:4px;font-weight:500}
+.signal-tag.intent{background:#ede9fe;color:#6d28d9}
+.signal-tag.hiring{background:#fce7f3;color:#be185d}
+.signal-tag.event{background:#e0f2fe;color:#0369a1}
+
+/* Contacts preview row */
+.suggested-contacts{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:11px;color:var(--text2)}
+.contacts-avatars{display:flex;gap:-4px}
+.contact-avatar{width:22px;height:22px;border-radius:50%;background:var(--blue);color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;border:2px solid var(--white);margin-left:-6px}
+.contact-avatar:first-child{margin-left:0}
+.contacts-summary{font-size:10px;color:var(--muted)}
+
+/* Similar customers */
+.suggested-similar{font-size:10px;color:var(--muted);margin:4px 0}
+.suggested-similar strong{color:var(--text2);font-weight:600}
+
+/* AI writeup snippet */
+.suggested-writeup{font-size:11px;color:var(--text2);line-height:1.5;margin:6px 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+
+/* Card source/priority tag */
+.suggested-source{font-size:9px;color:var(--muted);margin-top:4px}
+

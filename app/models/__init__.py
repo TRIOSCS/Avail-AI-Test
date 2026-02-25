@@ -14,6 +14,10 @@ from .config import ApiSource, GraphSubscription, SystemConfig  # noqa: F401
 # CRM: Companies & Sites
 from .crm import Company, CustomerSite, SiteContact  # noqa: F401
 
+# Discovery / Prospecting
+from .discovery_batch import DiscoveryBatch  # noqa: F401
+from .prospect_account import ProspectAccount  # noqa: F401
+
 # Enrichment
 from .enrichment import (  # noqa: F401
     EmailSignatureExtract,
