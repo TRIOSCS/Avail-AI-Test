@@ -682,9 +682,10 @@ def compute_all_avail_scores(db: Session, month: date | None = None) -> dict:
     # Exclude system/bot users (e.g. AvailAI Agent)
     _human = [User.is_active.is_(True), ~User.email.like("%@availai.local")]
 
-    buyers = db.query(User).filter(User.role.in_(["buyer", "trader"]), *_human).all()
+    # Everyone except pure sales gets buyer scores (buyers, traders, managers, admins)
+    buyers = db.query(User).filter(User.role.in_(["buyer", "trader", "manager", "admin"]), *_human).all()
     sales = db.query(User).filter(User.role == "sales", *_human).all()
-    # Traders and managers also get sales scores if they have sales activity
+    # Traders, managers, admins also get sales scores
     multi_role = db.query(User).filter(User.role.in_(["trader", "manager", "admin"]), *_human).all()
 
     buyer_results = []
