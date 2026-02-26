@@ -16,7 +16,7 @@ Job overview:
   - PO verification: configurable (default 30 min)
   - Stock sale auto-complete: daily at configured hour
   - Proactive matching: configurable (default 4h)
-  - Performance tracking: every 12h
+  - Performance tracking (vendor scorecards, buyer leaderboard, Avail Scores): every 12h
   - Deep email mining: every 4h
   - Deep enrichment sweep: every 12h
 """
@@ -675,7 +675,7 @@ async def _job_proactive_matching():
 
 @_traced_job
 async def _job_performance_tracking():
-    """Compute vendor scorecards and buyer leaderboard."""
+    """Compute vendor scorecards, buyer leaderboard, and Avail Scores."""
     from .database import SessionLocal
 
     db = SessionLocal()
@@ -685,6 +685,7 @@ async def _job_performance_tracking():
             compute_all_vendor_scorecards,
             compute_buyer_leaderboard,
         )
+        from .services.avail_score_service import compute_all_avail_scores
 
         loop = asyncio.get_running_loop()
         vs_result = await asyncio.wait_for(
@@ -703,11 +704,24 @@ async def _job_performance_tracking():
         logger.info(
             f"Buyer leaderboard: {bl_result['entries']} entries for {current_month}"
         )
+        # Avail Scores
+        as_result = await asyncio.wait_for(
+            loop.run_in_executor(None, compute_all_avail_scores, db, current_month),
+            timeout=300,
+        )
+        logger.info(
+            f"Avail Scores: {as_result['buyers_scored']} buyers, "
+            f"{as_result['sales_scored']} sales for {current_month}"
+        )
         # Recompute previous month during grace period (first 7 days)
         if now.day <= 7:
             prev_month = (current_month - timedelta(days=1)).replace(day=1)
             await asyncio.wait_for(
                 loop.run_in_executor(None, compute_buyer_leaderboard, db, prev_month),
+                timeout=300,
+            )
+            await asyncio.wait_for(
+                loop.run_in_executor(None, compute_all_avail_scores, db, prev_month),
                 timeout=300,
             )
     except asyncio.TimeoutError:
