@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 
 from .models import ActivityLog, Contact, Offer, PendingBatch, ProcessedMessage, Requirement, Requisition, VendorResponse
 from .services.credential_service import get_credential_cached
+from .vendor_utils import normalize_vendor_name
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ async def send_batch_rfq(
             log.warning(f"AI rephrase failed, using original bodies: {e}")
 
     # Build payloads and send all emails in parallel
-    avail_token = f"[AVAIL-{requisition_id}]"
+    avail_token = f"[ref:{requisition_id}]"
     send_tasks = []
     send_groups = []  # Track which groups we're sending for
 
@@ -64,7 +65,7 @@ async def send_batch_rfq(
 
         html_body = _build_html_body(group["body"])
         raw_subject = group["subject"]
-        tagged_subject = f"{avail_token} {raw_subject}" if avail_token not in raw_subject else raw_subject
+        tagged_subject = f"{raw_subject} {avail_token}" if avail_token not in raw_subject else raw_subject
         group["_tagged_subject"] = tagged_subject
 
         payload = {
@@ -103,7 +104,9 @@ async def send_batch_rfq(
 
         contact = Contact(
             requisition_id=requisition_id, user_id=user_id, contact_type="email",
-            vendor_name=group["vendor_name"], vendor_contact=email,
+            vendor_name=group["vendor_name"],
+            vendor_name_normalized=normalize_vendor_name(group["vendor_name"] or ""),
+            vendor_contact=email,
             parts_included=group.get("parts", []), subject=tagged_subject,
             details=group["body"], status="sent",
             status_updated_at=datetime.now(timezone.utc),
@@ -166,6 +169,7 @@ def log_phone_contact(
         user_id=user_id,
         contact_type="phone",
         vendor_name=vendor_name,
+        vendor_name_normalized=normalize_vendor_name(vendor_name or ""),
         vendor_contact=vendor_phone,
         parts_included=parts,
         subject=f"Call to {vendor_name}",
@@ -325,8 +329,8 @@ async def poll_inbox(
                     if domain not in NOISE_DOMAINS:
                         domain_map[domain] = c
 
-    # Subject token pattern: [AVAIL-{req_id}]
-    avail_token_re = re.compile(r"\[AVAIL-(\d+)\]")
+    # Subject token pattern: [ref:{req_id}] (new) or [AVAIL-{req_id}] (legacy)
+    avail_token_re = re.compile(r"\[(?:ref:|AVAIL-)(\d+)\]")
 
     results = []
     pending_parse = []  # VendorResponse objects awaiting AI parsing
@@ -809,16 +813,24 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
             if req and req.created_by:
                 owner_id = req.created_by
 
-            # Build a map of MPN → requirement_id for linking
+            # Build maps for linking: MPN → requirement_id, MPN → material_card_id
+            from .search_service import resolve_material_card
+            from .utils.normalization import normalize_mpn_key
+
             req_obj = db.get(Requisition, vr.requisition_id)
             mpn_to_req_id: dict[str, int] = {}
+            mpn_to_card_id: dict[str, int] = {}
             if req_obj:
                 for r in db.query(Requirement).filter(Requirement.requisition_id == vr.requisition_id).all():
                     if r.primary_mpn:
-                        mpn_to_req_id[r.primary_mpn.upper().strip()] = r.id
+                        key = normalize_mpn_key(r.primary_mpn) or r.primary_mpn.upper().strip()
+                        mpn_to_req_id[key] = r.id
+                        if r.material_card_id:
+                            mpn_to_card_id[key] = r.material_card_id
 
             for draft in draft_offers:
-                mpn = (draft.get("mpn") or "").upper().strip()
+                raw_mpn = draft.get("mpn") or ""
+                mpn_key = normalize_mpn_key(raw_mpn) or raw_mpn.upper().strip()
                 # Dedup: check if offer already exists from this vendor response
                 existing = db.query(Offer.id).filter(
                     Offer.vendor_response_id == vr.id,
@@ -827,10 +839,19 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                 if existing:
                     continue
 
+                # Resolve material card — use requirement's card or find/create
+                card_id = mpn_to_card_id.get(mpn_key)
+                if not card_id and raw_mpn.strip():
+                    card = resolve_material_card(raw_mpn, db)
+                    if card:
+                        card_id = card.id
+
                 offer = Offer(
                     requisition_id=vr.requisition_id,
-                    requirement_id=mpn_to_req_id.get(mpn),
+                    requirement_id=mpn_to_req_id.get(mpn_key),
+                    material_card_id=card_id,
                     vendor_name=draft.get("vendor_name", ""),
+                    vendor_name_normalized=normalize_vendor_name(draft.get("vendor_name", "")),
                     mpn=draft.get("mpn", ""),
                     manufacturer=draft.get("manufacturer"),
                     qty_available=draft.get("qty_available"),

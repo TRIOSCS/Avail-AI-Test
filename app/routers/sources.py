@@ -338,9 +338,18 @@ def _create_sightings_from_attachment(
         if existing:
             continue
 
+        # Resolve material card
+        from ..search_service import resolve_material_card
+
+        mat_card = resolve_material_card(mpn, db)
+
+        from ..vendor_utils import normalize_vendor_name as _nvn
+
         sighting = Sighting(
             requirement_id=matched_req.id,
+            material_card_id=mat_card.id if mat_card else None,
             vendor_name=vr.vendor_name or "",
+            vendor_name_normalized=_nvn(vr.vendor_name or ""),
             vendor_email=vr.vendor_email,
             mpn_matched=normalize_mpn(mpn) or mpn,
             manufacturer=row.get("manufacturer", ""),
@@ -408,6 +417,7 @@ async def list_api_sources(
                 "category": src.category,
                 "source_type": src.source_type,
                 "status": src.status,
+                "is_active": src.is_active,
                 "description": src.description,
                 "setup_notes": src.setup_notes,
                 "signup_url": src.signup_url,
@@ -502,6 +512,45 @@ async def toggle_api_source(
     src.status = new_status
     db.commit()
     return {"ok": True, "status": src.status}
+
+
+@router.put("/api/sources/{source_id}/activate")
+async def toggle_source_active(
+    source_id: int,
+    user: User = Depends(require_settings_access),
+    db: Session = Depends(get_db),
+):
+    """Toggle is_active flag on a source (settings access required)."""
+    src = db.get(ApiSource, source_id)
+    if not src:
+        raise HTTPException(404, "API source not found")
+    src.is_active = not src.is_active
+    db.commit()
+    return {"ok": True, "is_active": src.is_active}
+
+
+@router.get("/api/sources/health-summary")
+async def health_summary(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lightweight health check — returns active sources with errors (for 60s polling)."""
+    errored = (
+        db.query(ApiSource)
+        .filter(ApiSource.is_active == True, ApiSource.status == "error")  # noqa: E712
+        .all()
+    )
+    return {
+        "has_errors": len(errored) > 0,
+        "errored_sources": [
+            {
+                "id": s.id,
+                "display_name": s.display_name,
+                "last_error": s.last_error,
+            }
+            for s in errored
+        ],
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════

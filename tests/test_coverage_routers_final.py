@@ -135,8 +135,8 @@ def test_add_requirement_teams_alert_exception(client, db_session, test_requisit
             )
             assert resp.status_code == 200
             data = resp.json()
-            assert len(data) >= 1
-            assert data[0]["primary_mpn"] == "TEST-HOT-001"
+            assert len(data["created"]) >= 1
+            assert data["created"][0]["primary_mpn"] == "TEST-HOT-001"
 
 
 # ── 3. Skip empty row in upload requirements (requisitions.py line 779) ──
@@ -803,7 +803,7 @@ def test_add_requirement_teams_alert_attribute_error(client, db_session, test_us
             )
             assert resp.status_code == 200
             data = resp.json()
-            assert len(data) >= 1
+            assert len(data["created"]) >= 1
 
 
 # ── 18. Upload with substitutes containing empty MPN (line 779) ──
@@ -1140,7 +1140,7 @@ async def test_vendor_search_fts_returns_results(db_session, test_user):
     mock_db = MagicMock()
     mock_db.query = mock_query_fn
 
-    result = await list_vendors(q="fts test vendor", limit=200, offset=0,
+    result = await list_vendors(q="fts test vendor", tag="", limit=200, offset=0,
                                 user=test_user, db=mock_db)
     assert result["total"] == 1
     assert len(result["vendors"]) == 1
@@ -1193,7 +1193,7 @@ async def test_vendor_search_fts_zero_results(db_session, test_user):
     mock_db = MagicMock()
     mock_db.query = mock_query_fn
 
-    result = await list_vendors(q="ilike fallback", limit=200, offset=0,
+    result = await list_vendors(q="ilike fallback", tag="", limit=200, offset=0,
                                 user=test_user, db=mock_db)
     assert result["total"] == 1
 

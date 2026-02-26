@@ -9,19 +9,21 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
-from sqlalchemy import func as sqlfunc
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload
 
-from ...config import settings
 from ...database import get_db
-from ...dependencies import require_buyer, require_user
-from ...models import ActivityLog, Offer, Quote, Requirement, Requisition, User
-from ...models import CustomerSite
+from ...dependencies import require_user
+from ...models import CustomerSite, Offer, Quote, Requisition, User
 from ...schemas.crm import QuoteCreate, QuoteReopen, QuoteResult, QuoteSendOverride, QuoteUpdate
 from ...schemas.responses import QuoteDetailResponse
-from ...services.credential_service import get_credential_cached
-from ...rate_limit import limiter
-from ._helpers import quote_to_dict, _preload_last_quoted_prices, _build_quote_email_html, next_quote_number
+from ._helpers import (
+    _PRICED_STATUSES,
+    _build_quote_email_html,
+    _preload_last_quoted_prices,
+    _quote_date_iso,
+    next_quote_number,
+    quote_to_dict,
+)
 
 router = APIRouter()
 
@@ -45,15 +47,13 @@ async def get_quote(
             joinedload(Quote.customer_site).joinedload(CustomerSite.site_contacts),
             joinedload(Quote.created_by),
         )
-        .filter(
-            Quote.requisition_id == req_id,
-        )
+        .filter(Quote.requisition_id == req_id)
         .order_by(Quote.revision.desc())
         .first()
     )
     if not quote:
         return None
-    return quote_to_dict(quote)
+    return quote_to_dict(quote, db)
 
 
 @router.get("/api/requisitions/{req_id}/quotes")
@@ -77,7 +77,7 @@ async def list_quotes(
         .order_by(Quote.revision.desc())
         .all()
     )
-    return [quote_to_dict(q) for q in quotes]
+    return [quote_to_dict(q, db) for q in quotes]
 
 
 @router.post("/api/requisitions/{req_id}/quote")
@@ -97,7 +97,7 @@ async def create_quote(
             400, "Requisition must be linked to a customer site before quoting"
         )
     offer_ids = payload.offer_ids
-    line_items = payload.line_items
+    line_items = [li.model_dump() for li in payload.line_items] if payload.line_items else []
     if offer_ids and not line_items:
         offers = db.query(Offer).options(joinedload(Offer.requirement)).filter(Offer.id.in_(offer_ids)).all()
         quoted_prices = _preload_last_quoted_prices(db)
@@ -111,7 +111,9 @@ async def create_quote(
                     if o.requirement.target_price
                     else None
                 )
-                lq = quoted_prices.get((o.mpn or "").upper().strip())
+                lq = (
+                    quoted_prices.get(f"card:{o.material_card_id}") if o.material_card_id else None
+                ) or quoted_prices.get((o.mpn or "").upper().strip())
                 last_q_price = lq.get("sell_price") if lq else None
             cost = float(o.unit_price) if o.unit_price else 0
             line_items.append(
@@ -129,10 +131,26 @@ async def create_quote(
                     "hardware_code": o.hardware_code,
                     "packaging": o.packaging,
                     "offer_id": o.id,
+                    "material_card_id": o.material_card_id,
                     "target_price": target,
                     "last_quoted_price": last_q_price,
                 }
             )
+    # Resolve material_card_id for line items that don't have one
+    from ...search_service import resolve_material_card
+
+    for li in line_items:
+        if not li.get("material_card_id") and li.get("mpn"):
+            try:
+                card = resolve_material_card(li["mpn"], db)
+                if card:
+                    li["material_card_id"] = card.id
+            except Exception:
+                logger.warning(
+                    "Failed to resolve material card for MPN=%s during quote creation for req=%d",
+                    li.get("mpn"), req_id,
+                )
+
     site = db.get(CustomerSite, req.customer_site_id)
     total_sell = sum(
         (item.get("qty") or 0) * (item.get("sell_price") or 0)
@@ -162,8 +180,9 @@ async def create_quote(
     old_status = req.status
     if req.status in ("active", "sourcing", "offers"):
         req.status = "quoting"
+
     db.commit()
-    result = quote_to_dict(quote)
+    result = quote_to_dict(quote, db)
     result["req_status"] = req.status
     result["status_changed"] = req.status != old_status
     return result
@@ -213,7 +232,7 @@ async def update_quote(
         .filter(Quote.id == quote.id)
         .first()
     )
-    return quote_to_dict(quote)
+    return quote_to_dict(quote, db)
 
 
 @router.delete("/api/quotes/{quote_id}")
@@ -340,6 +359,11 @@ async def quote_result(
     req = db.get(Requisition, quote.requisition_id)
     if req:
         req.status = payload.result
+
+    # CPH hook: record purchase history when quote is won
+    if payload.result == "won":
+        _record_quote_won_history(db, req, quote)
+
     db.commit()
     return {
         "ok": True,
@@ -373,7 +397,7 @@ async def revise_quote(
     )
     db.add(new_quote)
     db.commit()
-    return quote_to_dict(new_quote)
+    return quote_to_dict(new_quote, db)
 
 
 @router.post("/api/quotes/{quote_id}/reopen")
@@ -407,7 +431,7 @@ async def reopen_quote(
         )
         db.add(new_quote)
         db.commit()
-        return quote_to_dict(new_quote)
+        return quote_to_dict(new_quote, db)
     else:
         quote.status = "sent"
         quote.result = None
@@ -415,7 +439,7 @@ async def reopen_quote(
         quote.result_notes = None
         quote.result_at = None
         db.commit()
-        return quote_to_dict(quote)
+        return quote_to_dict(quote, db)
 
 
 # ── Pricing History ──────────────────────────────────────────────────────
@@ -425,48 +449,95 @@ async def reopen_quote(
 async def pricing_history(
     mpn: str, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
+    from ...models import MaterialCard
+    from ...utils.normalization import normalize_mpn_key
+
+    # Resolve MPN to material_card_id for fast FK lookup
+    norm_key = normalize_mpn_key(mpn)
+    card = db.query(MaterialCard).filter(MaterialCard.normalized_mpn == norm_key).first() if norm_key else None
+
     mpn_upper = mpn.upper().strip()
     quotes = (
         db.query(Quote)
-        .filter(
-            Quote.status.in_(["sent", "won", "lost"]),
-        )
+        .options(joinedload(Quote.customer_site).joinedload(CustomerSite.company))
+        .filter(Quote.status.in_(_PRICED_STATUSES))
         .order_by(Quote.sent_at.desc().nullslast(), Quote.created_at.desc())
         .limit(500)
         .all()
     )
     history = []
+    card_id = card.id if card else None
     for q in quotes:
         for item in q.line_items or []:
-            if (item.get("mpn") or "").upper().strip() == mpn_upper:
-                site_name = ""
-                if q.customer_site:
-                    site_name = (
-                        f"{q.customer_site.company.name} — {q.customer_site.site_name}"
-                        if q.customer_site.company
-                        else q.customer_site.site_name
-                    )
-                history.append(
-                    {
-                        "date": (q.sent_at or q.created_at).isoformat()
-                        if (q.sent_at or q.created_at)
-                        else None,
-                        "qty": item.get("qty"),
-                        "cost_price": item.get("cost_price"),
-                        "sell_price": item.get("sell_price"),
-                        "margin_pct": item.get("margin_pct"),
-                        "customer": site_name,
-                        "result": q.result,
-                        "quote_number": q.quote_number,
-                    }
+            matched_by_card = card_id and item.get("material_card_id") == card_id
+            matched_by_mpn = (item.get("mpn") or "").upper().strip() == mpn_upper
+            if not (matched_by_card or matched_by_mpn):
+                continue
+            site_name = ""
+            if q.customer_site:
+                site_name = (
+                    f"{q.customer_site.company.name} — {q.customer_site.site_name}"
+                    if q.customer_site.company
+                    else q.customer_site.site_name
                 )
-                break
+            history.append(
+                {
+                    "date": _quote_date_iso(q),
+                    "qty": item.get("qty"),
+                    "cost_price": item.get("cost_price"),
+                    "sell_price": item.get("sell_price"),
+                    "margin_pct": item.get("margin_pct"),
+                    "customer": site_name,
+                    "result": q.result,
+                    "quote_number": q.quote_number,
+                }
+            )
+            break
     prices = [h["sell_price"] for h in history if h.get("sell_price")]
     margins = [h["margin_pct"] for h in history if h.get("margin_pct")]
     return {
         "mpn": mpn,
+        "material_card_id": card_id,
         "history": history[:50],
         "avg_price": round(sum(prices) / len(prices), 4) if prices else None,
         "avg_margin": round(sum(margins) / len(margins), 2) if margins else None,
         "price_range": [min(prices), max(prices)] if prices else None,
     }
+
+
+def _record_quote_won_history(
+    db: Session, req: Requisition | None, quote: Quote
+) -> None:
+    """Feed customer_part_history from quote line items when quote is won directly.
+
+    Errors are logged but never block the quote result flow.
+    """
+    if not req or not req.customer_site_id:
+        return
+    try:
+        from ...services.purchase_history_service import upsert_purchase
+
+        site = db.get(CustomerSite, req.customer_site_id)
+        if not site or not site.company_id:
+            return
+        company_id = site.company_id
+
+        for li in quote.line_items or []:
+            card_id = li.get("material_card_id")
+            if not card_id:
+                continue
+            upsert_purchase(
+                db,
+                company_id=company_id,
+                material_card_id=card_id,
+                source="avail_quote_won",
+                unit_price=li.get("sell_price"),
+                quantity=li.get("qty"),
+                source_ref=f"quote:{quote.id}",
+            )
+    except Exception as e:
+        logger.error(
+            "Quote won purchase history recording failed for quote_id=%d quote_number=%s: %s",
+            quote.id, quote.quote_number, e,
+            exc_info=True,
+        )

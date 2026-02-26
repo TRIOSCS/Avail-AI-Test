@@ -14,9 +14,14 @@ from sqlalchemy.orm import Session
 from ..cache.decorators import cached_endpoint
 from ..database import get_db
 from ..dependencies import require_user
-from ..models import ProactiveMatch, SiteContact, User
+from ..models import ProactiveDoNotOffer, ProactiveMatch, SiteContact, User
 from ..scheduler import get_valid_token
-from ..schemas.proactive import DismissMatches, SendProactive
+from ..schemas.proactive import (
+    DismissMatches,
+    DoNotOfferRequest,
+    DraftProactive,
+    SendProactive,
+)
 
 router = APIRouter()
 
@@ -28,9 +33,35 @@ async def list_proactive_matches(
     db: Session = Depends(get_db),
 ):
     """List proactive matches for the current salesperson, grouped by customer."""
+    from ..dependencies import is_admin as _is_admin
     from ..services.proactive_service import get_matches_for_user
 
-    return get_matches_for_user(db, user.id, status=status)
+    admin_all = _is_admin(user) and status != "new"
+    return get_matches_for_user(db, user.id, status=status, admin_all=admin_all)
+
+
+@router.post("/api/proactive/refresh")
+async def refresh_proactive_matches(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Trigger a proactive matching scan (both legacy + CPH)."""
+    from ..services.proactive_service import scan_new_offers_for_matches
+
+    legacy = scan_new_offers_for_matches(db)
+
+    try:
+        from ..services.proactive_matching import run_proactive_scan
+
+        cph = run_proactive_scan(db)
+    except Exception:
+        cph = {"scanned_offers": 0, "matches_created": 0}
+
+    return {
+        "legacy_matches": legacy.get("matches_created", 0),
+        "cph_matches": cph.get("matches_created", 0),
+        "total_new": legacy.get("matches_created", 0) + cph.get("matches_created", 0),
+    }
 
 
 @router.get("/api/proactive/count")
@@ -67,6 +98,126 @@ async def dismiss_matches(
     return {"dismissed": updated}
 
 
+@router.post("/api/proactive/do-not-offer")
+async def add_do_not_offer(
+    body: DoNotOfferRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Permanently suppress MPNs for a customer company. Also auto-dismisses open matches."""
+    if not body.items:
+        raise HTTPException(400, "No items provided")
+
+    suppressed = 0
+    for item in body.items:
+        mpn = (item.mpn or "").strip().upper()
+        if not mpn or not item.company_id:
+            continue
+        existing = (
+            db.query(ProactiveDoNotOffer)
+            .filter(
+                ProactiveDoNotOffer.mpn == mpn,
+                ProactiveDoNotOffer.company_id == item.company_id,
+            )
+            .first()
+        )
+        if not existing:
+            db.add(ProactiveDoNotOffer(
+                mpn=mpn,
+                company_id=item.company_id,
+                created_by_id=user.id,
+                reason=item.reason,
+            ))
+            suppressed += 1
+
+        # Auto-dismiss any open matches for this mpn + company
+        db.query(ProactiveMatch).filter(
+            ProactiveMatch.mpn == mpn,
+            ProactiveMatch.company_id == item.company_id,
+            ProactiveMatch.status == "new",
+        ).update(
+            {"status": "dismissed", "dismiss_reason": "do_not_offer"},
+            synchronize_session=False,
+        )
+
+    db.commit()
+    return {"suppressed": suppressed}
+
+
+@router.post("/api/proactive/draft")
+async def draft_proactive_email(
+    body: DraftProactive,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """AI-draft a proactive offer email for review before sending."""
+    from ..models import CustomerSite, Offer
+    from ..services.proactive_email import draft_proactive_email as _draft
+
+    match_ids = body.match_ids
+    if not match_ids:
+        raise HTTPException(400, "Select at least one match")
+
+    matches = (
+        db.query(ProactiveMatch)
+        .filter(
+            ProactiveMatch.id.in_(match_ids),
+            ProactiveMatch.salesperson_id == user.id,
+        )
+        .all()
+    )
+    if not matches:
+        raise HTTPException(400, "No valid matches found")
+
+    site_id = matches[0].customer_site_id
+    site = db.get(CustomerSite, site_id)
+    company = site.company if site else None
+    company_name = company.name if company else "Customer"
+
+    # Resolve contact name
+    contact_name = None
+    if body.contact_ids:
+        primary = db.get(SiteContact, body.contact_ids[0])
+        if primary and primary.full_name:
+            contact_name = primary.full_name.split()[0]  # First name
+
+    # Build parts list for AI
+    parts = []
+    for m in matches:
+        offer = m.offer
+        cost = float(offer.unit_price) if offer and offer.unit_price else 0
+        sell = body.sell_prices.get(str(m.id), cost * 1.3)
+        parts.append({
+            "mpn": m.mpn,
+            "manufacturer": offer.manufacturer if offer else "",
+            "qty": offer.qty_available if offer else 0,
+            "sell_price": float(sell),
+            "condition": offer.condition if offer else "",
+            "lead_time": offer.lead_time if offer else "",
+            "customer_purchase_count": m.customer_purchase_count or 0,
+            "customer_last_purchased_at": (
+                m.customer_last_purchased_at.strftime("%b %Y")
+                if m.customer_last_purchased_at
+                else None
+            ),
+        })
+
+    salesperson_name = user.name or user.email.split("@")[0]
+
+    result = await _draft(
+        company_name=company_name,
+        contact_name=contact_name,
+        parts=parts,
+        salesperson_name=salesperson_name,
+        notes=body.notes,
+    )
+
+    if not result:
+        raise HTTPException(500, "Failed to generate email draft")
+
+    return result
+
+
 @router.post("/api/proactive/send")
 async def send_proactive(
     body: SendProactive,
@@ -101,6 +252,7 @@ async def send_proactive(
             sell_prices,
             subject,
             notes,
+            email_html=body.email_html,
         )
         return result
     except ValueError as e:

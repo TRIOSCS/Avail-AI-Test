@@ -3,9 +3,10 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
-from sqlalchemy import func as sqlfunc
+from sqlalchemy import String, func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from ...cache.decorators import cached_endpoint, invalidate_prefix
 from ...config import settings
 from ...database import get_db
 from ...dependencies import require_user
@@ -24,105 +25,119 @@ async def list_companies(
     search: str = "",
     owner_id: int = 0,
     unassigned: int = 0,
+    tag: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """List active companies with sites and open requisition counts."""
-    query = (
-        db.query(Company)
-        .filter(Company.is_active == True)  # noqa: E712
-        .options(
-            selectinload(Company.sites).joinedload(CustomerSite.owner),
-            joinedload(Company.account_owner),
-        )
-    )
-    if search.strip():
-        safe = search.strip().replace("%", r"\%").replace("_", r"\_")
-        query = query.filter(Company.name.ilike(f"%{safe}%"))
-    if unassigned:
-        query = query.filter(Company.account_owner_id == None)  # noqa: E711
-    companies = query.order_by(Company.name).limit(500).all()
 
-    # Pre-fetch open requisition counts per site (avoids N+1 query per site)
-    company_ids = [c.id for c in companies]
-    site_open_counts: dict[int, int] = {}
-    if company_ids:
-        count_rows = (
-            db.query(
-                Requisition.customer_site_id,
-                sqlfunc.count(Requisition.id),
+    @cached_endpoint(prefix="company_list", ttl_hours=0.5, key_params=["search", "owner_id", "unassigned", "tag"])
+    def _fetch(search, owner_id, unassigned, tag, db):
+        query = (
+            db.query(Company)
+            .filter(Company.is_active == True)  # noqa: E712
+            .options(
+                selectinload(Company.sites).joinedload(CustomerSite.owner),
+                joinedload(Company.account_owner),
             )
-            .filter(
-                Requisition.status.notin_(["archived", "won", "lost"]),
-            )
-            .join(CustomerSite)
-            .filter(CustomerSite.company_id.in_(company_ids))
-            .group_by(Requisition.customer_site_id)
-            .all()
         )
-        site_open_counts = {row[0]: row[1] for row in count_rows}
+        if search.strip():
+            safe = search.strip().replace("%", r"\%").replace("_", r"\_")
+            query = query.filter(Company.name.ilike(f"%{safe}%"))
+        if tag.strip():
+            safe_tag = tag.strip().lower()
+            query = query.filter(
+                sqlfunc.lower(sqlfunc.cast(Company.brand_tags, String)).contains(safe_tag)
+                | sqlfunc.lower(sqlfunc.cast(Company.commodity_tags, String)).contains(safe_tag)
+            )
+        if unassigned:
+            query = query.filter(Company.account_owner_id == None)  # noqa: E711
+        companies = query.order_by(Company.name).limit(500).all()
 
-    result = []
-    for c in companies:
-        sites = []
-        for s in c.sites:
-            if not s.is_active:
+        # Pre-fetch open requisition counts per site (avoids N+1 query per site)
+        company_ids = [c.id for c in companies]
+        site_open_counts: dict[int, int] = {}
+        if company_ids:
+            count_rows = (
+                db.query(
+                    Requisition.customer_site_id,
+                    sqlfunc.count(Requisition.id),
+                )
+                .filter(
+                    Requisition.status.notin_(["archived", "won", "lost"]),
+                )
+                .join(CustomerSite)
+                .filter(CustomerSite.company_id.in_(company_ids))
+                .group_by(Requisition.customer_site_id)
+                .all()
+            )
+            site_open_counts = {row[0]: row[1] for row in count_rows}
+
+        result = []
+        for c in companies:
+            sites = []
+            for s in c.sites:
+                if not s.is_active:
+                    continue
+                if owner_id and not unassigned and s.owner_id != owner_id:
+                    continue
+                open_count = site_open_counts.get(s.id, 0)
+                sites.append(
+                    {
+                        "id": s.id,
+                        "site_name": s.site_name,
+                        "owner_id": s.owner_id,
+                        "owner_name": s.owner.name if s.owner else None,
+                        "contact_name": s.contact_name,
+                        "contact_email": s.contact_email,
+                        "contact_phone": s.contact_phone,
+                        "contact_title": s.contact_title,
+                        "payment_terms": s.payment_terms,
+                        "shipping_terms": s.shipping_terms,
+                        "city": s.city,
+                        "state": s.state,
+                        "open_reqs": open_count,
+                        "notes": s.notes,
+                    }
+                )
+            if owner_id and not unassigned and not sites:
                 continue
-            if owner_id and not unassigned and s.owner_id != owner_id:
-                continue
-            open_count = site_open_counts.get(s.id, 0)
-            sites.append(
+            result.append(
                 {
-                    "id": s.id,
-                    "site_name": s.site_name,
-                    "owner_id": s.owner_id,
-                    "owner_name": s.owner.name if s.owner else None,
-                    "contact_name": s.contact_name,
-                    "contact_email": s.contact_email,
-                    "contact_phone": s.contact_phone,
-                    "contact_title": s.contact_title,
-                    "payment_terms": s.payment_terms,
-                    "shipping_terms": s.shipping_terms,
-                    "city": s.city,
-                    "state": s.state,
-                    "open_reqs": open_count,
-                    "notes": s.notes,
+                    "id": c.id,
+                    "name": c.name,
+                    "website": c.website,
+                    "industry": c.industry,
+                    "notes": c.notes,
+                    "domain": c.domain,
+                    "linkedin_url": c.linkedin_url,
+                    "legal_name": c.legal_name,
+                    "employee_size": c.employee_size,
+                    "hq_city": c.hq_city,
+                    "hq_state": c.hq_state,
+                    "hq_country": c.hq_country,
+                    "last_enriched_at": c.last_enriched_at.isoformat()
+                    if c.last_enriched_at
+                    else None,
+                    "enrichment_source": c.enrichment_source,
+                    "account_type": c.account_type,
+                    "phone": c.phone,
+                    "credit_terms": c.credit_terms,
+                    "tax_id": c.tax_id,
+                    "currency": c.currency,
+                    "preferred_carrier": c.preferred_carrier,
+                    "is_strategic": c.is_strategic,
+                    "brand_tags": c.brand_tags or [],
+                    "commodity_tags": c.commodity_tags or [],
+                    "account_owner_id": c.account_owner_id,
+                    "account_owner_name": (c.account_owner.name if c.account_owner else None) if c.account_owner_id else None,
+                    "site_count": len(sites),
+                    "sites": sites,
                 }
             )
-        if owner_id and not unassigned and not sites:
-            continue
-        result.append(
-            {
-                "id": c.id,
-                "name": c.name,
-                "website": c.website,
-                "industry": c.industry,
-                "notes": c.notes,
-                "domain": c.domain,
-                "linkedin_url": c.linkedin_url,
-                "legal_name": c.legal_name,
-                "employee_size": c.employee_size,
-                "hq_city": c.hq_city,
-                "hq_state": c.hq_state,
-                "hq_country": c.hq_country,
-                "last_enriched_at": c.last_enriched_at.isoformat()
-                if c.last_enriched_at
-                else None,
-                "enrichment_source": c.enrichment_source,
-                "account_type": c.account_type,
-                "phone": c.phone,
-                "credit_terms": c.credit_terms,
-                "tax_id": c.tax_id,
-                "currency": c.currency,
-                "preferred_carrier": c.preferred_carrier,
-                "is_strategic": c.is_strategic,
-                "account_owner_id": c.account_owner_id,
-                "account_owner_name": (c.account_owner.name if c.account_owner else None) if c.account_owner_id else None,
-                "site_count": len(sites),
-                "sites": sites,
-            }
-        )
-    return result
+        return result
+
+    return _fetch(search=search, owner_id=owner_id, unassigned=unassigned, tag=tag, db=db)
 
 
 @router.get("/api/companies/typeahead")
@@ -131,26 +146,32 @@ async def companies_typeahead(
     db: Session = Depends(get_db),
 ):
     """Lightweight endpoint returning all active companies + site IDs for the
-    requisition creation typeahead. No limit, minimal payload."""
-    companies = (
-        db.query(Company)
-        .filter(Company.is_active == True)  # noqa: E712
-        .options(selectinload(Company.sites))
-        .order_by(Company.name)
-        .all()
-    )
-    return [
-        {
-            "id": c.id,
-            "name": c.name,
-            "sites": [
-                {"id": s.id, "site_name": s.site_name}
-                for s in c.sites
-                if s.is_active
-            ],
-        }
-        for c in companies
-    ]
+    requisition creation typeahead. No limit, minimal payload.
+    Cached for 2 hours — invalidated when companies/sites change."""
+
+    @cached_endpoint(prefix="companies_typeahead", ttl_hours=2, key_params=[])
+    def _fetch(db):
+        companies = (
+            db.query(Company)
+            .filter(Company.is_active == True)  # noqa: E712
+            .options(selectinload(Company.sites))
+            .order_by(Company.name)
+            .all()
+        )
+        return [
+            {
+                "id": c.id,
+                "name": c.name,
+                "sites": [
+                    {"id": s.id, "site_name": s.site_name}
+                    for s in c.sites
+                    if s.is_active
+                ],
+            }
+            for c in companies
+        ]
+
+    return _fetch(db=db)
 
 
 @router.get("/api/companies/check-duplicate")
@@ -268,34 +289,14 @@ async def create_company(
                             apply_enrichment_to_company(c, enrichment)
                             s.commit()
 
-                    # Auto-discover contacts and attach to default site
+                    # Discover contacts but do NOT auto-add — let user review
                     from ...enrichment_service import find_suggested_contacts
-                    from ...models import SiteContact
                     contacts = await find_suggested_contacts(d, n)
                     if contacts:
-                        existing_emails = {
-                            sc.email.lower()
-                            for sc in s.query(SiteContact).filter(
-                                SiteContact.customer_site_id == sid,
-                                SiteContact.email.isnot(None),
-                            ).all()
-                        }
-                        added = 0
-                        for ct in contacts:
-                            email = (ct.get("email") or "").lower()
-                            if email and email not in existing_emails:
-                                s.add(SiteContact(
-                                    customer_site_id=sid,
-                                    full_name=ct.get("full_name"),
-                                    title=ct.get("title"),
-                                    email=email,
-                                    phone=ct.get("phone"),
-                                ))
-                                existing_emails.add(email)
-                                added += 1
-                        if added:
-                            s.commit()
-                            logger.info("Auto-discovered %d contacts for company %d", added, cid)
+                        logger.info(
+                            "Discovered %d suggested contacts for company %d — pending user review",
+                            len(contacts), cid,
+                        )
                 finally:
                     s.close()
             except Exception:
@@ -304,6 +305,8 @@ async def create_company(
         asyncio.create_task(_enrich_company_bg(company.id, default_site.id, domain, company.name))
         enrich_triggered = True
 
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
     return {
         "id": company.id,
         "name": company.name,
@@ -325,4 +328,28 @@ async def update_company(
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(company, field, value)
     db.commit()
+    invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
     return {"ok": True}
+
+
+@router.post("/api/companies/{company_id}/analyze-tags")
+async def analyze_company_tags(
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Trigger AI analysis of customer's requisition history to generate brand/commodity tags."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    from ...services.customer_analysis_service import analyze_customer_materials
+
+    await analyze_customer_materials(company_id, db_session=db)
+    db.refresh(company)
+    return {
+        "ok": True,
+        "brand_tags": company.brand_tags or [],
+        "commodity_tags": company.commodity_tags or [],
+    }

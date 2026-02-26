@@ -17,6 +17,9 @@ export default defineConfig({
     outDir: resolve(__dirname, "app/static/dist"),
     emptyOutDir: true,
     manifest: true,
+    sourcemap: false,
+    minify: "terser",
+    chunkSizeWarningLimit: 500,
     rollupOptions: {
       input: {
         app: resolve(__dirname, "app/static/app.js"),

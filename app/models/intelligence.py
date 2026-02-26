@@ -44,6 +44,8 @@ class MaterialCard(Base):
     enrichment_source = Column(String(50))  # "gradient_agent", "manual", etc.
     enriched_at = Column(DateTime)
 
+    deleted_at = Column(DateTime, nullable=True)  # NULL = active, non-NULL = soft-deleted
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,
@@ -63,6 +65,7 @@ class MaterialVendorHistory(Base):
     id = Column(Integer, primary_key=True)
     material_card_id = Column(Integer, ForeignKey("material_cards.id"), nullable=False)
     vendor_name = Column(String(255), nullable=False)
+    vendor_name_normalized = Column(String(255))
     source_type = Column(String(50))
     is_authorized = Column(Boolean, default=False)
     first_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -83,6 +86,28 @@ class MaterialVendorHistory(Base):
     __table_args__ = (
         Index("ix_mvh_card_vendor", "material_card_id", "vendor_name", unique=True),
         Index("ix_mvh_vendor", "vendor_name"),
+        Index("ix_mvh_vendor_norm", "vendor_name_normalized"),
+    )
+
+
+class MaterialCardAudit(Base):
+    """Audit log for material card lifecycle events."""
+
+    __tablename__ = "material_card_audit"
+    id = Column(Integer, primary_key=True)
+    material_card_id = Column(Integer, index=True)  # No FK — survives card deletion
+    action = Column(String(50), nullable=False)  # created, linked, unlinked, deleted, merged, healed, restored
+    entity_type = Column(String(50))  # requirement, sighting, offer
+    entity_id = Column(Integer)
+    old_card_id = Column(Integer)
+    new_card_id = Column(Integer)
+    normalized_mpn = Column(String(255), index=True)
+    details = Column(JSON)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_by = Column(String(255))  # system, user email, scheduler
+
+    __table_args__ = (
+        Index("ix_mca_card_action", "material_card_id", "action"),
     )
 
 
@@ -104,6 +129,18 @@ class ProactiveMatch(Base):
     salesperson_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     mpn = Column(String(255), nullable=False)
     status = Column(String(20), default="new")  # new | sent | dismissed | converted
+
+    # CPH-enriched fields (populated by matching engine)
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
+    match_score = Column(Integer, default=0)  # 0-100 composite score
+    margin_pct = Column(Float)  # Potential margin %
+    customer_purchase_count = Column(Integer, default=0)
+    customer_last_price = Column(Float)
+    customer_last_purchased_at = Column(DateTime)
+    our_cost = Column(Float)
+    dismiss_reason = Column(String(255))
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     offer = relationship("Offer", foreign_keys=[offer_id])
@@ -111,6 +148,7 @@ class ProactiveMatch(Base):
     requisition = relationship("Requisition", foreign_keys=[requisition_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
     salesperson = relationship("User", foreign_keys=[salesperson_id])
+    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
 
     __table_args__ = (
         Index("ix_pm_offer", "offer_id"),
@@ -119,6 +157,9 @@ class ProactiveMatch(Base):
         Index("ix_pm_sales", "salesperson_id"),
         Index("ix_pm_status", "status"),
         Index("ix_pm_mpn_site", "mpn", "customer_site_id"),
+        Index("ix_pm_material_card", "material_card_id"),
+        Index("ix_pm_score", "match_score"),
+        Index("ix_pm_status_sales", "status", "salesperson_id"),
     )
 
 
@@ -173,6 +214,27 @@ class ProactiveThrottle(Base):
     )
 
 
+class ProactiveDoNotOffer(Base):
+    """Permanent suppression: salesperson marks an MPN as 'do not offer' to a company."""
+
+    __tablename__ = "proactive_do_not_offer"
+    id = Column(Integer, primary_key=True)
+    mpn = Column(String(255), nullable=False)
+    company_id = Column(
+        Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    reason = Column(String(255))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    company = relationship("Company", foreign_keys=[company_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+
+    __table_args__ = (
+        Index("ix_pdno_mpn_company", "mpn", "company_id", unique=True),
+    )
+
+
 class ChangeLog(Base):
     """Field-level change log for audit trail on offers, requirements, requisitions."""
 
@@ -208,6 +270,11 @@ class ActivityLog(Base):
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"))
     vendor_contact_id = Column(Integer, ForeignKey("vendor_contacts.id"))
     requisition_id = Column(Integer, ForeignKey("requisitions.id"))
+    quote_id = Column(Integer, ForeignKey("quotes.id"))
+    customer_site_id = Column(Integer, ForeignKey("customer_sites.id"))
+    site_contact_id = Column(
+        Integer, ForeignKey("site_contacts.id", ondelete="SET NULL")
+    )
 
     # Contact snapshot
     contact_email = Column(String(255))
@@ -220,6 +287,8 @@ class ActivityLog(Base):
     external_id = Column(String(255))
     notes = Column(Text)
     dismissed_at = Column(DateTime)
+    auto_logged = Column(Boolean, default=False)
+    occurred_at = Column(DateTime)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -228,6 +297,9 @@ class ActivityLog(Base):
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
     vendor_contact = relationship("VendorContact", foreign_keys=[vendor_contact_id])
     requisition = relationship("Requisition", foreign_keys=[requisition_id])
+    quote = relationship("Quote", foreign_keys=[quote_id])
+    customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
+    site_contact = relationship("SiteContact", foreign_keys=[site_contact_id])
 
     __table_args__ = (
         Index(
@@ -247,6 +319,12 @@ class ActivityLog(Base):
             "vendor_contact_id",
             "created_at",
             postgresql_where=Column("vendor_contact_id").isnot(None),
+        ),
+        Index(
+            "ix_activity_site_contact",
+            "site_contact_id",
+            "created_at",
+            postgresql_where=Column("site_contact_id").isnot(None),
         ),
         Index("ix_activity_user", "user_id", "created_at"),
         Index(

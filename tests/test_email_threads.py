@@ -229,6 +229,20 @@ class TestBuildThreadSummary:
         assert "[AVAIL-42]" not in summary["subject"]
         assert "RFQ for LM317T" in summary["subject"]
 
+    def test_strips_ref_token_from_subject(self):
+        messages = [
+            {
+                "subject": "RFQ for LM317T [ref:42]",
+                "from": {"emailAddress": {"address": "vendor@arrow.com"}},
+                "toRecipients": [],
+                "bodyPreview": "Quote attached",
+                "receivedDateTime": "2025-01-15T10:00:00Z",
+            }
+        ]
+        summary = _build_thread_summary("conv-456", messages, "subject_token")
+        assert "[ref:42]" not in summary["subject"]
+        assert "RFQ for LM317T" in summary["subject"]
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Pydantic Schema Validation

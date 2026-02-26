@@ -7,7 +7,6 @@ but should not import from routers.
 from datetime import datetime, timezone
 
 from loguru import logger
-from sqlalchemy import func as sqlfunc
 
 from ..models import MaterialCard, MaterialVendorHistory, Sighting, VendorCard
 
@@ -37,7 +36,10 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
             .join(
                 MaterialCard, MaterialVendorHistory.material_card_id == MaterialCard.id
             )
-            .filter(MaterialVendorHistory.vendor_name == card.normalized_name)
+            .filter(
+                MaterialVendorHistory.vendor_name == card.normalized_name,
+                MaterialCard.deleted_at.is_(None),
+            )
             .order_by(MaterialVendorHistory.times_seen.desc())
             .limit(150)
             .all()
@@ -54,8 +56,7 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
         sighting_rows = (
             db.query(Sighting.mpn_matched, Sighting.manufacturer)
             .filter(
-                sqlfunc.lower(sqlfunc.trim(Sighting.vendor_name))
-                == card.normalized_name
+                Sighting.vendor_name_normalized == card.normalized_name
             )
             .filter(Sighting.mpn_matched.isnot(None), Sighting.mpn_matched != "")
             .order_by(Sighting.created_at.desc())

@@ -346,12 +346,12 @@ class TestFindSentMessage:
         gc = AsyncMock()
         gc.get_json.return_value = {
             "value": [
-                {"id": "msg-1", "conversationId": "conv-1", "subject": "[AVAIL-10] RFQ Parts"},
+                {"id": "msg-1", "conversationId": "conv-1", "subject": "RFQ Parts [ref:10]"},
                 {"id": "msg-2", "conversationId": "conv-2", "subject": "Something Else"},
             ]
         }
         with patch("asyncio.sleep", new_callable=AsyncMock):
-            result = await _find_sent_message(gc, "[AVAIL-10] RFQ Parts")
+            result = await _find_sent_message(gc, "RFQ Parts [ref:10]")
         assert result["id"] == "msg-1"
         assert result["conversationId"] == "conv-1"
 
@@ -364,7 +364,7 @@ class TestFindSentMessage:
             ]
         }
         with patch("asyncio.sleep", new_callable=AsyncMock):
-            result = await _find_sent_message(gc, "[AVAIL-10] RFQ Parts")
+            result = await _find_sent_message(gc, "RFQ Parts [ref:10]")
         assert result is None
 
     @pytest.mark.asyncio
@@ -396,11 +396,11 @@ class TestFindSentMessage:
         gc = AsyncMock()
         gc.get_json.return_value = {
             "value": [
-                {"id": "msg-1", "conversationId": "conv-1", "subject": " [AVAIL-10] RFQ "},
+                {"id": "msg-1", "conversationId": "conv-1", "subject": " RFQ [ref:10] "},
             ]
         }
         with patch("asyncio.sleep", new_callable=AsyncMock):
-            result = await _find_sent_message(gc, " [AVAIL-10] RFQ ")
+            result = await _find_sent_message(gc, " RFQ [ref:10] ")
         assert result["id"] == "msg-1"
 
 
@@ -417,7 +417,7 @@ class TestSendBatchRfq:
                 {
                     "id": "sent-msg-1",
                     "conversationId": "conv-1",
-                    "subject": f"[AVAIL-{test_requisition.id}] RFQ for parts",
+                    "subject": f"RFQ for parts [ref:{test_requisition.id}]",
                 }
             ]
         }
@@ -549,7 +549,7 @@ class TestSendBatchRfq:
 
     @pytest.mark.asyncio
     async def test_subject_tagging(self, db_session, test_user, test_requisition):
-        """Subject gets [AVAIL-{id}] prefix if not already present."""
+        """Subject gets [ref:{id}] suffix if not already present."""
         mock_gc = AsyncMock()
         mock_gc.post_json.return_value = {}
         mock_gc.get_json.return_value = {"value": []}
@@ -580,22 +580,22 @@ class TestSendBatchRfq:
         # The posted payload should have the tagged subject
         call_args = mock_gc.post_json.call_args
         payload = call_args[0][1]
-        assert f"[AVAIL-{test_requisition.id}]" in payload["message"]["subject"]
+        assert f"[ref:{test_requisition.id}]" in payload["message"]["subject"]
 
     @pytest.mark.asyncio
     async def test_subject_already_tagged(self, db_session, test_user, test_requisition):
-        """Subject already has [AVAIL-{id}] — don't double-tag."""
+        """Subject already has [ref:{id}] — don't double-tag."""
         mock_gc = AsyncMock()
         mock_gc.post_json.return_value = {}
         mock_gc.get_json.return_value = {"value": []}
 
-        avail_token = f"[AVAIL-{test_requisition.id}]"
+        avail_token = f"[ref:{test_requisition.id}]"
         vendor_groups = [
             {
                 "vendor_name": "Vendor A",
                 "vendor_email": "sales@vendora.com",
                 "parts": ["LM317T"],
-                "subject": f"{avail_token} Already Tagged",
+                "subject": f"Already Tagged {avail_token}",
                 "body": "Please quote.",
             }
         ]
@@ -802,7 +802,7 @@ class TestSendBatchRfq:
         """After sending, look up sent message and set graph IDs."""
         mock_gc = AsyncMock()
         mock_gc.post_json.return_value = {}
-        tagged_subject = f"[AVAIL-{test_requisition.id}] RFQ"
+        tagged_subject = f"RFQ [ref:{test_requisition.id}]"
         mock_gc.get_json.return_value = {
             "value": [
                 {
@@ -1668,7 +1668,7 @@ class TestPollInbox:
 
     @pytest.mark.asyncio
     async def test_tier2_subject_token_match(self, db_session, test_user, test_requisition):
-        """Tier 2: Match by [AVAIL-{id}] subject token + email."""
+        """Tier 2: Match by [AVAIL-{id}] (legacy) subject token + email."""
         contact = Contact(
             requisition_id=test_requisition.id,
             user_id=test_user.id,

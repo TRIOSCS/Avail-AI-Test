@@ -53,6 +53,9 @@ class Requisition(Base):
     requirements = relationship(
         "Requirement", back_populates="requisition", cascade="all, delete-orphan"
     )
+    attachments = relationship(
+        "RequisitionAttachment", back_populates="requisition", cascade="all, delete-orphan"
+    )
     contacts = relationship(
         "Contact", back_populates="requisition", cascade="all, delete-orphan"
     )
@@ -68,6 +71,7 @@ class Requirement(Base):
     __tablename__ = "requirements"
     id = Column(Integer, primary_key=True)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
     primary_mpn = Column(String(255))
     normalized_mpn = Column(String(255), index=True)
     oem_pn = Column(String(255))
@@ -87,6 +91,10 @@ class Requirement(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="requirements")
+    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
+    attachments = relationship(
+        "RequirementAttachment", back_populates="requirement", cascade="all, delete-orphan"
+    )
     sightings = relationship(
         "Sighting", back_populates="requirement", cascade="all, delete-orphan"
     )
@@ -97,6 +105,7 @@ class Requirement(Base):
     __table_args__ = (
         Index("ix_req_requisition", "requisition_id"),
         Index("ix_req_primary_mpn", "primary_mpn"),
+        Index("ix_requirements_material_card", "material_card_id"),
     )
 
 
@@ -104,10 +113,13 @@ class Sighting(Base):
     __tablename__ = "sightings"
     id = Column(Integer, primary_key=True)
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
     vendor_name = Column(String(255), nullable=False)
+    vendor_name_normalized = Column(String(255), index=True)
     vendor_email = Column(String(255))
     vendor_phone = Column(String(100))
     mpn_matched = Column(String(255))
+    normalized_mpn = Column(String(255), index=True)
     manufacturer = Column(String(255))
     qty_available = Column(Integer)
     unit_price = Column(Numeric(12, 4))
@@ -133,12 +145,57 @@ class Sighting(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requirement = relationship("Requirement", back_populates="sightings")
+    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
     source_company = relationship("Company", foreign_keys=[source_company_id])
 
     __table_args__ = (
         Index("ix_sightings_vendor_name", "vendor_name"),
+        Index("ix_sightings_vendor_norm", "vendor_name_normalized"),
         Index("ix_sight_req", "requirement_id"),
         Index("ix_sightings_source_company", "source_company_id"),
         Index("ix_sightings_req_vendor", "requirement_id", "vendor_name"),
         Index("ix_sightings_req_score", "requirement_id", score.desc()),
+        Index("ix_sightings_material_card", "material_card_id"),
     )
+
+
+class RequisitionAttachment(Base):
+    """File attachment on a requisition (stored in OneDrive)."""
+
+    __tablename__ = "requisition_attachments"
+    id = Column(Integer, primary_key=True)
+    requisition_id = Column(
+        Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
+    )
+    file_name = Column(String(500), nullable=False)
+    onedrive_item_id = Column(String(500))
+    onedrive_url = Column(Text)
+    thumbnail_url = Column(Text)
+    content_type = Column(String(100))
+    size_bytes = Column(Integer)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    requisition = relationship("Requisition", back_populates="attachments")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
+
+
+class RequirementAttachment(Base):
+    """File attachment on a requirement (stored in OneDrive)."""
+
+    __tablename__ = "requirement_attachments"
+    id = Column(Integer, primary_key=True)
+    requirement_id = Column(
+        Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False
+    )
+    file_name = Column(String(500), nullable=False)
+    onedrive_item_id = Column(String(500))
+    onedrive_url = Column(Text)
+    thumbnail_url = Column(Text)
+    content_type = Column(String(100))
+    size_bytes = Column(Integer)
+    uploaded_by_id = Column(Integer, ForeignKey("users.id"))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    requirement = relationship("Requirement", back_populates="attachments")
+    uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])

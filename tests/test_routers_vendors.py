@@ -852,8 +852,11 @@ def test_delete_material_admin(admin_client, db_session, admin_user):
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
 
-    # Verify it's gone
-    assert db_session.get(MaterialCard, mid) is None
+    # Verify it's soft-deleted
+    db_session.expire_all()
+    card = db_session.get(MaterialCard, mid)
+    assert card is not None
+    assert card.deleted_at is not None
 
 
 # ── Group 5: Email Metrics & History (6 tests) ──────────────────────────

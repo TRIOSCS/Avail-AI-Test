@@ -24,7 +24,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import ActivityLog, Company, User
+from app.models import ActivityLog, Company, CustomerSite, User
 
 log = logging.getLogger("avail.ownership")
 
@@ -336,6 +336,255 @@ def get_manager_digest(db: Session) -> dict:
         ],
         "generated_at": now.isoformat(),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  SITE-LEVEL OWNERSHIP — Prospecting Pool
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def run_site_ownership_sweep(db: Session) -> dict:
+    """Nightly sweep: clear stale site ownership, log warnings.
+
+    Sites with owner_id set and no activity for 30 days lose ownership.
+    Warning zone starts at day 23 (7 days before expiration).
+    """
+    now = datetime.now(timezone.utc)
+    warned = 0
+    cleared = 0
+    inactivity_limit = settings.customer_inactivity_days  # 30 days
+    warning_day = inactivity_limit - 7
+
+    owned = (
+        db.query(CustomerSite)
+        .filter(
+            CustomerSite.owner_id.isnot(None),
+            CustomerSite.is_active.is_(True),
+        )
+        .all()
+    )
+
+    for site in owned:
+        days_inactive = _site_days_since_activity(site, now)
+        if days_inactive is None:
+            if site.created_at:
+                created = (
+                    site.created_at.replace(tzinfo=timezone.utc)
+                    if site.created_at.tzinfo is None
+                    else site.created_at
+                )
+                days_inactive = (now - created).days
+            else:
+                days_inactive = 999
+
+        if days_inactive >= inactivity_limit:
+            site.owner_id = None
+            site.ownership_cleared_at = now
+            db.flush()
+            cleared += 1
+            log.info(
+                f"Site ownership cleared: '{site.site_name}' (ID {site.id}) — "
+                f"{days_inactive} days inactive"
+            )
+            continue
+
+        if days_inactive >= warning_day:
+            today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            already_warned = (
+                db.query(ActivityLog)
+                .filter(
+                    ActivityLog.customer_site_id == site.id,
+                    ActivityLog.activity_type == "ownership_warning",
+                    ActivityLog.created_at >= today_start,
+                )
+                .first()
+            )
+            if not already_warned and site.owner_id:
+                warning = ActivityLog(
+                    user_id=site.owner_id,
+                    activity_type="ownership_warning",
+                    channel="system",
+                    company_id=site.company_id,
+                    customer_site_id=site.id,
+                    contact_name=site.site_name,
+                    subject=f"Site ownership warning: {inactivity_limit - days_inactive} days remaining on {site.site_name}",
+                )
+                db.add(warning)
+                db.flush()
+                warned += 1
+
+    if cleared or warned:
+        db.commit()
+
+    result = {
+        "total_owned": len(owned),
+        "warned": warned,
+        "cleared": cleared,
+    }
+    log.info(f"Site ownership sweep complete: {result}")
+    return result
+
+
+def get_open_pool_sites(db: Session) -> list[dict]:
+    """Get all unowned active sites with parent company info."""
+    sites = (
+        db.query(CustomerSite)
+        .filter(
+            CustomerSite.owner_id.is_(None),
+            CustomerSite.is_active.is_(True),
+        )
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+
+    results = []
+    company_cache = {}
+    for s in sites:
+        if s.company_id not in company_cache:
+            company_cache[s.company_id] = db.get(Company, s.company_id)
+        co = company_cache[s.company_id]
+        results.append({
+            "site_id": s.id,
+            "site_name": s.site_name,
+            "company_id": s.company_id,
+            "company_name": co.name if co else None,
+            "contact_name": s.contact_name,
+            "contact_email": s.contact_email,
+            "city": s.city,
+            "state": s.state,
+            "last_activity_at": s.last_activity_at.isoformat() if s.last_activity_at else None,
+            "ownership_cleared_at": s.ownership_cleared_at.isoformat() if s.ownership_cleared_at else None,
+        })
+    return results
+
+
+def claim_site(site_id: int, user_id: int, db: Session) -> bool:
+    """Claim an unowned site. Sales/trader roles only. Concurrency-safe."""
+    user = db.get(User, user_id)
+    if not user or user.role not in ("sales", "trader"):
+        return False
+
+    site = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.id == site_id, CustomerSite.owner_id.is_(None))
+        .with_for_update()
+        .first()
+    )
+    if not site:
+        return False
+
+    site.owner_id = user_id
+    site.ownership_cleared_at = None
+    db.flush()
+
+    log.info(
+        f"Site claimed: '{site.site_name}' (ID {site.id}) by user {user.name} (ID {user_id})"
+    )
+    return True
+
+
+def get_my_sites(user_id: int, db: Session) -> list[dict]:
+    """Get sites owned by user with health status (green/yellow/red)."""
+    now = datetime.now(timezone.utc)
+    inactivity_limit = settings.customer_inactivity_days
+    warning_day = inactivity_limit - 7
+
+    sites = (
+        db.query(CustomerSite)
+        .filter(
+            CustomerSite.owner_id == user_id,
+            CustomerSite.is_active.is_(True),
+        )
+        .order_by(CustomerSite.site_name)
+        .all()
+    )
+
+    results = []
+    company_cache = {}
+    for s in sites:
+        if s.company_id not in company_cache:
+            company_cache[s.company_id] = db.get(Company, s.company_id)
+        co = company_cache[s.company_id]
+
+        days_inactive = _site_days_since_activity(s, now)
+        if days_inactive is None:
+            status = "no_activity"
+        elif days_inactive <= warning_day:
+            status = "green"
+        elif days_inactive <= inactivity_limit:
+            status = "yellow"
+        else:
+            status = "red"
+
+        results.append({
+            "site_id": s.id,
+            "site_name": s.site_name,
+            "company_id": s.company_id,
+            "company_name": co.name if co else None,
+            "contact_name": s.contact_name,
+            "contact_email": s.contact_email,
+            "city": s.city,
+            "state": s.state,
+            "days_inactive": days_inactive,
+            "inactivity_limit": inactivity_limit,
+            "status": status,
+            "last_activity_at": s.last_activity_at.isoformat() if s.last_activity_at else None,
+        })
+    return results
+
+
+def get_sites_at_risk(db: Session) -> list[dict]:
+    """Get owned sites approaching inactivity limit (in warning zone)."""
+    now = datetime.now(timezone.utc)
+    inactivity_limit = settings.customer_inactivity_days
+    warning_day = inactivity_limit - 7
+
+    owned = (
+        db.query(CustomerSite, User)
+        .outerjoin(User, CustomerSite.owner_id == User.id)
+        .filter(
+            CustomerSite.owner_id.isnot(None),
+            CustomerSite.is_active.is_(True),
+        )
+        .all()
+    )
+
+    at_risk = []
+    company_cache = {}
+    for site, owner in owned:
+        days_inactive = _site_days_since_activity(site, now)
+        if days_inactive is None:
+            days_inactive = 999
+
+        if days_inactive >= warning_day:
+            days_remaining = max(0, inactivity_limit - days_inactive)
+            if site.company_id not in company_cache:
+                company_cache[site.company_id] = db.get(Company, site.company_id)
+            co = company_cache[site.company_id]
+            at_risk.append({
+                "site_id": site.id,
+                "site_name": site.site_name,
+                "company_id": site.company_id,
+                "company_name": co.name if co else None,
+                "owner_id": site.owner_id,
+                "owner_name": owner.name if owner else None,
+                "days_inactive": days_inactive,
+                "days_remaining": days_remaining,
+                "inactivity_limit": inactivity_limit,
+            })
+
+    at_risk.sort(key=lambda x: x["days_remaining"])
+    return at_risk
+
+
+def _site_days_since_activity(site: CustomerSite, now: datetime) -> int | None:
+    """Calculate days since last activity for a site."""
+    if not site.last_activity_at:
+        return None
+    last = site.last_activity_at
+    if last.tzinfo is None:
+        last = last.replace(tzinfo=timezone.utc)
+    return (now - last).days
 
 
 # ═══════════════════════════════════════════════════════════════════════

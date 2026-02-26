@@ -2,7 +2,7 @@
 
 import os
 
-APP_VERSION = "2.9.1"
+APP_VERSION = "3.0.0"
 
 
 class Settings:
@@ -79,11 +79,20 @@ class Settings:
     # Agent service-to-service auth
     agent_api_key: str = os.getenv("AGENT_API_KEY", "")
 
+    # Explorium / Vibe Prospecting API
+    explorium_api_key: str = os.getenv("EXPLORIUM_API_KEY", "")
+    explorium_api_base_url: str = os.getenv(
+        "EXPLORIUM_API_BASE_URL", "https://api.explorium.ai"
+    )
+
     # Enrichment APIs
     apollo_api_key: str = os.getenv("APOLLO_API_KEY", "")
+    apollo_rate_limit_per_min: int = int(os.getenv("APOLLO_RATE_LIMIT_PER_MIN", "5"))
 
     # Deep Enrichment APIs
     hunter_api_key: str = os.getenv("HUNTER_API_KEY", "")
+    hunter_monthly_search_limit: int = int(os.getenv("HUNTER_MONTHLY_SEARCH_LIMIT", "25"))
+    hunter_monthly_verify_limit: int = int(os.getenv("HUNTER_MONTHLY_VERIFY_LIMIT", "50"))
     rocketreach_api_key: str = os.getenv("ROCKETREACH_API_KEY", "")
     clearbit_api_key: str = os.getenv("CLEARBIT_API_KEY", "")
 
@@ -102,6 +111,14 @@ class Settings:
     )
     deep_enrichment_stale_days: int = int(
         os.getenv("DEEP_ENRICHMENT_STALE_DAYS", "30")
+    )
+
+    # Material card AI enrichment
+    material_enrichment_enabled: bool = (
+        os.getenv("MATERIAL_ENRICHMENT_ENABLED", "true").lower() == "true"
+    )
+    material_enrichment_batch_size: int = int(
+        os.getenv("MATERIAL_ENRICHMENT_BATCH_SIZE", "300")
     )
 
     # AI Features (Definitive Spec)
@@ -160,6 +177,9 @@ class Settings:
     )
     proactive_archive_age_days: int = int(os.getenv("PROACTIVE_ARCHIVE_AGE_DAYS", "30"))
     proactive_throttle_days: int = int(os.getenv("PROACTIVE_THROTTLE_DAYS", "21"))
+    proactive_scan_interval_hours: int = int(os.getenv("PROACTIVE_SCAN_INTERVAL_HOURS", "4"))
+    proactive_min_margin_pct: float = float(os.getenv("PROACTIVE_MIN_MARGIN_PCT", "10.0"))
+    proactive_match_expiry_days: int = int(os.getenv("PROACTIVE_MATCH_EXPIRY_DAYS", "30"))
 
     # Buy plan — stock sale detection & auto-complete
     stock_sale_vendor_names: list = [
@@ -180,11 +200,32 @@ class Settings:
     buyplan_auto_complete_tz: str = os.getenv("BUYPLAN_AUTO_COMPLETE_TZ", "America/New_York")
     po_verify_interval_min: int = int(os.getenv("PO_VERIFY_INTERVAL_MIN", "30"))
 
+    # Contact intelligence
+    contact_scoring_enabled: bool = (
+        os.getenv("CONTACT_SCORING_ENABLED", "true").lower() == "true"
+    )
+    contact_nudge_dormant_days: int = int(os.getenv("CONTACT_NUDGE_DORMANT_DAYS", "30"))
+    contact_nudge_cooling_days: int = int(os.getenv("CONTACT_NUDGE_COOLING_DAYS", "14"))
+
     # Own company domains — used to filter internal emails from vendor threads
     own_domains: frozenset = frozenset(
         d.strip().lower()
         for d in os.getenv("OWN_DOMAINS", "trioscs.com").split(",")
         if d.strip()
+    )
+
+    # Prospecting module (Phase 8)
+    prospecting_enabled: bool = (
+        os.getenv("PROSPECTING_ENABLED", "true").lower() == "true"
+    )
+    prospecting_min_fit_for_contacts: int = int(
+        os.getenv("PROSPECTING_MIN_FIT_FOR_CONTACTS", "60")
+    )
+    prospecting_expire_days: int = int(
+        os.getenv("PROSPECTING_EXPIRE_DAYS", "90")
+    )
+    prospecting_resurface_days: int = int(
+        os.getenv("PROSPECTING_RESURFACE_DAYS", "180")
     )
 
 

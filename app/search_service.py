@@ -174,16 +174,19 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     log.info(f"Req {req.id} ({pns[0]}): {len(sightings)} fresh sightings")
 
     # 3. Material card upsert (errors won't break search)
+    card_ids = set()
     for pn in pns:
         try:
-            _upsert_material_card(pn, sightings, db, now)
+            card = _upsert_material_card(pn, sightings, db, now)
+            if card:
+                card_ids.add(card.id)
         except Exception as e:
-            log.error(f"Material card upsert failed for '{pn}': {e}")
+            log.error("MATERIAL_CARD_UPSERT_FAIL: mpn=%s error=%s", pn, e)
             db.rollback()
 
     # 4. Historical vendors from material cards
     fresh_vendors = {s.vendor_name.lower() for s in sightings}
-    history = _get_material_history(pns, fresh_vendors, db)
+    history = _get_material_history(list(card_ids), fresh_vendors, db)
 
     # 5. Combine + sort
     results = []
@@ -492,6 +495,7 @@ def _save_sightings(
         s = Sighting(
             requirement_id=req.id,
             vendor_name=clean_vendor,
+            vendor_name_normalized=normalize_vendor_name(clean_vendor),
             vendor_email=r.get("vendor_email"),
             vendor_phone=r.get("vendor_phone"),
             mpn_matched=clean_mpn,
@@ -605,37 +609,34 @@ def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
 
 
 def _get_material_history(
-    pns: list[str], fresh_vendors: set, db: Session
+    material_card_ids: list[int], fresh_vendors: set, db: Session
 ) -> list[dict]:
-    """Vendors from material cards NOT in fresh results."""
-    if not pns:
+    """All vendor touchpoints from material cards, excluding vendors with fresh sightings."""
+    if not material_card_ids:
         return []
 
-    # Batch fetch all material cards for these PNs (1 query instead of N)
-    norm_pns = [normalize_mpn_key(pn) for pn in pns if normalize_mpn_key(pn)]
-    if not norm_pns:
-        return []
     cards = (
-        db.query(MaterialCard).filter(MaterialCard.normalized_mpn.in_(norm_pns)).all()
+        db.query(MaterialCard)
+        .filter(MaterialCard.id.in_(material_card_ids), MaterialCard.deleted_at.is_(None))
+        .all()
     )
     if not cards:
         return []
 
-    # Batch fetch all vendor histories for these cards (1 query instead of N lazy loads)
     card_map = {c.id: c for c in cards}
     all_vh = (
         db.query(MaterialVendorHistory)
-        .filter(MaterialVendorHistory.material_card_id.in_(card_map.keys()))
+        .filter(MaterialVendorHistory.material_card_id.in_(material_card_ids))
         .all()
     )
 
+    from .vendor_utils import normalize_vendor_name as _nvn
+
     rows = []
-    seen = set()
     for vh in all_vh:
-        vk = vh.vendor_name.lower()
-        if vk in fresh_vendors or vk in seen:
+        vk = _nvn(vh.vendor_name) or vh.vendor_name.lower()
+        if vk in fresh_vendors:
             continue
-        seen.add(vk)
         card = card_map[vh.material_card_id]
         rows.append(
             {
@@ -713,23 +714,101 @@ def _history_to_result(h: dict, now: datetime) -> dict:
     }
 
 
+def _audit_card_created(db: Session, card: MaterialCard) -> None:
+    """Log a 'created' audit entry for a new material card."""
+    try:
+        from .services.audit_service import log_audit
+        log_audit(db, material_card_id=card.id, action="created",
+                  normalized_mpn=card.normalized_mpn, created_by="system")
+    except Exception:
+        pass  # Audit should never break card creation
+
+
+def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
+    """Find or create a MaterialCard for the given MPN.
+
+    Returns the card (flushed, with id set) or None if MPN is too short.
+
+    Uses atomic INSERT ... ON CONFLICT DO NOTHING on PostgreSQL to eliminate
+    race conditions when concurrent requests create the same card.  Falls back
+    to try/except for SQLite (tests).
+    """
+    norm = normalize_mpn_key(mpn)
+    if not norm:
+        return None
+
+    # Fast path — card already exists (no write, cheapest possible check)
+    card = db.query(MaterialCard).filter_by(normalized_mpn=norm).filter(
+        MaterialCard.deleted_at.is_(None)
+    ).first()
+    if card:
+        log.debug("MC_METRIC: action=resolved mpn=%s card_id=%d", norm, card.id)
+        return card
+
+    display = normalize_mpn(mpn) or mpn.strip()
+
+    dialect = db.bind.dialect.name if db.bind else ""
+    if dialect == "postgresql":
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        stmt = pg_insert(MaterialCard).values(
+            normalized_mpn=norm,
+            display_mpn=display,
+            search_count=0,
+        ).on_conflict_do_nothing(index_elements=["normalized_mpn"])
+        result = db.execute(stmt)
+        db.flush()
+        # Re-fetch (unfiltered — may be soft-deleted and needs restoring)
+        card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
+        if card is None:
+            log.error("MATERIAL_CARD_RESOLVE_FAIL: card missing after ON CONFLICT for mpn=%s", norm)
+        elif card.deleted_at is not None:
+            # Restore soft-deleted card
+            card.deleted_at = None
+            log.info("MC_METRIC: action=restored mpn=%s card_id=%d", norm, card.id)
+            _audit_card_created(db, card)
+        elif result.rowcount == 0:
+            log.info("MC_METRIC: action=race_resolved mpn=%s card_id=%d", norm, card.id)
+        else:
+            log.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
+            _audit_card_created(db, card)
+        return card
+    else:
+        # SQLite / test fallback — use try/except on IntegrityError
+        from sqlalchemy.exc import IntegrityError
+
+        try:
+            card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0)
+            db.add(card)
+            db.flush()
+            log.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
+            _audit_card_created(db, card)
+            return card
+        except IntegrityError:
+            db.rollback()
+            log.info("MC_METRIC: action=race_resolved mpn=%s", norm)
+            card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
+            # Restore if soft-deleted
+            if card and card.deleted_at is not None:
+                card.deleted_at = None
+                db.flush()
+                log.info("MC_METRIC: action=restored mpn=%s card_id=%d", norm, card.id)
+            return card
+
+
 def _upsert_material_card(
     pn: str, sightings: list[Sighting], db: Session, now: datetime
-):
-    """Upsert material card. Raises on error — caller handles rollback."""
+) -> MaterialCard | None:
+    """Upsert material card + link sightings. Raises on error — caller handles rollback."""
     norm = normalize_mpn_key(pn)
     if not norm:
-        return
+        return None
     pn_key = normalize_mpn_key(pn)
     pn_sightings = [s for s in sightings if normalize_mpn_key(s.mpn_matched or "") == pn_key]
     if not pn_sightings:
-        return
+        return None
 
-    card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
-    if not card:
-        card = MaterialCard(normalized_mpn=norm, display_mpn=pn, search_count=0)
-        db.add(card)
-        db.flush()
+    card = resolve_material_card(pn, db)
 
     card.search_count = (card.search_count or 0) + 1
     card.last_searched_at = now
@@ -739,9 +818,12 @@ def _upsert_material_card(
                 card.manufacturer = s.manufacturer
                 break
 
-    # Batch fetch all existing vendor histories for this card (avoids N+1)
+    # Batch fetch all existing vendor histories for this card (avoids N+1).
+    # Key by normalized vendor name so "ARROW", "Arrow", "arrow" all match.
+    from .vendor_utils import normalize_vendor_name as _nvn
+
     existing_vh = {
-        vh.vendor_name: vh
+        _nvn(vh.vendor_name): vh
         for vh in db.query(MaterialVendorHistory)
         .filter_by(material_card_id=card.id)
         .all()
@@ -751,7 +833,8 @@ def _upsert_material_card(
         if not s.vendor_name:
             continue
         raw = s.raw_data or {}
-        vh = existing_vh.get(s.vendor_name)
+        vn_key = _nvn(s.vendor_name)
+        vh = existing_vh.get(vn_key)
 
         if vh:
             vh.last_seen = now
@@ -769,9 +852,11 @@ def _upsert_material_card(
             if raw.get("vendor_sku"):
                 vh.vendor_sku = raw["vendor_sku"]
         else:
+            vn_norm = _nvn(s.vendor_name) or s.vendor_name
             new_vh = MaterialVendorHistory(
                 material_card_id=card.id,
-                vendor_name=s.vendor_name,
+                vendor_name=vn_norm,
+                vendor_name_normalized=vn_norm,
                 source_type=s.source_type,
                 is_authorized=s.is_authorized or False,
                 first_seen=now,
@@ -784,8 +869,17 @@ def _upsert_material_card(
                 vendor_sku=raw.get("vendor_sku"),
             )
             db.add(new_vh)
-            existing_vh[s.vendor_name] = new_vh  # Prevent dupe inserts within batch
+            existing_vh[vn_key] = new_vh  # Prevent dupe inserts within batch
+
+    # Link sightings to material card + populate normalized_mpn
+    for s in pn_sightings:
+        if not s.material_card_id:
+            s.material_card_id = card.id
+        if not s.normalized_mpn and s.mpn_matched:
+            s.normalized_mpn = normalize_mpn_key(s.mpn_matched)
+
     db.commit()
+    return card
 
 
 def sighting_to_dict(s: Sighting) -> dict:
@@ -818,4 +912,5 @@ def sighting_to_dict(s: Sighting) -> dict:
         "lead_time_days": s.lead_time_days,
         "lead_time": s.lead_time,
         "created_at": s.created_at.isoformat() if s.created_at else None,
+        "is_stale": (datetime.now(timezone.utc) - (s.created_at.replace(tzinfo=timezone.utc) if s.created_at.tzinfo is None else s.created_at)).days > 90 if s.created_at else False,
     }

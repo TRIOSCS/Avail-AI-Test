@@ -176,7 +176,7 @@ class TestLifespanSentry:
                 call_kwargs = mock_sentry_init.call_args[1]
                 assert call_kwargs["environment"] == "production"
                 assert "integrations" in call_kwargs
-                assert len(call_kwargs["integrations"]) == 2
+                assert len(call_kwargs["integrations"]) == 4
                 assert call_kwargs["before_send"] is not None
         finally:
             if original is not None:
@@ -603,4 +603,8 @@ class TestModuleLevelBranches:
 
             # Restore the original app object to avoid breaking other tests
             main_mod.app = original_app
+
+
+# ── Cache warmup (lines 121-123) ───────────────────────────────────────
+
 

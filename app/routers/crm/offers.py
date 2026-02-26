@@ -6,16 +6,15 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...config import settings
 from ...database import get_db
-from ...dependencies import require_buyer, require_user
+from ...dependencies import is_admin as _is_admin, require_buyer, require_user
 from ...models import (
     ActivityLog,
     ChangeLog,
+    MaterialCard,
     Offer,
     OfferAttachment,
     Quote,
-    Requirement,
     Requisition,
     User,
     VendorCard,
@@ -24,14 +23,9 @@ from ...models import (
 from ...schemas.crm import OfferCreate, OfferUpdate, OneDriveAttach
 from ...schemas.responses import OfferListResponse
 from ...services.credential_service import get_credential_cached
-from ...utils.normalization import (
-    normalize_condition,
-    normalize_mpn,
-    normalize_mpn_key,
-    normalize_packaging,
-)
+from ...utils.normalization import normalize_mpn_key
 from ...vendor_utils import normalize_vendor_name
-from ._helpers import record_changes, _preload_last_quoted_prices
+from ._helpers import _preload_last_quoted_prices, record_changes
 
 router = APIRouter()
 
@@ -157,31 +151,35 @@ async def list_offers(
     # Preload quoted prices ONCE instead of per-requirement DB call
     quoted_prices = _preload_last_quoted_prices(db)
 
-    # ── Cross-requisition historical offers ──────────────────────────
-    # Collect all MPNs (primary + substitutes) per requirement
-    req_mpn_map: dict[int, set[str]] = {}  # requirement_id → set of normalized MPNs
-    all_mpns: set[str] = set()
-    primary_mpns: set[str] = set()
+    # ── Cross-requisition historical offers (via material_card_id FK) ──
+    req_card_map: dict[int, set[int]] = {}
+    all_card_ids: set[int] = set()
+    primary_card_ids: dict[int, int | None] = {}
     for r in req.requirements:
-        mpns: set[str] = set()
-        p = (r.primary_mpn or "").upper().strip()
-        if p:
-            mpns.add(p)
-            primary_mpns.add(p)
-        for s in r.substitutes or []:
-            s_norm = (s if isinstance(s, str) else "").upper().strip()
-            if s_norm:
-                mpns.add(s_norm)
-        req_mpn_map[r.id] = mpns
-        all_mpns |= mpns
+        r_card_ids: set[int] = set()
+        if r.material_card_id:
+            r_card_ids.add(r.material_card_id)
+            primary_card_ids[r.id] = r.material_card_id
+        else:
+            primary_card_ids[r.id] = None
+        for sub in r.substitutes or []:
+            sub_str = (sub if isinstance(sub, str) else "").strip()
+            if sub_str:
+                sub_key = normalize_mpn_key(sub_str)
+                if sub_key:
+                    sub_card = db.query(MaterialCard.id).filter_by(normalized_mpn=sub_key).first()
+                    if sub_card:
+                        r_card_ids.add(sub_card[0])
+        req_card_map[r.id] = r_card_ids
+        all_card_ids |= r_card_ids
 
     hist_by_req: dict[int, list] = {}
-    if all_mpns:
+    if all_card_ids:
         hist_query = (
             db.query(Offer)
             .filter(
                 Offer.requisition_id != req_id,
-                sqlfunc.upper(Offer.mpn).in_(all_mpns),
+                Offer.material_card_id.in_(all_card_ids),
                 Offer.status.in_(["active", "won"]),
             )
             .options(joinedload(Offer.entered_by))
@@ -189,16 +187,12 @@ async def list_offers(
             .limit(100)
             .all()
         )
-        # Bucket historical offers into requirement groups
         for ho in hist_query:
-            ho_mpn = (ho.mpn or "").upper().strip()
             for r in req.requirements:
-                if ho_mpn in req_mpn_map.get(r.id, set()):
+                if ho.material_card_id in req_card_map.get(r.id, set()):
                     if r.id not in hist_by_req:
                         hist_by_req[r.id] = []
-                    is_sub = ho_mpn not in primary_mpns or (
-                        ho_mpn != (r.primary_mpn or "").upper().strip()
-                    )
+                    is_sub = ho.material_card_id != primary_card_ids.get(r.id)
                     hist_by_req[r.id].append(
                         {
                             "id": ho.id,
@@ -219,12 +213,14 @@ async def list_offers(
                             "is_substitute": is_sub,
                         }
                     )
-                    break  # assign to first matching requirement only
+                    break
 
     result = []
     for r in req.requirements:
         target = float(r.target_price) if r.target_price else None
-        last_q = quoted_prices.get((r.primary_mpn or "").upper().strip())
+        last_q = (
+            quoted_prices.get(f"card:{r.material_card_id}") if r.material_card_id else None
+        ) or quoted_prices.get((r.primary_mpn or "").upper().strip())
         result.append(
             {
                 "requirement_id": r.id,
@@ -324,11 +320,20 @@ async def create_offer(
             asyncio.create_task(
                 _background_enrich_vendor(card.id, domain, card.display_name)
             )
+    # Resolve material card for this MPN
+    from ...search_service import resolve_material_card
+    from ...utils.normalization import normalize_mpn_key
+
+    mat_card = resolve_material_card(payload.mpn, db)
+
     offer = Offer(
         requisition_id=req_id,
         requirement_id=payload.requirement_id,
+        material_card_id=mat_card.id if mat_card else None,
+        normalized_mpn=normalize_mpn_key(payload.mpn) if payload.mpn else None,
         vendor_card_id=card.id,
         vendor_name=card.display_name,
+        vendor_name_normalized=card.normalized_name,
         mpn=payload.mpn,
         manufacturer=payload.manufacturer,
         qty_available=payload.qty_available,
@@ -425,6 +430,11 @@ async def update_offer(
     record_changes(db, "offer", offer_id, user.id, old_dict, new_dict, trackable)
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
+
+    # CPH hook: record purchase history when offer status changes to 'won'
+    if old_dict.get("status") != "won" and offer.status == "won":
+        _record_offer_won_history(db, offer)
+
     db.commit()
     return {"ok": True}
 
@@ -508,6 +518,33 @@ async def reject_offer(
                    {"status": old_status}, {"status": "rejected"}, ["status"])
     db.commit()
     return {"ok": True, "status": "rejected"}
+
+
+@router.patch("/api/offers/{offer_id}/mark-sold")
+async def mark_offer_sold(
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark an offer as sold — stock is confirmed purchased/gone.
+
+    Only the buyer who created the offer or an admin can mark it sold.
+    """
+    offer = db.get(Offer, offer_id)
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    if offer.entered_by_id != user.id and not _is_admin(user):
+        raise HTTPException(403, "Only the offer creator or an admin can mark sold")
+    if offer.status == "sold":
+        return {"ok": True, "status": "sold", "message": "Already marked sold"}
+    old_status = offer.status
+    offer.status = "sold"
+    offer.updated_at = datetime.now(timezone.utc)
+    offer.updated_by_id = user.id
+    record_changes(db, "offer", offer_id, user.id,
+                   {"status": old_status}, {"status": "sold"}, ["status"])
+    db.commit()
+    return {"ok": True, "status": "sold"}
 
 
 @router.get("/api/changelog/{entity_type}/{entity_id}")
@@ -712,3 +749,35 @@ async def browse_onedrive(
         }
         for i in items
     ]
+
+
+def _record_offer_won_history(db: Session, offer: Offer) -> None:
+    """Feed customer_part_history when an offer is marked as won.
+
+    Resolves the company via offer → requisition → customer_site → company.
+    Errors are logged but never block the offer update flow.
+    """
+    if not offer.material_card_id:
+        return
+    try:
+        from ...models import CustomerSite
+        from ...services.purchase_history_service import upsert_purchase
+
+        req = db.get(Requisition, offer.requisition_id) if offer.requisition_id else None
+        if not req or not req.customer_site_id:
+            return
+        site = db.get(CustomerSite, req.customer_site_id)
+        if not site or not site.company_id:
+            return
+
+        upsert_purchase(
+            db,
+            company_id=site.company_id,
+            material_card_id=offer.material_card_id,
+            source="avail_offer",
+            unit_price=offer.unit_price,
+            quantity=offer.qty_available,
+            source_ref=f"offer:{offer.id}",
+        )
+    except Exception as e:
+        logger.warning("Offer won purchase history recording failed: %s", e)

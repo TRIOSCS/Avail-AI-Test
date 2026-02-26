@@ -196,7 +196,7 @@ class TestNormalizeCompanyInput:
 
     def test_cleans_name_and_domain(self):
         from app.enrichment_service import normalize_company_input
-        name, domain = asyncio.get_event_loop().run_until_complete(
+        name, domain = asyncio.run(
             normalize_company_input("  Arrow Electronics  ", "https://www.arrow.com/")
         )
         assert name == "Arrow Electronics"
@@ -204,7 +204,7 @@ class TestNormalizeCompanyInput:
 
     def test_empty_name(self):
         from app.enrichment_service import normalize_company_input
-        name, domain = asyncio.get_event_loop().run_until_complete(
+        name, domain = asyncio.run(
             normalize_company_input("", "example.com")
         )
         assert name == ""
@@ -212,7 +212,7 @@ class TestNormalizeCompanyInput:
 
     def test_no_domain(self):
         from app.enrichment_service import normalize_company_input
-        name, domain = asyncio.get_event_loop().run_until_complete(
+        name, domain = asyncio.run(
             normalize_company_input("Arrow", "")
         )
         assert name == "Arrow"
@@ -223,7 +223,7 @@ class TestNormalizeCompanyInput:
         from app.enrichment_service import normalize_company_input
         with patch("app.enrichment_service.get_credential_cached", return_value="sk-test"):
             with patch("app.enrichment_service.claude_text", new_callable=AsyncMock, return_value="Fixed Name"):
-                name, domain = asyncio.get_event_loop().run_until_complete(
+                name, domain = asyncio.run(
                     normalize_company_input("Xyzwrk Corp", "example.com")
                 )
                 assert name == "Fixed Name"
@@ -231,7 +231,7 @@ class TestNormalizeCompanyInput:
     def test_suspicious_name_no_api_key(self):
         """Without API key, suspicious name passes through unchanged."""
         from app.enrichment_service import normalize_company_input
-        name, domain = asyncio.get_event_loop().run_until_complete(
+        name, domain = asyncio.run(
             normalize_company_input("Xyzwrk Corp", "example.com")
         )
         assert name == "Xyzwrk Corp"
@@ -246,7 +246,7 @@ class TestClayFindCompany:
     def test_no_api_key_returns_none(self):
         from app.enrichment_service import _clay_find_company
         with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.get_event_loop().run_until_complete(_clay_find_company("example.com"))
+            result = asyncio.run(_clay_find_company("example.com"))
             assert result is None
 
     def test_success(self):
@@ -264,7 +264,7 @@ class TestClayFindCompany:
         with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _clay_find_company("example.com")
                 )
                 assert result["source"] == "clay"
@@ -281,7 +281,7 @@ class TestClayFindCompany:
         with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _clay_find_company("example.com")
                 )
                 assert result is None
@@ -291,7 +291,7 @@ class TestClayFindCompany:
         with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(side_effect=Exception("timeout"))
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _clay_find_company("example.com")
                 )
                 assert result is None
@@ -301,7 +301,7 @@ class TestClayFindContacts:
     def test_no_api_key_returns_empty(self):
         from app.enrichment_service import _clay_find_contacts
         with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 _clay_find_contacts("example.com")
             )
             assert result == []
@@ -319,7 +319,7 @@ class TestClayFindContacts:
         with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _clay_find_contacts("example.com")
                 )
                 assert len(result) == 2
@@ -339,7 +339,7 @@ class TestClayFindContacts:
         with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _clay_find_contacts("example.com")
                 )
                 assert len(result) == 1
@@ -354,7 +354,7 @@ class TestExploriumFindCompany:
     def test_no_api_key_returns_none(self):
         from app.enrichment_service import _explorium_find_company
         with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 _explorium_find_company("example.com")
             )
             assert result is None
@@ -375,7 +375,7 @@ class TestExploriumFindCompany:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _explorium_find_company("example.com")
                 )
                 assert result["source"] == "explorium"
@@ -387,7 +387,7 @@ class TestExploriumFindContacts:
     def test_no_api_key_returns_empty(self):
         from app.enrichment_service import _explorium_find_contacts
         with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 _explorium_find_contacts("example.com")
             )
             assert result == []
@@ -404,7 +404,7 @@ class TestExploriumFindContacts:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _explorium_find_contacts("example.com")
                 )
                 assert len(result) == 1
@@ -421,7 +421,7 @@ class TestGradientFindCompany:
     def test_no_api_key_returns_none(self):
         from app.enrichment_service import _gradient_find_company
         with patch("app.config.settings", SimpleNamespace(do_gradient_api_key="")):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 _gradient_find_company("example.com")
             )
             assert result is None
@@ -441,7 +441,7 @@ class TestGradientFindCompany:
                     "hq_country": "US",
                 },
             ):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _gradient_find_company("example.com", "Grad Corp")
                 )
                 assert result["source"] == "gradient"
@@ -456,7 +456,7 @@ class TestGradientFindCompany:
                 new_callable=AsyncMock,
                 side_effect=Exception("fail"),
             ):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _gradient_find_company("example.com")
                 )
                 assert result is None
@@ -471,7 +471,7 @@ class TestAiFindCompany:
     def test_no_api_key_returns_none(self):
         from app.enrichment_service import _ai_find_company
         with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 _ai_find_company("example.com")
             )
             assert result is None
@@ -491,7 +491,7 @@ class TestAiFindCompany:
                     "website": "https://ai.com",
                 },
             ):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _ai_find_company("ai.com", "AI Corp")
                 )
                 assert result["source"] == "ai"
@@ -505,7 +505,7 @@ class TestAiFindCompany:
                 new_callable=AsyncMock,
                 return_value=None,
             ):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _ai_find_company("example.com")
                 )
                 assert result is None
@@ -515,7 +515,7 @@ class TestAiFindContacts:
     def test_no_api_key_returns_empty(self):
         from app.enrichment_service import _ai_find_contacts
         with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 _ai_find_contacts("example.com")
             )
             assert result == []
@@ -530,7 +530,7 @@ class TestAiFindContacts:
                     {"full_name": "Bob", "title": "Sales", "email": "bob@ai.com"},
                 ],
             ):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _ai_find_contacts("ai.com", "AI Corp")
                 )
                 assert len(result) == 1
@@ -556,7 +556,7 @@ class TestEnrichEntity:
         cached = {"legal_name": "Cached Corp", "domain": "cached.com", "source": "cache"}
         with patch("app.cache.intel_cache.get_cached", return_value=cached):
             with patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock, return_value=("Cached", "cached.com")):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     enrich_entity("cached.com")
                 )
                 assert result["legal_name"] == "Cached Corp"
@@ -565,7 +565,7 @@ class TestEnrichEntity:
         from app.enrichment_service import enrich_entity
         with patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock, return_value=("Test", "test.com")):
             with patch("app.enrichment_service._ai_find_company", new_callable=AsyncMock, return_value=None):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     enrich_entity("test.com")
                 )
                 assert result["domain"] == "test.com"
@@ -585,7 +585,7 @@ class TestEnrichEntity:
         with patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock, return_value=("Clay", "clay.com")):
             with patch("app.enrichment_service._clay_find_company", new_callable=AsyncMock, return_value=clay_data):
                 with patch("app.enrichment_service._ai_find_company", new_callable=AsyncMock, return_value=None):
-                    result = asyncio.get_event_loop().run_until_complete(
+                    result = asyncio.run(
                         enrich_entity("clay.com")
                     )
                     assert "clay" in result.get("source", "")
@@ -605,7 +605,7 @@ class TestFindSuggestedContacts:
 
     def test_all_providers_no_keys_returns_empty(self):
         from app.enrichment_service import find_suggested_contacts
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             find_suggested_contacts("example.com")
         )
         assert result == []
@@ -618,7 +618,7 @@ class TestFindSuggestedContacts:
         ]
         with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts[:1]):
             with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts[1:]):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     find_suggested_contacts("example.com")
                 )
                 # Should be deduped to 1 contact
@@ -631,7 +631,7 @@ class TestFindSuggestedContacts:
             {"full_name": "Janitor", "title": "Facilities Janitor", "email": "janitor@example.com", "source": "clay"},
         ]
         with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 find_suggested_contacts("example.com")
             )
             # VP Sales is relevant, Janitor is not
@@ -644,7 +644,7 @@ class TestFindSuggestedContacts:
             {"full_name": "Receptionist", "title": "Receptionist", "email": "front@example.com", "source": "clay"},
         ]
         with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 find_suggested_contacts("example.com")
             )
             # Should return unfiltered since filter removed everything
@@ -790,7 +790,7 @@ class TestNormalizeCompanyInputExceptionPath:
                 new_callable=AsyncMock,
                 side_effect=Exception("API timeout"),
             ):
-                name, domain = asyncio.get_event_loop().run_until_complete(
+                name, domain = asyncio.run(
                     normalize_company_input("Xyzwrk Corp", "example.com")
                 )
                 # Exception is caught; original suspicious name is returned unchanged
@@ -844,7 +844,7 @@ class TestClayFindContactsTitleFilter:
         with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _clay_find_contacts("example.com", title_filter="VP")
                 )
                 assert len(result) == 1
@@ -864,7 +864,7 @@ class TestClayFindContactsNon200:
         with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _clay_find_contacts("example.com")
                 )
                 assert result == []
@@ -879,7 +879,7 @@ class TestClayFindContactsException:
         with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(side_effect=Exception("network error"))
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _clay_find_contacts("example.com")
                 )
                 assert result == []
@@ -896,7 +896,7 @@ class TestExploriumFindCompanyNon200:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _explorium_find_company("example.com")
                 )
                 assert result is None
@@ -911,7 +911,7 @@ class TestExploriumFindCompanyException:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(side_effect=Exception("timeout"))
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _explorium_find_company("example.com")
                 )
                 assert result is None
@@ -933,7 +933,7 @@ class TestExploriumFindContactsTitleFilter:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _explorium_find_contacts("example.com", title_filter="Director")
                 )
                 assert len(result) == 1
@@ -952,7 +952,7 @@ class TestExploriumFindContactsNon200:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _explorium_find_contacts("example.com")
                 )
                 assert result == []
@@ -967,7 +967,7 @@ class TestExploriumFindContactsException:
         with patch("app.enrichment_service.get_credential_cached", return_value="exp-key"):
             with patch("app.enrichment_service.http") as mock_http:
                 mock_http.post = AsyncMock(side_effect=Exception("connection refused"))
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _explorium_find_contacts("example.com")
                 )
                 assert result == []
@@ -986,7 +986,7 @@ class TestGradientFindCompanyNullData:
                 new_callable=AsyncMock,
                 return_value=None,
             ):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _gradient_find_company("example.com")
                 )
                 assert result is None
@@ -1001,7 +1001,7 @@ class TestGradientFindCompanyNullData:
                 new_callable=AsyncMock,
                 return_value=["not", "a", "dict"],
             ):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _gradient_find_company("example.com")
                 )
                 assert result is None
@@ -1019,7 +1019,7 @@ class TestAiFindCompanyException:
                 new_callable=AsyncMock,
                 side_effect=Exception("rate limited"),
             ):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _ai_find_company("example.com")
                 )
                 assert result is None
@@ -1037,7 +1037,7 @@ class TestAiFindContactsException:
                 new_callable=AsyncMock,
                 side_effect=Exception("websearch failed"),
             ):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     _ai_find_contacts("example.com", "Example Corp")
                 )
                 assert result == []
@@ -1101,7 +1101,7 @@ class TestEnrichEntityAIFillsGaps:
                             new_callable=AsyncMock,
                             return_value=ai_data,
                         ):
-                            result = asyncio.get_event_loop().run_until_complete(
+                            result = asyncio.run(
                                 enrich_entity("partial.com")
                             )
                             # Clay's legal_name should NOT be overwritten by AI
@@ -1172,7 +1172,7 @@ class TestEnrichEntityAIFillsGaps:
                                         raise ImportError("no clearbit")
                                     return original_import(name, *args, **kwargs)
                                 with patch("builtins.__import__", side_effect=mock_import):
-                                    result = asyncio.get_event_loop().run_until_complete(
+                                    result = asyncio.run(
                                         enrich_entity("onlyai.com")
                                     )
                                     assert result["source"] == "ai"
@@ -1219,7 +1219,7 @@ class TestEnrichEntitySafeProviderExceptions:
                                 new_callable=AsyncMock,
                                 return_value=None,
                             ):
-                                result = asyncio.get_event_loop().run_until_complete(
+                                result = asyncio.run(
                                     enrich_entity("test.com")
                                 )
                                 # Should still return a result even if Apollo/Clearbit fail
@@ -1259,7 +1259,7 @@ class TestEnrichEntitySafeProviderExceptions:
                                 new_callable=AsyncMock,
                                 return_value=None,
                             ):
-                                result = asyncio.get_event_loop().run_until_complete(
+                                result = asyncio.run(
                                     enrich_entity("test.com")
                                 )
                                 assert result["domain"] == "test.com"
@@ -1281,7 +1281,7 @@ class TestFindSuggestedContactsProviderExceptions:
 
         # All providers return empty except we simulate hunter raising an exception
         # via return_exceptions=True in gather. The _safe_hunter wrapper catches it.
-        result = asyncio.get_event_loop().run_until_complete(
+        result = asyncio.run(
             find_suggested_contacts("example.com")
         )
         assert result == []
@@ -1295,7 +1295,7 @@ class TestFindSuggestedContactsProviderExceptions:
             {"full_name": "Irrelevant Janitor", "title": "Facilities Janitor", "email": "janitor@example.com", "source": "clay"},
         ]
         with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 find_suggested_contacts("example.com")
             )
             # No Title Person has email → relevant; Janitor has irrelevant title → filtered out
@@ -1310,7 +1310,7 @@ class TestFindSuggestedContactsProviderExceptions:
             {"full_name": "Ghost Person", "title": "", "email": None, "source": "clay"},
         ]
         with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 find_suggested_contacts("example.com")
             )
             # Filter removes Ghost Person (no title, no email → not relevant)
@@ -1335,7 +1335,7 @@ class TestFindSuggestedContactsProviderExceptions:
                 new_callable=AsyncMock,
                 side_effect=Exception("explorium timeout"),
             ):
-                result = asyncio.get_event_loop().run_until_complete(
+                result = asyncio.run(
                     find_suggested_contacts("example.com")
                 )
                 # Should still return the good contact from clay
@@ -1394,7 +1394,7 @@ class TestEnrichEntitySafeApolloAndClearbitDirectly:
                                 return_value=None,
                             ):
                                 with patch("builtins.__import__", side_effect=mock_import):
-                                    result = asyncio.get_event_loop().run_until_complete(
+                                    result = asyncio.run(
                                         enrich_entity("test.com")
                                     )
                                     assert result["domain"] == "test.com"
@@ -1426,7 +1426,7 @@ class TestFindSuggestedContactsHunterRocketreachApolloExceptions:
             return original_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=mock_import):
-            result = asyncio.get_event_loop().run_until_complete(
+            result = asyncio.run(
                 find_suggested_contacts("example.com")
             )
             assert result == []

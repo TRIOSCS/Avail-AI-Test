@@ -70,7 +70,7 @@ def _buyplan_to_dict(bp: BuyPlan, db=None) -> dict:
         vendor_names.discard("")
         if vendor_names:
             cards = db.query(VendorCard).filter(
-                sqlfunc.lower(VendorCard.normalized_name).in_(vendor_names)
+                VendorCard.normalized_name.in_(vendor_names)
             ).all()
             score_map = {
                 c.normalized_name: {
@@ -213,6 +213,9 @@ async def submit_buy_plan(
     # Mark selected offers as "won" so engagement scorer counts wins
     for o in offers:
         o.status = "won"
+
+    # Feed customer purchase history for proactive matching
+    _record_purchase_history(db, req, quote, offers)
 
     from ...services.buyplan_service import log_buyplan_activity
 
@@ -860,3 +863,53 @@ async def get_buyplan_for_quote(
     if not plan:
         return None
     return _buyplan_to_dict(plan, db)
+
+
+def _record_purchase_history(
+    db: Session, req: Requisition | None, quote: Quote, offers: list[Offer]
+) -> None:
+    """Feed customer_part_history from won offers and quote line items.
+
+    Called once when a buy plan is first submitted (not on resubmit).
+    Errors are logged but never block the buy plan flow.
+    """
+    if not req or not req.customer_site_id:
+        return
+    try:
+        from ...models import CustomerSite
+        from ...services.purchase_history_service import upsert_purchase
+
+        site = db.get(CustomerSite, req.customer_site_id)
+        if not site or not site.company_id:
+            return
+        company_id = site.company_id
+
+        # From won offers
+        for o in offers:
+            if o.material_card_id:
+                upsert_purchase(
+                    db,
+                    company_id=company_id,
+                    material_card_id=o.material_card_id,
+                    source="avail_offer",
+                    unit_price=o.unit_price,
+                    quantity=o.qty_available,
+                    source_ref=f"offer:{o.id}",
+                )
+
+        # From quote line items (may include parts not in offer selection)
+        for li in quote.line_items or []:
+            card_id = li.get("material_card_id")
+            if not card_id:
+                continue
+            upsert_purchase(
+                db,
+                company_id=company_id,
+                material_card_id=card_id,
+                source="avail_quote_won",
+                unit_price=li.get("sell_price"),
+                quantity=li.get("qty"),
+                source_ref=f"quote:{quote.id}",
+            )
+    except Exception as e:
+        logger.warning("Purchase history recording failed: %s", e)

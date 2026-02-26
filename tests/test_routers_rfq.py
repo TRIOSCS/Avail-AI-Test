@@ -1202,6 +1202,7 @@ def test_send_follow_up_auth_failure(rfq_client, db_session, test_user, test_req
     assert resp.status_code == 401
 
 
+
 # ══════════════════════════════════════════════════════════════════════
 # NEW TESTS — Follow-ups with sales role filtering
 # ══════════════════════════════════════════════════════════════════════

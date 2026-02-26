@@ -124,10 +124,13 @@ def _make_contact(
     created_at: datetime | None = None,
 ) -> Contact:
     """Create a Contact (RFQ sent to vendor)."""
+    from app.vendor_utils import normalize_vendor_name
+
     c = Contact(
         requisition_id=requisition.id,
         user_id=user.id,
         vendor_name=vendor_name,
+        vendor_name_normalized=normalize_vendor_name(vendor_name),
         contact_type=contact_type,
         status="sent",
         created_at=created_at or datetime.now(timezone.utc),

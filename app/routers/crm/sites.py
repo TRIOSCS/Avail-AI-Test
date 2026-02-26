@@ -1,12 +1,14 @@
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
+from ...cache.decorators import invalidate_prefix
 from ...database import get_db
-from ...dependencies import require_buyer, require_user
+from ...dependencies import is_admin as _is_admin, require_buyer, require_user
 from ...models import Company, CustomerSite, Requisition, SiteContact, User
 from ...schemas.crm import SiteContactCreate, SiteContactUpdate, SiteCreate, SiteUpdate
+from ...schemas.v13_features import SiteContactNoteLog
 
 router = APIRouter()
 
@@ -26,6 +28,7 @@ async def add_site(
     site = CustomerSite(company_id=company_id, **payload.model_dump())
     db.add(site)
     db.commit()
+    invalidate_prefix("companies_typeahead")
     return {"id": site.id, "site_name": site.site_name}
 
 
@@ -39,7 +42,22 @@ async def update_site(
     site = db.get(CustomerSite, site_id)
     if not site:
         raise HTTPException(404, "Site not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+
+    updates = payload.model_dump(exclude_unset=True)
+
+    # Admin-only ownership guard
+    if "owner_id" in updates:
+        new_owner = updates["owner_id"]
+        caller_is_admin = _is_admin(user)
+
+        if site.owner_id is not None and not caller_is_admin:
+            # Non-admin cannot reassign an owned site
+            raise HTTPException(403, "Only admins can reassign owned sites")
+        if new_owner is None and not caller_is_admin:
+            # Non-admin cannot unassign a site
+            raise HTTPException(403, "Only admins can unassign sites")
+
+    for field, value in updates.items():
         setattr(site, field, value)
     db.commit()
     return {"ok": True}
@@ -109,6 +127,7 @@ async def get_site(
                 "phone": c.phone,
                 "notes": c.notes,
                 "is_primary": c.is_primary,
+                "is_active": c.is_active,
             }
             for c in contacts
         ],
@@ -128,19 +147,27 @@ async def get_site(
 # ── Site Contacts ─────────────────────────────────────────────────────────
 
 
-@router.get("/api/sites/{site_id}/contacts")
-async def list_site_contacts(
-    site_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+@router.get("/api/customer-contacts")
+async def list_customer_contacts(
+    include_archived: bool = False,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
 ):
-    site = db.get(CustomerSite, site_id)
-    if not site:
-        raise HTTPException(404, "Site not found")
-    contacts = (
+    """All customer contacts across all sites, for the unified Contacts view."""
+    q = (
         db.query(SiteContact)
-        .filter(
-            SiteContact.customer_site_id == site_id,
+        .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
+        .join(Company, CustomerSite.company_id == Company.id)
+        .filter(Company.is_active == True)  # noqa: E712
+    )
+    if not include_archived:
+        q = q.filter(SiteContact.is_active == True)  # noqa: E712
+    contacts = (
+        q.options(
+            joinedload(SiteContact.customer_site).joinedload(CustomerSite.company),
         )
-        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+        .order_by(SiteContact.full_name)
+        .limit(5000)
         .all()
     )
     return [
@@ -152,6 +179,46 @@ async def list_site_contacts(
             "phone": c.phone,
             "notes": c.notes,
             "is_primary": c.is_primary,
+            "is_active": c.is_active,
+            "company_id": c.customer_site.company_id if c.customer_site else None,
+            "company_name": c.customer_site.company.name
+            if c.customer_site and c.customer_site.company
+            else None,
+            "site_id": c.customer_site_id,
+            "site_name": c.customer_site.site_name if c.customer_site else None,
+            "contact_type": "customer",
+            "created_at": c.created_at.isoformat() if c.created_at else None,
+        }
+        for c in contacts
+    ]
+
+
+@router.get("/api/sites/{site_id}/contacts")
+async def list_site_contacts(
+    site_id: int,
+    include_archived: bool = False,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    site = db.get(CustomerSite, site_id)
+    if not site:
+        raise HTTPException(404, "Site not found")
+    q = db.query(SiteContact).filter(
+        SiteContact.customer_site_id == site_id,
+    )
+    if not include_archived:
+        q = q.filter(SiteContact.is_active == True)  # noqa: E712
+    contacts = q.order_by(SiteContact.is_primary.desc(), SiteContact.full_name).all()
+    return [
+        {
+            "id": c.id,
+            "full_name": c.full_name,
+            "title": c.title,
+            "email": c.email,
+            "phone": c.phone,
+            "notes": c.notes,
+            "is_primary": c.is_primary,
+            "is_active": c.is_active,
         }
         for c in contacts
     ]
@@ -215,3 +282,65 @@ async def delete_site_contact(
     db.delete(contact)
     db.commit()
     return {"ok": True}
+
+
+# ── Site Contact Notes ───────────────────────────────────────────────────
+
+
+@router.post("/api/sites/{site_id}/contacts/{contact_id}/notes")
+async def log_contact_note(
+    site_id: int,
+    contact_id: int,
+    payload: SiteContactNoteLog,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a timestamped note against a site contact."""
+    site = db.get(CustomerSite, site_id)
+    if not site:
+        raise HTTPException(404, "Site not found")
+    contact = db.get(SiteContact, contact_id)
+    if not contact or contact.customer_site_id != site_id:
+        raise HTTPException(404, "Contact not found")
+
+    from app.services.activity_service import log_site_contact_note
+
+    record = log_site_contact_note(
+        user_id=user.id,
+        site_contact_id=contact_id,
+        customer_site_id=site_id,
+        company_id=site.company_id,
+        notes=payload.notes,
+        db=db,
+    )
+    db.commit()
+    return {"status": "logged", "activity_id": record.id}
+
+
+@router.get("/api/sites/{site_id}/contacts/{contact_id}/notes")
+async def get_contact_notes(
+    site_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get note history for a site contact."""
+    site = db.get(CustomerSite, site_id)
+    if not site:
+        raise HTTPException(404, "Site not found")
+    contact = db.get(SiteContact, contact_id)
+    if not contact or contact.customer_site_id != site_id:
+        raise HTTPException(404, "Contact not found")
+
+    from app.services.activity_service import get_site_contact_notes
+
+    notes = get_site_contact_notes(contact_id, db)
+    return [
+        {
+            "id": n.id,
+            "notes": n.notes,
+            "user_name": n.user.name if n.user else None,
+            "created_at": n.created_at.isoformat() if n.created_at else None,
+        }
+        for n in notes
+    ]

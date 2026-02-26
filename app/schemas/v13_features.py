@@ -99,6 +99,12 @@ class GraphWebhookPayload(BaseModel, extra="allow"):
     value: list[dict] = []
 
 
+class SiteContactNoteLog(BaseModel):
+    """Log a manual note against a site contact."""
+
+    notes: str
+
+
 class EmailClickLog(BaseModel):
     """Auto-log when a mailto: link is clicked."""
 

@@ -59,6 +59,19 @@ def _register_btrim(db_session: Session):
     raw_conn.close()
 
 
+def _get_or_create_card(db: Session, mpn: str) -> "MaterialCard":
+    """Find-or-create a MaterialCard for test MPN."""
+    from app.models import MaterialCard
+
+    normalized = mpn.strip().lower()
+    card = db.query(MaterialCard).filter_by(normalized_mpn=normalized).first()
+    if not card:
+        card = MaterialCard(normalized_mpn=normalized, display_mpn=mpn, search_count=0)
+        db.add(card)
+        db.flush()
+    return card
+
+
 def _make_archived_requisition(
     db: Session,
     user: User,
@@ -68,6 +81,7 @@ def _make_archived_requisition(
     days_ago: int = 60,
 ) -> tuple[Requisition, Requirement]:
     """Create an archived requisition with one requirement at a customer site."""
+    card = _get_or_create_card(db, mpn)
     req = Requisition(
         name=f"Archived-{mpn}",
         customer_name="Acme Electronics",
@@ -81,6 +95,8 @@ def _make_archived_requisition(
     item = Requirement(
         requisition_id=req.id,
         primary_mpn=mpn,
+        normalized_mpn=mpn.strip().lower(),
+        material_card_id=card.id,
         target_qty=target_qty,
         created_at=datetime.now(timezone.utc) - timedelta(days=days_ago),
     )
@@ -98,6 +114,7 @@ def _make_offer(
     price: float = 0.50,
 ) -> Offer:
     """Create an offer on a requisition (entered just now)."""
+    card = _get_or_create_card(db, mpn)
     o = Offer(
         requisition_id=requisition.id,
         vendor_name="SupplierCo",
@@ -105,6 +122,7 @@ def _make_offer(
         qty_available=qty,
         unit_price=price,
         entered_by_id=user.id,
+        material_card_id=card.id,
         status="active",
         created_at=datetime.now(timezone.utc),
     )
@@ -183,10 +201,10 @@ class TestScanNewOffersForMatches:
         assert match.salesperson_id == sales.id
         assert match.customer_site_id == test_customer_site.id
 
-    def test_scan_skips_short_mpn(
+    def test_scan_skips_no_card(
         self, db_session, test_user, test_company, test_customer_site
     ):
-        """Offer with MPN shorter than 3 chars is skipped."""
+        """Offer without material_card_id is skipped."""
         _reset_last_scan()
         _register_btrim(db_session)
 
@@ -202,7 +220,7 @@ class TestScanNewOffersForMatches:
         _make_archived_requisition(db_session, sales, test_customer_site, mpn="AB")
 
         source_req = Requisition(
-            name="Src-Short",
+            name="Src-NoCard",
             customer_name="X",
             status="open",
             created_by=test_user.id,
@@ -210,7 +228,19 @@ class TestScanNewOffersForMatches:
         )
         db_session.add(source_req)
         db_session.flush()
-        _make_offer(db_session, source_req, test_user, mpn="AB")
+        # Create offer WITHOUT material_card_id
+        o = Offer(
+            requisition_id=source_req.id,
+            vendor_name="SupplierCo",
+            mpn="AB",
+            qty_available=100,
+            unit_price=0.50,
+            entered_by_id=test_user.id,
+            status="active",
+            material_card_id=None,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(o)
         db_session.commit()
 
         result = scan_new_offers_for_matches(db_session)
@@ -392,7 +422,7 @@ class TestSendProactiveOffer:
     def test_send_no_matches(self, db_session, test_user):
         """Empty match_ids raises ValueError."""
         with pytest.raises(ValueError, match="No valid matches"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 send_proactive_offer(
                     db=db_session,
                     user=test_user,
@@ -423,7 +453,7 @@ class TestSendProactiveOffer:
         db_session.commit()
 
         with pytest.raises(ValueError, match="No valid contacts"):
-            asyncio.get_event_loop().run_until_complete(
+            asyncio.run(
                 send_proactive_offer(
                     db=db_session,
                     user=test_user,
@@ -956,7 +986,8 @@ class TestGetMatchesForUser:
         from app.services.proactive_service import get_matches_for_user
 
         result = get_matches_for_user(db_session, test_user.id)
-        assert result == []
+        assert result["groups"] == []
+        assert result["stats"]["total"] == 0
 
     def test_matches_grouped_by_site(
         self, db_session, test_user, test_company, test_customer_site, test_offer
@@ -979,10 +1010,12 @@ class TestGetMatchesForUser:
         db_session.commit()
 
         result = get_matches_for_user(db_session, test_user.id, status="new")
-        assert len(result) == 1
-        assert result[0]["customer_site_id"] == test_customer_site.id
-        assert len(result[0]["matches"]) == 1
-        assert result[0]["matches"][0]["mpn"] == "LM317T"
+        groups = result["groups"]
+        assert len(groups) == 1
+        assert groups[0]["customer_site_id"] == test_customer_site.id
+        assert len(groups[0]["matches"]) == 1
+        assert groups[0]["matches"][0]["mpn"] == "LM317T"
+        assert result["stats"]["total"] == 1
 
     def test_matches_all_statuses(
         self, db_session, test_user, test_company, test_customer_site, test_offer
@@ -1006,12 +1039,12 @@ class TestGetMatchesForUser:
         db_session.commit()
 
         result = get_matches_for_user(db_session, test_user.id, status="")
-        assert len(result) == 1
+        assert len(result["groups"]) == 1
 
     def test_match_with_offer_details_included(
         self, db_session, test_user, test_company, test_customer_site, test_offer
     ):
-        """Match with a valid offer includes offer details in the response."""
+        """Match with a valid offer includes offer details and CPH fields in the response."""
         from app.services.proactive_service import get_matches_for_user
 
         archived_req, req_item = _make_archived_requisition(
@@ -1025,17 +1058,25 @@ class TestGetMatchesForUser:
             salesperson_id=test_user.id,
             mpn="DETAILS",
             status="new",
+            match_score=75,
+            margin_pct=22.5,
+            customer_purchase_count=3,
         )
         db_session.add(m)
         db_session.commit()
 
         result = get_matches_for_user(db_session, test_user.id, status="new")
-        assert len(result) == 1
-        match_dict = result[0]["matches"][0]
+        groups = result["groups"]
+        assert len(groups) == 1
+        match_dict = groups[0]["matches"][0]
         assert match_dict["vendor_name"] != ""
         assert match_dict["offer_id"] == test_offer.id
         assert match_dict["status"] == "new"
         assert match_dict["created_at"] is not None
+        # CPH-enriched fields
+        assert match_dict["match_score"] == 75
+        assert match_dict["margin_pct"] == 22.5
+        assert match_dict["customer_purchase_count"] == 3
 
 
 # ── Scan commit error ─────────────────────────────────────────────

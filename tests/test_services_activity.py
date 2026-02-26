@@ -14,16 +14,19 @@ from app.models import (
     ActivityLog,
     Company,
     CustomerSite,
+    SiteContact,
     VendorCard,
     VendorContact,
 )
 from app.services.activity_service import (
     days_since_last_activity,
     get_company_activities,
+    get_site_contact_notes,
     get_user_activities,
     get_vendor_activities,
     log_call_activity,
     log_email_activity,
+    log_site_contact_note,
     match_email_to_entity,
     match_phone_to_entity,
 )
@@ -459,3 +462,83 @@ class TestVendorManualLogging:
             db=db_session,
         )
         assert record is not None
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Site contact note logging
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestSiteContactNoteLogging:
+    def test_log_site_contact_note(self, db_session, test_user):
+        co = _make_company(db_session)
+        site = _make_site(db_session, co.id)
+        contact = SiteContact(
+            customer_site_id=site.id, full_name="Note Test Contact"
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        record = log_site_contact_note(
+            user_id=test_user.id,
+            site_contact_id=contact.id,
+            customer_site_id=site.id,
+            company_id=co.id,
+            notes="Discussed pricing",
+            db=db_session,
+        )
+        assert record is not None
+        assert record.activity_type == "note"
+        assert record.channel == "manual"
+        assert record.site_contact_id == contact.id
+        assert record.company_id == co.id
+        assert record.customer_site_id == site.id
+        assert record.notes == "Discussed pricing"
+        assert record.contact_name == "Note Test Contact"
+
+    def test_get_site_contact_notes_only_for_contact(self, db_session, test_user):
+        co = _make_company(db_session)
+        site = _make_site(db_session, co.id)
+        c1 = SiteContact(customer_site_id=site.id, full_name="Contact A")
+        c2 = SiteContact(customer_site_id=site.id, full_name="Contact B")
+        db_session.add_all([c1, c2])
+        db_session.commit()
+
+        log_site_contact_note(test_user.id, c1.id, site.id, co.id, "Note for A", db_session)
+        log_site_contact_note(test_user.id, c2.id, site.id, co.id, "Note for B", db_session)
+        db_session.commit()
+
+        notes_a = get_site_contact_notes(c1.id, db_session)
+        assert len(notes_a) == 1
+        assert notes_a[0].notes == "Note for A"
+
+        notes_b = get_site_contact_notes(c2.id, db_session)
+        assert len(notes_b) == 1
+        assert notes_b[0].notes == "Note for B"
+
+    def test_get_site_contact_notes_ordered(self, db_session, test_user):
+        co = _make_company(db_session)
+        site = _make_site(db_session, co.id)
+        contact = SiteContact(customer_site_id=site.id, full_name="Order Test")
+        db_session.add(contact)
+        db_session.commit()
+
+        log_site_contact_note(test_user.id, contact.id, site.id, co.id, "First", db_session)
+        log_site_contact_note(test_user.id, contact.id, site.id, co.id, "Second", db_session)
+        db_session.commit()
+
+        notes = get_site_contact_notes(contact.id, db_session)
+        assert len(notes) == 2
+        # Most recent first
+        assert notes[0].notes == "Second"
+        assert notes[1].notes == "First"
+
+    def test_get_site_contact_notes_empty(self, db_session, test_user):
+        co = _make_company(db_session)
+        site = _make_site(db_session, co.id)
+        contact = SiteContact(customer_site_id=site.id, full_name="Empty Notes")
+        db_session.add(contact)
+        db_session.commit()
+
+        notes = get_site_contact_notes(contact.id, db_session)
+        assert notes == []

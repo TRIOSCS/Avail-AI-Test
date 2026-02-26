@@ -56,6 +56,8 @@ async def lifespan(app):
     if settings.sentry_dsn:
         import sentry_sdk
         from sentry_sdk.integrations.fastapi import FastApiIntegration
+        from sentry_sdk.integrations.httpx import HttpxIntegration
+        from sentry_sdk.integrations.loguru import LoguruIntegration
         from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
         def _sentry_before_send(event, hint):
@@ -91,10 +93,15 @@ async def lifespan(app):
             profiles_sample_rate=settings.sentry_profiles_sample_rate,
             environment="production" if "https" in settings.app_url else "development",
             release=APP_VERSION,
-            integrations=[FastApiIntegration(), SqlalchemyIntegration()],
+            integrations=[
+                FastApiIntegration(),
+                SqlalchemyIntegration(),
+                LoguruIntegration(level="WARNING", event_level="ERROR"),
+                HttpxIntegration(),
+            ],
             before_send=_sentry_before_send,
         )
-        logger.info("Sentry initialized (DSN configured)")
+        logger.info("Sentry initialized (logging + tracing + AI monitoring)")
 
     run_startup_migrations()
     _seed_api_sources()
@@ -107,6 +114,28 @@ async def lifespan(app):
     configure_scheduler()
     scheduler.start()
     logger.info("APScheduler started")
+
+    # Warm heavy caches in background so first user request is fast
+    async def _warm_caches():  # pragma: no cover
+        import asyncio
+        await asyncio.sleep(2)  # let app finish startup first
+        try:
+            from .database import SessionLocal
+            db = SessionLocal()
+            try:
+                from .models import VendorCard, Company, Requisition
+                db.query(VendorCard).count()
+                db.query(Company).count()
+                db.query(Requisition).count()
+                logger.info("Cache warmup complete")
+            finally:
+                db.close()
+        except Exception as e:
+            logger.warning(f"Cache warmup failed (non-fatal): {e}")
+
+    import asyncio
+    asyncio.create_task(_warm_caches())
+
     yield
     logger.info("Shutting down scheduler (waiting for running jobs)...")
     scheduler.shutdown(wait=True)
@@ -811,7 +840,8 @@ def _seed_api_sources():
                     all_set = all(os.getenv(v) for v in env_vars)
                     if all_set:
                         status = "live"
-                db.add(ApiSource(status=status, **src))
+                is_active = status == "live"
+                db.add(ApiSource(status=status, is_active=is_active, **src))
 
         db.commit()
     except Exception as e:
@@ -873,3 +903,15 @@ app.include_router(documents_router)
 from .routers.error_reports import router as error_reports_router
 
 app.include_router(error_reports_router)
+
+from .routers.command_center import router as command_center_router
+
+app.include_router(command_center_router)
+from .routers.dashboard import router as dashboard_router
+
+app.include_router(dashboard_router)
+from .routers.prospect_pool import router as prospect_pool_router
+from .routers.prospect_suggested import router as prospect_suggested_router
+
+app.include_router(prospect_pool_router)
+app.include_router(prospect_suggested_router)

@@ -427,7 +427,7 @@ class TestNormalizePackaging:
         assert normalize_packaging("Bulk") == "bulk"
 
     def test_bag(self):
-        assert normalize_packaging("Bag") == "bulk"
+        assert normalize_packaging("Bag") == "bag"
 
     def test_loose(self):
         assert normalize_packaging("Loose") == "bulk"
@@ -444,8 +444,11 @@ class TestNormalizePackaging:
     def test_tr_shorthand(self):
         assert normalize_packaging("TR") == "reel"
 
+    def test_box(self):
+        assert normalize_packaging("Custom Box") == "box"
+
     def test_unknown(self):
-        assert normalize_packaging("Custom Box") is None
+        assert normalize_packaging("Custom Wrap") is None
 
     def test_none(self):
         assert normalize_packaging(None) is None

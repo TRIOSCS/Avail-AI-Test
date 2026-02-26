@@ -44,23 +44,27 @@ def sales_client(db_session: Session, sales_user: User) -> TestClient:
 # ── Matches ──────────────────────────────────────────────────────────
 
 
-@patch("app.services.proactive_service.get_matches_for_user", return_value=[])
-def test_matches_empty(mock_fn, client):
-    """No matches -> empty list."""
-    resp = client.get("/api/proactive/matches")
-    assert resp.status_code == 200
-    assert resp.json() == []
-
-
 @patch("app.services.proactive_service.get_matches_for_user",
-       return_value=[{"site": "Acme", "matches": []}])
-def test_matches_with_data(mock_fn, client):
-    """Returns grouped matches."""
+       return_value={"groups": [], "stats": {"total": 0, "avg_score": 0, "avg_margin": None, "high_margin_count": 0}})
+def test_matches_empty(mock_fn, client):
+    """No matches -> empty groups with stats."""
     resp = client.get("/api/proactive/matches")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 1
-    assert data[0]["site"] == "Acme"
+    assert data["groups"] == []
+    assert data["stats"]["total"] == 0
+
+
+@patch("app.services.proactive_service.get_matches_for_user",
+       return_value={"groups": [{"site": "Acme", "matches": []}], "stats": {"total": 1, "avg_score": 80, "avg_margin": 25.0, "high_margin_count": 0}})
+def test_matches_with_data(mock_fn, client):
+    """Returns grouped matches with stats."""
+    resp = client.get("/api/proactive/matches")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["groups"]) == 1
+    assert data["groups"][0]["site"] == "Acme"
+    assert data["stats"]["avg_score"] == 80
 
 
 # ── Count ────────────────────────────────────────────────────────────
@@ -281,7 +285,8 @@ class TestScorecardExtended:
 
 
 class TestMatchesStatusFilter:
-    @patch("app.services.proactive_service.get_matches_for_user", return_value=[])
+    @patch("app.services.proactive_service.get_matches_for_user",
+           return_value={"groups": [], "stats": {"total": 0, "avg_score": 0, "avg_margin": None, "high_margin_count": 0}})
     def test_matches_sent_status(self, mock_fn, client):
         """Matches with status=sent filter."""
         resp = client.get("/api/proactive/matches?status=sent")
@@ -299,6 +304,104 @@ class TestConvertExtended:
         """Already-converted offer -> 400."""
         resp = client.post("/api/proactive/convert/1")
         assert resp.status_code == 400
+
+
+class TestRefresh:
+    @patch("app.services.proactive_matching.run_proactive_scan",
+           return_value={"scanned_offers": 2, "scanned_sightings": 0, "matches_created": 1})
+    @patch("app.services.proactive_service.scan_new_offers_for_matches",
+           return_value={"scanned": 3, "matches_created": 2})
+    def test_refresh_success(self, mock_legacy, mock_cph, client):
+        """Refresh triggers both scans and returns combined count."""
+        resp = client.post("/api/proactive/refresh")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["legacy_matches"] == 2
+        assert data["cph_matches"] == 1
+        assert data["total_new"] == 3
+
+    @patch("app.services.proactive_matching.run_proactive_scan",
+           side_effect=Exception("CPH scan failed"))
+    @patch("app.services.proactive_service.scan_new_offers_for_matches",
+           return_value={"scanned": 1, "matches_created": 0})
+    def test_refresh_cph_failure_graceful(self, mock_legacy, mock_cph, client):
+        """CPH scan failure doesn't break the endpoint."""
+        resp = client.post("/api/proactive/refresh")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["cph_matches"] == 0
+
+
+class TestDraftEndpoint:
+    @patch("app.services.proactive_email.draft_proactive_email", new_callable=AsyncMock,
+           return_value={"subject": "Parts for You", "body": "Great deal!", "html": "<p>Great deal!</p>"})
+    def test_draft_success(self, mock_draft, client, db_session, test_user, test_requisition, test_offer, test_customer_site):
+        """AI draft returns subject + body + html."""
+        from app.models import Company
+        match = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=test_requisition.id,
+            requisition_id=test_requisition.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="LM317T",
+            status="new",
+        )
+        db_session.add(match)
+        db_session.commit()
+        resp = client.post("/api/proactive/draft", json={
+            "match_ids": [match.id],
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["subject"] == "Parts for You"
+        assert "html" in data
+
+    def test_draft_empty_match_ids(self, client):
+        """Empty match_ids -> 400."""
+        resp = client.post("/api/proactive/draft", json={"match_ids": []})
+        assert resp.status_code == 400
+
+    @patch("app.services.proactive_email.draft_proactive_email", new_callable=AsyncMock,
+           return_value=None)
+    def test_draft_ai_failure(self, mock_draft, client, db_session, test_user, test_requisition, test_offer, test_customer_site):
+        """AI returns None -> 500."""
+        match = ProactiveMatch(
+            offer_id=test_offer.id,
+            requirement_id=test_requisition.id,
+            requisition_id=test_requisition.id,
+            customer_site_id=test_customer_site.id,
+            salesperson_id=test_user.id,
+            mpn="LM317T",
+            status="new",
+        )
+        db_session.add(match)
+        db_session.commit()
+        resp = client.post("/api/proactive/draft", json={
+            "match_ids": [match.id],
+        })
+        assert resp.status_code == 500
+
+    def test_draft_no_valid_matches(self, client):
+        """Non-existent match_ids -> 400."""
+        resp = client.post("/api/proactive/draft", json={"match_ids": [99999]})
+        assert resp.status_code == 400
+
+    @patch("app.services.proactive_service.send_proactive_offer", new_callable=AsyncMock,
+           return_value={"ok": True, "sent_to": 1})
+    @patch("app.routers.proactive.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
+    def test_send_with_email_html(self, mock_token, mock_send, client):
+        """Send with email_html passes it through to service."""
+        resp = client.post("/api/proactive/send", json={
+            "match_ids": [1],
+            "contact_ids": [1],
+            "email_html": "<p>Custom email body</p>",
+        })
+        assert resp.status_code == 200
+        # Verify email_html was passed to the service
+        call_kwargs = mock_send.call_args
+        assert call_kwargs[1].get("email_html") == "<p>Custom email body</p>" or \
+               (len(call_kwargs[0]) > 8 and call_kwargs[0][8] == "<p>Custom email body</p>")
 
 
 class TestContactsExtended:

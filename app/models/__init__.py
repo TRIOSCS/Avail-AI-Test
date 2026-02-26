@@ -14,6 +14,10 @@ from .config import ApiSource, GraphSubscription, SystemConfig  # noqa: F401
 # CRM: Companies & Sites
 from .crm import Company, CustomerSite, SiteContact  # noqa: F401
 
+# Discovery / Prospecting
+from .discovery_batch import DiscoveryBatch  # noqa: F401
+from .prospect_account import ProspectAccount  # noqa: F401
+
 # Enrichment
 from .enrichment import (  # noqa: F401
     EmailSignatureExtract,
@@ -31,7 +35,9 @@ from .intelligence import (  # noqa: F401
     ActivityLog,
     ChangeLog,
     MaterialCard,
+    MaterialCardAudit,
     MaterialVendorHistory,
+    ProactiveDoNotOffer,
     ProactiveMatch,
     ProactiveOffer,
     ProactiveThrottle,
@@ -40,10 +46,15 @@ from .intelligence import (  # noqa: F401
 # Offers, Contacts, Vendor Responses
 from .offers import Contact, Offer, OfferAttachment, VendorResponse  # noqa: F401
 
+# Purchase History (Proactive matching backbone)
+from .purchase_history import CustomerPartHistory  # noqa: F401
+
 # Performance Tracking
 from .performance import (  # noqa: F401
+    AvailScoreSnapshot,
     BuyerLeaderboardSnapshot,
     BuyerVendorStats,
+    MultiplierScoreSnapshot,
     StockListHash,
     VendorMetricsSnapshot,
 )
@@ -54,8 +65,14 @@ from .pipeline import ColumnMappingCache, PendingBatch, ProcessedMessage, SyncSt
 # Quotes & Buy Plans
 from .quotes import BuyPlan, Quote  # noqa: F401
 
-# Core: Requisitions & Requirements
-from .sourcing import Requirement, Requisition, Sighting  # noqa: F401
+# Core: Requisitions, Requirements & Attachments
+from .sourcing import (  # noqa: F401
+    Requirement,
+    RequirementAttachment,
+    Requisition,
+    RequisitionAttachment,
+    Sighting,
+)
 
 # Sync
 from .sync import SyncLog  # noqa: F401

@@ -3,32 +3,79 @@ E2E test fixtures — Playwright against the live Docker app.
 
 Creates a signed Starlette session cookie for user_id=1 (admin)
 so tests can skip the Azure OAuth flow.
+
+Base URL resolution (in order):
+1. E2E_BASE_URL env var (explicit override)
+2. Docker container IP (auto-detected if availai-app-1 is running)
+3. https://app.availai.net (remote fallback)
 """
 
 import base64
 import json
 import os
+import subprocess
 
 import pytest
 
+
+# ── Base URL resolution ─────────────────────────────────────────────
+
+def _get_docker_app_ip() -> str | None:
+    """Auto-detect the app container's IP on the Docker network."""
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "availai-app-1", "--format",
+             "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}"],
+            capture_output=True, text=True, timeout=5,
+        )
+        ip = result.stdout.strip()
+        return ip if ip else None
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return None
+
+
+def _resolve_base_url() -> str:
+    env_url = os.getenv("E2E_BASE_URL")
+    if env_url:
+        return env_url
+    docker_ip = _get_docker_app_ip()
+    if docker_ip:
+        return f"http://{docker_ip}:8000"
+    return "https://app.availai.net"
+
+
+BASE_URL = _resolve_base_url()
+
+
 # ── Session cookie helper ────────────────────────────────────────────
 
-SECRET_KEY = os.getenv(
-    "SESSION_SECRET",
-    os.getenv(
-        "SECRET_KEY",
-        "ea277450d8b187b493c424a734864512bef722de5229ae998a558c41a753e5e1",
-    ),
-)
-BASE_URL = os.getenv("E2E_BASE_URL", "https://app.availai.net")
+def _get_secret_key() -> str:
+    """Get the session secret: try Docker container first, then env, then default."""
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "exec", "-T", "app", "python3", "-c",
+             "from app.config import settings; print(settings.secret_key)"],
+            capture_output=True, text=True, cwd="/root/availai", timeout=10,
+        )
+        secret = result.stdout.strip()
+        if secret:
+            return secret
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        pass
+    return os.getenv(
+        "SESSION_SECRET",
+        os.getenv(
+            "SECRET_KEY",
+            "ea277450d8b187b493c424a734864512bef722de5229ae998a558c41a753e5e1",
+        ),
+    )
+
+
+SECRET_KEY = _get_secret_key()
 
 
 def _sign_session(data: dict, secret: str) -> str:
-    """Replicate Starlette SessionMiddleware cookie signing.
-
-    Starlette uses itsdangerous.TimestampSigner with the default
-    'cookie-session' salt and sha1 digest.
-    """
+    """Replicate Starlette SessionMiddleware cookie signing."""
     import itsdangerous
 
     payload = base64.b64encode(json.dumps(data).encode()).decode()

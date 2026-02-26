@@ -7,25 +7,25 @@ httpx==0.28.1
 openpyxl==3.1.5
 jinja2==3.1.6
 # Email Mining v2 hardening
-filetype>=1.2.0
-charset-normalizer>=3.3.0
+filetype==1.2.0
+charset-normalizer==3.4.4
 # Credential encryption
-cryptography>=42.0.0
+cryptography==46.0.5
 # Observability
-loguru>=0.7.0
-prometheus-fastapi-instrumentator>=6.1.0
-sentry-sdk[fastapi]>=2.19.0
+loguru==0.7.3
+prometheus-fastapi-instrumentator==7.1.0
+sentry-sdk[fastapi]==2.53.0
 # Rate limiting
-slowapi>=0.1.9
+slowapi==0.1.9
 # Fuzzy matching
-thefuzz[speedup]>=0.22.0
+thefuzz[speedup]==0.22.1
 # PDF generation
-weasyprint>=60.0
+weasyprint==68.1
 # Scheduling
-apscheduler>=3.10.4,<4.0
+apscheduler==3.11.2,<4.0
 # Migrations
-alembic>=1.13.0
+alembic==1.18.4
 # Caching
-redis[hiredis]>=5.2.0
+redis[hiredis]==7.2.0
 # CSRF protection
-starlette-csrf>=3.0.0
+starlette-csrf==3.0.0

@@ -249,15 +249,81 @@ async def parse_signature_ai(body: str, sender_name: str = "", sender_email: str
         return {"confidence": 0.0}
 
 
+async def parse_signature_gradient(body: str, sender_name: str = "", sender_email: str = "") -> dict:
+    """Use Gradient (Sonnet tier) for fast, cheap signature extraction.
+
+    Primary AI path — cheaper than Claude direct. Falls back gracefully.
+    """
+    from .gradient_service import gradient_json
+
+    sig_block = _extract_signature_block(body)
+    if not sig_block:
+        return {"confidence": 0.0}
+
+    sig_text = sig_block[:2000]
+
+    prompt = (
+        f"Extract contact information from this email signature.\n"
+        f"Sender name: {sender_name or 'unknown'}\n"
+        f"Sender email: {sender_email or 'unknown'}\n\n"
+        f"Signature block:\n```\n{sig_text}\n```\n\n"
+        f"Return a JSON object with these keys (use null for unknown):\n"
+        f'{{"full_name", "title", "company_name", "phone", "mobile", '
+        f'"website", "address", "linkedin_url"}}'
+    )
+
+    try:
+        data = await gradient_json(
+            prompt,
+            system="You extract contact information from email signatures. Return ONLY valid JSON.",
+            model_tier="default",
+            max_tokens=512,
+            timeout=10,
+        )
+        if not data or not isinstance(data, dict):
+            return {"confidence": 0.0}
+
+        result = {
+            "full_name": data.get("full_name"),
+            "title": data.get("title"),
+            "company_name": data.get("company_name"),
+            "phone": data.get("phone"),
+            "mobile": data.get("mobile"),
+            "email": sender_email or None,
+            "website": data.get("website"),
+            "linkedin_url": data.get("linkedin_url"),
+            "address": data.get("address"),
+        }
+
+        fields_found = sum(1 for v in result.values() if v)
+        result["confidence"] = min(0.5 + (fields_found * 0.08), 0.95)
+        return result
+    except Exception as e:
+        log.warning("Gradient signature parsing failed: %s", e)
+        return {"confidence": 0.0}
+
+
 async def extract_signature(body: str, sender_name: str = "", sender_email: str = "") -> dict:
-    """Try regex first, fall back to AI if confidence < 0.7."""
+    """Try regex first, fall back to Gradient then Claude if confidence < 0.7."""
     regex_result = parse_signature_regex(body)
 
     if regex_result.get("confidence", 0) >= 0.7:
         regex_result["extraction_method"] = "regex"
         return regex_result
 
-    # Try AI for better results
+    # Try Gradient (primary AI path — fast + cheap)
+    try:
+        from ..config import settings
+
+        if settings.do_gradient_api_key:
+            gradient_result = await parse_signature_gradient(body, sender_name, sender_email)
+            if gradient_result.get("confidence", 0) > regex_result.get("confidence", 0):
+                gradient_result["extraction_method"] = "gradient_ai"
+                return gradient_result
+    except Exception:
+        pass
+
+    # Fallback to Claude (secondary AI path)
     try:
         ai_result = await parse_signature_ai(body, sender_name, sender_email)
         if ai_result.get("confidence", 0) > regex_result.get("confidence", 0):

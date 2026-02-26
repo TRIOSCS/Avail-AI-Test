@@ -348,7 +348,7 @@ def compute_single_vendor_score(card, db: Session) -> float | None:
     outreach = (
         db.query(func.count(Contact.id))
         .filter(Contact.contact_type == "email")
-        .filter(func.lower(Contact.vendor_name) == norm)
+        .filter(Contact.vendor_name_normalized == norm)
         .scalar()
         or 0
     )
@@ -372,7 +372,7 @@ def compute_single_vendor_score(card, db: Session) -> float | None:
 
     wins = (
         db.query(func.count(Offer.id))
-        .filter(func.lower(Offer.vendor_name) == norm)
+        .filter(Offer.vendor_name_normalized == norm)
         .filter(Offer.status == "won")
         .scalar()
         or 0
@@ -415,7 +415,7 @@ def apply_outbound_stats(db: Session, vendors_contacted: dict[str, int]):
             vendor_key = domain.split(".")[0] if "." in domain else domain
             card = (
                 db.query(VendorCard)
-                .filter(func.lower(VendorCard.normalized_name) == vendor_key.lower())
+                .filter(VendorCard.normalized_name == vendor_key.lower())
                 .first()
             )
 

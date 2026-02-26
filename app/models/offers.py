@@ -30,11 +30,14 @@ class Offer(Base):
         Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
     )
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"))
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
 
-    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"))
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"))
     vendor_name = Column(String(255), nullable=False)
+    vendor_name_normalized = Column(String(255))
 
     mpn = Column(String(255), nullable=False)
+    normalized_mpn = Column(String(255), index=True)
     manufacturer = Column(String(255))
     qty_available = Column(Integer)
     unit_price = Column(Numeric(12, 4))
@@ -51,11 +54,12 @@ class Offer(Base):
     country_of_origin = Column(String(100))
 
     source = Column(String(50), default="manual")
-    vendor_response_id = Column(Integer, ForeignKey("vendor_responses.id"))
+    vendor_response_id = Column(Integer, ForeignKey("vendor_responses.id", ondelete="SET NULL"))
     entered_by_id = Column(Integer, ForeignKey("users.id"))
 
     notes = Column(Text)
-    status = Column(String(20), default="active")
+    status = Column(String(20), default="active")  # active | sold
+    is_stale = Column(Boolean, default=False)  # display-only: True if >14 days old
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Audit trail
@@ -76,6 +80,8 @@ class Offer(Base):
 
     requisition = relationship("Requisition", back_populates="offers")
     requirement = relationship("Requirement", back_populates="offers")
+    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
+    vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
     entered_by = relationship("User", foreign_keys=[entered_by_id])
     updated_by = relationship("User", foreign_keys=[updated_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])
@@ -93,6 +99,9 @@ class Offer(Base):
         Index("ix_offers_req_status", "requisition_id", "status"),
         Index("ix_offers_entered_created", "entered_by_id", "created_at"),
         Index("ix_offers_req_created", "requisition_id", "created_at"),
+        Index("ix_offers_vendor_name", "vendor_name"),
+        Index("ix_offers_vendor_norm", "vendor_name_normalized"),
+        Index("ix_offers_material_card", "material_card_id"),
     )
 
 
@@ -126,6 +135,7 @@ class Contact(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     contact_type = Column(String(20), nullable=False)
     vendor_name = Column(String(255), nullable=False)
+    vendor_name_normalized = Column(String(255))
     vendor_contact = Column(String(255))
     parts_included = Column(JSON, default=list)
     subject = Column(String(500))
@@ -147,6 +157,7 @@ class Contact(Base):
         Index("ix_contact_status", "status"),
         Index("ix_contact_user_status", "user_id", "status", "created_at"),
         Index("ix_contact_vendor_name", "vendor_name"),
+        Index("ix_contacts_vendor_norm", "vendor_name_normalized"),
         Index("ix_contact_type_created", "contact_type", "created_at"),
         Index("ix_contact_type_vendor", "contact_type", "vendor_name"),
     )

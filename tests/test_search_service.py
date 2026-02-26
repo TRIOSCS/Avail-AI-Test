@@ -331,6 +331,57 @@ class TestSightingToDict:
         d = sighting_to_dict(s)
         assert d["condition"] == "refurbished"
 
+    def test_is_stale_recent(self, db_session):
+        """Sightings created recently should not be stale."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        s = Sighting(
+            requirement_id=req.id,
+            vendor_name="Arrow",
+            mpn_matched="LM317T",
+            created_at=datetime.now(timezone.utc) - timedelta(days=10),
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        d = sighting_to_dict(s)
+        assert d["is_stale"] is False
+
+    def test_is_stale_old(self, db_session):
+        """Sightings older than 90 days should be stale."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        s = Sighting(
+            requirement_id=req.id,
+            vendor_name="Arrow",
+            mpn_matched="LM317T",
+            created_at=datetime.now(timezone.utc) - timedelta(days=91),
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        d = sighting_to_dict(s)
+        assert d["is_stale"] is True
+
+    def test_is_stale_no_created_at(self, db_session):
+        """Sightings with no created_at should not be stale."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        s = Sighting(
+            requirement_id=req.id,
+            vendor_name="Arrow",
+            mpn_matched="LM317T",
+            created_at=None,
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        d = sighting_to_dict(s)
+        assert d["is_stale"] is False
+
 
 # ── _history_to_result ───────────────────────────────────────────────────
 
@@ -463,7 +514,7 @@ class TestGetMaterialHistory:
         db_session.commit()
 
         fresh_vendors = {"mouser"}  # Arrow not in fresh
-        result = _get_material_history(["LM317T"], fresh_vendors, db_session)
+        result = _get_material_history([card.id], fresh_vendors, db_session)
         assert len(result) == 1
         assert result[0]["vendor_name"] == "Arrow"
         assert result[0]["currency"] == "EUR"
@@ -487,19 +538,19 @@ class TestGetMaterialHistory:
         db_session.commit()
 
         fresh_vendors = {"arrow"}  # Arrow IS in fresh
-        result = _get_material_history(["LM317T"], fresh_vendors, db_session)
+        result = _get_material_history([card.id], fresh_vendors, db_session)
         assert len(result) == 0
 
-    def test_empty_pns(self, db_session):
+    def test_empty_card_ids(self, db_session):
         result = _get_material_history([], set(), db_session)
         assert result == []
 
     def test_no_cards_found(self, db_session):
-        result = _get_material_history(["NONEXISTENT"], set(), db_session)
+        result = _get_material_history([999999], set(), db_session)
         assert result == []
 
-    def test_dedup_vendor_history(self, db_session):
-        """Multiple vendor history entries for same vendor (across cards) are deduped."""
+    def test_all_vendor_touchpoints_shown(self, db_session):
+        """Multiple vendor history entries for same vendor (across cards) are all shown."""
         card1 = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", search_count=1)
         card2 = MaterialCard(normalized_mpn="lm7805", display_mpn="LM7805", search_count=1)
         db_session.add_all([card1, card2])
@@ -517,14 +568,9 @@ class TestGetMaterialHistory:
             db_session.add(vh)
         db_session.commit()
 
-        result = _get_material_history(["LM317T", "LM7805"], set(), db_session)
-        # "arrow" appears twice but dedup by seen set should keep only one
-        assert len(result) == 1
-
-    def test_pns_with_empty_normalized_key(self, db_session):
-        """PNs that normalize to empty key should be filtered."""
-        result = _get_material_history(["", "   "], set(), db_session)
-        assert result == []
+        result = _get_material_history([card1.id, card2.id], set(), db_session)
+        # Both vendor history rows should be returned (no dedup)
+        assert len(result) == 2
 
     def test_none_times_seen(self, db_session):
         """times_seen=None should default to 1 in the output."""
@@ -542,7 +588,7 @@ class TestGetMaterialHistory:
         db_session.add(vh)
         db_session.commit()
 
-        result = _get_material_history(["LM317T"], set(), db_session)
+        result = _get_material_history([card.id], set(), db_session)
         assert result[0]["times_seen"] == 1
 
     def test_none_is_authorized(self, db_session):
@@ -562,7 +608,7 @@ class TestGetMaterialHistory:
         db_session.add(vh)
         db_session.commit()
 
-        result = _get_material_history(["LM317T"], set(), db_session)
+        result = _get_material_history([card.id], set(), db_session)
         assert result[0]["is_authorized"] is False
 
 
@@ -600,7 +646,7 @@ class TestUpsertMaterialCard:
 
         vh = db_session.query(MaterialVendorHistory).filter_by(material_card_id=card.id).first()
         assert vh is not None
-        assert vh.vendor_name == "Arrow"
+        assert vh.vendor_name == "arrow"  # Stored normalized since Phase 2
         assert vh.times_seen == 1
         assert vh.is_authorized is True
         assert vh.vendor_sku == "ARR-001"
@@ -754,7 +800,7 @@ class TestUpsertMaterialCard:
         _upsert_material_card("LM317T", [s], db_session, now)
 
         vh_mouser = db_session.query(MaterialVendorHistory).filter_by(
-            material_card_id=card.id, vendor_name="Mouser"
+            material_card_id=card.id, vendor_name="mouser"
         ).first()
         assert vh_mouser is not None
         assert vh_mouser.times_seen == 1
@@ -905,8 +951,37 @@ class TestSaveSightings:
         assert len(result) == 1
         s = result[0]
         assert s.vendor_name == "Arrow Electronics"
+        assert s.vendor_name_normalized == "arrow electronics"
         assert s.confidence == 0.8  # 4 / 5.0
         assert s.score == 100.0  # is_authorized => 100
+
+    def test_vendor_name_normalized_populated(self, db_session):
+        """Sighting creation populates vendor_name_normalized."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        fresh = [
+            {
+                "vendor_name": "Mouser Electronics, Inc.",
+                "mpn_matched": "NE555P",
+                "qty_available": 500,
+                "unit_price": 0.30,
+                "source_type": "nexar",
+            },
+            {
+                "vendor_name": "  DigiKey Corp.  ",
+                "mpn_matched": "LM7805",
+                "qty_available": 200,
+                "unit_price": 0.75,
+                "source_type": "nexar",
+            },
+        ]
+        result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
+        assert len(result) == 2
+        norms = {s.vendor_name_normalized for s in result}
+        assert "mouser electronics" in norms
+        assert "digikey" in norms
 
     def test_connector_aware_delete(self, db_session):
         """Only sightings from succeeded sources are deleted."""

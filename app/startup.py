@@ -45,6 +45,8 @@ def run_startup_migrations() -> None:
 
     _backfill_normalized_mpn()
     _create_default_user_if_env_set()
+    _backfill_sighting_offer_normalized_mpn()
+    _backfill_sighting_vendor_normalized()
     log.info("Startup migrations complete")
 
 
@@ -104,9 +106,72 @@ def _add_missing_columns(conn) -> None:
         "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS vendor_score_computed_at TIMESTAMP",
         # Add password_hash to users for optional password auth (encrypted at rest)
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT",
+        # Contact intelligence columns on vendor_contacts
+        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS first_name VARCHAR(100)",
+        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS last_name VARCHAR(100)",
+        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS phone_mobile VARCHAR(100)",
+        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS relationship_score FLOAT",
+        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS activity_trend VARCHAR(20)",
+        "ALTER TABLE vendor_contacts ADD COLUMN IF NOT EXISTS score_computed_at TIMESTAMP",
+        # Activity log additions
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS quote_id INTEGER",
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS auto_logged BOOLEAN DEFAULT FALSE",
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS occurred_at TIMESTAMP",
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS customer_site_id INTEGER REFERENCES customer_sites(id)",
+        # Prospecting pool: site-level ownership columns
+        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMP",
+        "ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS ownership_cleared_at TIMESTAMP",
+        # Contact archive + note log columns
+        "ALTER TABLE site_contacts ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS site_contact_id INTEGER REFERENCES site_contacts(id)",
+        # Customer AI material tags (mirrors vendor_cards pattern)
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS brand_tags JSON DEFAULT '[]'",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS commodity_tags JSON DEFAULT '[]'",
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS material_tags_updated_at TIMESTAMP",
+        # API health: active/planned classification
+        "ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT FALSE",
+        # Prospecting module: company record origin
+        "ALTER TABLE companies ADD COLUMN IF NOT EXISTS source VARCHAR(50) DEFAULT 'manual'",
+        # Proactive matching: CPH-enriched columns on proactive_matches
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS material_card_id INTEGER REFERENCES material_cards(id) ON DELETE SET NULL",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS company_id INTEGER REFERENCES companies(id) ON DELETE SET NULL",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS match_score INTEGER DEFAULT 0",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS margin_pct FLOAT",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS customer_purchase_count INTEGER DEFAULT 0",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS customer_last_price FLOAT",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS customer_last_purchased_at TIMESTAMP",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS our_cost FLOAT",
+        "ALTER TABLE proactive_matches ADD COLUMN IF NOT EXISTS dismiss_reason VARCHAR(255)",
+        # Vendor name normalization on sightings
+        "ALTER TABLE sightings ADD COLUMN IF NOT EXISTS vendor_name_normalized VARCHAR(255)",
     ]
     for stmt in stmts:
         _exec(conn, stmt)
+
+    # FK constraint migration: SET NULL on offers.vendor_card_id
+    _exec(conn, """
+        DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM information_schema.table_constraints
+            WHERE constraint_name='offers_vendor_card_id_fkey' AND table_name='offers')
+          THEN
+            ALTER TABLE offers DROP CONSTRAINT offers_vendor_card_id_fkey;
+            ALTER TABLE offers ADD CONSTRAINT offers_vendor_card_id_fkey
+              FOREIGN KEY (vendor_card_id) REFERENCES vendor_cards(id) ON DELETE SET NULL;
+          END IF;
+        END $$
+    """)
+    # FK constraint migration: SET NULL on offers.vendor_response_id
+    _exec(conn, """
+        DO $$ BEGIN
+          IF EXISTS (SELECT 1 FROM information_schema.table_constraints
+            WHERE constraint_name='offers_vendor_response_id_fkey' AND table_name='offers')
+          THEN
+            ALTER TABLE offers DROP CONSTRAINT offers_vendor_response_id_fkey;
+            ALTER TABLE offers ADD CONSTRAINT offers_vendor_response_id_fkey
+              FOREIGN KEY (vendor_response_id) REFERENCES vendor_responses(id) ON DELETE SET NULL;
+          END IF;
+        END $$
+    """)
 
     # Backfill vendor_score from engagement_score as initial data
     _exec(conn, """
@@ -116,6 +181,39 @@ def _add_missing_columns(conn) -> None:
             is_new_vendor = CASE WHEN engagement_score IS NULL THEN TRUE ELSE FALSE END
         WHERE vendor_score IS NULL AND engagement_score IS NOT NULL
     """)
+
+    # Backfill first_name/last_name from full_name
+    _exec(conn, """
+        UPDATE vendor_contacts
+        SET first_name = SPLIT_PART(full_name, ' ', 1),
+            last_name = CASE
+                WHEN POSITION(' ' IN full_name) > 0
+                THEN SUBSTRING(full_name FROM POSITION(' ' IN full_name) + 1)
+                ELSE NULL
+            END
+        WHERE full_name IS NOT NULL AND first_name IS NULL
+    """)
+
+    # Backfill occurred_at from created_at
+    _exec(conn, """
+        UPDATE activity_log SET occurred_at = created_at WHERE occurred_at IS NULL
+    """)
+
+    # Backfill customer_sites.last_activity_at from parent company
+    _exec(conn, """
+        UPDATE customer_sites cs
+        SET last_activity_at = c.last_activity_at
+        FROM companies c
+        WHERE cs.company_id = c.id
+          AND cs.last_activity_at IS NULL
+          AND c.last_activity_at IS NOT NULL
+    """)
+
+    # Backfill site_contacts.is_active
+    _exec(conn, "UPDATE site_contacts SET is_active = TRUE WHERE is_active IS NULL")
+
+    # Backfill api_sources.is_active from status
+    _exec(conn, "UPDATE api_sources SET is_active = TRUE WHERE status = 'live' AND is_active = FALSE")
 
 
 def _exec(conn, stmt: str, params: dict | None = None) -> None:
@@ -330,15 +428,15 @@ def _add_check_constraints(conn) -> None:
         ("sightings", "chk_sight_confidence", "confidence IS NULL OR (confidence >= 0 AND confidence <= 1)"),
         ("sightings", "chk_sight_score", "score IS NULL OR score >= 0"),
         ("sightings", "chk_sight_lead_time", "lead_time_days IS NULL OR lead_time_days >= 0"),
-        ("sightings", "chk_sight_condition", "condition IS NULL OR condition IN ('new','refurb','used')"),
-        ("sightings", "chk_sight_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape')"),
+        ("sightings", "chk_sight_condition", "condition IS NULL OR condition IN ('new','refurb','used','other')"),
+        ("sightings", "chk_sight_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape','bag','box','each','strip','other')"),
         # ── offers ──
         ("offers", "chk_offer_qty", "qty_available IS NULL OR qty_available > 0"),
         ("offers", "chk_offer_price", "unit_price IS NULL OR unit_price > 0"),
         ("offers", "chk_offer_moq", "moq IS NULL OR moq > 0"),
-        ("offers", "chk_offer_condition", "condition IS NULL OR condition IN ('new','refurb','used')"),
-        ("offers", "chk_offer_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape')"),
-        ("offers", "chk_offer_status", "status IN ('active','expired','won','lost','pending_review')"),
+        ("offers", "chk_offer_condition", "condition IS NULL OR condition IN ('new','refurb','used','other')"),
+        ("offers", "chk_offer_packaging", "packaging IS NULL OR packaging IN ('reel','tube','tray','bulk','cut_tape','bag','box','each','strip','other')"),
+        ("offers", "chk_offer_status", "status IN ('active','expired','won','lost','pending_review','rejected')"),
     ]
     # NOTE: table/constraint names are hardcoded literals above — not user input.
     # DDL identifiers cannot use bind params. This is safe as-is.
@@ -360,9 +458,11 @@ def _add_check_constraints(conn) -> None:
 def _create_perf_indexes(conn) -> None:
     """Create functional/composite indexes for hot query paths."""
     _exec(conn, """
-        CREATE INDEX IF NOT EXISTS ix_sightings_vendor_lower
-        ON sightings (LOWER(TRIM(vendor_name)))
+        CREATE INDEX IF NOT EXISTS ix_sightings_vendor_norm
+        ON sightings (vendor_name_normalized)
     """)
+    # Drop legacy expression index — vendor_name_normalized index handles all queries now
+    _exec(conn, "DROP INDEX IF EXISTS ix_sightings_vendor_lower")
     # pg_trgm for fast ILIKE search on requisitions + requirements
     _exec(conn, "CREATE EXTENSION IF NOT EXISTS pg_trgm")
     _exec(conn, """
@@ -396,10 +496,7 @@ def _create_perf_indexes(conn) -> None:
         CREATE INDEX IF NOT EXISTS ix_requirements_primary_mpn
         ON requirements (LOWER(primary_mpn))
     """)
-    _exec(conn, """
-        CREATE INDEX IF NOT EXISTS ix_sightings_mpn_matched
-        ON sightings (mpn_matched) WHERE mpn_matched IS NOT NULL
-    """)
+    # ix_sightings_mpn_matched removed — 0 scans, not worth the write overhead
     _exec(conn, """
         CREATE INDEX IF NOT EXISTS ix_offers_vendor_card
         ON offers (vendor_card_id) WHERE vendor_card_id IS NOT NULL
@@ -412,3 +509,126 @@ def _create_perf_indexes(conn) -> None:
         CREATE INDEX IF NOT EXISTS ix_vendor_responses_vendor_name
         ON vendor_responses (vendor_name) WHERE vendor_name IS NOT NULL
     """)
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_vendor_name ON offers (vendor_name)")
+    # ix_vendor_cards_created_at removed — 0 scans
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_vendor_cards_score_computed_at ON vendor_cards (vendor_score_computed_at)")
+
+    # GIN FTS indexes removed — 0 scans, 146 MB combined. Re-add if FTS search is implemented.
+
+    # ix_vendor_contacts_phone removed — 0 scans
+
+    # FK indexes — prevent slow JOINs / cascade deletes
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_activity_log_customer_site_id ON activity_log (customer_site_id)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_activity_log_site_contact_id ON activity_log (site_contact_id)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_requisitions_updated_by_id ON requisitions (updated_by_id)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_approved_by_id ON offers (approved_by_id)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_offers_updated_by_id ON offers (updated_by_id)")
+
+    # Proactive matching indexes
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_pm_material_card ON proactive_matches (material_card_id)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_pm_score ON proactive_matches (match_score)")
+    _exec(conn, "CREATE INDEX IF NOT EXISTS ix_pm_status_sales ON proactive_matches (status, salesperson_id)")
+
+    # Phase 3: soft-delete column for material cards
+    _exec(conn, "ALTER TABLE material_cards ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP")
+
+
+def _backfill_sighting_offer_normalized_mpn() -> None:
+    """One-time backfill: populate sightings.normalized_mpn and offers.normalized_mpn."""
+    import re
+    _nonalnum = re.compile(r"[^a-z0-9]")
+
+    def _key(raw):
+        if not raw:
+            return ""
+        return _nonalnum.sub("", str(raw).strip().lower())
+
+    with engine.connect() as conn:
+        # Sightings: compute from mpn_matched
+        try:
+            rows = conn.execute(
+                sqltext(
+                    "SELECT id, mpn_matched FROM sightings "
+                    "WHERE normalized_mpn IS NULL AND mpn_matched IS NOT NULL"
+                )
+            ).fetchall()
+            if rows:
+                for r in rows:
+                    nk = _key(r[1])
+                    if nk:
+                        conn.execute(
+                            sqltext("UPDATE sightings SET normalized_mpn = :nk WHERE id = :id"),
+                            {"nk": nk, "id": r[0]},
+                        )
+                conn.commit()
+                log.info("Backfilled normalized_mpn on %d sightings", len(rows))
+        except Exception as e:
+            log.warning("Backfill sightings.normalized_mpn failed: %s", e)
+            conn.rollback()
+
+        # Offers: compute from mpn
+        try:
+            rows = conn.execute(
+                sqltext(
+                    "SELECT id, mpn FROM offers "
+                    "WHERE normalized_mpn IS NULL AND mpn IS NOT NULL"
+                )
+            ).fetchall()
+            if rows:
+                for r in rows:
+                    nk = _key(r[1])
+                    if nk:
+                        conn.execute(
+                            sqltext("UPDATE offers SET normalized_mpn = :nk WHERE id = :id"),
+                            {"nk": nk, "id": r[0]},
+                        )
+                conn.commit()
+                log.info("Backfilled normalized_mpn on %d offers", len(rows))
+        except Exception as e:
+            log.warning("Backfill offers.normalized_mpn failed: %s", e)
+            conn.rollback()
+
+
+def _backfill_sighting_vendor_normalized() -> None:
+    """Backfill sightings.vendor_name_normalized from vendor_name until none remain."""
+    from .vendor_utils import normalize_vendor_name
+
+    with engine.connect() as conn:
+        # Check column exists first
+        try:
+            conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings LIMIT 0"))
+        except Exception:
+            conn.rollback()
+            return  # Column not yet created
+
+        total = 0
+        while True:
+            try:
+                rows = conn.execute(
+                    sqltext(
+                        "SELECT id, vendor_name FROM sightings "
+                        "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
+                        "LIMIT 10000"
+                    )
+                ).fetchall()
+                if not rows:
+                    break
+                batch = []
+                for r in rows:
+                    nv = normalize_vendor_name(r[1])
+                    if nv:
+                        batch.append({"nv": nv, "id": r[0]})
+                if batch:
+                    for b in batch:
+                        conn.execute(
+                            sqltext("UPDATE sightings SET vendor_name_normalized = :nv WHERE id = :id"),
+                            b,
+                        )
+                    conn.commit()
+                total += len(batch)
+            except Exception as e:
+                log.warning("Backfill sightings.vendor_name_normalized failed: %s", e)
+                conn.rollback()
+                break
+        if total:
+            log.info("Backfilled vendor_name_normalized on %d sightings", total)

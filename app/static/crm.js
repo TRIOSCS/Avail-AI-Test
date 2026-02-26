@@ -8,6 +8,7 @@ import {
     toggleDrillDown, guardBtn, openVendorPopup,
     loadVendorContacts, refreshProactiveBadge,
     currentReqId, setCurrentReqId,
+    _renderAvailScoreTable,
 } from 'app';
 
 // ── Debounced CRM Handlers ─────────────────────────────────────────────
@@ -41,26 +42,101 @@ function sortCustList(col) {
     renderCustomers();
 }
 
-function autoLogCrmCall(phone) {
-    apiFetch('/api/activities/call', {
+function autoLogCrmCall(phone, companyId) {
+    const cid = companyId || _selectedCustId;
+    const url = cid
+        ? '/api/companies/' + cid + '/activities/call'
+        : '/api/activities/call';
+    apiFetch(url, {
         method: 'POST', body: { phone: phone, direction: 'outbound' }
     }).catch(function(e) { logCatchError('autoLogCrmCall', e); });
 }
 
-// ── Customer Filter / Sort Helpers ─────────────────────────────────────
-function toggleCustUnassigned(btn) {
-    _custUnassigned = !_custUnassigned;
-    btn.classList.toggle('on', _custUnassigned);
-    loadCustomers();
+// ── Top bar view label ────────────────────────────────────────────────
+
+function _setTopViewLabel(label) {
+    const bc = document.getElementById('topBreadcrumb');
+    const bcText = document.getElementById('topBreadcrumbText');
+    const bcBack = bc?.querySelector('.breadcrumb-back');
+    if (bc) bc.style.display = label ? 'flex' : 'none';
+    if (bcText) bcText.textContent = label || '';
+    // Hide back button when just showing view name (not drilled down)
+    if (bcBack) bcBack.style.display = 'none';
 }
 
-// sortCustomers removed — now handled by sortCustList() with column headers
+function _setTopDrillLabel(label) {
+    const bc = document.getElementById('topBreadcrumb');
+    const bcText = document.getElementById('topBreadcrumbText');
+    const bcBack = bc?.querySelector('.breadcrumb-back');
+    if (bc) bc.style.display = 'flex';
+    if (bcText) bcText.textContent = label || '';
+    // Show back button when drilled into a record
+    if (bcBack) bcBack.style.display = '';
+}
+
+// ── Abort all CRM fetches (called from showView on tab switch) ────────
+function _abortAllCrmFetches() {
+    if (_custAbort) { try { _custAbort.abort(); } catch(e){} _custAbort = null; }
+    if (typeof _prospectAbort !== 'undefined' && _prospectAbort) { try { _prospectAbort.abort(); } catch(e){} _prospectAbort = null; }
+}
+
+// ── Customer Filter / Sort / Drawer Helpers ───────────────────────────
+
+let _custFilterMode = 'all';
+let _custOwnerFilterId = null;  // null = all, number = specific user
+let _custSelectedIds = new Set();
+
+function setCustFilter(mode, btn) {
+    _custFilterMode = mode;
+    document.querySelectorAll('#view-customers .chip-row .chip').forEach(c => c.classList.toggle('on', c.dataset.value === mode));
+    renderCustomers();
+}
+
+function setCustOwnerFilter(val) {
+    _custOwnerFilterId = val ? parseInt(val) : null;
+    renderCustomers();
+}
+
+async function _populateCustOwnerDropdown() {
+    const sel = document.getElementById('custOwnerFilter');
+    if (!sel) return;
+    try {
+        if (!_userListCache) {
+            try { _userListCache = await apiFetch('/api/users/list'); } catch(e) { _userListCache = []; }
+        }
+        const roles = ['sales', 'trader', 'manager', 'admin'];
+        const users = _userListCache.filter(u => roles.includes(u.role));
+        sel.innerHTML = '<option value="">All Accounts</option>' +
+            users.map(u => '<option value="' + u.id + '"' +
+                (u.id === window.userId ? ' selected' : '') +
+                '>' + esc(u.name) + '</option>').join('');
+        // Default to current user
+        if (window.userId) {
+            _custOwnerFilterId = window.userId;
+        }
+    } catch(e) { /* ignore */ }
+}
+
+function toggleCustUnassigned(btn) {
+    setCustFilter('unassigned', btn);
+}
 
 // ── Customers View ─────────────────────────────────────────────────────
 
 async function showCustomers() {
     showView('view-customers');
+    // Ensure flex display for the full-width layout
+    const viewEl = document.getElementById('view-customers');
+    if (viewEl) viewEl.style.display = 'flex';
     setCurrentReqId(null);
+    // Reset stale state from previous session
+    _selectedCustId = null;
+    _custFilterMode = 'all';
+    document.querySelectorAll('#view-customers .chip-row .chip').forEach(c => c.classList.toggle('on', c.dataset.value === 'all'));
+    // Populate owner filter dropdown
+    _populateCustOwnerDropdown();
+    // Show view indicator in top bar
+    _setTopViewLabel('Accounts');
     // Role-based account filtering
     const isManagerOrAdmin = window.__isAdmin || ['manager','trader'].includes(window.userRole);
     const isSalesOnly = window.userRole === 'sales';
@@ -68,9 +144,9 @@ async function showCustomers() {
     const toggleInput = document.getElementById('custMyOnly');
     if (toggleLabel && toggleInput) {
         if (isManagerOrAdmin) {
-            toggleLabel.style.display = '';  // Show toggle for managers/admins/traders
+            toggleLabel.style.display = '';
         } else {
-            toggleLabel.style.display = 'none';  // Hide for sales — forced to my accounts
+            toggleLabel.style.display = 'none';
             toggleInput.checked = true;
         }
     }
@@ -89,174 +165,1017 @@ async function loadCustomers() {
         const myOnly = document.getElementById('custMyOnly')?.checked;
         let url = '/api/companies?search=' + encodeURIComponent(filter);
         if ((isSalesOnly || myOnly) && window.userId) url += '&owner_id=' + window.userId;
-        if (_custUnassigned) url += '&unassigned=1';
-        const result = await apiFetch(url, {signal: _custAbort.signal});
-        // Filter out vendor-type accounts — they belong in the Vendors view
+        if (_custFilterMode === 'unassigned') url += '&unassigned=1';
+        const [result, reqs] = await Promise.all([
+            apiFetch(url, {signal: _custAbort.signal}).catch(e => { if (e.name !== 'AbortError') showToast('Failed to load accounts', 'error'); return []; }),
+            apiFetch('/api/requisitions', {signal: _custAbort.signal}).catch(() => []),
+        ]);
         crmCustomers = (Array.isArray(result) ? result : []).filter(c =>
             !c.account_type || c.account_type.toLowerCase() !== 'vendor'
         );
+        _enrichCustomersWithReqStats(crmCustomers, Array.isArray(reqs) ? reqs : []);
         renderCustomers();
     } catch (e) { if (e.name === 'AbortError') return; showToast('Failed to load customers', 'error'); console.error(e); }
+}
+
+function _enrichCustomersWithReqStats(companies, reqs) {
+    // Build a map: site_id → company_id
+    const siteToCompany = {};
+    for (const c of companies) {
+        for (const s of (c.sites || [])) {
+            siteToCompany[s.id] = c.id;
+        }
+    }
+    // Compute per-company: win rate and 90-day revenue
+    const now = Date.now();
+    const d90 = 90 * 86400000;
+    const compStats = {};
+    for (const r of reqs) {
+        const cid = r.customer_site_id ? siteToCompany[r.customer_site_id] : null;
+        if (!cid) continue;
+        if (!compStats[cid]) compStats[cid] = { won: 0, lost: 0, total: 0, revenue: 0, lastReqDate: null };
+        const st = (r.status || '').toLowerCase();
+        if (st === 'won' || st === 'lost') compStats[cid].total++;
+        if (st === 'won') {
+            compStats[cid].won++;
+            if (r.created_at && (now - new Date(r.created_at).getTime()) < d90) {
+                compStats[cid].revenue += parseFloat(r.won_revenue || r.total_value || 0);
+            }
+        }
+        if (st === 'lost') compStats[cid].lost++;
+        // Track last RFQ date
+        if (r.created_at) {
+            if (!compStats[cid].lastReqDate || r.created_at > compStats[cid].lastReqDate) {
+                compStats[cid].lastReqDate = r.created_at;
+            }
+        }
+    }
+    for (const c of companies) {
+        const s = compStats[c.id];
+        if (s) {
+            c.win_rate = s.total > 0 ? (s.won / s.total) * 100 : null;
+            c.revenue_90d = s.revenue || null;
+            c.last_req_date = s.lastReqDate || null;
+        }
+    }
 }
 
 async function goToCompany(companyId) {
     if (!companyId) return;
     showView('view-customers');
+    const viewEl = document.getElementById('view-customers');
+    if (viewEl) viewEl.style.display = 'flex';
     setCurrentReqId(null);
     try {
         crmCustomers = await apiFetch('/api/companies');
+        crmCustomers = (Array.isArray(crmCustomers) ? crmCustomers : []).filter(c =>
+            !c.account_type || c.account_type.toLowerCase() !== 'vendor'
+        );
         renderCustomers();
     } catch (e) { showToast('Failed to load customers', 'error'); return; }
-    // Find and expand the target company drill-down row
-    setTimeout(() => {
-        const drow = document.getElementById('cd-' + companyId);
-        if (drow) {
-            const dataRow = drow.previousElementSibling;
-            if (dataRow) dataRow.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            if (!drow.classList.contains('open')) {
-                toggleCustDrill(companyId);
-            }
-        }
-    }, 100);
+    setTimeout(() => openCustDrawer(companyId), 150);
     navHighlight(document.getElementById('navCustomers'));
+}
+
+let _selectedCustId = null;
+
+function _custHealthColor(c) {
+    const enrichDays = window.daysSince ? window.daysSince(c.last_enriched_at) : 999;
+    if (enrichDays <= 30) return 'green';
+    if (enrichDays <= 90) return 'amber';
+    return 'red';
+}
+
+function _custHealthLabel(c) {
+    const enrichDays = window.daysSince ? window.daysSince(c.last_enriched_at) : 999;
+    if (enrichDays <= 30) return 'Healthy';
+    if (enrichDays <= 90) return 'Aging';
+    if (enrichDays < 900) return 'At Risk';
+    return 'New';
 }
 
 function renderCustomers() {
     const el = document.getElementById('custList');
     if (!el) return;
-    const countEl = document.getElementById('custFilterCount');
+    const countEl = document.getElementById('custListCount');
     if (!crmCustomers.length) {
-        el.innerHTML = '<p class="empty">No customers yet \u2014 add a company to get started</p>';
+        el.innerHTML = '<p class="crm-empty">No accounts yet — click <b>+ New Account</b> to get started</p>';
         if (countEl) countEl.textContent = '';
         return;
     }
+
+    // Apply view filters
+    let filtered = [...crmCustomers];
+    if (_custOwnerFilterId) filtered = filtered.filter(c => c.sites && c.sites.some(s => s.owner_id === _custOwnerFilterId));
+    if (_custFilterMode === 'strategic') filtered = filtered.filter(c => c.is_strategic);
+    if (_custFilterMode === 'at-risk') filtered = filtered.filter(c => _custHealthColor(c) === 'red');
+    if (_custFilterMode === 'stale') {
+        const daysSince = window.daysSince || (() => 999);
+        filtered = filtered.filter(c => daysSince(c.last_enriched_at) > 30);
+    }
+
     // Sort
-    const sorted = [...crmCustomers];
     if (_custSortCol) {
-        sorted.sort((a, b) => {
+        filtered.sort((a, b) => {
             let va, vb;
             switch (_custSortCol) {
                 case 'name': va = (a.name || ''); vb = (b.name || ''); break;
-                case 'type': va = (a.account_type || ''); vb = (b.account_type || ''); break;
-                case 'industry': va = (a.industry || ''); vb = (b.industry || ''); break;
-                case 'sites': va = a.site_count || 0; vb = b.site_count || 0; break;
-                case 'owner': va = (a.account_owner_name || ''); vb = (b.account_owner_name || ''); break;
+                case 'health': va = _custHealthColor(a) === 'green' ? 0 : _custHealthColor(a) === 'amber' ? 1 : 2; vb = _custHealthColor(b) === 'green' ? 0 : _custHealthColor(b) === 'amber' ? 1 : 2; break;
+                case 'owner': va = (a.account_owner_name || 'zzz'); vb = (b.account_owner_name || 'zzz'); break;
+                case 'sites': va = (a.site_count || 0); vb = (b.site_count || 0); break;
+                case 'reqs': va = (a.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0); vb = (b.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0); break;
+                case 'type': va = (a.account_type || 'zzz'); vb = (b.account_type || 'zzz'); break;
+                case 'revenue': va = (a.revenue_90d || 0); vb = (b.revenue_90d || 0); break;
+                case 'winrate': va = (a.win_rate || 0); vb = (b.win_rate || 0); break;
+                case 'lastreq': va = (a.last_req_date || ''); vb = (b.last_req_date || ''); break;
                 default: va = 0; vb = 0;
             }
             if (typeof va === 'string') return _custSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
             return _custSortDir === 'asc' ? va - vb : vb - va;
         });
     } else {
-        sorted.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     }
 
-    if (countEl) countEl.textContent = sorted.length + ' companies';
+    if (countEl) countEl.textContent = filtered.length + ' accounts';
 
-    const thC = (col) => _custSortCol === col ? ' class="sorted"' : '';
-    const sa = (col) => `<span class="sort-arrow">${_custSortArrow(col)}</span>`;
+    // Build table
+    const thSort = (col, label) => {
+        const active = _custSortCol === col;
+        const arrow = active ? (_custSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+        return `<th class="${active ? 'sorted' : ''}" onclick="sortCustList('${col}')">${label}<span class="sort-arrow">${arrow}</span></th>`;
+    };
 
-    let html = `<div style="padding:0 16px"><table class="tbl"><thead><tr>
-        <th style="width:30px"></th>
-        <th onclick="sortCustList('name')"${thC('name')}>Company ${sa('name')}</th>
-        <th onclick="sortCustList('type')"${thC('type')}>Type ${sa('type')}</th>
-        <th onclick="sortCustList('industry')"${thC('industry')}>Industry ${sa('industry')}</th>
-        <th onclick="sortCustList('sites')"${thC('sites')}>Sites ${sa('sites')}</th>
-        <th onclick="sortCustList('owner')"${thC('owner')}>Owner ${sa('owner')}</th>
-        <th>Health</th>
-        <th style="width:90px">Actions</th>
-    </tr></thead><tbody>`;
+    let html = `<table class="crm-table">
+        <thead><tr>
+            <th class="td-check"><input type="checkbox" onchange="toggleAllCustCheckboxes(this)"></th>
+            ${thSort('name', 'Account')}
+            ${thSort('type', 'Type')}
+            ${thSort('health', 'Health')}
+            ${thSort('owner', 'Owner')}
+            ${thSort('sites', 'Sites')}
+            ${thSort('reqs', 'Open Reqs')}
+            ${thSort('revenue', '90-day Revenue')}
+            ${thSort('winrate', 'Win Rate')}
+            ${thSort('lastreq', 'Last RFQ')}
+        </tr></thead><tbody>`;
 
-    for (const c of sorted) {
+    for (const c of filtered) {
         const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
-        const domain = c.domain || (c.website ? c.website.replace(/https?:\/\/(www\.)?/, '').split('/')[0] : '');
-        const ownerHtml = c.account_owner_name
-            ? esc(c.account_owner_name)
-            : '<span style="color:var(--red);font-weight:600">unassigned</span>';
+        const healthColor = _custHealthColor(c);
+        const healthLabel = _custHealthLabel(c);
+        const openReqs = (c.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0);
+        const checked = _custSelectedIds.has(c.id) ? ' checked' : '';
+        const activeRow = _selectedCustId === c.id ? ' active-row' : '';
+        const acctType = c.account_type || 'Standard';
+        const typeColors = { Customer: '--blue', Prospect: '--amber', Partner: '--green', Competitor: '--red' };
+        const typeColor = typeColors[acctType] || '--muted';
+        const rev90 = c.revenue_90d != null ? '$' + Number(c.revenue_90d).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0}) : '—';
+        const winRate = c.win_rate != null ? Math.round(c.win_rate) + '%' : '—';
 
-        const enrichDays = window.daysSince ? window.daysSince(c.last_enriched_at) : 999;
-        const enrichColor = window.recencyColor ? window.recencyColor(enrichDays, [7, 21]) : 'muted';
-
-        html += `<tr onclick="toggleCustDrill(${c.id})" data-company-id="${c.id}">
-            <td><button class="ea" id="ca-${c.id}">\u25b6</button></td>
-            <td><b class="cust-link">${esc(displayName)}</b>${domain ? '<br><span style="font-size:10px;color:var(--muted)">' + esc(domain) + '</span>' : ''}</td>
-            <td>${c.account_type ? '<span class="badge b-src">' + esc(c.account_type) + '</span>' : '\u2014'}</td>
-            <td style="font-size:11px">${esc(c.industry || '\u2014')}</td>
-            <td class="mono">${c.site_count || 0}</td>
-            <td>${ownerHtml}${c.account_owner_name ? '<br><span class="badge b-src" style="font-size:9px;margin-top:2px">' + esc(c.account_owner_name) + '</span>' : ''}</td>
-            <td>${window.healthDot ? window.healthDot(enrichColor, enrichDays < 900 ? enrichDays + 'd since enrichment' : 'Never enriched') : ''} <span id="actHealth-${c.id}"></span></td>
-            <td style="white-space:nowrap" onclick="event.stopPropagation()">
-                <button class="btn-enrich" onclick="openEditCompany(${c.id})">Edit</button>
-                <button class="btn-enrich" onclick="unifiedEnrichCompany(${c.id})">Enrich</button>
+        html += `<tr class="${activeRow}" onclick="openCustDrawer(${c.id})" data-company-id="${c.id}">
+            <td class="td-check"><input type="checkbox" onclick="event.stopPropagation();toggleCustCheckbox(${c.id},this)"${checked}></td>
+            <td>
+                <div style="display:flex;align-items:center;gap:8px">
+                    <span style="font-weight:600;color:var(--text)">${esc(displayName)}</span>
+                    ${c.is_strategic ? '<span title="Strategic" style="color:var(--amber);font-size:12px">★</span>' : ''}
+                </div>
+                ${c.domain ? '<div style="font-size:11px;color:var(--muted)">' + esc(c.domain) + '</div>' : ''}
             </td>
-        </tr>
-        <tr class="drow" id="cd-${c.id}"><td colspan="8">
-            <div id="cdInner-${c.id}"><p class="empty" style="padding:4px;font-size:11px">Loading...</p></div>
-        </td></tr>`;
+            <td><span style="background:var(${typeColor}-bg,#f1f5f9);color:var(${typeColor},#64748b);padding:1px 8px;border-radius:4px;font-size:10px;font-weight:600">${esc(acctType)}</span></td>
+            <td><div class="health-indicator"><span class="health-dot health-dot-${healthColor}"></span><span class="health-indicator-label">${healthLabel}</span></div></td>
+            <td>${c.account_owner_name ? '<span style="font-size:12px">' + esc(c.account_owner_name) + '</span>' : '<span style="font-size:11px;color:var(--muted)">—</span>'}</td>
+            <td>${c.site_count || 0}</td>
+            <td>${openReqs || '<span style="color:var(--muted)">0</span>'}</td>
+            <td class="mono" style="color:var(--teal)">${rev90}</td>
+            <td>${winRate !== '—' ? '<span style="font-weight:600;color:' + (c.win_rate >= 50 ? 'var(--green)' : c.win_rate >= 25 ? 'var(--amber)' : 'var(--red)') + '">' + winRate + '</span>' : '<span class="muted-cell">—</span>'}</td>
+            <td class="muted-cell">${c.last_req_date ? getRelativeTime(c.last_req_date) : '—'}</td>
+        </tr>`;
     }
-
-    html += '</tbody></table></div>';
+    html += '</tbody></table>';
     el.innerHTML = html;
 }
 
-function toggleCustDrill(companyId) {
-    const drow = document.getElementById('cd-' + companyId);
-    const arrow = document.getElementById('ca-' + companyId);
-    if (!drow) return;
-    const opening = !drow.classList.contains('open');
-    drow.classList.toggle('open');
-    if (arrow) arrow.classList.toggle('open');
-    if (opening) {
-        _loadCustDrillContent(companyId);
-        loadCompanyActivityStatus(companyId);
+// ── Checkbox / Bulk Actions ───────────────────────────────────────────
+
+function toggleCustCheckbox(companyId, cb) {
+    if (cb.checked) _custSelectedIds.add(companyId);
+    else _custSelectedIds.delete(companyId);
+    _updateCustBulkBar();
+}
+
+function toggleAllCustCheckboxes(masterCb) {
+    const checkboxes = document.querySelectorAll('#custList tbody .td-check input[type="checkbox"]');
+    checkboxes.forEach(cb => {
+        cb.checked = masterCb.checked;
+        const row = cb.closest('tr');
+        const cid = Number(row?.dataset?.companyId);
+        if (cid) { if (masterCb.checked) _custSelectedIds.add(cid); else _custSelectedIds.delete(cid); }
+    });
+    _updateCustBulkBar();
+}
+
+function clearCustSelection() {
+    _custSelectedIds.clear();
+    document.querySelectorAll('#custList .td-check input[type="checkbox"]').forEach(cb => cb.checked = false);
+    _updateCustBulkBar();
+}
+
+function _updateCustBulkBar() {
+    const bar = document.getElementById('custBulkBar');
+    const countEl = document.getElementById('custBulkCount');
+    if (!bar) return;
+    const n = _custSelectedIds.size;
+    if (countEl) countEl.textContent = n;
+    bar.classList.toggle('visible', n > 0);
+}
+
+async function bulkAssignOwner() {
+    // Simple prompt for now
+    const name = prompt('Assign owner (enter user ID):');
+    if (!name) return;
+    const ownerId = parseInt(name);
+    if (isNaN(ownerId)) { showToast('Invalid user ID', 'error'); return; }
+    for (const cid of _custSelectedIds) {
+        try { await apiFetch('/api/companies/' + cid, { method: 'PUT', body: { account_owner_id: ownerId } }); }
+        catch (e) { console.error('bulk assign error', cid, e); }
+    }
+    showToast(_custSelectedIds.size + ' accounts updated', 'success');
+    clearCustSelection();
+    loadCustomers();
+}
+
+function bulkExportAccounts() {
+    const ids = [..._custSelectedIds];
+    const data = crmCustomers.filter(c => ids.includes(c.id));
+    const csv = ['Name,Industry,Owner,Sites,Domain'].concat(
+        data.map(c => [c.name, c.industry || '', c.account_owner_name || '', c.site_count || 0, c.domain || ''].map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','))
+    ).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'accounts_export.csv'; a.click();
+    URL.revokeObjectURL(url);
+    showToast('Exported ' + data.length + ' accounts', 'success');
+}
+
+// ── Customer Drawer ───────────────────────────────────────────────────
+
+async function openCustDrawer(companyId, tab) {
+    _selectedCustId = companyId;
+    // Highlight active row in table
+    document.querySelectorAll('#custList tbody tr').forEach(r => {
+        r.classList.toggle('active-row', Number(r.dataset.companyId) === companyId);
+    });
+    const backdrop = document.getElementById('custDrawerBackdrop');
+    const drawer = document.getElementById('custDrawer');
+    const viewEl = document.getElementById('view-customers');
+    const miniList = document.getElementById('custMiniList');
+    const tableWrap = document.getElementById('custTableWrap');
+    const isDesktop = window.innerWidth > 768;
+
+    // Split-pane: show mini-list on desktop
+    if (isDesktop && miniList) {
+        _renderMiniList(companyId);
+        miniList.classList.add('open');
+        if (viewEl) viewEl.classList.add('cust-split-active');
+        if (tableWrap) tableWrap.style.display = 'none';
+        if (backdrop) backdrop.classList.remove('open');
+    } else {
+        if (backdrop) backdrop.classList.add('open');
+    }
+    if (drawer) drawer.classList.add('open');
+    // Show drill-down breadcrumb in top bar
+    const comp = crmCustomers.find(x => x.id === companyId);
+    _setTopDrillLabel(comp ? comp.name.replace(/\s*(bucket|pass)\s*$/i, '').trim() : 'Account');
+    // Ensure company data is loaded (may be called from Contacts view before CRM tab)
+    if (!crmCustomers.find(x => x.id === companyId)) {
+        try {
+            const companies = await apiFetch('/api/companies?search=');
+            crmCustomers = (Array.isArray(companies) ? companies : []).filter(c =>
+                c && typeof c === 'object' && c.id && c.name
+            );
+        } catch (_e) { /* will show "Account not found" in drawer */ }
+    }
+    const targetTab = tab || 'overview';
+    switchCustDrawerTab(targetTab);
+    // Highlight correct tab button
+    const tabNames = ['overview', 'contacts', 'sites', 'activity', 'pipeline'];
+    const tabIdx = tabNames.indexOf(targetTab);
+    document.querySelectorAll('#custDrawerTabs .drawer-tab').forEach((t, i) => t.classList.toggle('active', i === tabIdx));
+}
+
+let _miniListIds = []; // ordered company IDs for keyboard nav
+
+function _renderMiniListFromSearch() { _renderMiniList(_selectedCustId); }
+
+function _renderMiniList(activeId) {
+    const miniList = document.getElementById('custMiniList');
+    if (!miniList) return;
+    let filtered = [...crmCustomers];
+    if (_custFilterMode === 'strategic') filtered = filtered.filter(c => c.is_strategic);
+    if (_custFilterMode === 'healthy') filtered = filtered.filter(c => _custHealthColor(c) === 'green');
+    if (_custFilterMode === 'at-risk') filtered = filtered.filter(c => _custHealthColor(c) === 'red');
+    if (_custFilterMode === 'unassigned') filtered = filtered.filter(c => !c.account_owner_id);
+    filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    // Apply mini-list search filter
+    const searchInput = miniList.querySelector('.cust-mini-search');
+    const searchQ = (searchInput?.value || '').toLowerCase().trim();
+    if (searchQ) {
+        filtered = filtered.filter(c =>
+            (c.name || '').toLowerCase().includes(searchQ) ||
+            (c.account_owner_name || '').toLowerCase().includes(searchQ) ||
+            (c.domain || '').toLowerCase().includes(searchQ)
+        );
+    }
+
+    _miniListIds = filtered.map(c => c.id);
+
+    // Build header (only on first render or if not present)
+    let headerHtml = '';
+    if (!miniList.querySelector('.cust-mini-list-header')) {
+        headerHtml = `<div class="cust-mini-list-header">
+            <input class="cust-mini-search" placeholder="Filter accounts..." oninput="_renderMiniListFromSearch()"
+                onkeydown="_miniListKeyNav(event)">
+            <div class="cust-mini-count">${filtered.length} account${filtered.length !== 1 ? 's' : ''}</div>
+        </div>`;
+    }
+
+    let itemsHtml = '';
+    for (const c of filtered) {
+        const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
+        const hc = _custHealthColor(c);
+        const hl = _custHealthLabel(c);
+        const isActive = c.id === activeId;
+        const owner = c.account_owner_name || '';
+        const strategic = c.is_strategic ? '<span style="color:var(--amber);font-size:10px" title="Strategic">★</span> ' : '';
+        itemsHtml += `<div class="cust-mini-list-item${isActive ? ' active' : ''}" data-cid="${c.id}" onclick="openCustDrawer(${c.id})">
+            <div class="cust-mini-list-info">
+                <div class="cust-mini-list-name">${strategic}${esc(displayName)}</div>
+                <div class="cust-mini-list-meta">
+                    <span class="cust-mini-list-health ${hc}">${hl}</span>
+                    ${owner ? '<span class="cust-mini-list-sub">' + esc(owner) + '</span>' : ''}
+                </div>
+            </div>
+        </div>`;
+    }
+
+    if (headerHtml) {
+        miniList.innerHTML = headerHtml + '<div class="cust-mini-list-scroll">' + itemsHtml + '</div>';
+        // Preserve search value
+    } else {
+        const scrollEl = miniList.querySelector('.cust-mini-list-scroll');
+        if (scrollEl) scrollEl.innerHTML = itemsHtml;
+        const countEl = miniList.querySelector('.cust-mini-count');
+        if (countEl) countEl.textContent = `${filtered.length} account${filtered.length !== 1 ? 's' : ''}`;
+    }
+
+    // Scroll active item into view
+    const activeEl = miniList.querySelector('.cust-mini-list-item.active');
+    if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+}
+
+function _miniListKeyNav(event) {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    if (!_miniListIds.length || !_selectedCustId) return;
+    const idx = _miniListIds.indexOf(_selectedCustId);
+    let next;
+    if (event.key === 'ArrowDown') next = idx < _miniListIds.length - 1 ? idx + 1 : 0;
+    else next = idx > 0 ? idx - 1 : _miniListIds.length - 1;
+    openCustDrawer(_miniListIds[next]);
+}
+
+function closeCustDrawer() {
+    _selectedCustId = null;
+    const backdrop = document.getElementById('custDrawerBackdrop');
+    const drawer = document.getElementById('custDrawer');
+    const viewEl = document.getElementById('view-customers');
+    const miniList = document.getElementById('custMiniList');
+    const tableWrap = document.getElementById('custTableWrap');
+    if (backdrop) backdrop.classList.remove('open');
+    if (drawer) drawer.classList.remove('open');
+    if (miniList) miniList.classList.remove('open');
+    if (viewEl) viewEl.classList.remove('cust-split-active');
+    if (tableWrap) tableWrap.style.display = '';
+    document.querySelectorAll('#custList tbody tr').forEach(r => r.classList.remove('active-row'));
+    // Restore view label
+    _setTopViewLabel('Accounts');
+}
+
+async function analyzeCustomerTags(companyId) {
+    const btn = document.getElementById('analyzeTags-' + companyId);
+    if (btn) { btn.disabled = true; btn.textContent = 'Analyzing...'; }
+    try {
+        const result = await apiFetch('/api/companies/' + companyId + '/analyze-tags', { method: 'POST' });
+        // Update local cache
+        const c = crmCustomers.find(x => x.id === companyId);
+        if (c) { c.brand_tags = result.brand_tags || []; c.commodity_tags = result.commodity_tags || []; }
+        const container = document.getElementById('custTags-' + companyId);
+        if (container) {
+            const tags = (result.brand_tags || []).map(t => '<span class="tag tag-brand">' + esc(t) + '</span>').join('') +
+                (result.commodity_tags || []).map(t => '<span class="tag tag-commodity">' + esc(t) + '</span>').join('');
+            container.innerHTML = tags || '<span style="font-size:11px;color:var(--muted)">No focus areas detected</span>';
+        }
+        showToast('Tags analyzed', 'success');
+    } catch (e) {
+        showToast('Tag analysis failed', 'error');
+        logCatchError('analyzeCustomerTags', e);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = 'Analyze Tags'; }
     }
 }
 
-async function _loadCustDrillContent(companyId) {
-    const inner = document.getElementById('cdInner-' + companyId);
-    if (!inner || inner.dataset.loaded) return;
+function switchCustDrawerTab(tab, btn) {
+    document.querySelectorAll('#custDrawerTabs .drawer-tab').forEach(t => t.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    if (!_selectedCustId) return;
+    if (tab === 'overview') _renderCustDrawerOverview(_selectedCustId);
+    else if (tab === 'contacts') _renderCustDrawerContacts(_selectedCustId);
+    else if (tab === 'sites') _renderCustDrawerSites(_selectedCustId);
+    else if (tab === 'activity') _renderCustDrawerActivity(_selectedCustId);
+    else if (tab === 'pipeline') _renderCustDrawerPipeline(_selectedCustId);
+}
+
+function _renderCustDrawerOverview(companyId) {
+    const body = document.getElementById('custDrawerBody');
+    const title = document.getElementById('custDrawerTitle');
+    if (!body) return;
+    const c = crmCustomers.find(x => x.id === companyId);
+    if (!c) { body.innerHTML = '<p class="crm-empty">Account not found</p>'; return; }
+
+    const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
+    if (title) title.innerHTML = esc(displayName) + (c.is_strategic ? ' <span style="color:var(--amber)">★</span>' : '');
+
+    const healthColor = _custHealthColor(c);
+    const healthLabel = _custHealthLabel(c);
+
+    // Count contacts across all sites
+    const totalContacts = (c.sites || []).reduce((n, s) => n + (s.contact_count || 0), 0);
+    const openReqs = (c.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0);
+
+    let html = `<div class="drawer-section" style="border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+            <div class="health-indicator"><span class="health-dot health-dot-${healthColor}"></span><span class="health-indicator-label" style="font-weight:600">${healthLabel}</span></div>
+            <div style="display:flex;align-items:center;gap:6px">
+                <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:${c.is_strategic ? 'var(--amber)' : 'var(--muted)'};cursor:pointer;user-select:none" title="Strategic accounts have a 90-day inactivity window (vs 30-day)">
+                    <input type="checkbox" ${c.is_strategic ? 'checked' : ''} onchange="toggleStrategic(${c.id},this.checked)" style="accent-color:var(--amber)"> ★ Strategic
+                </label>
+                <button class="btn btn-ghost btn-sm" onclick="openEditCompany(${c.id})">Edit</button>
+                <button class="btn-enrich" onclick="unifiedEnrichCompany(${c.id})">Enrich</button>
+            </div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;text-align:center;margin-bottom:4px">
+            <div><div style="font-size:22px;font-weight:700;color:var(--text)">${c.site_count || 0}</div><div style="font-size:10px;color:var(--muted)">Sites</div></div>
+            <div><div style="font-size:22px;font-weight:700;color:var(--text)">${totalContacts}</div><div style="font-size:10px;color:var(--muted)">Contacts</div></div>
+            <div><div style="font-size:22px;font-weight:700;color:var(--blue)">${openReqs}</div><div style="font-size:10px;color:var(--muted)">Open Reqs</div></div>
+            <div><div style="font-size:22px;font-weight:700;color:var(--text)">${c.account_type || 'Standard'}</div><div style="font-size:10px;color:var(--muted)">Type</div></div>
+        </div>
+    </div>`;
+
+    // Two-column grid for details + notes
+    html += '<div class="drawer-overview-grid">';
+
+    // Left column: Company details
+    html += `<div class="drawer-section">
+        <div class="drawer-section-title">Account Details</div>
+        <div class="drawer-field"><span class="drawer-field-label">Owner</span><span class="drawer-field-value">${c.account_owner_name ? esc(c.account_owner_name) : '<span style="color:var(--red)">Unassigned</span>'}</span></div>
+        <div class="drawer-field"><span class="drawer-field-label">Industry</span><span class="drawer-field-value">${esc(c.industry || '—')}</span></div>
+        ${c.domain ? '<div class="drawer-field"><span class="drawer-field-label">Domain</span><span class="drawer-field-value"><a href="https://'+escAttr(c.domain)+'" target="_blank">'+esc(c.domain)+'</a></span></div>' : ''}
+        ${c.website ? '<div class="drawer-field"><span class="drawer-field-label">Website</span><span class="drawer-field-value"><a href="'+escAttr(c.website)+'" target="_blank">'+esc(c.website)+'</a></span></div>' : ''}
+        ${c.phone ? '<div class="drawer-field"><span class="drawer-field-label">Phone</span><span class="drawer-field-value"><a href="tel:'+escAttr(c.phone)+'" onclick="autoLogCrmCall(\''+escAttr(c.phone)+'\','+c.id+')">'+esc(c.phone)+'</a></span></div>' : ''}
+        ${c.employee_size ? '<div class="drawer-field"><span class="drawer-field-label">Size</span><span class="drawer-field-value">'+esc(c.employee_size)+'</span></div>' : ''}
+        ${c.hq_city ? '<div class="drawer-field"><span class="drawer-field-label">HQ</span><span class="drawer-field-value">'+esc(c.hq_city)+(c.hq_state ? ', '+esc(c.hq_state) : '')+'</span></div>' : ''}
+        ${c.credit_terms ? '<div class="drawer-field"><span class="drawer-field-label">Credit Terms</span><span class="drawer-field-value">'+esc(c.credit_terms)+'</span></div>' : ''}
+        ${c.linkedin_url ? '<div class="drawer-field"><span class="drawer-field-label">LinkedIn</span><span class="drawer-field-value"><a href="'+escAttr(c.linkedin_url)+'" target="_blank">View Profile</a></span></div>' : ''}
+        <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+                <div class="drawer-section-title" style="margin:0">Focus Areas</div>
+                <button class="btn btn-ghost btn-sm" id="analyzeTags-${c.id}" onclick="analyzeCustomerTags(${c.id})">Analyze Tags</button>
+            </div>
+            <div id="custTags-${c.id}">
+                ${(c.brand_tags && c.brand_tags.length) || (c.commodity_tags && c.commodity_tags.length) ?
+                    (c.brand_tags || []).map(t => '<span class="tag tag-brand">' + esc(t) + '</span>').join('') +
+                    (c.commodity_tags || []).map(t => '<span class="tag tag-commodity">' + esc(t) + '</span>').join('')
+                    : '<span style="font-size:11px;color:var(--muted)">No tags yet — click Analyze Tags</span>'}
+            </div>
+        </div>
+    </div>`;
+
+    // Right column: Notes & recent activity
+    html += `<div class="drawer-section">
+        <div class="drawer-section-title">Account Notes</div>
+        <div class="notes-panel">
+            <textarea id="custNotes-${c.id}" rows="4" style="width:100%;resize:vertical;border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px;background:var(--white);font-family:inherit"
+                placeholder="Add account notes..." onblur="saveCustNotes(${c.id})">${esc(c.notes || '')}</textarea>
+            <div class="note-compose">
+                <textarea id="custNewNote-${c.id}" rows="1" placeholder="Log a note..." onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();logCustNote(${c.id})}"></textarea>
+                <button class="btn btn-sm btn-ghost" onclick="logCustNote(${c.id})">Log</button>
+            </div>
+            <div id="custRecentNotes-${c.id}" class="notes-log"></div>
+        </div>
+    </div>`;
+
+    html += '</div>'; // close drawer-overview-grid
+
+    body.innerHTML = html;
+    // Load recent notes asynchronously
+    _loadCustRecentNotes(c.id);
+}
+
+async function _renderCustDrawerSites(companyId) {
+    const body = document.getElementById('custDrawerBody');
+    if (!body) return;
     const c = crmCustomers.find(x => x.id === companyId);
     if (!c) return;
 
-    // Enrichment tags
-    const acctTags = [
-        c.employee_size ? '<span class="enrich-tag">\ud83d\udc65 ' + esc(c.employee_size) + '</span>' : '',
-        c.hq_city ? '<span class="enrich-tag">\ud83d\udccd ' + esc(c.hq_city) + (c.hq_state ? ', ' + esc(c.hq_state) : '') + '</span>' : '',
-        c.phone ? '<span class="enrich-tag">\ud83d\udcde ' + esc(c.phone) + '</span>' : '',
-        c.credit_terms ? '<span class="enrich-tag">' + esc(c.credit_terms) + '</span>' : '',
-        c.linkedin_url ? '<a href="' + escAttr(c.linkedin_url) + '" target="_blank" style="color:var(--teal);text-decoration:none;font-size:10px">LinkedIn \u2197</a>' : '',
-    ].filter(Boolean).join('');
-    const enrichHtml = acctTags ? '<div class="enrich-bar" style="margin-bottom:8px">' + acctTags + '</div>' : '';
-
-    // Sites sub-table
     const sites = c.sites || [];
-    let sitesHtml = '';
-    if (sites.length) {
-        sitesHtml = `<table class="dtbl"><thead><tr><th>Site</th><th>Owner</th><th>Open Reqs</th></tr></thead><tbody>`;
-        for (const s of sites) {
-            sitesHtml += `<tr style="cursor:pointer" onclick="toggleSiteDetail(${s.id})">
-                <td style="font-weight:600">${esc(s.site_name)}</td>
-                <td>${esc(s.owner_name || '\u2014')}</td>
-                <td class="mono">${s.open_reqs || 0}</td>
-            </tr>
-            <tr><td colspan="3"><div id="siteDetail-${s.id}" class="site-detail-panel" style="display:none"></div></td></tr>`;
-        }
-        sitesHtml += '</tbody></table>';
+    if (!sites.length) {
+        body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No sites — <a href="#" onclick="event.preventDefault();openAddSiteModal(${c.id},'${escAttr(c.name)}')">add one</a></p></div>`;
+        return;
     }
-    sitesHtml += `<button class="btn btn-ghost btn-sm" style="margin-top:6px" onclick="event.stopPropagation();openAddSiteModal(${c.id},'${escAttr(c.name)}')">+ Add Site</button>`;
 
-    // Activity section
-    const actHtml = `<div class="cust-activity-section" style="margin-top:8px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <span class="si-contacts-title">Recent Activity</span>
-            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openLogNoteModal(${c.id},'${escAttr(c.name)}')">+ Note</button>
-        </div>
-        <div id="actList-${c.id}"><p class="empty" style="padding:4px;font-size:11px">Loading...</p></div>
-    </div>`;
+    let html = `<div class="drawer-section" style="padding-bottom:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div class="drawer-section-title" style="margin:0">${sites.length} Sites</div>
+            <button class="btn btn-ghost btn-sm" onclick="openAddSiteModal(${c.id},'${escAttr(c.name)}')">+ Add Site</button>
+        </div>`;
 
-    inner.innerHTML = enrichHtml + sitesHtml + actHtml;
-    inner.dataset.loaded = '1';
-    loadCompanyActivities(companyId);
+    for (const s of sites) {
+        const contactCount = s.contact_count || 0;
+        html += `<div class="site-accordion" id="siteAccordion-${s.id}">
+            <div class="site-accordion-header" onclick="toggleSiteAccordion(${s.id})">
+                <div class="site-accordion-title">
+                    <span style="font-size:10px;transition:transform 0.2s" id="siteArrow-${s.id}">▶</span>
+                    ${esc(s.site_name)}
+                    ${s.owner_name ? '<span style="font-size:11px;color:var(--muted);font-weight:400">' + esc(s.owner_name) + '</span>' : ''}
+                </div>
+                <div class="site-accordion-meta">
+                    ${s.open_reqs ? s.open_reqs + ' reqs' : ''}
+                    ${s.city ? (s.open_reqs ? ' · ' : '') + esc(s.city) : ''}
+                </div>
+            </div>
+            <div class="site-accordion-body" id="siteAccBody-${s.id}"></div>
+        </div>`;
+    }
+    html += '</div>';
+    body.innerHTML = html;
 }
+
+async function toggleSiteAccordion(siteId) {
+    const bodyEl = document.getElementById('siteAccBody-' + siteId);
+    const arrow = document.getElementById('siteArrow-' + siteId);
+    if (!bodyEl) return;
+
+    if (bodyEl.classList.contains('open')) {
+        bodyEl.classList.remove('open');
+        if (arrow) arrow.style.transform = '';
+        return;
+    }
+
+    bodyEl.classList.add('open');
+    if (arrow) arrow.style.transform = 'rotate(90deg)';
+
+    // Load site details
+    bodyEl.innerHTML = '<p class="empty" style="padding:8px;font-size:11px">Loading...</p>';
+    try {
+        const s = await apiFetch('/api/sites/' + siteId);
+        const contacts = s.contacts || [];
+        const sorted = [...contacts].sort((a, b) => {
+            if (a.is_primary !== b.is_primary) return b.is_primary ? 1 : -1;
+            return (a.full_name || '').localeCompare(b.full_name || '');
+        });
+
+        let html = '';
+
+        // Contacts
+        if (sorted.length) {
+            html += '<div style="margin-bottom:10px">';
+            for (const c of sorted) {
+                const initials = (c.full_name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+                const cStatus = c.contact_status || 'new';
+                const CSTATUS = window.CONTACT_STATUS || {};
+                const csCfg = CSTATUS[cStatus] || { label: cStatus, color: '#64748b', bg: '#e2e8f0' };
+                const lastContact = c.last_contacted_at ? getRelativeTime(c.last_contacted_at) : '';
+                html += `<div class="site-contact-row">
+                    <div class="site-contact-avatar">${initials}</div>
+                    <div class="site-contact-info">
+                        <div class="site-contact-name">
+                            ${esc(c.full_name)}${c.is_primary ? ' <span style="font-size:9px;color:var(--blue);font-weight:700">PRIMARY</span>' : ''}
+                            <span style="background:${csCfg.bg};color:${csCfg.color};padding:1px 5px;border-radius:3px;font-size:9px;font-weight:600;margin-left:4px">${csCfg.label}</span>
+                        </div>
+                        ${c.title ? '<div class="site-contact-title">' + esc(c.title) + '</div>' : ''}
+                        ${c.email ? '<div style="font-size:10px;color:var(--muted)">' + esc(c.email) + '</div>' : ''}
+                        ${lastContact ? '<div style="font-size:10px;color:var(--muted)">Last contact: ' + lastContact + '</div>' : ''}
+                    </div>
+                    <div class="site-contact-actions">
+                        ${c.email ? '<a href="mailto:'+escAttr(c.email)+'" title="Email" onclick="event.stopPropagation();autoLogEmail(\''+escAttr(c.email)+'\',\''+escAttr(c.full_name || '')+'\')">✉</a>' : ''}
+                        ${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" title="Call" onclick="event.stopPropagation();autoLogCrmCall(\''+escAttr(c.phone)+'\')">📞</a>' : ''}
+                        <a href="#" onclick="event.preventDefault();event.stopPropagation();openEditSiteContact(${s.id},${c.id})">Edit</a>
+                    </div>
+                </div>`;
+            }
+            html += '</div>';
+        } else {
+            html += '<p style="font-size:11px;color:var(--muted);padding:4px 0">No contacts yet</p>';
+        }
+
+        // Site details
+        html += `<div style="font-size:11px;color:var(--muted);display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+            ${s.payment_terms ? '<span>Terms: ' + esc(s.payment_terms) + '</span>' : ''}
+            ${s.shipping_terms ? '<span>Ship: ' + esc(s.shipping_terms) + '</span>' : ''}
+            ${s.city ? '<span>' + esc(s.city) + (s.state ? ', ' + esc(s.state) : '') + '</span>' : ''}
+        </div>`;
+
+        // Recent reqs
+        if ((s.recent_reqs || []).length) {
+            html += '<div style="margin-bottom:8px">';
+            for (const r of s.recent_reqs.slice(0, 3)) {
+                html += `<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:11px;cursor:pointer" onclick="event.stopPropagation();sidebarNav('reqs');setTimeout(()=>toggleDrillDown(${r.id}),300)">
+                    <span class="status-badge status-${r.status}" style="font-size:10px">${r.status}</span>
+                    <span style="color:var(--text)">REQ-${String(r.id).padStart(3,'0')}</span>
+                    <span style="color:var(--muted)">${r.requirement_count} MPNs</span>
+                </div>`;
+            }
+            html += '</div>';
+        }
+
+        // Action buttons
+        html += `<div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openAddSiteContact(${s.id})">+ Contact</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditSiteModal(${s.id})">Edit Site</button>
+        </div>`;
+
+        bodyEl.innerHTML = html;
+    } catch (e) {
+        bodyEl.innerHTML = '<p class="empty" style="color:var(--red);font-size:11px">Failed to load site</p>';
+    }
+}
+
+function _toggleActivityDetail(id) {
+    const el = document.getElementById('actDetail-' + id);
+    if (el) el.classList.toggle('open');
+}
+
+async function _renderCustDrawerActivity(companyId) {
+    const body = document.getElementById('custDrawerBody');
+    if (!body) return;
+    body.innerHTML = '<div class="drawer-section"><p class="empty">Loading activity...</p></div>';
+    try {
+        const activities = await apiFetch('/api/companies/' + companyId + '/activities');
+        const c = crmCustomers.find(x => x.id === companyId);
+        if (!activities.length) {
+            body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No activity recorded — send an RFQ or log a note to get started</p>
+                ${c ? '<button class="btn btn-ghost btn-sm" onclick="openLogNoteModal('+c.id+',\''+escAttr(c.name)+'\')">+ Add Note</button>' : ''}
+            </div>`;
+            return;
+        }
+        const actIcon = window.activityIcon || (() => '');
+        const relTime = window.getRelativeTime || (() => '');
+
+        let html = '<div style="padding:12px 20px">';
+        html += `<div class="activity-feed">`;
+        for (const a of activities.slice(0, 30)) {
+            const label = (a.activity_type || '').replace(/_/g, ' ');
+            const dur = a.duration_seconds ? ' (' + Math.round(a.duration_seconds / 60) + 'm)' : '';
+            const typeClass = 'activity-icon-' + (a.activity_type === 'email' ? 'email' : a.activity_type === 'call' ? 'call' : a.activity_type === 'note' ? 'note' : 'system');
+            const isEmail = (a.activity_type || '').includes('email');
+            html += `<div class="activity-item">
+                <div class="activity-icon ${typeClass}">${actIcon(a.activity_type)}</div>
+                <div class="activity-content">
+                    <div class="activity-title">${esc(a.summary || label + dur)}</div>
+                    ${isEmail && a.subject ? '<div class="activity-subject">' + esc(a.subject) + '</div>' : ''}
+                    <div class="activity-detail">${esc(a.user_name || '')}</div>
+                    ${isEmail && (a.subject || a.contact_email || a.notes) ? '<button class="activity-view-pill" onclick="_toggleActivityDetail('+a.id+')">View</button><div class="activity-email-detail" id="actDetail-'+a.id+'">'
+                        + (a.subject ? '<div><span class="activity-email-label">Subject:</span>' + esc(a.subject) + '</div>' : '')
+                        + (a.contact_email ? '<div><span class="activity-email-label">Contact:</span>' + esc(a.contact_email) + '</div>' : '')
+                        + (a.notes ? '<div><span class="activity-email-label">Notes:</span>' + esc(a.notes) + '</div>' : '')
+                        + '</div>' : ''}
+                </div>
+                <span class="activity-time">${relTime(a.created_at)}</span>
+            </div>`;
+        }
+        html += '</div></div>';
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load activity</p></div>';
+    }
+}
+
+async function _renderCustDrawerPipeline(companyId) {
+    const body = document.getElementById('custDrawerBody');
+    if (!body) return;
+    const c = crmCustomers.find(x => x.id === companyId);
+    if (!c) return;
+
+    // Gather all reqs from all sites
+    const siteIds = (c.sites || []).map(s => s.id);
+    body.innerHTML = '<div class="drawer-section"><p class="empty">Loading pipeline...</p></div>';
+
+    try {
+        // Fetch site details for recent reqs
+        const sitePromises = siteIds.slice(0, 20).map(sid => apiFetch('/api/sites/' + sid).catch(() => null));
+        const siteResults = await Promise.all(sitePromises);
+        const allReqs = [];
+        for (const s of siteResults) {
+            if (s && s.recent_reqs) {
+                for (const r of s.recent_reqs) {
+                    allReqs.push({ ...r, site_name: s.site_name });
+                }
+            }
+        }
+
+        if (!allReqs.length) {
+            body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No requisitions for this account — create one from the main RFQ list</p></div>';
+            return;
+        }
+
+        // Group by status
+        const groups = { open: [], quoted: [], won: [], lost: [], archived: [] };
+        for (const r of allReqs) {
+            const st = (r.status || 'open').toLowerCase();
+            if (groups[st]) groups[st].push(r);
+            else groups.open.push(r);
+        }
+
+        let html = '<div style="padding:12px 20px">';
+        for (const [status, reqs] of Object.entries(groups)) {
+            if (!reqs.length) continue;
+            const color = status === 'won' ? 'var(--green)' : status === 'lost' ? 'var(--red)' : status === 'quoted' ? 'var(--amber)' : 'var(--blue)';
+            html += `<div style="margin-bottom:16px">
+                <div style="font-size:11px;font-weight:600;text-transform:uppercase;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;gap:6px">
+                    <span style="width:8px;height:8px;border-radius:50%;background:${color}"></span>
+                    ${status} (${reqs.length})
+                </div>`;
+            for (const r of reqs) {
+                html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);cursor:pointer" onclick="sidebarNav('reqs');setTimeout(()=>toggleDrillDown(${r.id}),300)">
+                    <span style="font-size:12px;font-weight:600;color:var(--blue)">REQ-${String(r.id).padStart(3,'0')}</span>
+                    <span style="font-size:12px;color:var(--text);flex:1">${esc(r.name || '')}</span>
+                    <span style="font-size:11px;color:var(--muted)">${r.requirement_count || 0} MPNs</span>
+                </div>`;
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load pipeline</p></div>';
+    }
+}
+
+// Legacy compat
+function selectCustomer(companyId) { openCustDrawer(companyId); }
+function renderCustomerDetail(companyId) { openCustDrawer(companyId); }
+
+async function toggleStrategic(companyId, checked) {
+    try {
+        await apiFetch('/api/companies/' + companyId, {
+            method: 'PUT', body: { is_strategic: checked }
+        });
+        // Update local cache
+        const c = crmCustomers.find(x => x.id === companyId);
+        if (c) c.is_strategic = checked;
+        showToast(checked ? 'Marked as strategic (90-day window)' : 'Removed strategic flag (30-day window)');
+    } catch (e) {
+        logCatchError('toggleStrategic', e);
+        showToast('Failed to update', 'error');
+    }
+}
+
+async function saveCustNotes(companyId) {
+    const el = document.getElementById('custNotes-' + companyId);
+    if (!el) return;
+    try {
+        await apiFetch('/api/companies/' + companyId, {
+            method: 'PUT', body: { notes: el.value }
+        });
+    } catch (e) { logCatchError('saveCustNotes', e); }
+}
+
+async function logCustNote(companyId) {
+    const el = document.getElementById('custNewNote-' + companyId);
+    if (!el || !el.value.trim()) return;
+    try {
+        await apiFetch('/api/companies/' + companyId + '/activities/note', {
+            method: 'POST', body: { notes: el.value.trim() }
+        });
+        el.value = '';
+        showToast('Note logged');
+        _loadCustRecentNotes(companyId);
+    } catch (e) { logCatchError('logCustNote', e); }
+}
+
+async function _loadCustRecentNotes(companyId) {
+    const container = document.getElementById('custRecentNotes-' + companyId);
+    if (!container) return;
+    try {
+        const activities = await apiFetch('/api/companies/' + companyId + '/activities');
+        const notes = activities.filter(a => a.activity_type === 'note').slice(0, 10);
+        if (!notes.length) { container.innerHTML = ''; return; }
+        const relTime = window.getRelativeTime || ((d) => d ? new Date(d).toLocaleDateString() : '');
+        container.innerHTML = notes.map(n => `<div class="note-entry">
+            <div>${esc(n.notes || n.summary || '')}</div>
+            <div class="note-entry-meta"><span>${esc(n.user_name || n.contact_name || '')}</span><span>${relTime(n.created_at)}</span></div>
+        </div>`).join('');
+    } catch (e) { /* silently fail */ }
+}
+
+async function saveContactNotes(siteId, contactId) {
+    const el = document.getElementById('contactNotes-' + contactId);
+    if (!el) return;
+    const statusEl = document.getElementById('noteStatus-' + contactId);
+    try {
+        await apiFetch('/api/sites/' + siteId + '/contacts/' + contactId, {
+            method: 'PUT', body: { notes: el.value }
+        });
+        if (statusEl) { statusEl.textContent = 'Saved'; statusEl.classList.add('visible'); setTimeout(() => statusEl.classList.remove('visible'), 2000); }
+    } catch (e) {
+        logCatchError('saveContactNotes', e);
+        if (statusEl) { statusEl.textContent = 'Error'; statusEl.style.color = 'var(--red)'; statusEl.classList.add('visible'); setTimeout(() => { statusEl.classList.remove('visible'); statusEl.style.color = ''; }, 2000); }
+    }
+}
+
+let _drawerContacts = [];
+const _debouncedFilterDrawerContacts = debounce((q) => filterDrawerContacts(q), 150);
+
+function _buildContactCardHtml(ct, companyId) {
+    const initials = (ct.full_name || '?').split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+    const relTime = window.getRelativeTime || (() => '');
+    const location = [ct.site_city, ct.site_state].filter(Boolean).join(', ');
+    const isArchived = ct.is_active === false;
+    const archiveBtn = isArchived
+        ? `<button onclick="event.stopPropagation();toggleContactArchive(${ct.site_id},${ct.id},false)" title="Restore" style="font-size:10px;color:var(--green)">Restore</button>`
+        : `<button onclick="event.stopPropagation();toggleContactArchive(${ct.site_id},${ct.id},true)" title="Archive" style="font-size:10px;color:var(--muted)">Archive</button>`;
+    return `<div class="contact-card" ${isArchived ? 'style="opacity:0.5"' : ''}>
+        <div class="contact-card-header">
+            <div class="contact-card-avatar">${initials}</div>
+            <div class="contact-card-info">
+                <div class="contact-card-name">${esc(ct.full_name)}${ct.is_primary ? ' <span class="contact-badge-primary">Primary</span>' : ''}${isArchived ? ' <span style="font-size:9px;color:var(--muted)">(Archived)</span>' : ''}</div>
+                ${ct.title ? '<div class="contact-card-title">' + esc(ct.title) + '</div>' : ''}
+                <div class="contact-card-site">${esc(ct.site_name)}</div>
+                ${location ? '<div class="contact-card-location">' + esc(location) + '</div>' : ''}
+            </div>
+            <div class="contact-card-actions">
+                ${ct.email ? '<a href="mailto:'+escAttr(ct.email)+'" title="'+escAttr(ct.email)+'" onclick="event.stopPropagation();autoLogEmail(\''+escAttr(ct.email)+'\',\''+escAttr(ct.full_name || '')+'\')">✉</a>' : ''}
+                ${ct.phone ? '<a href="tel:'+escAttr(ct.phone)+'" title="'+escAttr(ct.phone)+'" onclick="event.stopPropagation();autoLogCrmCall(\''+escAttr(ct.phone)+'\','+companyId+')">📞</a>' : ''}
+                <button onclick="openEditSiteContact(${ct.site_id},${ct.id})" title="Edit">✎</button>
+                ${archiveBtn}
+            </div>
+        </div>
+        <div class="contact-card-meta">
+            ${ct.email ? '<a href="mailto:'+escAttr(ct.email)+'" onclick="event.stopPropagation()">' + esc(ct.email) + '</a>' : ''}
+            ${ct.phone ? '<a href="tel:'+escAttr(ct.phone)+'" onclick="event.stopPropagation();autoLogCrmCall(\''+escAttr(ct.phone)+'\','+companyId+')">' + esc(ct.phone) + '</a>' : ''}
+            ${ct.created_at ? '<span class="contact-card-added">' + relTime(ct.created_at) + '</span>' : ''}
+        </div>
+        <div class="contact-card-notes" style="display:flex;align-items:center;gap:0">
+            <textarea id="contactNotes-${ct.id}" rows="1" placeholder="Contact notes..."
+                onblur="saveContactNotes(${ct.site_id},${ct.id})"
+                onkeydown="if(event.ctrlKey&&event.key==='Enter'){event.preventDefault();saveContactNotes(${ct.site_id},${ct.id})}">${esc(ct.notes || '')}</textarea>
+            <span class="note-save-status" id="noteStatus-${ct.id}">Saved</span>
+        </div>
+        <div style="margin-top:4px;display:flex;align-items:start;gap:4px">
+            <textarea id="contactNewNote-${ct.id}" rows="1" placeholder="Log a note..." style="flex:1;font-size:11px;padding:4px;border:1px solid var(--border);border-radius:4px;resize:none"
+                onkeydown="if(event.ctrlKey&&event.key==='Enter'){event.preventDefault();logContactNote(${ct.site_id},${ct.id})}"></textarea>
+            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:4px 8px" onclick="logContactNote(${ct.site_id},${ct.id})">Log</button>
+        </div>
+        <div id="contactRecentNotes-${ct.id}" style="margin-top:4px"></div>
+    </div>`;
+}
+
+async function logContactNote(siteId, contactId) {
+    const el = document.getElementById('contactNewNote-' + contactId);
+    if (!el || !el.value.trim()) return;
+    try {
+        await apiFetch('/api/sites/' + siteId + '/contacts/' + contactId + '/notes', {
+            method: 'POST', body: { notes: el.value.trim() }
+        });
+        el.value = '';
+        showToast('Note logged');
+        _loadContactRecentNotes(siteId, contactId);
+    } catch (e) { logCatchError('logContactNote', e); }
+}
+
+async function _loadContactRecentNotes(siteId, contactId) {
+    const container = document.getElementById('contactRecentNotes-' + contactId);
+    if (!container) return;
+    try {
+        const notes = await apiFetch('/api/sites/' + siteId + '/contacts/' + contactId + '/notes');
+        if (!notes.length) { container.innerHTML = ''; return; }
+        const relTime = window.getRelativeTime || ((d) => d ? new Date(d).toLocaleDateString() : '');
+        container.innerHTML = notes.slice(0, 10).map(n => `<div class="note-entry">
+            <div>${esc(n.notes || '')}</div>
+            <div class="note-entry-meta"><span>${esc(n.user_name || '')}</span><span>${relTime(n.created_at)}</span></div>
+        </div>`).join('');
+    } catch (e) { /* silently fail */ }
+}
+
+async function toggleContactArchive(siteId, contactId, currentlyActive) {
+    const action = currentlyActive ? 'archive' : 'restore';
+    if (!confirm('Are you sure you want to ' + action + ' this contact?')) return;
+    try {
+        await apiFetch('/api/sites/' + siteId + '/contacts/' + contactId, {
+            method: 'PUT', body: { is_active: !currentlyActive }
+        });
+        showToast('Contact ' + (currentlyActive ? 'archived' : 'restored'));
+        // Reload the current view
+        if (typeof renderCustomerDetail === 'function' && window._lastCustDetailId) {
+            renderCustomerDetail(window._lastCustDetailId);
+        }
+    } catch (e) { logCatchError('toggleContactArchive', e); }
+}
+
+function filterDrawerContacts(query) {
+    const grid = document.getElementById('drawerContactsGrid');
+    if (!grid) return;
+    const q = (query || '').toLowerCase().trim();
+    const filtered = q ? _drawerContacts.filter(ct => {
+        return (ct.full_name || '').toLowerCase().includes(q)
+            || (ct.title || '').toLowerCase().includes(q)
+            || (ct.site_name || '').toLowerCase().includes(q)
+            || (ct.site_city || '').toLowerCase().includes(q)
+            || (ct.site_state || '').toLowerCase().includes(q)
+            || (ct.email || '').toLowerCase().includes(q);
+    }) : _drawerContacts;
+    const cid = _selectedCustId || 0;
+    grid.innerHTML = filtered.length
+        ? filtered.map(ct => _buildContactCardHtml(ct, cid)).join('')
+        : '<p class="crm-empty" style="padding:20px;grid-column:1/-1">No contacts match your search</p>';
+}
+
+async function _renderCustDrawerContacts(companyId) {
+    const body = document.getElementById('custDrawerBody');
+    const title = document.getElementById('custDrawerTitle');
+    if (!body) return;
+    const c = crmCustomers.find(x => x.id === companyId);
+    if (!c) { body.innerHTML = '<p class="crm-empty">Account not found</p>'; return; }
+
+    const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
+    if (title) title.innerHTML = esc(displayName) + (c.is_strategic ? ' <span style="color:var(--amber)">★</span>' : '');
+
+    const sites = c.sites || [];
+    if (!sites.length) {
+        body.innerHTML = `<div class="drawer-section"><p class="crm-empty">No sites yet — <a href="#" onclick="event.preventDefault();openAddSiteModal(${c.id},'${escAttr(c.name)}')">add a site</a> to start adding contacts</p></div>`;
+        return;
+    }
+
+    body.innerHTML = '<div class="drawer-section"><p class="empty">Loading contacts...</p></div>';
+
+    try {
+        // Fetch contacts from all sites in parallel
+        const sitePromises = sites.slice(0, 30).map(s => apiFetch('/api/sites/' + s.id).catch(() => null));
+        const siteResults = await Promise.all(sitePromises);
+        const allContacts = [];
+        for (const s of siteResults) {
+            if (s && s.contacts) {
+                for (const ct of s.contacts) {
+                    allContacts.push({ ...ct, site_id: s.id, site_name: s.site_name,
+                        site_city: s.city, site_state: s.state });
+                }
+            }
+        }
+
+        // Sort: primary first, then alphabetical
+        allContacts.sort((a, b) => {
+            if (a.is_primary !== b.is_primary) return b.is_primary ? 1 : -1;
+            return (a.full_name || '').localeCompare(b.full_name || '');
+        });
+
+        _drawerContacts = allContacts;
+
+        let html = `<div class="drawer-section" style="padding-bottom:8px;border-bottom:1px solid var(--border)">
+            <div style="display:flex;align-items:center;justify-content:space-between">
+                <div class="drawer-section-title" style="margin:0">${allContacts.length} Contact${allContacts.length !== 1 ? 's' : ''} across ${sites.length} site${sites.length !== 1 ? 's' : ''}</div>
+                <button class="btn btn-ghost btn-sm" onclick="openAddSiteContact(${sites[0].id})">+ Add Contact</button>
+            </div>
+            ${allContacts.length > 3 ? '<input class="drawer-contact-search" placeholder="Search contacts..." oninput="_debouncedFilterDrawerContacts(this.value)">' : ''}
+        </div>`;
+
+        if (!allContacts.length) {
+            html += `<div class="drawer-section"><p class="crm-empty">No contacts yet — add contacts to your sites to build your stakeholder map</p></div>`;
+        } else {
+            html += '<div class="contacts-grid" id="drawerContactsGrid">';
+            for (const ct of allContacts) {
+                html += _buildContactCardHtml(ct, companyId);
+            }
+            html += '</div>';
+        }
+
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load contacts</p></div>';
+    }
+}
+
+// Escape key to close drawer
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+        if (document.getElementById('prospectDrawer')?.classList.contains('open')) { closeProspectDrawer(); e.preventDefault(); return; }
+        if (document.getElementById('custDrawer')?.classList.contains('open')) { closeCustDrawer(); e.preventDefault(); return; }
+        if (document.getElementById('vendorDrawer')?.classList.contains('open') && window.closeVendorDrawer) { window.closeVendorDrawer(); e.preventDefault(); return; }
+        if (document.getElementById('contactDrawer')?.classList.contains('open') && window.closeContactDrawer) { window.closeContactDrawer(); e.preventDefault(); return; }
+    }
+});
 
 async function toggleSiteDetail(siteId) {
     const panel = document.getElementById('siteDetail-' + siteId);
@@ -273,8 +1192,13 @@ async function toggleSiteDetail(siteId) {
                 if (a.is_primary !== b.is_primary) return b.is_primary ? 1 : -1;
                 return (a.full_name || '').localeCompare(b.full_name || '');
             });
-            const renderContact = c => `
-                <div class="si-contact-card" data-contact-search="${escAttr((c.full_name + ' ' + (c.title || '') + ' ' + (c.email || '')).toLowerCase())}">
+            const renderContact = c => {
+                const isArchived = c.is_active === false;
+                const archiveBtn = isArchived
+                    ? `<button class="btn btn-ghost btn-sm" style="color:var(--green)" onclick="event.stopPropagation();toggleContactArchive(${s.id},${c.id},false)">Restore</button>`
+                    : `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="event.stopPropagation();toggleContactArchive(${s.id},${c.id},true)">Archive</button>`;
+                return `
+                <div class="si-contact-card" ${isArchived ? 'style="opacity:0.5"' : ''} data-contact-search="${escAttr((c.full_name + ' ' + (c.title || '') + ' ' + (c.email || '')).toLowerCase())}">
                     <div class="si-contact-left">
                         <div class="si-contact-avatar">${esc((c.full_name || '?')[0].toUpperCase())}</div>
                     </div>
@@ -282,6 +1206,7 @@ async function toggleSiteDetail(siteId) {
                         <div class="si-contact-row1">
                             <span class="si-contact-name">${esc(c.full_name)}</span>
                             ${c.is_primary ? '<span class="si-contact-badge">Primary</span>' : ''}
+                            ${isArchived ? '<span style="font-size:9px;color:var(--muted)">(Archived)</span>' : ''}
                         </div>
                         ${c.title ? '<div class="si-contact-title">' + esc(c.title) + '</div>' : ''}
                         <div class="si-contact-meta">
@@ -289,25 +1214,45 @@ async function toggleSiteDetail(siteId) {
                             ${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" class="si-contact-phone" onclick="autoLogCrmCall(\''+escAttr(c.phone)+'\')">'+esc(c.phone)+'</a>' : ''}
                         </div>
                         ${c.notes ? '<div class="si-contact-notes">'+esc(c.notes)+'</div>' : ''}
+                        <div style="margin-top:4px;display:flex;align-items:start;gap:4px">
+                            <textarea id="siContactNewNote-${c.id}" rows="1" placeholder="Log a note..." style="flex:1;font-size:11px;padding:4px;border:1px solid var(--border);border-radius:4px;resize:none"
+                                onkeydown="if(event.ctrlKey&&event.key==='Enter'){event.preventDefault();logContactNote(${s.id},${c.id})}"></textarea>
+                            <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:4px 8px" onclick="logContactNote(${s.id},${c.id})">Log</button>
+                        </div>
+                        <div id="contactRecentNotes-${c.id}" style="margin-top:4px"></div>
                     </div>
                     <div class="si-contact-actions">
                         <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openEditSiteContact(${s.id},${c.id})">Edit</button>
+                        ${archiveBtn}
                         <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();deleteSiteContact(${s.id},${c.id},'${escAttr(c.full_name)}')">✕</button>
                     </div>
                 </div>`;
+            };
+            const activeContacts = contacts.filter(c => c.is_active !== false);
+            const archivedContacts = contacts.filter(c => c.is_active === false);
             const searchBar = contacts.length > 5
                 ? `<input class="si-contact-search" placeholder="Filter contacts…" oninput="_debouncedFilterSiteContacts(this,${s.id})">`
                 : '';
-            const contactsHtml = contacts.length
-                ? `${searchBar}<div class="si-contact-grid" id="contactGrid-${s.id}">${sorted.map(renderContact).join('')}</div>`
-                : '<p class="empty" style="padding:4px;font-size:11px">No contacts — add one below</p>';
+            const archiveToggle = archivedContacts.length
+                ? `<label style="font-size:10px;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" onchange="document.getElementById('archivedContacts-${s.id}').style.display=this.checked?'block':'none'"> Show archived (${archivedContacts.length})</label>`
+                : '';
+            const activeHtml = activeContacts.length
+                ? activeContacts.map(renderContact).join('')
+                : '<p class="empty" style="padding:4px;font-size:11px">No active contacts — add one below</p>';
+            const archivedHtml = archivedContacts.length
+                ? `<div id="archivedContacts-${s.id}" style="display:none">${archivedContacts.map(renderContact).join('')}</div>`
+                : '';
+            const contactsHtml = `${searchBar}<div class="si-contact-grid" id="contactGrid-${s.id}">${activeHtml}${archivedHtml}</div>`;
             panel.innerHTML = `
             <div class="site-info">
                 <div class="si-row"><span class="si-label">Owner</span><span>${esc(s.owner_name || '—')}</span></div>
                 <div class="si-contacts">
                     <div style="display:flex;align-items:center;justify-content:space-between">
-                        <div class="si-contacts-title">Contacts <span style="font-weight:400;color:var(--muted)">(${contacts.length})</span></div>
-                        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openAddSiteContact(${s.id})">+ Add</button>
+                        <div class="si-contacts-title">Contacts <span style="font-weight:400;color:var(--muted)">(${activeContacts.length})</span></div>
+                        <div style="display:flex;align-items:center;gap:8px">
+                            ${archiveToggle}
+                            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();openAddSiteContact(${s.id})">+ Add</button>
+                        </div>
                     </div>
                     ${contactsHtml}
                 </div>
@@ -610,7 +1555,7 @@ function _sortOffers(offers) {
 function renderOffers() {
     const el = document.getElementById('offersContent');
     if (!crmOffers.length) {
-        el.innerHTML = '<p class="empty">No offers yet — log vendor offers as they come in</p>';
+        el.innerHTML = stateEmpty('No offers yet', 'Log vendor offers as they come in');
         return;
     }
     const filterBar = `<div id="offerFilterBar" class="offer-filter-bar">
@@ -949,7 +1894,7 @@ async function buildQuoteFromSelected() {
         console.error('buildQuoteFromSelected:', e);
         const msg = (e.message || '').toLowerCase();
         if (e.status === 400 && msg.includes('customer site')) {
-            showToast('Link this requisition to a customer site first (Customers tab)', 'error');
+            showToast('Link this requisition to a customer site first (Accounts tab)', 'error');
         } else {
             showToast('Error building quote: ' + (e.message || 'unknown error'), 'error');
         }
@@ -962,7 +1907,7 @@ function renderQuote() {
         const reqInfo = typeof _reqListData !== 'undefined' ? _reqListData.find(r => r.id === currentReqId) : null;
         const hasSite = reqInfo && reqInfo.customer_site_id;
         const steps = [];
-        if (!hasSite) steps.push('<li style="color:var(--red)">Link a customer site to this requisition (go to Customers)</li>');
+        if (!hasSite) steps.push('<li style="color:var(--red)">Link a customer site to this requisition (go to Accounts)</li>');
         steps.push('<li>Log vendor offers on the <strong>Offers</strong> tab</li>');
         steps.push('<li>Select offers using the checkboxes, then click <strong>Build Quote from Selected</strong></li>');
         el.innerHTML = '<div class="empty" style="text-align:left;max-width:400px;margin:40px auto"><p style="font-weight:600;margin-bottom:8px">No quote yet</p><ol style="margin:0;padding-left:20px;line-height:1.8;font-size:12px">' + steps.join('') + '</ol></div>';
@@ -971,7 +1916,8 @@ function renderQuote() {
     const q = crmQuote;
     const isDraft = q.status === 'draft';
     const lines = (q.line_items || []).map((item, i) => {
-        const sellInput = isDraft ? `<input type="number" step="0.0001" class="quote-sell-input" value="${item.sell_price||0}" onchange="updateQuoteLine(${i},'sell_price',this.value)">` : '$'+Number(item.sell_price||0).toFixed(4);
+        const diffBadge = item._priceDiff ? ` <span style="font-size:9px;color:${item._priceDiff > 0 ? 'var(--red)' : 'var(--green)'}">${item._priceDiff > 0 ? '\u2191' : '\u2193'} $${Math.abs(item._priceDiff).toFixed(4)}</span>` : '';
+        const sellInput = isDraft ? `<input type="number" step="0.0001" class="quote-sell-input" value="${item.sell_price||0}" onchange="updateQuoteLine(${i},'sell_price',this.value)">` : '$'+Number(item.sell_price||0).toFixed(4) + diffBadge;
         const leadInput = isDraft ? `<input type="text" class="quote-cell-input" value="${escAttr(item.lead_time||'')}" onchange="updateQuoteLineField(${i},'lead_time',this.value)" placeholder="—" style="width:60px">` : esc(item.lead_time || '—');
         const condInput = isDraft ? `<input type="text" class="quote-cell-input" value="${escAttr(item.condition||'')}" onchange="updateQuoteLineField(${i},'condition',this.value)" placeholder="—" style="width:50px">` : esc(item.condition || '—');
         const dcInput = isDraft ? `<input type="text" class="quote-cell-input" value="${escAttr(item.date_code||'')}" onchange="updateQuoteLineField(${i},'date_code',this.value)" placeholder="—" style="width:50px">` : esc(item.date_code || '—');
@@ -984,7 +1930,7 @@ function renderQuote() {
             <td class="quote-cost">$${Number(item.cost_price||0).toFixed(4)}</td>
             <td>${item.target_price != null ? '$'+Number(item.target_price).toFixed(4) : '—'}</td>
             <td>${sellInput}</td>
-            <td class="quote-margin" id="qm-${i}">${Number(item.margin_pct||0).toFixed(1)}%</td>
+            <td class="quote-margin" id="qm-${i}" style="color:${(item.margin_pct||0) >= 20 ? 'var(--green)' : (item.margin_pct||0) >= 10 ? 'var(--amber)' : 'var(--red)'}">${Number(item.margin_pct||0).toFixed(1)}%</td>
             <td>${leadInput}</td>
             <td>${condInput}</td>
             <td>${dcInput}</td>
@@ -1018,7 +1964,7 @@ function renderQuote() {
             </div>
         </div>
         <div style="text-align:right">
-            <div><strong>${esc(q.quote_number)} Rev ${q.revision}</strong> <span class="status-badge status-${q.status}">${q.status}</span></div>
+            <div><strong>${esc(q.quote_number)} Rev ${q.revision}</strong> <span class="status-badge status-${q.status}">${q.status}</span> <span id="quoteAutoSaveStatus" style="font-size:10px;color:var(--muted);margin-left:6px"></span></div>
             <div style="color:var(--text2);font-size:12px;margin-top:2px">
                 ${esc(q.customer_name || '')}<br>
                 ${esc(q.contact_name || '')} · ${q.contact_email ? '<a href="mailto:'+esc(q.contact_email)+'" onclick="autoLogEmail(\''+escAttr(q.contact_email)+'\',\''+escAttr(q.contact_name || '')+'\')">'+esc(q.contact_email)+'</a>' : ''}
@@ -1055,6 +2001,24 @@ function renderQuote() {
     loadQuoteHistory();
 }
 
+let _quoteAutoSaveTimer = null;
+function _scheduleQuoteAutoSave() {
+    clearTimeout(_quoteAutoSaveTimer);
+    const indicator = document.getElementById('quoteAutoSaveStatus');
+    if (indicator) indicator.textContent = '';
+    _quoteAutoSaveTimer = setTimeout(async () => {
+        if (!crmQuote || crmQuote.status !== 'draft') return;
+        if (indicator) indicator.textContent = 'Saving\u2026';
+        try {
+            await saveQuoteDraft();
+            if (indicator) indicator.textContent = 'Saved';
+            setTimeout(() => { if (indicator && indicator.textContent === 'Saved') indicator.textContent = ''; }, 2000);
+        } catch (e) {
+            if (indicator) indicator.textContent = 'Save failed';
+        }
+    }, 500);
+}
+
 function updateQuoteLine(idx, field, value) {
     if (!crmQuote) return;
     const item = crmQuote.line_items[idx];
@@ -1063,14 +2027,20 @@ function updateQuoteLine(idx, field, value) {
         const cost = item.cost_price || 0;
         item.margin_pct = item.sell_price > 0 ? ((item.sell_price - cost) / item.sell_price * 100) : 0;
         const mEl = document.getElementById('qm-' + idx);
-        if (mEl) mEl.textContent = item.margin_pct.toFixed(1) + '%';
+        if (mEl) {
+            const mPct = item.margin_pct;
+            const mColor = mPct >= 20 ? 'var(--green)' : mPct >= 10 ? 'var(--amber)' : 'var(--red)';
+            mEl.innerHTML = `${mPct.toFixed(1)}% <span style="font-size:9px;color:${mColor}">(${mPct >= 20 ? 'good' : mPct >= 10 ? 'low' : 'thin'})</span>`;
+        }
         refreshQuoteTotals();
     }
+    _scheduleQuoteAutoSave();
 }
 
 function updateQuoteLineField(idx, field, value) {
     if (!crmQuote) return;
     crmQuote.line_items[idx][field] = value;
+    _scheduleQuoteAutoSave();
 }
 
 function refreshQuoteTotals() {
@@ -1208,6 +2178,10 @@ async function confirmSendQuote() {
     var btn = document.querySelector('#sendQuoteModal .btn-primary');
     await guardBtn(btn, 'Sending…', async () => {
         closeModal('sendQuoteModal');
+        // Optimistic UI: immediately show "Sending..." status
+        const prevStatus = crmQuote.status;
+        const badge = document.querySelector('.status-badge.status-' + prevStatus);
+        if (badge) { badge.textContent = 'sending\u2026'; badge.className = 'status-badge status-sent'; }
         try {
             await saveQuoteDraft();
             var sendData = await apiFetch('/api/quotes/' + crmQuote.id + '/send', {
@@ -1217,7 +2191,11 @@ async function confirmSendQuote() {
             showToast('Quote sent to ' + (sendData.sent_to || toEmail), 'success');
             notifyStatusChange(sendData);
             loadQuote();
-        } catch (e) { logCatchError('sendQuoteEmail', e); showToast('Error sending quote: ' + (e.message||''), 'error'); }
+        } catch (e) {
+            // Revert optimistic update on failure
+            if (badge) { badge.textContent = prevStatus; badge.className = 'status-badge status-' + prevStatus; }
+            logCatchError('sendQuoteEmail', e); showToast('Error sending quote: ' + (e.message||''), 'error');
+        }
     });
 }
 
@@ -1262,6 +2240,20 @@ async function loadSpecificQuote(quoteId) {
         const quotes = await apiFetch('/api/requisitions/' + currentReqId + '/quotes');
         const q = quotes.find(x => x.id === quoteId);
         if (q) {
+            // Find the latest (highest revision) quote for diff comparison
+            const latest = quotes.reduce((a, b) => (b.revision > a.revision ? b : a), quotes[0]);
+            if (latest && latest.id !== q.id) {
+                const latestItems = latest.line_items || [];
+                (q.line_items || []).forEach(item => {
+                    const match = latestItems.find(li => li.mpn === item.mpn);
+                    if (match && match.sell_price != null && item.sell_price != null) {
+                        const diff = item.sell_price - match.sell_price;
+                        if (Math.abs(diff) >= 0.0001) {
+                            item._priceDiff = diff;
+                        }
+                    }
+                });
+            }
             crmQuote = q;
             crmQuote._isHistorical = true;
             renderQuote();
@@ -1273,6 +2265,10 @@ async function markQuoteResult(result) {
     if (!crmQuote) return;
     if (result === 'won') { openBuyPlanModal(); return; }
     if (markQuoteResult._busy) return; markQuoteResult._busy = true;
+    // Optimistic UI
+    const prevStatus = crmQuote.status;
+    const badge = document.querySelector('.status-badge.status-' + prevStatus);
+    if (badge) { badge.textContent = result === 'lost' ? 'updating\u2026' : result; badge.className = 'status-badge status-' + result; }
     try {
         const resultData = await apiFetch('/api/quotes/' + crmQuote.id + '/result', {
             method: 'POST', body: { result }
@@ -1280,7 +2276,12 @@ async function markQuoteResult(result) {
         showToast('Quote updated', 'info');
         notifyStatusChange(resultData);
         loadQuote();
-    } catch (e) { console.error('markQuoteResult:', e); showToast('Error updating result', 'error'); }
+        _refreshCustPipeline();
+    } catch (e) {
+        // Revert on failure
+        if (badge) { badge.textContent = prevStatus; badge.className = 'status-badge status-' + prevStatus; }
+        console.error('markQuoteResult:', e); showToast('Error updating result', 'error');
+    }
     finally { markQuoteResult._busy = false; }
 }
 
@@ -1690,6 +2691,7 @@ async function verifyBuyPlanPOs() {
 
 let _bpFilter = '';
 let _buyPlans = [];
+let _bpMyOnly = false;
 
 async function showBuyPlans() {
     showView('view-buyplans');
@@ -1717,6 +2719,11 @@ function setBpFilter(status, btn) {
     loadBuyPlans();
 }
 
+function toggleBpMyOnly(checked) {
+    _bpMyOnly = checked;
+    renderBuyPlansList();
+}
+
 let _bpSortCol = null;
 let _bpSortDir = 'asc';
 
@@ -1740,6 +2747,11 @@ function renderBuyPlansList() {
     const el = document.getElementById('buyPlansList');
     let data = [..._buyPlans];
 
+    // "My Assignments" filter
+    if (_bpMyOnly && window.__userName) {
+        const myName = window.__userName.toLowerCase();
+        data = data.filter(bp => (bp.submitted_by || '').toLowerCase() === myName);
+    }
     // Search filter
     const q = (document.getElementById('bpSearch') || {}).value || '';
     if (q) {
@@ -1751,7 +2763,7 @@ function renderBuyPlansList() {
     }
 
     if (!data.length) {
-        el.innerHTML = '<p class="empty">No buy plans found</p>';
+        el.innerHTML = stateEmpty('No buy plans found', 'Create a buy plan from the offers tab on any requisition');
         return;
     }
 
@@ -1932,6 +2944,7 @@ async function submitLost() {
         showToast('Quote marked as lost', 'info');
         notifyStatusChange(lostData);
         loadQuote();
+        _refreshCustPipeline();
     } catch (e) { console.error('submitLost:', e); showToast('Error submitting', 'error'); }
 }
 
@@ -2062,9 +3075,9 @@ function filterSiteTypeahead(query) {
             return '<div class="site-typeahead-item" onclick="selectSite(' + s.id + ',\'' + escAttr(s.label) + '\')">' + esc(s.label) + '</div>';
         }).join('');
     }
-    // Always show "+ New Customer" at the bottom
+    // Always show "+ New Account" at the bottom
     const qEsc = escAttr(q);
-    html += '<div class="site-typeahead-item site-typeahead-add" onclick="quickCreateCompany(\'' + qEsc + '\')">+ New Customer' + (q ? ': <b>' + esc(q) + '</b>' : '') + '</div>';
+    html += '<div class="site-typeahead-item site-typeahead-add" onclick="quickCreateCompany(\'' + qEsc + '\')">+ New Account' + (q ? ': <b>' + esc(q) + '</b>' : '') + '</div>';
     list.innerHTML = html;
     list.classList.add('show');
 }
@@ -2269,8 +3282,21 @@ async function unifiedEnrichCompany(companyId) {
             body: { force: true },
         });
         if (res.status === 'completed') {
-            const n = (res.enriched_fields || []).length;
-            showToast(`Enrichment complete — ${n} field${n !== 1 ? 's' : ''} updated`, 'success');
+            const fields = res.enriched_fields || [];
+            const contactQueued = fields.filter(f => f.startsWith('contact_queued:')).length;
+            const dataFields = fields.filter(f => !f.startsWith('contact_queued:')).length;
+            let msg = `Enrichment complete — ${dataFields} field${dataFields !== 1 ? 's' : ''} updated`;
+            if (contactQueued) msg += `, ${contactQueued} contact${contactQueued !== 1 ? 's' : ''} pending review`;
+            showToast(msg, 'success');
+            // If contacts were queued, prompt user to review via suggested contacts modal
+            if (contactQueued) {
+                const c = crmCustomers.find(x => x.id === companyId);
+                if (c && c.domain) {
+                    setTimeout(() => openSuggestedContacts('site',
+                        (c.sites && c.sites[0]) ? c.sites[0].id : 0,
+                        c.domain, c.name), 500);
+                }
+            }
         } else {
             showToast('Enrichment: ' + (res.status || 'done'));
         }
@@ -2751,6 +3777,8 @@ async function saveLogCall() {
         });
         closeModal('logCallModal');
         showToast('Call logged', 'success');
+        // Invalidate RFQ activity cache if viewing a requisition
+        if (currentReqId && window._ddTabCache && window._ddTabCache[currentReqId]) delete window._ddTabCache[currentReqId].activity;
         const el = document.getElementById('actList-' + companyId);
         if (el) el.innerHTML = '<p class="empty" style="padding:4px;font-size:11px">Loading...</p>';
         loadCompanyActivities(parseInt(companyId));
@@ -2780,6 +3808,8 @@ async function saveLogNote() {
         });
         closeModal('logNoteModal');
         showToast('Note added', 'success');
+        // Invalidate RFQ activity cache if viewing a requisition
+        if (currentReqId && window._ddTabCache && window._ddTabCache[currentReqId]) delete window._ddTabCache[currentReqId].activity;
         const el = document.getElementById('actList-' + companyId);
         if (el) el.innerHTML = '<p class="empty" style="padding:4px;font-size:11px">Loading...</p>';
         loadCompanyActivities(parseInt(companyId));
@@ -2790,11 +3820,17 @@ async function saveLogNote() {
 
 // ── Proactive Offers ──────────────────────────────────────────────────
 
-let _proactiveMatches = [];
+let _proactiveGroups = [];
+let _proactiveStats = {};
 let _proactiveSent = [];
 let _proactiveTab = 'matches';
 let _proactiveSendSiteId = null;
 let _proactiveSendMatchIds = [];
+let _proactiveGroupsOpen = new Set();   // expanded customer groups
+let _proactiveSelected = new Set();      // checked match IDs for send
+
+// Proactive badge auto-refresh every 5 minutes
+setInterval(() => { if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge(); }, 5 * 60 * 1000);
 let _proactiveSiteContacts = [];
 
 async function showProactiveOffers() {
@@ -2820,55 +3856,227 @@ function switchProactiveTab(tab, btn) {
 
 async function loadProactiveMatches() {
     try {
-        _proactiveMatches = await apiFetch('/api/proactive/matches');
+        const resp = await apiFetch('/api/proactive/matches');
+        _proactiveGroups = resp.groups || [];
+        _proactiveStats = resp.stats || {};
+        // Pre-select all matches
+        _proactiveSelected.clear();
+        for (const g of _proactiveGroups) for (const m of g.matches) _proactiveSelected.add(String(m.id));
+        // Auto-expand first group if nothing open
+        if (_proactiveGroups.length && _proactiveGroupsOpen.size === 0)
+            _proactiveGroupsOpen.add(_proactiveGroups[0].customer_site_id);
+        renderProactiveStatsBar();
         renderProactiveMatches();
     } catch (e) { showToast('Failed to load matches', 'error'); }
 }
 
+function _marginColor(pct) {
+    if (pct == null) return 'var(--muted)';
+    if (pct > 30) return 'var(--green)';
+    if (pct >= 15) return 'var(--amber)';
+    return 'var(--red)';
+}
+
+function _scoreBadge(score) {
+    let bg = 'var(--muted)';
+    if (score >= 80) bg = 'var(--green)';
+    else if (score >= 60) bg = 'var(--teal)';
+    else if (score >= 40) bg = 'var(--amber)';
+    else bg = 'var(--red)';
+    return `<span style="display:inline-block;padding:1px 6px;border-radius:10px;font-size:10px;font-weight:700;color:#fff;background:${bg}">${score}</span>`;
+}
+
+function _fmtDaysAgo(isoDate) {
+    if (!isoDate) return '—';
+    const days = Math.floor((Date.now() - new Date(isoDate).getTime()) / 86400000);
+    if (days <= 0) return 'Today';
+    if (days === 1) return '1d ago';
+    if (days < 30) return days + 'd ago';
+    if (days < 365) return Math.floor(days / 30) + 'mo ago';
+    return Math.floor(days / 365) + 'y ago';
+}
+
+function renderProactiveStatsBar() {
+    const el = document.getElementById('proactiveStatsBar');
+    if (!el) return;
+    const s = _proactiveStats;
+    if (!s.total) { el.style.display = 'none'; return; }
+    el.style.display = '';
+    el.innerHTML = `<div style="display:flex;gap:16px;flex-wrap:wrap;padding:10px 12px;background:var(--bg2);border-radius:8px;font-size:12px">
+        <div><span style="font-weight:700;font-size:18px;color:var(--teal)">${s.total}</span> <span style="color:var(--muted)">Matches</span></div>
+        <div><span style="font-weight:700;font-size:18px">${s.avg_score || 0}</span> <span style="color:var(--muted)">Avg Score</span></div>
+        <div><span style="font-weight:700;font-size:18px;color:${_marginColor(s.avg_margin)}">${s.avg_margin != null ? s.avg_margin + '%' : '—'}</span> <span style="color:var(--muted)">Avg Margin</span></div>
+        <div><span style="font-weight:700;font-size:18px;color:var(--green)">${s.high_margin_count}</span> <span style="color:var(--muted)">&gt;30% Margin</span></div>
+    </div>`;
+}
+
+function _vendorScoreClass(score) {
+    if (score == null) return '';
+    if (score >= 70) return 'color:var(--green)';
+    if (score >= 40) return 'color:var(--amber)';
+    return 'color:var(--red)';
+}
+
+function _vendorTip(m) {
+    const parts = [];
+    if (m.vendor_score != null) parts.push('Score: ' + m.vendor_score);
+    if (m.overall_win_rate != null) parts.push('Win: ' + m.overall_win_rate + '%');
+    if (m.ghost_rate != null) parts.push('Ghost: ' + m.ghost_rate + '%');
+    return parts.join(' · ') || '';
+}
+
+function toggleProactiveGroup(siteId) {
+    if (_proactiveGroupsOpen.has(siteId)) _proactiveGroupsOpen.delete(siteId);
+    else _proactiveGroupsOpen.add(siteId);
+    renderProactiveMatches();
+}
+
+function toggleProactiveSelect(matchId) {
+    const k = String(matchId);
+    if (_proactiveSelected.has(k)) _proactiveSelected.delete(k); else _proactiveSelected.add(k);
+}
+
+function toggleAllProactiveInGroup(siteId, checked) {
+    const g = _proactiveGroups.find(g => g.customer_site_id === siteId);
+    if (!g) return;
+    for (const m of g.matches) { const k = String(m.id); if (checked) _proactiveSelected.add(k); else _proactiveSelected.delete(k); }
+    renderProactiveMatches();
+}
+
+function _allGroupChecked(group) {
+    return group.matches.length > 0 && group.matches.every(m => _proactiveSelected.has(String(m.id)));
+}
+
+function _selectedCountInGroup(group) {
+    return group.matches.filter(m => _proactiveSelected.has(String(m.id))).length;
+}
+
+async function doNotOfferMatch(matchId, siteId) {
+    const group = _proactiveGroups.find(g => g.customer_site_id === siteId);
+    const m = group ? group.matches.find(x => x.id === matchId) : null;
+    if (!m || !group) return;
+    try {
+        await apiFetch('/api/proactive/do-not-offer', { method: 'POST', body: { items: [{ mpn: m.mpn, company_id: group.company_id }] } });
+        showToast(`"${m.mpn}" will not be offered to ${group.company_name} again`);
+        loadProactiveMatches();
+        if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
+    } catch (e) { showToast('Failed to set Do Not Offer', 'error'); }
+}
+
+async function doNotOfferSelected(siteId) {
+    const group = _proactiveGroups.find(g => g.customer_site_id === siteId);
+    if (!group) return;
+    const items = group.matches
+        .filter(m => _proactiveSelected.has(String(m.id)))
+        .map(m => ({ mpn: m.mpn, company_id: group.company_id }));
+    if (!items.length) { showToast('Select items first', 'error'); return; }
+    try {
+        await apiFetch('/api/proactive/do-not-offer', { method: 'POST', body: { items } });
+        showToast(`${items.length} part${items.length !== 1 ? 's' : ''} suppressed for ${group.company_name}`);
+        loadProactiveMatches();
+        if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
+    } catch (e) { showToast('Failed to set Do Not Offer', 'error'); }
+}
+
 function renderProactiveMatches() {
     const el = document.getElementById('proactiveMatchesPanel');
-    if (!_proactiveMatches.length) {
-        el.innerHTML = '<p class="empty">No proactive matches yet. When buyers log offers for parts your archived customers needed, matches will appear here.</p>';
+    if (!_proactiveGroups.length) {
+        el.innerHTML = '<p class="empty">No proactive matches in the last 7 days. When buyers log offers for parts your archived customers needed, matches will appear here.</p>';
         return;
     }
-    el.innerHTML = _proactiveMatches.map(group => {
-        const matchRows = group.matches.map(m => `
-            <tr>
-                <td><input type="checkbox" class="pm-check" data-id="${m.id}" data-site="${group.customer_site_id}" checked></td>
-                <td><strong>${esc(m.mpn)}</strong></td>
-                <td>${esc(m.manufacturer || '')}</td>
-                <td>${esc(m.vendor_name)}</td>
-                <td>${(m.qty_available||0).toLocaleString()}</td>
-                <td>${m.unit_price != null ? '$' + Number(m.unit_price).toFixed(4) : '—'}</td>
-                <td>${esc(m.condition || '')}</td>
-                <td>${esc(m.lead_time || '')}</td>
-                <td style="font-size:10px;color:var(--muted)">${esc(m.original_req_name || '')}</td>
-            </tr>
-        `).join('');
-        return `
-        <div class="card-v2" style="margin-bottom:12px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                <div>
-                    <strong>${esc(group.company_name)}</strong>
-                    ${group.site_name ? ' — ' + esc(group.site_name) : ''}
-                    <span style="font-size:11px;color:var(--muted);margin-left:8px">${group.matches.length} match${group.matches.length !== 1 ? 'es' : ''}</span>
-                </div>
-                <div style="display:flex;gap:6px">
-                    <button class="btn btn-primary btn-sm" onclick="openProactiveSendModal(${group.customer_site_id})">Send to Customer</button>
-                    <button class="btn btn-ghost btn-sm" onclick="dismissProactiveGroup(${group.customer_site_id})">Dismiss</button>
-                </div>
+    let html = '<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg2)">';
+
+    for (const group of _proactiveGroups) {
+        const isOpen = _proactiveGroupsOpen.has(group.customer_site_id);
+        const bestScore = Math.max(...group.matches.map(m => m.match_score || 0));
+        const margins = group.matches.filter(m => m.margin_pct != null).map(m => m.margin_pct);
+        const bestMargin = margins.length ? Math.max(...margins) : null;
+        const selCount = _selectedCountInGroup(group);
+
+        // ── Customer header row (always visible) ──
+        html += `<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .15s;${isOpen ? 'background:var(--bg3)' : ''}" onclick="toggleProactiveGroup(${group.customer_site_id})" class="proactive-group-hdr">
+            <span style="font-size:10px;color:var(--muted);width:14px;text-align:center;transition:transform .2s;${isOpen ? 'transform:rotate(90deg)' : ''}">&#9654;</span>
+            <span style="font-weight:700;font-size:14px;flex:1">${esc(group.company_name)}${group.site_name ? '<span style="color:var(--muted);font-weight:400;font-size:12px;margin-left:6px">' + esc(group.site_name) + '</span>' : ''}</span>
+            <span style="font-size:11px;color:var(--muted);background:var(--bg);padding:2px 8px;border-radius:10px">${group.matches.length} match${group.matches.length !== 1 ? 'es' : ''}</span>
+            ${_scoreBadge(bestScore)}
+            <span style="font-weight:700;font-size:12px;min-width:50px;text-align:right;color:${_marginColor(bestMargin)}">${bestMargin != null ? bestMargin.toFixed(1) + '%' : '—'}</span>
+            <div style="display:flex;gap:6px;margin-left:12px" onclick="event.stopPropagation()">
+                <button class="btn btn-primary btn-sm" onclick="openProactiveSendModal(${group.customer_site_id})">Send</button>
+                <button class="btn btn-ghost btn-sm" onclick="dismissProactiveGroup(${group.customer_site_id})">Dismiss</button>
             </div>
-            <table class="tbl">
-                <thead><tr><th></th><th>MPN</th><th>Mfr</th><th>Vendor</th><th>Qty</th><th>Price</th><th>Cond</th><th>Lead</th><th>Orig. Req</th></tr></thead>
-                <tbody>${matchRows}</tbody>
-            </table>
         </div>`;
-    }).join('');
+
+        // ── Expanded detail ──
+        if (isOpen) {
+            html += `<div style="border-bottom:1px solid var(--border);background:var(--bg)">`;
+            // Sub-header with selection info + DNO button
+            html += `<div style="padding:8px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
+                <div style="font-size:11px;color:var(--muted)">
+                    <input type="checkbox" style="accent-color:var(--teal);width:14px;height:14px;vertical-align:middle;margin-right:6px" onchange="toggleAllProactiveInGroup(${group.customer_site_id},this.checked)" ${_allGroupChecked(group) ? 'checked' : ''}>
+                    <strong>${selCount} selected</strong>
+                </div>
+                <button class="btn btn-sm" style="background:transparent;color:var(--red);border:1px solid rgba(248,81,73,.3);font-size:10px" onclick="doNotOfferSelected(${group.customer_site_id})">&#128683; Do Not Offer Selected</button>
+            </div>`;
+
+            html += `<div style="overflow-x:auto"><table class="tbl" style="font-size:11px;width:100%"><thead><tr>
+                <th style="width:28px"></th>
+                <th>Part</th>
+                <th>Cond</th>
+                <th>Warranty</th>
+                <th>Lead Time</th>
+                <th>Location</th>
+                <th style="text-align:right">Price</th>
+                <th style="text-align:right">Qty</th>
+                <th>Vendor</th>
+                <th>Buyer</th>
+                <th style="text-align:center">Score</th>
+                <th style="text-align:right">Margin</th>
+                <th style="text-align:center;font-size:9px" title="Do Not Offer Again">DNO</th>
+                <th></th>
+            </tr></thead><tbody>`;
+
+            for (const m of group.matches) {
+                const checked = _proactiveSelected.has(String(m.id));
+                const vs = m.vendor_score != null ? m.vendor_score.toFixed(0) : '—';
+                const cphBadge = m.customer_purchase_count > 0
+                    ? `<span style="font-size:9px;color:var(--purple);background:rgba(167,139,250,.1);padding:1px 6px;border-radius:8px;margin-left:4px">${m.customer_purchase_count}x bought</span>`
+                    : '';
+                html += `<tr style="border-bottom:1px solid var(--border)">
+                    <td><input type="checkbox" style="accent-color:var(--teal);width:14px;height:14px" ${checked ? 'checked' : ''} onchange="toggleProactiveSelect(${m.id})"></td>
+                    <td><strong>${esc(m.mpn)}</strong>${cphBadge}</td>
+                    <td>${esc(m.condition || '—')}</td>
+                    <td>${esc(m.warranty || '—')}</td>
+                    <td>${esc(m.lead_time || '—')}</td>
+                    <td>${esc(m.country_of_origin || '—')}</td>
+                    <td style="text-align:right;font-family:monospace;font-size:11px">${m.unit_price != null ? '$' + Number(m.unit_price).toFixed(4) : '—'}</td>
+                    <td style="text-align:right">${(m.qty_available || 0).toLocaleString()}</td>
+                    <td><span>${esc(m.vendor_name)}</span> <span style="font-size:9px;padding:1px 5px;border-radius:8px;border:1px solid var(--border);${_vendorScoreClass(m.vendor_score)}" title="${_vendorTip(m)}">${vs}</span></td>
+                    <td style="font-size:10px;color:var(--muted)">${esc(m.entered_by_name || '—')}</td>
+                    <td style="text-align:center">${_scoreBadge(m.match_score)}</td>
+                    <td style="text-align:right;font-weight:700;color:${_marginColor(m.margin_pct)}">${m.margin_pct != null ? m.margin_pct.toFixed(1) + '%' : '—'}</td>
+                    <td style="text-align:center"><input type="checkbox" style="accent-color:var(--red);width:14px;height:14px" onchange="doNotOfferMatch(${m.id},${group.customer_site_id})" title="Do not offer this part to ${esc(group.company_name)} again"></td>
+                    <td style="text-align:center"><button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:9px" onclick="dismissSingleMatch(${m.id})">&#10005;</button></td>
+                </tr>`;
+            }
+            html += '</tbody></table></div></div>';
+        }
+    }
+    html += '</div>';
+    el.innerHTML = html;
+}
+
+async function dismissSingleMatch(matchId) {
+    try {
+        await apiFetch('/api/proactive/dismiss', { method: 'POST', body: { match_ids: [matchId] } });
+        showToast('Match dismissed');
+        loadProactiveMatches();
+        if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
+    } catch (e) { showToast('Failed to dismiss', 'error'); }
 }
 
 async function dismissProactiveGroup(siteId) {
     const ids = [];
-    _proactiveMatches.forEach(g => {
+    _proactiveGroups.forEach(g => {
         if (g.customer_site_id === siteId) g.matches.forEach(m => ids.push(m.id));
     });
     if (!ids.length) return;
@@ -2880,11 +4088,26 @@ async function dismissProactiveGroup(siteId) {
     } catch (e) { showToast('Failed to dismiss', 'error'); }
 }
 
+async function refreshProactiveMatches() {
+    const btn = document.getElementById('proactiveRefreshBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Scanning…'; }
+    try {
+        const result = await apiFetch('/api/proactive/refresh', { method: 'POST' });
+        const total = result.total_new || 0;
+        showToast(total ? `Found ${total} new match${total !== 1 ? 'es' : ''}` : 'No new matches found');
+        loadProactiveMatches();
+        if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
+    } catch (e) { showToast('Scan failed', 'error'); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = 'Refresh Matches'; } }
+}
+
 async function openProactiveSendModal(siteId) {
     _proactiveSendSiteId = siteId;
-    // Get selected match IDs for this site
-    const checks = document.querySelectorAll(`.pm-check[data-site="${siteId}"]:checked`);
-    _proactiveSendMatchIds = Array.from(checks).map(c => parseInt(c.dataset.id));
+    // Get selected match IDs for this site from _proactiveSelected state
+    const group = _proactiveGroups.find(g => g.customer_site_id === siteId);
+    _proactiveSendMatchIds = group
+        ? group.matches.filter(m => _proactiveSelected.has(String(m.id))).map(m => m.id)
+        : [];
     if (!_proactiveSendMatchIds.length) { showToast('Select at least one item', 'error'); return; }
 
     // Load contacts
@@ -2892,8 +4115,7 @@ async function openProactiveSendModal(siteId) {
         _proactiveSiteContacts = await apiFetch('/api/proactive/contacts/' + siteId);
     } catch (e) { logCatchError('proactiveContacts', e); _proactiveSiteContacts = []; }
 
-    // Find group for company name
-    const group = _proactiveMatches.find(g => g.customer_site_id === siteId);
+    // Company name from group already resolved above
     const companyName = group ? group.company_name : '';
 
     // Populate modal
@@ -2924,19 +4146,71 @@ async function openProactiveSendModal(siteId) {
         });
     }
     itemsEl.innerHTML = selectedMatches.map(m => {
-        const defaultSell = m.unit_price ? (m.unit_price * 1.3).toFixed(4) : '0';
+        const defaultSell = m.our_cost ? (m.our_cost * 1.3).toFixed(4) : (m.unit_price ? (m.unit_price * 1.3).toFixed(4) : '0');
         return `<tr>
             <td>${esc(m.mpn)}</td>
             <td>${esc(m.vendor_name)}</td>
             <td>${(m.qty_available||0).toLocaleString()}</td>
-            <td>$${m.unit_price != null ? Number(m.unit_price).toFixed(4) : '—'}</td>
+            <td>$${m.our_cost != null ? Number(m.our_cost).toFixed(4) : (m.unit_price != null ? Number(m.unit_price).toFixed(4) : '—')}</td>
             <td><input type="number" step="0.0001" class="ps-sell" data-id="${m.id}" value="${defaultSell}" style="width:90px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px" oninput="_debouncedUpdateProactivePreview()"></td>
             <td class="ps-margin" data-id="${m.id}"></td>
         </tr>`;
     }).join('');
     updateProactivePreview();
 
+    // Reset draft preview
+    const draftPreview = document.getElementById('psDraftPreview');
+    if (draftPreview) draftPreview.innerHTML = '<p style="color:var(--muted);font-style:italic">Click "AI Draft" to generate a personalized email, or type your own message here.</p>';
+    const draftStatus = document.getElementById('psDraftStatus');
+    if (draftStatus) draftStatus.textContent = '';
+    _proactiveDraftHtml = null;
+
     openModal('proactiveSendModal');
+}
+
+let _proactiveDraftHtml = null;
+
+async function generateProactiveDraft() {
+    const btn = document.getElementById('psDraftBtn');
+    const status = document.getElementById('psDraftStatus');
+    const preview = document.getElementById('psDraftPreview');
+    if (!btn || !preview) return;
+
+    const contactIds = Array.from(document.querySelectorAll('.ps-contact:checked')).map(c => parseInt(c.value));
+    const sellPrices = {};
+    document.querySelectorAll('.ps-sell').forEach(input => {
+        sellPrices[input.dataset.id] = parseFloat(input.value) || 0;
+    });
+
+    btn.disabled = true;
+    btn.textContent = 'Drafting…';
+    if (status) status.textContent = '';
+
+    try {
+        const result = await apiFetch('/api/proactive/draft', {
+            method: 'POST',
+            body: {
+                match_ids: _proactiveSendMatchIds,
+                contact_ids: contactIds,
+                sell_prices: sellPrices,
+                notes: document.getElementById('psNotes').value.trim() || null,
+            }
+        });
+        if (result.html) {
+            preview.innerHTML = result.html;
+            _proactiveDraftHtml = result.html;
+        }
+        if (result.subject) {
+            document.getElementById('psSubject').value = result.subject;
+        }
+        if (status) status.textContent = 'Draft generated — edit as needed';
+    } catch (e) {
+        logCatchError('proactiveDraft', e);
+        if (status) status.textContent = 'Draft failed — send will use default template';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'AI Draft';
+    }
 }
 
 function updateProactivePreview() {
@@ -2944,9 +4218,9 @@ function updateProactivePreview() {
     document.querySelectorAll('.ps-sell').forEach(input => {
         const id = input.dataset.id;
         const sell = parseFloat(input.value) || 0;
-        const group = _proactiveMatches.find(g => g.customer_site_id === _proactiveSendSiteId);
+        const group = _proactiveGroups.find(g => g.customer_site_id === _proactiveSendSiteId);
         const match = group ? group.matches.find(m => m.id === parseInt(id)) : null;
-        const cost = match ? (match.unit_price || 0) : 0;
+        const cost = match ? (match.our_cost || match.unit_price || 0) : 0;
         const qty = match ? (match.qty_available || 0) : 0;
         const margin = sell > 0 ? ((sell - cost) / sell * 100).toFixed(1) : '0.0';
         const marginEl = document.querySelector(`.ps-margin[data-id="${id}"]`);
@@ -2969,6 +4243,14 @@ async function sendProactiveOffer() {
         sellPrices[input.dataset.id] = parseFloat(input.value) || 0;
     });
 
+    // Capture email HTML from draft preview (if user edited or AI-drafted)
+    const draftPreview = document.getElementById('psDraftPreview');
+    let emailHtml = null;
+    if (draftPreview && _proactiveDraftHtml) {
+        // Use current content of the editable preview (may have been hand-edited)
+        emailHtml = draftPreview.innerHTML;
+    }
+
     await guardBtn(btn, 'Sending…', async () => {
         try {
             await apiFetch('/api/proactive/send', {
@@ -2979,6 +4261,7 @@ async function sendProactiveOffer() {
                     sell_prices: sellPrices,
                     subject: document.getElementById('psSubject').value.trim(),
                     notes: document.getElementById('psNotes').value.trim() || null,
+                    email_html: emailHtml,
                 }
             });
             showToast('Proactive offer sent!', 'success');
@@ -3140,11 +4423,14 @@ function switchPerfTab(tab, btn) {
     document.getElementById('perfVendorPanel').style.display = tab === 'vendors' ? '' : 'none';
     document.getElementById('perfBuyerPanel').style.display = tab === 'buyers' ? '' : 'none';
     document.getElementById('perfSalesPanel').style.display = tab === 'sales' ? '' : 'none';
+    const availPanel = document.getElementById('perfAvailScorePanel');
+    if (availPanel) availPanel.style.display = tab === 'avail-score' ? '' : 'none';
     const digestPanel = document.getElementById('perfDigestPanel');
     if (digestPanel) digestPanel.style.display = tab === 'digest' ? '' : 'none';
     if (tab === 'vendors') loadVendorScorecards();
     else if (tab === 'buyers') loadBuyerLeaderboard();
     else if (tab === 'sales') loadSalespersonScorecard();
+    else if (tab === 'avail-score') loadAvailScores();
     else if (tab === 'digest') loadManagerDigest();
 }
 
@@ -3193,6 +4479,37 @@ async function loadManagerDigest() {
         el.innerHTML = html;
     } catch (e) {
         el.innerHTML = '<p class="empty">Failed to load digest</p>';
+    }
+}
+
+let _availScoreRole = 'buyer';
+async function loadAvailScores(role) {
+    if (role) _availScoreRole = role;
+    const el = document.getElementById('perfAvailScorePanel');
+    if (!el) return;
+    el.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        const data = await apiFetch(`/api/performance/avail-scores?role=${_availScoreRole}`);
+        const entries = data.entries || [];
+        const month = data.month || '';
+        let html = '<div style="padding:0 16px">';
+        // Role toggle
+        html += `<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div class="fpills fpills-sm">
+                <button type="button" class="fp fp-sm ${_availScoreRole==='buyer'?'on':''}" onclick="loadAvailScores('buyer')">Buyers</button>
+                <button type="button" class="fp fp-sm ${_availScoreRole==='sales'?'on':''}" onclick="loadAvailScores('sales')">Sales</button>
+            </div>
+        </div>`;
+        if (!entries.length) {
+            html += '<p class="empty">No Avail Score data yet — scores are computed daily</p></div>';
+            el.innerHTML = html;
+            return;
+        }
+        html += _renderAvailScoreTable(entries, _availScoreRole, month);
+        html += '</div>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<p class="empty">Failed to load Avail Scores</p>';
     }
 }
 
@@ -3542,10 +4859,11 @@ function openSettingsTab(panel) {
     document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
     const navBtn = document.getElementById('navSettings');
     if (navBtn) navBtn.classList.add('active');
-    switchSettingsTab(panel || 'users');
+    switchSettingsTab(panel || localStorage.getItem('settings_active_tab') || 'users');
 }
 
 function switchSettingsTab(name, btn) {
+    try { localStorage.setItem('settings_active_tab', name); } catch(e) {}
     document.querySelectorAll('.settings-panel').forEach(p => p.style.display = 'none');
     document.querySelectorAll('#settingsTabs .tab').forEach(t => t.classList.remove('on'));
     const target = document.getElementById('settings-' + name);
@@ -3566,6 +4884,8 @@ function switchSettingsTab(name, btn) {
     else if (name === 'teams') loadTeamsConfig();
     else if (name === 'enrichment') { loadEnrichmentQueue(); loadEnrichmentStats(); }
     else if (name === 'tickets') loadTroubleTickets();
+    else if (name === 'vendor-dedup') loadVendorDedupSuggestions();
+    else if (name === 'company-dedup') loadCompanyDedupSuggestions();
 }
 
 // Keep backward compat for dropdown links
@@ -3578,7 +4898,8 @@ let _sourcesSearchTimer = null;
 let _sourcesShowPlanned = false;
 
 function _isPlannedSource(s) {
-    // Sources with no env_vars are always "planned" regardless of status
+    // Use is_active flag from API if available, fall back to env_vars check
+    if (typeof s.is_active === 'boolean') return !s.is_active;
     return !(s.env_vars && s.env_vars.length);
 }
 
@@ -3737,6 +5058,10 @@ function _renderSourceCard(s, canToggle, isPlanned) {
         ? `<button class="btn btn-ghost btn-sm" id="test-btn-${s.id}" onclick="testSourceCred(${s.id})">Test</button>`
         : '';
 
+    const activeToggleHtml = canToggle
+        ? `<button class="btn btn-ghost btn-sm" onclick="toggleSourceActive(${s.id})" style="font-size:10px;color:${s.is_active?'var(--green)':'var(--amber)'}">${s.is_active ? '● Active' : '○ Planned'}</button>`
+        : '';
+
     const cardCls = isPlanned ? 'card s-card s-card-planned' : 'card s-card';
 
     return `<div class="${cardCls}" style="max-width:none">
@@ -3747,6 +5072,7 @@ function _renderSourceCard(s, canToggle, isPlanned) {
                 <span class="s-hint">${s.source_type}</span>
             </div>
             <div class="s-row" style="gap:8px">
+                ${activeToggleHtml}
                 ${toggleHtml}
                 ${testHtml}
             </div>
@@ -3910,6 +5236,16 @@ async function toggleSourceStatus(sourceId, currentStatus) {
         loadSettingsSources();
     } catch (e) {
         showToast('Failed to toggle source: ' + (e.message || e), 'error');
+    }
+}
+
+async function toggleSourceActive(sourceId) {
+    try {
+        const data = await apiFetch(`/api/sources/${sourceId}/activate`, { method: 'PUT' });
+        showToast(`Source marked ${data.is_active ? 'Active' : 'Planned'}`, 'success');
+        loadSettingsSources();
+    } catch (e) {
+        showToast('Failed to toggle active state: ' + (e.message || e), 'error');
     }
 }
 
@@ -4420,6 +5756,10 @@ async function testTeamsPost() {
 
 let _eqSelectedIds = new Set();
 let _bfPollInterval = null;
+
+window.addEventListener('beforeunload', () => {
+    if (_bfPollInterval) { clearInterval(_bfPollInterval); _bfPollInterval = null; }
+});
 
 function switchEnrichTab(tab, btn) {
     document.querySelectorAll('#enrichTabs .tab').forEach(t => t.classList.remove('on'));
@@ -4936,11 +6276,1120 @@ async function regeneratePrompt(id, btn) {
     });
 }
 
+// ── Vendor Dedup ────────────────────────────────────────────────────────
+
+async function loadVendorDedupSuggestions() {
+    const el = document.getElementById('dedupResults');
+    const status = document.getElementById('dedupStatus');
+    if (!el) return;
+    const threshold = (document.getElementById('dedupThreshold') || {}).value || 85;
+    el.innerHTML = '<p class="empty">Scanning vendors...</p>';
+    if (status) status.textContent = 'Scanning...';
+    try {
+        const data = await apiFetch(`/api/admin/vendor-dedup-suggestions?threshold=${threshold}&limit=100`);
+        if (status) status.textContent = data.count + ' potential duplicate' + (data.count !== 1 ? 's' : '') + ' found';
+        if (!data.count) {
+            el.innerHTML = '<p class="empty">No duplicate vendors found at this threshold</p>';
+            return;
+        }
+        let html = '<table class="tbl"><thead><tr><th>Score</th><th>Vendor A</th><th>Sightings</th><th>Vendor B</th><th>Sightings</th><th></th></tr></thead><tbody>';
+        for (const c of data.candidates) {
+            const keepA = (c.vendor_a.sightings || 0) >= (c.vendor_b.sightings || 0);
+            const keepId = keepA ? c.vendor_a.id : c.vendor_b.id;
+            const removeId = keepA ? c.vendor_b.id : c.vendor_a.id;
+            const scoreColor = c.score >= 95 ? 'var(--red)' : c.score >= 90 ? 'var(--amber)' : 'var(--muted)';
+            html += `<tr id="dedup-row-${c.vendor_a.id}-${c.vendor_b.id}">
+                <td style="font-weight:700;color:${scoreColor}">${c.score}%</td>
+                <td>${esc(c.vendor_a.name)}${keepA ? ' <span style="font-size:9px;color:var(--green);font-weight:600">KEEP</span>' : ''}</td>
+                <td class="mono">${c.vendor_a.sightings}</td>
+                <td>${esc(c.vendor_b.name)}${!keepA ? ' <span style="font-size:9px;color:var(--green);font-weight:600">KEEP</span>' : ''}</td>
+                <td class="mono">${c.vendor_b.sightings}</td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="mergeVendors(${keepId},${removeId},this)" title="Merge into vendor with more sightings">Merge</button>
+                    <button class="btn btn-sm btn-ghost" onclick="this.closest('tr').remove()" title="Dismiss">Skip</button>
+                </td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<p class="empty" style="color:var(--red)">Failed to load: ' + esc(e.message) + '</p>';
+        if (status) status.textContent = '';
+    }
+}
+
+async function mergeVendors(keepId, removeId, btn) {
+    if (!confirm(`Merge vendor #${removeId} into #${keepId}? This cannot be undone.`)) return;
+    await guardBtn(btn, 'Merging...', async () => {
+        const result = await apiFetch('/api/admin/vendor-merge', {
+            method: 'POST',
+            body: { keep_id: keepId, remove_id: removeId },
+        });
+        showToast(`Merged! ${result.reassigned} records reassigned`, 'success');
+        const row = btn.closest('tr');
+        if (row) row.remove();
+        // Update status count
+        const remaining = document.querySelectorAll('#dedupResults tbody tr').length;
+        const status = document.getElementById('dedupStatus');
+        if (status) status.textContent = remaining + ' remaining';
+    });
+}
+
+
+// ── Company Dedup ─────────────────────────────────────────────────────
+
+async function loadCompanyDedupSuggestions() {
+    const el = document.getElementById('companyDedupResults');
+    const status = document.getElementById('companyDedupStatus');
+    if (!el) return;
+    const threshold = (document.getElementById('companyDedupThreshold') || {}).value || 85;
+    el.innerHTML = '<p class="empty">Scanning companies...</p>';
+    if (status) status.textContent = 'Scanning...';
+    try {
+        const data = await apiFetch(`/api/admin/company-dedup-suggestions?threshold=${threshold}&limit=100`);
+        if (status) status.textContent = data.count + ' potential duplicate' + (data.count !== 1 ? 's' : '') + ' found';
+        if (!data.count) {
+            el.innerHTML = '<p class="empty">No duplicate companies found at this threshold</p>';
+            return;
+        }
+        let html = '<table class="tbl"><thead><tr><th>Score</th><th>Company A</th><th>Sites</th><th>Company B</th><th>Sites</th><th></th></tr></thead><tbody>';
+        for (const c of data.candidates) {
+            const keepId = c.auto_keep_id;
+            const removeId = keepId === c.company_a.id ? c.company_b.id : c.company_a.id;
+            const scoreColor = c.score >= 95 ? 'var(--red)' : c.score >= 90 ? 'var(--amber)' : 'var(--muted)';
+            const aIsKeep = c.company_a.id === keepId;
+            html += `<tr id="cdedup-row-${c.company_a.id}-${c.company_b.id}">
+                <td style="font-weight:700;color:${scoreColor}">${c.score}%</td>
+                <td>${esc(c.company_a.name)}${aIsKeep ? ' <span style="font-size:9px;color:var(--green);font-weight:600">KEEP</span>' : ''}</td>
+                <td class="mono">${c.company_a.site_count}</td>
+                <td>${esc(c.company_b.name)}${!aIsKeep ? ' <span style="font-size:9px;color:var(--green);font-weight:600">KEEP</span>' : ''}</td>
+                <td class="mono">${c.company_b.site_count}</td>
+                <td>
+                    <button class="btn btn-sm btn-primary" onclick="previewCompanyMerge(${keepId},${removeId},this)" title="Preview merge impact">Merge</button>
+                    <button class="btn btn-sm btn-ghost" onclick="this.closest('tr').remove()" title="Dismiss">Skip</button>
+                </td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<p class="empty" style="color:var(--red)">Failed to load: ' + esc(e.message) + '</p>';
+        if (status) status.textContent = '';
+    }
+}
+
+async function previewCompanyMerge(keepId, removeId, btn) {
+    await guardBtn(btn, 'Loading...', async () => {
+        const preview = await apiFetch(`/api/admin/company-merge-preview?keep_id=${keepId}&remove_id=${removeId}`);
+        const parts = [];
+        if (preview.sites_to_move) parts.push(`${preview.sites_to_move} site(s) moved`);
+        if (preview.sites_to_delete) parts.push(`${preview.sites_to_delete} empty HQ site(s) deleted`);
+        if (preview.activities_to_reassign) parts.push(`${preview.activities_to_reassign} activities reassigned`);
+        if (preview.fields_to_fill.length) parts.push(`${preview.fields_to_fill.length} fields filled`);
+        if (preview.tags_to_merge) parts.push(`${preview.tags_to_merge} new tags`);
+        const summary = parts.length ? parts.join(', ') : 'No data to move';
+        if (!confirm(`Merge "${preview.remove.name}" into "${preview.keep.name}"?\n\n${summary}\n\nThis cannot be undone.`)) return;
+        await mergeCompanies(keepId, removeId, btn);
+    });
+}
+
+async function mergeCompanies(keepId, removeId, btn) {
+    await guardBtn(btn, 'Merging...', async () => {
+        const result = await apiFetch('/api/admin/company-merge', {
+            method: 'POST',
+            body: { keep_id: keepId, remove_id: removeId },
+        });
+        showToast(`Merged! ${result.sites_moved} sites moved, ${result.reassigned} records reassigned`, 'success');
+        const row = btn.closest('tr');
+        if (row) row.remove();
+        const remaining = document.querySelectorAll('#companyDedupResults tbody tr').length;
+        const cStatus = document.getElementById('companyDedupStatus');
+        if (cStatus) cStatus.textContent = remaining + ' remaining';
+    });
+}
+
+
+/// ── Suggested Accounts (Prospect Pool from prospect_accounts) ───────────
+
+let _suggestedPage = 1;
+let _suggestedReadiness = '';
+let _suggestedAbort = null;
+
+const debouncedLoadSuggested = debounce(() => { _suggestedPage = 1; loadSuggested(); }, 300);
+
+function setSuggestedReadiness(val, btn) {
+    _suggestedReadiness = val;
+    document.querySelectorAll('#suggestedPills .chip').forEach(c => c.classList.toggle('on', c.dataset.value === val));
+    _suggestedPage = 1;
+    loadSuggested();
+}
+
+async function showSuggested() {
+    showView('view-suggested');
+    const viewEl = document.getElementById('view-suggested');
+    if (viewEl) viewEl.style.display = 'flex';
+    setCurrentReqId(null);
+    _suggestedPage = 1;
+    const search = document.getElementById('suggestedSearch');
+    if (search) search.value = '';
+    const size = document.getElementById('suggestedSize');
+    if (size) size.value = '';
+    const fit = document.getElementById('suggestedFitScore');
+    if (fit) fit.value = '0';
+    const readiness = document.getElementById('suggestedReadinessScore');
+    if (readiness) readiness.value = '0';
+    const sort = document.getElementById('suggestedSort');
+    if (sort) sort.value = 'readiness_desc';
+    _setTopViewLabel('Suggested');
+    await loadSuggested();
+}
+
+async function loadSuggested() {
+    if (_suggestedAbort) { try { _suggestedAbort.abort(); } catch(e){} }
+    _suggestedAbort = new AbortController();
+    const grid = document.getElementById('suggestedGrid');
+    if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner"></div> Loading…</div>';
+
+    const search = (document.getElementById('suggestedSearch')?.value || '').trim();
+    const size = document.getElementById('suggestedSize')?.value || '';
+    const fitScore = document.getElementById('suggestedFitScore')?.value || '0';
+    const readinessScore = document.getElementById('suggestedReadinessScore')?.value || '0';
+    const sort = document.getElementById('suggestedSort')?.value || 'readiness_desc';
+    const params = new URLSearchParams({ page: _suggestedPage, per_page: 100, sort });
+    if (search) params.set('search', search);
+    if (size) params.set('employee_size', size);
+    if (parseInt(fitScore) > 0) params.set('min_fit_score', fitScore);
+    if (parseInt(readinessScore) > 0) params.set('min_readiness_score', readinessScore);
+
+    try {
+        const [data, stats] = await Promise.all([
+            apiFetch('/api/prospects/suggested?' + params, { signal: _suggestedAbort.signal }),
+            apiFetch('/api/prospects/suggested/stats', { signal: _suggestedAbort.signal }),
+        ]);
+        renderSuggestedStats(stats);
+        renderSuggestedGrid(data);
+    } catch (e) {
+        if (e.name === 'AbortError') return;
+        showToast('Failed to load suggested accounts', 'error');
+        console.error(e);
+    }
+}
+
+function renderSuggestedStats(stats) {
+    const el = document.getElementById('suggestedStats');
+    if (!el) return;
+    el.innerHTML = `
+        <span class="stat-item"><span class="stat-val">${stats.total_available}</span> available</span>
+        <span class="stat-item"><span class="stat-val">${stats.call_now_count}</span> call now</span>
+        <span class="stat-item"><span class="stat-val">${stats.nurture_count}</span> nurture</span>
+        <span class="stat-item"><span class="stat-val">${stats.high_fit_count}</span> high fit</span>
+        <span class="stat-item"><span class="stat-val">${stats.claimed_this_month}</span> claimed this month</span>
+        <span class="stat-item" style="margin-left:auto;cursor:pointer;color:var(--blue);font-weight:600" onclick="toggleScoringGuide()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            Scoring Guide
+        </span>
+    `;
+}
+
+function renderSuggestedGrid(data) {
+    const grid = document.getElementById('suggestedGrid');
+    const pager = document.getElementById('suggestedPager');
+    if (!grid) return;
+
+    if (!data.items.length) {
+        grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--muted)">No accounts match your filters</div>';
+        if (pager) pager.innerHTML = '';
+        return;
+    }
+
+    grid.innerHTML = data.items.map(a => {
+        // Readiness tier badge
+        const tierLabels = { call_now: 'Call Now', nurture: 'Nurture', monitor: 'Monitor' };
+        const tierBadge = `<span class="suggested-badge ${a.readiness_tier}">${tierLabels[a.readiness_tier] || a.readiness_tier}</span>`;
+        const sfBadge = a.company_id ? '<span class="suggested-badge sf">SF</span>' : '';
+
+        // Domain link
+        const domainLink = a.domain
+            ? `<a class="suggested-card-domain" href="https://${escAttr(a.domain)}" target="_blank" rel="noopener">${esc(a.domain)}</a>`
+            : '';
+
+        // Meta info
+        const meta = [];
+        if (a.industry) meta.push('<span>' + esc(a.industry) + '</span>');
+        if (a.employee_count_range) meta.push('<span>' + esc(a.employee_count_range) + ' emp</span>');
+        if (a.hq_location) meta.push('<span>' + esc(a.hq_location) + '</span>');
+
+        // Score bars
+        const fitPct = Math.min(a.fit_score, 100);
+        const readPct = Math.min(a.readiness_score, 100);
+        const scoreBars = `<div class="suggested-scores">
+            <div class="score-bar"><div class="score-bar-label"><span>Fit</span><span>${a.fit_score}</span></div><div class="score-bar-track"><div class="score-bar-fill fit" style="width:${fitPct}%"></div></div></div>
+            <div class="score-bar"><div class="score-bar-label"><span>Readiness</span><span>${a.readiness_score}</span></div><div class="score-bar-track"><div class="score-bar-fill readiness" style="width:${readPct}%"></div></div></div>
+        </div>`;
+
+        // Signal tags
+        let signalHtml = '';
+        if (a.signal_tags && a.signal_tags.length) {
+            signalHtml = '<div class="suggested-signals">' +
+                a.signal_tags.map(s => `<span class="signal-tag ${s.type}">${esc(s.label)}</span>`).join('') +
+                '</div>';
+        }
+
+        // Contacts preview
+        let contactsHtml = '';
+        if (a.contacts_count > 0) {
+            const avatars = (a.contacts_preview || []).slice(0, 3).map(c => {
+                const initials = (c.name || '?').split(' ').map(w => w[0]).join('').substring(0, 2).toUpperCase();
+                return `<span class="contact-avatar" title="${escAttr(c.name || '')}">${initials}</span>`;
+            }).join('');
+            contactsHtml = `<div class="suggested-contacts">
+                <div class="contacts-avatars">${avatars}</div>
+                <span class="contacts-summary">${a.contacts_count} contacts &middot; ${a.contacts_verified} verified &middot; ${a.contacts_decision_makers} DMs</span>
+            </div>`;
+        }
+
+        // Similar customers
+        let similarHtml = '';
+        if (a.similar_customers && a.similar_customers.length) {
+            const names = a.similar_customers.map(s => esc(s.name || s)).join(', ');
+            similarHtml = `<div class="suggested-similar">Similar to: <strong>${names}</strong></div>`;
+        }
+
+        // AI writeup snippet
+        const writeupHtml = a.ai_writeup
+            ? `<div class="suggested-writeup">${esc(a.ai_writeup)}</div>`
+            : '';
+
+        // One-liner
+        const oneLinerHtml = a.one_liner
+            ? `<div style="font-size:10px;color:var(--text);padding:2px 0;font-style:italic;border-left:2px solid var(--blue);padding-left:6px;margin:3px 0;line-height:1.3">${esc(a.one_liner)}</div>`
+            : '';
+
+        // Warm intro badge
+        const warmBadge = a.has_warm_intro
+            ? `<span class="suggested-badge" style="background:${a.warm_intro_warmth === 'hot' ? '#dcfce7;color:#166534' : '#fef9c3;color:#854d0e'}">${a.warm_intro_warmth === 'hot' ? '🔥 Warm Intro' : '👋 Prior Contact'}</span>`
+            : '';
+
+        return `<div class="suggested-card" id="sg-card-${a.id}">
+            <div class="suggested-card-header">
+                <div>
+                    <div class="suggested-card-name" style="cursor:pointer" onclick="openSuggestedDetail(${a.id})">${esc(a.name)}</div>
+                    ${domainLink}
+                </div>
+                <div class="suggested-card-badges">${warmBadge}${tierBadge}${sfBadge}</div>
+            </div>
+            ${oneLinerHtml}
+            ${meta.length ? '<div class="suggested-card-meta">' + meta.join(' &middot; ') + '</div>' : ''}
+            ${scoreBars}
+            ${signalHtml}
+            ${contactsHtml}
+            ${similarHtml}
+            ${writeupHtml}
+            <div class="suggested-card-actions">
+                <button class="btn-claim" onclick="claimSuggestedAccount(${a.id},'${escAttr(a.name)}')">Claim</button>
+                <select class="dismiss-select" onchange="dismissSuggestedAccount(${a.id},'${escAttr(a.name)}',this.value);this.selectedIndex=0">
+                    <option value="">Dismiss…</option>
+                    <option value="not_relevant">Not relevant</option>
+                    <option value="competitor">Competitor</option>
+                    <option value="too_small">Too small</option>
+                    <option value="too_large">Too large</option>
+                    <option value="duplicate">Duplicate</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+        </div>`;
+    }).join('');
+
+    // Pagination — inline in toolbar
+    if (pager) {
+        const totalPages = Math.ceil(data.total / data.per_page);
+        let html = '';
+        if (_suggestedPage > 1) html += `<button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:11px" onclick="suggestedGoPage(${_suggestedPage - 1})">&laquo;</button>`;
+        html += `<span>${data.total} accounts &middot; ${data.page}/${totalPages}</span>`;
+        if (_suggestedPage < totalPages) html += `<button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:11px" onclick="suggestedGoPage(${_suggestedPage + 1})">&raquo;</button>`;
+        pager.innerHTML = html;
+    }
+}
+
+function suggestedGoPage(page) {
+    _suggestedPage = page;
+    loadSuggested();
+    const wrap = document.querySelector('.suggested-grid-wrap');
+    if (wrap) wrap.scrollTop = 0;
+}
+
+function toggleScoringGuide() {
+    const el = document.getElementById('suggestedLegend');
+    if (!el) return;
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+async function claimSuggestedAccount(id, name) {
+    if (!confirm('Claim "' + name + '"? It will be added to your Accounts list.')) return;
+    try {
+        const result = await apiFetch('/api/prospects/suggested/' + id + '/claim', { method: 'POST' });
+        showToast('Claimed: ' + (result.company_name || name), 'success');
+        const card = document.getElementById('sg-card-' + id);
+        if (card) { card.style.opacity = '0'; card.style.transition = 'opacity .3s'; setTimeout(() => card.remove(), 300); }
+        try {
+            const stats = await apiFetch('/api/prospects/suggested/stats');
+            renderSuggestedStats(stats);
+        } catch(e) {}
+    } catch (e) {
+        if (e.message && e.message.includes('409')) showToast('Already claimed by another user', 'error');
+        else showToast(e.message || 'Failed to claim account', 'error');
+    }
+}
+
+async function dismissSuggestedAccount(id, name, reason) {
+    if (!reason) return;
+    try {
+        await apiFetch('/api/prospects/suggested/' + id + '/dismiss', { method: 'POST', body: { reason: reason } });
+        showToast('Dismissed: ' + name, 'info');
+        const card = document.getElementById('sg-card-' + id);
+        if (card) { card.style.opacity = '0'; card.style.transition = 'opacity .3s'; setTimeout(() => card.remove(), 300); }
+        try {
+            const stats = await apiFetch('/api/prospects/suggested/stats');
+            renderSuggestedStats(stats);
+        } catch(e) {}
+    } catch (e) {
+        showToast(e.message || 'Failed to dismiss account', 'error');
+    }
+}
+
+async function openSuggestedDetail(prospectId) {
+    const backdrop = document.getElementById('suggestedDetailBackdrop');
+    const drawer = document.getElementById('suggestedDetailDrawer');
+    const body = document.getElementById('suggestedDetailBody');
+    const title = document.getElementById('suggestedDetailTitle');
+    if (backdrop) backdrop.classList.add('open');
+    if (drawer) drawer.classList.add('open');
+    if (body) body.innerHTML = '<div class="spinner-row"><div class="spinner"></div> Loading account intelligence…</div>';
+
+    try {
+        const detail = await apiFetch('/api/prospects/suggested/' + prospectId);
+        if (title) title.textContent = detail.name || 'Account Detail';
+
+        // Build the AI intelligence view
+        let html = '';
+
+        // Health badge
+        const tier = detail.readiness_tier;
+        const tierLabels = { call_now: 'Call Now', nurture: 'Nurture', monitor: 'Monitor' };
+        const tierColor = tier === 'call_now' ? '#22c55e' : tier === 'nurture' ? '#eab308' : '#9ca3af';
+        html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${tierColor}"></span>
+            <span style="font-weight:600;font-size:14px">${tierLabels[tier] || tier}</span>
+            <span style="color:var(--muted);font-size:12px">Fit: ${detail.fit_score}/100 · Readiness: ${detail.readiness_score}/100</span>
+        </div>`;
+
+        // Score bars
+        html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+            <div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:2px"><span>Fit Score</span><span>${detail.fit_score}</span></div><div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:${detail.fit_score}%;height:100%;background:var(--blue);border-radius:3px"></div></div></div>
+            <div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:2px"><span>Readiness</span><span>${detail.readiness_score}</span></div><div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:${detail.readiness_score}%;height:100%;background:${tierColor};border-radius:3px"></div></div></div>
+        </div>`;
+
+        // Company info
+        html += '<div style="border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:12px">';
+        const fields = [
+            ['Industry', detail.industry],
+            ['Size', detail.employee_count_range],
+            ['Revenue', detail.revenue_range],
+            ['Location', detail.hq_location],
+            ['Region', detail.region],
+            ['Domain', detail.domain ? `<a href="https://${detail.domain}" target="_blank" rel="noopener">${detail.domain}</a>` : null],
+        ];
+        for (const [label, val] of fields) {
+            if (val) html += `<div style="display:flex;gap:8px;font-size:12px;padding:3px 0"><span style="color:var(--muted);min-width:80px">${label}</span><span>${val}</span></div>`;
+        }
+        html += '</div>';
+
+        // Fit reasoning
+        if (detail.fit_reasoning) {
+            html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">Fit Breakdown</div>';
+            const parts = detail.fit_reasoning.split(';').map(p => p.trim()).filter(Boolean);
+            html += '<div style="font-size:11px;color:var(--text)">' + parts.map(p => '<div style="padding:2px 0">' + esc(p) + '</div>').join('') + '</div></div>';
+        }
+
+        // AI Writeup
+        if (detail.ai_writeup) {
+            html += `<div style="background:var(--bg-alt,#f0f4ff);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px;border-left:3px solid var(--blue)">
+                <div style="font-weight:600;font-size:12px;margin-bottom:6px;color:var(--blue)">AI Analysis</div>
+                <div style="font-size:12px;line-height:1.5">${esc(detail.ai_writeup)}</div>
+            </div>`;
+        }
+
+        // Signals
+        if (detail.signal_tags && detail.signal_tags.length) {
+            html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">Signals</div><div style="display:flex;flex-wrap:wrap;gap:4px">';
+            for (const s of detail.signal_tags) {
+                html += `<span class="signal-tag ${s.type}">${esc(s.label)}</span>`;
+            }
+            html += '</div></div>';
+        }
+
+        // Enrichment data
+        const ed = detail.enrichment_data || {};
+
+        // Warm intro
+        const warmIntro = ed.warm_intro || {};
+        if (warmIntro.has_warm_intro) {
+            const warmColor = warmIntro.warmth === 'hot' ? '#166534' : '#854d0e';
+            const warmBg = warmIntro.warmth === 'hot' ? '#dcfce7' : '#fef9c3';
+            html += `<div style="background:${warmBg};border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;border-left:3px solid ${warmColor}">
+                <div style="font-weight:600;font-size:12px;color:${warmColor};margin-bottom:4px">${warmIntro.warmth === 'hot' ? '🔥 Warm Introduction Available' : '👋 Prior Contact Detected'}</div>`;
+            if (warmIntro.contacts && warmIntro.contacts.length) {
+                for (const c of warmIntro.contacts.slice(0, 3)) {
+                    html += `<div style="font-size:11px;padding:2px 0">${esc(c.name || '')} — ${esc(c.title || '')}${c.relationship_score ? ' (score: ' + c.relationship_score + ')' : ''}</div>`;
+                }
+            }
+            if (warmIntro.sighting_count > 0) {
+                html += `<div style="font-size:11px;padding:2px 0">${warmIntro.sighting_count} stock offers received from this domain</div>`;
+            }
+            if (warmIntro.engagement_score) {
+                html += `<div style="font-size:11px;padding:2px 0">Engagement score: ${warmIntro.engagement_score}/100</div>`;
+            }
+            html += '</div>';
+        }
+
+        // SAM.gov data
+        const samGov = ed.sam_gov || null;
+        if (samGov) {
+            html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">Government Registration (SAM.gov)</div>';
+            if (samGov.cage_code) html += '<div style="font-size:11px;padding:2px 0"><strong>CAGE Code:</strong> ' + esc(samGov.cage_code) + '</div>';
+            if (samGov.uei) html += '<div style="font-size:11px;padding:2px 0"><strong>UEI:</strong> ' + esc(samGov.uei) + '</div>';
+            if (samGov.entity_type) html += '<div style="font-size:11px;padding:2px 0"><strong>Type:</strong> ' + esc(samGov.entity_type) + '</div>';
+            if (samGov.purpose) html += '<div style="font-size:11px;padding:2px 0"><strong>Purpose:</strong> ' + esc(samGov.purpose) + '</div>';
+            if (samGov.naics_codes && samGov.naics_codes.length) {
+                const naicsStr = samGov.naics_codes.map(n => n.code + (n.primary ? ' (primary)' : '')).join(', ');
+                html += '<div style="font-size:11px;padding:2px 0"><strong>NAICS:</strong> ' + esc(naicsStr) + '</div>';
+            }
+            html += '</div>';
+        }
+
+        // Recent news
+        const news = ed.recent_news || [];
+        if (news.length) {
+            html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">Recent News</div>';
+            for (const n of news.slice(0, 5)) {
+                const typeColor = n.signal_type === 'funding' ? '#22c55e' : n.signal_type === 'acquisition' ? '#8b5cf6' : n.signal_type === 'expansion' ? '#3b82f6' : n.signal_type === 'contract' ? '#059669' : 'var(--muted)';
+                const typeBadge = n.signal_type !== 'general' ? `<span style="font-size:9px;padding:1px 4px;border-radius:4px;background:${typeColor};color:white;margin-right:4px">${esc(n.signal_type)}</span>` : '';
+                html += `<div style="padding:4px 0;border-top:1px solid var(--border);font-size:11px">
+                    ${typeBadge}<a href="${esc(n.link)}" target="_blank" rel="noopener" style="color:var(--text)">${esc(n.title)}</a>
+                    ${n.source ? '<div style="font-size:10px;color:var(--muted)">' + esc(n.source) + '</div>' : ''}
+                </div>`;
+            }
+            html += '</div>';
+        }
+
+        // Historical context
+        if (ed.historical_context || detail.historical_context) {
+            const hc = detail.historical_context || {};
+            if (Object.keys(hc).length) {
+                html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">Historical Context</div>';
+                if (hc.bought_before) html += '<div style="font-size:11px;padding:2px 0;color:#22c55e">Previously purchased from Trio</div>';
+                if (hc.quoted_before || hc.quote_count > 0) html += '<div style="font-size:11px;padding:2px 0">' + (hc.quote_count || 0) + ' previous quotes</div>';
+                if (hc.last_activity) html += '<div style="font-size:11px;padding:2px 0">Last activity: ' + esc(String(hc.last_activity)) + '</div>';
+                html += '</div>';
+            }
+        }
+
+        // Contacts preview
+        if (detail.contacts_count > 0) {
+            html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:6px">Contacts (' + detail.contacts_count + ')</div>';
+            html += '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">' + detail.contacts_verified + ' verified · ' + detail.contacts_decision_makers + ' decision makers</div>';
+            for (const c of (detail.contacts_preview || [])) {
+                const senBadge = c.seniority === 'decision_maker' ? ' <span style="color:var(--blue);font-size:9px;font-weight:600">DM</span>' : '';
+                html += `<div style="padding:4px 0;border-top:1px solid var(--border);font-size:12px">
+                    <strong>${esc(c.name || '—')}</strong>${senBadge}
+                    ${c.title ? '<div style="color:var(--muted);font-size:11px">' + esc(c.title) + '</div>' : ''}
+                    ${c.email_masked ? '<div style="font-size:10px;color:var(--muted)">' + esc(c.email_masked) + '</div>' : ''}
+                </div>`;
+            }
+            html += '</div>';
+        }
+
+        // Similar customers
+        if (detail.similar_customers && detail.similar_customers.length) {
+            html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">Similar Trio Customers</div>';
+            for (const s of detail.similar_customers) {
+                html += `<div style="padding:4px 0;font-size:12px;border-top:1px solid var(--border)">
+                    <strong>${esc(s.name || '')}</strong> <span style="font-size:10px;padding:2px 6px;border-radius:8px;background:${s.match_strength === 'strong' ? '#dcfce7' : s.match_strength === 'moderate' ? '#fef9c3' : '#f3f4f6'};color:var(--text)">${esc(s.match_strength || '')}</span>
+                    <div style="font-size:11px;color:var(--muted)">${esc(s.match_reason || '')}</div>
+                </div>`;
+            }
+            html += '</div>';
+        }
+
+        // Actions
+        html += `<div style="display:flex;gap:8px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="claimSuggestedAccount(${detail.id},'${escAttr(detail.name)}')">Claim Account</button>
+            <button class="btn btn-ghost" onclick="enrichProspectFree(${detail.id})" id="enrichBtn-${detail.id}" title="SAM.gov + Google News (free)">Enrich</button>
+            <select class="dismiss-select" onchange="dismissSuggestedAccount(${detail.id},'${escAttr(detail.name)}',this.value);if(this.value)closeSuggestedDetail();this.selectedIndex=0" style="font-size:12px">
+                <option value="">Dismiss…</option>
+                <option value="not_relevant">Not relevant</option>
+                <option value="competitor">Competitor</option>
+                <option value="too_small">Too small</option>
+                <option value="too_large">Too large</option>
+                <option value="other">Other</option>
+            </select>
+        </div>`;
+
+        if (body) body.innerHTML = html;
+    } catch (e) {
+        if (body) body.innerHTML = '<div style="padding:20px;color:var(--red)">Failed to load account details</div>';
+    }
+}
+
+function closeSuggestedDetail() {
+    const backdrop = document.getElementById('suggestedDetailBackdrop');
+    const drawer = document.getElementById('suggestedDetailDrawer');
+    if (backdrop) backdrop.classList.remove('open');
+    if (drawer) drawer.classList.remove('open');
+}
+
+async function enrichProspectFree(prospectId) {
+    const btn = document.getElementById('enrichBtn-' + prospectId);
+    if (btn) { btn.disabled = true; btn.textContent = 'Enriching…'; }
+    try {
+        const result = await apiFetch('/api/prospects/suggested/' + prospectId + '/enrich-free', { method: 'POST' });
+        let msg = 'Enrichment complete';
+        const parts = [];
+        if (result.sam_gov) parts.push('SAM.gov data found');
+        if (result.news_count > 0) parts.push(result.news_count + ' news articles');
+        if (result.has_warm_intro) parts.push('warm intro detected');
+        if (parts.length) msg += ': ' + parts.join(', ');
+        showToast(msg, 'success');
+        // Refresh the detail view
+        openSuggestedDetail(prospectId);
+    } catch (e) {
+        showToast(e.message || 'Enrichment failed', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Enrich'; }
+    }
+}
+
+
+/// ── Prospecting (Accounts-First Hierarchy) ──────────────────────────────
+
+let _prospectingTab = 'my-accounts';
+let _prospectingData = [];
+let _prospectCapacity = null;
+let _expandedAccounts = new Set();
+
+const debouncedLoadProspecting = debounce(() => loadProspecting(), 250);
+
+function setProspectingTab(tab, btn) {
+    _prospectingTab = tab;
+    _expandedAccounts.clear();
+    document.querySelectorAll('#prospectingPills .chip').forEach(c => c.classList.toggle('on', c.dataset.value === tab));
+    // Show/hide health filter (only for my-accounts)
+    const healthFilter = document.getElementById('prospectHealthFilter');
+    if (healthFilter) healthFilter.style.display = tab === 'my-accounts' ? '' : 'none';
+    loadProspecting();
+}
+
+async function showProspecting() {
+    showView('view-prospecting');
+    const viewEl = document.getElementById('view-prospecting');
+    if (viewEl) viewEl.style.display = 'flex';
+    setCurrentReqId(null);
+    _selectedProspectSiteId = null;
+    _prospectingData = [];
+    _expandedAccounts.clear();
+    _setTopViewLabel('Prospecting');
+    await loadProspecting();
+}
+
+async function _loadCapacityBar() {
+    try {
+        _prospectCapacity = await apiFetch('/api/prospecting/capacity');
+        _renderCapacityBar();
+    } catch (e) { console.error('Capacity load failed:', e); }
+}
+
+function _renderCapacityBar() {
+    const el = document.getElementById('prospectCapBar');
+    if (!el || !_prospectCapacity) return;
+    const c = _prospectCapacity;
+    const pct = Math.min(100, Math.round((c.used / c.cap) * 100));
+    const color = pct >= 90 ? 'var(--red)' : pct >= 75 ? '#eab308' : 'var(--blue)';
+    let nudge = '';
+    if (c.stale_accounts && c.stale_accounts.length > 0 && c.used >= 180) {
+        nudge = `<span style="color:var(--muted);font-size:10px;margin-left:8px">${c.stale_accounts.length} accounts with no activity in 90+ days</span>`;
+    }
+    el.innerHTML = `<span style="white-space:nowrap">My Pipeline: <strong>${c.used}</strong>/${c.cap} sites</span>
+        <div style="width:120px;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+            <div style="width:${pct}%;height:100%;background:${color};border-radius:3px;transition:width .3s"></div>
+        </div>
+        <span style="font-weight:600;color:${color}">${pct}%</span>${nudge}`;
+}
+
+let _prospectAbort = null;
+async function loadProspecting() {
+    if (_prospectAbort) { try { _prospectAbort.abort(); } catch(e){} }
+    _prospectAbort = new AbortController();
+    const body = document.getElementById('prospectingBody');
+    if (body) body.innerHTML = '<tr><td colspan="7" class="empty"><div class="spinner"></div> Loading…</td></tr>';
+
+    // Always load capacity bar
+    _loadCapacityBar();
+
+    try {
+        if (_prospectingTab === 'my-accounts') {
+            _prospectingData = await apiFetch('/api/prospecting/my-accounts', {signal: _prospectAbort.signal}) || [];
+        } else if (_prospectingTab === 'at-risk') {
+            _prospectingData = await apiFetch('/api/prospecting/at-risk', {signal: _prospectAbort.signal}) || [];
+        } else {
+            _prospectingData = await apiFetch('/api/prospecting/pool', {signal: _prospectAbort.signal}) || [];
+        }
+        renderProspecting();
+    } catch (e) {
+        if (e.name === 'AbortError') return;
+        showToast('Failed to load prospecting data', 'error');
+        console.error(e);
+    }
+}
+
+function renderProspecting() {
+    const head = document.getElementById('prospectingHead');
+    const body = document.getElementById('prospectingBody');
+    if (!head || !body) return;
+
+    const filter = (document.getElementById('prospectingFilter')?.value || '').toLowerCase();
+    const healthFilter = document.getElementById('prospectHealthFilter')?.value || '';
+    let filtered = _prospectingData;
+
+    if (_prospectingTab === 'my-accounts') {
+        // Filter accounts
+        if (filter) {
+            filtered = filtered.filter(a =>
+                (a.name || '').toLowerCase().includes(filter) ||
+                (a.domain || '').toLowerCase().includes(filter) ||
+                (a.industry || '').toLowerCase().includes(filter) ||
+                (a.location || '').toLowerCase().includes(filter)
+            );
+        }
+        if (healthFilter) {
+            filtered = filtered.filter(a => a.health === healthFilter);
+        }
+
+        head.innerHTML = '<th style="width:30px"></th><th>Account</th><th>Industry</th><th>Location</th><th>Sites</th><th>Health</th><th>Last Activity</th><th></th>';
+        if (!filtered.length) {
+            body.innerHTML = '<tr><td colspan="8" class="empty">No accounts — claim sites from the Open Pool tab</td></tr>';
+            return;
+        }
+        let html = '';
+        for (const a of filtered) {
+            const isExpanded = _expandedAccounts.has(a.company_id);
+            const chevron = `<span style="cursor:pointer;font-size:14px;color:var(--muted);transition:transform .2s;display:inline-block;${isExpanded ? 'transform:rotate(90deg)' : ''}" onclick="event.stopPropagation();toggleAccountExpand(${a.company_id})">&#9654;</span>`;
+            const healthDot = _healthBadge(a.health);
+            const sitesLabel = `${a.active_sites}/${a.site_count} active`;
+            const strategic = a.is_strategic ? ' <span style="color:var(--blue);font-size:9px;font-weight:600">STRATEGIC</span>' : '';
+
+            html += `<tr style="cursor:pointer" onclick="toggleAccountExpand(${a.company_id})" class="prospect-account-row">
+                <td>${chevron}</td>
+                <td><strong>${esc(a.name)}</strong>${strategic}${a.domain ? '<br><small class="u-color-muted">' + esc(a.domain) + '</small>' : ''}</td>
+                <td>${esc(a.industry || '—')}</td>
+                <td>${esc(a.location || '—')}</td>
+                <td>${sitesLabel}</td>
+                <td>${healthDot}</td>
+                <td>${a.last_activity ? fmtRelative(a.last_activity) : '<span class="u-color-muted">Never</span>'}</td>
+                <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();releaseStaleSites(${a.company_id},'${escAttr(a.name)}')" title="Release inactive sites" style="font-size:10px">Release</button></td>
+            </tr>`;
+            // Expanded sites row (placeholder, filled by toggleAccountExpand)
+            html += `<tr id="acct-sites-${a.company_id}" style="display:${isExpanded ? 'table-row' : 'none'}"><td colspan="8" style="padding:0;background:var(--bg-alt,#f9fafb)"><div id="acct-sites-inner-${a.company_id}" style="padding:4px 12px 8px 40px"><div class="spinner" style="margin:8px auto"></div></div></td></tr>`;
+        }
+        body.innerHTML = html;
+        // Load sites for expanded accounts
+        for (const cid of _expandedAccounts) {
+            _loadAccountSites(cid);
+        }
+    } else if (_prospectingTab === 'pool') {
+        if (filter) {
+            filtered = filtered.filter(s =>
+                (s.site_name || '').toLowerCase().includes(filter) ||
+                (s.company_name || '').toLowerCase().includes(filter) ||
+                (s.contact_name || '').toLowerCase().includes(filter) ||
+                (s.city || '').toLowerCase().includes(filter)
+            );
+        }
+        head.innerHTML = '<th>Company</th><th>Site</th><th>Contact</th><th>Location</th><th>Last Activity</th><th></th>';
+        body.innerHTML = filtered.length ? filtered.map(s => `<tr style="cursor:pointer" onclick="openProspectDrawer(${s.site_id})">
+            <td>${esc(s.company_name || '')}</td>
+            <td>${esc(s.site_name || '')}</td>
+            <td>${esc(s.contact_name || '')}${s.contact_email ? '<br><small class="u-color-muted">' + esc(s.contact_email) + '</small>' : ''}</td>
+            <td>${esc([s.city, s.state].filter(Boolean).join(', '))}</td>
+            <td>${s.last_activity_at ? fmtRelative(s.last_activity_at) : '<span class="u-color-muted">Never</span>'}</td>
+            <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();claimSite(${s.site_id})">Claim</button></td>
+        </tr>`).join('') : '<tr><td colspan="6" class="empty">No unassigned sites — all sites have owners</td></tr>';
+    } else {
+        // at-risk
+        if (filter) {
+            filtered = filtered.filter(s =>
+                (s.site_name || '').toLowerCase().includes(filter) ||
+                (s.company_name || '').toLowerCase().includes(filter) ||
+                (s.owner_name || '').toLowerCase().includes(filter)
+            );
+        }
+        head.innerHTML = '<th>Company</th><th>Site</th><th>Owner</th><th>Days Inactive</th><th>Days Left</th>';
+        body.innerHTML = filtered.length ? filtered.map(s => {
+            const color = s.days_remaining <= 2 ? '#ef4444' : '#eab308';
+            return `<tr style="cursor:pointer" onclick="openProspectDrawer(${s.site_id})">
+                <td>${esc(s.company_name || '')}</td>
+                <td>${esc(s.site_name || '')}</td>
+                <td>${esc(s.owner_name || '')}</td>
+                <td>${s.days_inactive}</td>
+                <td style="color:${color};font-weight:600">${s.days_remaining}</td>
+            </tr>`;
+        }).join('') : '<tr><td colspan="5" class="empty">No sites at risk</td></tr>';
+    }
+}
+
+function _healthBadge(health) {
+    const map = {
+        green: '<span style="color:#22c55e">&#x25cf;</span> Active',
+        yellow: '<span style="color:#eab308">&#x25cf;</span> At Risk',
+        red: '<span style="color:#ef4444">&#x25cf;</span> Expiring',
+        grey: '<span style="color:#9ca3af">&#x25cf;</span> No Activity',
+    };
+    return map[health] || map.grey;
+}
+
+async function toggleAccountExpand(companyId) {
+    const row = document.getElementById('acct-sites-' + companyId);
+    if (!row) return;
+    if (_expandedAccounts.has(companyId)) {
+        _expandedAccounts.delete(companyId);
+        row.style.display = 'none';
+        // Update chevron
+        const chevron = row.previousElementSibling?.querySelector('span');
+        if (chevron) chevron.style.transform = '';
+    } else {
+        _expandedAccounts.add(companyId);
+        row.style.display = 'table-row';
+        const chevron = row.previousElementSibling?.querySelector('span');
+        if (chevron) chevron.style.transform = 'rotate(90deg)';
+        await _loadAccountSites(companyId);
+    }
+}
+
+async function _loadAccountSites(companyId) {
+    const inner = document.getElementById('acct-sites-inner-' + companyId);
+    if (!inner) return;
+    inner.innerHTML = '<div class="spinner" style="margin:8px auto"></div>';
+    try {
+        const data = await apiFetch('/api/prospecting/accounts/' + companyId + '/sites');
+        if (!data.sites || !data.sites.length) {
+            inner.innerHTML = '<div style="padding:8px;color:var(--muted);font-size:12px">No sites found</div>';
+            return;
+        }
+        let html = '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+        html += '<thead><tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="padding:4px 8px;text-align:left">Site</th><th style="padding:4px 8px;text-align:left">Type</th><th style="padding:4px 8px;text-align:left">Contact</th><th style="padding:4px 8px;text-align:left">Location</th><th style="padding:4px 8px;text-align:left">Status</th><th style="padding:4px 8px;text-align:left">Last Activity</th><th style="padding:4px 8px"></th></tr></thead><tbody>';
+        for (const s of data.sites) {
+            const dot = _healthBadge(s.status);
+            html += `<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="openProspectDrawer(${s.site_id})">
+                <td style="padding:6px 8px">${esc(s.site_name)}</td>
+                <td style="padding:6px 8px">${esc(s.site_type || '—')}</td>
+                <td style="padding:6px 8px">${esc(s.contact_name || '—')}${s.contact_email ? '<br><small class="u-color-muted">' + esc(s.contact_email) + '</small>' : ''}</td>
+                <td style="padding:6px 8px">${esc([s.city, s.state].filter(Boolean).join(', ') || '—')}</td>
+                <td style="padding:6px 8px">${dot}</td>
+                <td style="padding:6px 8px">${s.last_activity_at ? fmtRelative(s.last_activity_at) : '<span class="u-color-muted">Never</span>'}</td>
+                <td style="padding:6px 8px"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();releaseSite(${s.site_id},'${escAttr(s.site_name)}')" style="font-size:10px" title="Release site">Release</button></td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        inner.innerHTML = html;
+    } catch (e) {
+        inner.innerHTML = '<div style="padding:8px;color:var(--red);font-size:12px">Failed to load sites</div>';
+    }
+}
+
+async function releaseSite(siteId, siteName) {
+    if (!confirm('Release "' + siteName + '" back to the open pool?')) return;
+    try {
+        await apiFetch('/api/prospecting/release/' + siteId, { method: 'POST' });
+        showToast('Released: ' + siteName, 'info');
+        await loadProspecting();
+    } catch (e) {
+        showToast(e.message || 'Failed to release site', 'error');
+    }
+}
+
+async function releaseStaleSites(companyId, companyName) {
+    if (!confirm('Release all inactive sites for "' + companyName + '"? Only sites with no activity in 90+ days will be released.')) return;
+    try {
+        const data = await apiFetch('/api/prospecting/accounts/' + companyId + '/sites');
+        const stale = (data.sites || []).filter(s => s.status === 'red' || s.status === 'grey');
+        if (!stale.length) { showToast('No stale sites to release', 'info'); return; }
+        for (const s of stale) {
+            await apiFetch('/api/prospecting/release/' + s.site_id, { method: 'POST' });
+        }
+        showToast('Released ' + stale.length + ' stale sites from ' + companyName, 'success');
+        await loadProspecting();
+    } catch (e) {
+        showToast(e.message || 'Failed to release sites', 'error');
+    }
+}
+
+async function claimSite(siteId) {
+    // Check capacity before confirming
+    if (_prospectCapacity && _prospectCapacity.at_cap) {
+        showToast('You have reached the ' + _prospectCapacity.cap + '-site cap. Release inactive sites before claiming new ones.', 'error');
+        return;
+    }
+    if (!confirm('Claim this site? You will be responsible for maintaining contact.')) return;
+    try {
+        const result = await apiFetch('/api/prospecting/claim/' + siteId, { method: 'POST' });
+        showToast('Site claimed: ' + (result.site_name || ''), 'success');
+        await loadProspecting();
+    } catch (e) {
+        const msg = e.message || 'Failed to claim site';
+        if (msg.includes('cap is')) {
+            showToast(msg, 'error');
+            _loadCapacityBar();
+        } else {
+            showToast(msg, 'error');
+        }
+    }
+}
+
+/// ── Prospecting Drawer (split-pane detail) ─────────────────────────────
+
+let _selectedProspectSiteId = null;
+let _prospectMiniListIds = [];
+
+function _renderProspectMiniList(activeSiteId) {
+    const miniList = document.getElementById('prospectMiniList');
+    if (!miniList) return;
+    let filtered = [..._prospectingData];
+
+    // Apply mini-list search filter
+    const searchInput = miniList.querySelector('.prospect-mini-search');
+    const searchQ = (searchInput?.value || '').toLowerCase().trim();
+    if (searchQ) {
+        filtered = filtered.filter(s =>
+            (s.site_name || '').toLowerCase().includes(searchQ) ||
+            (s.company_name || '').toLowerCase().includes(searchQ) ||
+            (s.contact_name || '').toLowerCase().includes(searchQ)
+        );
+    }
+    _prospectMiniListIds = filtered.map(s => s.site_id);
+
+    let headerHtml = '';
+    if (!miniList.querySelector('.prospect-mini-list-header')) {
+        headerHtml = `<div class="prospect-mini-list-header">
+            <input class="prospect-mini-search" placeholder="Filter sites..." oninput="_renderProspectMiniListFromSearch()"
+                onkeydown="_prospectMiniListKeyNav(event)">
+            <div class="prospect-mini-count">${filtered.length} site${filtered.length !== 1 ? 's' : ''}</div>
+        </div>`;
+    }
+
+    let itemsHtml = '';
+    for (const s of filtered) {
+        const isActive = s.site_id === activeSiteId;
+        itemsHtml += `<div class="prospect-mini-list-item${isActive ? ' active' : ''}" data-sid="${s.site_id}" onclick="openProspectDrawer(${s.site_id})">
+            <div class="prospect-mini-list-info">
+                <div class="prospect-mini-list-name">${esc(s.site_name || '')}</div>
+                <div class="prospect-mini-list-meta">
+                    <span class="prospect-mini-list-sub">${esc(s.company_name || '')}</span>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    if (headerHtml) {
+        miniList.innerHTML = headerHtml + '<div class="prospect-mini-list-scroll">' + itemsHtml + '</div>';
+    } else {
+        const scrollEl = miniList.querySelector('.prospect-mini-list-scroll');
+        if (scrollEl) scrollEl.innerHTML = itemsHtml;
+        const countEl = miniList.querySelector('.prospect-mini-count');
+        if (countEl) countEl.textContent = `${filtered.length} site${filtered.length !== 1 ? 's' : ''}`;
+    }
+
+    const activeEl = miniList.querySelector('.prospect-mini-list-item.active');
+    if (activeEl) activeEl.scrollIntoView({ block: 'nearest' });
+}
+
+function _renderProspectMiniListFromSearch() { _renderProspectMiniList(_selectedProspectSiteId); }
+
+function _prospectMiniListKeyNav(event) {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    if (!_prospectMiniListIds.length || !_selectedProspectSiteId) return;
+    const idx = _prospectMiniListIds.indexOf(_selectedProspectSiteId);
+    let next;
+    if (event.key === 'ArrowDown') next = idx < _prospectMiniListIds.length - 1 ? idx + 1 : 0;
+    else next = idx > 0 ? idx - 1 : _prospectMiniListIds.length - 1;
+    openProspectDrawer(_prospectMiniListIds[next]);
+}
+
+async function openProspectDrawer(siteId) {
+    _selectedProspectSiteId = siteId;
+    const backdrop = document.getElementById('prospectDrawerBackdrop');
+    const drawer = document.getElementById('prospectDrawer');
+    const viewEl = document.getElementById('view-prospecting');
+    const miniList = document.getElementById('prospectMiniList');
+    const tableWrap = document.getElementById('prospectTableWrap');
+    const isDesktop = window.innerWidth > 768;
+
+    if (isDesktop && miniList) {
+        _renderProspectMiniList(siteId);
+        miniList.classList.add('open');
+        if (viewEl) viewEl.classList.add('prospect-split-active');
+        if (tableWrap) tableWrap.style.display = 'none';
+        if (backdrop) backdrop.classList.remove('open');
+    } else {
+        if (backdrop) backdrop.classList.add('open');
+    }
+    if (drawer) drawer.classList.add('open');
+
+    // Show drill-down breadcrumb
+    const site = _prospectingData.find(s => s.site_id === siteId);
+    _setTopDrillLabel(site ? (site.site_name || site.company_name || 'Site') : 'Site');
+
+    switchProspectDrawerTab('overview');
+    document.querySelectorAll('#prospectDrawerTabs .drawer-tab').forEach((t, i) => t.classList.toggle('active', i === 0));
+}
+
+function closeProspectDrawer() {
+    _selectedProspectSiteId = null;
+    const backdrop = document.getElementById('prospectDrawerBackdrop');
+    const drawer = document.getElementById('prospectDrawer');
+    const viewEl = document.getElementById('view-prospecting');
+    const miniList = document.getElementById('prospectMiniList');
+    const tableWrap = document.getElementById('prospectTableWrap');
+    if (backdrop) backdrop.classList.remove('open');
+    if (drawer) drawer.classList.remove('open');
+    if (miniList) miniList.classList.remove('open');
+    if (viewEl) viewEl.classList.remove('prospect-split-active');
+    if (tableWrap) tableWrap.style.display = '';
+    // Restore view label
+    _setTopViewLabel('Prospecting');
+}
+
+function switchProspectDrawerTab(tab, btn) {
+    document.querySelectorAll('#prospectDrawerTabs .drawer-tab').forEach(t => t.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    if (!_selectedProspectSiteId) return;
+    if (tab === 'overview') _renderProspectDrawerOverview(_selectedProspectSiteId);
+    else if (tab === 'contacts') _renderProspectDrawerContacts(_selectedProspectSiteId);
+    else if (tab === 'activity') _renderProspectDrawerActivity(_selectedProspectSiteId);
+}
+
+async function _renderProspectDrawerOverview(siteId) {
+    const body = document.getElementById('prospectDrawerBody');
+    const title = document.getElementById('prospectDrawerTitle');
+    if (!body) return;
+
+    body.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading site…</div>';
+    try {
+        const s = await apiFetch('/api/sites/' + siteId);
+        if (title) title.textContent = s.site_name || 'Site';
+
+        const contacts = s.contacts || [];
+        const contactCount = contacts.length;
+        const siteData = _prospectingData.find(x => x.site_id === siteId) || {};
+
+        let html = `<div class="drawer-section" style="border-bottom:1px solid var(--border)">
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;text-align:center;margin-bottom:8px">
+                <div><div style="font-size:22px;font-weight:700;color:var(--text)">${contactCount}</div><div style="font-size:10px;color:var(--muted)">Contacts</div></div>
+                <div><div style="font-size:22px;font-weight:700;color:var(--text)">${esc(siteData.status || 'N/A')}</div><div style="font-size:10px;color:var(--muted)">Status</div></div>
+                <div><div style="font-size:22px;font-weight:700;color:var(--text)">${s.owner_name ? esc(s.owner_name) : '<span style="color:var(--red)">None</span>'}</div><div style="font-size:10px;color:var(--muted)">Owner</div></div>
+            </div>
+        </div>`;
+
+        html += `<div class="drawer-section">
+            <div class="drawer-section-title">Site Details</div>
+            <div class="drawer-field"><span class="drawer-field-label">Company</span><span class="drawer-field-value">${esc(s.company_name || siteData.company_name || '—')}</span></div>
+            ${s.site_type ? '<div class="drawer-field"><span class="drawer-field-label">Type</span><span class="drawer-field-value">' + esc(s.site_type) + '</span></div>' : ''}
+            ${s.city ? '<div class="drawer-field"><span class="drawer-field-label">Location</span><span class="drawer-field-value">' + esc([s.city, s.state].filter(Boolean).join(', ')) + '</span></div>' : ''}
+            ${s.contact_name ? '<div class="drawer-field"><span class="drawer-field-label">Primary Contact</span><span class="drawer-field-value">' + esc(s.contact_name) + (s.contact_email ? ' <a href="mailto:' + escAttr(s.contact_email) + '">' + esc(s.contact_email) + '</a>' : '') + '</span></div>' : ''}
+            ${s.payment_terms ? '<div class="drawer-field"><span class="drawer-field-label">Payment Terms</span><span class="drawer-field-value">' + esc(s.payment_terms) + '</span></div>' : ''}
+            ${s.notes ? '<div class="drawer-field"><span class="drawer-field-label">Notes</span><span class="drawer-field-value">' + esc(s.notes) + '</span></div>' : ''}
+        </div>`;
+
+        // Claim button if no owner
+        if (!s.owner_id) {
+            html += `<div class="drawer-section" style="text-align:center">
+                <button class="btn btn-primary" onclick="claimSite(${siteId}).then(()=>openProspectDrawer(${siteId}))">Claim This Site</button>
+            </div>`;
+        }
+
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load site</p></div>';
+    }
+}
+
+async function _renderProspectDrawerContacts(siteId) {
+    const body = document.getElementById('prospectDrawerBody');
+    if (!body) return;
+
+    body.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading contacts…</div>';
+    try {
+        const contacts = await apiFetch('/api/sites/' + siteId + '/contacts');
+        if (!contacts.length) {
+            body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No contacts at this site</p></div>';
+            return;
+        }
+        let html = '<div class="drawer-section"><div class="drawer-section-title">' + contacts.length + ' Contacts</div>';
+        for (const ct of contacts) {
+            html += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+                <div style="font-weight:600;font-size:12px">${esc(ct.full_name || '—')} ${ct.is_primary ? '<span style="color:var(--blue);font-size:9px">PRIMARY</span>' : ''}</div>
+                ${ct.title ? '<div style="font-size:11px;color:var(--muted)">' + esc(ct.title) + '</div>' : ''}
+                <div style="font-size:11px;margin-top:2px">
+                    ${ct.email ? '<a href="mailto:' + escAttr(ct.email) + '">' + esc(ct.email) + '</a>' : ''}
+                    ${ct.phone ? ' &middot; <a href="tel:' + escAttr(ct.phone) + '">' + esc(ct.phone) + '</a>' : ''}
+                </div>
+            </div>`;
+        }
+        html += '</div>';
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load contacts</p></div>';
+    }
+}
+
+async function _renderProspectDrawerActivity(siteId) {
+    const body = document.getElementById('prospectDrawerBody');
+    if (!body) return;
+
+    body.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading activity…</div>';
+    try {
+        const activities = await apiFetch('/api/activities?site_id=' + siteId);
+        if (!activities.length) {
+            body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No activity recorded — claim this site and start outreach</p></div>';
+            return;
+        }
+        let html = '<div class="drawer-section"><div class="drawer-section-title">Activity Feed</div>';
+        for (const a of activities) {
+            html += `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+                <div style="display:flex;align-items:center;gap:6px">
+                    <span style="font-size:11px;font-weight:600">${esc(a.activity_type || 'note')}</span>
+                    <span style="font-size:10px;color:var(--muted)">${a.created_at ? fmtRelative(a.created_at) : ''}</span>
+                </div>
+                ${a.note ? '<div style="font-size:12px;margin-top:2px">' + esc(a.note) + '</div>' : ''}
+                ${a.user_name ? '<div style="font-size:10px;color:var(--muted)">by ' + esc(a.user_name) + '</div>' : ''}
+            </div>`;
+        }
+        html += '</div>';
+        body.innerHTML = html;
+    } catch (e) {
+        body.innerHTML = '<div class="drawer-section"><p class="crm-empty" style="color:var(--red)">Failed to load activity</p></div>';
+    }
+}
+
+function _refreshCustPipeline() {
+    if (_selectedCustId) _renderCustDrawerPipeline(_selectedCustId);
+}
+
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
+    _refreshCustPipeline,
     _attrSearch, _attrSelect, _debouncedFilterSiteContacts,
-    _debouncedLoadVendorScorecards, _debouncedUpdateBpTotals,
-    _debouncedUpdateProactivePreview,
+    _debouncedFilterDrawerContacts, _debouncedLoadVendorScorecards,
+    _debouncedUpdateBpTotals, _debouncedUpdateProactivePreview,
+    _toggleActivityDetail,
     applyMarkup, approveBuyPlan, approveEnrichItem,
     autoCreateSiteAndSelect, autoLogCrmCall,
     browseOneDrive, cancelBuyPlan, cancelCredEdit, cancelEnrichJob,
@@ -4948,7 +7397,7 @@ Object.assign(window, {
     copyQuoteTable, deleteAIContact, deleteAdminUser, deleteCredential,
     deleteOffer, deleteOfferAttachment, deleteSiteContact,
     dismissActivity, dismissProactiveGroup, editCredential,
-    eqToggleAll, eqToggleItem, loadBuyPlans, loadBuyerLeaderboard,
+    eqToggleAll, eqToggleItem, loadBuyPlans, loadBuyerLeaderboard, toggleBpMyOnly,
     loadQuote, loadSpecificQuote, loadSalespersonScorecard,
     loadTroubleTickets, markQuoteResult, onSourcesSearch,
     openAddSiteContact, openAddSiteModal, openBuyPlanDetail,
@@ -4963,7 +7412,7 @@ Object.assign(window, {
     saveParsedOffers, saveQuoteDraft, saveTeamsConfig, scToggle,
     selectOneDriveFile, selectSite, sendQuoteEmail, setOfferFilter,
     setOfferSort, setSourcesFilter, showView, sortBpList, sortCustList,
-    sortSalesScorecard, testSourceCred, testTeamsPost, toggleCustDrill,
+    sortSalesScorecard, testSourceCred, testTeamsPost,
     toggleOfferSelect, togglePlannedSources, toggleSiteDetail,
     toggleSourceStatus, tokenApprovePlan, tokenRejectPlan,
     triggerDeepScan, unifiedEnrichCompany, updateQuoteLine,
@@ -4981,7 +7430,35 @@ Object.assign(window, {
     startWebsiteScrape, submitBuyPlan, submitLost, switchEnrichTab,
     switchPerfTab, switchProactiveTab, switchSettingsTab,
     toggleCustUnassigned, updateOffer,
+    selectCustomer, renderCustomerDetail, saveCustNotes,
+    logCustNote, saveContactNotes, logContactNote, _loadContactRecentNotes, toggleContactArchive,
+    toggleStrategic, _renderMiniList, _renderMiniListFromSearch, _miniListKeyNav,
+    _setTopViewLabel, _setTopDrillLabel, _abortAllCrmFetches,
+    analyzeCustomerTags, setCustFilter, setCustOwnerFilter, openCustDrawer, closeCustDrawer, switchCustDrawerTab,
+    toggleCustCheckbox, toggleAllCustCheckboxes, clearCustSelection,
+    bulkAssignOwner, bulkExportAccounts, toggleSiteAccordion,
+    // Suggested accounts (company-level pool)
+    showSuggested, loadSuggested, debouncedLoadSuggested, setSuggestedReadiness,
+    claimSuggestedAccount, dismissSuggestedAccount, suggestedGoPage, toggleScoringGuide,
+    openSuggestedDetail, closeSuggestedDetail, enrichProspectFree,
+    // Prospecting pool + drawer (accounts-first)
+    showProspecting, loadProspecting, claimSite, setProspectingTab,
+    debouncedLoadProspecting, renderProspecting,
+    toggleAccountExpand, releaseSite, releaseStaleSites,
+    openProspectDrawer, closeProspectDrawer, switchProspectDrawerTab,
+    _renderProspectMiniListFromSearch, _prospectMiniListKeyNav,
+    // Vendor dedup
+    loadVendorDedupSuggestions, mergeVendors,
+    // Company dedup
+    loadCompanyDedupSuggestions, previewCompanyMerge, mergeCompanies,
     // Cross-file calls from app.js
     goToCompany, showBuyPlans, showCustomers, showPerformance,
     showProactiveOffers, showSettings,
+    // Proactive UI functions called from HTML onclick
+    switchProactiveTab, openProactiveSendModal, dismissProactiveGroup,
+    dismissSingleMatch, toggleProactiveGroup, refreshProactiveMatches,
+    toggleProactiveSelect, toggleAllProactiveInGroup, doNotOfferMatch, doNotOfferSelected,
+    sendProactiveOffer, convertProactiveOffer, updateProactivePreview, generateProactiveDraft,
+    loadProactiveScorecard,
+    loadAvailScores,
 });

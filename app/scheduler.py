@@ -15,8 +15,8 @@ Job overview:
   - Routing expiration: every 12h
   - PO verification: configurable (default 30 min)
   - Stock sale auto-complete: daily at configured hour
-  - Proactive matching: every 5 min
-  - Performance tracking: every 12h
+  - Proactive matching: configurable (default 4h)
+  - Performance tracking (vendor scorecards, buyer leaderboard, Avail Scores): every 12h
   - Deep email mining: every 4h
   - Deep enrichment sweep: every 12h
 """
@@ -188,6 +188,8 @@ def configure_scheduler():
                           id="webhook_subs", name="Webhook subscriptions")
         scheduler.add_job(_job_ownership_sweep, IntervalTrigger(hours=12),
                           id="ownership_sweep", name="Ownership sweep")
+        scheduler.add_job(_job_site_ownership_sweep, CronTrigger(hour=3, minute=0),
+                          id="site_ownership_sweep", name="Site ownership sweep")
 
     # Buy plan jobs
     scheduler.add_job(_job_po_verification, IntervalTrigger(minutes=settings.po_verify_interval_min),
@@ -199,7 +201,8 @@ def configure_scheduler():
 
     # Proactive matching
     if settings.proactive_matching_enabled:
-        scheduler.add_job(_job_proactive_matching, IntervalTrigger(minutes=5),
+        interval_h = max(1, settings.proactive_scan_interval_hours)
+        scheduler.add_job(_job_proactive_matching, IntervalTrigger(hours=interval_h),
                           id="proactive_matching", name="Proactive matching")
 
     # Performance tracking
@@ -214,9 +217,56 @@ def configure_scheduler():
         scheduler.add_job(_job_deep_enrichment, IntervalTrigger(hours=12),
                           id="deep_enrichment", name="Deep enrichment sweep")
 
+    # Contact scoring (nightly at 2am UTC)
+    if settings.contact_scoring_enabled:
+        scheduler.add_job(_job_contact_scoring, CronTrigger(hour=2, minute=0),
+                          id="contact_scoring", name="Contact relationship scoring")
+
+    # Contact status auto-compute (nightly at 3am UTC)
+    scheduler.add_job(_job_contact_status_compute, CronTrigger(hour=3, minute=0),
+                      id="contact_status_compute", name="Contact status auto-compute")
+
     # Cache cleanup
     scheduler.add_job(_job_cache_cleanup, IntervalTrigger(hours=24),
                       id="cache_cleanup", name="Cache cleanup")
+
+    # Monthly full enrichment refresh — runs on 1st when API credits reset
+    # Uses all available providers (Clay, Apollo, Gradient, Hunter, AI)
+    if settings.deep_enrichment_enabled:
+        scheduler.add_job(_job_monthly_enrichment_refresh, CronTrigger(day=1, hour=4, minute=0),
+                          id="monthly_enrichment_refresh", name="Monthly enrichment refresh (credit reset)")
+
+    # Prospecting module (Phase 8) — monthly cycle
+    if settings.prospecting_enabled:
+        scheduler.add_job(_job_pool_health_report, CronTrigger(day=1, hour=8, minute=0),
+                          id="pool_health_report", name="Pool health report")
+        scheduler.add_job(_job_discover_prospects, CronTrigger(day=1, hour=21, minute=0),
+                          id="discover_prospects", name="Prospect discovery")
+        scheduler.add_job(_job_enrich_pool, CronTrigger(day=2, hour=2, minute=0),
+                          id="enrich_pool", name="Pool enrichment")
+        scheduler.add_job(_job_find_contacts, CronTrigger(day=3, hour=2, minute=0),
+                          id="find_contacts", name="Prospect contact enrichment")
+        scheduler.add_job(_job_refresh_scores, CronTrigger(day=15, hour=2, minute=0),
+                          id="refresh_scores", name="Prospect score refresh")
+        scheduler.add_job(_job_expire_and_resurface, CronTrigger(day="last", hour=21, minute=0),
+                          id="expire_and_resurface", name="Expire and resurface prospects")
+
+    # Proactive offer expiry (daily at 4am UTC)
+    scheduler.add_job(_job_proactive_offer_expiry, CronTrigger(hour=4, minute=30),
+                      id="proactive_offer_expiry", name="Expire stale proactive offers")
+
+    # Offer stale flagging (daily at 5am UTC) — display-only, never hides offers
+    scheduler.add_job(_job_flag_stale_offers, CronTrigger(hour=5, minute=0),
+                      id="flag_stale_offers", name="Flag stale offers (14d+)")
+
+    # Material card integrity check + self-healing (every 6 hours)
+    scheduler.add_job(_job_integrity_check, IntervalTrigger(hours=6),
+                      id="integrity_check", name="Material card integrity check")
+
+    # Material card AI enrichment (descriptions + commodity classification)
+    if settings.material_enrichment_enabled:
+        scheduler.add_job(_job_material_enrichment, IntervalTrigger(hours=6),
+                          id="material_enrichment", name="Material card AI enrichment")
 
     job_count = len(scheduler.get_jobs())
     logger.info(f"APScheduler configured with {job_count} jobs")
@@ -278,10 +328,24 @@ async def _job_token_refresh():
 
         # Refresh all users in parallel
         async def _safe_refresh(user):
+            from .cache.intel_cache import _get_redis
+            lock_key = f"lock:token_refresh:{user.id}"
+            r = _get_redis()
+            if r:
+                acquired = r.set(lock_key, "1", nx=True, ex=60)
+                if not acquired:
+                    logger.debug("Token refresh skipped for %s — lock held", user.email)
+                    return
             try:
                 await refresh_user_token(user, db)
             except Exception as e:
                 logger.error(f"Token refresh error for {user.email}: {e}")
+            finally:
+                if r:
+                    try:
+                        r.delete(lock_key)
+                    except Exception:
+                        pass
 
         if users_to_refresh:
             await asyncio.gather(*[_safe_refresh(u) for u in users_to_refresh])
@@ -491,6 +555,22 @@ async def _job_ownership_sweep():
 
 
 @_traced_job
+async def _job_site_ownership_sweep():
+    """Run site-level ownership sweep (prospecting pool)."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .services.ownership_service import run_site_ownership_sweep
+        run_site_ownership_sweep(db)
+    except Exception as e:
+        logger.error(f"Site ownership sweep error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
 async def _job_po_verification():
     """Verify PO sent status for pending buy plans."""
     from .database import SessionLocal
@@ -546,21 +626,51 @@ async def _job_stock_autocomplete():
 
 @_traced_job
 async def _job_proactive_matching():
-    """Scan new offers for proactive matching."""
+    """Scan new offers/sightings for proactive matching via CPH + archived reqs."""
     from .database import SessionLocal
 
     db = SessionLocal()
     try:
+        from .models import ProactiveMatch
+        from .services.proactive_matching import expire_old_matches, run_proactive_scan
         from .services.proactive_service import scan_new_offers_for_matches
+
         loop = asyncio.get_running_loop()
+
+        # Legacy scan (archived requisitions)
         result = await asyncio.wait_for(
             loop.run_in_executor(None, scan_new_offers_for_matches, db),
             timeout=300,
         )
         if result.get("matches_created"):
             logger.info(
-                f"Proactive matching: {result['matches_created']} new matches from {result['scanned']} offers"
+                f"Proactive matching (legacy): {result['matches_created']} new matches from {result['scanned']} offers"
             )
+
+        # CPH-based scan (purchase history)
+        cph_result = await asyncio.wait_for(
+            loop.run_in_executor(None, run_proactive_scan, db),
+            timeout=300,
+        )
+        if cph_result.get("matches_created"):
+            logger.info(
+                f"Proactive matching (CPH): {cph_result['matches_created']} new matches "
+                f"from {cph_result['scanned_offers']} offers + {cph_result['scanned_sightings']} sightings"
+            )
+
+        # Expire stale matches
+        expired = await loop.run_in_executor(None, expire_old_matches, db)
+        if expired:
+            logger.info(f"Proactive matching: expired {expired} old matches")
+
+        # Summary log with total pending
+        new_matches = result.get("matches_created", 0) + cph_result.get("matches_created", 0)
+        total_pending = db.query(ProactiveMatch).filter(
+            ProactiveMatch.status == "new"
+        ).count()
+        logger.info(
+            f"Proactive scan complete: {new_matches} new matches, {total_pending} pending"
+        )
     except asyncio.TimeoutError:
         logger.error("Proactive matching timed out after 300s")
         db.rollback()
@@ -573,7 +683,7 @@ async def _job_proactive_matching():
 
 @_traced_job
 async def _job_performance_tracking():
-    """Compute vendor scorecards and buyer leaderboard."""
+    """Compute vendor scorecards, buyer leaderboard, and Avail Scores."""
     from .database import SessionLocal
 
     db = SessionLocal()
@@ -583,6 +693,7 @@ async def _job_performance_tracking():
             compute_all_vendor_scorecards,
             compute_buyer_leaderboard,
         )
+        from .services.avail_score_service import compute_all_avail_scores
 
         loop = asyncio.get_running_loop()
         vs_result = await asyncio.wait_for(
@@ -601,11 +712,24 @@ async def _job_performance_tracking():
         logger.info(
             f"Buyer leaderboard: {bl_result['entries']} entries for {current_month}"
         )
+        # Avail Scores
+        as_result = await asyncio.wait_for(
+            loop.run_in_executor(None, compute_all_avail_scores, db, current_month),
+            timeout=300,
+        )
+        logger.info(
+            f"Avail Scores: {as_result['buyers']} buyers, "
+            f"{as_result['sales']} sales, {as_result['saved']} saved for {current_month}"
+        )
         # Recompute previous month during grace period (first 7 days)
         if now.day <= 7:
             prev_month = (current_month - timedelta(days=1)).replace(day=1)
             await asyncio.wait_for(
                 loop.run_in_executor(None, compute_buyer_leaderboard, db, prev_month),
+                timeout=300,
+            )
+            await asyncio.wait_for(
+                loop.run_in_executor(None, compute_all_avail_scores, db, prev_month),
                 timeout=300,
             )
     except asyncio.TimeoutError:
@@ -688,7 +812,7 @@ async def _job_deep_email_mining():
 
 @_traced_job
 async def _job_deep_enrichment():
-    """Deep enrichment sweep for vendors and companies."""
+    """Deep enrichment sweep — companies first, then vendors."""
     from .config import settings
     from .database import SessionLocal
     from .models import Company, VendorCard
@@ -698,19 +822,60 @@ async def _job_deep_enrichment():
         now = datetime.now(timezone.utc)
         from .services.deep_enrichment_service import deep_enrich_company, deep_enrich_vendor
 
-        # Enrich up to 50 vendors per sweep
+        async def _safe_enrich_company(cid):
+            try:
+                db.begin_nested()
+                await deep_enrich_company(cid, db)
+                db.commit()
+            except Exception as e:
+                logger.warning(f"Enrichment sweep company {cid} error: {e}")
+                db.rollback()
+
+        async def _safe_enrich_vendor(vid):
+            try:
+                db.begin_nested()
+                await deep_enrich_vendor(vid, db)
+                db.commit()
+            except Exception as e:
+                logger.warning(f"Enrichment sweep vendor {vid} error: {e}")
+                db.rollback()
+
+        # Companies FIRST — customer accounts are highest priority (up to 50)
+        stale_companies = (
+            db.query(Company.id)
+            .filter(
+                (Company.deep_enrichment_at.is_(None)) |
+                (Company.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
+            )
+            .order_by(Company.last_activity_at.desc().nullslast())
+            .limit(50)
+            .all()
+        )
+
+        if stale_companies:
+            for i in range(0, len(stale_companies), 10):
+                batch = [cid for (cid,) in stale_companies[i:i + 10]]
+                await asyncio.wait_for(
+                    asyncio.gather(*[_safe_enrich_company(cid) for cid in batch], return_exceptions=True),
+                    timeout=300,
+                )
+
+        # Vendors second — most active first (up to 50)
         stale_vendors = (
             db.query(VendorCard.id)
             .filter(
                 (VendorCard.deep_enrichment_at.is_(None)) |
                 (VendorCard.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
             )
-            .order_by(VendorCard.sighting_count.desc().nullslast())
+            .order_by(
+                VendorCard.last_activity_at.desc().nullslast(),
+                VendorCard.sighting_count.desc().nullslast(),
+            )
             .limit(50)
             .all()
         )
 
-        # Enrich recently created entities (last 24h with no enrichment)
+        # Recently created vendors (last 24h, no enrichment yet)
         recent_vendors = (
             db.query(VendorCard.id)
             .filter(
@@ -721,61 +886,92 @@ async def _job_deep_enrichment():
             .all()
         )
 
-        # Enrich up to 20 companies
-        stale_companies = (
-            db.query(Company.id)
-            .filter(
-                (Company.deep_enrichment_at.is_(None)) |
-                (Company.deep_enrichment_at < now - timedelta(days=settings.deep_enrichment_stale_days))
-            )
-            .limit(20)
-            .all()
-        )
-
-        # Run all enrichments concurrently in batches of 10
-        async def _safe_enrich_vendor(vid):
-            try:
-                db.begin_nested()  # SAVEPOINT for per-vendor isolation
-                await deep_enrich_vendor(vid, db)
-                db.commit()  # release savepoint
-            except Exception as e:
-                logger.warning(f"Enrichment sweep vendor {vid} error: {e}")
-                db.rollback()  # rollback to savepoint only
-
-        async def _safe_enrich_company(cid):
-            try:
-                db.begin_nested()  # SAVEPOINT for per-company isolation
-                await deep_enrich_company(cid, db)
-                db.commit()  # release savepoint
-            except Exception as e:
-                logger.warning(f"Enrichment sweep company {cid} error: {e}")
-                db.rollback()  # rollback to savepoint only
-
         all_vendor_ids = [vid for (vid,) in stale_vendors] + [vid for (vid,) in recent_vendors]
-        # Process in batches of 10 to avoid overwhelming external APIs
         for i in range(0, len(all_vendor_ids), 10):
             batch = all_vendor_ids[i:i + 10]
-            tasks = [_safe_enrich_vendor(vid) for vid in batch]
             await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=300,
-            )
-
-        if stale_companies:
-            await asyncio.wait_for(
-                asyncio.gather(
-                    *[_safe_enrich_company(cid) for (cid,) in stale_companies],
-                    return_exceptions=True,
-                ),
+                asyncio.gather(*[_safe_enrich_vendor(vid) for vid in batch], return_exceptions=True),
                 timeout=300,
             )
 
         logger.info(
-            f"Deep enrichment sweep: {len(stale_vendors)} vendors, "
-            f"{len(recent_vendors)} new vendors, {len(stale_companies)} companies"
+            f"Deep enrichment sweep: {len(stale_companies)} companies, "
+            f"{len(stale_vendors)} vendors, {len(recent_vendors)} new vendors"
         )
     except Exception as e:
         logger.error(f"Deep enrichment sweep error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_monthly_enrichment_refresh():
+    """1st of month 4AM UTC — full enrichment refresh when API credits reset.
+
+    Runs a large backfill (2000 items) using all available providers:
+    Clay, Apollo, Gradient, Hunter, Anthropic AI. Entities are prioritized
+    by most recent activity so the most-used accounts get fresh data first.
+    Force-refreshes entities whose enrichment data is older than 30 days.
+    """
+    from .database import SessionLocal
+    from .models import EnrichmentJob
+    from .services.deep_enrichment_service import run_backfill_job
+
+    db = SessionLocal()
+    try:
+        # Skip if there's already a running job
+        running = db.query(EnrichmentJob).filter(
+            EnrichmentJob.status == "running"
+        ).first()
+        if running:
+            logger.info(f"Monthly enrichment skipped — job #{running.id} already running")
+            return
+
+        # Flush enrichment cache so providers are re-queried with fresh credits
+        from .cache.intel_cache import flush_enrichment_cache
+        cleared = flush_enrichment_cache()
+        logger.info(f"Monthly enrichment: cleared {cleared} expired cache entries")
+
+        job_id = await run_backfill_job(
+            db,
+            started_by_id=1,  # System/admin
+            scope={
+                "entity_types": ["vendor", "company"],
+                "max_items": 2000,
+                "include_deep_email": True,
+                "lookback_days": 365,
+            },
+        )
+        logger.info(f"Monthly enrichment refresh started: job #{job_id}")
+    except Exception as e:
+        logger.error(f"Monthly enrichment refresh error: {e}")
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_contact_scoring():
+    """Nightly: compute relationship scores for all vendor contacts."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .services.contact_intelligence import compute_all_contact_scores
+
+        loop = asyncio.get_running_loop()
+        result = await asyncio.wait_for(
+            loop.run_in_executor(None, compute_all_contact_scores, db),
+            timeout=300,
+        )
+        logger.info(
+            f"Contact scoring: {result['updated']} updated, {result['skipped']} skipped"
+        )
+    except asyncio.TimeoutError:
+        logger.error("Contact scoring timed out after 300s")
+        db.rollback()
+    except Exception as e:
+        logger.error(f"Contact scoring error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -976,7 +1172,7 @@ async def _download_and_import_stock_list(
         # Batch in chunks of 500 to keep IN clause manageable
         for i in range(0, len(valid_mpns), 500):
             chunk = valid_mpns[i:i + 500]
-            for c in db.query(MaterialCard).filter(MaterialCard.normalized_mpn.in_(chunk)).all():
+            for c in db.query(MaterialCard).filter(MaterialCard.normalized_mpn.in_(chunk), MaterialCard.deleted_at.is_(None)).all():
                 card_map[c.normalized_mpn] = c
         # Pre-load existing MVH entries for this vendor
         existing_card_ids = [c.id for c in card_map.values()]
@@ -1028,6 +1224,7 @@ async def _download_and_import_stock_list(
             mvh = MaterialVendorHistory(
                 material_card_id=card.id,
                 vendor_name=norm_vendor,
+                vendor_name_normalized=norm_vendor,
                 source_type="excess_list" if is_excess_list else "email_auto_import",
                 last_qty=row.get("qty"),
                 last_price=row.get("unit_price") or row.get("price"),
@@ -1332,3 +1529,246 @@ async def _sync_user_contacts(user, db):
     except Exception as e:
         logger.error(f"Contacts sync commit failed: {e}")
         db.rollback()
+
+
+@_traced_job
+async def _job_contact_status_compute():
+    """Auto-compute contact_status for SiteContacts based on activity history.
+
+    Rules:
+      - Never downgrade 'champion' (manual designation only)
+      - Last activity ≤7 days → 'active'
+      - Last activity 7-30 days → keep current (no auto-downgrade from active)
+      - Last activity 30-90 days → 'quiet'
+      - Last activity >90 days → 'inactive'
+      - No activity ever → keep 'new' or set 'inactive' if created >90 days ago
+    """
+    from sqlalchemy import func, case
+
+    from .database import SessionLocal
+    from .models import SiteContact
+    from .models.intelligence import ActivityLog
+
+    db = SessionLocal()
+    try:
+        now = datetime.now(timezone.utc)
+
+        # Subquery: most recent activity per site_contact_id
+        last_activity_sq = (
+            db.query(
+                ActivityLog.site_contact_id,
+                func.max(ActivityLog.created_at).label("last_at"),
+            )
+            .filter(ActivityLog.site_contact_id.isnot(None))
+            .group_by(ActivityLog.site_contact_id)
+            .subquery()
+        )
+
+        # Fetch all active site contacts with their last activity
+        contacts = (
+            db.query(SiteContact, last_activity_sq.c.last_at)
+            .outerjoin(last_activity_sq, SiteContact.id == last_activity_sq.c.site_contact_id)
+            .filter(SiteContact.is_active.is_(True))
+            .all()
+        )
+
+        updated = 0
+        for sc, last_at in contacts:
+            # Never downgrade champion
+            if sc.contact_status == "champion":
+                continue
+
+            if last_at is not None:
+                last_at = _utc(last_at)
+                days = (now - last_at).days
+                if days <= 7:
+                    new_status = "active"
+                elif days <= 30:
+                    # Don't auto-downgrade active contacts in the 7-30 day window
+                    continue
+                elif days <= 90:
+                    new_status = "quiet"
+                else:
+                    new_status = "inactive"
+            else:
+                # No activity ever
+                created = _utc(sc.created_at) if sc.created_at else now
+                days_since_created = (now - created).days
+                if days_since_created > 90:
+                    new_status = "inactive"
+                else:
+                    continue  # Keep 'new' status
+
+            if sc.contact_status != new_status:
+                sc.contact_status = new_status
+                updated += 1
+
+        db.commit()
+        logger.info(f"Contact status compute: {updated} contacts updated out of {len(contacts)}")
+    except Exception as e:
+        logger.error(f"Contact status compute error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+# ── Prospecting Module Jobs (Phase 8) ────────────────────────────────
+
+
+@_traced_job
+async def _job_pool_health_report():
+    """1st of month 8AM — log pool statistics."""
+    from .services.prospect_scheduler import job_pool_health_report
+    await job_pool_health_report()
+
+
+@_traced_job
+async def _job_discover_prospects():
+    """1st of month 9PM — run discovery for next segment slice."""
+    from .services.prospect_scheduler import job_discover_prospects
+    await job_discover_prospects()
+
+
+@_traced_job
+async def _job_enrich_pool():
+    """2nd of month 2AM — enrich signals, similar customers, AI writeups."""
+    from .services.prospect_scheduler import job_enrich_pool
+    await job_enrich_pool()
+
+
+@_traced_job
+async def _job_find_contacts():
+    """3rd of month 2AM — find procurement contacts."""
+    from .services.prospect_scheduler import job_find_contacts
+    await job_find_contacts()
+
+
+@_traced_job
+async def _job_refresh_scores():
+    """15th of month 2AM — re-score all suggested prospects."""
+    from .services.prospect_scheduler import job_refresh_scores
+    await job_refresh_scores()
+
+
+@_traced_job
+async def _job_expire_and_resurface():
+    """Last day of month 9PM — expire stale, resurface refreshed."""
+    from .services.prospect_scheduler import job_expire_and_resurface
+    await job_expire_and_resurface()
+
+
+# ── Proactive Offer Expiry ───────────────────────────────────────────
+
+
+@_traced_job
+async def _job_proactive_offer_expiry():
+    """Daily — expire proactive offers with status='sent' that are older than 14 days.
+
+    Proactive offers that never got a customer response should not linger
+    indefinitely. After 14 days, mark them as 'expired' so they don't
+    clutter the active pipeline.
+    """
+    from .database import SessionLocal
+    from .models.intelligence import ProactiveOffer
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        expired_count = (
+            db.query(ProactiveOffer)
+            .filter(
+                ProactiveOffer.status == "sent",
+                ProactiveOffer.sent_at < cutoff,
+            )
+            .update({"status": "expired"}, synchronize_session="fetch")
+        )
+        if expired_count:
+            db.commit()
+            logger.info(f"Expired {expired_count} stale proactive offer(s)")
+    except Exception as e:
+        logger.error(f"Proactive offer expiry error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+# ── Offer Stale Flagging ─────────────────────────────────────────────
+
+
+@_traced_job
+async def _job_flag_stale_offers():
+    """Daily — flag active offers older than 14 days as is_stale.
+
+    Display-only metadata. Stale offers remain fully visible everywhere.
+    "Leave no stone unturned" — we never hide or filter by is_stale.
+    """
+    from .database import SessionLocal
+    from .models.offers import Offer
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        flagged = (
+            db.query(Offer)
+            .filter(
+                Offer.status == "active",
+                Offer.is_stale.is_(False),
+                Offer.created_at < cutoff,
+            )
+            .update({"is_stale": True}, synchronize_session="fetch")
+        )
+        if flagged:
+            db.commit()
+            logger.info(f"Flagged {flagged} offer(s) as stale (14d+)")
+    except Exception as e:
+        logger.error(f"Offer stale flagging error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+# ── Material Card Integrity ──────────────────────────────────────────
+
+
+@_traced_job
+async def _job_integrity_check():
+    """Every 6h — check material card linkage integrity and self-heal."""
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .services.integrity_service import run_integrity_check
+        report = run_integrity_check(db)
+        logger.info(
+            "Integrity check complete: status=%s cards=%d healed=(%d/%d/%d)",
+            report["status"],
+            report["material_cards_total"],
+            report["healed"]["requirements"],
+            report["healed"]["sightings"],
+            report["healed"]["offers"],
+        )
+    except Exception:
+        logger.exception("Integrity check failed")
+    finally:
+        db.close()
+
+
+async def _job_material_enrichment():
+    """Every 6h — AI-enrich material cards missing descriptions/categories."""
+    from .config import settings
+    from .database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        from .services.material_enrichment_service import enrich_pending_cards
+        result = await enrich_pending_cards(
+            db, limit=settings.material_enrichment_batch_size
+        )
+        logger.info(
+            "Material enrichment: enriched=%d errors=%d pending=%d",
+            result["enriched"], result["errors"], result.get("pending", 0),
+        )
+    except Exception:
+        logger.exception("Material enrichment job failed")
+    finally:
+        db.close()

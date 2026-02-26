@@ -6,9 +6,17 @@ from sqlalchemy.orm import Session
 
 from ...models import ChangeLog, Quote, User
 
-
 # Late import — re-exported for backward compatibility
 from ...services.crm_service import next_quote_number  # noqa: F401
+
+# Statuses considered for pricing history lookups
+_PRICED_STATUSES = ["sent", "won", "lost"]
+
+
+def _quote_date_iso(q: Quote) -> str | None:
+    """Return the best available date for a quote as an ISO string."""
+    dt = q.sent_at or q.created_at
+    return dt.isoformat() if dt else None
 
 
 def record_changes(db: Session, entity_type: str, entity_id: int,
@@ -30,59 +38,94 @@ def record_changes(db: Session, entity_type: str, entity_id: int,
 
 def get_last_quoted_price(mpn: str, db: Session) -> dict | None:
     """Find most recent sell price for an MPN across all quotes."""
+    from ...models import MaterialCard
+    from ...utils.normalization import normalize_mpn_key
+
     quotes = (
         db.query(Quote)
-        .filter(
-            Quote.status.in_(["sent", "won", "lost"]),
-        )
+        .filter(Quote.status.in_(_PRICED_STATUSES))
         .order_by(Quote.sent_at.desc().nullslast(), Quote.created_at.desc())
         .limit(100)
         .all()
     )
+    norm_key = normalize_mpn_key(mpn)
+    card = db.query(MaterialCard).filter(MaterialCard.normalized_mpn == norm_key).first() if norm_key else None
+    card_id = card.id if card else None
     mpn_upper = mpn.upper().strip()
     for q in quotes:
         for item in q.line_items or []:
-            if (item.get("mpn") or "").upper().strip() == mpn_upper:
+            matched_by_card = card_id and item.get("material_card_id") == card_id
+            matched_by_mpn = (item.get("mpn") or "").upper().strip() == mpn_upper
+            if matched_by_card or matched_by_mpn:
                 return {
                     "sell_price": item.get("sell_price"),
                     "margin_pct": item.get("margin_pct"),
                     "quote_number": q.quote_number,
-                    "date": (q.sent_at or q.created_at).isoformat()
-                    if (q.sent_at or q.created_at)
-                    else None,
+                    "date": _quote_date_iso(q),
                     "result": q.result,
                 }
     return None
 
 
 def _preload_last_quoted_prices(db: Session) -> dict[str, dict]:
-    """Load recent quotes ONCE and build MPN→price lookup dict."""
+    """Load recent quotes ONCE and build MPN/card_id to price lookup dict.
+
+    Keys by both MPN string (uppercase) and material_card_id so callers
+    can look up by either.  card_id keys are prefixed with ``card:`` to
+    avoid collisions with MPN strings.
+    """
     quotes = (
         db.query(Quote)
-        .filter(Quote.status.in_(["sent", "won", "lost"]))
+        .filter(Quote.status.in_(_PRICED_STATUSES))
         .order_by(Quote.sent_at.desc().nullslast(), Quote.created_at.desc())
         .limit(100)
         .all()
     )
     result: dict[str, dict] = {}
     for q in quotes:
+        date_str = _quote_date_iso(q)
         for item in q.line_items or []:
+            entry = {
+                "sell_price": item.get("sell_price"),
+                "margin_pct": item.get("margin_pct"),
+                "quote_number": q.quote_number,
+                "date": date_str,
+                "result": q.result,
+            }
             mpn_key = (item.get("mpn") or "").upper().strip()
             if mpn_key and mpn_key not in result:
-                result[mpn_key] = {
-                    "sell_price": item.get("sell_price"),
-                    "margin_pct": item.get("margin_pct"),
-                    "quote_number": q.quote_number,
-                    "date": (q.sent_at or q.created_at).isoformat()
-                    if (q.sent_at or q.created_at)
-                    else None,
-                    "result": q.result,
-                }
+                result[mpn_key] = entry
+            card_id = item.get("material_card_id")
+            if card_id:
+                card_key = f"card:{card_id}"
+                if card_key not in result:
+                    result[card_key] = entry
     return result
 
 
-def quote_to_dict(q: Quote) -> dict:
+def quote_to_dict(q: Quote, db=None) -> dict:
     """Serialize a Quote to API response dict."""
+    enriched_items = q.line_items or []
+    if db and enriched_items:
+        try:
+            card_ids = [li.get("material_card_id") for li in enriched_items if li.get("material_card_id")]
+            if card_ids:
+                from ...models import MaterialCard
+
+                cards = {c.id: c for c in db.query(MaterialCard).filter(MaterialCard.id.in_(card_ids)).all()}
+                enriched_items = []
+                for li in q.line_items or []:
+                    item = dict(li)
+                    card = cards.get(li.get("material_card_id"))
+                    if card:
+                        item.setdefault("description", card.description)
+                        item.setdefault("category", card.category)
+                    enriched_items.append(item)
+        except Exception:
+            from loguru import logger
+
+            logger.warning("MaterialCard enrichment failed for quote %s, returning raw items", q.id)
+            enriched_items = q.line_items or []
     return {
         "id": q.id,
         "requisition_id": q.requisition_id,
@@ -116,7 +159,7 @@ def quote_to_dict(q: Quote) -> dict:
         ],
         "quote_number": q.quote_number,
         "revision": q.revision,
-        "line_items": q.line_items or [],
+        "line_items": enriched_items,
         "subtotal": float(q.subtotal) if q.subtotal else None,
         "total_cost": float(q.total_cost) if q.total_cost else None,
         "total_margin_pct": float(q.total_margin_pct) if q.total_margin_pct else None,
@@ -214,7 +257,7 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
 
     greeting = f"Dear {_esc(to_name)}," if to_name else "Dear Valued Customer,"
     notes_block = f'<div style="margin-top:16px;padding:12px 16px;background:#F3F5F7;border-left:3px solid {BLUE};border-radius:4px;font-size:13px;color:#444">{_esc(quote.notes)}</div>' if quote.notes else ""
-    signature = user.email_signature or f"{user.name or 'Trio Supply Chain Solutions'}"
+    signature = user.email_signature or user.name or "Trio Supply Chain Solutions"
     sig_html = _esc(signature).replace("\n", "<br>")
 
     th_base = f"padding:10px 14px;border-bottom:2px solid {BLUE};font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:{DARK};background:#F3F5F7"

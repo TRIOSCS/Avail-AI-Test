@@ -68,6 +68,24 @@ def vite_css_tags(app_version: str = "") -> Markup:
     return Markup(f'<link rel="stylesheet" href="/static/styles.css{bust}">')
 
 
+def vite_app_url(app_version: str = "") -> str:
+    """Return URL for the app.js entry point."""
+    url = _manifest_url("app.js")
+    if url:
+        return url
+    bust = f"?v={app_version}" if app_version else ""
+    return f"/static/app.js{bust}"
+
+
+def vite_crm_url(app_version: str = "") -> str:
+    """Return URL for the crm.js entry point."""
+    url = _manifest_url("crm.js")
+    if url:
+        return url
+    bust = f"?v={app_version}" if app_version else ""
+    return f"/static/crm.js{bust}"
+
+
 def vite_js_tags(app_version: str = "") -> Markup:
     """Return <script> tags for JS entry points."""
     if os.environ.get("VITE_DEV"):

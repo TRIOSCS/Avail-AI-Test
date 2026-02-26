@@ -175,7 +175,7 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
             sqltext("""
             SELECT manufacturer, SUM(cnt) as total FROM (
                 SELECT manufacturer, COUNT(*) as cnt FROM sightings
-                WHERE LOWER(TRIM(vendor_name)) = :norm
+                WHERE vendor_name_normalized = :norm
                   AND manufacturer IS NOT NULL AND manufacturer != ''
                 GROUP BY manufacturer
                 UNION ALL
@@ -195,7 +195,7 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
                 sqltext("""
             SELECT COUNT(*) FROM (
                 SELECT DISTINCT mpn_matched as mpn FROM sightings
-                WHERE LOWER(TRIM(vendor_name)) = :norm AND mpn_matched IS NOT NULL
+                WHERE vendor_name_normalized = :norm AND mpn_matched IS NOT NULL
                 UNION
                 SELECT DISTINCT mc.normalized_mpn as mpn FROM material_vendor_history mvh
                 JOIN material_cards mc ON mc.id = mvh.material_card_id
@@ -277,78 +277,97 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
 @router.get("/api/vendors", response_model=VendorListResponse, response_model_exclude_none=True)
 async def list_vendors(
     q: str = Query("", description="Vendor name search filter"),
+    tag: str = Query("", description="Filter by brand or commodity tag"),
     limit: int = Query(200, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """List vendor cards with search, pagination, and engagement scores."""
-    q = q.strip().lower()
-    query = db.query(VendorCard).order_by(VendorCard.display_name)
-    if q:
-        if len(q) >= 3:
-            # Full-text search for longer queries (faster + ranked)
-            try:
-                fts_query = db.query(VendorCard).filter(
-                    VendorCard.search_vector.isnot(None),
-                    sqltext("search_vector @@ plainto_tsquery('english', :q)"),
-                ).params(q=q).order_by(
-                    sqltext("ts_rank(search_vector, plainto_tsquery('english', :q)) DESC"),
-                ).params(q=q)
-                fts_count = fts_query.count()
-                if fts_count > 0:
-                    query = fts_query
-                else:
-                    # FTS found nothing, fall back to ILIKE
+
+    @cached_endpoint(prefix="vendor_list", ttl_hours=0.5, key_params=["q", "tag", "limit", "offset"])
+    def _fetch(q, tag, limit, offset, db):
+        query = db.query(VendorCard).order_by(VendorCard.display_name)
+        if tag.strip():
+            from sqlalchemy import String as SAString
+            safe_tag = tag.strip().lower()
+            query = query.filter(
+                sqlfunc.lower(sqlfunc.cast(VendorCard.brand_tags, SAString)).contains(safe_tag)
+                | sqlfunc.lower(sqlfunc.cast(VendorCard.commodity_tags, SAString)).contains(safe_tag)
+            )
+        if q:
+            if len(q) >= 3:
+                # Full-text search for longer queries (faster + ranked)
+                try:
+                    fts_query = db.query(VendorCard).filter(
+                        VendorCard.search_vector.isnot(None),
+                        sqltext("search_vector @@ plainto_tsquery('english', :q)"),
+                    ).params(q=q).order_by(
+                        sqltext("ts_rank(search_vector, plainto_tsquery('english', :q)) DESC"),
+                    ).params(q=q)
+                    fts_count = fts_query.count()
+                    if fts_count > 0:
+                        query = fts_query
+                    else:
+                        # FTS found nothing, fall back to ILIKE
+                        safe_q = q.replace("%", r"\%").replace("_", r"\_")
+                        query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
+                except (ProgrammingError, OperationalError):
+                    # FTS not available (e.g., SQLite in tests), fall back to ILIKE
                     safe_q = q.replace("%", r"\%").replace("_", r"\_")
                     query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
-            except (ProgrammingError, OperationalError):
-                # FTS not available (e.g., SQLite in tests), fall back to ILIKE
+            else:
                 safe_q = q.replace("%", r"\%").replace("_", r"\_")
                 query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
-        else:
-            safe_q = q.replace("%", r"\%").replace("_", r"\_")
-            query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
-    total = query.count()
-    cards = query.limit(limit).offset(offset).all()
-    if not cards:
-        return []
-    # Batch fetch review stats — single query instead of N+1
-    card_ids = [c.id for c in cards]
-    review_stats = {}
-    if card_ids:
-        for cid, avg, cnt in (
-            db.query(
-                VendorReview.vendor_card_id,
-                sqlfunc.avg(VendorReview.rating),
-                sqlfunc.count(VendorReview.id),
+        total = query.count()
+        cards = query.limit(limit).offset(offset).all()
+        if not cards:
+            return {"vendors": [], "total": 0, "limit": limit, "offset": offset}
+        # Batch fetch review stats — single query instead of N+1
+        card_ids = [c.id for c in cards]
+        review_stats = {}
+        if card_ids:
+            for cid, avg, cnt in (
+                db.query(
+                    VendorReview.vendor_card_id,
+                    sqlfunc.avg(VendorReview.rating),
+                    sqlfunc.count(VendorReview.id),
+                )
+                .filter(VendorReview.vendor_card_id.in_(card_ids))
+                .group_by(VendorReview.vendor_card_id)
+                .all()
+            ):
+                review_stats[cid] = (avg, cnt)
+        results = []
+        for c in cards:
+            stat = review_stats.get(c.id)
+            avg_rating = round(float(stat[0]), 1) if stat else None
+            review_count = int(stat[1]) if stat else 0
+            resp_rate = None
+            if c.total_outreach and c.total_outreach > 0:
+                resp_rate = round((c.total_responses or 0) / c.total_outreach * 100, 1)
+            results.append(
+                {
+                    "id": c.id,
+                    "display_name": c.display_name,
+                    "emails": c.emails or [],
+                    "phones": c.phones or [],
+                    "sighting_count": c.sighting_count or 0,
+                    "vendor_score": c.vendor_score,
+                    "is_new_vendor": c.is_new_vendor if c.is_new_vendor is not None else True,
+                    "engagement_score": c.vendor_score,
+                    "is_blacklisted": c.is_blacklisted or False,
+                    "avg_rating": avg_rating,
+                    "review_count": review_count,
+                    "total_pos": c.total_pos or 0,
+                    "response_rate": resp_rate,
+                    "last_sighting_at": (c.last_activity_at or c.updated_at or c.created_at).isoformat() if (c.last_activity_at or c.updated_at or c.created_at) else None,
+                }
             )
-            .filter(VendorReview.vendor_card_id.in_(card_ids))
-            .group_by(VendorReview.vendor_card_id)
-            .all()
-        ):
-            review_stats[cid] = (avg, cnt)
-    results = []
-    for c in cards:
-        stat = review_stats.get(c.id)
-        avg_rating = round(float(stat[0]), 1) if stat else None
-        review_count = int(stat[1]) if stat else 0
-        results.append(
-            {
-                "id": c.id,
-                "display_name": c.display_name,
-                "emails": c.emails or [],
-                "phones": c.phones or [],
-                "sighting_count": c.sighting_count or 0,
-                "vendor_score": c.vendor_score,
-                "is_new_vendor": c.is_new_vendor if c.is_new_vendor is not None else True,
-                "engagement_score": c.vendor_score,
-                "is_blacklisted": c.is_blacklisted or False,
-                "avg_rating": avg_rating,
-                "review_count": review_count,
-            }
-        )
-    return {"vendors": results, "total": total, "limit": limit, "offset": offset}
+        return {"vendors": results, "total": total, "limit": limit, "offset": offset}
+
+    q = q.strip().lower()
+    return _fetch(q=q, tag=tag, limit=limit, offset=offset, db=db)
 
 
 @router.get("/api/autocomplete/names")
@@ -364,7 +383,7 @@ async def autocomplete_names(
     limit = min(int(request.query_params.get("limit", "8")), 20)
     safe_q = q.replace("%", r"\%").replace("_", r"\_")
 
-    from sqlalchemy import cast, String
+    from sqlalchemy import String, cast
 
     # Primary: match on normalized_name
     vendors_by_name = (
@@ -869,15 +888,23 @@ async def list_vendor_contacts(
             "id": c.id,
             "contact_type": c.contact_type,
             "full_name": c.full_name,
+            "first_name": c.first_name,
+            "last_name": c.last_name,
             "title": c.title,
             "label": c.label,
             "email": c.email,
             "phone": c.phone,
+            "phone_mobile": c.phone_mobile,
             "phone_type": c.phone_type,
             "source": c.source,
             "is_verified": c.is_verified,
             "confidence": c.confidence,
             "interaction_count": c.interaction_count,
+            "relationship_score": c.relationship_score,
+            "activity_trend": c.activity_trend,
+            "score_computed_at": c.score_computed_at.isoformat()
+            if c.score_computed_at
+            else None,
             "last_interaction_at": c.last_interaction_at.isoformat()
             if c.last_interaction_at
             else None,
@@ -885,6 +912,115 @@ async def list_vendor_contacts(
         }
         for c in contacts
     ]
+
+
+@router.get("/api/vendors/{card_id}/contacts/{contact_id}/timeline")
+async def get_contact_timeline(
+    card_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Activity timeline for a specific vendor contact."""
+    from ..models import ActivityLog
+
+    vc = (
+        db.query(VendorContact).filter_by(id=contact_id, vendor_card_id=card_id).first()
+    )
+    if not vc:
+        raise HTTPException(404, "Contact not found")
+
+    activities = (
+        db.query(ActivityLog)
+        .filter(ActivityLog.vendor_contact_id == contact_id)
+        .order_by(ActivityLog.occurred_at.desc())
+        .limit(50)
+        .all()
+    )
+    return [
+        {
+            "id": a.id,
+            "activity_type": a.activity_type,
+            "channel": a.channel,
+            "subject": a.subject,
+            "notes": a.notes,
+            "duration_seconds": a.duration_seconds,
+            "auto_logged": a.auto_logged,
+            "occurred_at": a.occurred_at.isoformat() if a.occurred_at else (a.created_at.isoformat() if a.created_at else None),
+            "requisition_id": a.requisition_id,
+            "quote_id": a.quote_id,
+        }
+        for a in activities
+    ]
+
+
+@router.get("/api/vendors/{card_id}/contact-nudges")
+async def get_contact_nudges(
+    card_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get nudge suggestions for dormant/cooling contacts."""
+    card = db.get(VendorCard, card_id)
+    if not card:
+        raise HTTPException(404, "Vendor not found")
+
+    from ..services.contact_intelligence import generate_contact_nudges
+
+    return generate_contact_nudges(db, card_id)
+
+
+@router.get("/api/vendors/{card_id}/contacts/{contact_id}/summary")
+async def get_contact_summary(
+    card_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """AI-generated relationship summary for a contact."""
+    from ..services.contact_intelligence import generate_contact_summary
+
+    summary = generate_contact_summary(db, card_id, contact_id)
+    return {"summary": summary}
+
+
+@router.post("/api/vendors/{card_id}/contacts/{contact_id}/log-call")
+async def log_contact_call(
+    card_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Log a click-to-call event for a specific vendor contact."""
+    from ..models import ActivityLog
+
+    vc = (
+        db.query(VendorContact).filter_by(id=contact_id, vendor_card_id=card_id).first()
+    )
+    if not vc:
+        raise HTTPException(404, "Contact not found")
+
+    now = datetime.now(timezone.utc)
+    activity = ActivityLog(
+        user_id=user.id,
+        activity_type="call_initiated",
+        channel="phone",
+        vendor_card_id=card_id,
+        vendor_contact_id=contact_id,
+        contact_phone=vc.phone or vc.phone_mobile,
+        contact_name=vc.full_name,
+        auto_logged=True,
+        occurred_at=now,
+        created_at=now,
+    )
+    db.add(activity)
+
+    vc.interaction_count = (vc.interaction_count or 0) + 1
+    vc.last_interaction_at = now
+    vc.last_seen_at = now
+
+    db.commit()
+    return {"ok": True, "activity_id": activity.id}
 
 
 @router.post("/api/vendors/{card_id}/contacts")
@@ -1167,66 +1303,58 @@ def material_card_to_dict(card: MaterialCard, db: Session) -> dict:
         .all()
     )
 
-    # Find sightings and offers for this MPN via requirements
-    mpn = card.display_mpn or card.normalized_mpn
-    req_ids = [
-        r.id
-        for r in db.query(Requirement.id)
-        .filter(sqlfunc.lower(Requirement.primary_mpn) == mpn.lower())
-        .all()
-    ]
-
+    # Find sightings and offers for this material card via FK
     sightings_list = []
     offers_list = []
-    if req_ids:
-        sightings = (
-            db.query(Sighting)
-            .filter(Sighting.requirement_id.in_(req_ids))
-            .order_by(Sighting.created_at.desc())
-            .limit(50)
-            .all()
-        )
-        sightings_list = [
-            {
-                "id": s.id,
-                "vendor_name": s.vendor_name,
-                "qty_available": s.qty_available,
-                "unit_price": s.unit_price,
-                "currency": s.currency or "USD",
-                "source_type": s.source_type,
-                "is_authorized": s.is_authorized,
-                "date_code": s.date_code,
-                "condition": s.condition,
-                "lead_time": s.lead_time,
-                "created_at": s.created_at.isoformat() if s.created_at else None,
-            }
-            for s in sightings
-            if not s.is_unavailable
-        ]
 
-        offers = (
-            db.query(Offer)
-            .filter(Offer.requirement_id.in_(req_ids))
-            .order_by(Offer.created_at.desc())
-            .limit(50)
-            .all()
-        )
-        offers_list = [
-            {
-                "id": o.id,
-                "vendor_name": o.vendor_name,
-                "qty_available": o.qty_available,
-                "unit_price": float(o.unit_price) if o.unit_price else None,
-                "currency": o.currency or "USD",
-                "lead_time": o.lead_time,
-                "date_code": o.date_code,
-                "condition": o.condition,
-                "status": o.status,
-                "source": o.source,
-                "created_at": o.created_at.isoformat() if o.created_at else None,
-            }
-            for o in offers
-        ]
+    sightings = (
+        db.query(Sighting)
+        .filter(Sighting.material_card_id == card.id)
+        .order_by(Sighting.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    sightings_list = [
+        {
+            "id": s.id,
+            "vendor_name": s.vendor_name,
+            "qty_available": s.qty_available,
+            "unit_price": s.unit_price,
+            "currency": s.currency or "USD",
+            "source_type": s.source_type,
+            "is_authorized": s.is_authorized,
+            "date_code": s.date_code,
+            "condition": s.condition,
+            "lead_time": s.lead_time,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        }
+        for s in sightings
+        if not s.is_unavailable
+    ]
+
+    offers = (
+        db.query(Offer)
+        .filter(Offer.material_card_id == card.id)
+        .order_by(Offer.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    offers_list = [
+        {
+            "id": o.id,
+            "vendor_name": o.vendor_name,
+            "qty_available": o.qty_available,
+            "unit_price": float(o.unit_price) if o.unit_price else None,
+            "currency": o.currency or "USD",
+            "lead_time": o.lead_time,
+            "date_code": o.date_code,
+            "condition": o.condition,
+            "status": o.status,
+            "source": o.source,
+            "created_at": o.created_at.isoformat() if o.created_at else None,
+        }
+        for o in offers
+    ]
 
     return {
         "id": card.id,
@@ -1281,47 +1409,52 @@ async def list_materials(
     q = request.query_params.get("q", "").strip().lower()
     limit = min(int(request.query_params.get("limit", "200")), 1000)
     offset = max(int(request.query_params.get("offset", "0")), 0)
-    query = db.query(MaterialCard).order_by(MaterialCard.last_searched_at.desc())
-    if q:
-        safe_q = q.replace("%", r"\%").replace("_", r"\_")
-        query = query.filter(MaterialCard.normalized_mpn.ilike(f"{safe_q}%"))
-    total = query.count()
-    cards = query.limit(limit).offset(offset).all()
-    if not cards:
-        return {"materials": [], "total": total, "limit": limit, "offset": offset}
-    # Batch fetch vendor counts — single query instead of N+1
-    card_ids = [c.id for c in cards]
-    counts = (
-        dict(
-            db.query(
-                MaterialVendorHistory.material_card_id,
-                sqlfunc.count(MaterialVendorHistory.id),
+
+    @cached_endpoint(prefix="material_list", ttl_hours=2, key_params=["q", "limit", "offset"])
+    def _fetch(q, limit, offset, user, db):
+        query = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None)).order_by(MaterialCard.last_searched_at.desc())
+        if q:
+            safe_q = q.replace("%", r"\%").replace("_", r"\_")
+            query = query.filter(MaterialCard.normalized_mpn.ilike(f"{safe_q}%"))
+        total = query.count()
+        cards = query.limit(limit).offset(offset).all()
+        if not cards:
+            return {"materials": [], "total": total, "limit": limit, "offset": offset}
+        # Batch fetch vendor counts — single query instead of N+1
+        card_ids = [c.id for c in cards]
+        counts = (
+            dict(
+                db.query(
+                    MaterialVendorHistory.material_card_id,
+                    sqlfunc.count(MaterialVendorHistory.id),
+                )
+                .filter(MaterialVendorHistory.material_card_id.in_(card_ids))
+                .group_by(MaterialVendorHistory.material_card_id)
+                .all()
             )
-            .filter(MaterialVendorHistory.material_card_id.in_(card_ids))
-            .group_by(MaterialVendorHistory.material_card_id)
-            .all()
+            if card_ids
+            else {}
         )
-        if card_ids
-        else {}
-    )
-    return {
-        "materials": [
-            {
-                "id": c.id,
-                "display_mpn": c.display_mpn,
-                "manufacturer": c.manufacturer,
-                "search_count": c.search_count or 0,
-                "vendor_count": counts.get(c.id, 0),
-                "last_searched_at": c.last_searched_at.isoformat()
-                if c.last_searched_at
-                else None,
-            }
-            for c in cards
-        ],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    }
+        return {
+            "materials": [
+                {
+                    "id": c.id,
+                    "display_mpn": c.display_mpn,
+                    "manufacturer": c.manufacturer,
+                    "search_count": c.search_count or 0,
+                    "vendor_count": counts.get(c.id, 0),
+                    "last_searched_at": c.last_searched_at.isoformat()
+                    if c.last_searched_at
+                    else None,
+                }
+                for c in cards
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    return _fetch(q=q, limit=limit, offset=offset, user=user, db=db)
 
 
 @router.get("/api/materials/{card_id}")
@@ -1329,7 +1462,7 @@ async def get_material(
     card_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     card = db.get(MaterialCard, card_id)
-    if not card:
+    if not card or card.deleted_at is not None:
         raise HTTPException(404, "Material not found")
     return material_card_to_dict(card, db)
 
@@ -1340,7 +1473,7 @@ async def get_material_by_mpn(
 ):
     """Look up a material card by MPN."""
     norm = normalize_mpn_key(mpn)
-    card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
+    card = db.query(MaterialCard).filter_by(normalized_mpn=norm).filter(MaterialCard.deleted_at.is_(None)).first()
     if not card:
         raise HTTPException(404, "No material card found for this MPN")
     return material_card_to_dict(card, db)
@@ -1354,7 +1487,7 @@ async def update_material(
     db: Session = Depends(get_db),
 ):
     card = db.get(MaterialCard, card_id)
-    if not card:
+    if not card or card.deleted_at is not None:
         raise HTTPException(404, "Material not found")
     if data.manufacturer is not None:
         card.manufacturer = data.manufacturer
@@ -1412,12 +1545,179 @@ async def enrich_material(
 async def delete_material(
     card_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)
 ):
+    """Soft-delete a material card. Sets deleted_at timestamp; records are preserved."""
+    from datetime import datetime, timezone
+
+    from ..services.audit_service import log_audit
+
     card = db.get(MaterialCard, card_id)
     if not card:
         raise HTTPException(404, "Material not found")
-    db.delete(card)
+    if card.deleted_at is not None:
+        raise HTTPException(400, "Card is already deleted")
+    card.deleted_at = datetime.now(timezone.utc)
+    log_audit(db, material_card_id=card.id, action="soft_deleted",
+              normalized_mpn=card.normalized_mpn,
+              created_by=user.email if hasattr(user, "email") else "admin")
+    db.commit()
+    return {"ok": True, "deleted_at": card.deleted_at.isoformat()}
+
+
+@router.post("/api/materials/{card_id}/restore")
+async def restore_material(
+    card_id: int, user: User = Depends(require_admin), db: Session = Depends(get_db)
+):
+    """Restore a soft-deleted material card."""
+    from ..services.audit_service import log_audit
+
+    card = db.get(MaterialCard, card_id)
+    if not card:
+        raise HTTPException(404, "Material not found")
+    if card.deleted_at is None:
+        raise HTTPException(400, "Card is not deleted")
+    card.deleted_at = None
+    log_audit(db, material_card_id=card.id, action="restored",
+              normalized_mpn=card.normalized_mpn,
+              created_by=user.email if hasattr(user, "email") else "admin")
     db.commit()
     return {"ok": True}
+
+
+# ── Material Card Merge ───────────────────────────────────────────────
+
+
+@router.post("/api/materials/merge")
+async def merge_material_cards(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Merge two material cards: move all linked records from source to target, then delete source.
+
+    Body: {"source_card_id": int, "target_card_id": int}
+
+    All requirements, sightings, and offers pointing to source_card_id are re-pointed
+    to target_card_id.  Vendor histories are merged (combine counts, keep earliest
+    first_seen, latest last_seen).  The source card is deleted after merge.
+    """
+    body = await request.json()
+    source_id = body.get("source_card_id")
+    target_id = body.get("target_card_id")
+    if not source_id or not target_id:
+        raise HTTPException(400, "source_card_id and target_card_id are required")
+    if source_id == target_id:
+        raise HTTPException(400, "Cannot merge a card with itself")
+
+    source = db.get(MaterialCard, source_id)
+    target = db.get(MaterialCard, target_id)
+    if not source:
+        raise HTTPException(404, f"Source card {source_id} not found")
+    if not target:
+        raise HTTPException(404, f"Target card {target_id} not found")
+
+    # 1. Re-point requirements, sightings, offers
+    reassigned = {}
+    for model, name in [(Requirement, "requirements"), (Sighting, "sightings"), (Offer, "offers")]:
+        count = (
+            db.query(model)
+            .filter(model.material_card_id == source_id)
+            .update({model.material_card_id: target_id}, synchronize_session="fetch")
+        )
+        reassigned[name] = count
+
+    # 2. Merge vendor histories
+    source_vhs = (
+        db.query(MaterialVendorHistory)
+        .filter_by(material_card_id=source_id)
+        .all()
+    )
+    target_vhs = {
+        normalize_vendor_name(vh.vendor_name): vh
+        for vh in db.query(MaterialVendorHistory)
+        .filter_by(material_card_id=target_id)
+        .all()
+    }
+
+    vh_merged = 0
+    vh_moved = 0
+    for svh in source_vhs:
+        vn_key = normalize_vendor_name(svh.vendor_name)
+        tvh = target_vhs.get(vn_key)
+        if tvh:
+            # Merge into existing target record
+            tvh.times_seen = (tvh.times_seen or 1) + (svh.times_seen or 1)
+            if svh.first_seen and (not tvh.first_seen or svh.first_seen < tvh.first_seen):
+                tvh.first_seen = svh.first_seen
+            if svh.last_seen and (not tvh.last_seen or svh.last_seen > tvh.last_seen):
+                tvh.last_seen = svh.last_seen
+                # Update "last" fields from the more recent record
+                if svh.last_qty is not None:
+                    tvh.last_qty = svh.last_qty
+                if svh.last_price is not None:
+                    tvh.last_price = svh.last_price
+                if svh.last_currency:
+                    tvh.last_currency = svh.last_currency
+                if svh.last_manufacturer:
+                    tvh.last_manufacturer = svh.last_manufacturer
+                if svh.vendor_sku:
+                    tvh.vendor_sku = svh.vendor_sku
+            if svh.is_authorized:
+                tvh.is_authorized = True
+            db.delete(svh)
+            vh_merged += 1
+        else:
+            # Move to target card
+            svh.material_card_id = target_id
+            vh_moved += 1
+
+    # 3. Merge card metadata
+    target.search_count = (target.search_count or 0) + (source.search_count or 0)
+    if not target.manufacturer and source.manufacturer:
+        target.manufacturer = source.manufacturer
+    if not target.description and source.description:
+        target.description = source.description
+    # Enrichment: keep target's if present, else take source's
+    for field in ("lifecycle_status", "package_type", "category", "rohs_status",
+                  "pin_count", "datasheet_url", "specs_summary"):
+        if getattr(target, field) is None and getattr(source, field) is not None:
+            setattr(target, field, getattr(source, field))
+
+    # 4. Audit log
+    from ..services.audit_service import log_audit
+    log_audit(
+        db,
+        material_card_id=target_id,
+        action="merged",
+        old_card_id=source_id,
+        new_card_id=target_id,
+        normalized_mpn=target.normalized_mpn,
+        details={
+            "source_mpn": source.normalized_mpn,
+            "reassigned": reassigned,
+            "vh_merged": vh_merged,
+            "vh_moved": vh_moved,
+        },
+        created_by=user.email if hasattr(user, "email") else "admin",
+    )
+
+    # 5. Delete source card
+    db.delete(source)
+    db.commit()
+
+    logger.info(
+        "MC_METRIC: action=merged source_id=%d target_id=%d source_mpn=%s target_mpn=%s "
+        "reassigned=%s vh_merged=%d vh_moved=%d",
+        source_id, target_id, source.normalized_mpn, target.normalized_mpn,
+        reassigned, vh_merged, vh_moved,
+    )
+    return {
+        "ok": True,
+        "target_card_id": target_id,
+        "source_card_id": source_id,
+        "reassigned": reassigned,
+        "vendor_histories_merged": vh_merged,
+        "vendor_histories_moved": vh_moved,
+    }
 
 
 # ── Standalone Stock Import ────────────────────────────────────────────
@@ -1525,6 +1825,7 @@ async def import_stock_list_standalone(
             mvh = MaterialVendorHistory(
                 material_card_id=card.id,
                 vendor_name=norm_vendor,
+                vendor_name_normalized=norm_vendor,
                 source_type="stock_list",
                 source="stock_list",
                 last_qty=parsed.get("qty"),
@@ -1584,7 +1885,10 @@ async def get_vendor_offer_history(
     query = (
         db.query(MaterialVendorHistory, MaterialCard)
         .join(MaterialCard, MaterialVendorHistory.material_card_id == MaterialCard.id)
-        .filter(MaterialVendorHistory.vendor_name == card.normalized_name)
+        .filter(
+            MaterialVendorHistory.vendor_name == card.normalized_name,
+            MaterialCard.deleted_at.is_(None),
+        )
     )
     if q:
         safe_q = q.replace("%", r"\%").replace("_", r"\_")
@@ -1724,7 +2028,7 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
                 (array_agg(unit_price ORDER BY created_at DESC))[1] as last_price,
                 (array_agg(qty_available ORDER BY created_at DESC))[1] as last_qty
             FROM sightings
-            WHERE LOWER(TRIM(vendor_name)) = :norm
+            WHERE vendor_name_normalized = :norm
               AND mpn_matched IS NOT NULL AND mpn_matched != ''
             GROUP BY COALESCE(mpn_matched, '')
             UNION ALL
@@ -1756,7 +2060,7 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
             sqltext(f"""
         SELECT COUNT(*) FROM (
             SELECT DISTINCT COALESCE(mpn_matched, '') as mpn FROM sightings
-            WHERE LOWER(TRIM(vendor_name)) = :norm AND mpn_matched IS NOT NULL AND mpn_matched != ''
+            WHERE vendor_name_normalized = :norm AND mpn_matched IS NOT NULL AND mpn_matched != ''
             UNION
             SELECT DISTINCT mc.display_mpn as mpn FROM material_vendor_history mvh
             JOIN material_cards mc ON mc.id = mvh.material_card_id

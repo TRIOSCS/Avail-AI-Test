@@ -23,6 +23,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from ..cache.decorators import cached_endpoint, invalidate_prefix
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_user
 from ..models import (
@@ -30,11 +31,14 @@ from ..models import (
     ChangeLog,
     Contact,
     CustomerSite,
+    MaterialCard,
     Offer,
     ProactiveMatch,
     Quote,
     Requirement,
+    RequirementAttachment,
     Requisition,
+    RequisitionAttachment,
     Sighting,
     User,
     VendorResponse,
@@ -64,6 +68,7 @@ from ..utils.normalization import (
     normalize_price,
     normalize_quantity,
 )
+from ..vendor_utils import normalize_vendor_name
 from .rfq import _enrich_with_vendor_cards
 
 router = APIRouter(tags=["requisitions"])
@@ -94,6 +99,16 @@ async def list_requisitions(
     db: Session = Depends(get_db),
 ):
     """List requisitions with filtering, search, and sourcing scores."""
+
+    @cached_endpoint(prefix="req_list", ttl_hours=0.0083, key_params=["q", "status", "limit", "offset"])
+    def _fetch(q, status, limit, offset, user, db):
+        return _build_requisition_list(q, status, limit, offset, user, db)
+
+    return _fetch(q=q, status=status, limit=limit, offset=offset, user=user, db=db)
+
+
+def _build_requisition_list(q, status, limit, offset, user, db):
+    """Build the requisitions list response (extracted for caching)."""
     # Single query with subquery counts — avoids N+1 lazy loads
     req_count_sq = (
         select(sqlfunc.count(Requirement.id))
@@ -458,6 +473,7 @@ async def create_requisition(
     )
     db.add(req)
     db.commit()
+    invalidate_prefix("req_list")
     return {"id": req.id, "name": req.name}
 
 
@@ -473,6 +489,7 @@ async def toggle_archive(
     else:
         req.status = "archived"
     db.commit()
+    invalidate_prefix("req_list")
     return {"ok": True, "status": req.status}
 
 
@@ -488,6 +505,7 @@ async def bulk_archive(
     )
     count = q.update({"status": "archived"}, synchronize_session="fetch")
     db.commit()
+    invalidate_prefix("req_list")
     return {"ok": True, "archived_count": count}
 
 
@@ -501,6 +519,7 @@ async def dismiss_new_offers(
         raise HTTPException(404, "Requisition not found")
     req.offers_viewed_at = sqlfunc.now()
     db.commit()
+    invalidate_prefix("req_list")
     return {"ok": True}
 
 
@@ -521,6 +540,7 @@ async def update_requisition(
     if body.deadline is not None:
         req.deadline = body.deadline or None
     db.commit()
+    invalidate_prefix("req_list")
     return {"ok": True, "name": req.name}
 
 
@@ -543,7 +563,7 @@ async def list_requirements(
             db.query(
                 Sighting.requirement_id,
                 sqlfunc.count(
-                    sqlfunc.distinct(sqlfunc.lower(sqlfunc.trim(Sighting.vendor_name)))
+                    sqlfunc.distinct(Sighting.vendor_name_normalized)
                 ),
             )
             .filter(
@@ -639,10 +659,16 @@ async def add_requirements(
             if key and key not in seen_keys:
                 seen_keys.add(key)
                 deduped_subs.append(s)
+        # Resolve material card
+        from ..search_service import resolve_material_card
+
+        mat_card = resolve_material_card(parsed.primary_mpn, db)
+
         r = Requirement(
             requisition_id=req_id,
             primary_mpn=parsed.primary_mpn,
             normalized_mpn=normalize_mpn_key(parsed.primary_mpn),
+            material_card_id=mat_card.id if mat_card else None,
             target_qty=parsed.target_qty,
             target_price=parsed.target_price,
             substitutes=deduped_subs[:20],
@@ -671,7 +697,36 @@ async def add_requirements(
     except (AttributeError, ValueError, RuntimeError):
         logger.debug("Teams hot-requirement alert failed", exc_info=True)
 
-    return [{"id": r.id, "primary_mpn": r.primary_mpn} for r in created]
+    # Duplicate detection: check if any of these MPNs were quoted for the same customer recently
+    duplicates = []
+    if req.customer_site_id and created:
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+        card_ids = [r.material_card_id for r in created if r.material_card_id]
+        if card_ids:
+            dup_rows = (
+                db.query(Requirement.primary_mpn, Requisition.id, Requisition.name)
+                .join(Requisition, Requirement.requisition_id == Requisition.id)
+                .filter(
+                    Requirement.material_card_id.in_(card_ids),
+                    Requisition.customer_site_id == req.customer_site_id,
+                    Requisition.id != req_id,
+                    Requisition.created_at >= cutoff,
+                    Requisition.status.notin_(["archived"]),
+                )
+                .all()
+            )
+            seen = set()
+            for mpn, rid, rname in dup_rows:
+                key = f"{mpn}:{rid}"
+                if key not in seen:
+                    seen.add(key)
+                    duplicates.append({"mpn": mpn, "req_id": rid, "req_name": rname})
+
+    return {
+        "created": [{"id": r.id, "primary_mpn": r.primary_mpn} for r in created],
+        "duplicates": duplicates,
+    }
 
 
 @router.post("/api/requisitions/{req_id}/upload")
@@ -752,10 +807,16 @@ async def upload_requirements(
         target_price_raw = row.get("target_price") or row.get("price") or ""
         target_price = normalize_price(target_price_raw)
 
+        # Resolve material card
+        from ..search_service import resolve_material_card
+
+        mat_card = resolve_material_card(mpn, db)
+
         r = Requirement(
             requisition_id=req_id,
             primary_mpn=mpn,
             normalized_mpn=normalize_mpn_key(mpn),
+            material_card_id=mat_card.id if mat_card else None,
             target_qty=qty,
             target_price=target_price,
             substitutes=deduped_subs[:20],
@@ -808,6 +869,11 @@ async def update_requirement(
     if data.primary_mpn is not None:
         r.primary_mpn = normalize_mpn(data.primary_mpn) or data.primary_mpn.strip()
         r.normalized_mpn = normalize_mpn_key(data.primary_mpn)
+        # Re-resolve material card for new MPN
+        from ..search_service import resolve_material_card
+
+        mat_card = resolve_material_card(data.primary_mpn, db)
+        r.material_card_id = mat_card.id if mat_card else None
     if data.target_qty is not None:
         r.target_qty = data.target_qty
     if data.substitutes is not None:
@@ -972,30 +1038,36 @@ async def get_saved_sightings(
     for s in all_sightings:
         sightings_by_req.setdefault(s.requirement_id, []).append(s)
 
-    # ── Cross-requisition historical offers ──────────────────────────
-    req_mpn_map: dict[int, set[str]] = {}
-    all_mpns: set[str] = set()
-    primary_mpns: set[str] = set()
+    # ── Cross-requisition historical offers (via material_card_id FK) ──
+    req_card_map: dict[int, set[int]] = {}
+    all_card_ids: set[int] = set()
+    primary_card_ids: dict[int, int | None] = {}
     for r in req.requirements:
-        mpns: set[str] = set()
-        p = (r.primary_mpn or "").upper().strip()
-        if p:
-            mpns.add(p)
-            primary_mpns.add(p)
+        card_ids: set[int] = set()
+        if r.material_card_id:
+            card_ids.add(r.material_card_id)
+            primary_card_ids[r.id] = r.material_card_id
+        else:
+            primary_card_ids[r.id] = None
+        # Resolve substitute MPNs to material card IDs
         for sub in r.substitutes or []:
-            s_norm = (sub if isinstance(sub, str) else "").upper().strip()
-            if s_norm:
-                mpns.add(s_norm)
-        req_mpn_map[r.id] = mpns
-        all_mpns |= mpns
+            sub_str = (sub if isinstance(sub, str) else "").strip()
+            if sub_str:
+                sub_key = normalize_mpn_key(sub_str)
+                if sub_key:
+                    sub_card = db.query(MaterialCard.id).filter_by(normalized_mpn=sub_key).first()
+                    if sub_card:
+                        card_ids.add(sub_card[0])
+        req_card_map[r.id] = card_ids
+        all_card_ids |= card_ids
 
     hist_by_req: dict[int, list] = {}
-    if all_mpns:
+    if all_card_ids:
         hist_query = (
             db.query(Offer)
             .filter(
                 Offer.requisition_id != req_id,
-                sqlfunc.upper(Offer.mpn).in_(all_mpns),
+                Offer.material_card_id.in_(all_card_ids),
                 Offer.status.in_(["active", "won"]),
             )
             .options(joinedload(Offer.entered_by))
@@ -1004,12 +1076,11 @@ async def get_saved_sightings(
             .all()
         )
         for ho in hist_query:
-            ho_mpn = (ho.mpn or "").upper().strip()
             for r in req.requirements:
-                if ho_mpn in req_mpn_map.get(r.id, set()):
+                if ho.material_card_id in req_card_map.get(r.id, set()):
                     if r.id not in hist_by_req:
                         hist_by_req[r.id] = []
-                    is_sub = ho_mpn != (r.primary_mpn or "").upper().strip()
+                    is_sub = ho.material_card_id != primary_card_ids.get(r.id)
                     hist_by_req[r.id].append(
                         {
                             "id": ho.id,
@@ -1042,9 +1113,8 @@ async def get_saved_sightings(
 
         # Append material history (vendors seen before but not in fresh results)
         fresh_vendors = {s.vendor_name.lower() for s in rows}
-        pns = [r.primary_mpn] + (r.substitutes or [])
-        pns = [p for p in pns if p]
-        history = _get_material_history(pns, fresh_vendors, db)
+        card_ids = list(req_card_map.get(r.id, set()))
+        history = _get_material_history(card_ids, fresh_vendors, db)
         for h in history:
             sighting_dicts.append(_history_to_result(h, now))
 
@@ -1148,9 +1218,16 @@ async def import_stock_list(
 
         display_mpn = normalize_mpn(mpn) or mpn
 
+        # Resolve material card
+        from ..search_service import resolve_material_card
+
+        mat_card = resolve_material_card(mpn, db)
+
         s = Sighting(
             requirement_id=r.id,
+            material_card_id=mat_card.id if mat_card else None,
             vendor_name=vendor_name.strip(),
+            vendor_name_normalized=normalize_vendor_name(vendor_name),
             mpn_matched=display_mpn,
             manufacturer=parsed.get("manufacturer"),
             qty_available=parsed.get("qty"),
@@ -1171,6 +1248,257 @@ async def import_stock_list(
 
     db.commit()
     return {"imported_rows": imported, "matched_sightings": matched}
+
+
+# ══════════════════════════════════════════════════════════════════════
+# FILE ATTACHMENTS — Requisitions & Requirements (OneDrive)
+# ══════════════════════════════════════════════════════════════════════
+
+
+@router.get("/api/requisitions/{req_id}/attachments")
+async def list_requisition_attachments(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List all file attachments on a requisition."""
+    req = db.get(Requisition, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    return [
+        {
+            "id": a.id,
+            "file_name": a.file_name,
+            "onedrive_url": a.onedrive_url,
+            "content_type": a.content_type,
+            "size_bytes": a.size_bytes,
+            "uploaded_by": a.uploaded_by.name if a.uploaded_by else None,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in req.attachments
+    ]
+
+
+@router.post("/api/requisitions/{req_id}/attachments")
+async def upload_requisition_attachment(
+    req_id: int,
+    file: UploadFile = File(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Upload a file to OneDrive and attach it to a requisition."""
+    req = db.get(Requisition, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 10 MB)")
+    if not user.access_token:
+        raise HTTPException(401, "Microsoft account not connected — please re-login")
+    from ..http_client import http
+
+    safe_name = file.filename.replace("/", "_").replace("\\", "_")
+    drive_path = f"/me/drive/root:/AvailAI/Requisitions/{req_id}/{safe_name}:/content"
+    resp = await http.put(
+        f"https://graph.microsoft.com/v1.0{drive_path}",
+        content=content,
+        headers={
+            "Authorization": f"Bearer {user.access_token}",
+            "Content-Type": file.content_type or "application/octet-stream",
+        },
+        timeout=30,
+    )
+    if resp.status_code not in (200, 201):
+        logger.error(f"OneDrive upload failed: {resp.status_code} {resp.text[:300]}")
+        raise HTTPException(502, "Failed to upload to OneDrive")
+    result = resp.json()
+    att = RequisitionAttachment(
+        requisition_id=req_id,
+        file_name=safe_name,
+        onedrive_item_id=result.get("id"),
+        onedrive_url=result.get("webUrl"),
+        content_type=file.content_type,
+        size_bytes=len(content),
+        uploaded_by_id=user.id,
+    )
+    db.add(att)
+    db.commit()
+    return {
+        "id": att.id,
+        "file_name": att.file_name,
+        "onedrive_url": att.onedrive_url,
+        "content_type": att.content_type,
+    }
+
+
+@router.post("/api/requisitions/{req_id}/attachments/onedrive")
+async def attach_requisition_from_onedrive(
+    req_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Attach an existing OneDrive file to a requisition by item ID."""
+    req = db.get(Requisition, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    body = await request.json()
+    item_id = body.get("item_id")
+    if not item_id:
+        raise HTTPException(400, "item_id is required")
+    if not user.access_token:
+        raise HTTPException(401, "Microsoft account not connected")
+    from ..utils.graph_client import GraphClient
+
+    gc = GraphClient(user.access_token)
+    item = await gc.get_json(f"/me/drive/items/{item_id}")
+    if "error" in item:
+        raise HTTPException(404, "OneDrive item not found")
+    att = RequisitionAttachment(
+        requisition_id=req_id,
+        file_name=item.get("name", "file"),
+        onedrive_item_id=item_id,
+        onedrive_url=item.get("webUrl"),
+        content_type=item.get("file", {}).get("mimeType"),
+        size_bytes=item.get("size"),
+        uploaded_by_id=user.id,
+    )
+    db.add(att)
+    db.commit()
+    return {
+        "id": att.id,
+        "file_name": att.file_name,
+        "onedrive_url": att.onedrive_url,
+        "content_type": att.content_type,
+    }
+
+
+@router.delete("/api/requisition-attachments/{att_id}")
+async def delete_requisition_attachment(
+    att_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a requisition attachment (and remove from OneDrive)."""
+    att = db.get(RequisitionAttachment, att_id)
+    if not att:
+        raise HTTPException(404, "Attachment not found")
+    if att.onedrive_item_id and user.access_token:
+        try:
+            from ..http_client import http
+
+            await http.delete(
+                f"https://graph.microsoft.com/v1.0/me/drive/items/{att.onedrive_item_id}",
+                headers={"Authorization": f"Bearer {user.access_token}"},
+                timeout=15,
+            )
+        except (ConnectionError, TimeoutError, OSError) as e:
+            logger.warning(f"Failed to delete OneDrive item {att.onedrive_item_id}: {e}")
+    db.delete(att)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/api/requirements/{req_id}/attachments")
+async def list_requirement_attachments(
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List all file attachments on a requirement."""
+    req = db.get(Requirement, req_id)
+    if not req:
+        raise HTTPException(404, "Requirement not found")
+    return [
+        {
+            "id": a.id,
+            "file_name": a.file_name,
+            "onedrive_url": a.onedrive_url,
+            "content_type": a.content_type,
+            "size_bytes": a.size_bytes,
+            "uploaded_by": a.uploaded_by.name if a.uploaded_by else None,
+            "created_at": a.created_at.isoformat() if a.created_at else None,
+        }
+        for a in req.attachments
+    ]
+
+
+@router.post("/api/requirements/{req_id}/attachments")
+async def upload_requirement_attachment(
+    req_id: int,
+    file: UploadFile = File(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Upload a file to OneDrive and attach it to a requirement."""
+    req = db.get(Requirement, req_id)
+    if not req:
+        raise HTTPException(404, "Requirement not found")
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(400, "File too large (max 10 MB)")
+    if not user.access_token:
+        raise HTTPException(401, "Microsoft account not connected — please re-login")
+    from ..http_client import http
+
+    safe_name = file.filename.replace("/", "_").replace("\\", "_")
+    drive_path = f"/me/drive/root:/AvailAI/Requirements/{req_id}/{safe_name}:/content"
+    resp = await http.put(
+        f"https://graph.microsoft.com/v1.0{drive_path}",
+        content=content,
+        headers={
+            "Authorization": f"Bearer {user.access_token}",
+            "Content-Type": file.content_type or "application/octet-stream",
+        },
+        timeout=30,
+    )
+    if resp.status_code not in (200, 201):
+        logger.error(f"OneDrive upload failed: {resp.status_code} {resp.text[:300]}")
+        raise HTTPException(502, "Failed to upload to OneDrive")
+    result = resp.json()
+    att = RequirementAttachment(
+        requirement_id=req_id,
+        file_name=safe_name,
+        onedrive_item_id=result.get("id"),
+        onedrive_url=result.get("webUrl"),
+        content_type=file.content_type,
+        size_bytes=len(content),
+        uploaded_by_id=user.id,
+    )
+    db.add(att)
+    db.commit()
+    return {
+        "id": att.id,
+        "file_name": att.file_name,
+        "onedrive_url": att.onedrive_url,
+        "content_type": att.content_type,
+    }
+
+
+@router.delete("/api/requirement-attachments/{att_id}")
+async def delete_requirement_attachment(
+    att_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a requirement attachment (and remove from OneDrive)."""
+    att = db.get(RequirementAttachment, att_id)
+    if not att:
+        raise HTTPException(404, "Attachment not found")
+    if att.onedrive_item_id and user.access_token:
+        try:
+            from ..http_client import http
+
+            await http.delete(
+                f"https://graph.microsoft.com/v1.0/me/drive/items/{att.onedrive_item_id}",
+                headers={"Authorization": f"Bearer {user.access_token}"},
+                timeout=15,
+            )
+        except (ConnectionError, TimeoutError, OSError) as e:
+            logger.warning(f"Failed to delete OneDrive item {att.onedrive_item_id}: {e}")
+    db.delete(att)
+    db.commit()
+    return {"ok": True}
 
 
 # ── Contacts ─────────────────────────────────────────────────────────────
