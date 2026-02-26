@@ -710,8 +710,8 @@ async def _job_performance_tracking():
             timeout=300,
         )
         logger.info(
-            f"Avail Scores: {as_result['buyers_scored']} buyers, "
-            f"{as_result['sales_scored']} sales for {current_month}"
+            f"Avail Scores: {as_result['buyers']} buyers, "
+            f"{as_result['sales']} sales, {as_result['saved']} saved for {current_month}"
         )
         # Recompute previous month during grace period (first 7 days)
         if now.day <= 7:
