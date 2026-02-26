@@ -1063,10 +1063,16 @@
                 <h2 style="margin:0;font-size:18px">Command Center</h2>
                 <select id="dashUserSelect" class="vflt" onchange="setDashUserFilter(this.value)" style="font-size:11px;min-width:120px"></select>
             </div>
-            <div class="chip-row" style="margin:0" id="dashPeriodPills">
-                <span class="chip on" onclick="setDashPeriod('7d',this)">7 Days</span>
-                <span class="chip" onclick="setDashPeriod('30d',this)">30 Days</span>
-                <span class="chip" onclick="setDashPeriod('90d',this)">90 Days</span>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                <div class="chip-row" style="margin:0" id="dashScopePills">
+                    <span class="chip on" onclick="setDashScope('my',this)">My Data</span>
+                    <span class="chip" onclick="setDashScope('team',this)">Team</span>
+                </div>
+                <div class="chip-row" style="margin:0" id="dashPeriodPills">
+                    <span class="chip on" onclick="setDashPeriod('7d',this)">7 Days</span>
+                    <span class="chip" onclick="setDashPeriod('30d',this)">30 Days</span>
+                    <span class="chip" onclick="setDashPeriod('90d',this)">90 Days</span>
+                </div>
             </div>
         </div>
         <div id="dashboardContent" aria-live="polite"><p class="empty">Loading…</p></div>
