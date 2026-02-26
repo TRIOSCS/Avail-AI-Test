@@ -33,26 +33,20 @@ def setup_logging() -> None:
 
     log_level = os.getenv("LOG_LEVEL", "INFO").upper()
     is_production = "availai.net" in os.getenv("APP_URL", "")
+    # EXTRA_LOGS=1: JSON stdout + scheduler job logs; 0 or unset: human-readable, quiet scheduler
+    extra_logs = os.getenv("EXTRA_LOGS", "0").strip() == "1"
 
-    if is_production:
-        # Production: JSON lines to stdout (Docker captures these)
+    use_json_stdout = is_production and extra_logs
+    if use_json_stdout:
+        # Production with extra logs: JSON lines to stdout
         logger.add(
             sys.stdout,
             level=log_level,
             format="{message}",
-            serialize=True,  # JSON output
-        )
-        # Rotate file for persistent logs on the server
-        logger.add(
-            "/var/log/avail/avail.log",
-            level=log_level,
-            rotation="50 MB",
-            retention="7 days",
-            compression="gz",
             serialize=True,
         )
     else:
-        # Development: human-readable with colors
+        # Human-readable (dev or EXTRA_LOGS=0)
         logger.add(
             sys.stdout,
             level=log_level,
@@ -64,16 +58,34 @@ def setup_logging() -> None:
             ),
             colorize=True,
         )
+    if is_production:
+        # Rotate file for persistent logs on the server (always JSON for parsing)
+        logger.add(
+            "/var/log/avail/avail.log",
+            level=log_level,
+            rotation="50 MB",
+            retention="7 days",
+            compression="gz",
+            serialize=True,
+        )
 
     # Intercept stdlib logging → route through Loguru
     # This makes all existing logging.getLogger() calls use Loguru
     logging.basicConfig(handlers=[_InterceptHandler()], level=0, force=True)
 
-    # Quiet noisy third-party loggers
-    for noisy in ("httpx", "httpcore", "uvicorn.access", "sqlalchemy.engine"):
+    # Quiet noisy third-party loggers (INFO → WARNING so startup isn't spammed)
+    noisy_loggers = ["httpx", "httpcore", "uvicorn.access", "sqlalchemy.engine"]
+    if not extra_logs:
+        noisy_loggers.append("apscheduler.schedulers.base")
+    for noisy in noisy_loggers:
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
-    logger.info("Logging configured", level=log_level, production=is_production)
+    logger.info(
+        "Logging configured",
+        level=log_level,
+        production=is_production,
+        extra_logs=extra_logs,
+    )
 
 
 class _InterceptHandler(logging.Handler):

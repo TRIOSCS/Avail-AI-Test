@@ -7056,10 +7056,12 @@ let _srcSort = 'default';
 
 function renderSources() {
     const el = document.getElementById('sourceResults');
+    if (!el) return; // Not on Sourcing view (e.g. RFQ drill-down Sightings tab) — avoid setting innerHTML on null
     const keys = Object.keys(searchResults);
     if (!keys.length) {
         el.innerHTML = stateEmpty('No results found', 'Try a different part number or check spelling');
-        document.getElementById('srcFilterCount').textContent = '';
+        const countEl = document.getElementById('srcFilterCount');
+        if (countEl) countEl.textContent = '';
         document.getElementById('collapsedMatchHint')?.classList.add('hidden');
         return;
     }

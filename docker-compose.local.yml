@@ -6,6 +6,7 @@ services:
       - "8000:8000"
     environment:
       - TESTING=1
+      - EXTRA_LOGS=0
 
   caddy:
     ports:
