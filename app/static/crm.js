@@ -6995,7 +6995,7 @@ Object.assign(window, {
     toggleCustCheckbox, toggleAllCustCheckboxes, clearCustSelection,
     bulkAssignOwner, bulkExportAccounts, toggleSiteAccordion,
     // Suggested accounts (company-level pool)
-    showSuggested, loadSuggested, debouncedLoadSuggested, setSuggestedPriority,
+    showSuggested, loadSuggested, debouncedLoadSuggested,
     claimSuggestedAccount, dismissSuggestedAccount, suggestedGoPage,
     // Prospecting pool + drawer
     showProspecting, loadProspecting, claimSite, setProspectingTab,

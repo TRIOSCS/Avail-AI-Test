@@ -1938,6 +1938,7 @@ let _reqListData = [];     // cached list for client-side filtering
 let _reqStatusFilter = 'all';
 let _reqListSort = 'newest';
 let _myReqsOnly = false;   // "My Reqs" toggle for non-sales roles
+let _filterUserId = null;  // User dropdown filter — null = all, id = specific user
 let _serverSearchActive = false; // True when server-side search returned filtered results
 let _currentMainView = 'rfq';  // 'rfq' | 'sourcing' | 'archive'
 let _archiveGroupsOpen = new Set();  // company_id or customer_display keys that are expanded
@@ -5293,7 +5294,9 @@ function renderReqList() {
             data = data.filter(r => r.status === _reqStatusFilter);
         }
     }
-    if (_myReqsOnly && window.userId) {
+    if (_filterUserId) {
+        data = data.filter(r => r.created_by === _filterUserId || r.sales_user_id === _filterUserId);
+    } else if (_myReqsOnly && window.userId) {
         data = data.filter(r => r.created_by === window.userId);
     }
     // Apply filter panel filters
@@ -5349,7 +5352,7 @@ function renderReqList() {
     const sa = (col) => `<span class="sort-arrow">${_sortArrow(col)}</span>`;
     const v = _currentMainView;
     const _healthWarnHtml = `<button class="subbar-icon-btn subbar-health-warn" id="subbarHealthWarn" style="display:${window._apiHealthErrors.length?'inline-flex':'none'}" onmouseenter="showHealthTooltip(event)" onmouseleave="hideHealthTooltip()" title="API errors detected"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></button>`;
-    const _thIcons = `<th style="width:90px;text-align:right">${_healthWarnHtml}<button class="subbar-icon-btn${_myReqsOnly?' on':''}" id="myAccountsBtn" onclick="toggleMyAccounts(this)" title="My Accounts"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></button><button class="subbar-icon-btn subbar-trouble" onclick="openTroubleChat()" title="Trouble Ticket"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></button></th>`;
+    const _thIcons = `<th style="width:140px;text-align:right">${_healthWarnHtml}<select id="userFilterSelect" class="vflt" onchange="setUserFilter(this.value)" title="Filter by user" style="font-size:10px;max-width:100px"></select><button class="subbar-icon-btn subbar-trouble" onclick="openTroubleChat()" title="Trouble Ticket"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="var(--red)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></button></th>`;
     let thead;
     if (v === 'sourcing') {
         thead = `<thead><tr>
@@ -5847,16 +5850,35 @@ let _activeFilters = {};
 let _toolbarQuickFilter = '';
 
 function toggleMyAccounts(btn) {
-    _myReqsOnly = !_myReqsOnly;
-    btn.classList.toggle('on', _myReqsOnly);
-    // Sync both desktop and mobile My Accounts buttons
-    var desktop = document.getElementById('myAccountsBtn');
-    var mobile = document.getElementById('mobileMyAccountsBtn');
-    if (desktop) desktop.classList.toggle('on', _myReqsOnly);
-    if (mobile) mobile.classList.toggle('on', _myReqsOnly);
-    if (_myReqsOnly) _activeFilters['my_accounts'] = true;
+    // Legacy — redirect to user filter with current user
+    if (_filterUserId) { setUserFilter(''); } else { setUserFilter(String(window.userId)); }
+}
+
+function setUserFilter(val) {
+    _filterUserId = val ? parseInt(val) : null;
+    _myReqsOnly = !!_filterUserId;
+    if (_filterUserId) _activeFilters['my_accounts'] = true;
     else delete _activeFilters['my_accounts'];
+    // Sync all user filter dropdowns
+    document.querySelectorAll('#userFilterSelect, #mobileUserFilterSelect').forEach(sel => {
+        if (sel) sel.value = val || '';
+    });
     renderReqList();
+}
+
+async function _populateUserFilter() {
+    const sels = document.querySelectorAll('#userFilterSelect, #mobileUserFilterSelect');
+    if (!sels.length) return;
+    let users = window._userFilterList;
+    if (!users) {
+        try { users = await apiFetch('/api/users/list'); } catch(e) { users = []; }
+        window._userFilterList = users;
+    }
+    const opts = '<option value="">All Users</option>' +
+        users.map(u => '<option value="' + u.id + '"' +
+            (_filterUserId === u.id ? ' selected' : '') +
+            '>' + esc(u.name) + '</option>').join('');
+    sels.forEach(sel => { sel.innerHTML = opts; });
 }
 
 // ── API Health Tooltip ──────────────────────────────────────────────────
@@ -6009,7 +6031,6 @@ function setMainView(view, btn) {
             })
             .catch(e => { if (e.name !== 'AbortError') showToast('Failed to load archived requisitions', 'error'); });
     }
-    buildFilterGroups();
 }
 
 // ── Toolbar Controls ────────────────────────────────────────────────────
