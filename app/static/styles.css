@@ -72,7 +72,7 @@ body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg)
 h1,h2,h3,h4,h5,h6,b,strong,.vp-label,.si-contacts-title,.sight-group-title{color:var(--blue);letter-spacing:-.01em}
 
 /* Login */
-.login{display:flex;align-items:center;justify-content:center;height:100vh;background:linear-gradient(135deg,#f8fafc 0%,#e0ecf8 50%,#f0f5fb 100%)}
+.login{display:flex;align-items:center;justify-content:center;height:100vh;background:#ffffff}
 .login-card{background:var(--white);border:1px solid rgba(0,0,0,.06);border-radius:var(--radius-xl);padding:56px 48px 44px;text-align:center;max-width:460px;width:90%;box-shadow:var(--shadow-xl),0 0 0 1px rgba(0,0,0,.02)}
 .login-logo{width:280px;margin-bottom:12px}
 .login-divider{width:48px;height:2px;background:linear-gradient(90deg,transparent,var(--border2),transparent);margin:0 auto 20px;border-radius:1px}
