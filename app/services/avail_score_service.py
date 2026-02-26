@@ -81,27 +81,27 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
 
     # ── Fetch user's reqs for the month ──
     # Include reqs the user created, sent RFQs on, or logged offers for
-    created_ids = set(
-        r.id for (r,) in db.query(Requisition.id).filter(
+    created_ids = {
+        rid for (rid,) in db.query(Requisition.id).filter(
             Requisition.created_by == user_id,
             Requisition.created_at >= start_dt,
             Requisition.created_at < end_dt,
         ).all()
-    )
-    rfq_req_ids = set(
-        r for (r,) in db.query(Contact.requisition_id.distinct()).filter(
+    }
+    rfq_req_ids = {
+        rid for (rid,) in db.query(Contact.requisition_id.distinct()).filter(
             Contact.user_id == user_id,
             Contact.created_at >= start_dt,
             Contact.created_at < end_dt,
         ).all()
-    )
-    offer_req_ids = set(
-        r for (r,) in db.query(Offer.requisition_id.distinct()).filter(
+    }
+    offer_req_ids = {
+        rid for (rid,) in db.query(Offer.requisition_id.distinct()).filter(
             Offer.entered_by_id == user_id,
             Offer.created_at >= start_dt,
             Offer.created_at < end_dt,
-        ).all() if r is not None
-    )
+        ).all() if rid is not None
+    }
     all_req_ids = created_ids | rfq_req_ids | offer_req_ids
     user_reqs = db.query(Requisition).filter(Requisition.id.in_(all_req_ids)).all() if all_req_ids else []
     req_ids = [r.id for r in user_reqs]
