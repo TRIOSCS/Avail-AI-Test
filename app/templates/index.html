@@ -93,7 +93,7 @@
         <button type="button" class="fp fp-sm" data-view="archive" onclick="setMainView('archive',this);_syncMobilePills(this)">Archive</button>
     </div>
     <div class="mobile-toolbar-stats" id="mobileToolbarStats"></div>
-    <select id="mobileUserFilterSelect" class="vflt" onchange="setUserFilter(this.value)" title="Filter by user" style="font-size:10px;max-width:90px"></select>
+    <select id="mobileUserFilterSelect" class="vflt" onchange="setUserFilter(this.value)" title="Filter by user"></select>
     <button type="button" class="mobile-act-btn mobile-act-primary" onclick="openNewReqModal()" title="New RFQ">+</button>
     <button type="button" class="mobile-act-btn mobile-act-trouble" onclick="openTroubleChat()" title="Report Issue">!</button>
 </div>
@@ -715,7 +715,7 @@
             <div class="field"><label>HQ Country</label><input id="ecHqCountry"></div>
             <div class="field"><label>Credit Terms</label><input id="ecCreditTerms" placeholder="Net 30"></div>
             <div class="field"><label>Tax ID</label><input id="ecTaxId" placeholder="EIN / VAT"></div>
-            <div class="field"><label>Currency</label><input id="ecCurrency" placeholder="USD" style="width:80px"></div>
+            <div class="field"><label>Currency</label><input id="ecCurrency" placeholder="USD"></div>
             <div class="field"><label>Preferred Carrier</label><input id="ecCarrier" placeholder="FedEx, UPS..."></div>
             <div class="field" style="grid-column:1/-1"><label>Notes</label><textarea id="ecNotes" rows="2" style="width:100%"></textarea></div>
             <div class="field"><label class="u-flex u-items-center u-gap-sm"><input type="checkbox" id="ecStrategic"> Strategic Account</label></div>

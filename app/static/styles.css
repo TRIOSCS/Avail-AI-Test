@@ -441,6 +441,43 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 .mp-tbl-date{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--text2);white-space:nowrap;font-weight:500}
 
 @media(max-width:768px) and (hover:none),(max-width:768px) and (pointer:coarse){
+    /* WP1: Mobile CSS variables */
+    :root{
+        --touch-min:44px;
+        --font-min:12px;
+        --font-input:16px;
+        --mobile-pad:12px;
+        --sai-top:env(safe-area-inset-top,0px);
+        --sai-bottom:env(safe-area-inset-bottom,0px);
+        --sai-left:env(safe-area-inset-left,0px);
+        --sai-right:env(safe-area-inset-right,0px);
+    }
+
+    /* WP4: iOS zoom prevention — all inputs 16px on mobile */
+    input,select,textarea{font-size:16px !important}
+
+    /* WP2: mobile-act-btn — 44px touch targets */
+    .mobile-act-btn{width:44px;height:44px}
+
+    /* WP7: Override CSS replacements for removed inline styles on mobile */
+    #mobileUserFilterSelect{max-width:120px;min-height:44px}
+    #ecCurrency{width:100%}
+
+    /* WP3: Font size floor — 12px minimum on mobile */
+    .text-xs,.text-xxs,.text-xs-muted,.text-xxs-muted,.text-xs-secondary{font-size:12px}
+    .src-badge,.src-type-badge{font-size:11px}
+    .act-row-meta,.act-row-subject{font-size:11px}
+    .act-stat-label{font-size:11px}
+    .act-card-date{font-size:11px}
+    .mobile-toolbar-stats .tb-stat,.mobile-toolbar-stats .tb-ct{font-size:12px}
+    .badge,.status-badge,.nav-badge,.sc-los,.req-status{font-size:11px}
+    .src-env{font-size:11px}
+    .src-card-stats,.src-last-ok,.src-last-err,.src-setup-notes{font-size:11px}
+    .cc-stat-label,.cc-stat-sub{font-size:11px}
+    .score-bar-label,.contacts-summary,.suggested-source,.signal-tag{font-size:11px}
+    .sc-badges .badge{font-size:9px;padding:2px 5px}
+    .parse-parts-table{font-size:12px}
+
     /* Sidebar → hidden drawer on mobile */
     .sidebar{width:var(--sbw);top:0;transform:translateX(-100%);transition:transform .22s cubic-bezier(.4,0,.2,1);box-shadow:none}
     .sidebar.mobile-open{transform:translateX(0);box-shadow:4px 0 20px rgba(0,0,0,.3)}
@@ -475,16 +512,23 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .detail-header{flex-direction:column;gap:8px;align-items:flex-start}
     .detail-header h2{font-size:14px}
 
+    /* WP2: Touch targets — subbar icons 44px */
+    .subbar-icon-btn{width:44px;height:44px}
+
+    /* WP2: Checkboxes — 22px with padding for 44px tap area */
+    input[type=checkbox]{width:22px;height:22px;min-width:22px;min-height:22px;padding:11px;box-sizing:content-box}
+    .sc input[type=checkbox]{width:22px;height:22px}
+
     /* Tabs — horizontal scroll on mobile */
     .tabs{overflow-x:auto;width:100%;flex-wrap:nowrap;scrollbar-width:none}
     .tabs::-webkit-scrollbar{display:none}
-    .tab{white-space:nowrap;flex-shrink:0;padding:7px 14px;font-size:11px;min-height:34px}
+    .tab{white-space:nowrap;flex-shrink:0;padding:7px 14px;font-size:12px;min-height:44px}
 
     /* Filter bars — stack */
     .filter-bar{flex-direction:column;gap:6px;align-items:stretch}
     .filter-search{max-width:100%;min-width:0;font-size:16px}
     .filter-pills{flex-wrap:wrap;gap:3px}
-    .filter-pill{padding:5px 10px;font-size:10px;min-height:30px;display:inline-flex;align-items:center}
+    .filter-pill{padding:5px 10px;font-size:12px;min-height:44px;display:inline-flex;align-items:center}
     .filter-count{text-align:right}
 
     /* Sighting cards — stack layout */
@@ -506,7 +550,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .act-stat-num{font-size:18px}
     .act-card-header{flex-wrap:wrap;gap:4px}
     .act-card-vendor{font-size:14px}
-    .act-card-date{margin-left:0;font-size:10px;width:100%}
+    .act-card-date{margin-left:0;font-size:11px;width:100%}
     .act-card-meta{flex-direction:column;gap:4px}
     .act-card-parts{gap:3px}
     .act-card-actions{justify-content:flex-start}
@@ -518,9 +562,12 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .email-select{max-width:100%;font-size:16px}
     .rfq-condition{flex-wrap:wrap;gap:4px}
 
-    .modal-lg{max-width:100%}
+    /* WP6: Modal treatment — reduce padding, stack buttons */
+    .modal-lg{max-width:100% !important}
+    .modal{padding:16px 12px !important}
     .modal h2{font-size:15px;margin-bottom:12px}
-    .mactions{flex-wrap:wrap}
+    .mactions{flex-wrap:wrap;gap:6px}
+    .mactions .btn{flex:1 1 100%;text-align:center;justify-content:center}
 
     /* Fields — 16px prevents iOS zoom */
     .field input,.field textarea{font-size:16px}
@@ -561,12 +608,12 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .uzone{padding:16px}
     #stockImportArea > div{flex-direction:column}
 
-    /* Buttons — larger touch targets */
-    .btn{padding:9px 16px;font-size:12px;min-height:36px}
-    .btn-sm{padding:6px 12px;font-size:11px;min-height:30px}
-    .btn-out{min-height:30px;padding:6px 12px}
-    .btn-call{min-height:30px;padding:6px 12px}
-    .btn-archive{min-height:28px}
+    /* WP2: Buttons — 44px touch targets */
+    .btn{padding:10px 16px;font-size:12px;min-height:44px}
+    .btn-sm{padding:8px 12px;font-size:11px;min-height:44px}
+    .btn-out{min-height:44px;padding:8px 12px}
+    .btn-call{min-height:44px;padding:8px 12px}
+    .btn-archive{min-height:44px}
 
     /* Login */
     .login-card{padding:40px 24px 36px;width:92%}
@@ -587,14 +634,30 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .tbl th:nth-child(n+6),.tbl td:nth-child(n+6){display:none}
     .tbl{font-size:12px}
     .tbl th,.tbl td{padding:6px 4px}
+
+    /* WP5: Table scroll hints — right-edge fade */
+    .crm-table-wrap,.dd-panel{
+        -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 24px),transparent 100%);
+        mask-image:linear-gradient(to right,#000 calc(100% - 24px),transparent 100%);
+    }
+    .crm-table-wrap:not(:hover),.dd-panel:not(:hover){
+        -webkit-mask-image:linear-gradient(to right,#000 calc(100% - 24px),transparent 100%);
+        mask-image:linear-gradient(to right,#000 calc(100% - 24px),transparent 100%);
+    }
+    /* Remove mask when scrolled to end (JS adds .scrolled-end) or on hover */
+    .crm-table-wrap.scrolled-end,.dd-panel.scrolled-end,
+    .crm-table-wrap:hover,.dd-panel:hover{
+        -webkit-mask-image:none;
+        mask-image:none;
+    }
     /* View toolbars — stack on mobile */
     .view-toolbar{flex-direction:column;align-items:stretch;gap:8px}
     .view-toolbar h2{font-size:16px}
     .view-toolbar .sbox{width:100% !important}
     .view-toolbar .fpills{overflow-x:auto;scrollbar-width:none}
     .view-toolbar .fpills::-webkit-scrollbar{display:none}
-    /* Main scroll padding */
-    .main-scroll{padding:2px 10px}
+    /* WP9: Main scroll padding with safe areas */
+    .main-scroll{padding:2px calc(10px + env(safe-area-inset-right)) 2px calc(10px + env(safe-area-inset-left))}
     /* Notification panel responsive */
     .notif-panel-standalone{top:calc(92px + env(safe-area-inset-top));right:12px;left:12px;width:auto;max-height:calc(100vh - 110px)}
     /* Modal safe-area */
@@ -622,19 +685,26 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 .mobile-toolbar-stats .tb-stat{font-size:10px;padding:2px 6px;gap:3px}
 .mobile-toolbar-stats .tb-ct{font-size:10px}
 
-/* Extra small screens (phones in portrait) */
+/* WP8: Extra small screens — reclaim space via padding/margins, keep 44px targets & 12px+ fonts */
 @media(max-width:420px) and (hover:none),(max-width:420px) and (pointer:coarse){
-    .tab{font-size:10px;padding:6px 10px}
+    .tab{font-size:12px;padding:6px 10px;min-height:44px}
     .sc-vendor{font-size:12px}
-    .act-stat{flex:1 1 calc(50% - 3px)}
+    .act-stat{flex:1 1 calc(50% - 3px);padding:6px 8px}
     .act-stat-num{font-size:16px}
-    .act-stat-label{font-size:9px}
-    .src-stat{flex:1 1 calc(50% - 4px)}
-    .btn-primary{padding:8px 12px}
+    .act-stat-label{font-size:11px}
+    .src-stat{flex:1 1 calc(50% - 4px);padding:6px 8px}
+    .btn-primary{padding:8px 10px}
     .login-card{padding:32px 16px 28px}
     .login-logo{width:200px}
-    .mobile-act-btn{width:32px;height:32px;font-size:14px}
-    #mobilePills .fp{padding:4px 10px;font-size:10px}
+    /* Keep 44px touch target, reduce margins around it */
+    .mobile-act-btn{width:44px;height:44px;font-size:16px}
+    .mobile-toolbar{gap:4px;padding:0 6px}
+    #mobilePills .fp{padding:4px 10px;font-size:12px}
+    /* Tighter padding to reclaim space */
+    .main-scroll{padding:2px 6px}
+    .modal{padding:12px 8px !important}
+    .req-row{padding:8px 10px}
+    .sc{padding:4px 8px !important}
 }
 
 /* ── Data Sources Tab ── */
@@ -917,7 +987,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .cust-header>span:last-child{width:100%;justify-content:flex-start}
     .cust-activity-section{padding:6px 0}
     .act-row{flex-wrap:wrap;gap:4px}
-    .act-row-meta{font-size:9px}
+    .act-row-meta{font-size:11px}
     /* Vendor contacts in popup */
     #vpContactsList .si-contact{flex-direction:column;align-items:flex-start;gap:4px}
     #vpContactsList .si-contact-actions{width:100%;justify-content:flex-end}
@@ -930,14 +1000,14 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     /* Drill-down sub-tabs — horizontal scroll like main tabs */
     .dd-tabs{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none}
     .dd-tabs::-webkit-scrollbar{display:none}
-    .dd-tab{white-space:nowrap;flex-shrink:0;padding:8px 14px;font-size:12px;min-height:36px}
+    .dd-tab{white-space:nowrap;flex-shrink:0;padding:8px 14px;font-size:12px;min-height:44px}
     /* Drill-down inner tables — scroll via panel wrapper */
     .dtbl{font-size:11px}
     .dtbl th,.dtbl td{padding:4px 6px;white-space:nowrap}
     /* Drill-down cell — more breathing room */
     .drow>td{padding:8px 6px 12px}
-    /* Expand arrow — larger touch target */
-    .ea{width:28px;height:28px;font-size:11px}
+    /* WP2: Expand arrow — 44px touch target */
+    .ea{width:44px;height:44px;font-size:12px}
     /* Quote table — wrap in scrollable parent */
     .quote-table th,.quote-table td{padding:4px 6px;white-space:nowrap}
     .quote-sell-input{width:70px;font-size:14px;min-height:36px}
@@ -965,7 +1035,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
     .offer-group-header{flex-direction:column;gap:4px;align-items:flex-start}
     /* Parse preview panel — tighter on mobile */
     .parse-preview{padding:10px}
-    .parse-parts-table{font-size:10px}
+    .parse-parts-table{font-size:12px}
     .parse-actions{flex-wrap:wrap;justify-content:stretch}
     .parse-actions .btn{flex:1;text-align:center}
     /* Intel card — compact */
@@ -1699,6 +1769,10 @@ tr.dl-row-warn>td{background:rgba(217,136,11,.06)!important}
 .source-status-banner.ss-expanded .ss-toggle-hint::after{content:' \25bc'}
 .source-status-banner:not(.ss-expanded) .ss-toggle-hint::after{content:' \25b6'}
 
+/* WP7: CSS replacements for removed inline styles */
+#mobileUserFilterSelect{font-size:10px;max-width:90px}
+#ecCurrency{width:80px}
+
 /* ── Mobile deep fixes — consolidated into @media(max-width:768px) above ── */
 
 /* Bug Report Link — inline next to pills */
@@ -1944,7 +2018,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 /* ── v2 Responsive ───────────────────────────────────────── */
 @media (max-width:768px){
     .stat-grid{grid-template-columns:repeat(2,1fr)}
-    .sb-group-label{font-size:9px}
+    .sb-group-label{font-size:12px}
     .sb-nav-group .sb-nav-btn{margin-left:4px}
     .sb-group-header{padding:6px 10px}
     .contact-card{flex-wrap:wrap}
@@ -1958,7 +2032,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 @media (max-width:480px){
     .stat-grid{grid-template-columns:1fr}
     .chip-row{gap:4px}
-    .chip{font-size:10px;padding:3px 8px}
+    .chip{font-size:12px;padding:4px 8px}
 }
 
 /* ── v2 Owner Avatar ─────────────────────────────────────── */
@@ -2206,7 +2280,12 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
     .crm-table{font-size:12px}
     .crm-table th,.crm-table td{padding:8px 10px}
     .drawer{width:100%;min-width:0;max-width:100%}
-    .bulk-bar{left:16px;right:16px;transform:none;width:auto}
+    /* WP2: drawer close — 44px touch target */
+    .drawer-close{width:44px;height:44px}
+    /* WP9: drawer safe areas for notched phones */
+    .drawer-body{padding-bottom:env(safe-area-inset-bottom)}
+    .drawer-header{padding-left:calc(16px + env(safe-area-inset-left));padding-right:calc(16px + env(safe-area-inset-right))}
+    .bulk-bar{left:16px;right:16px;transform:none;width:auto;padding-bottom:calc(10px + var(--sai-bottom,env(safe-area-inset-bottom,0px)))}
     .bulk-bar.visible{transform:translateY(0)}
     .drawer-overview-grid{grid-template-columns:1fr!important}
     .contacts-grid{grid-template-columns:1fr!important}
