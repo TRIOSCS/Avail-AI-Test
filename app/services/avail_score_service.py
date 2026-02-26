@@ -80,15 +80,30 @@ def compute_buyer_avail_score(db: Session, user_id: int, month: date) -> dict:
     end_dt = datetime(month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc)
 
     # ── Fetch user's reqs for the month ──
-    user_reqs = (
-        db.query(Requisition)
-        .filter(
+    # Include reqs the user created, sent RFQs on, or logged offers for
+    created_ids = set(
+        r.id for (r,) in db.query(Requisition.id).filter(
             Requisition.created_by == user_id,
             Requisition.created_at >= start_dt,
             Requisition.created_at < end_dt,
-        )
-        .all()
+        ).all()
     )
+    rfq_req_ids = set(
+        r for (r,) in db.query(Contact.requisition_id.distinct()).filter(
+            Contact.user_id == user_id,
+            Contact.created_at >= start_dt,
+            Contact.created_at < end_dt,
+        ).all()
+    )
+    offer_req_ids = set(
+        r for (r,) in db.query(Offer.requisition_id.distinct()).filter(
+            Offer.entered_by_id == user_id,
+            Offer.created_at >= start_dt,
+            Offer.created_at < end_dt,
+        ).all() if r is not None
+    )
+    all_req_ids = created_ids | rfq_req_ids | offer_req_ids
+    user_reqs = db.query(Requisition).filter(Requisition.id.in_(all_req_ids)).all() if all_req_ids else []
     req_ids = [r.id for r in user_reqs]
     total_reqs = len(req_ids)
 
@@ -664,10 +679,13 @@ def compute_all_avail_scores(db: Session, month: date | None = None) -> dict:
     """
     month = (month or date.today()).replace(day=1)
 
-    buyers = db.query(User).filter(User.role.in_(["buyer", "trader"]), User.is_active.is_(True)).all()
-    sales = db.query(User).filter(User.role == "sales", User.is_active.is_(True)).all()
+    # Exclude system/bot users (e.g. AvailAI Agent)
+    _human = [User.is_active.is_(True), ~User.email.like("%@availai.local")]
+
+    buyers = db.query(User).filter(User.role.in_(["buyer", "trader"]), *_human).all()
+    sales = db.query(User).filter(User.role == "sales", *_human).all()
     # Traders and managers also get sales scores if they have sales activity
-    multi_role = db.query(User).filter(User.role.in_(["trader", "manager", "admin"]), User.is_active.is_(True)).all()
+    multi_role = db.query(User).filter(User.role.in_(["trader", "manager", "admin"]), *_human).all()
 
     buyer_results = []
     for user in buyers:
