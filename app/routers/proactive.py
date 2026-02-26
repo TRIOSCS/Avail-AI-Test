@@ -14,9 +14,14 @@ from sqlalchemy.orm import Session
 from ..cache.decorators import cached_endpoint
 from ..database import get_db
 from ..dependencies import require_user
-from ..models import ProactiveMatch, SiteContact, User
+from ..models import ProactiveDoNotOffer, ProactiveMatch, SiteContact, User
 from ..scheduler import get_valid_token
-from ..schemas.proactive import DismissMatches, DraftProactive, SendProactive
+from ..schemas.proactive import (
+    DismissMatches,
+    DoNotOfferRequest,
+    DraftProactive,
+    SendProactive,
+)
 
 router = APIRouter()
 
@@ -91,6 +96,52 @@ async def dismiss_matches(
     )
     db.commit()
     return {"dismissed": updated}
+
+
+@router.post("/api/proactive/do-not-offer")
+async def add_do_not_offer(
+    body: DoNotOfferRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Permanently suppress MPNs for a customer company. Also auto-dismisses open matches."""
+    if not body.items:
+        raise HTTPException(400, "No items provided")
+
+    suppressed = 0
+    for item in body.items:
+        mpn = (item.mpn or "").strip().upper()
+        if not mpn or not item.company_id:
+            continue
+        existing = (
+            db.query(ProactiveDoNotOffer)
+            .filter(
+                ProactiveDoNotOffer.mpn == mpn,
+                ProactiveDoNotOffer.company_id == item.company_id,
+            )
+            .first()
+        )
+        if not existing:
+            db.add(ProactiveDoNotOffer(
+                mpn=mpn,
+                company_id=item.company_id,
+                created_by_id=user.id,
+                reason=item.reason,
+            ))
+            suppressed += 1
+
+        # Auto-dismiss any open matches for this mpn + company
+        db.query(ProactiveMatch).filter(
+            ProactiveMatch.mpn == mpn,
+            ProactiveMatch.company_id == item.company_id,
+            ProactiveMatch.status == "new",
+        ).update(
+            {"status": "dismissed", "dismiss_reason": "do_not_offer"},
+            synchronize_session=False,
+        )
+
+    db.commit()
+    return {"suppressed": suppressed}
 
 
 @router.post("/api/proactive/draft")

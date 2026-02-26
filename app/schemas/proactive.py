@@ -21,3 +21,13 @@ class SendProactive(BaseModel):
     subject: str | None = None
     notes: str | None = None
     email_html: str | None = None  # AI-drafted or user-edited HTML body
+
+
+class DoNotOfferItem(BaseModel):
+    mpn: str
+    company_id: int
+    reason: str | None = None
+
+
+class DoNotOfferRequest(BaseModel):
+    items: list[DoNotOfferItem]

@@ -214,6 +214,27 @@ class ProactiveThrottle(Base):
     )
 
 
+class ProactiveDoNotOffer(Base):
+    """Permanent suppression: salesperson marks an MPN as 'do not offer' to a company."""
+
+    __tablename__ = "proactive_do_not_offer"
+    id = Column(Integer, primary_key=True)
+    mpn = Column(String(255), nullable=False)
+    company_id = Column(
+        Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    reason = Column(String(255))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    company = relationship("Company", foreign_keys=[company_id])
+    created_by = relationship("User", foreign_keys=[created_by_id])
+
+    __table_args__ = (
+        Index("ix_pdno_mpn_company", "mpn", "company_id", unique=True),
+    )
+
+
 class ChangeLog(Base):
     """Field-level change log for audit trail on offers, requirements, requisitions."""
 

@@ -343,6 +343,9 @@ async def list_vendors(
             stat = review_stats.get(c.id)
             avg_rating = round(float(stat[0]), 1) if stat else None
             review_count = int(stat[1]) if stat else 0
+            resp_rate = None
+            if c.total_outreach and c.total_outreach > 0:
+                resp_rate = round((c.total_responses or 0) / c.total_outreach * 100, 1)
             results.append(
                 {
                     "id": c.id,
@@ -356,6 +359,9 @@ async def list_vendors(
                     "is_blacklisted": c.is_blacklisted or False,
                     "avg_rating": avg_rating,
                     "review_count": review_count,
+                    "total_pos": c.total_pos or 0,
+                    "response_rate": resp_rate,
+                    "last_sighting_at": (c.last_activity_at or c.updated_at or c.created_at).isoformat() if (c.last_activity_at or c.updated_at or c.created_at) else None,
                 }
             )
         return {"vendors": results, "total": total, "limit": limit, "offset": offset}
