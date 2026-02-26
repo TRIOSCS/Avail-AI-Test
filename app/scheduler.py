@@ -721,6 +721,16 @@ async def _job_performance_tracking():
             f"Avail Scores: {as_result['buyers']} buyers, "
             f"{as_result['sales']} sales, {as_result['saved']} saved for {current_month}"
         )
+        # Multiplier Scores
+        from .services.multiplier_score_service import compute_all_multiplier_scores
+        ms_result = await asyncio.wait_for(
+            loop.run_in_executor(None, compute_all_multiplier_scores, db, current_month),
+            timeout=300,
+        )
+        logger.info(
+            f"Multiplier Scores: {ms_result['buyers']} buyers, "
+            f"{ms_result['sales']} sales, {ms_result['saved']} saved for {current_month}"
+        )
         # Recompute previous month during grace period (first 7 days)
         if now.day <= 7:
             prev_month = (current_month - timedelta(days=1)).replace(day=1)
@@ -730,6 +740,10 @@ async def _job_performance_tracking():
             )
             await asyncio.wait_for(
                 loop.run_in_executor(None, compute_all_avail_scores, db, prev_month),
+                timeout=300,
+            )
+            await asyncio.wait_for(
+                loop.run_in_executor(None, compute_all_multiplier_scores, db, prev_month),
                 timeout=300,
             )
     except asyncio.TimeoutError:

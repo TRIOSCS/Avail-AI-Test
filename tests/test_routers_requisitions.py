@@ -698,6 +698,7 @@ def test_list_requirements_with_sightings_and_offers(
     s = Sighting(
         requirement_id=req_item.id,
         vendor_name="Test Vendor",
+        vendor_name_normalized="test vendor",
         mpn_matched="LM317T",
         source_type="api",
         score=60.0,

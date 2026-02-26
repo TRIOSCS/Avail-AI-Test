@@ -279,3 +279,327 @@ class TestRunStartupMigrationsNonTesting:
                 os.environ["TESTING"] = original
             else:
                 os.environ["TESTING"] = "1"
+
+
+class TestBackfillSightingOfferNormalizedMpn:
+    """Tests for _backfill_sighting_offer_normalized_mpn (lines 492-545)."""
+
+    def test_backfill_sightings_and_offers(self):
+        """Rows with NULL normalized_mpn get updated from mpn_matched / mpn."""
+        from app.startup import _backfill_sighting_offer_normalized_mpn
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(
+                "CREATE TABLE sightings (id INTEGER PRIMARY KEY, mpn_matched TEXT, normalized_mpn TEXT)"
+            ))
+            conn.execute(sqltext(
+                "CREATE TABLE offers (id INTEGER PRIMARY KEY, mpn TEXT, normalized_mpn TEXT)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (1, 'LM-317T', NULL)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (2, 'RC-0805 FR', NULL)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO offers (id, mpn, normalized_mpn) VALUES (1, 'SN-74HC595', NULL)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO offers (id, mpn, normalized_mpn) VALUES (2, 'ATmega328P', NULL)"
+            ))
+            conn.commit()
+
+        with patch("app.startup.engine", eng):
+            _backfill_sighting_offer_normalized_mpn()
+
+        with eng.connect() as conn:
+            s1 = conn.execute(sqltext("SELECT normalized_mpn FROM sightings WHERE id = 1")).fetchone()
+            assert s1[0] == "lm317t"
+            s2 = conn.execute(sqltext("SELECT normalized_mpn FROM sightings WHERE id = 2")).fetchone()
+            assert s2[0] == "rc0805fr"
+            o1 = conn.execute(sqltext("SELECT normalized_mpn FROM offers WHERE id = 1")).fetchone()
+            assert o1[0] == "sn74hc595"
+            o2 = conn.execute(sqltext("SELECT normalized_mpn FROM offers WHERE id = 2")).fetchone()
+            assert o2[0] == "atmega328p"
+
+    def test_key_with_empty_string(self):
+        """_key('') returns '' so row is skipped (not updated)."""
+        from app.startup import _backfill_sighting_offer_normalized_mpn
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(
+                "CREATE TABLE sightings (id INTEGER PRIMARY KEY, mpn_matched TEXT, normalized_mpn TEXT)"
+            ))
+            conn.execute(sqltext(
+                "CREATE TABLE offers (id INTEGER PRIMARY KEY, mpn TEXT, normalized_mpn TEXT)"
+            ))
+            # mpn_matched is empty string after strip, _key returns ""
+            conn.execute(sqltext(
+                "INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (1, '  ', NULL)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO offers (id, mpn, normalized_mpn) VALUES (1, '---', NULL)"
+            ))
+            conn.commit()
+
+        with patch("app.startup.engine", eng):
+            _backfill_sighting_offer_normalized_mpn()
+
+        with eng.connect() as conn:
+            s = conn.execute(sqltext("SELECT normalized_mpn FROM sightings WHERE id = 1")).fetchone()
+            assert s[0] is None  # not updated because _key returned ""
+            o = conn.execute(sqltext("SELECT normalized_mpn FROM offers WHERE id = 1")).fetchone()
+            assert o[0] is None
+
+    def test_key_with_none(self):
+        """_key(None) returns '' — exercises the `if not raw: return ""` branch (line 498-499)."""
+        from app.startup import _backfill_sighting_offer_normalized_mpn
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(
+                "CREATE TABLE sightings (id INTEGER PRIMARY KEY, mpn_matched TEXT, normalized_mpn TEXT)"
+            ))
+            conn.execute(sqltext(
+                "CREATE TABLE offers (id INTEGER PRIMARY KEY, mpn TEXT, normalized_mpn TEXT)"
+            ))
+            # The WHERE clause filters NULL mpn_matched, but if somehow present,
+            # we need rows that DO have mpn_matched to exercise _key.
+            # Insert a row with a valid mpn_matched to enter the loop, and one
+            # with all-special-chars to get empty _key result.
+            conn.execute(sqltext(
+                "INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (1, '!!!', NULL)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO offers (id, mpn, normalized_mpn) VALUES (1, '!!!', NULL)"
+            ))
+            conn.commit()
+
+        with patch("app.startup.engine", eng):
+            _backfill_sighting_offer_normalized_mpn()
+
+        with eng.connect() as conn:
+            s = conn.execute(sqltext("SELECT normalized_mpn FROM sightings WHERE id = 1")).fetchone()
+            assert s[0] is None
+            o = conn.execute(sqltext("SELECT normalized_mpn FROM offers WHERE id = 1")).fetchone()
+            assert o[0] is None
+
+    def test_no_rows_to_backfill(self):
+        """When no rows have NULL normalized_mpn, the function exits cleanly."""
+        from app.startup import _backfill_sighting_offer_normalized_mpn
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(
+                "CREATE TABLE sightings (id INTEGER PRIMARY KEY, mpn_matched TEXT, normalized_mpn TEXT)"
+            ))
+            conn.execute(sqltext(
+                "CREATE TABLE offers (id INTEGER PRIMARY KEY, mpn TEXT, normalized_mpn TEXT)"
+            ))
+            # All rows already have normalized_mpn populated
+            conn.execute(sqltext(
+                "INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (1, 'LM317', 'lm317')"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO offers (id, mpn, normalized_mpn) VALUES (1, 'LM317', 'lm317')"
+            ))
+            conn.commit()
+
+        with patch("app.startup.engine", eng):
+            _backfill_sighting_offer_normalized_mpn()
+
+    def test_sightings_exception_path(self):
+        """If sightings table doesn't exist, the exception path is taken."""
+        from app.startup import _backfill_sighting_offer_normalized_mpn
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            # Only create offers, not sightings — sightings query will fail
+            conn.execute(sqltext(
+                "CREATE TABLE offers (id INTEGER PRIMARY KEY, mpn TEXT, normalized_mpn TEXT)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO offers (id, mpn, normalized_mpn) VALUES (1, 'LM317', NULL)"
+            ))
+            conn.commit()
+
+        with patch("app.startup.engine", eng):
+            _backfill_sighting_offer_normalized_mpn()
+
+        with eng.connect() as conn:
+            o = conn.execute(sqltext("SELECT normalized_mpn FROM offers WHERE id = 1")).fetchone()
+            assert o[0] == "lm317"
+
+    def test_offers_exception_path(self):
+        """If offers table doesn't exist, the exception path is taken."""
+        from app.startup import _backfill_sighting_offer_normalized_mpn
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(
+                "CREATE TABLE sightings (id INTEGER PRIMARY KEY, mpn_matched TEXT, normalized_mpn TEXT)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO sightings (id, mpn_matched, normalized_mpn) VALUES (1, 'LM317', NULL)"
+            ))
+            conn.commit()
+
+        with patch("app.startup.engine", eng):
+            _backfill_sighting_offer_normalized_mpn()
+
+        with eng.connect() as conn:
+            s = conn.execute(sqltext("SELECT normalized_mpn FROM sightings WHERE id = 1")).fetchone()
+            assert s[0] == "lm317"
+
+
+class TestBackfillSightingVendorNormalized:
+    """Tests for _backfill_sighting_vendor_normalized (lines 548-590)."""
+
+    def test_backfill_vendor_names(self):
+        """Rows with NULL vendor_name_normalized get updated."""
+        from app.startup import _backfill_sighting_vendor_normalized
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(
+                "CREATE TABLE sightings (id INTEGER PRIMARY KEY, vendor_name TEXT, vendor_name_normalized TEXT)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (1, 'Acme Inc.', NULL)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (2, 'GlobalParts LLC', NULL)"
+            ))
+            conn.commit()
+
+        with patch("app.startup.engine", eng), \
+             patch("app.vendor_utils.normalize_vendor_name", side_effect=lambda n: n.lower().replace(" ", "")):
+            _backfill_sighting_vendor_normalized()
+
+        with eng.connect() as conn:
+            r1 = conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings WHERE id = 1")).fetchone()
+            assert r1[0] == "acmeinc."
+            r2 = conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings WHERE id = 2")).fetchone()
+            assert r2[0] == "globalpartsllc"
+
+    def test_column_not_exists_returns_early(self):
+        """If vendor_name_normalized column doesn't exist, function returns without error."""
+        from app.startup import _backfill_sighting_vendor_normalized
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            # Create sightings WITHOUT vendor_name_normalized column
+            conn.execute(sqltext(
+                "CREATE TABLE sightings (id INTEGER PRIMARY KEY, vendor_name TEXT)"
+            ))
+            conn.commit()
+
+        with patch("app.startup.engine", eng):
+            # Should return early without error
+            _backfill_sighting_vendor_normalized()
+
+    def test_no_rows_to_update(self):
+        """When no rows have NULL vendor_name_normalized, function exits cleanly."""
+        from app.startup import _backfill_sighting_vendor_normalized
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(
+                "CREATE TABLE sightings (id INTEGER PRIMARY KEY, vendor_name TEXT, vendor_name_normalized TEXT)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (1, 'Acme', 'acme')"
+            ))
+            conn.commit()
+
+        with patch("app.startup.engine", eng), \
+             patch("app.vendor_utils.normalize_vendor_name", side_effect=lambda n: n.lower()):
+            _backfill_sighting_vendor_normalized()
+
+    def test_normalize_returns_empty_skips_row(self):
+        """If normalize_vendor_name returns empty for a row, that row is not added
+        to the batch. On next iteration the same row is re-selected, and we use
+        the exception path to break out of the loop."""
+        from app.startup import _backfill_sighting_vendor_normalized
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(
+                "CREATE TABLE sightings (id INTEGER PRIMARY KEY, vendor_name TEXT, vendor_name_normalized TEXT)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (1, '???', NULL)"
+            ))
+            conn.commit()
+
+        call_count = 0
+
+        def normalize_then_fail(name):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return ""  # exercises the `if nv` falsy branch
+            raise RuntimeError("stop loop")
+
+        with patch("app.startup.engine", eng), \
+             patch("app.vendor_utils.normalize_vendor_name", side_effect=normalize_then_fail):
+            _backfill_sighting_vendor_normalized()
+
+        with eng.connect() as conn:
+            r = conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings WHERE id = 1")).fetchone()
+            assert r[0] is None  # not updated because normalize returned ""
+
+    def test_exception_during_batch_breaks_loop(self):
+        """If an exception occurs during batch processing, loop breaks cleanly."""
+        from app.startup import _backfill_sighting_vendor_normalized
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(
+                "CREATE TABLE sightings (id INTEGER PRIMARY KEY, vendor_name TEXT, vendor_name_normalized TEXT)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (1, 'Acme', NULL)"
+            ))
+            conn.commit()
+
+        def exploding_normalize(name):
+            raise RuntimeError("boom")
+
+        with patch("app.startup.engine", eng), \
+             patch("app.vendor_utils.normalize_vendor_name", side_effect=exploding_normalize):
+            _backfill_sighting_vendor_normalized()
+
+        # Row should remain NULL since the exception caused rollback + break
+        with eng.connect() as conn:
+            r = conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings WHERE id = 1")).fetchone()
+            assert r[0] is None
+
+    def test_logs_total_when_rows_updated(self, caplog):
+        """When rows are updated, the total is logged."""
+        from app.startup import _backfill_sighting_vendor_normalized
+
+        eng = _make_sqlite_engine()
+        with eng.connect() as conn:
+            conn.execute(sqltext(
+                "CREATE TABLE sightings (id INTEGER PRIMARY KEY, vendor_name TEXT, vendor_name_normalized TEXT)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (1, 'Acme', NULL)"
+            ))
+            conn.execute(sqltext(
+                "INSERT INTO sightings (id, vendor_name, vendor_name_normalized) VALUES (2, 'Beta Corp', NULL)"
+            ))
+            conn.commit()
+
+        with patch("app.startup.engine", eng), \
+             patch("app.vendor_utils.normalize_vendor_name", side_effect=lambda n: n.lower()):
+            _backfill_sighting_vendor_normalized()
+
+        with eng.connect() as conn:
+            r1 = conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings WHERE id = 1")).fetchone()
+            assert r1[0] == "acme"
+            r2 = conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings WHERE id = 2")).fetchone()
+            assert r2[0] == "beta corp"

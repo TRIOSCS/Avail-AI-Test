@@ -1231,7 +1231,7 @@ let _dashScope = 'my';           // 'my' or 'team' — universal scope toggle
 let _dashUserId = null;          // specific user to view in CC — null = current user
 let _buyerScope = 'my';          // kept for backward compat in loadBuyerDashboard
 let _dashPerspective = null;     // 'sales' or 'purchasing' — null = auto from role
-let _dashPerfTab = 'vendors';    // active scorecard sub-tab
+let _dashPerfTab = 'leaderboard'; // active scorecard sub-tab
 
 function setDashPeriod(period, btn) {
     _dashPeriod = period;
@@ -1322,8 +1322,8 @@ function _loadDashScorecard(tab) {
     // Delegate to the existing scorecard loaders, targeting the new container
     const el = document.getElementById('dashPerfContent');
     if (!el) return;
-    // The existing functions render to their own panels; we'll load directly into dashPerfContent
-    if (tab === 'vendors') _loadDashVendorScorecard(el);
+    if (tab === 'leaderboard') _loadDashTeamLeaderboard(el);
+    else if (tab === 'vendors') _loadDashVendorScorecard(el);
     else if (tab === 'buyers') _loadDashBuyerLeaderboard(el);
     else if (tab === 'sales') _loadDashSalesScorecard(el);
     else if (tab === 'avail-score') _loadDashAvailScore(el);
@@ -1426,6 +1426,153 @@ async function _loadDashAvailScore(el) {
         if (!entries.length) { el.innerHTML = '<p class="empty">No Avail Score data yet — scores are computed daily</p>'; return; }
         el.innerHTML = _renderAvailScoreTable(entries, role, data.month);
     } catch(e) { el.innerHTML = '<p class="empty">Failed to load Avail Scores</p>'; }
+}
+
+async function _loadDashTeamLeaderboard(el) {
+    const role = _effectivePerspective() === 'sales' ? 'sales' : 'buyer';
+    el.innerHTML = '<p class="empty">Loading leaderboard...</p>';
+    try {
+        const data = await apiFetch(`/api/dashboard/team-leaderboard?role=${role}`);
+        const entries = data.entries || [];
+        if (!entries.length) {
+            el.innerHTML = '<p class="empty">No leaderboard data yet — scores are computed daily</p>';
+            return;
+        }
+        el.innerHTML = _renderTeamLeaderboard(entries, role, data.month);
+    } catch(e) {
+        console.error('Leaderboard load error:', e);
+        el.innerHTML = '<p class="empty">Failed to load leaderboard</p>';
+    }
+}
+
+function _renderTeamLeaderboard(entries, role, month) {
+    const monthLabel = month ? new Date(month + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : '';
+    const myId = window.userId;
+    const roleLabel = role === 'buyer' ? 'Purchasing' : 'Sales';
+
+    let html = `<div class="lb-header">
+        <span class="lb-month">${esc(monthLabel)}</span>
+        <span class="as-role-badge as-role-${role}">${roleLabel}</span>
+    </div>`;
+
+    html += '<div class="lb-list">';
+    for (const e of entries) {
+        const isMe = e.user_id === myId;
+        const scoreColor = e.avail_score >= 60 ? 'var(--green)' : e.avail_score >= 40 ? 'var(--amber)' : 'var(--muted)';
+        const rankClass = e.rank === 1 ? 'lb-gold' : e.rank === 2 ? 'lb-silver' : e.rank === 3 ? 'lb-bronze' : '';
+        const bonusTotal = (e.avail_bonus || 0) + (e.mult_bonus || 0);
+        const bonusTag = bonusTotal > 0 ? `<span class="lb-bonus-badge">+$${bonusTotal}</span>` : '';
+        const qualTag = (!e.avail_qualified && !e.mult_qualified) ? '<span class="lb-unqualified">Not Qualified</span>' : '';
+        const meClass = isMe ? ' lb-me' : '';
+
+        html += `<div class="lb-entry${meClass}" onclick="this.classList.toggle('lb-open');this.querySelector('.lb-detail').classList.toggle('open')">
+            <div class="lb-row">
+                <span class="lb-rank ${rankClass}">${e.rank || '—'}</span>
+                <div class="lb-name-col">
+                    <span class="lb-name">${esc(e.user_name)}${isMe ? ' <span class="lb-you">(You)</span>' : ''}</span>
+                    <div class="lb-tags">${qualTag}${bonusTag}</div>
+                </div>
+                <div class="lb-scores">
+                    <div class="lb-score-block">
+                        <span class="lb-score-val" style="color:${scoreColor}">${(e.avail_score || 0).toFixed(0)}</span>
+                        <span class="lb-score-lbl">Avail</span>
+                    </div>
+                    <div class="lb-score-sep"></div>
+                    <div class="lb-score-block">
+                        <span class="lb-score-val lb-pts">${(e.total_points || 0).toFixed(1)}</span>
+                        <span class="lb-score-lbl">Points</span>
+                    </div>
+                </div>
+                <svg class="as-chevron" viewBox="0 0 24 24" width="14" height="14"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+            <div class="lb-detail">
+                ${_renderLeaderboardDetail(e, role)}
+            </div>
+        </div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+function _renderLeaderboardDetail(entry, role) {
+    let html = '<div class="lb-detail-grid">';
+
+    // Left column: Avail Score breakdown
+    html += '<div class="lb-detail-col"><div class="lb-detail-title">Avail Score <span class="lb-detail-sub">' + (entry.avail_score || 0).toFixed(0) + '/100</span></div>';
+    html += '<div class="lb-detail-split">';
+    html += '<div><div class="lb-metric-hdr">Behaviors <span class="lb-metric-sub">' + (entry.behavior_total || 0).toFixed(1) + '/50</span></div>';
+    for (let i = 1; i <= 5; i++) {
+        const score = entry['b' + i + '_score'] ?? 0;
+        const label = entry['b' + i + '_label'] || 'B' + i;
+        const pct = score * 10;
+        html += `<div class="lb-metric">
+            <span class="lb-metric-label">${esc(label)}</span>
+            <div class="lb-bar"><div class="lb-bar-fill lb-bar-behavior" style="width:${pct}%"></div></div>
+            <span class="lb-metric-num">${score.toFixed(1)}</span>
+        </div>`;
+    }
+    html += '</div><div><div class="lb-metric-hdr">Outcomes <span class="lb-metric-sub">' + (entry.outcome_total || 0).toFixed(1) + '/50</span></div>';
+    for (let i = 1; i <= 5; i++) {
+        const score = entry['o' + i + '_score'] ?? 0;
+        const label = entry['o' + i + '_label'] || 'O' + i;
+        const pct = score * 10;
+        html += `<div class="lb-metric">
+            <span class="lb-metric-label">${esc(label)}</span>
+            <div class="lb-bar"><div class="lb-bar-fill lb-bar-outcome" style="width:${pct}%"></div></div>
+            <span class="lb-metric-num">${score.toFixed(1)}</span>
+        </div>`;
+    }
+    html += '</div></div></div>';
+
+    // Right column: Multiplier Points breakdown
+    html += '<div class="lb-detail-col"><div class="lb-detail-title">Multiplier Points <span class="lb-detail-sub">' + (entry.total_points || 0).toFixed(1) + ' pts</span></div>';
+    const bd = entry.breakdown || {};
+    if (role === 'buyer') {
+        const tiers = [
+            { label: 'Offers (base)', count: bd.offers_base || 0, pts: bd.pts_base || 0, rate: '1pt' },
+            { label: 'Quoted', count: bd.offers_quoted || 0, pts: bd.pts_quoted || 0, rate: '3pt' },
+            { label: 'Buy Plan', count: bd.offers_bp || 0, pts: bd.pts_bp || 0, rate: '5pt' },
+            { label: 'PO Confirmed', count: bd.offers_po || 0, pts: bd.pts_po || 0, rate: '8pt' },
+        ];
+        html += '<div class="lb-tier-list">';
+        const maxPts = Math.max(...tiers.map(t => t.pts), 1);
+        for (const t of tiers) {
+            const pct = Math.round(t.pts / maxPts * 100);
+            html += `<div class="lb-tier">
+                <div class="lb-tier-head"><span>${t.label} <span class="lb-tier-rate">${t.rate}</span></span><span class="lb-tier-val">${t.count} &times; = ${t.pts.toFixed(1)}</span></div>
+                <div class="lb-bar"><div class="lb-bar-fill lb-bar-tier" style="width:${pct}%"></div></div>
+            </div>`;
+        }
+        html += '</div>';
+        html += '<div class="lb-bonus-section"><div class="lb-metric-hdr">Bonus Points</div>';
+        html += `<div class="lb-metric"><span class="lb-metric-label">RFQs Sent</span><span class="lb-metric-num">${bd.rfqs_sent || 0} &times; 0.25 = ${(bd.pts_rfqs || 0).toFixed(1)}</span></div>`;
+        html += `<div class="lb-metric"><span class="lb-metric-label">Stock Lists</span><span class="lb-metric-num">${bd.stock_lists || 0} &times; 2 = ${(bd.pts_stock || 0).toFixed(1)}</span></div>`;
+        html += '</div>';
+    } else {
+        const tiers = [
+            { label: 'Quotes Sent', count: bd.quotes_sent || 0, pts: bd.pts_quote_sent || 0, rate: '2pt' },
+            { label: 'Quotes Won', count: bd.quotes_won || 0, pts: bd.pts_quote_won || 0, rate: '8pt' },
+            { label: 'Proactive Sent', count: bd.proactive_sent || 0, pts: bd.pts_proactive_sent || 0, rate: '1pt' },
+            { label: 'Proactive Converted', count: bd.proactive_converted || 0, pts: bd.pts_proactive_converted || 0, rate: '4pt' },
+        ];
+        html += '<div class="lb-tier-list">';
+        const maxPts = Math.max(...tiers.map(t => t.pts), 1);
+        for (const t of tiers) {
+            const pct = Math.round(t.pts / maxPts * 100);
+            html += `<div class="lb-tier">
+                <div class="lb-tier-head"><span>${t.label} <span class="lb-tier-rate">${t.rate}</span></span><span class="lb-tier-val">${t.count} &times; = ${t.pts.toFixed(1)}</span></div>
+                <div class="lb-bar"><div class="lb-bar-fill lb-bar-tier" style="width:${pct}%"></div></div>
+            </div>`;
+        }
+        html += '</div>';
+        html += '<div class="lb-bonus-section"><div class="lb-metric-hdr">Bonus Points</div>';
+        html += `<div class="lb-metric"><span class="lb-metric-label">New Accounts</span><span class="lb-metric-num">${bd.new_accounts || 0} &times; 3 = ${(bd.pts_accounts || 0).toFixed(1)}</span></div>`;
+        html += '</div>';
+    }
+    html += '</div>';
+
+    html += '</div>';
+    return html;
 }
 
 export function _renderAvailScoreTable(entries, role, month) {

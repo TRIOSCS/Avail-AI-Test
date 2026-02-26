@@ -133,6 +133,62 @@ class TestAnalyzeVendorMaterials:
 
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
+    async def test_empty_parts_list_returns_early(self, mock_claude, db_session):
+        """Vendor with NO MVH and NO matching Sightings → early return at line 74."""
+        card = _make_vendor_card(db_session, "orphan vendor")
+        db_session.commit()
+
+        result = await _analyze_vendor_materials(card.id, db_session=db_session)
+        assert result is None
+        mock_claude.assert_not_called()
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
+    async def test_sighting_loop_body_covers_lines_67_72(self, mock_claude, db_session):
+        """Sightings with matching vendor_name_normalized → loop body runs
+        (lines 67-72) and feeds parts_list to Claude."""
+        mock_claude.return_value = {"brands": ["Acme"], "commodities": ["Widgets"]}
+
+        card = _make_vendor_card(db_session, "sighting vendor")
+        # Create sightings whose vendor_name_normalized matches the card
+        s1 = _make_sighting(db_session, "sighting vendor", "PART-A", "Acme")
+        s1.vendor_name_normalized = "sighting vendor"
+        s2 = _make_sighting(db_session, "sighting vendor", "PART-B", "Beta")
+        s2.vendor_name_normalized = "sighting vendor"
+        # Duplicate MPN to exercise the dedup (key already in seen_mpns)
+        s3 = _make_sighting(db_session, "sighting vendor", "PART-A", "Acme")
+        s3.vendor_name_normalized = "sighting vendor"
+        db_session.commit()
+
+        await _analyze_vendor_materials(card.id, db_session=db_session)
+
+        mock_claude.assert_called_once()
+        prompt_arg = mock_claude.call_args[0][0]
+        assert "PART-A" in prompt_arg
+        assert "PART-B" in prompt_arg
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
+    async def test_sighting_loop_breaks_at_200(self, mock_claude, db_session):
+        """Line 72: break when parts_list hits 200 in the sighting loop."""
+        mock_claude.return_value = {"brands": [], "commodities": []}
+
+        card = _make_vendor_card(db_session, "bulk vendor")
+        # Create 205 sightings with unique MPNs
+        for i in range(205):
+            s = _make_sighting(db_session, "bulk vendor", f"BULK-{i:04d}", "Mfr")
+            s.vendor_name_normalized = "bulk vendor"
+        db_session.commit()
+
+        await _analyze_vendor_materials(card.id, db_session=db_session)
+
+        mock_claude.assert_called_once()
+        prompt_arg = mock_claude.call_args[0][0]
+        # Should have exactly 200 parts (capped by the break)
+        assert "200 samples" in prompt_arg
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
     async def test_mvh_parts_included_in_prompt(self, mock_claude, db_session):
         mock_claude.return_value = {"brands": ["TI"], "commodities": ["Regulators"]}
 

@@ -1353,7 +1353,7 @@ class TestDeepEnrichCompany:
                 result = await deep_enrich_company(enrichable_company.id, db_session)
 
         assert result["status"] == "completed"
-        assert any("contact_queued:newcontact@deepco.com" in f for f in result["enriched_fields"])
+        assert any("contact:newcontact@deepco.com" in f for f in result["enriched_fields"])
         mock_route.assert_called_once()
         call_args = mock_route.call_args
         assert call_args[0][0] == db_session  # db

@@ -2832,6 +2832,7 @@ def test_material_card_to_dict_with_sightings_and_offers(db_session, test_materi
 
     sighting = Sighting(
         requirement_id=requirement.id,
+        material_card_id=test_material_card.id,
         vendor_name="Test Vendor",
         mpn_matched="LM317T",
         qty_available=500,
@@ -2845,6 +2846,7 @@ def test_material_card_to_dict_with_sightings_and_offers(db_session, test_materi
     offer = Offer(
         requisition_id=req.id,
         requirement_id=requirement.id,
+        material_card_id=test_material_card.id,
         vendor_name="Test Vendor",
         mpn="LM317T",
         qty_available=500,
