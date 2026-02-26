@@ -3825,6 +3825,8 @@ let _proactiveSent = [];
 let _proactiveTab = 'matches';
 let _proactiveSendSiteId = null;
 let _proactiveSendMatchIds = [];
+let _proactiveGroupsOpen = new Set();   // expanded customer groups
+let _proactiveSelected = new Set();      // checked match IDs for send
 
 // Proactive badge auto-refresh every 5 minutes
 setInterval(() => { if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge(); }, 5 * 60 * 1000);
@@ -3856,6 +3858,12 @@ async function loadProactiveMatches() {
         const resp = await apiFetch('/api/proactive/matches');
         _proactiveGroups = resp.groups || [];
         _proactiveStats = resp.stats || {};
+        // Pre-select all matches
+        _proactiveSelected.clear();
+        for (const g of _proactiveGroups) for (const m of g.matches) _proactiveSelected.add(String(m.id));
+        // Auto-expand first group if nothing open
+        if (_proactiveGroups.length && _proactiveGroupsOpen.size === 0)
+            _proactiveGroupsOpen.add(_proactiveGroups[0].customer_site_id);
         renderProactiveStatsBar();
         renderProactiveMatches();
     } catch (e) { showToast('Failed to load matches', 'error'); }
@@ -3901,100 +3909,159 @@ function renderProactiveStatsBar() {
     </div>`;
 }
 
+function _vendorScoreClass(score) {
+    if (score == null) return '';
+    if (score >= 70) return 'color:var(--green)';
+    if (score >= 40) return 'color:var(--amber)';
+    return 'color:var(--red)';
+}
+
+function _vendorTip(m) {
+    const parts = [];
+    if (m.vendor_score != null) parts.push('Score: ' + m.vendor_score);
+    if (m.overall_win_rate != null) parts.push('Win: ' + m.overall_win_rate + '%');
+    if (m.ghost_rate != null) parts.push('Ghost: ' + m.ghost_rate + '%');
+    return parts.join(' · ') || '';
+}
+
+function toggleProactiveGroup(siteId) {
+    if (_proactiveGroupsOpen.has(siteId)) _proactiveGroupsOpen.delete(siteId);
+    else _proactiveGroupsOpen.add(siteId);
+    renderProactiveMatches();
+}
+
+function toggleProactiveSelect(matchId) {
+    const k = String(matchId);
+    if (_proactiveSelected.has(k)) _proactiveSelected.delete(k); else _proactiveSelected.add(k);
+}
+
+function toggleAllProactiveInGroup(siteId, checked) {
+    const g = _proactiveGroups.find(g => g.customer_site_id === siteId);
+    if (!g) return;
+    for (const m of g.matches) { const k = String(m.id); if (checked) _proactiveSelected.add(k); else _proactiveSelected.delete(k); }
+    renderProactiveMatches();
+}
+
+function _allGroupChecked(group) {
+    return group.matches.length > 0 && group.matches.every(m => _proactiveSelected.has(String(m.id)));
+}
+
+function _selectedCountInGroup(group) {
+    return group.matches.filter(m => _proactiveSelected.has(String(m.id))).length;
+}
+
+async function doNotOfferMatch(matchId, siteId) {
+    const group = _proactiveGroups.find(g => g.customer_site_id === siteId);
+    const m = group ? group.matches.find(x => x.id === matchId) : null;
+    if (!m || !group) return;
+    try {
+        await apiFetch('/api/proactive/do-not-offer', { method: 'POST', body: { items: [{ mpn: m.mpn, company_id: group.company_id }] } });
+        showToast(`"${m.mpn}" will not be offered to ${group.company_name} again`);
+        loadProactiveMatches();
+        if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
+    } catch (e) { showToast('Failed to set Do Not Offer', 'error'); }
+}
+
+async function doNotOfferSelected(siteId) {
+    const group = _proactiveGroups.find(g => g.customer_site_id === siteId);
+    if (!group) return;
+    const items = group.matches
+        .filter(m => _proactiveSelected.has(String(m.id)))
+        .map(m => ({ mpn: m.mpn, company_id: group.company_id }));
+    if (!items.length) { showToast('Select items first', 'error'); return; }
+    try {
+        await apiFetch('/api/proactive/do-not-offer', { method: 'POST', body: { items } });
+        showToast(`${items.length} part${items.length !== 1 ? 's' : ''} suppressed for ${group.company_name}`);
+        loadProactiveMatches();
+        if (typeof refreshProactiveBadge === 'function') refreshProactiveBadge();
+    } catch (e) { showToast('Failed to set Do Not Offer', 'error'); }
+}
+
 function renderProactiveMatches() {
     const el = document.getElementById('proactiveMatchesPanel');
     if (!_proactiveGroups.length) {
-        el.innerHTML = '<p class="empty">No proactive matches yet. When buyers log offers for parts your archived customers needed, matches will appear here.</p>';
+        el.innerHTML = '<p class="empty">No proactive matches in the last 7 days. When buyers log offers for parts your archived customers needed, matches will appear here.</p>';
         return;
     }
-    el.innerHTML = _proactiveGroups.map(group => {
-        const matchRows = group.matches.map(m => {
-            const marginStr = m.margin_pct != null ? m.margin_pct.toFixed(1) + '%' : '—';
-            const marginClr = _marginColor(m.margin_pct);
-            const costStr = m.our_cost != null ? '$' + Number(m.our_cost).toFixed(4) : '—';
-            const theirPrice = m.customer_last_price != null ? '$' + Number(m.customer_last_price).toFixed(4) : '—';
-            return `
-            <tr class="pm-row" data-id="${m.id}" data-site="${group.customer_site_id}" onclick="toggleProactiveDetail(this,${m.id},${group.customer_site_id})" style="cursor:pointer">
-                <td onclick="event.stopPropagation()"><input type="checkbox" class="pm-check" data-id="${m.id}" data-site="${group.customer_site_id}" checked></td>
-                <td>${_scoreBadge(m.match_score)}</td>
-                <td><strong>${esc(m.mpn)}</strong></td>
-                <td>${(m.qty_available||0).toLocaleString()}</td>
-                <td>${costStr}</td>
-                <td><strong>${esc(group.company_name)}</strong></td>
-                <td>${_fmtDaysAgo(m.customer_last_purchased_at)}</td>
-                <td>${m.customer_purchase_count || 0}x</td>
-                <td>${theirPrice}</td>
-                <td style="font-weight:600;color:${marginClr}">${marginStr}</td>
-                <td>${esc(m.vendor_name)}</td>
-                <td onclick="event.stopPropagation()"><button class="btn btn-ghost btn-sm" style="padding:1px 6px;font-size:10px" onclick="dismissSingleMatch(${m.id})">Dismiss</button></td>
-            </tr>`;
-        }).join('');
-        return `
-        <div class="card-v2" style="margin-bottom:12px">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                <div>
-                    <strong>${esc(group.company_name)}</strong>
-                    ${group.site_name ? ' — ' + esc(group.site_name) : ''}
-                    <span style="font-size:11px;color:var(--muted);margin-left:8px">${group.matches.length} match${group.matches.length !== 1 ? 'es' : ''}</span>
-                </div>
-                <div style="display:flex;gap:6px">
-                    <button class="btn btn-primary btn-sm" onclick="openProactiveSendModal(${group.customer_site_id})">Send to Customer</button>
-                    <button class="btn btn-ghost btn-sm" onclick="dismissProactiveGroup(${group.customer_site_id})">Dismiss All</button>
-                </div>
-            </div>
-            <div style="overflow-x:auto">
-            <table class="tbl" style="font-size:12px">
-                <thead><tr>
-                    <th style="width:30px"></th>
-                    <th>Score</th>
-                    <th>Part</th>
-                    <th style="text-align:right">Qty</th>
-                    <th style="text-align:right">Our Cost</th>
-                    <th>Customer</th>
-                    <th>Last Bought</th>
-                    <th>Times</th>
-                    <th style="text-align:right">Their Price</th>
-                    <th style="text-align:right">Margin</th>
-                    <th>Source</th>
-                    <th></th>
-                </tr></thead>
-                <tbody>${matchRows}</tbody>
-            </table>
+    let html = '<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden;background:var(--bg2)">';
+
+    for (const group of _proactiveGroups) {
+        const isOpen = _proactiveGroupsOpen.has(group.customer_site_id);
+        const bestScore = Math.max(...group.matches.map(m => m.match_score || 0));
+        const margins = group.matches.filter(m => m.margin_pct != null).map(m => m.margin_pct);
+        const bestMargin = margins.length ? Math.max(...margins) : null;
+        const selCount = _selectedCountInGroup(group);
+
+        // ── Customer header row (always visible) ──
+        html += `<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;cursor:pointer;border-bottom:1px solid var(--border);transition:background .15s;${isOpen ? 'background:var(--bg3)' : ''}" onclick="toggleProactiveGroup(${group.customer_site_id})" class="proactive-group-hdr">
+            <span style="font-size:10px;color:var(--muted);width:14px;text-align:center;transition:transform .2s;${isOpen ? 'transform:rotate(90deg)' : ''}">&#9654;</span>
+            <span style="font-weight:700;font-size:14px;flex:1">${esc(group.company_name)}${group.site_name ? '<span style="color:var(--muted);font-weight:400;font-size:12px;margin-left:6px">' + esc(group.site_name) + '</span>' : ''}</span>
+            <span style="font-size:11px;color:var(--muted);background:var(--bg);padding:2px 8px;border-radius:10px">${group.matches.length} match${group.matches.length !== 1 ? 'es' : ''}</span>
+            ${_scoreBadge(bestScore)}
+            <span style="font-weight:700;font-size:12px;min-width:50px;text-align:right;color:${_marginColor(bestMargin)}">${bestMargin != null ? bestMargin.toFixed(1) + '%' : '—'}</span>
+            <div style="display:flex;gap:6px;margin-left:12px" onclick="event.stopPropagation()">
+                <button class="btn btn-primary btn-sm" onclick="openProactiveSendModal(${group.customer_site_id})">Send</button>
+                <button class="btn btn-ghost btn-sm" onclick="dismissProactiveGroup(${group.customer_site_id})">Dismiss</button>
             </div>
         </div>`;
-    }).join('');
-}
 
-function toggleProactiveDetail(tr, matchId, siteId) {
-    const existing = tr.nextElementSibling;
-    if (existing && existing.classList.contains('pm-detail-row')) {
-        existing.remove();
-        return;
-    }
-    // Find the match data
-    let match = null;
-    for (const g of _proactiveGroups) {
-        match = g.matches.find(m => m.id === matchId);
-        if (match) break;
-    }
-    if (!match) return;
+        // ── Expanded detail ──
+        if (isOpen) {
+            html += `<div style="border-bottom:1px solid var(--border);background:var(--bg)">`;
+            // Sub-header with selection info + DNO button
+            html += `<div style="padding:8px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)">
+                <div style="font-size:11px;color:var(--muted)">
+                    <input type="checkbox" style="accent-color:var(--teal);width:14px;height:14px;vertical-align:middle;margin-right:6px" onchange="toggleAllProactiveInGroup(${group.customer_site_id},this.checked)" ${_allGroupChecked(group) ? 'checked' : ''}>
+                    <strong>${selCount} selected</strong>
+                </div>
+                <button class="btn btn-sm" style="background:transparent;color:var(--red);border:1px solid rgba(248,81,73,.3);font-size:10px" onclick="doNotOfferSelected(${group.customer_site_id})">&#128683; Do Not Offer Selected</button>
+            </div>`;
 
-    const cols = tr.querySelectorAll('td').length;
-    const detailRow = document.createElement('tr');
-    detailRow.className = 'pm-detail-row';
-    detailRow.innerHTML = `<td colspan="${cols}" style="background:var(--bg2);padding:10px 16px;font-size:11px;border-left:3px solid var(--teal)">
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 24px">
-            <div><span style="color:var(--muted)">Manufacturer:</span> ${esc(match.manufacturer || '—')}</div>
-            <div><span style="color:var(--muted)">Condition:</span> ${esc(match.condition || '—')}</div>
-            <div><span style="color:var(--muted)">Lead Time:</span> ${esc(match.lead_time || '—')}</div>
-            <div><span style="color:var(--muted)">Offer Date:</span> ${match.offer_created_at ? fmtDateTime(match.offer_created_at) : '—'}</div>
-            <div><span style="color:var(--muted)">Original RFQ:</span> ${esc(match.original_req_name || '—')}</div>
-            <div><span style="color:var(--muted)">Match Created:</span> ${match.created_at ? fmtDateTime(match.created_at) : '—'}</div>
-            <div><span style="color:var(--muted)">Customer Purchase Count:</span> ${match.customer_purchase_count || 0}</div>
-            <div><span style="color:var(--muted)">Customer Last Paid:</span> ${match.customer_last_price != null ? '$' + Number(match.customer_last_price).toFixed(4) : '—'}</div>
-        </div>
-    </td>`;
-    tr.after(detailRow);
+            html += `<div style="overflow-x:auto"><table class="tbl" style="font-size:11px;width:100%"><thead><tr>
+                <th style="width:28px"></th>
+                <th>Part</th>
+                <th>Cond</th>
+                <th>Warranty</th>
+                <th>Lead Time</th>
+                <th>Location</th>
+                <th style="text-align:right">Price</th>
+                <th style="text-align:right">Qty</th>
+                <th>Vendor</th>
+                <th>Buyer</th>
+                <th style="text-align:center">Score</th>
+                <th style="text-align:right">Margin</th>
+                <th style="text-align:center;font-size:9px" title="Do Not Offer Again">DNO</th>
+                <th></th>
+            </tr></thead><tbody>`;
+
+            for (const m of group.matches) {
+                const checked = _proactiveSelected.has(String(m.id));
+                const vs = m.vendor_score != null ? m.vendor_score.toFixed(0) : '—';
+                const cphBadge = m.customer_purchase_count > 0
+                    ? `<span style="font-size:9px;color:var(--purple);background:rgba(167,139,250,.1);padding:1px 6px;border-radius:8px;margin-left:4px">${m.customer_purchase_count}x bought</span>`
+                    : '';
+                html += `<tr style="border-bottom:1px solid var(--border)">
+                    <td><input type="checkbox" style="accent-color:var(--teal);width:14px;height:14px" ${checked ? 'checked' : ''} onchange="toggleProactiveSelect(${m.id})"></td>
+                    <td><strong>${esc(m.mpn)}</strong>${cphBadge}</td>
+                    <td>${esc(m.condition || '—')}</td>
+                    <td>${esc(m.warranty || '—')}</td>
+                    <td>${esc(m.lead_time || '—')}</td>
+                    <td>${esc(m.country_of_origin || '—')}</td>
+                    <td style="text-align:right;font-family:monospace;font-size:11px">${m.unit_price != null ? '$' + Number(m.unit_price).toFixed(4) : '—'}</td>
+                    <td style="text-align:right">${(m.qty_available || 0).toLocaleString()}</td>
+                    <td><span>${esc(m.vendor_name)}</span> <span style="font-size:9px;padding:1px 5px;border-radius:8px;border:1px solid var(--border);${_vendorScoreClass(m.vendor_score)}" title="${_vendorTip(m)}">${vs}</span></td>
+                    <td style="font-size:10px;color:var(--muted)">${esc(m.entered_by_name || '—')}</td>
+                    <td style="text-align:center">${_scoreBadge(m.match_score)}</td>
+                    <td style="text-align:right;font-weight:700;color:${_marginColor(m.margin_pct)}">${m.margin_pct != null ? m.margin_pct.toFixed(1) + '%' : '—'}</td>
+                    <td style="text-align:center"><input type="checkbox" style="accent-color:var(--red);width:14px;height:14px" onchange="doNotOfferMatch(${m.id},${group.customer_site_id})" title="Do not offer this part to ${esc(group.company_name)} again"></td>
+                    <td style="text-align:center"><button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:9px" onclick="dismissSingleMatch(${m.id})">&#10005;</button></td>
+                </tr>`;
+            }
+            html += '</tbody></table></div></div>';
+        }
+    }
+    html += '</div>';
+    el.innerHTML = html;
 }
 
 async function dismissSingleMatch(matchId) {
@@ -4035,9 +4102,11 @@ async function refreshProactiveMatches() {
 
 async function openProactiveSendModal(siteId) {
     _proactiveSendSiteId = siteId;
-    // Get selected match IDs for this site
-    const checks = document.querySelectorAll(`.pm-check[data-site="${siteId}"]:checked`);
-    _proactiveSendMatchIds = Array.from(checks).map(c => parseInt(c.dataset.id));
+    // Get selected match IDs for this site from _proactiveSelected state
+    const group = _proactiveGroups.find(g => g.customer_site_id === siteId);
+    _proactiveSendMatchIds = group
+        ? group.matches.filter(m => _proactiveSelected.has(String(m.id))).map(m => m.id)
+        : [];
     if (!_proactiveSendMatchIds.length) { showToast('Select at least one item', 'error'); return; }
 
     // Load contacts

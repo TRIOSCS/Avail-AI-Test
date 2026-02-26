@@ -80,6 +80,7 @@ class Offer(Base):
     requisition = relationship("Requisition", back_populates="offers")
     requirement = relationship("Requirement", back_populates="offers")
     material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
+    vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
     entered_by = relationship("User", foreign_keys=[entered_by_id])
     updated_by = relationship("User", foreign_keys=[updated_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])

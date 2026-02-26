@@ -23,6 +23,7 @@ from ..models import (
     BuyPlan,
     CustomerSite,
     Offer,
+    ProactiveDoNotOffer,
     ProactiveMatch,
     ProactiveOffer,
     ProactiveThrottle,
@@ -31,6 +32,7 @@ from ..models import (
     Requisition,
     SiteContact,
     User,
+    VendorCard,
 )
 
 log = logging.getLogger("avail.proactive")
@@ -90,6 +92,20 @@ def scan_new_offers_for_matches(db: Session) -> dict:
         for req_item, requisition in candidates:
             site_id = requisition.customer_site_id
             sales_id = requisition.created_by
+
+            # Check do-not-offer suppression
+            _site = db.get(CustomerSite, site_id)
+            if _site and _site.company_id:
+                dno = (
+                    db.query(ProactiveDoNotOffer)
+                    .filter(
+                        ProactiveDoNotOffer.mpn == offer_mpn,
+                        ProactiveDoNotOffer.company_id == _site.company_id,
+                    )
+                    .first()
+                )
+                if dno:
+                    continue
 
             # Check throttle
             throttled = (
@@ -164,12 +180,25 @@ def get_matches_for_user(
         query = query.filter(ProactiveMatch.salesperson_id == user_id)
     if status:
         query = query.filter(ProactiveMatch.status == status)
+
+    # For new matches, only show last 7 days
+    if status == "new":
+        seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        query = query.filter(ProactiveMatch.created_at >= seven_days_ago)
+
     query = query.options(
-        joinedload(ProactiveMatch.offer),
+        joinedload(ProactiveMatch.offer).joinedload(Offer.vendor_card),
+        joinedload(ProactiveMatch.offer).joinedload(Offer.entered_by),
         joinedload(ProactiveMatch.requisition),
         joinedload(ProactiveMatch.customer_site).joinedload(CustomerSite.company),
     ).order_by(ProactiveMatch.match_score.desc(), ProactiveMatch.created_at.desc())
     matches = query.all()
+
+    # Build do-not-offer set for filtering
+    dno_rows = db.query(
+        ProactiveDoNotOffer.mpn, ProactiveDoNotOffer.company_id,
+    ).all()
+    dno_set = {(r.mpn, r.company_id) for r in dno_rows}
 
     # Group by customer site
     groups: dict[int, dict] = {}
@@ -178,14 +207,21 @@ def get_matches_for_user(
     high_margin_count = 0
 
     for m in matches:
+        # Skip matches suppressed by do-not-offer
+        site = m.customer_site
+        company_id = m.company_id or (site.company_id if site else None)
+        mpn_upper = (m.mpn or "").strip().upper()
+        if company_id and (mpn_upper, company_id) in dno_set:
+            continue
+
         site_id = m.customer_site_id
         if site_id not in groups:
-            site = m.customer_site
             company_name = ""
             if site and site.company:
                 company_name = site.company.name
             groups[site_id] = {
                 "customer_site_id": site_id,
+                "company_id": company_id,
                 "company_name": company_name,
                 "site_name": site.site_name if site else "",
                 "matches": [],
@@ -199,6 +235,11 @@ def get_matches_for_user(
             if margin > 30:
                 high_margin_count += 1
 
+        # Vendor card info
+        vc = offer.vendor_card if offer else None
+        # Buyer info
+        entered_by = offer.entered_by if offer else None
+
         groups[site_id]["matches"].append(
             {
                 "id": m.id,
@@ -210,7 +251,9 @@ def get_matches_for_user(
                 if offer and offer.unit_price
                 else None,
                 "condition": offer.condition if offer else "",
+                "warranty": offer.warranty if offer else "",
                 "lead_time": offer.lead_time if offer else "",
+                "country_of_origin": offer.country_of_origin if offer else "",
                 "manufacturer": offer.manufacturer if offer else "",
                 "offer_created_at": offer.created_at.isoformat()
                 if offer and offer.created_at
@@ -229,10 +272,20 @@ def get_matches_for_user(
                 "customer_last_purchased_at": m.customer_last_purchased_at.isoformat()
                 if m.customer_last_purchased_at
                 else None,
+                # Vendor card fields
+                "vendor_score": round(vc.vendor_score, 1) if vc and vc.vendor_score else None,
+                "engagement_score": round(vc.engagement_score, 1) if vc and vc.engagement_score else None,
+                "ghost_rate": round(vc.ghost_rate * 100, 1) if vc and vc.ghost_rate else None,
+                "overall_win_rate": round(vc.overall_win_rate * 100, 1) if vc and vc.overall_win_rate else None,
+                "vendor_total_wins": vc.total_wins if vc else 0,
+                # Buyer info
+                "entered_by_name": (entered_by.name or entered_by.email.split("@")[0])
+                if entered_by else "",
+                "entered_by_id": offer.entered_by_id if offer else None,
             }
         )
 
-    total = len(matches)
+    total = sum(len(g["matches"]) for g in groups.values())
     return {
         "groups": list(groups.values()),
         "stats": {

@@ -17,6 +17,7 @@ from ..models import (
     Company,
     CustomerSite,
     Offer,
+    ProactiveDoNotOffer,
     ProactiveMatch,
     ProactiveThrottle,
     Requirement,
@@ -160,6 +161,18 @@ def _find_matches(
             .first()
         )
         if not site:
+            continue
+
+        # Check do-not-offer suppression
+        dno = (
+            db.query(ProactiveDoNotOffer)
+            .filter(
+                ProactiveDoNotOffer.mpn == mpn.upper().strip(),
+                ProactiveDoNotOffer.company_id == cph.company_id,
+            )
+            .first()
+        )
+        if dno:
             continue
 
         # Check throttle
