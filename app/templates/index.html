@@ -138,23 +138,10 @@
             <div class="sb-group-items">
                 <button type="button" class="sb-nav-btn" id="navCustomers" data-tip="Accounts" onclick="sidebarNav('customers',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span> Accounts</button>
                 <button type="button" class="sb-nav-btn" id="navVendors" data-tip="Vendors" onclick="sidebarNav('vendors',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M6 2L3 7v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-3-5z"/><line x1="3" y1="7" x2="21" y2="7"/><path d="M16 11a4 4 0 0 1-8 0"/></svg></span> Vendors</button>
-                <button type="button" class="sb-nav-btn" id="navContacts" data-tip="Contacts" onclick="sidebarNav('contacts',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22 6 12 13 2 6"/></svg></span> Contacts</button>
-                <button type="button" class="sb-nav-btn" id="navSuggested" data-tip="Suggested" onclick="sidebarNav('suggested',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span> Suggested</button>
-                <button type="button" class="sb-nav-btn" id="navProspecting" data-tip="Prospecting" onclick="sidebarNav('prospecting',this)" style="display:none"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span> Prospecting</button>
+                <button type="button" class="sb-nav-btn" id="navSuggested" data-tip="Prospecting" onclick="sidebarNav('suggested',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span> Prospecting</button>
             </div>
         </div>
-        <div class="sb-nav-group" data-section="insights" style="--section-color:var(--insights-color);--section-dot:var(--insights-dot);--section-border:var(--insights-border)">
-            <div class="sb-section-dot"></div>
-            <div class="sb-group-header" onclick="toggleSidebarGroup(this)">
-                <span class="sb-group-icon"><svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg></span>
-                <span class="sb-group-label">Insight</span>
-                <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
-            </div>
-            <div class="sb-group-items">
-                <button type="button" class="sb-nav-btn" id="navDashboard" data-tip="Dashboard" onclick="sidebarNav('dashboard',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg></span> Dashboard</button>
-                <button type="button" class="sb-nav-btn" id="navScorecards" data-tip="Scorecards" onclick="sidebarNav('performance',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M12 20V10"/><path d="M18 20V4"/><path d="M6 20v-4"/></svg></span> Scorecards</button>
-            </div>
-        </div>
+        <!-- Insight section removed — Dashboard + Scorecards consolidated into Command Center -->
     </nav>
     <button type="button" class="sb-scroll-arrow sb-scroll-down" id="sbScrollDown" onclick="document.querySelector('.sidebar-nav').scrollBy({top:80,behavior:'smooth'})" aria-label="Scroll down"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg></button>
     <div class="sidebar-footer">
@@ -1012,7 +999,13 @@
     <!-- VIEW: Dashboard -->
     <div id="view-dashboard" style="display:none">
         <div style="padding:16px 0 8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-            <h2 style="margin:0;font-size:18px">Dashboard</h2>
+            <div style="display:flex;align-items:center;gap:12px">
+                <h2 style="margin:0;font-size:18px">Command Center</h2>
+                <div class="chip-row" style="margin:0" id="dashScopePills">
+                    <span class="chip on" onclick="setDashScope('my',this)">My Work</span>
+                    <span class="chip" onclick="setDashScope('team',this)">Team</span>
+                </div>
+            </div>
             <div class="chip-row" style="margin:0" id="dashPeriodPills">
                 <span class="chip on" onclick="setDashPeriod('7d',this)">7 Days</span>
                 <span class="chip" onclick="setDashPeriod('30d',this)">30 Days</span>
@@ -1020,6 +1013,21 @@
             </div>
         </div>
         <div id="dashboardContent" aria-live="polite"><p class="empty">Loading…</p></div>
+        <!-- Scorecards section — visible in Team scope -->
+        <div id="dashScorecardsSection" style="display:none">
+            <div style="padding:16px 0 8px;border-top:1px solid var(--border);margin-top:16px">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
+                    <h3 style="margin:0;font-size:15px;color:var(--muted)">Scorecards</h3>
+                    <div class="fpills fpills-sm" id="dashPerfTabs">
+                        <button type="button" class="fp fp-sm on" onclick="switchDashPerfTab('vendors',this)">Vendor</button>
+                        <button type="button" class="fp fp-sm" onclick="switchDashPerfTab('buyers',this)">Buyer</button>
+                        <button type="button" class="fp fp-sm" onclick="switchDashPerfTab('sales',this)">Sales</button>
+                        <button type="button" class="fp fp-sm" id="dashPerfDigestTab" onclick="switchDashPerfTab('digest',this)" style="display:none">Digest</button>
+                    </div>
+                </div>
+                <div id="dashPerfContent"><p class="empty">Loading...</p></div>
+            </div>
+        </div>
     </div>
 
     <!-- VIEW: Performance Tracking -->

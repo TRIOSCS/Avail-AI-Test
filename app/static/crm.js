@@ -4114,8 +4114,7 @@ async function openProactiveSendModal(siteId) {
         _proactiveSiteContacts = await apiFetch('/api/proactive/contacts/' + siteId);
     } catch (e) { logCatchError('proactiveContacts', e); _proactiveSiteContacts = []; }
 
-    // Find group for company name
-    const group = _proactiveGroups.find(g => g.customer_site_id === siteId);
+    // Company name from group already resolved above
     const companyName = group ? group.company_name : '';
 
     // Populate modal
@@ -7012,7 +7011,8 @@ Object.assign(window, {
     showProactiveOffers, showSettings,
     // Proactive UI functions called from HTML onclick
     switchProactiveTab, openProactiveSendModal, dismissProactiveGroup,
-    dismissSingleMatch, toggleProactiveDetail, refreshProactiveMatches,
+    dismissSingleMatch, toggleProactiveGroup, refreshProactiveMatches,
+    toggleProactiveSelect, toggleAllProactiveInGroup, doNotOfferMatch, doNotOfferSelected,
     sendProactiveOffer, convertProactiveOffer, updateProactivePreview, generateProactiveDraft,
     loadProactiveScorecard,
 });

@@ -1227,30 +1227,46 @@ function showContacts() {
 }
 
 let _dashPeriod = '7d';
-let _buyerScope = 'my';
-let _dashPerspective = null; // 'sales' or 'purchasing' — null = auto from role
+let _dashScope = 'my';           // 'my' or 'team' — universal scope toggle
+let _buyerScope = 'my';          // kept for backward compat in loadBuyerDashboard
+let _dashPerspective = null;     // 'sales' or 'purchasing' — null = auto from role
+let _dashPerfTab = 'vendors';    // active scorecard sub-tab
 
 function setDashPeriod(period, btn) {
     _dashPeriod = period;
     document.querySelectorAll('#dashPeriodPills .chip').forEach(b => b.classList.remove('on'));
     if (btn) btn.classList.add('on');
     loadDashboard();
+    if (_dashScope === 'team') _loadDashScorecard(_dashPerfTab);
+}
+
+function setDashScope(scope, btn) {
+    _dashScope = scope;
+    _buyerScope = scope;  // keep legacy in sync
+    document.querySelectorAll('#dashScopePills .chip').forEach(b => b.classList.remove('on'));
+    if (btn) btn.classList.add('on');
+    // Show/hide scorecards section
+    const scSection = document.getElementById('dashScorecardsSection');
+    if (scSection) scSection.style.display = scope === 'team' ? '' : 'none';
+    // Show digest tab for admins
+    const digestTab = document.getElementById('dashPerfDigestTab');
+    if (digestTab) digestTab.style.display = window.__isAdmin ? '' : 'none';
+    loadDashboard();
+    if (scope === 'team') _loadDashScorecard(_dashPerfTab);
 }
 
 function setBuyerScope(scope, btn) {
-    _buyerScope = scope;
-    document.querySelectorAll('#buyerScopePills .chip').forEach(b => b.classList.remove('on'));
-    if (btn) btn.classList.add('on');
-    loadDashboard();
+    // Legacy — redirect to new unified scope
+    setDashScope(scope, null);
+    document.querySelectorAll('#dashScopePills .chip').forEach(b => {
+        b.classList.toggle('on', b.textContent.trim().toLowerCase().replace(' ','') === (scope === 'my' ? 'mywork' : 'team'));
+    });
 }
 
 function setDashPerspective(p, btn) {
     _dashPerspective = p;
     document.querySelectorAll('#ccPerspectivePills .cc-persp-btn').forEach(b => b.classList.remove('on'));
     if (btn) btn.classList.add('on');
-    // Remove scope toggle when switching — it gets rebuilt if needed
-    const scopePills = document.getElementById('buyerScopePills');
-    if (scopePills) scopePills.remove();
     loadDashboard();
 }
 
@@ -1264,13 +1280,117 @@ function _effectivePerspective() {
     return window.userRole === 'sales' ? 'sales' : 'purchasing';
 }
 
+function switchDashPerfTab(tab, btn) {
+    _dashPerfTab = tab;
+    document.querySelectorAll('#dashPerfTabs .fp').forEach(t => t.classList.remove('on'));
+    if (btn) btn.classList.add('on');
+    _loadDashScorecard(tab);
+}
+
+function _loadDashScorecard(tab) {
+    // Delegate to the existing scorecard loaders, targeting the new container
+    const el = document.getElementById('dashPerfContent');
+    if (!el) return;
+    // The existing functions render to their own panels; we'll load directly into dashPerfContent
+    if (tab === 'vendors') _loadDashVendorScorecard(el);
+    else if (tab === 'buyers') _loadDashBuyerLeaderboard(el);
+    else if (tab === 'sales') _loadDashSalesScorecard(el);
+    else if (tab === 'digest') _loadDashDigest(el);
+}
+
+async function _loadDashVendorScorecard(el) {
+    el.innerHTML = '<p class="empty">Loading vendor scorecard...</p>';
+    try {
+        const data = await apiFetch('/api/performance/vendors');
+        const vendors = data.vendors || data || [];
+        if (!vendors.length) { el.innerHTML = '<p class="empty">No vendor scorecard data yet</p>'; return; }
+        let html = '<table class="crm-table" style="font-size:12px"><thead><tr><th>Vendor</th><th>Score</th><th>Win Rate</th><th>Response</th><th>POs</th><th>Revenue</th></tr></thead><tbody>';
+        for (const v of vendors.slice(0, 20)) {
+            html += `<tr onclick="openVendorDrawer(${v.vendor_card_id || v.id})" style="cursor:pointer">
+                <td style="font-weight:600">${esc(v.vendor_name || v.display_name || '')}</td>
+                <td><span style="font-weight:700;font-family:'JetBrains Mono',monospace">${v.vendor_score != null ? Math.round(v.vendor_score) : '—'}</span></td>
+                <td>${v.win_rate != null ? Math.round(v.win_rate * 100) + '%' : '—'}</td>
+                <td>${v.avg_response_hours != null ? Math.round(v.avg_response_hours) + 'h' : '—'}</td>
+                <td>${v.total_pos || 0}</td>
+                <td>${v.total_revenue ? '$' + Number(v.total_revenue).toLocaleString() : '—'}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    } catch(e) { el.innerHTML = '<p class="empty">Failed to load vendor scorecard</p>'; }
+}
+
+async function _loadDashBuyerLeaderboard(el) {
+    el.innerHTML = '<p class="empty">Loading buyer leaderboard...</p>';
+    try {
+        const data = await apiFetch('/api/performance/buyers');
+        const buyers = data.buyers || data || [];
+        if (!buyers.length) { el.innerHTML = '<p class="empty">No buyer data yet</p>'; return; }
+        let html = '<table class="crm-table" style="font-size:12px"><thead><tr><th>Buyer</th><th>Active RFQs</th><th>Offers Logged</th><th>Quotes Built</th><th>Win Rate</th></tr></thead><tbody>';
+        for (const b of buyers) {
+            html += `<tr>
+                <td style="font-weight:600">${esc(b.buyer_name || b.name || '')}</td>
+                <td>${b.active_rfqs || b.active_reqs || 0}</td>
+                <td>${b.offers_logged || b.total_offers || 0}</td>
+                <td>${b.quotes_built || b.total_quotes || 0}</td>
+                <td>${b.win_rate != null ? Math.round(b.win_rate * 100) + '%' : '—'}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    } catch(e) { el.innerHTML = '<p class="empty">Failed to load buyer leaderboard</p>'; }
+}
+
+async function _loadDashSalesScorecard(el) {
+    el.innerHTML = '<p class="empty">Loading sales scorecard...</p>';
+    try {
+        const data = await apiFetch('/api/performance/sales');
+        const reps = data.salespeople || data || [];
+        if (!reps.length) { el.innerHTML = '<p class="empty">No sales data yet</p>'; return; }
+        let html = '<table class="crm-table" style="font-size:12px"><thead><tr><th>Salesperson</th><th>Quotes Sent</th><th>Won</th><th>Revenue</th><th>Win Rate</th></tr></thead><tbody>';
+        for (const s of reps) {
+            html += `<tr>
+                <td style="font-weight:600">${esc(s.name || '')}</td>
+                <td>${s.quotes_sent || 0}</td>
+                <td>${s.quotes_won || 0}</td>
+                <td>${s.revenue ? '$' + Number(s.revenue).toLocaleString() : '—'}</td>
+                <td>${s.win_rate != null ? Math.round(s.win_rate * 100) + '%' : '—'}</td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    } catch(e) { el.innerHTML = '<p class="empty">Failed to load sales scorecard</p>'; }
+}
+
+async function _loadDashDigest(el) {
+    el.innerHTML = '<p class="empty">Loading team digest...</p>';
+    try {
+        const data = await apiFetch('/api/sales/manager-digest');
+        const s = data.summary || data;
+        let html = '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px">';
+        const cards = [
+            { label: 'Active RFQs', val: s.active_rfqs ?? s.total_active ?? '—', color: 'var(--blue)' },
+            { label: 'Offers Today', val: s.offers_today ?? s.new_offers ?? '—', color: 'var(--green)' },
+            { label: 'Quotes Sent', val: s.quotes_sent ?? s.total_quotes ?? '—', color: 'var(--purple)' },
+            { label: 'Pending Follow-ups', val: s.pending_followups ?? s.follow_ups ?? '—', color: 'var(--amber)' },
+        ];
+        for (const c of cards) {
+            html += `<div class="card-v2" style="padding:16px;min-width:120px;text-align:center">
+                <div style="font-size:24px;font-weight:800;color:${c.color}">${c.val}</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:4px">${c.label}</div>
+            </div>`;
+        }
+        html += '</div>';
+        el.innerHTML = html;
+    } catch(e) { el.innerHTML = '<p class="empty">Failed to load team digest</p>'; }
+}
+
 function showDashboard() {
     showView('view-dashboard');
-    const header = document.querySelector('#view-dashboard > div:first-child');
-    if (!header) { loadDashboard(); return; }
 
     // Build perspective toggle for multi-role users (trader/manager/admin)
-    if (_isMultiRole()) {
+    const header = document.querySelector('#view-dashboard > div:first-child');
+    if (_isMultiRole() && header) {
         let toggle = document.getElementById('ccPerspectivePills');
         if (!toggle) {
             toggle = document.createElement('div');
@@ -1283,24 +1403,14 @@ function showDashboard() {
         }
     }
 
-    // Build scope toggle (My Work / Team) for purchasing perspective
-    if (_effectivePerspective() === 'purchasing') {
-        let scopePills = document.getElementById('buyerScopePills');
-        if (!scopePills) {
-            scopePills = document.createElement('div');
-            scopePills.className = 'chip-row';
-            scopePills.id = 'buyerScopePills';
-            scopePills.style.cssText = 'margin:0';
-            scopePills.innerHTML = `<span class="chip ${_buyerScope==='my'?'on':''}" onclick="setBuyerScope('my',this)">My Work</span><span class="chip ${_buyerScope==='team'?'on':''}" onclick="setBuyerScope('team',this)">Team</span>`;
-            const periodPills = document.getElementById('dashPeriodPills');
-            if (periodPills) periodPills.parentElement.insertBefore(scopePills, periodPills);
-        }
-    } else {
-        const scopePills = document.getElementById('buyerScopePills');
-        if (scopePills) scopePills.remove();
-    }
+    // Sync scope toggle state
+    const scSection = document.getElementById('dashScorecardsSection');
+    if (scSection) scSection.style.display = _dashScope === 'team' ? '' : 'none';
+    const digestTab = document.getElementById('dashPerfDigestTab');
+    if (digestTab) digestTab.style.display = window.__isAdmin ? '' : 'none';
 
     loadDashboard();
+    if (_dashScope === 'team') _loadDashScorecard(_dashPerfTab);
 }
 
 function goToReq(reqId) {
@@ -6035,12 +6145,10 @@ export function sidebarNav(page, el) {
     localStorage.setItem('_lastActivityTs', String(Date.now()));
     document.querySelectorAll('.sb-nav-btn, .sb-cc-header').forEach(i => i.classList.remove('active'));
     if (el) el.classList.add('active');
-    // Highlight both Command Center (top) and Dashboard (insight) for dashboard view
-    if (page === 'dashboard') {
+    // Highlight Command Center for dashboard/performance views
+    if (page === 'dashboard' || page === 'performance') {
         const ccBtn = document.getElementById('navCmdCenter');
-        const dbBtn = document.getElementById('navDashboard');
         if (ccBtn) ccBtn.classList.add('active');
-        if (dbBtn) dbBtn.classList.add('active');
     }
     var section = el && el.closest('[data-section]');
     if (section) {
@@ -6061,7 +6169,7 @@ export function sidebarNav(page, el) {
         materials: () => showMaterials(),
         buyplans: () => window.showBuyPlans(),
         proactive: () => window.showProactiveOffers(),
-        performance: () => window.showPerformance(),
+        performance: () => { setDashScope('team', null); showDashboard(); document.querySelectorAll('#dashScopePills .chip').forEach(b => b.classList.toggle('on', b.textContent.trim()==='Team')); },
         settings: () => window.showSettings(),
         contacts: () => showContacts(),
         dashboard: () => showDashboard(),
@@ -8218,6 +8326,7 @@ function filterVendorList() {
                 case 'name': va = (a.display_name || ''); vb = (b.display_name || ''); break;
                 case 'score': va = (a.vendor_score ?? -1); vb = (b.vendor_score ?? -1); break;
                 case 'response': va = (a.response_rate ?? 0); vb = (b.response_rate ?? 0); break;
+                case 'pos': va = (a.total_pos ?? 0); vb = (b.total_pos ?? 0); break;
                 case 'parts': va = (a.sighting_count ?? 0); vb = (b.sighting_count ?? 0); break;
                 default: va = 0; vb = 0;
             }
@@ -8250,6 +8359,7 @@ function filterVendorList() {
             <th>Tier</th>
             ${thSort('score', 'Score')}
             ${thSort('response', 'Response Rate')}
+            ${thSort('pos', 'POs Sent')}
             ${thSort('parts', 'Parts Seen')}
             <th>Last Activity</th>
         </tr></thead><tbody>`;
@@ -8269,6 +8379,7 @@ function filterVendorList() {
             <td><span class="tier-badge tier-badge-${tier}">${tier}</span></td>
             <td><span style="font-weight:600;font-family:'JetBrains Mono',monospace">${score}</span></td>
             <td>${responseRate}</td>
+            <td>${c.total_pos || 0}</td>
             <td>${c.sighting_count || 0}</td>
             <td class="muted-cell">${lastAgo}</td>
         </tr>`;
@@ -10170,7 +10281,8 @@ Object.assign(window, {
     // Contact Intelligence view
     debouncedLoadContacts, setContactStatusFilter, loadContacts, renderContacts, showContacts, updateContactStatus,
     // Dashboard / Command Center
-    setDashPeriod, setBuyerScope, setDashPerspective, showDashboard, loadDashboard, loadBuyerDashboard, goToReq,
+    setDashPeriod, setDashScope, setBuyerScope, setDashPerspective, switchDashPerfTab,
+    showDashboard, loadDashboard, loadBuyerDashboard, goToReq,
     // Unified state helpers
     stateLoading, stateEmpty, stateError,
 });
