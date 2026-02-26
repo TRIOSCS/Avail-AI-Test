@@ -3,6 +3,7 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from ...cache.decorators import invalidate_prefix
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin, require_buyer, require_user
 from ...models import Company, CustomerSite, Requisition, SiteContact, User
@@ -27,6 +28,7 @@ async def add_site(
     site = CustomerSite(company_id=company_id, **payload.model_dump())
     db.add(site)
     db.commit()
+    invalidate_prefix("companies_typeahead")
     return {"id": site.id, "site_name": site.site_name}
 
 

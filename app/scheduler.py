@@ -251,6 +251,14 @@ def configure_scheduler():
         scheduler.add_job(_job_expire_and_resurface, CronTrigger(day="last", hour=21, minute=0),
                           id="expire_and_resurface", name="Expire and resurface prospects")
 
+    # Proactive offer expiry (daily at 4am UTC)
+    scheduler.add_job(_job_proactive_offer_expiry, CronTrigger(hour=4, minute=30),
+                      id="proactive_offer_expiry", name="Expire stale proactive offers")
+
+    # Offer stale flagging (daily at 5am UTC) — display-only, never hides offers
+    scheduler.add_job(_job_flag_stale_offers, CronTrigger(hour=5, minute=0),
+                      id="flag_stale_offers", name="Flag stale offers (14d+)")
+
     # Material card integrity check + self-healing (every 6 hours)
     scheduler.add_job(_job_integrity_check, IntervalTrigger(hours=6),
                       id="integrity_check", name="Material card integrity check")
@@ -1647,6 +1655,76 @@ async def _job_expire_and_resurface():
     """Last day of month 9PM — expire stale, resurface refreshed."""
     from .services.prospect_scheduler import job_expire_and_resurface
     await job_expire_and_resurface()
+
+
+# ── Proactive Offer Expiry ───────────────────────────────────────────
+
+
+@_traced_job
+async def _job_proactive_offer_expiry():
+    """Daily — expire proactive offers with status='sent' that are older than 14 days.
+
+    Proactive offers that never got a customer response should not linger
+    indefinitely. After 14 days, mark them as 'expired' so they don't
+    clutter the active pipeline.
+    """
+    from .database import SessionLocal
+    from .models.intelligence import ProactiveOffer
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        expired_count = (
+            db.query(ProactiveOffer)
+            .filter(
+                ProactiveOffer.status == "sent",
+                ProactiveOffer.sent_at < cutoff,
+            )
+            .update({"status": "expired"}, synchronize_session="fetch")
+        )
+        if expired_count:
+            db.commit()
+            logger.info(f"Expired {expired_count} stale proactive offer(s)")
+    except Exception as e:
+        logger.error(f"Proactive offer expiry error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+# ── Offer Stale Flagging ─────────────────────────────────────────────
+
+
+@_traced_job
+async def _job_flag_stale_offers():
+    """Daily — flag active offers older than 14 days as is_stale.
+
+    Display-only metadata. Stale offers remain fully visible everywhere.
+    "Leave no stone unturned" — we never hide or filter by is_stale.
+    """
+    from .database import SessionLocal
+    from .models.offers import Offer
+
+    db = SessionLocal()
+    try:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=14)
+        flagged = (
+            db.query(Offer)
+            .filter(
+                Offer.status == "active",
+                Offer.is_stale.is_(False),
+                Offer.created_at < cutoff,
+            )
+            .update({"is_stale": True}, synchronize_session="fetch")
+        )
+        if flagged:
+            db.commit()
+            logger.info(f"Flagged {flagged} offer(s) as stale (14d+)")
+    except Exception as e:
+        logger.error(f"Offer stale flagging error: {e}")
+        db.rollback()
+    finally:
+        db.close()
 
 
 # ── Material Card Integrity ──────────────────────────────────────────

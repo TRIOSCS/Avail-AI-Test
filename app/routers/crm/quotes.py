@@ -180,6 +180,7 @@ async def create_quote(
     old_status = req.status
     if req.status in ("active", "sourcing", "offers"):
         req.status = "quoting"
+
     db.commit()
     result = quote_to_dict(quote, db)
     result["req_status"] = req.status

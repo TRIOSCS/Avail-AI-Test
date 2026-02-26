@@ -146,26 +146,32 @@ async def companies_typeahead(
     db: Session = Depends(get_db),
 ):
     """Lightweight endpoint returning all active companies + site IDs for the
-    requisition creation typeahead. No limit, minimal payload."""
-    companies = (
-        db.query(Company)
-        .filter(Company.is_active == True)  # noqa: E712
-        .options(selectinload(Company.sites))
-        .order_by(Company.name)
-        .all()
-    )
-    return [
-        {
-            "id": c.id,
-            "name": c.name,
-            "sites": [
-                {"id": s.id, "site_name": s.site_name}
-                for s in c.sites
-                if s.is_active
-            ],
-        }
-        for c in companies
-    ]
+    requisition creation typeahead. No limit, minimal payload.
+    Cached for 2 hours — invalidated when companies/sites change."""
+
+    @cached_endpoint(prefix="companies_typeahead", ttl_hours=2, key_params=[])
+    def _fetch(db):
+        companies = (
+            db.query(Company)
+            .filter(Company.is_active == True)  # noqa: E712
+            .options(selectinload(Company.sites))
+            .order_by(Company.name)
+            .all()
+        )
+        return [
+            {
+                "id": c.id,
+                "name": c.name,
+                "sites": [
+                    {"id": s.id, "site_name": s.site_name}
+                    for s in c.sites
+                    if s.is_active
+                ],
+            }
+            for c in companies
+        ]
+
+    return _fetch(db=db)
 
 
 @router.get("/api/companies/check-duplicate")
@@ -300,6 +306,7 @@ async def create_company(
         enrich_triggered = True
 
     invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
     return {
         "id": company.id,
         "name": company.name,
@@ -322,6 +329,7 @@ async def update_company(
         setattr(company, field, value)
     db.commit()
     invalidate_prefix("company_list")
+    invalidate_prefix("companies_typeahead")
     return {"ok": True}
 
 

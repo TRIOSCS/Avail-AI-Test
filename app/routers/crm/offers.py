@@ -7,7 +7,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ...database import get_db
-from ...dependencies import require_buyer, require_user
+from ...dependencies import is_admin as _is_admin, require_buyer, require_user
 from ...models import (
     ActivityLog,
     ChangeLog,
@@ -518,6 +518,33 @@ async def reject_offer(
                    {"status": old_status}, {"status": "rejected"}, ["status"])
     db.commit()
     return {"ok": True, "status": "rejected"}
+
+
+@router.patch("/api/offers/{offer_id}/mark-sold")
+async def mark_offer_sold(
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark an offer as sold — stock is confirmed purchased/gone.
+
+    Only the buyer who created the offer or an admin can mark it sold.
+    """
+    offer = db.get(Offer, offer_id)
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    if offer.entered_by_id != user.id and not _is_admin(user):
+        raise HTTPException(403, "Only the offer creator or an admin can mark sold")
+    if offer.status == "sold":
+        return {"ok": True, "status": "sold", "message": "Already marked sold"}
+    old_status = offer.status
+    offer.status = "sold"
+    offer.updated_at = datetime.now(timezone.utc)
+    offer.updated_by_id = user.id
+    record_changes(db, "offer", offer_id, user.id,
+                   {"status": old_status}, {"status": "sold"}, ["status"])
+    db.commit()
+    return {"ok": True, "status": "sold"}
 
 
 @router.get("/api/changelog/{entity_type}/{entity_id}")

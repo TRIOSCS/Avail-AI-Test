@@ -342,49 +342,49 @@ def hot_offers(
     """Return recent vendor offers received within `days` window.
 
     Shows vendor name, MPN, unit price, age, and links to the requisition.
-    Sorted by most recent first.
+    Sorted by most recent first. Cached for 15 min.
     """
     from ..models.offers import Offer
-    from ..models.sourcing import Requisition
 
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(days=days)
+    @cached_endpoint(prefix="hot_offers", ttl_hours=0.25, key_params=["days"])
+    def _fetch(days, db):
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(days=days)
 
-    offers = (
-        db.query(Offer)
-        .join(Requisition, Offer.requisition_id == Requisition.id)
-        .filter(
-            Offer.created_at >= cutoff,
-            Offer.status == "active",
+        # Query only needed columns, skip unnecessary JOIN since we just
+        # need requisition_id (already on the Offer row)
+        offers = (
+            db.query(
+                Offer.id, Offer.vendor_name, Offer.mpn, Offer.unit_price,
+                Offer.currency, Offer.requisition_id, Offer.source, Offer.created_at,
+            )
+            .filter(
+                Offer.created_at >= cutoff,
+                Offer.status == "active",
+            )
+            .order_by(Offer.created_at.desc())
+            .limit(15)
+            .all()
         )
-        .order_by(Offer.created_at.desc())
-        .limit(15)
-        .all()
-    )
 
-    results = []
-    for o in offers:
-        age_hours = (now - o.created_at).total_seconds() / 3600 if o.created_at else 0
-        if age_hours < 1:
-            age_label = "just now"
-        elif age_hours < 24:
-            age_label = f"{int(age_hours)}h ago"
-        else:
-            age_label = f"{int(age_hours / 24)}d ago"
+        results = []
+        for o in offers:
+            ca = _ensure_aware(o.created_at)
+            age_hours = (now - ca).total_seconds() / 3600 if ca else 0
+            results.append({
+                "id": o.id,
+                "vendor_name": o.vendor_name,
+                "mpn": o.mpn,
+                "unit_price": float(o.unit_price) if o.unit_price else None,
+                "currency": o.currency or "USD",
+                "requisition_id": o.requisition_id,
+                "source": o.source,
+                "age_label": _age_label(age_hours),
+                "created_at": o.created_at.isoformat() if o.created_at else None,
+            })
+        return results
 
-        results.append({
-            "id": o.id,
-            "vendor_name": o.vendor_name,
-            "mpn": o.mpn,
-            "unit_price": float(o.unit_price) if o.unit_price else None,
-            "currency": o.currency or "USD",
-            "requisition_id": o.requisition_id,
-            "source": o.source,
-            "age_label": age_label,
-            "created_at": o.created_at.isoformat() if o.created_at else None,
-        })
-
-    return results
+    return _fetch(days=days, db=db)
 
 
 @router.get("/buyer-brief")
@@ -554,38 +554,42 @@ def buyer_brief(
         })
 
     # ── Tile 3b: Requisitions at Risk ──
-    # Active reqs where: deadline ≤7 days away with no offers, OR no offers
-    # at all after 48h, OR only 1 offer (no competitive options)
-    at_risk_reqs = (
-        db.query(Requisition)
+    # Single query: join reqs with offer counts, only load reqs that could be at risk
+    # (created >48h ago with ≤1 offer, or have a deadline)
+    offer_count_sub = (
+        db.query(
+            Offer.requisition_id,
+            func.count(Offer.id).label("offer_cnt"),
+        )
+        .group_by(Offer.requisition_id)
+        .subquery()
+    )
+    at_risk_rows = (
+        db.query(
+            Requisition.id,
+            Requisition.name,
+            Requisition.customer_name,
+            Requisition.deadline,
+            Requisition.created_at,
+            func.coalesce(offer_count_sub.c.offer_cnt, 0).label("num_offers"),
+        )
+        .outerjoin(offer_count_sub, Requisition.id == offer_count_sub.c.requisition_id)
         .filter(
             Requisition.status.in_(("open", "active", "sourcing")),
             _user_filter(Requisition.created_by),
         )
         .all()
     )
-    # Batch-load offer counts for these reqs
-    at_risk_ids = [r.id for r in at_risk_reqs]
-    offer_counts = {}
-    if at_risk_ids:
-        oc_rows = (
-            db.query(Offer.requisition_id, func.count(Offer.id))
-            .filter(Offer.requisition_id.in_(at_risk_ids))
-            .group_by(Offer.requisition_id)
-            .all()
-        )
-        offer_counts = {rid: cnt for rid, cnt in oc_rows}
 
     reqs_at_risk = []
-    for r in at_risk_reqs:
-        num_offers = offer_counts.get(r.id, 0)
-        age_hours = (now - _ensure_aware(r.created_at)).total_seconds() / 3600 if r.created_at else 0
+    for row in at_risk_rows:
+        num_offers = row.num_offers
+        age_hours = (now - _ensure_aware(row.created_at)).total_seconds() / 3600 if row.created_at else 0
         risk_reasons = []
         urgency = "normal"
 
-        # Check deadline proximity with no/few offers
-        if r.deadline:
-            dl = r.deadline
+        if row.deadline:
+            dl = row.deadline
             if dl == "ASAP":
                 if num_offers == 0:
                     risk_reasons.append("ASAP — no offers")
@@ -610,44 +614,43 @@ def buyer_brief(
                 except (ValueError, TypeError):
                     pass
 
-        # Old req with zero offers (no deadline needed)
         if not risk_reasons and num_offers == 0 and age_hours >= 48:
             risk_reasons.append(f"no offers after {int(age_hours / 24)}d")
             urgency = "warning"
 
-        # Only 1 offer after 72h+ (no competitive options)
         if not risk_reasons and num_offers == 1 and age_hours >= 72:
             risk_reasons.append(f"only 1 offer after {int(age_hours / 24)}d")
             urgency = "normal"
 
         if risk_reasons:
             reqs_at_risk.append({
-                "id": r.id,
-                "name": r.name,
-                "customer_name": r.customer_name,
+                "id": row.id,
+                "name": row.name,
+                "customer_name": row.customer_name,
                 "num_offers": num_offers,
                 "risk": risk_reasons[0],
                 "urgency": urgency,
             })
 
-    # Sort: critical first, then warning, then normal
     urgency_order = {"critical": 0, "warning": 1, "normal": 2}
     reqs_at_risk.sort(key=lambda x: urgency_order.get(x["urgency"], 3))
     reqs_at_risk = reqs_at_risk[:15]
 
     # ── Tile 4: Quotes Due Soon (approaching deadlines) ──
-    deadline_reqs = (
-        db.query(Requisition)
+    # Only fetch columns needed, limit to 50 to avoid loading entire table
+    deadline_rows = (
+        db.query(Requisition.id, Requisition.name, Requisition.deadline)
         .filter(
             Requisition.deadline.isnot(None),
             Requisition.status.in_(("open", "active", "sourcing")),
             _user_filter(Requisition.created_by),
         )
+        .limit(200)
         .all()
     )
     quotes_due_soon = []
-    for r in deadline_reqs:
-        dl = r.deadline
+    for row in deadline_rows:
+        dl = row.deadline
         if dl == "ASAP":
             urgency = "critical"
             days_left = 0
@@ -666,8 +669,8 @@ def buyer_brief(
             except (ValueError, TypeError):
                 continue
         quotes_due_soon.append({
-            "id": r.id,
-            "name": r.name,
+            "id": row.id,
+            "name": row.name,
             "deadline": dl,
             "days_left": days_left,
             "urgency": urgency,

@@ -714,19 +714,26 @@ class TestRequisitionCreateRequirements:
 
     def test_add_requirements_duplicate_detection(self, client, db_session, test_customer_site):
         """Adding MPN that was recently quoted for same customer shows duplicate warning."""
-        from app.models import Requisition, Requirement
-        # Create first requisition with an MPN for this customer
+        from app.models import MaterialCard, Requisition, Requirement
+        # Create a material card so duplicate detection can match on material_card_id
+        mc = MaterialCard(normalized_mpn="dupmpn001", display_mpn="DUP-MPN-001")
+        db_session.add(mc)
+        db_session.flush()
+        # Create first requisition with an MPN linked to the card
         req1 = Requisition(name="First-Req", customer_site_id=test_customer_site.id, status="active", created_by=1)
         db_session.add(req1)
         db_session.flush()
-        r1 = Requirement(requisition_id=req1.id, primary_mpn="DUP-MPN-001", normalized_mpn="dupmpn001", target_qty=10)
+        r1 = Requirement(
+            requisition_id=req1.id, primary_mpn="DUP-MPN-001",
+            normalized_mpn="dupmpn001", material_card_id=mc.id, target_qty=10,
+        )
         db_session.add(r1)
         db_session.commit()
         # Create second requisition for same customer
         req2 = Requisition(name="Second-Req", customer_site_id=test_customer_site.id, status="draft", created_by=1)
         db_session.add(req2)
         db_session.commit()
-        # Add same MPN — should trigger duplicate warning
+        # Add same MPN — resolve_material_card finds existing card, triggering duplicate
         resp = client.post(
             f"/api/requisitions/{req2.id}/requirements",
             json=[{"primary_mpn": "DUP-MPN-001", "target_qty": 5}],

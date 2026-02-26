@@ -548,7 +548,7 @@ class TestGetAvailScores:
         assert result == []
 
     def test_get_scores_returns_metrics(self, db_session):
-        """Scores returned include full metric breakdown."""
+        """Scores returned include full metric breakdown (flat keys)."""
         buyer = _make_user(db_session, "Query Buyer", "buyer", "query")
         db_session.commit()
 
@@ -559,15 +559,12 @@ class TestGetAvailScores:
         entry = result[0]
         assert entry["user_name"] == "Query Buyer"
         assert entry["rank"] == 1
-        assert "metrics" in entry
-        assert len(entry["metrics"]) == 10
-        # Check metric structure
-        m = entry["metrics"][0]
-        assert "key" in m
-        assert "category" in m
-        assert "label" in m
-        assert "score" in m
-        assert "raw" in m
+        # Flat metric keys: b1-b5 and o1-o5 with _score, _label, _raw suffixes
+        for prefix in ("b", "o"):
+            for i in range(1, 6):
+                assert f"{prefix}{i}_score" in entry
+                assert f"{prefix}{i}_label" in entry
+                assert f"{prefix}{i}_raw" in entry
 
 
 # ── API Endpoint Tests ──────────────────────────────────────────────
