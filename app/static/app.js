@@ -1228,6 +1228,7 @@ function showContacts() {
 
 let _dashPeriod = '7d';
 let _dashScope = 'my';           // 'my' or 'team' — universal scope toggle
+let _dashUserId = null;          // specific user to view in CC — null = current user
 let _buyerScope = 'my';          // kept for backward compat in loadBuyerDashboard
 let _dashPerspective = null;     // 'sales' or 'purchasing' — null = auto from role
 let _dashPerfTab = 'vendors';    // active scorecard sub-tab
@@ -1258,9 +1259,39 @@ function setDashScope(scope, btn) {
 function setBuyerScope(scope, btn) {
     // Legacy — redirect to new unified scope
     setDashScope(scope, null);
-    document.querySelectorAll('#dashScopePills .chip').forEach(b => {
-        b.classList.toggle('on', b.textContent.trim().toLowerCase().replace(' ','') === (scope === 'my' ? 'mywork' : 'team'));
-    });
+}
+
+function setDashUserFilter(val) {
+    if (val === '' || val === String(window.userId)) {
+        _dashUserId = null;
+        _dashScope = 'my';
+        _buyerScope = 'my';
+    } else {
+        _dashUserId = parseInt(val);
+        _dashScope = 'team';
+        _buyerScope = 'team';
+    }
+    // Show scorecards when viewing team/other user
+    const scSection = document.getElementById('dashScorecardsSection');
+    if (scSection) scSection.style.display = _dashScope === 'team' ? '' : 'none';
+    loadDashboard();
+    if (_dashScope === 'team') _loadDashScorecard(_dashPerfTab);
+}
+
+async function _populateDashUserSelect() {
+    const sel = document.getElementById('dashUserSelect');
+    if (!sel) return;
+    let users = window._userFilterList;
+    if (!users) {
+        try { users = await apiFetch('/api/users/list'); } catch(e) { users = []; }
+        window._userFilterList = users;
+    }
+    const myId = window.userId;
+    sel.innerHTML = '<option value="">My Work</option>' +
+        users.filter(u => u.id !== myId).map(u =>
+            '<option value="' + u.id + '"' +
+            (_dashUserId === u.id ? ' selected' : '') +
+            '>' + esc(u.name) + '</option>').join('');
 }
 
 function setDashPerspective(p, btn) {
@@ -1409,6 +1440,7 @@ function showDashboard() {
     const digestTab = document.getElementById('dashPerfDigestTab');
     if (digestTab) digestTab.style.display = window.__isAdmin ? '' : 'none';
 
+    _populateDashUserSelect();
     loadDashboard();
     if (_dashScope === 'team') _loadDashScorecard(_dashPerfTab);
 }
@@ -1456,10 +1488,10 @@ async function loadDashboard() {
         const reqList = Array.isArray(reqs) ? reqs : [];
         const quoteList = Array.isArray(quotes) ? quotes : [];
         const attnList = Array.isArray(needsAttn) ? needsAttn : [];
-        const myId = window.userId;
+        const targetId = _dashUserId || window.userId;
 
-        // Filter to "my" data
-        const myReqs = myId ? reqList.filter(r => r.created_by === myId || r.sales_user_id === myId) : reqList;
+        // Filter to selected user's data
+        const myReqs = targetId ? reqList.filter(r => r.created_by === targetId || r.sales_user_id === targetId) : reqList;
 
         // Stat calculations
         const now = new Date();
@@ -5424,6 +5456,7 @@ function renderReqList() {
         loadMoreHtml = `<div style="text-align:center;padding:16px"><button class="btn btn-ghost" onclick="loadRequisitions('',true)">Load more archived RFQs…</button></div>`;
     }
     el.innerHTML = `<table class="tbl">${thead}<tbody>${rowsHtml}</tbody></table>${loadMoreHtml}`;
+    _populateUserFilter();
     _updateToolbarStats();
     // Restore previously open drill-downs
     if (_openDrillIds.length) {
@@ -6190,7 +6223,7 @@ export function sidebarNav(page, el) {
         materials: () => showMaterials(),
         buyplans: () => window.showBuyPlans(),
         proactive: () => window.showProactiveOffers(),
-        performance: () => { setDashScope('team', null); showDashboard(); document.querySelectorAll('#dashScopePills .chip').forEach(b => b.classList.toggle('on', b.textContent.trim()==='Team')); },
+        performance: () => { setDashScope('team', null); showDashboard(); },
         settings: () => window.showSettings(),
         contacts: () => showContacts(),
         dashboard: () => showDashboard(),
@@ -10302,7 +10335,8 @@ Object.assign(window, {
     // Contact Intelligence view
     debouncedLoadContacts, setContactStatusFilter, loadContacts, renderContacts, showContacts, updateContactStatus,
     // Dashboard / Command Center
-    setDashPeriod, setDashScope, setBuyerScope, setDashPerspective, switchDashPerfTab,
+    setDashPeriod, setDashScope, setBuyerScope, setDashPerspective, switchDashPerfTab, setDashUserFilter,
+    setUserFilter, _populateUserFilter, _populateDashUserSelect,
     showDashboard, loadDashboard, loadBuyerDashboard, goToReq,
     // Unified state helpers
     stateLoading, stateEmpty, stateError,
