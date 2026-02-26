@@ -1403,47 +1403,52 @@ async def list_materials(
     q = request.query_params.get("q", "").strip().lower()
     limit = min(int(request.query_params.get("limit", "200")), 1000)
     offset = max(int(request.query_params.get("offset", "0")), 0)
-    query = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None)).order_by(MaterialCard.last_searched_at.desc())
-    if q:
-        safe_q = q.replace("%", r"\%").replace("_", r"\_")
-        query = query.filter(MaterialCard.normalized_mpn.ilike(f"{safe_q}%"))
-    total = query.count()
-    cards = query.limit(limit).offset(offset).all()
-    if not cards:
-        return {"materials": [], "total": total, "limit": limit, "offset": offset}
-    # Batch fetch vendor counts — single query instead of N+1
-    card_ids = [c.id for c in cards]
-    counts = (
-        dict(
-            db.query(
-                MaterialVendorHistory.material_card_id,
-                sqlfunc.count(MaterialVendorHistory.id),
+
+    @cached_endpoint(prefix="material_list", ttl_hours=2, key_params=["q", "limit", "offset"])
+    def _fetch(q, limit, offset, user, db):
+        query = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None)).order_by(MaterialCard.last_searched_at.desc())
+        if q:
+            safe_q = q.replace("%", r"\%").replace("_", r"\_")
+            query = query.filter(MaterialCard.normalized_mpn.ilike(f"{safe_q}%"))
+        total = query.count()
+        cards = query.limit(limit).offset(offset).all()
+        if not cards:
+            return {"materials": [], "total": total, "limit": limit, "offset": offset}
+        # Batch fetch vendor counts — single query instead of N+1
+        card_ids = [c.id for c in cards]
+        counts = (
+            dict(
+                db.query(
+                    MaterialVendorHistory.material_card_id,
+                    sqlfunc.count(MaterialVendorHistory.id),
+                )
+                .filter(MaterialVendorHistory.material_card_id.in_(card_ids))
+                .group_by(MaterialVendorHistory.material_card_id)
+                .all()
             )
-            .filter(MaterialVendorHistory.material_card_id.in_(card_ids))
-            .group_by(MaterialVendorHistory.material_card_id)
-            .all()
+            if card_ids
+            else {}
         )
-        if card_ids
-        else {}
-    )
-    return {
-        "materials": [
-            {
-                "id": c.id,
-                "display_mpn": c.display_mpn,
-                "manufacturer": c.manufacturer,
-                "search_count": c.search_count or 0,
-                "vendor_count": counts.get(c.id, 0),
-                "last_searched_at": c.last_searched_at.isoformat()
-                if c.last_searched_at
-                else None,
-            }
-            for c in cards
-        ],
-        "total": total,
-        "limit": limit,
-        "offset": offset,
-    }
+        return {
+            "materials": [
+                {
+                    "id": c.id,
+                    "display_mpn": c.display_mpn,
+                    "manufacturer": c.manufacturer,
+                    "search_count": c.search_count or 0,
+                    "vendor_count": counts.get(c.id, 0),
+                    "last_searched_at": c.last_searched_at.isoformat()
+                    if c.last_searched_at
+                    else None,
+                }
+                for c in cards
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
+    return _fetch(q=q, limit=limit, offset=offset, user=user, db=db)
 
 
 @router.get("/api/materials/{card_id}")

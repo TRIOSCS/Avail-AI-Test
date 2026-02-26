@@ -42,6 +42,7 @@ from ..models import (
     User,
     VendorResponse,
 )
+from ..cache.decorators import cached_endpoint, invalidate_prefix
 from ..rate_limit import limiter
 from ..schemas.requisitions import (
     RequirementCreate,
@@ -98,6 +99,16 @@ async def list_requisitions(
     db: Session = Depends(get_db),
 ):
     """List requisitions with filtering, search, and sourcing scores."""
+
+    @cached_endpoint(prefix="req_list", ttl_hours=0.0083, key_params=["q", "status", "limit", "offset"])
+    def _fetch(q, status, limit, offset, user, db):
+        return _build_requisition_list(q, status, limit, offset, user, db)
+
+    return _fetch(q=q, status=status, limit=limit, offset=offset, user=user, db=db)
+
+
+def _build_requisition_list(q, status, limit, offset, user, db):
+    """Build the requisitions list response (extracted for caching)."""
     # Single query with subquery counts — avoids N+1 lazy loads
     req_count_sq = (
         select(sqlfunc.count(Requirement.id))
@@ -462,6 +473,7 @@ async def create_requisition(
     )
     db.add(req)
     db.commit()
+    invalidate_prefix("req_list")
     return {"id": req.id, "name": req.name}
 
 
@@ -477,6 +489,7 @@ async def toggle_archive(
     else:
         req.status = "archived"
     db.commit()
+    invalidate_prefix("req_list")
     return {"ok": True, "status": req.status}
 
 
@@ -492,6 +505,7 @@ async def bulk_archive(
     )
     count = q.update({"status": "archived"}, synchronize_session="fetch")
     db.commit()
+    invalidate_prefix("req_list")
     return {"ok": True, "archived_count": count}
 
 
@@ -505,6 +519,7 @@ async def dismiss_new_offers(
         raise HTTPException(404, "Requisition not found")
     req.offers_viewed_at = sqlfunc.now()
     db.commit()
+    invalidate_prefix("req_list")
     return {"ok": True}
 
 
@@ -525,6 +540,7 @@ async def update_requisition(
     if body.deadline is not None:
         req.deadline = body.deadline or None
     db.commit()
+    invalidate_prefix("req_list")
     return {"ok": True, "name": req.name}
 
 
