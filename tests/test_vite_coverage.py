@@ -20,6 +20,8 @@ import app.vite as vite_mod
 from app.vite import (
     _manifest_css,
     _manifest_url,
+    vite_app_url,
+    vite_crm_url,
     vite_css_tags,
     vite_js_tags,
 )
@@ -237,3 +239,40 @@ class TestViteJsTags:
                 result = vite_js_tags()
                 # Since crm_url is None, falls to importmap
                 assert "importmap" in str(result)
+
+
+# ── vite_app_url / vite_crm_url ─────────────────────────────────────
+
+
+class TestViteAppUrl:
+    def test_manifest_hit_returns_hashed_url(self):
+        """When manifest has app.js entry, return its hashed URL (line 75)."""
+        _clear_manifest_cache()
+        manifest = {"app.js": {"file": "assets/app-ha5h.js"}}
+        with patch.object(vite_mod, "_load_manifest", return_value=manifest):
+            result = vite_app_url("1.0")
+            assert result == "/static/assets/app-ha5h.js"
+
+    def test_no_manifest_falls_back(self):
+        """Without manifest, returns raw source with bust param."""
+        _clear_manifest_cache()
+        with patch.object(vite_mod, "_load_manifest", return_value=None):
+            result = vite_app_url("2.0")
+            assert result == "/static/app.js?v=2.0"
+
+
+class TestViteCrmUrl:
+    def test_manifest_hit_returns_hashed_url(self):
+        """When manifest has crm.js entry, return its hashed URL (line 84)."""
+        _clear_manifest_cache()
+        manifest = {"crm.js": {"file": "assets/crm-x9z.js"}}
+        with patch.object(vite_mod, "_load_manifest", return_value=manifest):
+            result = vite_crm_url("1.0")
+            assert result == "/static/assets/crm-x9z.js"
+
+    def test_no_manifest_falls_back(self):
+        """Without manifest, returns raw source with bust param."""
+        _clear_manifest_cache()
+        with patch.object(vite_mod, "_load_manifest", return_value=None):
+            result = vite_crm_url("3.0")
+            assert result == "/static/crm.js?v=3.0"

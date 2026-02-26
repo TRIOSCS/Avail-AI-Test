@@ -404,9 +404,9 @@ class TestMatchIndustry:
         assert score == 20
 
     def test_industry_keyword_match(self):
-        """Industry keyword match gets 10 points."""
+        """Industry keyword match gets 20 points."""
         segment, score = match_industry_segment("Aerospace Manufacturing", None)
-        assert score == 10
+        assert score == 20
         assert segment == "Aerospace & Defense"
 
     def test_no_match(self):

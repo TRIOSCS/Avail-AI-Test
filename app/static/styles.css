@@ -1859,6 +1859,56 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .as-metric-raw{font-size:10px;color:var(--text-muted);font-style:italic}
 @media(max-width:768px){.as-metrics{grid-template-columns:1fr}.as-scores{gap:2px}.as-total{font-size:14px}}
 
+/* ── Team Leaderboard ───────────────────────────────── */
+.lb-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.lb-month{font-size:13px;font-weight:600;color:var(--text)}
+.lb-list{display:flex;flex-direction:column;gap:2px}
+.lb-entry{border:1px solid var(--border);border-radius:8px;overflow:hidden;cursor:pointer;transition:box-shadow .15s}
+.lb-entry:hover{box-shadow:0 2px 8px rgba(0,0,0,.06)}
+.lb-me{border-color:var(--blue);background:rgba(61,104,149,0.04)}
+.lb-row{display:flex;align-items:center;gap:10px;padding:10px 14px}
+.lb-rank{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:50%;font-size:13px;font-weight:800;color:var(--muted);background:var(--surface);flex-shrink:0}
+.lb-gold{background:#fef3c7;color:#d97706}
+.lb-silver{background:#e5e7eb;color:#6b7280}
+.lb-bronze{background:#fed7aa;color:#c2410c}
+.lb-name-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.lb-name{font-weight:600;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lb-you{font-weight:400;color:var(--blue);font-size:11px}
+.lb-tags{display:flex;gap:4px;flex-wrap:wrap}
+.lb-bonus-badge{font-size:10px;font-weight:700;color:var(--green);background:var(--green-lt,#e6f7ee);padding:1px 6px;border-radius:8px}
+.lb-unqualified{font-size:10px;color:var(--muted);font-style:italic}
+.lb-scores{display:flex;align-items:center;gap:12px;flex-shrink:0}
+.lb-score-block{display:flex;flex-direction:column;align-items:center;gap:1px}
+.lb-score-val{font-size:18px;font-weight:800;font-family:'JetBrains Mono',monospace}
+.lb-pts{color:var(--blue)}
+.lb-score-lbl{font-size:9px;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);font-weight:600}
+.lb-score-sep{width:1px;height:28px;background:var(--border)}
+.lb-detail{max-height:0;overflow:hidden;transition:max-height .3s ease,padding .3s ease;padding:0 14px;border-top:0 solid var(--border)}
+.lb-detail.open{max-height:800px;padding:14px;border-top:1px solid var(--border)}
+.lb-entry.lb-open .as-chevron{transform:rotate(180deg)}
+.lb-detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}
+.lb-detail-col{display:flex;flex-direction:column;gap:8px}
+.lb-detail-title{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--muted);border-bottom:1px solid var(--border);padding-bottom:4px}
+.lb-detail-sub{font-weight:500;font-size:11px;color:var(--text-muted);float:right;text-transform:none;letter-spacing:0}
+.lb-detail-split{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.lb-metric-hdr{font-size:11px;font-weight:600;color:var(--text);margin-bottom:4px}
+.lb-metric-sub{font-weight:400;font-size:10px;color:var(--muted)}
+.lb-metric{display:flex;align-items:center;gap:6px;font-size:11px}
+.lb-metric-label{flex:1;color:var(--text);min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lb-metric-num{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;color:var(--text-muted);flex-shrink:0}
+.lb-bar{height:4px;background:var(--surface);border-radius:2px;flex:1;min-width:40px}
+.lb-bar-fill{height:100%;border-radius:2px;transition:width .3s ease}
+.lb-bar-behavior{background:var(--blue)}
+.lb-bar-outcome{background:var(--green)}
+.lb-bar-tier{background:var(--blue)}
+.lb-tier-list{display:flex;flex-direction:column;gap:6px}
+.lb-tier{display:flex;flex-direction:column;gap:2px}
+.lb-tier-head{display:flex;justify-content:space-between;font-size:11px;color:var(--text)}
+.lb-tier-rate{font-size:9px;color:var(--muted);font-weight:400}
+.lb-tier-val{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;color:var(--text-muted)}
+.lb-bonus-section{margin-top:8px;padding-top:6px;border-top:1px solid var(--border)}
+@media(max-width:768px){.lb-detail-grid{grid-template-columns:1fr}.lb-detail-split{grid-template-columns:1fr}.lb-scores{gap:8px}.lb-score-val{font-size:14px}}
+
 /* ── Engagement Ring (SVG) ───────────────────────────────── */
 .eng-ring{width:44px;height:44px;flex-shrink:0}
 .eng-ring-bg{fill:none;stroke:var(--border);stroke-width:3}

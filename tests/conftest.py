@@ -17,6 +17,10 @@ Depends on: app.models (Base), app.database (get_db), app.dependencies
 import asyncio
 import os
 
+import nest_asyncio
+
+nest_asyncio.apply()  # Allow nested event loops (prevents cross-test contamination)
+
 os.environ["TESTING"] = "1"  # Must be set before importing app modules
 os.environ["RATE_LIMIT_ENABLED"] = "false"  # Disable rate limiting in tests
 

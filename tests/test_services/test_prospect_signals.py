@@ -949,3 +949,254 @@ class TestRecalculateReadiness:
         db_session.refresh(p)
         score_after_events = p.readiness_score
         assert score_after_events >= score_after_intent
+
+
+# ── Coverage: enrich_missing_signals lines 214-216, 230-231 ─────────
+
+
+class TestEnrichMissingSignalsHiringAndEvents:
+    @patch("app.http_client.http")
+    def test_engineering_hiring_path(self, mock_http, db_session):
+        """Lines 214-216: hiring 'engineering' type when no procurement growth."""
+        from app.services.prospect_signals import enrich_missing_signals
+
+        p = _make_prospect(
+            db_session,
+            domain="enghire.com",
+            discovery_source="email_mining",
+            readiness_signals={},
+        )
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "businesses": [{
+                "business_intent_topics": ["electronic components"],
+                "workforce_trends": {
+                    "procurement": None,
+                    "engineering": "12% growth",
+                },
+                "recent_events": [],
+            }]
+        }
+        mock_http.post = AsyncMock(return_value=mock_resp)
+
+        with patch(
+            "app.services.prospect_discovery_explorium._get_api_key",
+            return_value="test-key",
+        ):
+            result = asyncio.get_event_loop().run_until_complete(
+                enrich_missing_signals(p.id, db_session)
+            )
+
+        assert result is True
+        db_session.refresh(p)
+        assert p.readiness_signals["hiring"]["type"] == "engineering"
+        assert p.readiness_signals["hiring"]["detail"] == "12% growth"
+
+    @patch("app.http_client.http")
+    def test_string_event_parsing(self, mock_http, db_session):
+        """Lines 230-231: when events contain plain strings instead of dicts."""
+        from app.services.prospect_signals import enrich_missing_signals
+
+        p = _make_prospect(
+            db_session,
+            domain="strevents.com",
+            discovery_source="email_mining",
+            readiness_signals={},
+        )
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "businesses": [{
+                "business_intent_topics": ["semiconductors"],
+                "recent_events": [
+                    "Acquired new subsidiary",
+                    {"type": "funding", "date": "2026-01", "description": "Series C"},
+                ],
+            }]
+        }
+        mock_http.post = AsyncMock(return_value=mock_resp)
+
+        with patch(
+            "app.services.prospect_discovery_explorium._get_api_key",
+            return_value="test-key",
+        ):
+            result = asyncio.get_event_loop().run_until_complete(
+                enrich_missing_signals(p.id, db_session)
+            )
+
+        assert result is True
+        db_session.refresh(p)
+        events = p.readiness_signals["events"]
+        # First event is a string parsed into {"type": str, "date": None, "description": str}
+        str_event = events[0]
+        assert str_event["type"] == "Acquired new subsidiary"
+        assert str_event["date"] is None
+        assert str_event["description"] == "Acquired new subsidiary"
+        # Second event is a normal dict
+        assert events[1]["type"] == "funding"
+
+
+# ── Coverage: find_similar_customers line 348, _to_bracket_index ────
+
+
+class TestFindSimilarCustomersWeakMatch:
+    def test_weak_match_region_only(self, db_session, test_user):
+        """Line 348: 'weak' match strength when score > 0 but < 15.
+
+        Region match (5 pts) + size match (10 pts) = 15 (moderate).
+        Region match (5 pts) alone = 5 (weak).
+        """
+        from app.services.prospect_signals import find_similar_customers
+
+        _make_company(
+            db_session, test_user,
+            name="Region Only Corp",
+            industry="Totally Different Industry",
+            employee_size="1-50",
+            hq_country="JP",
+            domain="regiononly.co.jp",
+        )
+
+        p = _make_prospect(
+            db_session,
+            domain="asiaprospect.com",
+            industry="Completely Unrelated Sector",
+            naics_code="999999",
+            employee_count_range="5001-10000",
+            region="ASIA",
+        )
+
+        result = find_similar_customers(p, db_session)
+        assert len(result) >= 1
+        weak_matches = [m for m in result if m["match_strength"] == "weak"]
+        assert len(weak_matches) >= 1
+        assert "Same region" in weak_matches[0]["match_reason"]
+
+
+class TestToBracketIndexEdgeCases:
+    def test_plus_format_valid(self):
+        """Lines 405-406: _to_bracket_index with '10000+' format."""
+        from app.services.prospect_signals import _compare_sizes
+
+        # "10000+" should parse to 10000, which is in bracket (5001, 10000)
+        assert _compare_sizes("10000+", "5001-10000") is True
+
+    def test_plus_format_invalid(self):
+        """Lines 405-406: _to_bracket_index with unparseable '+' format."""
+        from app.services.prospect_signals import _compare_sizes
+
+        # "abc+" should fail to parse -> None -> False
+        assert _compare_sizes("abc+", "1001-5000") is False
+
+    def test_dash_format_invalid(self):
+        """Lines 411-412: _to_bracket_index with non-parseable range."""
+        from app.services.prospect_signals import _compare_sizes
+
+        assert _compare_sizes("abc-def", "1001-5000") is False
+
+    def test_exceeds_all_brackets(self):
+        """Line 425: _to_bracket_index returns None when num > max bracket."""
+        from app.services.prospect_signals import _compare_sizes
+
+        # 2000000 exceeds the largest bracket (10001, 999999)
+        assert _compare_sizes("2000000", "1001-5000") is False
+
+
+# ── Coverage: run_signal_enrichment_batch error handling ─────────────
+
+
+class TestRunBatchErrorPaths:
+    @patch("app.services.prospect_signals.generate_ai_writeup", new_callable=AsyncMock)
+    @patch("app.services.prospect_signals.find_similar_customers")
+    @patch(
+        "app.services.prospect_signals.enrich_missing_signals",
+        new_callable=AsyncMock,
+        side_effect=Exception("Explorium down"),
+    )
+    def test_signal_enrichment_error_increments_errors(
+        self, mock_enrich, mock_similar, mock_writeup, db_session
+    ):
+        """Lines 640-642: exception in enrich_missing_signals increments errors."""
+        from app.services.prospect_signals import run_signal_enrichment_batch
+
+        _make_prospect(
+            db_session,
+            domain="enricherror.com",
+            fit_score=60,
+            readiness_signals={},
+        )
+
+        mock_similar.return_value = []
+        mock_writeup.return_value = "Writeup."
+
+        with patch("app.database.SessionLocal", return_value=db_session):
+            result = asyncio.get_event_loop().run_until_complete(
+                run_signal_enrichment_batch(min_fit_score=40)
+            )
+
+        assert result["errors"] >= 1
+        assert result["signals_added"] == 0
+
+    @patch("app.services.prospect_signals.generate_ai_writeup", new_callable=AsyncMock)
+    @patch("app.services.prospect_signals.find_similar_customers")
+    @patch("app.services.prospect_signals.enrich_missing_signals", new_callable=AsyncMock)
+    def test_skip_prospects_with_existing_similar_customers(
+        self, mock_enrich, mock_similar, mock_writeup, db_session
+    ):
+        """Line 656: skip prospects that already have similar_customers."""
+        from app.services.prospect_signals import run_signal_enrichment_batch
+
+        _make_prospect(
+            db_session,
+            domain="alreadymatched.com",
+            fit_score=60,
+            readiness_signals={"intent": {"strength": "strong"}, "hiring": {"type": "eng"}},
+            similar_customers=[{"name": "Existing Match", "match_strength": "strong"}],
+        )
+
+        mock_enrich.return_value = False
+        mock_writeup.return_value = "Writeup."
+
+        with patch("app.database.SessionLocal", return_value=db_session):
+            result = asyncio.get_event_loop().run_until_complete(
+                run_signal_enrichment_batch(min_fit_score=40)
+            )
+
+        # similar_customers already set → find_similar_customers should NOT be called
+        mock_similar.assert_not_called()
+        assert result["similar_computed"] == 0
+
+    @patch(
+        "app.services.prospect_signals.generate_ai_writeup",
+        new_callable=AsyncMock,
+        side_effect=Exception("Claude API exploded"),
+    )
+    @patch("app.services.prospect_signals.find_similar_customers")
+    @patch("app.services.prospect_signals.enrich_missing_signals", new_callable=AsyncMock)
+    def test_writeup_generation_error_increments_errors(
+        self, mock_enrich, mock_similar, mock_writeup, db_session
+    ):
+        """Lines 679-681: exception in generate_ai_writeup increments errors."""
+        from app.services.prospect_signals import run_signal_enrichment_batch
+
+        _make_prospect(
+            db_session,
+            domain="writeuperror.com",
+            fit_score=60,
+            readiness_signals={"intent": {"strength": "strong"}, "hiring": {"type": "eng"}},
+            ai_writeup=None,
+        )
+
+        mock_enrich.return_value = False
+        mock_similar.return_value = []
+
+        with patch("app.database.SessionLocal", return_value=db_session):
+            result = asyncio.get_event_loop().run_until_complete(
+                run_signal_enrichment_batch(min_fit_score=40)
+            )
+
+        assert result["errors"] >= 1
+        assert result["writeups_generated"] == 0
