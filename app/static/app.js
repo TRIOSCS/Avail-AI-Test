@@ -1430,14 +1430,15 @@ async function _loadDashAvailScore(el) {
 
 export function _renderAvailScoreTable(entries, role, month) {
     const monthLabel = month ? new Date(month + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : '';
-    let html = `<div class="as-header"><span class="as-month">${esc(monthLabel)}</span><span class="as-role-badge as-role-${role}">${role === 'buyer' ? 'Purchasing' : 'Sales'}</span></div>`;
+    const lastUpdate = entries.length && entries[0].updated_at ? new Date(entries[0].updated_at).toLocaleString() : '';
+    let html = `<div class="as-header"><span class="as-month">${esc(monthLabel)}</span><span class="as-role-badge as-role-${role}">${role === 'buyer' ? 'Purchasing' : 'Sales'}</span>${lastUpdate ? '<span class="as-updated">Updated ' + esc(lastUpdate) + '</span>' : ''}</div>`;
     html += '<div class="as-list">';
     for (const e of entries) {
         const scoreColor = e.total_score >= 60 ? 'var(--green)' : e.total_score >= 40 ? 'var(--amber)' : 'var(--muted)';
         const rankBadge = e.rank === 1 ? 'as-gold' : e.rank === 2 ? 'as-silver' : '';
         const bonusTag = e.bonus_amount > 0 ? `<span class="as-bonus">+$${e.bonus_amount}</span>` : '';
         const qualTag = !e.qualified ? '<span class="as-unqualified">Not Qualified</span>' : '';
-        html += `<div class="as-entry${e.qualified ? '' : ' as-dim'}" onclick="this.querySelector('.as-detail').classList.toggle('open')">
+        html += `<div class="as-entry${e.qualified ? '' : ' as-dim'}" onclick="this.classList.toggle('as-open');this.querySelector('.as-detail').classList.toggle('open')">
             <div class="as-row">
                 <span class="as-rank-num ${rankBadge}">${e.rank || '—'}</span>
                 <div class="as-name-col">

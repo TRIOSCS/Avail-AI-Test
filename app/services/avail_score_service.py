@@ -786,18 +786,14 @@ def get_avail_scores(db: Session, role_type: str, month: date) -> list[dict]:
             "outcome_total": snap.outcome_total,
             "qualified": snap.qualified,
             "bonus_amount": snap.bonus_amount,
-            "metrics": [],
+            "updated_at": snap.updated_at.isoformat() if snap.updated_at else None,
         }
-        # Build metrics list for expandable detail
-        for prefix, category in [("b", "behavior"), ("o", "outcome")]:
+        # Flat metric keys for frontend expandable detail
+        for prefix in ("b", "o"):
             for i in range(1, 6):
-                entry["metrics"].append({
-                    "key": f"{prefix}{i}",
-                    "category": category,
-                    "label": getattr(snap, f"{prefix}{i}_label") or "",
-                    "score": getattr(snap, f"{prefix}{i}_score") or 0,
-                    "raw": getattr(snap, f"{prefix}{i}_raw") or "",
-                })
+                entry[f"{prefix}{i}_score"] = getattr(snap, f"{prefix}{i}_score") or 0
+                entry[f"{prefix}{i}_label"] = getattr(snap, f"{prefix}{i}_label") or ""
+                entry[f"{prefix}{i}_raw"] = getattr(snap, f"{prefix}{i}_raw") or ""
         results.append(entry)
 
     return results

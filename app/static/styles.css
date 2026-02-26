@@ -1820,6 +1820,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .as-header{display:flex;align-items:center;gap:10px;margin-bottom:12px}
 .as-month{font-size:13px;font-weight:600;color:var(--text)}
 .as-role-badge{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;padding:2px 8px;border-radius:10px}
+.as-updated{font-size:10px;color:var(--muted);margin-left:auto}
 .as-role-buyer{background:var(--blue-lt,#e8f0fe);color:var(--blue)}
 .as-role-sales{background:var(--green-lt,#e6f7ee);color:var(--green)}
 .as-list{display:flex;flex-direction:column;gap:2px}
@@ -1839,7 +1840,7 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .as-sub-sep{color:var(--border);font-size:10px}
 .as-total{font-weight:800;font-size:16px}
 .as-chevron{flex-shrink:0;color:var(--muted);transition:transform .2s;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.as-detail.open~.as-row .as-chevron,.as-entry:has(.as-detail.open) .as-chevron{transform:rotate(180deg)}
+.as-entry.as-open .as-chevron{transform:rotate(180deg)}
 .as-detail{max-height:0;overflow:hidden;transition:max-height .25s ease,padding .25s ease;padding:0 14px;border-top:0 solid var(--border)}
 .as-detail.open{max-height:600px;padding:12px 14px;border-top:1px solid var(--border)}
 .as-metrics{display:grid;grid-template-columns:1fr 1fr;gap:16px}
