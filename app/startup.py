@@ -15,6 +15,7 @@ import logging
 from sqlalchemy import text as sqltext
 
 from .database import engine
+from .database import SessionLocal
 
 log = logging.getLogger(__name__)
 
@@ -43,7 +44,48 @@ def run_startup_migrations() -> None:
         _create_perf_indexes(conn)
 
     _backfill_normalized_mpn()
+    _create_default_user_if_env_set()
     log.info("Startup migrations complete")
+
+
+def _create_default_user_if_env_set() -> None:
+    """Create a default user from env vars if provided:
+    DEFAULT_USER_EMAIL, DEFAULT_USER_PASSWORD, DEFAULT_USER_ROLE (optional).
+    If the vars are missing, do nothing.
+    """
+    import os
+    import base64
+    import hashlib
+
+    email = os.environ.get("DEFAULT_USER_EMAIL")
+    password = os.environ.get("DEFAULT_USER_PASSWORD")
+    role = os.environ.get("DEFAULT_USER_ROLE", "admin")
+    if not email or not password:
+        return
+
+    # Avoid importing heavy ORM until we need it
+    from .models.auth import User
+
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter_by(email=email).first()
+        if existing:
+            log.info("Default user %s already exists, skipping creation", email)
+            return
+
+        # PBKDF2-HMAC-SHA256 with random salt
+        salt = os.urandom(16)
+        dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000)
+        store = base64.b64encode(salt).decode() + "$" + base64.b64encode(dk).decode()
+
+        user = User(email=email.lower(), name=email.split("@")[0], role=role, password_hash=store)
+        db.add(user)
+        db.commit()
+        log.info("Created default user %s with role %s", email, role)
+    except Exception:
+        log.exception("Failed creating default user")
+    finally:
+        db.close()
 
 
 def _add_missing_columns(conn) -> None:
@@ -60,6 +102,8 @@ def _add_missing_columns(conn) -> None:
         "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS advancement_score FLOAT",
         "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS is_new_vendor BOOLEAN DEFAULT TRUE",
         "ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS vendor_score_computed_at TIMESTAMP",
+        # Add password_hash to users for optional password auth (encrypted at rest)
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS password_hash TEXT",
     ]
     for stmt in stmts:
         _exec(conn, stmt)

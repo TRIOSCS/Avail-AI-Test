@@ -1,0 +1,19 @@
+services:
+  # Local override: do not bind host port 80 to avoid conflicts with host services.
+  # Maps HTTP/HTTPS to alternate local ports and expose the app for local browsing.
+  app:
+    ports:
+      - "8000:8000"
+    environment:
+      - TESTING=1
+
+  caddy:
+    ports:
+      - "8080:80"
+      - "8443:443"
+ 
+  # Expose Postgres on host for local development (host:5432 -> container:5432)
+  db:
+    ports:
+      - "5432:5432"
+

@@ -21,6 +21,8 @@ class User(Base):
     azure_id = Column(String(255), unique=True)
     refresh_token = Column(EncryptedText)
     access_token = Column(EncryptedText)
+    # PBKDF2 password hash stored as "<salt_b64>$<hash_b64>", encrypted at rest
+    password_hash = Column(EncryptedText)
     token_expires_at = Column(DateTime)
     email_signature = Column(Text)
     last_email_scan = Column(DateTime)

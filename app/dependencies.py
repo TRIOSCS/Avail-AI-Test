@@ -87,6 +87,7 @@ def require_settings_access(request: Request, db: Session = Depends(get_db)) -> 
 def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
     """Dependency: requires buyer role for RFQ actions."""
     user = require_user(request, db)
+    print(f"User role: {user.role}")
     if user.role not in ("buyer", "trader", "manager", "admin"):
         raise HTTPException(403, "Buyer role required for this action")
     return user
