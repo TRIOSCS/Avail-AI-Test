@@ -841,13 +841,26 @@ class TestCompleteBuyPlan:
         r = manager_client.put(f"/api/buy-plans/{plan.id}/complete")
         assert r.status_code == 200
 
-    def test_buyer_forbidden(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
+    def test_buyer_allowed_from_po_confirmed(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
+        """Buyers can complete from po_confirmed status."""
         plan = _create_buy_plan(
             db_session,
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
             submitted_by_id=sales_user.id,
             status="po_confirmed",
+        )
+        r = buyer_client.put(f"/api/buy-plans/{plan.id}/complete")
+        assert r.status_code == 200
+
+    def test_buyer_forbidden_from_approved(self, db_session, buyer_client, test_requisition, test_quote, sales_user):
+        """Buyers cannot complete from approved status (only po_entered/po_confirmed)."""
+        plan = _create_buy_plan(
+            db_session,
+            requisition_id=test_requisition.id,
+            quote_id=test_quote.id,
+            submitted_by_id=sales_user.id,
+            status="approved",
         )
         r = buyer_client.put(f"/api/buy-plans/{plan.id}/complete")
         assert r.status_code == 403
@@ -858,7 +871,7 @@ class TestCompleteBuyPlan:
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
             submitted_by_id=sales_user.id,
-            status="approved",
+            status="pending_approval",
         )
         r = admin_client.put(f"/api/buy-plans/{plan.id}/complete")
         assert r.status_code == 400

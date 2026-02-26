@@ -2061,8 +2061,15 @@ class TestBuyPlansAdditional:
         resp = admin_client.put(f"/api/buy-plans/{bp.id}/complete")
         assert resp.status_code == 200
 
-    def test_complete_buy_plan_not_admin(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_complete_buy_plan_buyer_from_po_confirmed(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
+        """Buyers can complete from po_confirmed status."""
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="po_confirmed")
+        resp = client.put(f"/api/buy-plans/{bp.id}/complete")
+        assert resp.status_code == 200
+
+    def test_complete_buy_plan_buyer_forbidden_from_approved(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
+        """Buyers cannot complete from approved status."""
+        bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
         resp = client.put(f"/api/buy-plans/{bp.id}/complete")
         assert resp.status_code == 403
 
