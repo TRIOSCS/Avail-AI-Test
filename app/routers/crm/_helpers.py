@@ -30,6 +30,9 @@ def record_changes(db: Session, entity_type: str, entity_id: int,
 
 def get_last_quoted_price(mpn: str, db: Session) -> dict | None:
     """Find most recent sell price for an MPN across all quotes."""
+    from ...models import MaterialCard
+    from ...utils.normalization import normalize_mpn_key
+
     quotes = (
         db.query(Quote)
         .filter(
@@ -39,10 +42,14 @@ def get_last_quoted_price(mpn: str, db: Session) -> dict | None:
         .limit(100)
         .all()
     )
+    norm_key = normalize_mpn_key(mpn)
+    card = db.query(MaterialCard).filter(MaterialCard.normalized_mpn == norm_key).first() if norm_key else None
+    card_id = card.id if card else None
     mpn_upper = mpn.upper().strip()
     for q in quotes:
         for item in q.line_items or []:
-            if (item.get("mpn") or "").upper().strip() == mpn_upper:
+            item_card_id = item.get("material_card_id")
+            if (card_id and item_card_id == card_id) or (item.get("mpn") or "").upper().strip() == mpn_upper:
                 return {
                     "sell_price": item.get("sell_price"),
                     "margin_pct": item.get("margin_pct"),
@@ -56,7 +63,12 @@ def get_last_quoted_price(mpn: str, db: Session) -> dict | None:
 
 
 def _preload_last_quoted_prices(db: Session) -> dict[str, dict]:
-    """Load recent quotes ONCE and build MPN→price lookup dict."""
+    """Load recent quotes ONCE and build MPN→price lookup dict.
+
+    Keys by both MPN string (uppercase) and material_card_id so callers
+    can look up by either.  card_id keys are prefixed with ``card:`` to
+    avoid collisions with MPN strings.
+    """
     quotes = (
         db.query(Quote)
         .filter(Quote.status.in_(["sent", "won", "lost"]))
@@ -67,17 +79,23 @@ def _preload_last_quoted_prices(db: Session) -> dict[str, dict]:
     result: dict[str, dict] = {}
     for q in quotes:
         for item in q.line_items or []:
+            entry = {
+                "sell_price": item.get("sell_price"),
+                "margin_pct": item.get("margin_pct"),
+                "quote_number": q.quote_number,
+                "date": (q.sent_at or q.created_at).isoformat()
+                if (q.sent_at or q.created_at)
+                else None,
+                "result": q.result,
+            }
             mpn_key = (item.get("mpn") or "").upper().strip()
             if mpn_key and mpn_key not in result:
-                result[mpn_key] = {
-                    "sell_price": item.get("sell_price"),
-                    "margin_pct": item.get("margin_pct"),
-                    "quote_number": q.quote_number,
-                    "date": (q.sent_at or q.created_at).isoformat()
-                    if (q.sent_at or q.created_at)
-                    else None,
-                    "result": q.result,
-                }
+                result[mpn_key] = entry
+            card_id = item.get("material_card_id")
+            if card_id:
+                card_key = f"card:{card_id}"
+                if card_key not in result:
+                    result[card_key] = entry
     return result
 
 
@@ -85,19 +103,25 @@ def quote_to_dict(q: Quote, db=None) -> dict:
     """Serialize a Quote to API response dict."""
     enriched_items = q.line_items or []
     if db and enriched_items:
-        card_ids = [li.get("material_card_id") for li in enriched_items if li.get("material_card_id")]
-        if card_ids:
-            from ...models import MaterialCard
+        try:
+            card_ids = [li.get("material_card_id") for li in enriched_items if li.get("material_card_id")]
+            if card_ids:
+                from ...models import MaterialCard
 
-            cards = {c.id: c for c in db.query(MaterialCard).filter(MaterialCard.id.in_(card_ids)).all()}
-            enriched_items = []
-            for li in q.line_items or []:
-                item = dict(li)
-                card = cards.get(li.get("material_card_id"))
-                if card:
-                    item.setdefault("description", card.description)
-                    item.setdefault("category", card.category)
-                enriched_items.append(item)
+                cards = {c.id: c for c in db.query(MaterialCard).filter(MaterialCard.id.in_(card_ids)).all()}
+                enriched_items = []
+                for li in q.line_items or []:
+                    item = dict(li)
+                    card = cards.get(li.get("material_card_id"))
+                    if card:
+                        item.setdefault("description", card.description)
+                        item.setdefault("category", card.category)
+                    enriched_items.append(item)
+        except Exception:
+            from loguru import logger
+
+            logger.warning("MaterialCard enrichment failed for quote %s, returning raw items", q.id)
+            enriched_items = q.line_items or []
     return {
         "id": q.id,
         "requisition_id": q.requisition_id,
@@ -131,7 +155,7 @@ def quote_to_dict(q: Quote, db=None) -> dict:
         ],
         "quote_number": q.quote_number,
         "revision": q.revision,
-        "line_items": q.line_items or [],
+        "line_items": enriched_items,
         "subtotal": float(q.subtotal) if q.subtotal else None,
         "total_cost": float(q.total_cost) if q.total_cost else None,
         "total_margin_pct": float(q.total_margin_pct) if q.total_margin_pct else None,

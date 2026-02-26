@@ -225,7 +225,9 @@ async def list_offers(
     result = []
     for r in req.requirements:
         target = float(r.target_price) if r.target_price else None
-        last_q = quoted_prices.get((r.primary_mpn or "").upper().strip())
+        last_q = (
+            quoted_prices.get(f"card:{r.material_card_id}") if r.material_card_id else None
+        ) or quoted_prices.get((r.primary_mpn or "").upper().strip())
         result.append(
             {
                 "requirement_id": r.id,
