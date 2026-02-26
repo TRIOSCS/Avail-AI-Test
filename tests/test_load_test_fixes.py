@@ -458,3 +458,74 @@ class TestBuyerBriefOptimized:
         mpns = [o["mpn"] for o in data]
         assert "ACTIVE-SHOWN" in mpns
         assert "SOLD-HIDDEN" not in mpns
+
+
+# ── Completed Deals tile ───────────────────────────────────────────────
+
+
+class TestCompletedDeals:
+    def test_completed_deals_in_buyer_brief(self, client, db_session, test_user):
+        """Buyer-brief should return completed_deals with won/lost data."""
+        co, site = _make_company_and_site(db_session)
+        req = _make_req(db_session, test_user, name="WON-REQ", status="won")
+        q = _make_quote(db_session, req, site, test_user, [], "Q-WON")
+        q.result = "won"
+        q.result_at = datetime.now(timezone.utc) - timedelta(hours=6)
+
+        req2 = _make_req(db_session, test_user, name="LOST-REQ", status="lost")
+        q2 = _make_quote(db_session, req2, site, test_user, [], "Q-LOST")
+        q2.result = "lost"
+        q2.result_at = datetime.now(timezone.utc) - timedelta(hours=12)
+        db_session.commit()
+
+        resp = client.get("/api/dashboard/buyer-brief")
+        assert resp.status_code == 200
+        data = resp.json()
+
+        cd = data["completed_deals"]
+        assert cd["won_count"] >= 1
+        assert cd["lost_count"] >= 1
+        assert cd["win_rate"] >= 0
+        assert len(cd["recent_wins"]) >= 1
+        assert len(cd["recent_losses"]) >= 1
+
+    def test_completed_deals_not_filtered_by_days(self, client, db_session, test_user):
+        """Completed deals must not be filtered by the days parameter."""
+        co, site = _make_company_and_site(db_session)
+        req = _make_req(db_session, test_user, name="OLD-WIN", status="won")
+        q = _make_quote(db_session, req, site, test_user, [], "Q-OLD-WIN")
+        q.result = "won"
+        q.result_at = datetime.now(timezone.utc) - timedelta(days=60)
+        db_session.commit()
+
+        # Even with days=7, old deals should still appear
+        resp = client.get("/api/dashboard/buyer-brief?days=7")
+        data = resp.json()
+        cd = data["completed_deals"]
+        assert cd["won_count"] >= 1
+        win_names = [w["name"] for w in cd["recent_wins"]]
+        assert "OLD-WIN" in win_names
+
+    def test_completed_deals_values(self, client, db_session, test_user):
+        """Completed deals should include quote values."""
+        co, site = _make_company_and_site(db_session)
+        req = _make_req(db_session, test_user, name="VAL-REQ", status="won")
+        q = _make_quote(db_session, req, site, test_user, [], "Q-VAL")
+        q.subtotal = 5000.00
+        q.result = "won"
+        q.result_at = datetime.now(timezone.utc)
+        db_session.commit()
+
+        resp = client.get("/api/dashboard/buyer-brief")
+        data = resp.json()
+        cd = data["completed_deals"]
+        assert cd["won_value"] >= 5000.0
+        wins = [w for w in cd["recent_wins"] if w["name"] == "VAL-REQ"]
+        assert len(wins) == 1
+        assert wins[0]["value"] == 5000.0
+
+    def test_pipeline_includes_lost(self, client, db_session, test_user):
+        """Pipeline summary should include lost_this_month."""
+        resp = client.get("/api/dashboard/buyer-brief")
+        data = resp.json()
+        assert "lost_this_month" in data["pipeline"]

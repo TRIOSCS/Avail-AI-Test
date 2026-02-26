@@ -712,6 +712,70 @@ def buyer_brief(
         for row in top_vendors_q
     ]
 
+    # ── Tile 7: Completed Deals (all-time — never filtered by days window) ──
+    # Summary stats: total wins, losses, values across all time
+    completed_stats = db.query(
+        func.count(case((Quote.result == "won", Quote.id))).label("won_count"),
+        func.count(case((Quote.result == "lost", Quote.id))).label("lost_count"),
+        func.coalesce(func.sum(case((Quote.result == "won", Quote.subtotal))), 0).label("won_value"),
+        func.coalesce(func.sum(case((Quote.result == "lost", Quote.subtotal))), 0).label("lost_value"),
+    ).filter(
+        Quote.result.in_(("won", "lost")),
+        _user_filter(Quote.created_by_id),
+    ).first()
+
+    all_won = completed_stats.won_count or 0
+    all_lost = completed_stats.lost_count or 0
+    all_win_rate = round(all_won / (all_won + all_lost) * 100) if (all_won + all_lost) else 0
+
+    # Recent 15 won deals
+    recent_won_q = (
+        db.query(
+            Requisition.id, Requisition.name, Requisition.customer_name,
+            Quote.subtotal, Quote.result_at,
+        )
+        .join(Quote, Quote.requisition_id == Requisition.id)
+        .filter(Quote.result == "won", _user_filter(Quote.created_by_id))
+        .order_by(Quote.result_at.desc())
+        .limit(15)
+        .all()
+    )
+    recent_wins = [
+        {
+            "id": r.id, "name": r.name, "customer_name": r.customer_name,
+            "value": float(r.subtotal) if r.subtotal else None,
+            "closed_at": r.result_at.isoformat() if r.result_at else None,
+            "age_label": _age_label(
+                (now - _ensure_aware(r.result_at)).total_seconds() / 3600
+            ) if r.result_at else None,
+        }
+        for r in recent_won_q
+    ]
+
+    # Recent 15 lost deals
+    recent_lost_q = (
+        db.query(
+            Requisition.id, Requisition.name, Requisition.customer_name,
+            Quote.subtotal, Quote.result_at,
+        )
+        .join(Quote, Quote.requisition_id == Requisition.id)
+        .filter(Quote.result == "lost", _user_filter(Quote.created_by_id))
+        .order_by(Quote.result_at.desc())
+        .limit(15)
+        .all()
+    )
+    recent_losses = [
+        {
+            "id": r.id, "name": r.name, "customer_name": r.customer_name,
+            "value": float(r.subtotal) if r.subtotal else None,
+            "closed_at": r.result_at.isoformat() if r.result_at else None,
+            "age_label": _age_label(
+                (now - _ensure_aware(r.result_at)).total_seconds() / 3600
+            ) if r.result_at else None,
+        }
+        for r in recent_lost_q
+    ]
+
     return {
         "kpis": {
             "sourcing_ratio": sourcing_ratio,
@@ -733,10 +797,20 @@ def buyer_brief(
         "reqs_at_risk": reqs_at_risk,
         "quotes_due_soon": quotes_due_soon,
         "top_vendors": top_vendors,
+        "completed_deals": {
+            "won_count": all_won,
+            "lost_count": all_lost,
+            "won_value": float(completed_stats.won_value or 0),
+            "lost_value": float(completed_stats.lost_value or 0),
+            "win_rate": all_win_rate,
+            "recent_wins": recent_wins,
+            "recent_losses": recent_losses,
+        },
         "pipeline": {
             "active_reqs": pipeline_active,
             "quotes_out": pipeline_quoted,
             "won_this_month": pipeline_won,
+            "lost_this_month": lost_quotes,
             "buyplans_approved": pipeline_buyplans,
         },
     }

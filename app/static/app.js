@@ -1783,6 +1783,9 @@ async function loadBuyerDashboard(el) {
         const reqsAtRisk = brief.reqs_at_risk || [];
         const quotesDue = brief.quotes_due_soon || [];
         const topVendors = brief.top_vendors || [];
+        const completed = brief.completed_deals || {};
+        const recentWins = completed.recent_wins || [];
+        const recentLosses = completed.recent_losses || [];
         const hotList = Array.isArray(hotOffers) ? hotOffers : [];
 
         let html = '';
@@ -1818,6 +1821,8 @@ async function loadBuyerDashboard(el) {
             <span class="cc-pipe-item"><span class="cc-pipe-num">${pipeline.quotes_out || 0}</span> Quoted</span>
             <span class="cc-pipe-sep">&rarr;</span>
             <span class="cc-pipe-item" style="color:var(--green)"><span class="cc-pipe-num">${pipeline.won_this_month || 0}</span> Won</span>
+            <span class="cc-pipe-sep">/</span>
+            <span class="cc-pipe-item" style="color:var(--red)"><span class="cc-pipe-num">${pipeline.lost_this_month || 0}</span> Lost</span>
             <span class="cc-pipe-sep">&rarr;</span>
             <span class="cc-pipe-item" style="color:var(--purple)"><span class="cc-pipe-num">${pipeline.buyplans_approved || 0}</span> Buy Plans</span>
         </div>`;
@@ -1970,6 +1975,53 @@ async function loadBuyerDashboard(el) {
             html += '</div>';
         } else {
             html += '<p class="cc-empty">No new offers.</p>';
+        }
+        html += '</div>';
+
+        // Card 7: Won Deals (all-time, never filtered by date window)
+        const fmtVal = v => v ? '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '\u2014';
+        const wonTotal = fmtVal(completed.won_value);
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--green)">&#9679;</span> Won Deals <span class="cc-card-count">${completed.won_count || 0}</span></h3>`;
+        html += `<div class="cc-completed-stats" style="padding:0 12px 8px;font-size:0.85rem;color:var(--text-muted)">Total value: <strong style="color:var(--green)">${wonTotal}</strong> &middot; Win rate: <strong>${completed.win_rate || 0}%</strong></div>`;
+        if (recentWins.length) {
+            html += '<div class="cc-card-scroll">';
+            html += recentWins.map(r => {
+                const val = r.value ? fmtVal(r.value) : '';
+                return `<div class="cc-row" onclick="goToReq(${r.id})">
+                    <span class="cc-dot" style="background:var(--green)"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
+                        <span class="cc-row-detail">${r.customer_name ? esc(r.customer_name) + ' &middot; ' : ''}${r.age_label || ''}</span>
+                    </div>
+                    ${val ? '<span class="cc-row-badge cc-badge-green">' + val + '</span>' : ''}
+                </div>`;
+            }).join('');
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No won deals yet.</p>';
+        }
+        html += '</div>';
+
+        // Card 8: Lost Deals (all-time, never filtered by date window)
+        const lostTotal = fmtVal(completed.lost_value);
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Lost Deals <span class="cc-card-count">${completed.lost_count || 0}</span></h3>`;
+        html += `<div class="cc-completed-stats" style="padding:0 12px 8px;font-size:0.85rem;color:var(--text-muted)">Total value: <strong style="color:var(--red)">${lostTotal}</strong></div>`;
+        if (recentLosses.length) {
+            html += '<div class="cc-card-scroll">';
+            html += recentLosses.map(r => {
+                const val = r.value ? fmtVal(r.value) : '';
+                return `<div class="cc-row" onclick="goToReq(${r.id})">
+                    <span class="cc-dot" style="background:var(--red)"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
+                        <span class="cc-row-detail">${r.customer_name ? esc(r.customer_name) + ' &middot; ' : ''}${r.age_label || ''}</span>
+                    </div>
+                    ${val ? '<span class="cc-row-badge">' + val + '</span>' : ''}
+                </div>`;
+            }).join('');
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No lost deals.</p>';
         }
         html += '</div>';
 
