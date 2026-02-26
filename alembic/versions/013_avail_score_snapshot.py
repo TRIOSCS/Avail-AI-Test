@@ -2,6 +2,7 @@
 
 0-100 scoring (50 behaviors + 50 outcomes) ranking buyers and salespeople
 with $500/$250 bonus for 1st/2nd place finishers.
+Idempotent: table may already exist from create_all / startup.
 
 Revision ID: 013_avail_score_snapshot
 Revises: 012_vendor_name_normalized
@@ -9,7 +10,7 @@ Create Date: 2026-02-26
 """
 
 from alembic import op
-import sqlalchemy as sa
+from sqlalchemy import text
 
 revision = "013_avail_score_snapshot"
 down_revision = "012_vendor_name_normalized"
@@ -18,75 +19,42 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "avail_score_snapshot",
-        sa.Column("id", sa.Integer, primary_key=True),
-        sa.Column(
-            "user_id",
-            sa.Integer,
-            sa.ForeignKey("users.id", ondelete="CASCADE"),
-            nullable=False,
-        ),
-        sa.Column("month", sa.Date, nullable=False),
-        sa.Column("role_type", sa.String(20), nullable=False),
-        # Behavior metrics (b1–b5)
-        sa.Column("b1_score", sa.Float, default=0),
-        sa.Column("b1_label", sa.String(50)),
-        sa.Column("b1_raw", sa.String(100)),
-        sa.Column("b2_score", sa.Float, default=0),
-        sa.Column("b2_label", sa.String(50)),
-        sa.Column("b2_raw", sa.String(100)),
-        sa.Column("b3_score", sa.Float, default=0),
-        sa.Column("b3_label", sa.String(50)),
-        sa.Column("b3_raw", sa.String(100)),
-        sa.Column("b4_score", sa.Float, default=0),
-        sa.Column("b4_label", sa.String(50)),
-        sa.Column("b4_raw", sa.String(100)),
-        sa.Column("b5_score", sa.Float, default=0),
-        sa.Column("b5_label", sa.String(50)),
-        sa.Column("b5_raw", sa.String(100)),
-        sa.Column("behavior_total", sa.Float, default=0),
-        # Outcome metrics (o1–o5)
-        sa.Column("o1_score", sa.Float, default=0),
-        sa.Column("o1_label", sa.String(50)),
-        sa.Column("o1_raw", sa.String(100)),
-        sa.Column("o2_score", sa.Float, default=0),
-        sa.Column("o2_label", sa.String(50)),
-        sa.Column("o2_raw", sa.String(100)),
-        sa.Column("o3_score", sa.Float, default=0),
-        sa.Column("o3_label", sa.String(50)),
-        sa.Column("o3_raw", sa.String(100)),
-        sa.Column("o4_score", sa.Float, default=0),
-        sa.Column("o4_label", sa.String(50)),
-        sa.Column("o4_raw", sa.String(100)),
-        sa.Column("o5_score", sa.Float, default=0),
-        sa.Column("o5_label", sa.String(50)),
-        sa.Column("o5_raw", sa.String(100)),
-        sa.Column("outcome_total", sa.Float, default=0),
-        # Composite
-        sa.Column("total_score", sa.Float, default=0),
-        sa.Column("rank", sa.Integer),
-        sa.Column("qualified", sa.Boolean, default=False),
-        sa.Column("bonus_amount", sa.Float, default=0),
-        sa.Column("created_at", sa.DateTime),
-        sa.Column("updated_at", sa.DateTime),
-    )
-    op.create_index(
-        "ix_ass_user_month",
-        "avail_score_snapshot",
-        ["user_id", "month", "role_type"],
-        unique=True,
-    )
-    op.create_index(
-        "ix_ass_month_role_rank",
-        "avail_score_snapshot",
-        ["month", "role_type", "rank"],
-    )
-    op.create_index(
-        "ix_ass_month_role_score",
-        "avail_score_snapshot",
-        ["month", "role_type", "total_score"],
-    )
+    conn = op.get_bind()
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS avail_score_snapshot (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            month DATE NOT NULL,
+            role_type VARCHAR(20) NOT NULL,
+            b1_score FLOAT DEFAULT 0, b1_label VARCHAR(50), b1_raw VARCHAR(100),
+            b2_score FLOAT DEFAULT 0, b2_label VARCHAR(50), b2_raw VARCHAR(100),
+            b3_score FLOAT DEFAULT 0, b3_label VARCHAR(50), b3_raw VARCHAR(100),
+            b4_score FLOAT DEFAULT 0, b4_label VARCHAR(50), b4_raw VARCHAR(100),
+            b5_score FLOAT DEFAULT 0, b5_label VARCHAR(50), b5_raw VARCHAR(100),
+            behavior_total FLOAT DEFAULT 0,
+            o1_score FLOAT DEFAULT 0, o1_label VARCHAR(50), o1_raw VARCHAR(100),
+            o2_score FLOAT DEFAULT 0, o2_label VARCHAR(50), o2_raw VARCHAR(100),
+            o3_score FLOAT DEFAULT 0, o3_label VARCHAR(50), o3_raw VARCHAR(100),
+            o4_score FLOAT DEFAULT 0, o4_label VARCHAR(50), o4_raw VARCHAR(100),
+            o5_score FLOAT DEFAULT 0, o5_label VARCHAR(50), o5_raw VARCHAR(100),
+            outcome_total FLOAT DEFAULT 0,
+            total_score FLOAT DEFAULT 0,
+            rank INTEGER,
+            qualified BOOLEAN DEFAULT FALSE,
+            bonus_amount FLOAT DEFAULT 0,
+            created_at TIMESTAMP,
+            updated_at TIMESTAMP
+        )
+    """))
+    conn.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_ass_user_month ON avail_score_snapshot (user_id, month, role_type)"
+    ))
+    conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_ass_month_role_rank ON avail_score_snapshot (month, role_type, rank)"
+    ))
+    conn.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_ass_month_role_score ON avail_score_snapshot (month, role_type, total_score)"
+    ))
 
 
 def downgrade() -> None:

@@ -9,6 +9,7 @@ for the proactive offer expiry job which filters by status='sent' and sent_at.
 
 is_stale: Boolean flag on offers — display-only metadata for offers older
 than 14 days. Does NOT hide or filter offers. "Leave no stone unturned."
+Idempotent: column/indexes may already exist from startup.
 
 Revision ID: 015_performance_indexes
 Revises: 014_multiplier_score_snapshot
@@ -16,7 +17,7 @@ Create Date: 2026-02-26
 """
 
 from alembic import op
-import sqlalchemy as sa
+from sqlalchemy import text
 
 revision = "015_performance_indexes"
 down_revision = "014_multiplier_score_snapshot"
@@ -25,20 +26,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_index(
-        "ix_offers_status_created",
-        "offers",
-        ["status", "created_at"],
-    )
-    op.create_index(
-        "ix_poff_status_sent",
-        "proactive_offers",
-        ["status", "sent_at"],
-    )
-    op.add_column(
-        "offers",
-        sa.Column("is_stale", sa.Boolean, server_default=sa.text("false"), nullable=False),
-    )
+    conn = op.get_bind()
+    conn.execute(text("ALTER TABLE offers ADD COLUMN IF NOT EXISTS is_stale BOOLEAN NOT NULL DEFAULT FALSE"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_offers_status_created ON offers (status, created_at)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_poff_status_sent ON proactive_offers (status, sent_at)"))
 
 
 def downgrade() -> None:
