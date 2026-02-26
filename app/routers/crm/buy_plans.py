@@ -121,25 +121,9 @@ def _buyplan_to_dict(bp: BuyPlan, db=None) -> dict:
     }
 
 
-@router.post("/api/quotes/{quote_id}/buy-plan")
-async def submit_buy_plan(
-    quote_id: int,
-    body: BuyPlanSubmit,
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Submit a buy plan when marking a quote as Won."""
-    quote = db.get(Quote, quote_id)
-    if not quote:
-        raise HTTPException(404, "Quote not found")
+def _build_buy_plan_line_items(quote: Quote, body: BuyPlanSubmit, db: Session):
+    """Build line_items for a buy plan from quote + submit body. Shared by draft and submit."""
     offer_ids = body.offer_ids
-    if not offer_ids:
-        raise HTTPException(400, "At least one offer must be selected")
-    salesperson_notes = body.salesperson_notes.strip()
-    plan_qtys = body.plan_qtys
-
-    # Build buy plan line items — prefer quote line_items (preserves user edits)
     offers = db.query(Offer).options(joinedload(Offer.entered_by)).filter(Offer.id.in_(offer_ids)).all()
     offers_map = {o.id: o for o in offers}
     quote_items_by_offer = {
@@ -147,6 +131,7 @@ async def submit_buy_plan(
         for item in (quote.line_items or [])
         if item.get("offer_id")
     }
+    plan_qtys = body.plan_qtys or {}
     line_items = []
     for oid in offer_ids:
         o = offers_map.get(oid)
@@ -164,6 +149,7 @@ async def submit_buy_plan(
                 "qty": qi.get("qty") or qty_available,
                 "plan_qty": int(plan_qty) if plan_qty else qty_available,
                 "cost_price": qi.get("cost_price") or (float(o.unit_price) if o.unit_price else 0),
+                "sell_price": qi.get("sell_price"),
                 "lead_time": qi.get("lead_time") or o.lead_time,
                 "condition": qi.get("condition") or o.condition,
                 "date_code": qi.get("date_code") or o.date_code,
@@ -177,16 +163,118 @@ async def submit_buy_plan(
                 "po_verified": False,
             }
         )
+    return line_items, offers
+
+
+@router.post("/api/quotes/{quote_id}/buy-plan/draft")
+async def create_buy_plan_draft(
+    quote_id: int,
+    body: BuyPlanSubmit,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a buy plan in Draft. Sales can later use 'Ready to send' (PUT submit) to move to Pending."""
+    quote = db.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    if not body.offer_ids:
+        raise HTTPException(400, "At least one offer must be selected")
+    line_items, _ = _build_buy_plan_line_items(quote, body, db)
+    if not line_items:
+        raise HTTPException(400, "No valid offers for selected IDs")
+    stock_names = settings.stock_sale_vendor_names
+    is_stock = all(
+        (item.get("vendor_name") or "").strip().lower() in stock_names
+        for item in line_items
+    )
+    plan = BuyPlan(
+        requisition_id=quote.requisition_id,
+        quote_id=quote_id,
+        status="draft",
+        salesperson_notes=(body.salesperson_notes or "").strip() or None,
+        line_items=line_items,
+        submitted_by_id=user.id,
+        is_stock_sale=is_stock,
+    )
+    db.add(plan)
+    db.commit()
+    db.refresh(plan)
+    from ...services.buyplan_service import log_buyplan_activity
+    log_buyplan_activity(db, user.id, plan, "buyplan_created", "draft created")
+    return {"ok": True, "buy_plan_id": plan.id, "status": "draft"}
+
+
+@router.put("/api/buy-plans/{plan_id}/submit")
+async def submit_draft_buy_plan(
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Move Draft -> Pending (Ready to send). Allowed: plan creator (sales) or admin/manager."""
+    plan = db.get(BuyPlan, plan_id)
+    if not plan:
+        raise HTTPException(404, "Buy plan not found")
+    if plan.status != "draft":
+        raise HTTPException(400, f"Can only submit draft plans, current: {plan.status}")
+    is_mgr = _is_admin(user) or user.role == "manager"
+    is_creator = plan.submitted_by_id == user.id
+    if not is_mgr and not is_creator:
+        raise HTTPException(403, "Only the plan creator or admin/manager can submit for approval")
+    import secrets
+    from datetime import timedelta
+    plan.status = "pending_approval"
+    plan.approval_token = secrets.token_urlsafe(32)
+    plan.token_expires_at = datetime.now(timezone.utc) + timedelta(days=30)
+    plan.submitted_at = datetime.now(timezone.utc)
+    quote = db.get(Quote, plan.quote_id)
+    req = db.get(Requisition, plan.requisition_id) if plan.requisition_id else None
+    offer_ids = [item.get("offer_id") for item in (plan.line_items or []) if item.get("offer_id")]
+    if quote:
+        quote.result = "won"
+        quote.result_at = datetime.now(timezone.utc)
+        quote.status = "won"
+        quote.won_revenue = quote.subtotal
+    if req:
+        req.status = "won"
+    if offer_ids:
+        for o in db.query(Offer).filter(Offer.id.in_(offer_ids)).all():
+            o.status = "won"
+    if quote and offer_ids:
+        offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
+        _record_purchase_history(db, req, quote, offers)
+    from ...services.buyplan_service import log_buyplan_activity, notify_buyplan_submitted, run_buyplan_bg
+    log_buyplan_activity(db, user.id, plan, "buyplan_submitted", "submitted for approval")
+    db.commit()
+    run_buyplan_bg(notify_buyplan_submitted, plan.id)
+    return {"ok": True, "status": "pending_approval", "buy_plan_id": plan.id}
+
+
+@router.post("/api/quotes/{quote_id}/buy-plan")
+async def submit_buy_plan(
+    quote_id: int,
+    body: BuyPlanSubmit,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Submit a buy plan when marking a quote as Won (creates plan in Pending in one step)."""
+    quote = db.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    offer_ids = body.offer_ids
+    if not offer_ids:
+        raise HTTPException(400, "At least one offer must be selected")
+    salesperson_notes = (body.salesperson_notes or "").strip()
+    line_items, offers = _build_buy_plan_line_items(quote, body, db)
+    if not line_items:
+        raise HTTPException(400, "No valid offers for selected IDs")
 
     import secrets
-
-    # Detect stock sale: all vendors match stock_sale_vendor_names
     stock_names = settings.stock_sale_vendor_names
     is_stock = bool(line_items) and all(
         (item.get("vendor_name") or "").strip().lower() in stock_names
         for item in line_items
     )
-
     from datetime import timedelta
     plan = BuyPlan(
         requisition_id=quote.requisition_id,
@@ -195,13 +283,13 @@ async def submit_buy_plan(
         salesperson_notes=salesperson_notes or None,
         line_items=line_items,
         submitted_by_id=user.id,
+        submitted_at=datetime.now(timezone.utc),
         approval_token=secrets.token_urlsafe(32),
         token_expires_at=datetime.now(timezone.utc) + timedelta(days=30),
         is_stock_sale=is_stock,
     )
     db.add(plan)
 
-    # Mark quote as won
     quote.result = "won"
     quote.result_at = datetime.now(timezone.utc)
     quote.status = "won"
@@ -209,26 +297,16 @@ async def submit_buy_plan(
     req = db.get(Requisition, quote.requisition_id)
     if req:
         req.status = "won"
-
-    # Mark selected offers as "won" so engagement scorer counts wins
     for o in offers:
         o.status = "won"
-
-    # Feed customer purchase history for proactive matching
     _record_purchase_history(db, req, quote, offers)
-
     from ...services.buyplan_service import log_buyplan_activity
-
     log_buyplan_activity(
         db, user.id, plan, "buyplan_submitted", f"submitted for quote #{quote_id}"
     )
     db.commit()
-
-    # Send notifications asynchronously (own DB session)
     from ...services.buyplan_service import notify_buyplan_submitted, run_buyplan_bg
-
     run_buyplan_bg(notify_buyplan_submitted, plan.id)
-
     return {
         "ok": True,
         "buy_plan_id": plan.id,
@@ -258,7 +336,11 @@ async def list_buy_plans(
         .order_by(BuyPlan.created_at.desc())
     )
     if status:
-        query = query.filter(BuyPlan.status == status)
+        # Workflow: Draft | Pending | Approved | Completed. "Approved" includes po_entered, po_confirmed.
+        if status == "approved":
+            query = query.filter(BuyPlan.status.in_(["approved", "po_entered", "po_confirmed"]))
+        else:
+            query = query.filter(BuyPlan.status == status)
     if not _is_admin(user):
         if user.role in ("sales", "trader"):
             query = query.filter(BuyPlan.submitted_by_id == user.id)
@@ -555,19 +637,24 @@ async def complete_buy_plan(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Admin/manager marks a buy plan as complete."""
-    if not _is_admin(user) and user.role != "manager":
-        raise HTTPException(403, "Admin or manager required")
+    """Mark buy plan complete. Admin/manager: from Approved or PO-entered. Buyer: only after PO entered (po_entered/po_confirmed)."""
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise HTTPException(404, "Buy plan not found")
-    allowed = ["po_confirmed"]
-    if plan.is_stock_sale:
-        allowed.append("approved")
-    if plan.status not in allowed:
+    allowed_statuses = ["approved", "po_entered", "po_confirmed"]
+    if plan.status not in allowed_statuses:
         raise HTTPException(
-            400, f"Can only complete from {'/'.join(allowed)}, current: {plan.status}"
+            400, f"Can only complete from {'/'.join(allowed_statuses)}, current: {plan.status}"
         )
+    is_mgr = _is_admin(user) or user.role == "manager"
+    is_buyer = user.role in ("buyer", "trader")
+    if is_mgr:
+        pass  # can complete from any allowed status
+    elif is_buyer:
+        if plan.status not in ("po_entered", "po_confirmed"):
+            raise HTTPException(403, "Buyer can mark complete only after PO numbers are entered")
+    else:
+        raise HTTPException(403, "Only admin, manager, or buyer can mark plan complete")
 
     plan.status = "complete"
     plan.completed_at = datetime.now(timezone.utc)

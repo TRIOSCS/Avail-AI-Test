@@ -44,7 +44,7 @@ def run_startup_migrations() -> None:
         _create_perf_indexes(conn)
 
     _backfill_normalized_mpn()
-    _create_default_user_if_env_set()
+    # _create_default_user_if_env_set()  # Disabled for server push; re-enable when needed
     _backfill_sighting_offer_normalized_mpn()
     _backfill_sighting_vendor_normalized()
     log.info("Startup migrations complete")

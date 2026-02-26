@@ -6,7 +6,7 @@ Create Date: 2026-02-25
 """
 
 from alembic import op
-import sqlalchemy as sa
+from sqlalchemy import text
 
 revision = "011_phase3_integrity"
 down_revision = "010_add_material_card_fk"
@@ -15,34 +15,36 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # 1. Redundant normalized_mpn on sightings and offers (backup linkage key)
-    op.add_column("sightings", sa.Column("normalized_mpn", sa.String(255), nullable=True))
-    op.create_index("ix_sightings_normalized_mpn", "sightings", ["normalized_mpn"])
+    conn = op.get_bind()
+    # 1. Redundant normalized_mpn on sightings and offers (idempotent: column may exist from startup backfill)
+    conn.execute(text("ALTER TABLE sightings ADD COLUMN IF NOT EXISTS normalized_mpn VARCHAR(255)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_sightings_normalized_mpn ON sightings (normalized_mpn)"))
 
-    op.add_column("offers", sa.Column("normalized_mpn", sa.String(255), nullable=True))
-    op.create_index("ix_offers_normalized_mpn", "offers", ["normalized_mpn"])
+    conn.execute(text("ALTER TABLE offers ADD COLUMN IF NOT EXISTS normalized_mpn VARCHAR(255)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_offers_normalized_mpn ON offers (normalized_mpn)"))
 
     # 2. Soft-delete on material cards
-    op.add_column("material_cards", sa.Column("deleted_at", sa.DateTime(), nullable=True))
+    conn.execute(text("ALTER TABLE material_cards ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP"))
 
-    # 3. Audit log table
-    op.create_table(
-        "material_card_audit",
-        sa.Column("id", sa.Integer(), primary_key=True),
-        sa.Column("material_card_id", sa.Integer(), nullable=True),
-        sa.Column("action", sa.String(50), nullable=False),
-        sa.Column("entity_type", sa.String(50), nullable=True),
-        sa.Column("entity_id", sa.Integer(), nullable=True),
-        sa.Column("old_card_id", sa.Integer(), nullable=True),
-        sa.Column("new_card_id", sa.Integer(), nullable=True),
-        sa.Column("normalized_mpn", sa.String(255), nullable=True),
-        sa.Column("details", sa.JSON(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=True),
-        sa.Column("created_by", sa.String(255), nullable=True),
-    )
-    op.create_index("ix_mca_material_card_id", "material_card_audit", ["material_card_id"])
-    op.create_index("ix_mca_normalized_mpn", "material_card_audit", ["normalized_mpn"])
-    op.create_index("ix_mca_card_action", "material_card_audit", ["material_card_id", "action"])
+    # 3. Audit log table (idempotent: table may exist from prior partial run or create_all)
+    conn.execute(text("""
+        CREATE TABLE IF NOT EXISTS material_card_audit (
+            id SERIAL PRIMARY KEY,
+            material_card_id INTEGER,
+            action VARCHAR(50) NOT NULL,
+            entity_type VARCHAR(50),
+            entity_id INTEGER,
+            old_card_id INTEGER,
+            new_card_id INTEGER,
+            normalized_mpn VARCHAR(255),
+            details JSON,
+            created_at TIMESTAMP,
+            created_by VARCHAR(255)
+        )
+    """))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_mca_material_card_id ON material_card_audit (material_card_id)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_mca_normalized_mpn ON material_card_audit (normalized_mpn)"))
+    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_mca_card_action ON material_card_audit (material_card_id, action)"))
 
 
 def downgrade() -> None:

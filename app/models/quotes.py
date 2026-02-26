@@ -84,7 +84,8 @@ class BuyPlan(Base):
     )
 
     status = Column(String(30), default="pending_approval")
-    # pending_approval | approved | rejected | po_entered | po_confirmed | complete | cancelled
+    # Workflow: draft | pending_approval | approved | complete (UI shows: Draft -> Pending -> Approved -> Completed)
+    # Legacy: po_entered, po_confirmed map to Approved in UI; rejected, cancelled are terminal.
 
     line_items = Column(JSON, nullable=False, default=list)
 

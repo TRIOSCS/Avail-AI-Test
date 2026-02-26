@@ -4103,6 +4103,7 @@ function ddOpenBuyPlanModal(reqId) {
         </div>
         <div style="display:flex;gap:8px;justify-content:flex-end">
             <button class="btn btn-ghost" onclick="document.getElementById('ddBuyPlanOverlay').remove()">Cancel</button>
+            <button class="btn btn-ghost" id="ddBpDraftBtn" onclick="ddCreateBuyPlanDraft(${reqId})">Create as draft</button>
             <button class="btn btn-success" id="ddBpSubmitBtn" onclick="ddSubmitBuyPlan(${reqId})">Mark Won & Submit Buy Plan</button>
         </div>
     </div>`;
@@ -4131,14 +4132,13 @@ function ddUpdateBpTotals(reqId) {
     if (el) el.textContent = '$' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 
-async function ddSubmitBuyPlan(reqId) {
+function _ddBpPayload(reqId) {
     const q = _ddQuoteData[reqId];
-    if (!q) return;
+    if (!q) return null;
     const lines = q.lines || q.line_items || [];
     const checks = document.querySelectorAll('.dd-bp-check:checked');
     const selectedIndices = Array.from(checks).map(c => parseInt(c.dataset.idx));
-    if (!selectedIndices.length) { showToast('Select at least one item', 'error'); return; }
-
+    if (!selectedIndices.length) return null;
     const offerIds = [];
     const planQtys = {};
     selectedIndices.forEach(i => {
@@ -4149,14 +4149,41 @@ async function ddSubmitBuyPlan(reqId) {
             if (qtyInput) planQtys[item.offer_id] = parseInt(qtyInput.value) || item.qty || 0;
         }
     });
-    if (!offerIds.length) { showToast('No offer IDs found on line items', 'error'); return; }
-
+    if (!offerIds.length) return null;
     const notes = (document.getElementById('ddBpNotes')?.value || '').trim();
+    return { offer_ids: offerIds, plan_qtys: planQtys, salesperson_notes: notes };
+}
+
+async function ddCreateBuyPlanDraft(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    const payload = _ddBpPayload(reqId);
+    if (!payload) { showToast('Select at least one item', 'error'); return; }
+    const btn = document.getElementById('ddBpDraftBtn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Creating\u2026'; }
+    try {
+        const res = await apiFetch('/api/quotes/' + q.id + '/buy-plan/draft', { method: 'POST', body: payload });
+        showToast('Buy plan created as draft. Go to Buy Plans and click "Ready to send" when ready.', 'success');
+        const overlay = document.getElementById('ddBuyPlanOverlay');
+        if (overlay) overlay.remove();
+        if (typeof window.showBuyPlans === 'function') { window.showBuyPlans(); if (typeof window.loadBuyPlans === 'function') window.loadBuyPlans(); }
+    } catch (e) {
+        showToast('Error: ' + (e.message || e), 'error');
+    }
+    if (btn) { btn.disabled = false; btn.textContent = 'Create as draft'; }
+}
+
+async function ddSubmitBuyPlan(reqId) {
+    const q = _ddQuoteData[reqId];
+    if (!q) return;
+    const payload = _ddBpPayload(reqId);
+    if (!payload) { showToast('Select at least one item', 'error'); return; }
+
     const btn = document.getElementById('ddBpSubmitBtn');
     if (btn) { btn.disabled = true; btn.textContent = 'Submitting\u2026'; }
     try {
         const res = await apiFetch('/api/quotes/' + q.id + '/buy-plan', {
-            method: 'POST', body: { offer_ids: offerIds, plan_qtys: planQtys, salesperson_notes: notes }
+            method: 'POST', body: payload
         });
         showToast('Buy plan submitted for approval!', 'success');
         const overlay = document.getElementById('ddBuyPlanOverlay');

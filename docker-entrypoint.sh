@@ -26,5 +26,13 @@ if [ -d /srv/static ]; then
     cp -r app/static/dist/* /srv/static/
 fi
 
-# Drop to non-root user for the app process
+# Run database migrations before starting the app (DB is healthy via depends_on)
+echo "Running alembic upgrade head..."
+if ! runuser -u appuser -- alembic upgrade head; then
+    echo "ERROR: alembic upgrade head failed — refusing to start app."
+    exit 1
+fi
+echo "Alembic: migrations applied."
+
+# Drop to non-root user and start the app
 exec runuser -u appuser -- "$@"

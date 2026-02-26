@@ -2393,22 +2393,25 @@ function renderBuyPlanStatus(targetId) {
     const isAdmin = window.__isAdmin;
     const isBuyer = ['buyer','trader','manager','admin'].includes(window.userRole);
 
+    // Workflow: Draft -> Pending -> Approved -> Completed (only these four)
     const statusColors = {
+        draft: 'var(--muted)',
         pending_approval: 'var(--amber)',
         approved: 'var(--green)',
-        rejected: 'var(--red)',
-        po_entered: 'var(--blue)',
+        po_entered: 'var(--green)',
         po_confirmed: 'var(--green)',
         complete: 'var(--green)',
+        rejected: 'var(--red)',
         cancelled: 'var(--muted)',
     };
     const statusLabels = {
-        pending_approval: 'Pending Approval',
-        approved: 'Approved \u2014 Awaiting PO',
+        draft: 'Draft',
+        pending_approval: 'Pending',
+        approved: 'Approved',
+        po_entered: 'Approved',
+        po_confirmed: 'Approved',
+        complete: 'Completed',
         rejected: 'Rejected',
-        po_entered: 'PO Entered \u2014 Verifying',
-        po_confirmed: 'PO Confirmed',
-        complete: 'Complete',
         cancelled: 'Cancelled',
     };
 
@@ -2442,7 +2445,7 @@ function renderBuyPlanStatus(targetId) {
         const planQty = item.plan_qty || item.qty || 0;
         let poCell = '';
         if (!hidePoCol) {
-            const poEditable = isBuyer && (bp.status === 'approved' || bp.status === 'po_entered');
+            const poEditable = isBuyer && (bp.status === 'approved' || bp.status === 'po_entered' || bp.status === 'po_confirmed');
             poCell = poEditable
                 ? `<input type="text" class="po-input" data-idx="${i}" placeholder="PO#" value="${esc(item.po_number||'')}" style="width:100px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px">`
                 : (item.po_number ? `<span style="font-weight:600">${esc(item.po_number)}</span>` : '\u2014');
@@ -2489,8 +2492,16 @@ function renderBuyPlanStatus(targetId) {
 
     let actionsHtml = '';
     const canApprove = isAdmin || window.userRole === 'manager';
+    const isSubmitter = bp.submitted_by_id === window.__userId;
+    const canSubmitDraft = (isSubmitter || canApprove) && bp.status === 'draft';
+
+    // 1. Draft -> Ready to send (Sales: creator, or Admin)
+    if (canSubmitDraft) {
+        actionsHtml += `<div style="margin-top:12px"><button class="btn btn-primary" onclick="submitDraftBuyPlan()">Ready to send</button></div>`;
+    }
+    // 2. Pending -> Approve/Reject (Admin/Manager only)
     if (canApprove && bp.status === 'pending_approval') {
-        actionsHtml = `
+        actionsHtml += `
             <div style="margin-top:12px">
                 <div class="field" style="margin-bottom:8px">
                     <label style="font-weight:600;font-size:12px">Acctivate Sales Order # <span style="color:var(--red)">*</span></label>
@@ -2505,9 +2516,16 @@ function renderBuyPlanStatus(targetId) {
                 </div>
             </div>`;
     }
-    // Cancel button for pending plans (submitter or admin/manager)
+    // 3. Approved -> Completed: Admin/Manager can complete from approved or PO-entered; Buyer only after PO entered (po_entered/po_confirmed)
+    if (canApprove && (bp.status === 'approved' || bp.status === 'po_entered' || bp.status === 'po_confirmed')) {
+        actionsHtml += `<div style="margin-top:12px"><button class="btn btn-success" onclick="completeBuyPlan()">Mark Complete</button></div>`;
+    }
+    if (isBuyer && !canApprove && (bp.status === 'po_entered' || bp.status === 'po_confirmed')) {
+        actionsHtml += `<div style="margin-top:12px"><button class="btn btn-success" onclick="completeBuyPlan()">Mark Complete</button></div>`;
+    }
+    // Cancel: Pending — submitter or admin/manager
     if (bp.status === 'pending_approval') {
-        const canCancel = canApprove || bp.submitted_by_id === window.__userId;
+        const canCancel = canApprove || isSubmitter;
         if (canCancel) {
             actionsHtml += `<div style="margin-top:8px"><button class="btn btn-ghost" onclick="cancelBuyPlan()">Cancel Plan</button></div>`;
         }
@@ -2527,12 +2545,8 @@ function renderBuyPlanStatus(targetId) {
             actionsHtml += `<div style="margin-top:8px"><button class="btn btn-ghost" onclick="cancelBuyPlan()">Cancel Plan</button></div>`;
         }
     }
-    // Complete button for po_confirmed (admin/manager)
-    if (canApprove && bp.status === 'po_confirmed') {
-        actionsHtml += `<div style="margin-top:12px"><button class="btn btn-success" onclick="completeBuyPlan()">Mark Complete</button></div>`;
-    }
-    // Resubmit button for rejected/cancelled
-    if (bp.status === 'rejected' || bp.status === 'cancelled') {
+    // Resubmit for rejected/cancelled (submitter or admin/manager)
+    if ((bp.status === 'rejected' || bp.status === 'cancelled') && (isSubmitter || canApprove)) {
         actionsHtml += `<div style="margin-top:12px"><button class="btn btn-primary" onclick="resubmitBuyPlan()">Resubmit Buy Plan</button></div>`;
     }
 
@@ -2544,7 +2558,7 @@ function renderBuyPlanStatus(targetId) {
                     <span class="status-badge" style="background:${statusColor};color:#fff;margin-left:8px">${statusLabel}</span>
                     ${bp.is_stock_sale ? '<span class="status-badge" style="background:#7c3aed;color:#fff;margin-left:4px">Stock Sale</span>' : ''}
                 </div>
-                <span style="font-size:11px;color:var(--muted)">Submitted by ${esc(bp.submitted_by||'')} ${bp.submitted_at ? '\xB7 '+fmtDateTime(bp.submitted_at) : ''}</span>
+                <span style="font-size:11px;color:var(--muted)">${bp.status === 'draft' ? 'Created by ' : 'Submitted by '}${esc(bp.submitted_by||'')} ${bp.submitted_at ? '\xB7 '+fmtDateTime(bp.submitted_at) : ''}</span>
             </div>
             ${contextHtml}
             ${marginHtml}
@@ -2557,6 +2571,19 @@ function renderBuyPlanStatus(targetId) {
             </div>
             ${actionsHtml}
         </div>`;
+}
+
+async function submitDraftBuyPlan() {
+    if (!_currentBuyPlan || _currentBuyPlan.status !== 'draft') return;
+    if (submitDraftBuyPlan._busy) return; submitDraftBuyPlan._busy = true;
+    try {
+        await apiFetch('/api/buy-plans/' + _currentBuyPlan.id + '/submit', { method: 'PUT' });
+        showToast('Buy plan sent for approval', 'success');
+        _currentBuyPlan = await apiFetch('/api/buy-plans/' + _currentBuyPlan.id);
+        renderBuyPlanStatus(_bpRenderTarget);
+        if (typeof loadBuyPlan === 'function') loadBuyPlan();
+    } catch (e) { showToast('Failed to submit: ' + (e.message || e), 'error'); }
+    finally { submitDraftBuyPlan._busy = false; }
 }
 
 async function approveBuyPlan() {
@@ -2767,8 +2794,9 @@ function renderBuyPlansList() {
         return;
     }
 
-    const statusLabels = {pending_approval:'Pending',approved:'Approved',rejected:'Rejected',po_entered:'PO Entered',po_confirmed:'Confirmed',complete:'Complete',cancelled:'Cancelled'};
-    const statusBadge = {pending_approval:'b-pend',approved:'b-appr',rejected:'b-rej',po_entered:'b-po',po_confirmed:'b-conf',complete:'b-comp',cancelled:'b-canc'};
+    // Workflow: Draft -> Pending -> Approved -> Completed
+    const statusLabels = {draft:'Draft',pending_approval:'Pending',approved:'Approved',po_entered:'Approved',po_confirmed:'Approved',complete:'Completed',rejected:'Rejected',cancelled:'Cancelled'};
+    const statusBadge = {draft:'b-draft',pending_approval:'b-pend',approved:'b-appr',po_entered:'b-appr',po_confirmed:'b-appr',complete:'b-comp',rejected:'b-rej',cancelled:'b-canc'};
 
     // Sort
     if (_bpSortCol) {

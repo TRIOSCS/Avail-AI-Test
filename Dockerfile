@@ -23,8 +23,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
     && apt-get purge -y gcc python3-dev && apt-get autoremove -y || true
 
-# Copy app code
+# Copy app code and Alembic (for migrations at runtime)
 COPY app/ app/
+COPY alembic.ini .
+COPY alembic/ alembic/
 
 # Overlay Vite build output from stage 1
 COPY --from=builder /build/app/static/dist/ app/static/dist/
