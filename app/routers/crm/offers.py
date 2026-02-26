@@ -6,7 +6,6 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...config import settings
 from ...database import get_db
 from ...dependencies import require_buyer, require_user
 from ...models import (
@@ -16,7 +15,6 @@ from ...models import (
     Offer,
     OfferAttachment,
     Quote,
-    Requirement,
     Requisition,
     User,
     VendorCard,
@@ -25,14 +23,9 @@ from ...models import (
 from ...schemas.crm import OfferCreate, OfferUpdate, OneDriveAttach
 from ...schemas.responses import OfferListResponse
 from ...services.credential_service import get_credential_cached
-from ...utils.normalization import (
-    normalize_condition,
-    normalize_mpn,
-    normalize_mpn_key,
-    normalize_packaging,
-)
+from ...utils.normalization import normalize_mpn_key
 from ...vendor_utils import normalize_vendor_name
-from ._helpers import record_changes, _preload_last_quoted_prices
+from ._helpers import _preload_last_quoted_prices, record_changes
 
 router = APIRouter()
 

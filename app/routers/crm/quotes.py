@@ -9,19 +9,21 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
-from sqlalchemy import func as sqlfunc
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload
 
-from ...config import settings
 from ...database import get_db
-from ...dependencies import require_buyer, require_user
-from ...models import ActivityLog, Offer, Quote, Requirement, Requisition, User
-from ...models import CustomerSite
+from ...dependencies import require_user
+from ...models import CustomerSite, Offer, Quote, Requisition, User
 from ...schemas.crm import QuoteCreate, QuoteReopen, QuoteResult, QuoteSendOverride, QuoteUpdate
 from ...schemas.responses import QuoteDetailResponse
-from ...services.credential_service import get_credential_cached
-from ...rate_limit import limiter
-from ._helpers import quote_to_dict, _preload_last_quoted_prices, _build_quote_email_html, next_quote_number
+from ._helpers import (
+    _PRICED_STATUSES,
+    _build_quote_email_html,
+    _preload_last_quoted_prices,
+    _quote_date_iso,
+    next_quote_number,
+    quote_to_dict,
+)
 
 router = APIRouter()
 
@@ -45,9 +47,7 @@ async def get_quote(
             joinedload(Quote.customer_site).joinedload(CustomerSite.site_contacts),
             joinedload(Quote.created_by),
         )
-        .filter(
-            Quote.requisition_id == req_id,
-        )
+        .filter(Quote.requisition_id == req_id)
         .order_by(Quote.revision.desc())
         .first()
     )
@@ -139,7 +139,7 @@ async def create_quote(
     # Resolve material_card_id for line items that don't have one
     from ...search_service import resolve_material_card
 
-    for li in line_items or []:
+    for li in line_items:
         if not li.get("material_card_id") and li.get("mpn"):
             try:
                 card = resolve_material_card(li["mpn"], db)
@@ -458,12 +458,8 @@ async def pricing_history(
     mpn_upper = mpn.upper().strip()
     quotes = (
         db.query(Quote)
-        .options(
-            joinedload(Quote.customer_site).joinedload(CustomerSite.company),
-        )
-        .filter(
-            Quote.status.in_(["sent", "won", "lost"]),
-        )
+        .options(joinedload(Quote.customer_site).joinedload(CustomerSite.company))
+        .filter(Quote.status.in_(_PRICED_STATUSES))
         .order_by(Quote.sent_at.desc().nullslast(), Quote.created_at.desc())
         .limit(500)
         .all()
@@ -472,15 +468,9 @@ async def pricing_history(
     card_id = card.id if card else None
     for q in quotes:
         for item in q.line_items or []:
-            # Match by material_card_id (fast) or fall back to MPN string match
-            item_card_id = item.get("material_card_id")
-            if card_id and item_card_id == card_id:
-                matched = True
-            elif (item.get("mpn") or "").upper().strip() == mpn_upper:
-                matched = True
-            else:
-                matched = False
-            if not matched:
+            matched_by_card = card_id and item.get("material_card_id") == card_id
+            matched_by_mpn = (item.get("mpn") or "").upper().strip() == mpn_upper
+            if not (matched_by_card or matched_by_mpn):
                 continue
             site_name = ""
             if q.customer_site:
@@ -491,9 +481,7 @@ async def pricing_history(
                 )
             history.append(
                 {
-                    "date": (q.sent_at or q.created_at).isoformat()
-                    if (q.sent_at or q.created_at)
-                    else None,
+                    "date": _quote_date_iso(q),
                     "qty": item.get("qty"),
                     "cost_price": item.get("cost_price"),
                     "sell_price": item.get("sell_price"),

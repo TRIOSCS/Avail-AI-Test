@@ -18,16 +18,11 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import (
-    CustomerSite,
     MaterialCard,
     Offer,
     Quote,
-    Requirement,
-    Requisition,
-    User,
 )
-from app.routers.crm import quote_to_dict, _preload_last_quoted_prices
-
+from app.routers.crm import _preload_last_quoted_prices, quote_to_dict
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 
@@ -422,12 +417,9 @@ def test_quote_to_dict_enrichment_failure_returns_raw_items(db_session, material
     """If MaterialCard query raises, raw items are returned instead of 500."""
     items = [{"mpn": "LM317T", "material_card_id": material_card.id}]
     q = _mock_quote(line_items=items)
-
-    with patch("app.routers.crm._helpers.Quote") as mock_cls:
-        # Force the db.query(MaterialCard) to raise by patching at the db level
-        broken_db = MagicMock()
-        broken_db.query.side_effect = Exception("DB connection lost")
-        d = quote_to_dict(q, db=broken_db)
+    broken_db = MagicMock()
+    broken_db.query.side_effect = Exception("DB connection lost")
+    d = quote_to_dict(q, db=broken_db)
     assert len(d["line_items"]) == 1
     assert d["line_items"][0]["mpn"] == "LM317T"
 

@@ -6,9 +6,17 @@ from sqlalchemy.orm import Session
 
 from ...models import ChangeLog, Quote, User
 
-
 # Late import — re-exported for backward compatibility
 from ...services.crm_service import next_quote_number  # noqa: F401
+
+# Statuses considered for pricing history lookups
+_PRICED_STATUSES = ["sent", "won", "lost"]
+
+
+def _quote_date_iso(q: Quote) -> str | None:
+    """Return the best available date for a quote as an ISO string."""
+    dt = q.sent_at or q.created_at
+    return dt.isoformat() if dt else None
 
 
 def record_changes(db: Session, entity_type: str, entity_id: int,
@@ -35,9 +43,7 @@ def get_last_quoted_price(mpn: str, db: Session) -> dict | None:
 
     quotes = (
         db.query(Quote)
-        .filter(
-            Quote.status.in_(["sent", "won", "lost"]),
-        )
+        .filter(Quote.status.in_(_PRICED_STATUSES))
         .order_by(Quote.sent_at.desc().nullslast(), Quote.created_at.desc())
         .limit(100)
         .all()
@@ -48,22 +54,21 @@ def get_last_quoted_price(mpn: str, db: Session) -> dict | None:
     mpn_upper = mpn.upper().strip()
     for q in quotes:
         for item in q.line_items or []:
-            item_card_id = item.get("material_card_id")
-            if (card_id and item_card_id == card_id) or (item.get("mpn") or "").upper().strip() == mpn_upper:
+            matched_by_card = card_id and item.get("material_card_id") == card_id
+            matched_by_mpn = (item.get("mpn") or "").upper().strip() == mpn_upper
+            if matched_by_card or matched_by_mpn:
                 return {
                     "sell_price": item.get("sell_price"),
                     "margin_pct": item.get("margin_pct"),
                     "quote_number": q.quote_number,
-                    "date": (q.sent_at or q.created_at).isoformat()
-                    if (q.sent_at or q.created_at)
-                    else None,
+                    "date": _quote_date_iso(q),
                     "result": q.result,
                 }
     return None
 
 
 def _preload_last_quoted_prices(db: Session) -> dict[str, dict]:
-    """Load recent quotes ONCE and build MPN→price lookup dict.
+    """Load recent quotes ONCE and build MPN/card_id to price lookup dict.
 
     Keys by both MPN string (uppercase) and material_card_id so callers
     can look up by either.  card_id keys are prefixed with ``card:`` to
@@ -71,21 +76,20 @@ def _preload_last_quoted_prices(db: Session) -> dict[str, dict]:
     """
     quotes = (
         db.query(Quote)
-        .filter(Quote.status.in_(["sent", "won", "lost"]))
+        .filter(Quote.status.in_(_PRICED_STATUSES))
         .order_by(Quote.sent_at.desc().nullslast(), Quote.created_at.desc())
         .limit(100)
         .all()
     )
     result: dict[str, dict] = {}
     for q in quotes:
+        date_str = _quote_date_iso(q)
         for item in q.line_items or []:
             entry = {
                 "sell_price": item.get("sell_price"),
                 "margin_pct": item.get("margin_pct"),
                 "quote_number": q.quote_number,
-                "date": (q.sent_at or q.created_at).isoformat()
-                if (q.sent_at or q.created_at)
-                else None,
+                "date": date_str,
                 "result": q.result,
             }
             mpn_key = (item.get("mpn") or "").upper().strip()
@@ -253,7 +257,7 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
 
     greeting = f"Dear {_esc(to_name)}," if to_name else "Dear Valued Customer,"
     notes_block = f'<div style="margin-top:16px;padding:12px 16px;background:#F3F5F7;border-left:3px solid {BLUE};border-radius:4px;font-size:13px;color:#444">{_esc(quote.notes)}</div>' if quote.notes else ""
-    signature = user.email_signature or f"{user.name or 'Trio Supply Chain Solutions'}"
+    signature = user.email_signature or user.name or "Trio Supply Chain Solutions"
     sig_html = _esc(signature).replace("\n", "<br>")
 
     th_base = f"padding:10px 14px;border-bottom:2px solid {BLUE};font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:{DARK};background:#F3F5F7"

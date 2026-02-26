@@ -23,6 +23,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
+from ..cache.decorators import cached_endpoint, invalidate_prefix
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_user
 from ..models import (
@@ -42,7 +43,6 @@ from ..models import (
     User,
     VendorResponse,
 )
-from ..cache.decorators import cached_endpoint, invalidate_prefix
 from ..rate_limit import limiter
 from ..schemas.requisitions import (
     RequirementCreate,
@@ -68,8 +68,8 @@ from ..utils.normalization import (
     normalize_price,
     normalize_quantity,
 )
-from .rfq import _enrich_with_vendor_cards
 from ..vendor_utils import normalize_vendor_name
+from .rfq import _enrich_with_vendor_cards
 
 router = APIRouter(tags=["requisitions"])
 

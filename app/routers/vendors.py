@@ -377,7 +377,7 @@ async def autocomplete_names(
     limit = min(int(request.query_params.get("limit", "8")), 20)
     safe_q = q.replace("%", r"\%").replace("_", r"\_")
 
-    from sqlalchemy import cast, String
+    from sqlalchemy import String, cast
 
     # Primary: match on normalized_name
     vendors_by_name = (
@@ -1541,6 +1541,7 @@ async def delete_material(
 ):
     """Soft-delete a material card. Sets deleted_at timestamp; records are preserved."""
     from datetime import datetime, timezone
+
     from ..services.audit_service import log_audit
 
     card = db.get(MaterialCard, card_id)

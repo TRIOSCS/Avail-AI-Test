@@ -8,13 +8,9 @@ Verifies:
 """
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-from sqlalchemy.orm import Session
-
-from app.models import MaterialCard, Requisition, User
-
+from app.models import MaterialCard
 
 # ── Requisition list caching ────────────────────────────────────────
 
@@ -117,7 +113,7 @@ class TestMaterialListCache:
 
     def test_list_materials_cached(self, client, db_session, test_user):
         """Materials list uses caching with material_list prefix."""
-        with patch("app.cache.decorators.get_cached", return_value=None) as mock_get, \
+        with patch("app.cache.decorators.get_cached", return_value=None), \
              patch("app.cache.decorators.set_cached") as mock_set:
             resp = client.get("/api/materials")
             assert resp.status_code == 200
