@@ -1326,6 +1326,7 @@ function _loadDashScorecard(tab) {
     if (tab === 'vendors') _loadDashVendorScorecard(el);
     else if (tab === 'buyers') _loadDashBuyerLeaderboard(el);
     else if (tab === 'sales') _loadDashSalesScorecard(el);
+    else if (tab === 'avail-score') _loadDashAvailScore(el);
     else if (tab === 'digest') _loadDashDigest(el);
 }
 
@@ -1414,6 +1415,82 @@ async function _loadDashDigest(el) {
         html += '</div>';
         el.innerHTML = html;
     } catch(e) { el.innerHTML = '<p class="empty">Failed to load team digest</p>'; }
+}
+
+async function _loadDashAvailScore(el) {
+    const role = _effectivePerspective() === 'sales' ? 'sales' : 'buyer';
+    el.innerHTML = '<p class="empty">Loading Avail Scores...</p>';
+    try {
+        const data = await apiFetch(`/api/performance/avail-scores?role=${role}`);
+        const entries = data.entries || [];
+        if (!entries.length) { el.innerHTML = '<p class="empty">No Avail Score data yet — scores are computed daily</p>'; return; }
+        el.innerHTML = _renderAvailScoreTable(entries, role, data.month);
+    } catch(e) { el.innerHTML = '<p class="empty">Failed to load Avail Scores</p>'; }
+}
+
+export function _renderAvailScoreTable(entries, role, month) {
+    const monthLabel = month ? new Date(month + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : '';
+    let html = `<div class="as-header"><span class="as-month">${esc(monthLabel)}</span><span class="as-role-badge as-role-${role}">${role === 'buyer' ? 'Purchasing' : 'Sales'}</span></div>`;
+    html += '<div class="as-list">';
+    for (const e of entries) {
+        const scoreColor = e.total_score >= 60 ? 'var(--green)' : e.total_score >= 40 ? 'var(--amber)' : 'var(--muted)';
+        const rankBadge = e.rank === 1 ? 'as-gold' : e.rank === 2 ? 'as-silver' : '';
+        const bonusTag = e.bonus_amount > 0 ? `<span class="as-bonus">+$${e.bonus_amount}</span>` : '';
+        const qualTag = !e.qualified ? '<span class="as-unqualified">Not Qualified</span>' : '';
+        html += `<div class="as-entry${e.qualified ? '' : ' as-dim'}" onclick="this.querySelector('.as-detail').classList.toggle('open')">
+            <div class="as-row">
+                <span class="as-rank-num ${rankBadge}">${e.rank || '—'}</span>
+                <div class="as-name-col">
+                    <span class="as-name">${esc(e.user_name || 'User #' + e.user_id)}</span>
+                    ${qualTag}${bonusTag}
+                </div>
+                <div class="as-scores">
+                    <span class="as-sub" title="Behaviors">${(e.behavior_total || 0).toFixed(0)}</span>
+                    <span class="as-sub-sep">+</span>
+                    <span class="as-sub" title="Outcomes">${(e.outcome_total || 0).toFixed(0)}</span>
+                    <span class="as-sub-sep">=</span>
+                    <span class="as-total" style="color:${scoreColor}">${(e.total_score || 0).toFixed(0)}</span>
+                </div>
+                <svg class="as-chevron" viewBox="0 0 24 24" width="14" height="14"><path d="M6 9l6 6 6-6"/></svg>
+            </div>
+            <div class="as-detail">
+                ${_renderAvailMetrics(e)}
+            </div>
+        </div>`;
+    }
+    html += '</div>';
+    return html;
+}
+
+function _renderAvailMetrics(entry) {
+    let html = '<div class="as-metrics">';
+    html += '<div class="as-metrics-col"><div class="as-metrics-title">Behaviors <span class="as-metrics-sub">' + (entry.behavior_total || 0).toFixed(1) + '/50</span></div>';
+    for (let i = 1; i <= 5; i++) {
+        const score = entry['b' + i + '_score'] ?? 0;
+        const label = entry['b' + i + '_label'] || 'B' + i;
+        const raw = entry['b' + i + '_raw'] || '';
+        const pct = score * 10;
+        html += `<div class="as-metric">
+            <div class="as-metric-head"><span class="as-metric-label">${esc(label)}</span><span class="as-metric-val">${score.toFixed(1)}<span class="as-metric-max">/10</span></span></div>
+            <div class="as-bar"><div class="as-bar-fill as-bar-behavior" style="width:${pct}%"></div></div>
+            ${raw ? '<div class="as-metric-raw">' + esc(raw) + '</div>' : ''}
+        </div>`;
+    }
+    html += '</div>';
+    html += '<div class="as-metrics-col"><div class="as-metrics-title">Outcomes <span class="as-metrics-sub">' + (entry.outcome_total || 0).toFixed(1) + '/50</span></div>';
+    for (let i = 1; i <= 5; i++) {
+        const score = entry['o' + i + '_score'] ?? 0;
+        const label = entry['o' + i + '_label'] || 'O' + i;
+        const raw = entry['o' + i + '_raw'] || '';
+        const pct = score * 10;
+        html += `<div class="as-metric">
+            <div class="as-metric-head"><span class="as-metric-label">${esc(label)}</span><span class="as-metric-val">${score.toFixed(1)}<span class="as-metric-max">/10</span></span></div>
+            <div class="as-bar"><div class="as-bar-fill as-bar-outcome" style="width:${pct}%"></div></div>
+            ${raw ? '<div class="as-metric-raw">' + esc(raw) + '</div>' : ''}
+        </div>`;
+    }
+    html += '</div></div>';
+    return html;
 }
 
 function showDashboard() {
@@ -5897,6 +5974,8 @@ function setUserFilter(val) {
         if (sel) sel.value = val || '';
     });
     renderReqList();
+    // Re-populate dropdowns after render rebuilt the table header
+    _populateUserFilter();
 }
 
 async function _populateUserFilter() {
@@ -9777,18 +9856,18 @@ function _notifLabel(type) {
 }
 function _notifClickAction(n) {
     const close = `markNotifRead(${n.id});document.getElementById('notifPanel').classList.remove('open');`;
-    // Offer pending review → navigate to requisition offers tab
+    // Offer pending review → navigate to RFQ view then open offers tab
     if (n.type === 'offer_pending_review' && n.requisition_id)
-        return close + `toggleDrillDown(${n.requisition_id});setTimeout(()=>_switchDdTab(${n.requisition_id},'offers'),400)`;
+        return close + `sidebarNav('reqs',document.getElementById('navReqs'));setTimeout(()=>{toggleDrillDown(${n.requisition_id});setTimeout(()=>_switchDdTab(${n.requisition_id},'offers'),400)},300)`;
     // Buy plan notifications → open buy plan detail
     if (n.type && n.type.startsWith('buyplan_') && n.requisition_id)
         return close + `showBuyPlans();setTimeout(()=>openBuyPlanDetail(${n.requisition_id}),300)`;
     // Vendor-related → open vendor popup
     if (n.vendor_card_id)
         return close + `openVendorPopup(${n.vendor_card_id})`;
-    // Requisition-related → expand drill-down
+    // Requisition-related → navigate to RFQ view then expand drill-down
     if (n.requisition_id)
-        return close + `toggleDrillDown(${n.requisition_id})`;
+        return close + `sidebarNav('reqs',document.getElementById('navReqs'));setTimeout(()=>toggleDrillDown(${n.requisition_id}),300)`;
     // Company-related → go to company
     if (n.company_id)
         return close + `goToCompany(${n.company_id})`;

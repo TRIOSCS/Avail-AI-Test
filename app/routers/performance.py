@@ -131,3 +131,51 @@ def refresh_buyer_leaderboard(
     result = compute_buyer_leaderboard(db, m)
     invalidate_prefix("perf_buyers")
     return {"status": "ok", **result}
+
+
+# ── Avail Scores ─────────────────────────────────────────────────────
+
+
+@router.get("/api/performance/avail-scores")
+def get_avail_scores_endpoint(
+    role: str = Query(..., pattern="^(buyer|sales)$"),
+    month: str = Query(None, description="YYYY-MM format"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return ranked Avail Scores for buyer or sales team."""
+    from ..services.avail_score_service import get_avail_scores
+
+    if month:
+        try:
+            m = datetime.strptime(month, "%Y-%m").date()
+        except ValueError:
+            raise HTTPException(400, "Invalid month format — use YYYY-MM")
+    else:
+        m = date.today().replace(day=1)
+
+    return {"month": m.isoformat(), "role": role, "entries": get_avail_scores(db, role, m)}
+
+
+@router.post("/api/performance/avail-scores/refresh")
+def refresh_avail_scores(
+    month: str = Query(None, description="YYYY-MM format"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Recompute Avail Scores for all users. Admin only."""
+    if not _is_admin(user):
+        raise HTTPException(403, "Admin required")
+    from ..services.avail_score_service import compute_all_avail_scores
+
+    if month:
+        try:
+            m = datetime.strptime(month, "%Y-%m").date()
+        except ValueError:
+            raise HTTPException(400, "Invalid month format — use YYYY-MM")
+    else:
+        m = date.today().replace(day=1)
+
+    result = compute_all_avail_scores(db, m)
+    invalidate_prefix("perf_avail")
+    return {"status": "ok", **result}

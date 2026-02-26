@@ -8,6 +8,7 @@ import {
     toggleDrillDown, guardBtn, openVendorPopup,
     loadVendorContacts, refreshProactiveBadge,
     currentReqId, setCurrentReqId,
+    _renderAvailScoreTable,
 } from 'app';
 
 // ── Debounced CRM Handlers ─────────────────────────────────────────────
@@ -4422,11 +4423,14 @@ function switchPerfTab(tab, btn) {
     document.getElementById('perfVendorPanel').style.display = tab === 'vendors' ? '' : 'none';
     document.getElementById('perfBuyerPanel').style.display = tab === 'buyers' ? '' : 'none';
     document.getElementById('perfSalesPanel').style.display = tab === 'sales' ? '' : 'none';
+    const availPanel = document.getElementById('perfAvailScorePanel');
+    if (availPanel) availPanel.style.display = tab === 'avail-score' ? '' : 'none';
     const digestPanel = document.getElementById('perfDigestPanel');
     if (digestPanel) digestPanel.style.display = tab === 'digest' ? '' : 'none';
     if (tab === 'vendors') loadVendorScorecards();
     else if (tab === 'buyers') loadBuyerLeaderboard();
     else if (tab === 'sales') loadSalespersonScorecard();
+    else if (tab === 'avail-score') loadAvailScores();
     else if (tab === 'digest') loadManagerDigest();
 }
 
@@ -4475,6 +4479,37 @@ async function loadManagerDigest() {
         el.innerHTML = html;
     } catch (e) {
         el.innerHTML = '<p class="empty">Failed to load digest</p>';
+    }
+}
+
+let _availScoreRole = 'buyer';
+async function loadAvailScores(role) {
+    if (role) _availScoreRole = role;
+    const el = document.getElementById('perfAvailScorePanel');
+    if (!el) return;
+    el.innerHTML = '<p class="empty">Loading...</p>';
+    try {
+        const data = await apiFetch(`/api/performance/avail-scores?role=${_availScoreRole}`);
+        const entries = data.entries || [];
+        const month = data.month || '';
+        let html = '<div style="padding:0 16px">';
+        // Role toggle
+        html += `<div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+            <div class="fpills fpills-sm">
+                <button type="button" class="fp fp-sm ${_availScoreRole==='buyer'?'on':''}" onclick="loadAvailScores('buyer')">Buyers</button>
+                <button type="button" class="fp fp-sm ${_availScoreRole==='sales'?'on':''}" onclick="loadAvailScores('sales')">Sales</button>
+            </div>
+        </div>`;
+        if (!entries.length) {
+            html += '<p class="empty">No Avail Score data yet — scores are computed daily</p></div>';
+            el.innerHTML = html;
+            return;
+        }
+        html += _renderAvailScoreTable(entries, _availScoreRole, month);
+        html += '</div>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<p class="empty">Failed to load Avail Scores</p>';
     }
 }
 
@@ -6395,12 +6430,14 @@ async function showSuggested() {
     if (viewEl) viewEl.style.display = 'flex';
     setCurrentReqId(null);
     _suggestedPage = 1;
-    _suggestedReadiness = '';
-    document.querySelectorAll('#suggestedPills .chip').forEach(c => c.classList.toggle('on', c.dataset.value === ''));
     const search = document.getElementById('suggestedSearch');
     if (search) search.value = '';
-    const region = document.getElementById('suggestedRegion');
-    if (region) region.value = '';
+    const size = document.getElementById('suggestedSize');
+    if (size) size.value = '';
+    const fit = document.getElementById('suggestedFitScore');
+    if (fit) fit.value = '0';
+    const readiness = document.getElementById('suggestedReadinessScore');
+    if (readiness) readiness.value = '0';
     const sort = document.getElementById('suggestedSort');
     if (sort) sort.value = 'readiness_desc';
     _setTopViewLabel('Suggested');
@@ -6414,12 +6451,15 @@ async function loadSuggested() {
     if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px"><div class="spinner"></div> Loading…</div>';
 
     const search = (document.getElementById('suggestedSearch')?.value || '').trim();
-    const region = document.getElementById('suggestedRegion')?.value || '';
+    const size = document.getElementById('suggestedSize')?.value || '';
+    const fitScore = document.getElementById('suggestedFitScore')?.value || '0';
+    const readinessScore = document.getElementById('suggestedReadinessScore')?.value || '0';
     const sort = document.getElementById('suggestedSort')?.value || 'readiness_desc';
-    const params = new URLSearchParams({ page: _suggestedPage, per_page: 20, sort });
+    const params = new URLSearchParams({ page: _suggestedPage, per_page: 100, sort });
     if (search) params.set('search', search);
-    if (_suggestedReadiness) params.set('readiness_level', _suggestedReadiness);
-    if (region) params.set('region', region);
+    if (size) params.set('employee_size', size);
+    if (parseInt(fitScore) > 0) params.set('min_fit_score', fitScore);
+    if (parseInt(readinessScore) > 0) params.set('min_readiness_score', readinessScore);
 
     try {
         const [data, stats] = await Promise.all([
@@ -6444,6 +6484,10 @@ function renderSuggestedStats(stats) {
         <span class="stat-item"><span class="stat-val">${stats.nurture_count}</span> nurture</span>
         <span class="stat-item"><span class="stat-val">${stats.high_fit_count}</span> high fit</span>
         <span class="stat-item"><span class="stat-val">${stats.claimed_this_month}</span> claimed this month</span>
+        <span class="stat-item" style="margin-left:auto;cursor:pointer;color:var(--blue);font-weight:600" onclick="toggleScoringGuide()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            Scoring Guide
+        </span>
     `;
 }
 
@@ -6516,14 +6560,25 @@ function renderSuggestedGrid(data) {
             ? `<div class="suggested-writeup">${esc(a.ai_writeup)}</div>`
             : '';
 
+        // One-liner
+        const oneLinerHtml = a.one_liner
+            ? `<div style="font-size:10px;color:var(--text);padding:2px 0;font-style:italic;border-left:2px solid var(--blue);padding-left:6px;margin:3px 0;line-height:1.3">${esc(a.one_liner)}</div>`
+            : '';
+
+        // Warm intro badge
+        const warmBadge = a.has_warm_intro
+            ? `<span class="suggested-badge" style="background:${a.warm_intro_warmth === 'hot' ? '#dcfce7;color:#166534' : '#fef9c3;color:#854d0e'}">${a.warm_intro_warmth === 'hot' ? '🔥 Warm Intro' : '👋 Prior Contact'}</span>`
+            : '';
+
         return `<div class="suggested-card" id="sg-card-${a.id}">
             <div class="suggested-card-header">
                 <div>
-                    <div class="suggested-card-name">${esc(a.name)}</div>
+                    <div class="suggested-card-name" style="cursor:pointer" onclick="openSuggestedDetail(${a.id})">${esc(a.name)}</div>
                     ${domainLink}
                 </div>
-                <div class="suggested-card-badges">${tierBadge}${sfBadge}</div>
+                <div class="suggested-card-badges">${warmBadge}${tierBadge}${sfBadge}</div>
             </div>
+            ${oneLinerHtml}
             ${meta.length ? '<div class="suggested-card-meta">' + meta.join(' &middot; ') + '</div>' : ''}
             ${scoreBars}
             ${signalHtml}
@@ -6545,14 +6600,13 @@ function renderSuggestedGrid(data) {
         </div>`;
     }).join('');
 
-    // Pagination
+    // Pagination — inline in toolbar
     if (pager) {
         const totalPages = Math.ceil(data.total / data.per_page);
-        if (totalPages <= 1) { pager.innerHTML = ''; return; }
         let html = '';
-        if (_suggestedPage > 1) html += `<button class="btn btn-ghost btn-sm" onclick="suggestedGoPage(${_suggestedPage - 1})">&laquo; Prev</button> `;
-        html += `<span style="font-size:12px;color:var(--muted)">Page ${data.page} of ${totalPages} (${data.total} accounts)</span>`;
-        if (_suggestedPage < totalPages) html += ` <button class="btn btn-ghost btn-sm" onclick="suggestedGoPage(${_suggestedPage + 1})">Next &raquo;</button>`;
+        if (_suggestedPage > 1) html += `<button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:11px" onclick="suggestedGoPage(${_suggestedPage - 1})">&laquo;</button>`;
+        html += `<span>${data.total} accounts &middot; ${data.page}/${totalPages}</span>`;
+        if (_suggestedPage < totalPages) html += `<button class="btn btn-ghost btn-sm" style="padding:2px 6px;font-size:11px" onclick="suggestedGoPage(${_suggestedPage + 1})">&raquo;</button>`;
         pager.innerHTML = html;
     }
 }
@@ -6562,6 +6616,12 @@ function suggestedGoPage(page) {
     loadSuggested();
     const wrap = document.querySelector('.suggested-grid-wrap');
     if (wrap) wrap.scrollTop = 0;
+}
+
+function toggleScoringGuide() {
+    const el = document.getElementById('suggestedLegend');
+    if (!el) return;
+    el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
 async function claimSuggestedAccount(id, name) {
@@ -6597,17 +6657,234 @@ async function dismissSuggestedAccount(id, name, reason) {
     }
 }
 
+async function openSuggestedDetail(prospectId) {
+    const backdrop = document.getElementById('suggestedDetailBackdrop');
+    const drawer = document.getElementById('suggestedDetailDrawer');
+    const body = document.getElementById('suggestedDetailBody');
+    const title = document.getElementById('suggestedDetailTitle');
+    if (backdrop) backdrop.classList.add('open');
+    if (drawer) drawer.classList.add('open');
+    if (body) body.innerHTML = '<div class="spinner-row"><div class="spinner"></div> Loading account intelligence…</div>';
 
-/// ── Prospecting Pool ───────────────────────────────────────────────────
+    try {
+        const detail = await apiFetch('/api/prospects/suggested/' + prospectId);
+        if (title) title.textContent = detail.name || 'Account Detail';
 
-let _prospectingTab = 'pool';
+        // Build the AI intelligence view
+        let html = '';
+
+        // Health badge
+        const tier = detail.readiness_tier;
+        const tierLabels = { call_now: 'Call Now', nurture: 'Nurture', monitor: 'Monitor' };
+        const tierColor = tier === 'call_now' ? '#22c55e' : tier === 'nurture' ? '#eab308' : '#9ca3af';
+        html += `<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <span style="display:inline-block;width:12px;height:12px;border-radius:50%;background:${tierColor}"></span>
+            <span style="font-weight:600;font-size:14px">${tierLabels[tier] || tier}</span>
+            <span style="color:var(--muted);font-size:12px">Fit: ${detail.fit_score}/100 · Readiness: ${detail.readiness_score}/100</span>
+        </div>`;
+
+        // Score bars
+        html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px">
+            <div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:2px"><span>Fit Score</span><span>${detail.fit_score}</span></div><div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:${detail.fit_score}%;height:100%;background:var(--blue);border-radius:3px"></div></div></div>
+            <div><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--muted);margin-bottom:2px"><span>Readiness</span><span>${detail.readiness_score}</span></div><div style="height:6px;background:var(--border);border-radius:3px;overflow:hidden"><div style="width:${detail.readiness_score}%;height:100%;background:${tierColor};border-radius:3px"></div></div></div>
+        </div>`;
+
+        // Company info
+        html += '<div style="border-bottom:1px solid var(--border);padding-bottom:12px;margin-bottom:12px">';
+        const fields = [
+            ['Industry', detail.industry],
+            ['Size', detail.employee_count_range],
+            ['Revenue', detail.revenue_range],
+            ['Location', detail.hq_location],
+            ['Region', detail.region],
+            ['Domain', detail.domain ? `<a href="https://${detail.domain}" target="_blank" rel="noopener">${detail.domain}</a>` : null],
+        ];
+        for (const [label, val] of fields) {
+            if (val) html += `<div style="display:flex;gap:8px;font-size:12px;padding:3px 0"><span style="color:var(--muted);min-width:80px">${label}</span><span>${val}</span></div>`;
+        }
+        html += '</div>';
+
+        // Fit reasoning
+        if (detail.fit_reasoning) {
+            html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">Fit Breakdown</div>';
+            const parts = detail.fit_reasoning.split(';').map(p => p.trim()).filter(Boolean);
+            html += '<div style="font-size:11px;color:var(--text)">' + parts.map(p => '<div style="padding:2px 0">' + esc(p) + '</div>').join('') + '</div></div>';
+        }
+
+        // AI Writeup
+        if (detail.ai_writeup) {
+            html += `<div style="background:var(--bg-alt,#f0f4ff);border-radius:var(--radius-sm);padding:12px;margin-bottom:12px;border-left:3px solid var(--blue)">
+                <div style="font-weight:600;font-size:12px;margin-bottom:6px;color:var(--blue)">AI Analysis</div>
+                <div style="font-size:12px;line-height:1.5">${esc(detail.ai_writeup)}</div>
+            </div>`;
+        }
+
+        // Signals
+        if (detail.signal_tags && detail.signal_tags.length) {
+            html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">Signals</div><div style="display:flex;flex-wrap:wrap;gap:4px">';
+            for (const s of detail.signal_tags) {
+                html += `<span class="signal-tag ${s.type}">${esc(s.label)}</span>`;
+            }
+            html += '</div></div>';
+        }
+
+        // Enrichment data
+        const ed = detail.enrichment_data || {};
+
+        // Warm intro
+        const warmIntro = ed.warm_intro || {};
+        if (warmIntro.has_warm_intro) {
+            const warmColor = warmIntro.warmth === 'hot' ? '#166534' : '#854d0e';
+            const warmBg = warmIntro.warmth === 'hot' ? '#dcfce7' : '#fef9c3';
+            html += `<div style="background:${warmBg};border-radius:var(--radius-sm);padding:10px 12px;margin-bottom:12px;border-left:3px solid ${warmColor}">
+                <div style="font-weight:600;font-size:12px;color:${warmColor};margin-bottom:4px">${warmIntro.warmth === 'hot' ? '🔥 Warm Introduction Available' : '👋 Prior Contact Detected'}</div>`;
+            if (warmIntro.contacts && warmIntro.contacts.length) {
+                for (const c of warmIntro.contacts.slice(0, 3)) {
+                    html += `<div style="font-size:11px;padding:2px 0">${esc(c.name || '')} — ${esc(c.title || '')}${c.relationship_score ? ' (score: ' + c.relationship_score + ')' : ''}</div>`;
+                }
+            }
+            if (warmIntro.sighting_count > 0) {
+                html += `<div style="font-size:11px;padding:2px 0">${warmIntro.sighting_count} stock offers received from this domain</div>`;
+            }
+            if (warmIntro.engagement_score) {
+                html += `<div style="font-size:11px;padding:2px 0">Engagement score: ${warmIntro.engagement_score}/100</div>`;
+            }
+            html += '</div>';
+        }
+
+        // SAM.gov data
+        const samGov = ed.sam_gov || null;
+        if (samGov) {
+            html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">Government Registration (SAM.gov)</div>';
+            if (samGov.cage_code) html += '<div style="font-size:11px;padding:2px 0"><strong>CAGE Code:</strong> ' + esc(samGov.cage_code) + '</div>';
+            if (samGov.uei) html += '<div style="font-size:11px;padding:2px 0"><strong>UEI:</strong> ' + esc(samGov.uei) + '</div>';
+            if (samGov.entity_type) html += '<div style="font-size:11px;padding:2px 0"><strong>Type:</strong> ' + esc(samGov.entity_type) + '</div>';
+            if (samGov.purpose) html += '<div style="font-size:11px;padding:2px 0"><strong>Purpose:</strong> ' + esc(samGov.purpose) + '</div>';
+            if (samGov.naics_codes && samGov.naics_codes.length) {
+                const naicsStr = samGov.naics_codes.map(n => n.code + (n.primary ? ' (primary)' : '')).join(', ');
+                html += '<div style="font-size:11px;padding:2px 0"><strong>NAICS:</strong> ' + esc(naicsStr) + '</div>';
+            }
+            html += '</div>';
+        }
+
+        // Recent news
+        const news = ed.recent_news || [];
+        if (news.length) {
+            html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">Recent News</div>';
+            for (const n of news.slice(0, 5)) {
+                const typeColor = n.signal_type === 'funding' ? '#22c55e' : n.signal_type === 'acquisition' ? '#8b5cf6' : n.signal_type === 'expansion' ? '#3b82f6' : n.signal_type === 'contract' ? '#059669' : 'var(--muted)';
+                const typeBadge = n.signal_type !== 'general' ? `<span style="font-size:9px;padding:1px 4px;border-radius:4px;background:${typeColor};color:white;margin-right:4px">${esc(n.signal_type)}</span>` : '';
+                html += `<div style="padding:4px 0;border-top:1px solid var(--border);font-size:11px">
+                    ${typeBadge}<a href="${esc(n.link)}" target="_blank" rel="noopener" style="color:var(--text)">${esc(n.title)}</a>
+                    ${n.source ? '<div style="font-size:10px;color:var(--muted)">' + esc(n.source) + '</div>' : ''}
+                </div>`;
+            }
+            html += '</div>';
+        }
+
+        // Historical context
+        if (ed.historical_context || detail.historical_context) {
+            const hc = detail.historical_context || {};
+            if (Object.keys(hc).length) {
+                html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">Historical Context</div>';
+                if (hc.bought_before) html += '<div style="font-size:11px;padding:2px 0;color:#22c55e">Previously purchased from Trio</div>';
+                if (hc.quoted_before || hc.quote_count > 0) html += '<div style="font-size:11px;padding:2px 0">' + (hc.quote_count || 0) + ' previous quotes</div>';
+                if (hc.last_activity) html += '<div style="font-size:11px;padding:2px 0">Last activity: ' + esc(String(hc.last_activity)) + '</div>';
+                html += '</div>';
+            }
+        }
+
+        // Contacts preview
+        if (detail.contacts_count > 0) {
+            html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:6px">Contacts (' + detail.contacts_count + ')</div>';
+            html += '<div style="font-size:11px;color:var(--muted);margin-bottom:4px">' + detail.contacts_verified + ' verified · ' + detail.contacts_decision_makers + ' decision makers</div>';
+            for (const c of (detail.contacts_preview || [])) {
+                const senBadge = c.seniority === 'decision_maker' ? ' <span style="color:var(--blue);font-size:9px;font-weight:600">DM</span>' : '';
+                html += `<div style="padding:4px 0;border-top:1px solid var(--border);font-size:12px">
+                    <strong>${esc(c.name || '—')}</strong>${senBadge}
+                    ${c.title ? '<div style="color:var(--muted);font-size:11px">' + esc(c.title) + '</div>' : ''}
+                    ${c.email_masked ? '<div style="font-size:10px;color:var(--muted)">' + esc(c.email_masked) + '</div>' : ''}
+                </div>`;
+            }
+            html += '</div>';
+        }
+
+        // Similar customers
+        if (detail.similar_customers && detail.similar_customers.length) {
+            html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:12px;margin-bottom:4px">Similar Trio Customers</div>';
+            for (const s of detail.similar_customers) {
+                html += `<div style="padding:4px 0;font-size:12px;border-top:1px solid var(--border)">
+                    <strong>${esc(s.name || '')}</strong> <span style="font-size:10px;padding:2px 6px;border-radius:8px;background:${s.match_strength === 'strong' ? '#dcfce7' : s.match_strength === 'moderate' ? '#fef9c3' : '#f3f4f6'};color:var(--text)">${esc(s.match_strength || '')}</span>
+                    <div style="font-size:11px;color:var(--muted)">${esc(s.match_reason || '')}</div>
+                </div>`;
+            }
+            html += '</div>';
+        }
+
+        // Actions
+        html += `<div style="display:flex;gap:8px;padding-top:12px;border-top:1px solid var(--border);flex-wrap:wrap">
+            <button class="btn btn-primary" onclick="claimSuggestedAccount(${detail.id},'${escAttr(detail.name)}')">Claim Account</button>
+            <button class="btn btn-ghost" onclick="enrichProspectFree(${detail.id})" id="enrichBtn-${detail.id}" title="SAM.gov + Google News (free)">Enrich</button>
+            <select class="dismiss-select" onchange="dismissSuggestedAccount(${detail.id},'${escAttr(detail.name)}',this.value);if(this.value)closeSuggestedDetail();this.selectedIndex=0" style="font-size:12px">
+                <option value="">Dismiss…</option>
+                <option value="not_relevant">Not relevant</option>
+                <option value="competitor">Competitor</option>
+                <option value="too_small">Too small</option>
+                <option value="too_large">Too large</option>
+                <option value="other">Other</option>
+            </select>
+        </div>`;
+
+        if (body) body.innerHTML = html;
+    } catch (e) {
+        if (body) body.innerHTML = '<div style="padding:20px;color:var(--red)">Failed to load account details</div>';
+    }
+}
+
+function closeSuggestedDetail() {
+    const backdrop = document.getElementById('suggestedDetailBackdrop');
+    const drawer = document.getElementById('suggestedDetailDrawer');
+    if (backdrop) backdrop.classList.remove('open');
+    if (drawer) drawer.classList.remove('open');
+}
+
+async function enrichProspectFree(prospectId) {
+    const btn = document.getElementById('enrichBtn-' + prospectId);
+    if (btn) { btn.disabled = true; btn.textContent = 'Enriching…'; }
+    try {
+        const result = await apiFetch('/api/prospects/suggested/' + prospectId + '/enrich-free', { method: 'POST' });
+        let msg = 'Enrichment complete';
+        const parts = [];
+        if (result.sam_gov) parts.push('SAM.gov data found');
+        if (result.news_count > 0) parts.push(result.news_count + ' news articles');
+        if (result.has_warm_intro) parts.push('warm intro detected');
+        if (parts.length) msg += ': ' + parts.join(', ');
+        showToast(msg, 'success');
+        // Refresh the detail view
+        openSuggestedDetail(prospectId);
+    } catch (e) {
+        showToast(e.message || 'Enrichment failed', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = 'Enrich'; }
+    }
+}
+
+
+/// ── Prospecting (Accounts-First Hierarchy) ──────────────────────────────
+
+let _prospectingTab = 'my-accounts';
 let _prospectingData = [];
+let _prospectCapacity = null;
+let _expandedAccounts = new Set();
 
 const debouncedLoadProspecting = debounce(() => loadProspecting(), 250);
 
 function setProspectingTab(tab, btn) {
     _prospectingTab = tab;
+    _expandedAccounts.clear();
     document.querySelectorAll('#prospectingPills .chip').forEach(c => c.classList.toggle('on', c.dataset.value === tab));
+    // Show/hide health filter (only for my-accounts)
+    const healthFilter = document.getElementById('prospectHealthFilter');
+    if (healthFilter) healthFilter.style.display = tab === 'my-accounts' ? '' : 'none';
     loadProspecting();
 }
 
@@ -6616,11 +6893,35 @@ async function showProspecting() {
     const viewEl = document.getElementById('view-prospecting');
     if (viewEl) viewEl.style.display = 'flex';
     setCurrentReqId(null);
-    // Reset stale state from previous session
     _selectedProspectSiteId = null;
     _prospectingData = [];
+    _expandedAccounts.clear();
     _setTopViewLabel('Prospecting');
     await loadProspecting();
+}
+
+async function _loadCapacityBar() {
+    try {
+        _prospectCapacity = await apiFetch('/api/prospecting/capacity');
+        _renderCapacityBar();
+    } catch (e) { console.error('Capacity load failed:', e); }
+}
+
+function _renderCapacityBar() {
+    const el = document.getElementById('prospectCapBar');
+    if (!el || !_prospectCapacity) return;
+    const c = _prospectCapacity;
+    const pct = Math.min(100, Math.round((c.used / c.cap) * 100));
+    const color = pct >= 90 ? 'var(--red)' : pct >= 75 ? '#eab308' : 'var(--blue)';
+    let nudge = '';
+    if (c.stale_accounts && c.stale_accounts.length > 0 && c.used >= 180) {
+        nudge = `<span style="color:var(--muted);font-size:10px;margin-left:8px">${c.stale_accounts.length} accounts with no activity in 90+ days</span>`;
+    }
+    el.innerHTML = `<span style="white-space:nowrap">My Pipeline: <strong>${c.used}</strong>/${c.cap} sites</span>
+        <div style="width:120px;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+            <div style="width:${pct}%;height:100%;background:${color};border-radius:3px;transition:width .3s"></div>
+        </div>
+        <span style="font-weight:600;color:${color}">${pct}%</span>${nudge}`;
 }
 
 let _prospectAbort = null;
@@ -6629,11 +6930,18 @@ async function loadProspecting() {
     _prospectAbort = new AbortController();
     const body = document.getElementById('prospectingBody');
     if (body) body.innerHTML = '<tr><td colspan="7" class="empty"><div class="spinner"></div> Loading…</td></tr>';
+
+    // Always load capacity bar
+    _loadCapacityBar();
+
     try {
-        const endpoint = _prospectingTab === 'my-sites' ? '/api/prospecting/my-sites'
-            : _prospectingTab === 'at-risk' ? '/api/prospecting/at-risk'
-            : '/api/prospecting/pool';
-        _prospectingData = await apiFetch(endpoint, {signal: _prospectAbort.signal}) || [];
+        if (_prospectingTab === 'my-accounts') {
+            _prospectingData = await apiFetch('/api/prospecting/my-accounts', {signal: _prospectAbort.signal}) || [];
+        } else if (_prospectingTab === 'at-risk') {
+            _prospectingData = await apiFetch('/api/prospecting/at-risk', {signal: _prospectAbort.signal}) || [];
+        } else {
+            _prospectingData = await apiFetch('/api/prospecting/pool', {signal: _prospectAbort.signal}) || [];
+        }
         renderProspecting();
     } catch (e) {
         if (e.name === 'AbortError') return;
@@ -6648,17 +6956,63 @@ function renderProspecting() {
     if (!head || !body) return;
 
     const filter = (document.getElementById('prospectingFilter')?.value || '').toLowerCase();
+    const healthFilter = document.getElementById('prospectHealthFilter')?.value || '';
     let filtered = _prospectingData;
-    if (filter) {
-        filtered = filtered.filter(s =>
-            (s.site_name || '').toLowerCase().includes(filter) ||
-            (s.company_name || '').toLowerCase().includes(filter) ||
-            (s.contact_name || '').toLowerCase().includes(filter) ||
-            (s.city || '').toLowerCase().includes(filter)
-        );
-    }
 
-    if (_prospectingTab === 'pool') {
+    if (_prospectingTab === 'my-accounts') {
+        // Filter accounts
+        if (filter) {
+            filtered = filtered.filter(a =>
+                (a.name || '').toLowerCase().includes(filter) ||
+                (a.domain || '').toLowerCase().includes(filter) ||
+                (a.industry || '').toLowerCase().includes(filter) ||
+                (a.location || '').toLowerCase().includes(filter)
+            );
+        }
+        if (healthFilter) {
+            filtered = filtered.filter(a => a.health === healthFilter);
+        }
+
+        head.innerHTML = '<th style="width:30px"></th><th>Account</th><th>Industry</th><th>Location</th><th>Sites</th><th>Health</th><th>Last Activity</th><th></th>';
+        if (!filtered.length) {
+            body.innerHTML = '<tr><td colspan="8" class="empty">No accounts — claim sites from the Open Pool tab</td></tr>';
+            return;
+        }
+        let html = '';
+        for (const a of filtered) {
+            const isExpanded = _expandedAccounts.has(a.company_id);
+            const chevron = `<span style="cursor:pointer;font-size:14px;color:var(--muted);transition:transform .2s;display:inline-block;${isExpanded ? 'transform:rotate(90deg)' : ''}" onclick="event.stopPropagation();toggleAccountExpand(${a.company_id})">&#9654;</span>`;
+            const healthDot = _healthBadge(a.health);
+            const sitesLabel = `${a.active_sites}/${a.site_count} active`;
+            const strategic = a.is_strategic ? ' <span style="color:var(--blue);font-size:9px;font-weight:600">STRATEGIC</span>' : '';
+
+            html += `<tr style="cursor:pointer" onclick="toggleAccountExpand(${a.company_id})" class="prospect-account-row">
+                <td>${chevron}</td>
+                <td><strong>${esc(a.name)}</strong>${strategic}${a.domain ? '<br><small class="u-color-muted">' + esc(a.domain) + '</small>' : ''}</td>
+                <td>${esc(a.industry || '—')}</td>
+                <td>${esc(a.location || '—')}</td>
+                <td>${sitesLabel}</td>
+                <td>${healthDot}</td>
+                <td>${a.last_activity ? fmtRelative(a.last_activity) : '<span class="u-color-muted">Never</span>'}</td>
+                <td><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();releaseStaleSites(${a.company_id},'${escAttr(a.name)}')" title="Release inactive sites" style="font-size:10px">Release</button></td>
+            </tr>`;
+            // Expanded sites row (placeholder, filled by toggleAccountExpand)
+            html += `<tr id="acct-sites-${a.company_id}" style="display:${isExpanded ? 'table-row' : 'none'}"><td colspan="8" style="padding:0;background:var(--bg-alt,#f9fafb)"><div id="acct-sites-inner-${a.company_id}" style="padding:4px 12px 8px 40px"><div class="spinner" style="margin:8px auto"></div></div></td></tr>`;
+        }
+        body.innerHTML = html;
+        // Load sites for expanded accounts
+        for (const cid of _expandedAccounts) {
+            _loadAccountSites(cid);
+        }
+    } else if (_prospectingTab === 'pool') {
+        if (filter) {
+            filtered = filtered.filter(s =>
+                (s.site_name || '').toLowerCase().includes(filter) ||
+                (s.company_name || '').toLowerCase().includes(filter) ||
+                (s.contact_name || '').toLowerCase().includes(filter) ||
+                (s.city || '').toLowerCase().includes(filter)
+            );
+        }
         head.innerHTML = '<th>Company</th><th>Site</th><th>Contact</th><th>Location</th><th>Last Activity</th><th></th>';
         body.innerHTML = filtered.length ? filtered.map(s => `<tr style="cursor:pointer" onclick="openProspectDrawer(${s.site_id})">
             <td>${esc(s.company_name || '')}</td>
@@ -6668,23 +7022,15 @@ function renderProspecting() {
             <td>${s.last_activity_at ? fmtRelative(s.last_activity_at) : '<span class="u-color-muted">Never</span>'}</td>
             <td><button class="btn btn-primary btn-sm" onclick="event.stopPropagation();claimSite(${s.site_id})">Claim</button></td>
         </tr>`).join('') : '<tr><td colspan="6" class="empty">No unassigned sites — all sites have owners</td></tr>';
-    } else if (_prospectingTab === 'my-sites') {
-        head.innerHTML = '<th>Company</th><th>Site</th><th>Contact</th><th>Location</th><th>Status</th><th>Last Activity</th>';
-        body.innerHTML = filtered.length ? filtered.map(s => {
-            const badge = s.status === 'green' ? '<span style="color:#22c55e">&#x25cf;</span> Active'
-                : s.status === 'yellow' ? '<span style="color:#eab308">&#x25cf;</span> At Risk'
-                : s.status === 'red' ? '<span style="color:#ef4444">&#x25cf;</span> Expiring'
-                : '<span style="color:#9ca3af">&#x25cf;</span> No Activity';
-            return `<tr style="cursor:pointer" onclick="openProspectDrawer(${s.site_id})">
-                <td>${esc(s.company_name || '')}</td>
-                <td>${esc(s.site_name || '')}</td>
-                <td>${esc(s.contact_name || '')}${s.contact_email ? '<br><small class="u-color-muted">' + esc(s.contact_email) + '</small>' : ''}</td>
-                <td>${esc([s.city, s.state].filter(Boolean).join(', '))}</td>
-                <td>${badge}</td>
-                <td>${s.last_activity_at ? fmtRelative(s.last_activity_at) : '<span class="u-color-muted">Never</span>'}</td>
-            </tr>`;
-        }).join('') : '<tr><td colspan="6" class="empty">You have no owned sites</td></tr>';
     } else {
+        // at-risk
+        if (filter) {
+            filtered = filtered.filter(s =>
+                (s.site_name || '').toLowerCase().includes(filter) ||
+                (s.company_name || '').toLowerCase().includes(filter) ||
+                (s.owner_name || '').toLowerCase().includes(filter)
+            );
+        }
         head.innerHTML = '<th>Company</th><th>Site</th><th>Owner</th><th>Days Inactive</th><th>Days Left</th>';
         body.innerHTML = filtered.length ? filtered.map(s => {
             const color = s.days_remaining <= 2 ? '#ef4444' : '#eab308';
@@ -6699,14 +7045,111 @@ function renderProspecting() {
     }
 }
 
+function _healthBadge(health) {
+    const map = {
+        green: '<span style="color:#22c55e">&#x25cf;</span> Active',
+        yellow: '<span style="color:#eab308">&#x25cf;</span> At Risk',
+        red: '<span style="color:#ef4444">&#x25cf;</span> Expiring',
+        grey: '<span style="color:#9ca3af">&#x25cf;</span> No Activity',
+    };
+    return map[health] || map.grey;
+}
+
+async function toggleAccountExpand(companyId) {
+    const row = document.getElementById('acct-sites-' + companyId);
+    if (!row) return;
+    if (_expandedAccounts.has(companyId)) {
+        _expandedAccounts.delete(companyId);
+        row.style.display = 'none';
+        // Update chevron
+        const chevron = row.previousElementSibling?.querySelector('span');
+        if (chevron) chevron.style.transform = '';
+    } else {
+        _expandedAccounts.add(companyId);
+        row.style.display = 'table-row';
+        const chevron = row.previousElementSibling?.querySelector('span');
+        if (chevron) chevron.style.transform = 'rotate(90deg)';
+        await _loadAccountSites(companyId);
+    }
+}
+
+async function _loadAccountSites(companyId) {
+    const inner = document.getElementById('acct-sites-inner-' + companyId);
+    if (!inner) return;
+    inner.innerHTML = '<div class="spinner" style="margin:8px auto"></div>';
+    try {
+        const data = await apiFetch('/api/prospecting/accounts/' + companyId + '/sites');
+        if (!data.sites || !data.sites.length) {
+            inner.innerHTML = '<div style="padding:8px;color:var(--muted);font-size:12px">No sites found</div>';
+            return;
+        }
+        let html = '<table style="width:100%;font-size:12px;border-collapse:collapse">';
+        html += '<thead><tr style="color:var(--muted);font-size:10px;text-transform:uppercase"><th style="padding:4px 8px;text-align:left">Site</th><th style="padding:4px 8px;text-align:left">Type</th><th style="padding:4px 8px;text-align:left">Contact</th><th style="padding:4px 8px;text-align:left">Location</th><th style="padding:4px 8px;text-align:left">Status</th><th style="padding:4px 8px;text-align:left">Last Activity</th><th style="padding:4px 8px"></th></tr></thead><tbody>';
+        for (const s of data.sites) {
+            const dot = _healthBadge(s.status);
+            html += `<tr style="border-top:1px solid var(--border);cursor:pointer" onclick="openProspectDrawer(${s.site_id})">
+                <td style="padding:6px 8px">${esc(s.site_name)}</td>
+                <td style="padding:6px 8px">${esc(s.site_type || '—')}</td>
+                <td style="padding:6px 8px">${esc(s.contact_name || '—')}${s.contact_email ? '<br><small class="u-color-muted">' + esc(s.contact_email) + '</small>' : ''}</td>
+                <td style="padding:6px 8px">${esc([s.city, s.state].filter(Boolean).join(', ') || '—')}</td>
+                <td style="padding:6px 8px">${dot}</td>
+                <td style="padding:6px 8px">${s.last_activity_at ? fmtRelative(s.last_activity_at) : '<span class="u-color-muted">Never</span>'}</td>
+                <td style="padding:6px 8px"><button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();releaseSite(${s.site_id},'${escAttr(s.site_name)}')" style="font-size:10px" title="Release site">Release</button></td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        inner.innerHTML = html;
+    } catch (e) {
+        inner.innerHTML = '<div style="padding:8px;color:var(--red);font-size:12px">Failed to load sites</div>';
+    }
+}
+
+async function releaseSite(siteId, siteName) {
+    if (!confirm('Release "' + siteName + '" back to the open pool?')) return;
+    try {
+        await apiFetch('/api/prospecting/release/' + siteId, { method: 'POST' });
+        showToast('Released: ' + siteName, 'info');
+        await loadProspecting();
+    } catch (e) {
+        showToast(e.message || 'Failed to release site', 'error');
+    }
+}
+
+async function releaseStaleSites(companyId, companyName) {
+    if (!confirm('Release all inactive sites for "' + companyName + '"? Only sites with no activity in 90+ days will be released.')) return;
+    try {
+        const data = await apiFetch('/api/prospecting/accounts/' + companyId + '/sites');
+        const stale = (data.sites || []).filter(s => s.status === 'red' || s.status === 'grey');
+        if (!stale.length) { showToast('No stale sites to release', 'info'); return; }
+        for (const s of stale) {
+            await apiFetch('/api/prospecting/release/' + s.site_id, { method: 'POST' });
+        }
+        showToast('Released ' + stale.length + ' stale sites from ' + companyName, 'success');
+        await loadProspecting();
+    } catch (e) {
+        showToast(e.message || 'Failed to release sites', 'error');
+    }
+}
+
 async function claimSite(siteId) {
+    // Check capacity before confirming
+    if (_prospectCapacity && _prospectCapacity.at_cap) {
+        showToast('You have reached the ' + _prospectCapacity.cap + '-site cap. Release inactive sites before claiming new ones.', 'error');
+        return;
+    }
     if (!confirm('Claim this site? You will be responsible for maintaining contact.')) return;
     try {
         const result = await apiFetch('/api/prospecting/claim/' + siteId, { method: 'POST' });
         showToast('Site claimed: ' + (result.site_name || ''), 'success');
         await loadProspecting();
     } catch (e) {
-        showToast(e.message || 'Failed to claim site', 'error');
+        const msg = e.message || 'Failed to claim site';
+        if (msg.includes('cap is')) {
+            showToast(msg, 'error');
+            _loadCapacityBar();
+        } else {
+            showToast(msg, 'error');
+        }
     }
 }
 
@@ -6995,11 +7438,13 @@ Object.assign(window, {
     toggleCustCheckbox, toggleAllCustCheckboxes, clearCustSelection,
     bulkAssignOwner, bulkExportAccounts, toggleSiteAccordion,
     // Suggested accounts (company-level pool)
-    showSuggested, loadSuggested, debouncedLoadSuggested,
-    claimSuggestedAccount, dismissSuggestedAccount, suggestedGoPage,
-    // Prospecting pool + drawer
+    showSuggested, loadSuggested, debouncedLoadSuggested, setSuggestedReadiness,
+    claimSuggestedAccount, dismissSuggestedAccount, suggestedGoPage, toggleScoringGuide,
+    openSuggestedDetail, closeSuggestedDetail, enrichProspectFree,
+    // Prospecting pool + drawer (accounts-first)
     showProspecting, loadProspecting, claimSite, setProspectingTab,
-    debouncedLoadProspecting,
+    debouncedLoadProspecting, renderProspecting,
+    toggleAccountExpand, releaseSite, releaseStaleSites,
     openProspectDrawer, closeProspectDrawer, switchProspectDrawerTab,
     _renderProspectMiniListFromSearch, _prospectMiniListKeyNav,
     // Vendor dedup
@@ -7015,4 +7460,5 @@ Object.assign(window, {
     toggleProactiveSelect, toggleAllProactiveInGroup, doNotOfferMatch, doNotOfferSelected,
     sendProactiveOffer, convertProactiveOffer, updateProactivePreview, generateProactiveDraft,
     loadProactiveScorecard,
+    loadAvailScores,
 });

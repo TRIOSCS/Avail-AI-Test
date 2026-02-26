@@ -125,6 +125,84 @@ class StockListHash(Base):
     )
 
 
+class AvailScoreSnapshot(Base):
+    """Monthly Avail Score snapshot — behavior + outcome scoring for bonus ranking.
+
+    Stores 10 individual metric scores (0–10 each) split into behaviors (50 max)
+    and outcomes (50 max) for a total of 0–100. Used for buyer and sales leaderboards
+    with financial bonus for 1st/2nd place.
+
+    Called by: services/avail_score_service.py (daily compute), routers/performance.py
+    """
+
+    __tablename__ = "avail_score_snapshot"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    month = Column(Date, nullable=False)
+    role_type = Column(String(20), nullable=False)  # 'buyer' or 'sales'
+
+    # Behavior metrics (0–10 each, 50 max total)
+    b1_score = Column(Float, default=0)
+    b1_label = Column(String(50))
+    b1_raw = Column(String(100))  # human-readable raw value, e.g. "4.2h avg"
+    b2_score = Column(Float, default=0)
+    b2_label = Column(String(50))
+    b2_raw = Column(String(100))
+    b3_score = Column(Float, default=0)
+    b3_label = Column(String(50))
+    b3_raw = Column(String(100))
+    b4_score = Column(Float, default=0)
+    b4_label = Column(String(50))
+    b4_raw = Column(String(100))
+    b5_score = Column(Float, default=0)
+    b5_label = Column(String(50))
+    b5_raw = Column(String(100))
+
+    behavior_total = Column(Float, default=0)  # sum of b1–b5
+
+    # Outcome metrics (0–10 each, 50 max total)
+    o1_score = Column(Float, default=0)
+    o1_label = Column(String(50))
+    o1_raw = Column(String(100))
+    o2_score = Column(Float, default=0)
+    o2_label = Column(String(50))
+    o2_raw = Column(String(100))
+    o3_score = Column(Float, default=0)
+    o3_label = Column(String(50))
+    o3_raw = Column(String(100))
+    o4_score = Column(Float, default=0)
+    o4_label = Column(String(50))
+    o4_raw = Column(String(100))
+    o5_score = Column(Float, default=0)
+    o5_label = Column(String(50))
+    o5_raw = Column(String(100))
+
+    outcome_total = Column(Float, default=0)  # sum of o1–o5
+
+    # Composite
+    total_score = Column(Float, default=0)  # behavior_total + outcome_total (0–100)
+    rank = Column(Integer)
+    qualified = Column(Boolean, default=False)  # meets minimum activity threshold
+    bonus_amount = Column(Float, default=0)  # $500/$250 or 0
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("ix_ass_user_month", "user_id", "month", "role_type", unique=True),
+        Index("ix_ass_month_role_rank", "month", "role_type", "rank"),
+        Index("ix_ass_month_role_score", "month", "role_type", "total_score"),
+    )
+
+
 class BuyerVendorStats(Base):
     """Per-buyer performance with a specific vendor. Auto-populated."""
 

@@ -51,6 +51,7 @@ from .purchase_history import CustomerPartHistory  # noqa: F401
 
 # Performance Tracking
 from .performance import (  # noqa: F401
+    AvailScoreSnapshot,
     BuyerLeaderboardSnapshot,
     BuyerVendorStats,
     StockListHash,

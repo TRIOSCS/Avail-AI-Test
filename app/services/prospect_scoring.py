@@ -15,7 +15,7 @@ ICP_SEGMENTS = {
         "naics_codes": ["336412", "336413"],
         "naics_prefixes": ["3364"],
         "keywords": [
-            "aerospace", "defense", "avionics", "mil-spec", "military",
+            "aerospace", "defense", "avionics", "avionic", "mil-spec", "military",
             "satellite", "space", "airframe", "missile", "radar",
         ],
     },
@@ -25,9 +25,10 @@ ICP_SEGMENTS = {
         "naics_codes": ["334513", "333314", "334510"],
         "naics_prefixes": ["3345", "3333"],
         "keywords": [
-            "medical device", "industrial machinery", "instrument",
+            "medical", "industrial", "instrument",
             "control instrument", "measuring", "installed base",
             "capital equipment", "field service", "mro",
+            "repair house",
         ],
     },
     "ems_electronics": {
@@ -39,6 +40,8 @@ ICP_SEGMENTS = {
             "ems", "electronics manufacturing", "pcb", "printed circuit",
             "semiconductor", "contract manufacturer", "pcba", "smt",
             "electronic component", "circuit board",
+            "passive", "active", "server", "datacenter", "data center",
+            "monitor", "desktop", "notebook",
         ],
     },
     "automotive": {
@@ -160,7 +163,7 @@ def match_industry_segment(
         elif industry:
             ind_lower = industry.lower()
             if any(kw in ind_lower for kw in seg["keywords"]):
-                score = 10
+                score = 20
 
         if score > best_score:
             best_score = score

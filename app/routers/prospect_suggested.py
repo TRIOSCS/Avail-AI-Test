@@ -32,7 +32,9 @@ async def list_suggested(
     search: str = "",
     region: str = "",
     industry: str = "",
+    employee_size: str = "",
     min_fit_score: int = 0,
+    min_readiness_score: int = 0,
     readiness_level: str = "",
     status: str = "suggested",
     sort: str = "readiness_desc",
@@ -43,7 +45,8 @@ async def list_suggested(
 ):
     """List prospect accounts from the unified pool.
 
-    Filters: search, region, industry, min_fit_score, readiness_level, status.
+    Filters: search, region, industry, employee_size, min_fit_score,
+             min_readiness_score, readiness_level, status.
     Sort: readiness_desc (default), fit_desc, composite_desc, name_asc.
     """
     page = max(1, page)
@@ -68,8 +71,17 @@ async def list_suggested(
         safe = industry.strip().replace("%", r"\%").replace("_", r"\_")
         query = query.filter(ProspectAccount.industry.ilike(f"%{safe}%"))
 
+    if employee_size:
+        safe = employee_size.strip().replace("%", r"\%").replace("_", r"\_")
+        query = query.filter(
+            ProspectAccount.employee_count_range.ilike(f"%{safe}%")
+        )
+
     if min_fit_score > 0:
         query = query.filter(ProspectAccount.fit_score >= min_fit_score)
+
+    if min_readiness_score > 0:
+        query = query.filter(ProspectAccount.readiness_score >= min_readiness_score)
 
     if readiness_level:
         if readiness_level == "call_now":
@@ -178,8 +190,28 @@ async def claim_suggested(
     New discovery (company_id NULL): create Company record, link it.
     Domain collision: if Company with same domain exists, link to it.
 
+    Enforces 200-site cap — users at cap must release sites first.
     Triggers background deep enrichment (contact reveal + AI briefing).
     """
+    from ..models import CustomerSite
+
+    SITE_CAP = 200
+    site_count = (
+        db.query(func.count(CustomerSite.id))
+        .filter(
+            CustomerSite.owner_id == user.id,
+            CustomerSite.is_active.is_(True),
+        )
+        .scalar()
+        or 0
+    )
+    if site_count >= SITE_CAP:
+        raise HTTPException(
+            409,
+            f"You have {site_count} sites (cap is {SITE_CAP}). "
+            "Release inactive sites before claiming new ones.",
+        )
+
     try:
         result = claim_prospect(prospect_id, user.id, db)
     except LookupError as e:
@@ -239,6 +271,46 @@ async def get_enrichment_status(
         return check_enrichment_status(prospect_id, db)
     except LookupError:
         raise HTTPException(404, "Prospect not found")
+
+
+@router.post("/api/prospects/suggested/{prospect_id}/enrich-free")
+async def enrich_prospect_free(
+    prospect_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Trigger free enrichment (SAM.gov + Google News) for a prospect.
+
+    Also runs warm intro detection. No API keys or credits consumed.
+    """
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+
+    from ..services.prospect_free_enrichment import run_free_enrichment
+    from ..services.prospect_warm_intros import detect_warm_intros, generate_one_liner
+
+    # Run free enrichment
+    result = await run_free_enrichment(prospect_id)
+
+    # Run warm intro detection (needs fresh db read after enrichment)
+    db.refresh(prospect)
+    warm = detect_warm_intros(prospect, db)
+    one_liner = generate_one_liner(prospect, warm)
+
+    ed = dict(prospect.enrichment_data or {})
+    ed["warm_intro"] = warm
+    ed["one_liner"] = one_liner
+    prospect.enrichment_data = ed
+    db.commit()
+
+    return {
+        "prospect_id": prospect_id,
+        "sam_gov": result.get("sam_gov", False),
+        "news_count": result.get("news_count", 0),
+        "has_warm_intro": warm.get("has_warm_intro", False),
+        "one_liner": one_liner,
+    }
 
 
 @router.post("/api/prospects/add")
@@ -337,6 +409,17 @@ def _serialize_prospect(p: ProspectAccount) -> dict:
     verified_count = sum(1 for c in contacts if isinstance(c, dict) and c.get("verified"))
     dm_count = sum(1 for c in contacts if isinstance(c, dict) and c.get("seniority") == "decision_maker")
 
+    # One-liner and warm intro from enrichment_data
+    ed = p.enrichment_data or {}
+    one_liner = ed.get("one_liner", "")
+    warm_intro = ed.get("warm_intro", {})
+
+    # Generate one-liner on the fly if not cached
+    if not one_liner:
+        from app.services.prospect_warm_intros import generate_one_liner
+
+        one_liner = generate_one_liner(p)
+
     return {
         "id": p.id,
         "name": p.name,
@@ -351,6 +434,9 @@ def _serialize_prospect(p: ProspectAccount) -> dict:
         "readiness_score": p.readiness_score or 0,
         "readiness_tier": readiness_tier,
         "signal_tags": signal_tags,
+        "one_liner": one_liner,
+        "has_warm_intro": warm_intro.get("has_warm_intro", False),
+        "warm_intro_warmth": warm_intro.get("warmth", "cold"),
         "contacts_count": len(contacts),
         "contacts_verified": verified_count,
         "contacts_decision_makers": dm_count,

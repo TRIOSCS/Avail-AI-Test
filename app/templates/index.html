@@ -107,7 +107,7 @@
         <div class="sb-nav-group sb-cc-group" data-section="cc" style="--section-color:var(--blue);--section-dot:linear-gradient(135deg,#3b6ea8,#1e3a5f);--section-border:rgba(59,110,168,.18)">
             <div class="sb-section-dot"></div>
             <div class="sb-group-header sb-cc-header" id="navCmdCenter" onclick="sidebarNav('dashboard',this)" data-tip="Command Center">
-                <span class="sb-group-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><polygon points="8,2 12.5,4.5 12.5,9.5 8,12 3.5,9.5 3.5,4.5"/><polygon points="16,2 20.5,4.5 20.5,9.5 16,12 11.5,9.5 11.5,4.5"/><polygon points="12,11 16.5,13.5 16.5,18.5 12,21 7.5,18.5 7.5,13.5"/></svg></span>
+                <span class="sb-group-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><polygon points="7.5,1 12.5,3.8 12.5,9.4 7.5,12.2 2.5,9.4 2.5,3.8"/><polygon points="16.5,1 21.5,3.8 21.5,9.4 16.5,12.2 11.5,9.4 11.5,3.8"/><polygon points="12,10.8 17,13.6 17,19.2 12,22 7,19.2 7,13.6"/></svg></span>
                 <span class="sb-group-label">Command Center</span>
             </div>
         </div>
@@ -283,18 +283,26 @@
         </div>
     </div>
 
-    <!-- VIEW: Prospecting Pool (site-level ownership) -->
+    <!-- VIEW: Prospecting (accounts-first hierarchy) -->
     <div id="view-prospecting" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
-        <div class="crm-header">
-            <h2>Prospecting Pool</h2>
+        <div class="crm-header" style="gap:12px;flex-wrap:wrap">
+            <h2>Prospecting</h2>
+            <div id="prospectCapBar" style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted)"></div>
         </div>
-        <div class="crm-toolbar">
-            <input class="sbox" id="prospectingFilter" placeholder="Search sites…" oninput="debouncedLoadProspecting()" style="flex:1;min-width:140px" aria-label="Search prospecting sites">
+        <div class="crm-toolbar" style="flex-wrap:wrap;gap:8px">
+            <input class="sbox" id="prospectingFilter" placeholder="Search accounts or sites…" oninput="debouncedLoadProspecting()" style="flex:1;min-width:140px" aria-label="Search prospecting">
             <div class="chip-row" style="margin:0" id="prospectingPills">
-                <span class="chip on" data-value="pool" onclick="setProspectingTab('pool',this)">Open Pool</span>
-                <span class="chip" data-value="my-sites" onclick="setProspectingTab('my-sites',this)">My Sites</span>
+                <span class="chip on" data-value="my-accounts" onclick="setProspectingTab('my-accounts',this)">My Accounts</span>
+                <span class="chip" data-value="pool" onclick="setProspectingTab('pool',this)">Open Pool</span>
                 <span class="chip" data-value="at-risk" onclick="setProspectingTab('at-risk',this)">At Risk</span>
             </div>
+            <select id="prospectHealthFilter" onchange="renderProspecting()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="">All Health</option>
+                <option value="green">Active</option>
+                <option value="yellow">At Risk</option>
+                <option value="red">Expiring</option>
+                <option value="grey">No Activity</option>
+            </select>
         </div>
         <div class="crm-table-wrap" id="prospectTableWrap" style="flex:1;overflow-y:auto">
             <table class="crm-table">
@@ -321,24 +329,34 @@
     </div>
 
     <!-- VIEW: Suggested (unified prospect pool from prospect_accounts) -->
-    <div id="view-suggested" style="display:none;flex-direction:column;height:calc(100vh - 56px)">
+    <div id="view-suggested" style="display:none;flex-direction:column;height:100%;min-height:0">
         <div class="crm-header">
             <h2>Suggested Accounts</h2>
         </div>
         <div id="suggestedStats" class="suggested-stats"></div>
-        <div class="crm-toolbar" style="flex-wrap:wrap;gap:8px">
+        <div class="crm-toolbar" style="flex-wrap:wrap;gap:8px;align-items:center">
             <input class="sbox" id="suggestedSearch" placeholder="Search name, domain, industry…" oninput="debouncedLoadSuggested()" style="flex:1;min-width:140px" aria-label="Search suggested accounts">
-            <div class="chip-row" style="margin:0" id="suggestedPills">
-                <span class="chip on" data-value="" onclick="setSuggestedReadiness('',this)">All</span>
-                <span class="chip" data-value="call_now" onclick="setSuggestedReadiness('call_now',this)">Call Now</span>
-                <span class="chip" data-value="nurture" onclick="setSuggestedReadiness('nurture',this)">Nurture</span>
-                <span class="chip" data-value="monitor" onclick="setSuggestedReadiness('monitor',this)">Monitor</span>
-            </div>
-            <select id="suggestedRegion" onchange="debouncedLoadSuggested()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
-                <option value="">All Regions</option>
-                <option value="US">US</option>
-                <option value="EU">EU</option>
-                <option value="Asia">Asia</option>
+            <select id="suggestedSize" onchange="debouncedLoadSuggested()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="">All Sizes</option>
+                <option value="1-50">1–50 emp</option>
+                <option value="51-200">51–200 emp</option>
+                <option value="201-500">201–500 emp</option>
+                <option value="501-1000">501–1,000 emp</option>
+                <option value="1001-5000">1,001–5,000 emp</option>
+                <option value="5001-10000">5,001–10,000 emp</option>
+                <option value="10001">10,001+ emp</option>
+            </select>
+            <select id="suggestedFitScore" onchange="debouncedLoadSuggested()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="0">All Fit Scores</option>
+                <option value="70">Fit 70+</option>
+                <option value="50">Fit 50+</option>
+                <option value="30">Fit 30+</option>
+            </select>
+            <select id="suggestedReadinessScore" onchange="debouncedLoadSuggested()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
+                <option value="0">All Readiness</option>
+                <option value="70">Call Now (70+)</option>
+                <option value="40">Nurture (40+)</option>
+                <option value="1">Any Signal (1+)</option>
             </select>
             <select id="suggestedSort" onchange="debouncedLoadSuggested()" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--white)">
                 <option value="readiness_desc">Sort: Readiness</option>
@@ -346,10 +364,54 @@
                 <option value="composite_desc">Sort: Composite</option>
                 <option value="name_asc">Sort: Name</option>
             </select>
+            <span id="suggestedPager" style="font-size:11px;color:var(--muted);white-space:nowrap;display:flex;align-items:center;gap:4px;margin-left:auto"></span>
         </div>
-        <div class="suggested-grid-wrap" style="flex:1;overflow-y:auto;padding:0 20px 20px">
+        <div id="suggestedLegend" class="scoring-legend" style="display:none">
+            <div class="scoring-legend-body" style="max-height:none;opacity:1">
+                <div class="scoring-legend-section">
+                    <div class="scoring-legend-title">Fit Score <span class="scoring-legend-range">(0–100)</span></div>
+                    <div class="scoring-legend-desc">How well this company matches your ideal customer profile.</div>
+                    <div class="scoring-legend-items">
+                        <span class="sl-item"><b>Industry</b> — ICP segment alignment (30 pts)</span>
+                        <span class="sl-item"><b>Size</b> — employee count sweet spot (20 pts)</span>
+                        <span class="sl-item"><b>Procurement</b> — has supply chain staff (15 pts)</span>
+                        <span class="sl-item"><b>NAICS</b> — gov classification match (15 pts)</span>
+                        <span class="sl-item"><b>Geography</b> — region relevance (10 pts)</span>
+                        <span class="sl-item"><b>Broker usage</b> — buys from brokers (10 pts)</span>
+                    </div>
+                </div>
+                <div class="scoring-legend-section">
+                    <div class="scoring-legend-title">Readiness Score <span class="scoring-legend-range">(0–100)</span></div>
+                    <div class="scoring-legend-desc">How likely this company is to buy right now.</div>
+                    <div class="scoring-legend-items">
+                        <span class="sl-item"><b>Intent</b> — active buying signals (35 pts)</span>
+                        <span class="sl-item"><b>Events</b> — funding, expansion, M&A (25 pts)</span>
+                        <span class="sl-item"><b>Hiring</b> — procurement/engineering roles (20 pts)</span>
+                        <span class="sl-item"><b>New hire</b> — recent procurement hire (10 pts)</span>
+                        <span class="sl-item"><b>Contacts</b> — verified decision makers (10 pts)</span>
+                    </div>
+                </div>
+                <div class="scoring-legend-section">
+                    <div class="scoring-legend-title">Readiness Tiers</div>
+                    <div class="scoring-legend-tiers">
+                        <span class="sl-tier"><span class="suggested-badge call_now">Call Now</span> Score 70+ — strong buying signals, reach out immediately</span>
+                        <span class="sl-tier"><span class="suggested-badge nurture">Nurture</span> Score 40–69 — promising signals, build the relationship</span>
+                        <span class="sl-tier"><span class="suggested-badge monitor">Monitor</span> Score &lt;40 — limited signals, watch for trigger events</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="suggested-grid-wrap" style="flex:1;overflow-y:auto;padding:0 20px 20px;min-height:0">
             <div class="suggested-grid" id="suggestedGrid"></div>
-            <div id="suggestedPager" style="text-align:center;padding:16px 0"></div>
+        </div>
+        <!-- AI Account Detail Modal -->
+        <div class="drawer-backdrop" id="suggestedDetailBackdrop" onclick="closeSuggestedDetail()"></div>
+        <div class="drawer" id="suggestedDetailDrawer" style="max-width:520px">
+            <div class="drawer-header">
+                <h3 id="suggestedDetailTitle">Account Detail</h3>
+                <button class="drawer-close" onclick="closeSuggestedDetail()">&times;</button>
+            </div>
+            <div class="drawer-body" id="suggestedDetailBody" style="padding:16px"></div>
         </div>
     </div>
 
@@ -1017,6 +1079,7 @@
                         <button type="button" class="fp fp-sm on" onclick="switchDashPerfTab('vendors',this)">Vendor</button>
                         <button type="button" class="fp fp-sm" onclick="switchDashPerfTab('buyers',this)">Buyer</button>
                         <button type="button" class="fp fp-sm" onclick="switchDashPerfTab('sales',this)">Sales</button>
+                        <button type="button" class="fp fp-sm" onclick="switchDashPerfTab('avail-score',this)">Avail Score</button>
                         <button type="button" class="fp fp-sm" id="dashPerfDigestTab" onclick="switchDashPerfTab('digest',this)" style="display:none">Digest</button>
                     </div>
                 </div>
@@ -1034,11 +1097,13 @@
             <button type="button" class="fp on" onclick="switchPerfTab('vendors',this)">Vendor Scorecard</button>
             <button type="button" class="fp" onclick="switchPerfTab('buyers',this)">Buyer Leaderboard</button>
             <button type="button" class="fp" onclick="switchPerfTab('sales',this)">Salesperson Scorecard</button>
+            <button type="button" class="fp" onclick="switchPerfTab('avail-score',this)">Avail Score</button>
             <button type="button" class="fp" id="perfDigestTab" onclick="switchPerfTab('digest',this)" style="display:none">Team Digest</button>
         </div>
         <div id="perfVendorPanel"><p class="empty">Loading...</p></div>
         <div id="perfBuyerPanel" style="display:none"><p class="empty">Loading...</p></div>
         <div id="perfSalesPanel" style="display:none"><p class="empty">Loading...</p></div>
+        <div id="perfAvailScorePanel" style="display:none"><p class="empty">Loading...</p></div>
         <div id="perfDigestPanel" style="display:none"><p class="empty">Loading...</p></div>
     </div>
 
