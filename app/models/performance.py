@@ -203,6 +203,78 @@ class AvailScoreSnapshot(Base):
     )
 
 
+class MultiplierScoreSnapshot(Base):
+    """Monthly multiplier score snapshot — competitive points for bonus determination.
+
+    Tracks offer pipeline progression points (non-stacking: each offer earns
+    only its highest tier) plus bonus points from RFQs/stock lists (buyer)
+    or new accounts (sales).  Column-based breakdown matches AvailScoreSnapshot
+    pattern for queryability.
+
+    Called by: services/multiplier_score_service.py (daily), routers/performance.py
+    """
+
+    __tablename__ = "multiplier_score_snapshot"
+    id = Column(Integer, primary_key=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    month = Column(Date, nullable=False)
+    role_type = Column(String(20), nullable=False)  # 'buyer' or 'sales'
+
+    # Totals
+    offer_points = Column(Float, default=0)  # from pipeline progression
+    bonus_points = Column(Float, default=0)  # from RFQs/stock lists or accounts
+    total_points = Column(Float, default=0)  # offer_points + bonus_points
+
+    # Buyer breakdown: offer pipeline tiers (non-stacking)
+    offers_total = Column(Integer, default=0)
+    offers_base_count = Column(Integer, default=0)
+    offers_base_pts = Column(Float, default=0)
+    offers_quoted_count = Column(Integer, default=0)
+    offers_quoted_pts = Column(Float, default=0)
+    offers_bp_count = Column(Integer, default=0)
+    offers_bp_pts = Column(Float, default=0)
+    offers_po_count = Column(Integer, default=0)
+    offers_po_pts = Column(Float, default=0)
+    rfqs_sent_count = Column(Integer, default=0)
+    rfqs_sent_pts = Column(Float, default=0)
+    stock_lists_count = Column(Integer, default=0)
+    stock_lists_pts = Column(Float, default=0)
+
+    # Sales breakdown: quotes + proactive + accounts
+    quotes_sent_count = Column(Integer, default=0)
+    quotes_sent_pts = Column(Float, default=0)
+    quotes_won_count = Column(Integer, default=0)
+    quotes_won_pts = Column(Float, default=0)
+    proactive_sent_count = Column(Integer, default=0)
+    proactive_sent_pts = Column(Float, default=0)
+    proactive_converted_count = Column(Integer, default=0)
+    proactive_converted_pts = Column(Float, default=0)
+    new_accounts_count = Column(Integer, default=0)
+    new_accounts_pts = Column(Float, default=0)
+
+    rank = Column(Integer)
+    avail_score = Column(Float, default=0)  # cached for qualification check
+    qualified = Column(Boolean, default=False)
+    bonus_amount = Column(Float, default=0)  # $500/$250 or 0
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    user = relationship("User", foreign_keys=[user_id])
+
+    __table_args__ = (
+        Index("ix_mss_user_month", "user_id", "month", "role_type", unique=True),
+        Index("ix_mss_month_role_rank", "month", "role_type", "rank"),
+        Index("ix_mss_month_role_points", "month", "role_type", "total_points"),
+    )
+
+
 class BuyerVendorStats(Base):
     """Per-buyer performance with a specific vendor. Auto-populated."""
 

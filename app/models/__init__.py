@@ -54,6 +54,7 @@ from .performance import (  # noqa: F401
     AvailScoreSnapshot,
     BuyerLeaderboardSnapshot,
     BuyerVendorStats,
+    MultiplierScoreSnapshot,
     StockListHash,
     VendorMetricsSnapshot,
 )
