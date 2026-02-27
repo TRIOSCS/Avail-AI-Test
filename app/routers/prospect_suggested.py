@@ -13,6 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
+from ..utils.sql_helpers import escape_like
 from ..dependencies import require_user
 from ..models import Company, User
 from ..models.discovery_batch import DiscoveryBatch
@@ -57,7 +58,7 @@ async def list_suggested(
     )
 
     if search:
-        safe = search.strip().replace("%", r"\%").replace("_", r"\_")
+        safe = escape_like(search.strip())
         query = query.filter(
             ProspectAccount.name.ilike(f"%{safe}%")
             | ProspectAccount.domain.ilike(f"%{safe}%")
@@ -68,11 +69,11 @@ async def list_suggested(
         query = query.filter(ProspectAccount.region == region)
 
     if industry:
-        safe = industry.strip().replace("%", r"\%").replace("_", r"\_")
+        safe = escape_like(industry.strip())
         query = query.filter(ProspectAccount.industry.ilike(f"%{safe}%"))
 
     if employee_size:
-        safe = employee_size.strip().replace("%", r"\%").replace("_", r"\_")
+        safe = escape_like(employee_size.strip())
         query = query.filter(
             ProspectAccount.employee_count_range.ilike(f"%{safe}%")
         )

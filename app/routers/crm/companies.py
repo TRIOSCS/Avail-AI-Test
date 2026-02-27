@@ -8,6 +8,7 @@ from sqlalchemy import String, func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ...cache.decorators import cached_endpoint, invalidate_prefix
+from ...utils.sql_helpers import escape_like
 from ...config import settings
 from ...database import get_db
 from ...dependencies import require_user
@@ -43,7 +44,7 @@ async def list_companies(
             )
         )
         if search.strip():
-            safe = search.strip().replace("%", r"\%").replace("_", r"\_")
+            safe = escape_like(search.strip())
             query = query.filter(Company.name.ilike(f"%{safe}%"))
         if tag.strip():
             safe_tag = tag.strip().lower()

@@ -7,6 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import Company
+from app.utils.sql_helpers import escape_like
 from app.schemas.prospect_pool import (
     PoolAccountList,
     PoolAccountRead,
@@ -60,11 +61,11 @@ def get_pool_accounts(filters: PoolFilters, db: Session) -> PoolAccountList:
         query = query.filter(Company.import_priority == filters.import_priority)
 
     if filters.industry:
-        safe = filters.industry.strip().replace("%", r"\%").replace("_", r"\_")
+        safe = escape_like(filters.industry.strip())
         query = query.filter(Company.industry.ilike(f"%{safe}%"))
 
     if filters.search:
-        safe = filters.search.strip().replace("%", r"\%").replace("_", r"\_")
+        safe = escape_like(filters.search.strip())
         query = query.filter(
             Company.name.ilike(f"%{safe}%") | Company.domain.ilike(f"%{safe}%")
         )

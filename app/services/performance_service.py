@@ -9,12 +9,14 @@ Depends on: models, database
 """
 
 import hashlib
-import logging
+from loguru import logger
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import and_, or_
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
+
+from ..utils.sql_helpers import escape_like
 
 from ..models import (
     ActivityLog,
@@ -36,7 +38,6 @@ from ..models import (
     VendorReview,
 )
 
-log = logging.getLogger("avail.performance")
 
 # ── Constants ──────────────────────────────────────────────────────────
 VENDOR_WINDOW_DAYS = 90
@@ -344,7 +345,7 @@ def compute_all_vendor_scorecards(db: Session) -> dict:
                 savepoint.commit()
 
             except Exception as e:
-                log.error(f"Vendor scorecard error for {vid}: {e}")
+                logger.error(f"Vendor scorecard error for {vid}: {e}")
                 savepoint.rollback()
                 continue
 
@@ -387,7 +388,7 @@ def get_vendor_scorecard_list(
     )
 
     if search:
-        q = q.filter(VendorCard.display_name.ilike(f"%{search}%"))
+        q = q.filter(VendorCard.display_name.ilike(f"%{escape_like(search)}%"))
 
     # Count before pagination
     total = q.count()
