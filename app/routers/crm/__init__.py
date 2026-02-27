@@ -13,6 +13,7 @@ Sub-modules:
 from fastapi import APIRouter
 
 from .buy_plans import router as buy_plans_router
+from .buy_plans_v3 import router as buy_plans_v3_router
 from .clone import router as clone_router
 from .companies import router as companies_router
 from .enrichment import router as enrichment_router
@@ -37,4 +38,5 @@ router.include_router(enrichment_router)
 router.include_router(offers_router)
 router.include_router(quotes_router)
 router.include_router(buy_plans_router)
+router.include_router(buy_plans_v3_router)
 router.include_router(clone_router)
