@@ -29,7 +29,7 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 @router.get("/needs-attention")
 @cached_endpoint(prefix="needs_attention", ttl_hours=0.5, key_params=["days"])
 def needs_attention(
-    days: int = Query(default=7, ge=0, le=90),
+    days: int = Query(default=30, ge=0, le=366),
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
@@ -335,7 +335,7 @@ def morning_brief(
 
 @router.get("/hot-offers")
 def hot_offers(
-    days: int = Query(default=7, ge=1, le=90),
+    days: int = Query(default=30, ge=1, le=366),
     db: Session = Depends(get_db),
     user=Depends(require_user),
 ):
