@@ -1310,8 +1310,10 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 /* Hover glow on icon */
 .sb-cc-header:hover .sb-group-icon{filter:drop-shadow(0 0 6px var(--blue));transform:scale(1.1)}
 .sb-cc-header.active:hover .sb-group-icon{transform:rotate(90deg) scale(1.1)}
-/* Top gradient bar — always brand gold, sits above OPPORTUNITY */
-.sb-top-gradient{height:2px;flex-shrink:0;background:#C4941D;transition:background .4s ease;margin:4px -10px 8px;width:calc(100% + 20px)}
+/* Top gradient bar — colored lines above each sidebar section */
+.sb-top-gradient{height:2px;flex-shrink:0;background:#C4941D;transition:background .4s ease;margin:4px 8px 8px;border-radius:1px}
+.sb-top-gradient-cc{background:#3b6ea8}
+.sb-top-gradient-rel{background:var(--relationships-color,#14b8a6)}
 /* Sidebar scroll arrows — appear when nav overflows */
 .sb-scroll-arrow{display:none;width:100%;padding:4px 0;border:none;background:linear-gradient(to bottom,#f0f2f5,rgba(240,242,245,.7));cursor:pointer;color:var(--muted);flex-shrink:0;align-items:center;justify-content:center;transition:color .15s}
 .sb-scroll-arrow:hover{color:var(--blue)}
