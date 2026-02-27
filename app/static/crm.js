@@ -2140,7 +2140,7 @@ function refreshQuoteTotals() {
 
 function applyMarkup() {
     if (!crmQuote) return;
-    const pct = parseFloat(document.getElementById('quickMarkup').value) || 0;
+    const pct = parseFloat(document.getElementById('quickMarkup')?.value) || 0;
     crmQuote.line_items.forEach(item => {
         item.sell_price = pct >= 100 ? 0 : Math.round((item.cost_price || 0) / (1 - pct / 100) * 10000) / 10000;
         item.margin_pct = item.sell_price > 0 ? ((item.sell_price - (item.cost_price||0)) / item.sell_price * 100) : 0;
@@ -2387,8 +2387,8 @@ function openBuyPlanModal() {
             <td>${esc(item.lead_time || '\u2014')}</td>
         </tr>`;
     }).join('');
-    document.getElementById('bpItems').innerHTML = items;
-    document.getElementById('bpSalespersonNotes').value = '';
+    const bpI = document.getElementById('bpItems'); if (bpI) bpI.innerHTML = items;
+    const bpN = document.getElementById('bpSalespersonNotes'); if (bpN) bpN.value = '';
     updateBpTotals();
 }
 

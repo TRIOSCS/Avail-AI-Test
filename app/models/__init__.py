@@ -30,6 +30,12 @@ from .enrichment import (  # noqa: F401
 # Error Reports / Trouble Tickets
 from .error_report import ErrorReport  # noqa: F401
 
+# NetComponents Search
+from .nc_classification_cache import NcClassificationCache  # noqa: F401
+from .nc_search_log import NcSearchLog  # noqa: F401
+from .nc_search_queue import NcSearchQueue  # noqa: F401
+from .nc_worker_status import NcWorkerStatus  # noqa: F401
+
 # Intelligence: Materials, Proactive, Activity
 from .intelligence import (  # noqa: F401
     ActivityLog,

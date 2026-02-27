@@ -142,6 +142,9 @@ class Sighting(Base):
     # v2.0: Excess list differentiation — links sighting to originating customer company
     source_company_id = Column(Integer, ForeignKey("companies.id"))
 
+    # NC integration: when the source data was fetched
+    source_searched_at = Column(DateTime)
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requirement = relationship("Requirement", back_populates="sightings")

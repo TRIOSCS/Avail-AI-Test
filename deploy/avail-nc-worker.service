@@ -1,0 +1,26 @@
+[Unit]
+Description=AVAIL NetComponents Search Worker
+Documentation=https://github.com/TRIOSCS/Avail-AI-Test
+After=network.target postgresql.service avail-xvfb.service
+Requires=avail-xvfb.service
+
+[Service]
+Type=simple
+User=avail
+Group=avail
+WorkingDirectory=/home/avail/avail-ai
+EnvironmentFile=/home/avail/avail-ai/.env
+Environment="DISPLAY=:99"
+Environment="PYTHONPATH=/home/avail/avail-ai"
+ExecStart=/home/avail/avail-ai/.venv/bin/python -m app.services.nc_worker.worker
+Restart=on-failure
+RestartSec=300
+StandardOutput=journal
+StandardError=journal
+
+# Safety limits
+MemoryMax=2G
+CPUQuota=50%
+
+[Install]
+WantedBy=multi-user.target

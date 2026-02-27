@@ -241,7 +241,7 @@ Desktop `#mainSearch` (line 42) and mobile `#mobileMainSearch` (line 81) both fi
 
 | # | Category | Description | Location | Status |
 |---|----------|-------------|----------|--------|
-| H1 | Null Safety | ~250 of 614+ `getElementById` calls lack null checks — crashes on missing elements | app.js ~120 calls, crm.js ~130 calls | **FIXING** |
+| H1 | Null Safety | ~250 of 614+ `getElementById` calls lack null checks — crashes on missing elements | app.js ~120 calls, crm.js ~130 calls | **FIXED** — added optional chaining and null guards to all ~250 unsafe calls |
 | H2 | CSRF Bypass | 3 buy-plan endpoints use raw `fetch()` instead of `apiFetch()` — missing auth/CSRF headers | crm.js:1818,1869,1882 | **FIXED** — all buy-plan token endpoints now use `apiFetch()` |
 | H3 | Modal Reset | Log Offer and New Company modals don't clear fields on reopen — stale data risk | app.js:3544; crm.js:338 | **FIXED** — both modals clear all fields in open functions |
 | H4 | Modal Loading | RFQ modal `dataset.loading` flag not cleared on API error — traps user | index.html:336; app.js:345 | **FIXED** — loading flag cleared in `finally` block |
