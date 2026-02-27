@@ -146,6 +146,8 @@ class ProspectContact(Base):
     is_saved = Column(Boolean, default=False)
     saved_by_id = Column(Integer, ForeignKey("users.id"))
     notes = Column(Text)
+    promoted_to_type = Column(String(20))
+    promoted_to_id = Column(Integer)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(

@@ -1508,3 +1508,38 @@ class TestAutoCompleteStockSales:
         assert completed == 0
         db_session.refresh(plan)
         assert plan.status == "approved"
+
+
+# ── V1 Deprecation Flag ──────────────────────────────────────────────
+
+
+class TestV1DeprecationFlag:
+    def test_submit_returns_410_when_v1_disabled(self, sales_client, test_quote, test_offer):
+        """POST /api/quotes/{id}/buy-plan returns 410 when V1 is disabled."""
+        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
+            mock_settings.buy_plan_v1_enabled = False
+            mock_settings.stock_sale_vendor_names = []
+            resp = sales_client.post(
+                f"/api/quotes/{test_quote.id}/buy-plan",
+                json={"offer_ids": [test_offer.id]},
+            )
+        assert resp.status_code == 410
+
+    def test_draft_returns_410_when_v1_disabled(self, sales_client, test_quote, test_offer):
+        """POST /api/quotes/{id}/buy-plan/draft returns 410 when V1 is disabled."""
+        with patch("app.routers.crm.buy_plans.settings") as mock_settings:
+            mock_settings.buy_plan_v1_enabled = False
+            mock_settings.stock_sale_vendor_names = []
+            resp = sales_client.post(
+                f"/api/quotes/{test_quote.id}/buy-plan/draft",
+                json={"offer_ids": [test_offer.id]},
+            )
+        assert resp.status_code == 410
+
+    def test_submit_works_when_v1_enabled(self, sales_client, test_quote, test_offer):
+        """POST /api/quotes/{id}/buy-plan works normally when V1 is enabled."""
+        resp = sales_client.post(
+            f"/api/quotes/{test_quote.id}/buy-plan",
+            json={"offer_ids": [test_offer.id]},
+        )
+        assert resp.status_code == 200

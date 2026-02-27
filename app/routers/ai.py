@@ -20,14 +20,17 @@ from ..config import settings
 from ..database import get_db
 from ..dependencies import is_admin as _is_admin
 from ..dependencies import require_user
+from ..utils.sql_helpers import escape_like
 from ..models import (
     Contact,
     CustomerSite,
     Offer,
     ProspectContact,
     Requirement,
+    SiteContact,
     User,
     VendorCard,
+    VendorContact,
     VendorResponse,
 )
 from ..schemas.ai import (
@@ -68,10 +71,11 @@ def _build_vendor_history(vendor_name: str, db: Session) -> dict:
     from sqlalchemy import func
 
     # Single combined query for rfq count, offer count, and last contact date
+    safe_vendor = escape_like(vendor_name)
     total_rfqs = (
         db.query(func.count(Contact.id))
         .filter(
-            Contact.vendor_name.ilike(f"%{vendor_name}%"),
+            Contact.vendor_name.ilike(f"%{safe_vendor}%"),
             Contact.contact_type == "email",
         )
         .scalar()
@@ -80,13 +84,13 @@ def _build_vendor_history(vendor_name: str, db: Session) -> dict:
     # Combine offer count + last contact into parallel-style queries
     total_offers = (
         db.query(func.count(Offer.id))
-        .filter(Offer.vendor_name.ilike(f"%{vendor_name}%"))
+        .filter(Offer.vendor_name.ilike(f"%{safe_vendor}%"))
         .scalar()
     ) or 0
 
     last_contact_date = (
         db.query(func.max(Contact.created_at))
-        .filter(Contact.vendor_name.ilike(f"%{vendor_name}%"))
+        .filter(Contact.vendor_name.ilike(f"%{safe_vendor}%"))
         .scalar()
     )
 
@@ -301,6 +305,56 @@ async def delete_prospect_contact(
     db.delete(pc)
     db.commit()
     return {"ok": True}
+
+
+@router.post("/api/ai/prospect-contacts/{contact_id}/promote")
+async def promote_prospect_contact(
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Promote a prospect contact to a VendorContact or SiteContact."""
+    pc = db.query(ProspectContact).filter(ProspectContact.id == contact_id).first()
+    if not pc:
+        raise HTTPException(404, "Prospect contact not found")
+
+    if pc.vendor_card_id:
+        vc = VendorContact(
+            vendor_card_id=pc.vendor_card_id,
+            full_name=pc.full_name,
+            title=pc.title,
+            email=pc.email,
+            phone=pc.phone,
+            linkedin_url=pc.linkedin_url,
+            source="prospect_promote",
+        )
+        db.add(vc)
+        db.flush()
+        pc.promoted_to_type = "vendor_contact"
+        pc.promoted_to_id = vc.id
+    elif pc.customer_site_id:
+        sc = SiteContact(
+            customer_site_id=pc.customer_site_id,
+            full_name=pc.full_name,
+            title=pc.title,
+            email=pc.email,
+            phone=pc.phone,
+        )
+        db.add(sc)
+        db.flush()
+        pc.promoted_to_type = "site_contact"
+        pc.promoted_to_id = sc.id
+    else:
+        raise HTTPException(400, "Contact has no vendor_card_id or customer_site_id")
+
+    pc.is_saved = True
+    pc.saved_by_id = user.id
+    db.commit()
+    return {
+        "ok": True,
+        "promoted_to_type": pc.promoted_to_type,
+        "promoted_to_id": pc.promoted_to_id,
+    }
 
 
 # ── Feature 2a: Parse RFQ Email (Gradient) ────────────────────────────────

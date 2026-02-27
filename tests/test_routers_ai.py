@@ -393,6 +393,107 @@ def test_delete_prospect_not_found(ai_client):
 
 
 # ---------------------------------------------------------------------------
+# Prospect Promotion (4 tests)
+# ---------------------------------------------------------------------------
+
+def test_promote_to_vendor_contact(ai_client, db_session, ai_test_user):
+    """POST /api/ai/prospect-contacts/{id}/promote creates VendorContact."""
+    from app.models import ProspectContact, VendorCard, VendorContact
+
+    card = VendorCard(normalized_name="promo vendor", display_name="Promo Vendor")
+    db_session.add(card)
+    db_session.flush()
+
+    pc = ProspectContact(
+        vendor_card_id=card.id,
+        full_name="Jane Promo",
+        title="Sales Director",
+        email="jane@promo.com",
+        phone="555-1234",
+        source="apollo",
+        confidence="high",
+    )
+    db_session.add(pc)
+    db_session.commit()
+    db_session.refresh(pc)
+
+    resp = ai_client.post(f"/api/ai/prospect-contacts/{pc.id}/promote")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["promoted_to_type"] == "vendor_contact"
+    assert data["promoted_to_id"] is not None
+
+    db_session.refresh(pc)
+    assert pc.is_saved is True
+    assert pc.saved_by_id == ai_test_user.id
+    assert pc.promoted_to_type == "vendor_contact"
+
+    vc = db_session.get(VendorContact, data["promoted_to_id"])
+    assert vc is not None
+    assert vc.full_name == "Jane Promo"
+    assert vc.email == "jane@promo.com"
+    assert vc.source == "prospect_promote"
+
+
+def test_promote_to_site_contact(ai_client, db_session, ai_test_user):
+    """POST /api/ai/prospect-contacts/{id}/promote creates SiteContact."""
+    from app.models import Company, CustomerSite, ProspectContact, SiteContact
+
+    co = Company(name="Promo Co")
+    db_session.add(co)
+    db_session.flush()
+    site = CustomerSite(company_id=co.id, site_name="HQ")
+    db_session.add(site)
+    db_session.flush()
+
+    pc = ProspectContact(
+        customer_site_id=site.id,
+        full_name="Bob Site",
+        title="Buyer",
+        email="bob@promoco.com",
+        source="web_search",
+        confidence="medium",
+    )
+    db_session.add(pc)
+    db_session.commit()
+    db_session.refresh(pc)
+
+    resp = ai_client.post(f"/api/ai/prospect-contacts/{pc.id}/promote")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["promoted_to_type"] == "site_contact"
+
+    sc = db_session.get(SiteContact, data["promoted_to_id"])
+    assert sc is not None
+    assert sc.full_name == "Bob Site"
+    assert sc.customer_site_id == site.id
+
+
+def test_promote_no_fk_returns_400(ai_client, db_session):
+    """POST promote with no vendor_card_id or customer_site_id returns 400."""
+    from app.models import ProspectContact
+
+    pc = ProspectContact(
+        full_name="Orphan Contact",
+        source="manual",
+        confidence="low",
+    )
+    db_session.add(pc)
+    db_session.commit()
+    db_session.refresh(pc)
+
+    resp = ai_client.post(f"/api/ai/prospect-contacts/{pc.id}/promote")
+    assert resp.status_code == 400
+
+
+def test_promote_not_found(ai_client):
+    """POST /api/ai/prospect-contacts/99999/promote returns 404."""
+    resp = ai_client.post("/api/ai/prospect-contacts/99999/promote")
+    assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
 # Parse Response (4 tests)
 # ---------------------------------------------------------------------------
 
