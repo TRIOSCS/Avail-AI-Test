@@ -200,6 +200,16 @@ class Settings:
     buyplan_auto_complete_tz: str = os.getenv("BUYPLAN_AUTO_COMPLETE_TZ", "America/New_York")
     po_verify_interval_min: int = int(os.getenv("PO_VERIFY_INTERVAL_MIN", "30"))
 
+    # Buy Plan V3 — AI thresholds
+    buyplan_auto_approve_threshold: float = float(
+        os.getenv("BUYPLAN_AUTO_APPROVE_THRESHOLD", "5000")
+    )
+    buyplan_stale_offer_days: int = int(os.getenv("BUYPLAN_STALE_OFFER_DAYS", "5"))
+    buyplan_min_margin_pct: float = float(os.getenv("BUYPLAN_MIN_MARGIN_PCT", "10"))
+    buyplan_nudge_buyer_hours: int = int(os.getenv("BUYPLAN_NUDGE_BUYER_HOURS", "4"))
+    buyplan_escalate_manager_hours: int = int(os.getenv("BUYPLAN_ESCALATE_MANAGER_HOURS", "8"))
+    buyplan_nudge_ops_hours: int = int(os.getenv("BUYPLAN_NUDGE_OPS_HOURS", "2"))
+
     # Contact intelligence
     contact_scoring_enabled: bool = (
         os.getenv("CONTACT_SCORING_ENABLED", "true").lower() == "true"
