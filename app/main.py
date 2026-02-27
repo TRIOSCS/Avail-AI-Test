@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy.orm import Session
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.middleware.sessions import SessionMiddleware
 
 from .config import APP_VERSION, settings
@@ -247,6 +248,9 @@ app.add_middleware(
     max_age=86400,
 )
 
+# GZip responses ≥ 500 bytes — big wins on JSON-heavy API payloads
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
 # CSRF protection (double-submit cookie) — disabled in test mode
 if not os.environ.get("TESTING"):
     import re
@@ -310,8 +314,15 @@ async def request_id_middleware(request: Request, call_next):
         if settings.app_url.startswith("https"):
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
 
-        # Skip noisy paths (static files, health checks)
+        # Cache-Control for static assets (hashed filenames from Vite get long cache)
         path = request.url.path
+        if path.startswith("/static/"):
+            if "/assets/" in path:  # Vite-hashed filenames — immutable
+                response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+            else:
+                response.headers["Cache-Control"] = "public, max-age=3600"
+
+        # Skip noisy paths (static files, health checks)
         if not (path.startswith("/static") or path == "/health"):
             logger.info(
                 "{method} {path} → {status} ({dur}ms)",

@@ -89,6 +89,24 @@ def _compute_sourcing_score(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt
     )
 
 
+@router.get("/api/requisitions/counts")
+async def requisition_counts(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Lightweight counts for dashboard widgets — avoids the heavy list query."""
+    total = db.scalar(select(sqlfunc.count(Requisition.id)))
+    open_cnt = db.scalar(
+        select(sqlfunc.count(Requisition.id)).where(
+            Requisition.status.in_(["open", "active", "sourcing"])
+        )
+    )
+    archive_cnt = db.scalar(
+        select(sqlfunc.count(Requisition.id)).where(Requisition.status == "archive")
+    )
+    return {"total": total or 0, "open": open_cnt or 0, "archive": archive_cnt or 0}
+
+
 @router.get("/api/requisitions", response_model=RequisitionListResponse, response_model_exclude_none=True)
 async def list_requisitions(
     q: str = "",

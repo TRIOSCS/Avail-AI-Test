@@ -25,6 +25,8 @@ export default defineConfig({
         app: resolve(__dirname, "app/static/app.js"),
         crm: resolve(__dirname, "app/static/crm.js"),
         styles: resolve(__dirname, "app/static/styles.css"),
+        mobile: resolve(__dirname, "app/static/mobile.css"),
+        touch: resolve(__dirname, "app/static/touch.js"),
       },
     },
   },

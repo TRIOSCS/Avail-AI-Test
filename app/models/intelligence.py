@@ -347,4 +347,11 @@ class ActivityLog(Base):
             "created_at",
             postgresql_where=Column("dismissed_at").is_(None),
         ),
+        Index(
+            "ix_activity_req_channel",
+            "requisition_id",
+            "channel",
+            "created_at",
+            postgresql_where=Column("requisition_id").isnot(None),
+        ),
     )

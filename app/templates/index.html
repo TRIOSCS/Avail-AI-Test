@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#3b6ea8">
     <meta name="apple-mobile-web-app-title" content="AVAIL">
     <title>AVAIL — Opportunity Management</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -261,7 +262,11 @@
         <!-- Account detail drawer -->
         <div class="drawer-backdrop" id="custDrawerBackdrop" onclick="closeCustDrawer()"></div>
         <div class="drawer" id="custDrawer">
-            <div class="drawer-header">
+            <div class="m-detail-header m-mobile-only">
+                <button class="m-back-btn" onclick="closeCustDrawer()">&larr;</button>
+                <span class="m-detail-title" id="custDrawerMobileTitle">Account</span>
+            </div>
+            <div class="drawer-header m-desktop-only">
                 <h3 id="custDrawerTitle">Account</h3>
                 <button class="drawer-close" onclick="closeCustDrawer()">&times;</button>
             </div>
@@ -315,7 +320,11 @@
         <!-- Site detail drawer -->
         <div class="drawer-backdrop" id="prospectDrawerBackdrop" onclick="closeProspectDrawer()"></div>
         <div class="drawer" id="prospectDrawer">
-            <div class="drawer-header">
+            <div class="m-detail-header m-mobile-only">
+                <button class="m-back-btn" onclick="closeProspectDrawer()">&larr;</button>
+                <span class="m-detail-title" id="prospectDrawerMobileTitle">Site</span>
+            </div>
+            <div class="drawer-header m-desktop-only">
                 <h3 id="prospectDrawerTitle">Site</h3>
                 <button class="drawer-close" onclick="closeProspectDrawer()">&times;</button>
             </div>
@@ -407,7 +416,11 @@
         <!-- AI Account Detail Modal -->
         <div class="drawer-backdrop" id="suggestedDetailBackdrop" onclick="closeSuggestedDetail()"></div>
         <div class="drawer" id="suggestedDetailDrawer" style="max-width:520px">
-            <div class="drawer-header">
+            <div class="m-detail-header m-mobile-only">
+                <button class="m-back-btn" onclick="closeSuggestedDetail()">&larr;</button>
+                <span class="m-detail-title" id="suggestedDetailMobileTitle">Account Detail</span>
+            </div>
+            <div class="drawer-header m-desktop-only">
                 <h3 id="suggestedDetailTitle">Account Detail</h3>
                 <button class="drawer-close" onclick="closeSuggestedDetail()">&times;</button>
             </div>
@@ -437,7 +450,11 @@
         <!-- Vendor detail drawer -->
         <div class="drawer-backdrop" id="vendorDrawerBackdrop" onclick="closeVendorDrawer()"></div>
         <div class="drawer" id="vendorDrawer">
-            <div class="drawer-header">
+            <div class="m-detail-header m-mobile-only">
+                <button class="m-back-btn" onclick="closeVendorDrawer()">&larr;</button>
+                <span class="m-detail-title" id="vendorDrawerMobileTitle">Vendor</span>
+            </div>
+            <div class="drawer-header m-desktop-only">
                 <h3 id="vendorDrawerTitle">Vendor</h3>
                 <button class="drawer-close" onclick="closeVendorDrawer()">&times;</button>
             </div>
@@ -1132,6 +1149,7 @@
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('tickets',this)">Trouble Tickets</button>
             <button type="button" class="tab" onclick="switchSettingsTab('vendor-dedup',this)">Vendor Dedup</button>
             <button type="button" class="tab" onclick="switchSettingsTab('company-dedup',this)">Company Dedup</button>
+            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('transfer',this)">Account Transfer</button>
         </div>
 
         <div id="settings-users" class="settings-panel">
@@ -1327,9 +1345,71 @@
             <div id="companyDedupResults"><p class="empty">Click "Scan for Duplicates" to find potential duplicate companies</p></div>
         </div>
 
+        <div id="settings-transfer" class="settings-panel" style="display:none">
+            <div style="display:flex;gap:16px;align-items:flex-end;margin-bottom:16px;flex-wrap:wrap">
+                <div>
+                    <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Transfer FROM (source)</label>
+                    <select id="transferSourceUser" onchange="loadTransferPreview()" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;font-size:12px;min-width:200px">
+                        <option value="">Select user...</option>
+                    </select>
+                </div>
+                <div>
+                    <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Transfer TO (target)</label>
+                    <select id="transferTargetUser" style="padding:6px 10px;border:1px solid var(--border);border-radius:4px;font-size:12px;min-width:200px">
+                        <option value="">Select user...</option>
+                    </select>
+                </div>
+            </div>
+            <div id="transferSitesContainer" style="display:none">
+                <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
+                    <label style="font-size:12px"><input type="checkbox" onchange="toggleTransferSelectAll(this.checked)"> Select All</label>
+                    <span id="transferSelectedCount" style="font-size:11px;color:var(--muted)">0 selected</span>
+                    <button type="button" class="btn btn-primary btn-sm" id="transferBtn" onclick="executeTransfer()" disabled>Transfer Selected</button>
+                </div>
+                <table class="tbl" style="font-size:12px">
+                    <thead><tr><th style="width:30px"></th><th>Site Name</th><th>Company</th><th>City</th><th>State</th><th>Active</th></tr></thead>
+                    <tbody id="transferSitesBody"></tbody>
+                </table>
+            </div>
+            <div id="transferEmpty"><p class="empty">Select a source user to see their assigned sites</p></div>
+        </div>
+
     </div><!-- end view-settings -->
     </div><!-- end main-scroll -->
 </main><!-- end main -->
+
+<!-- Mobile bottom navigation — 5 tabs, hidden on desktop via m-mobile-only -->
+<nav class="m-bottomnav m-mobile-only" id="mobileBottomNav">
+    <button type="button" class="m-bottomnav-tab active" data-nav="reqs" onclick="mobileTabNav('reqs',this)">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+        <span>RFQs</span>
+    </button>
+    <button type="button" class="m-bottomnav-tab" data-nav="customers" onclick="mobileTabNav('customers',this)">
+        <svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+        <span>Accounts</span>
+    </button>
+    <button type="button" class="m-bottomnav-tab" data-nav="vendors" onclick="mobileTabNav('vendors',this)">
+        <svg viewBox="0 0 24 24"><path d="M6 2L3 7v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-3-5z"/><line x1="3" y1="7" x2="21" y2="7"/><path d="M16 11a4 4 0 0 1-8 0"/></svg>
+        <span>Vendors</span>
+    </button>
+    <button type="button" class="m-bottomnav-tab" data-nav="suggested" onclick="mobileTabNav('suggested',this)">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+        <span>Prospect</span>
+    </button>
+    <button type="button" class="m-bottomnav-tab" data-nav="more" onclick="toggleMobileMore(this)">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="5" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="19" r="1.5" fill="currentColor" stroke="none"/></svg>
+        <span>More</span>
+    </button>
+</nav>
+<!-- Mobile "More" popover -->
+<div class="m-more-popover m-mobile-only" id="mobileMorePopover">
+    <button type="button" class="m-more-item" onclick="mobileMoreNav('materials')"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg> Materials</button>
+    <button type="button" class="m-more-item" onclick="mobileMoreNav('buyplans')"><svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg> Buy Plans</button>
+    <button type="button" class="m-more-item" onclick="mobileMoreNav('proactive')"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg> Proactive</button>
+    <button type="button" class="m-more-item" onclick="mobileMoreNav('dashboard')"><svg viewBox="0 0 24 24"><polygon points="7.5,1 12.5,3.8 12.5,9.4 7.5,12.2 2.5,9.4 2.5,3.8"/><polygon points="16.5,1 21.5,3.8 21.5,9.4 16.5,12.2 11.5,9.4 11.5,3.8"/><polygon points="12,10.8 17,13.6 17,19.2 12,22 7,19.2 7,13.6"/></svg> Command Center</button>
+    <button type="button" class="m-more-item" onclick="mobileMoreNav('prospecting')"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Prospecting</button>
+    <button type="button" class="m-more-item" onclick="mobileMoreNav('settings')"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Settings</button>
+</div>
 
 <!-- Trouble Chat Modal -->
 <div id="troubleModal" class="modal-bg" onclick="if(event.target===this)closeTroubleChat()">

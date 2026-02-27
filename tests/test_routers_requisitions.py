@@ -39,6 +39,24 @@ def test_create_requisition_with_customer(client, test_customer_site):
     assert resp.status_code == 200
 
 
+def test_requisition_counts_empty(client):
+    """GET /api/requisitions/counts returns zeros when none exist."""
+    resp = client.get("/api/requisitions/counts")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 0
+    assert data["open"] == 0
+    assert data["archive"] == 0
+
+
+def test_requisition_counts_with_data(client, test_requisition):
+    """GET /api/requisitions/counts reflects existing reqs."""
+    resp = client.get("/api/requisitions/counts")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] >= 1
+
+
 def test_list_requisitions_empty(client):
     """GET /api/requisitions returns empty list when none exist."""
     resp = client.get("/api/requisitions")

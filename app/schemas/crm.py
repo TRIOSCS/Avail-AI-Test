@@ -550,3 +550,12 @@ class QuoteSendOverride(BaseModel):
 class CompanyMergeRequest(BaseModel):
     keep_id: int
     remove_id: int
+
+
+# ── Mass Account Transfer ─────────────────────────────────────────
+
+
+class MassTransferRequest(BaseModel):
+    source_user_id: int
+    target_user_id: int
+    site_ids: list[int] = Field(..., min_length=1, max_length=1000)

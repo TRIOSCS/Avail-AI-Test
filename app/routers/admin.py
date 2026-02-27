@@ -24,7 +24,7 @@ from ..models import (
     VendorContact,
 )
 from ..rate_limit import limiter
-from ..schemas.crm import CompanyMergeRequest
+from ..schemas.crm import CompanyMergeRequest, MassTransferRequest
 from ..services.admin_service import (
     VALID_ROLES,
     get_all_config,
@@ -1025,6 +1025,109 @@ async def api_test_teams_post(
     if not ok:
         raise HTTPException(502, "Failed to post to Teams channel. Check permissions.")
     return {"status": "sent", "message": "Test card posted to Teams channel."}
+
+
+# ── Mass Account Transfer (admin only) ────────────────────────────
+
+
+@router.get("/api/admin/transfer/preview")
+@limiter.limit("30/minute")
+def api_transfer_preview(
+    request: Request,
+    source_user_id: int = 0,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Return all sites owned by source user with company names."""
+    source = db.get(User, source_user_id)
+    if not source:
+        raise HTTPException(404, "Source user not found")
+
+    sites = (
+        db.query(CustomerSite)
+        .filter(CustomerSite.owner_id == source_user_id)
+        .all()
+    )
+
+    # Batch-fetch company names to avoid N+1
+    company_ids = {s.company_id for s in sites if s.company_id}
+    companies = {}
+    if company_ids:
+        for c in db.query(Company).filter(Company.id.in_(company_ids)).all():
+            companies[c.id] = c.name
+
+    return {
+        "source_user": {"id": source.id, "name": source.name, "email": source.email},
+        "site_count": len(sites),
+        "sites": [
+            {
+                "id": s.id,
+                "site_name": s.site_name,
+                "company_name": companies.get(s.company_id, ""),
+                "city": s.city,
+                "state": s.state,
+                "is_active": s.is_active if s.is_active is not None else True,
+            }
+            for s in sites
+        ],
+    }
+
+
+@router.post("/api/admin/transfer/execute")
+@limiter.limit("10/minute")
+def api_transfer_execute(
+    request: Request,
+    body: MassTransferRequest,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Transfer site ownership from one user to another."""
+    if body.source_user_id == body.target_user_id:
+        raise HTTPException(400, "Source and target user must be different")
+
+    source = db.get(User, body.source_user_id)
+    if not source:
+        raise HTTPException(404, "Source user not found")
+
+    target = db.get(User, body.target_user_id)
+    if not target:
+        raise HTTPException(404, "Target user not found")
+
+    # Filter to sites that are actually owned by source (race-condition safe)
+    sites = (
+        db.query(CustomerSite)
+        .filter(
+            CustomerSite.id.in_(body.site_ids),
+            CustomerSite.owner_id == body.source_user_id,
+        )
+        .all()
+    )
+
+    if not sites:
+        raise HTTPException(400, "No matching sites owned by source user")
+
+    transferred_ids = {s.id for s in sites}
+    skipped_ids = [sid for sid in body.site_ids if sid not in transferred_ids]
+
+    for s in sites:
+        s.owner_id = body.target_user_id
+        s.ownership_cleared_at = None
+
+    db.commit()
+
+    logger.info(
+        "Mass transfer: %d sites from %s (id=%d) to %s (id=%d) by %s",
+        len(sites), source.name, source.id, target.name, target.id, user.email,
+    )
+
+    return {
+        "ok": True,
+        "transferred": len(sites),
+        "skipped": len(skipped_ids),
+        "skipped_ids": skipped_ids,
+        "source": {"id": source.id, "name": source.name},
+        "target": {"id": target.id, "name": target.name},
+    }
 
 
 def _upsert_config(db: Session, key: str, value: str, admin_email: str):

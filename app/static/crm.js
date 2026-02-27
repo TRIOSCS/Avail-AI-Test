@@ -18,6 +18,23 @@ const _debouncedUpdateProactivePreview = debounce(() => updateProactivePreview()
 const _debouncedLoadVendorScorecards = debounce(() => loadVendorScorecards(), 300);
 
 // ── CRM State ──────────────────────────────────────────────────────────
+// Client-side company detail cache — avoids re-fetching when toggling drawers
+const _companyDetailCache = {};  // {companyId: {data, ts}}
+const _COMPANY_CACHE_TTL = 60_000; // 60 seconds
+
+function _getCachedCompanyDetail(companyId) {
+    const c = _companyDetailCache[companyId];
+    if (c && (Date.now() - c.ts) < _COMPANY_CACHE_TTL) return c.data;
+    return null;
+}
+function _setCachedCompanyDetail(companyId, data) {
+    _companyDetailCache[companyId] = { data, ts: Date.now() };
+}
+function invalidateCompanyCache(companyId) {
+    if (companyId) delete _companyDetailCache[companyId];
+    else Object.keys(_companyDetailCache).forEach(k => delete _companyDetailCache[k]);
+}
+
 let crmCustomers = [];
 let crmOffers = [];
 let crmQuote = null;
@@ -353,7 +370,41 @@ function renderCustomers() {
         </tr>`;
     }
     html += '</tbody></table>';
-    el.innerHTML = html;
+
+    // Mobile: render cards instead of table
+    if (window.__isMobile) {
+        let mHtml = '';
+        for (const c of filtered) {
+            mHtml += _renderCustCardMobile(c);
+        }
+        el.innerHTML = mHtml || '<p class="m-empty">No accounts match filters</p>';
+    } else {
+        el.innerHTML = html;
+    }
+}
+
+function _renderCustCardMobile(c) {
+    const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
+    const healthColor = _custHealthColor(c);
+    const openReqs = (c.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0);
+    const rev90 = c.revenue_90d != null ? '$' + Number(c.revenue_90d).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0}) : '';
+    const owner = c.account_owner_name || '';
+
+    return `<div class="m-card m-health-${healthColor}" onclick="openCustDrawer(${c.id})">
+        <div class="m-card-header">
+            <span class="m-card-title">${esc(displayName)}${c.is_strategic ? ' <span style="color:var(--amber)">★</span>' : ''}</span>
+            <span class="m-card-chevron">›</span>
+        </div>
+        ${c.domain ? `<div class="m-card-subtitle">${esc(c.domain)}</div>` : ''}
+        <div class="m-card-body">
+            <span style="font-size:12px"><b>${c.site_count || 0}</b> sites</span>
+            <span style="font-size:12px"><b>${openReqs}</b> open reqs</span>
+            ${rev90 ? `<span style="font-size:12px;color:var(--green)">${rev90}</span>` : ''}
+        </div>
+        <div class="m-card-footer">
+            <span class="m-card-meta">${owner ? esc(owner) : '<span style="color:var(--muted)">Unassigned</span>'}</span>
+        </div>
+    </div>`;
 }
 
 // ── Checkbox / Bulk Actions ───────────────────────────────────────────
@@ -450,12 +501,18 @@ async function openCustDrawer(companyId, tab) {
     _setTopDrillLabel(comp ? comp.name.replace(/\s*(bucket|pass)\s*$/i, '').trim() : 'Account');
     // Ensure company data is loaded (may be called from Contacts view before CRM tab)
     if (!crmCustomers.find(x => x.id === companyId)) {
-        try {
-            const companies = await apiFetch('/api/companies?search=');
-            crmCustomers = (Array.isArray(companies) ? companies : []).filter(c =>
-                c && typeof c === 'object' && c.id && c.name
-            );
-        } catch (_e) { /* will show "Account not found" in drawer */ }
+        const cached = _getCachedCompanyDetail('_all');
+        if (cached) {
+            crmCustomers = cached;
+        } else {
+            try {
+                const companies = await apiFetch('/api/companies?search=');
+                crmCustomers = (Array.isArray(companies) ? companies : []).filter(c =>
+                    c && typeof c === 'object' && c.id && c.name
+                );
+                _setCachedCompanyDetail('_all', crmCustomers);
+            } catch (_e) { /* will show "Account not found" in drawer */ }
+        }
     }
     const targetTab = tab || 'overview';
     switchCustDrawerTab(targetTab);
@@ -607,6 +664,8 @@ function _renderCustDrawerOverview(companyId) {
 
     const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
     if (title) title.innerHTML = esc(displayName) + (c.is_strategic ? ' <span style="color:var(--amber)">★</span>' : '');
+    const mTitle = document.getElementById('custDrawerMobileTitle');
+    if (mTitle) mTitle.textContent = displayName;
 
     const healthColor = _custHealthColor(c);
     const healthLabel = _custHealthLabel(c);
@@ -1112,6 +1171,8 @@ async function _renderCustDrawerContacts(companyId) {
 
     const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
     if (title) title.innerHTML = esc(displayName) + (c.is_strategic ? ' <span style="color:var(--amber)">★</span>' : '');
+    const mTitle2 = document.getElementById('custDrawerMobileTitle');
+    if (mTitle2) mTitle2.textContent = displayName;
 
     const sites = c.sites || [];
     if (!sites.length) {
@@ -1406,6 +1467,7 @@ async function saveEditCompany() {
         });
         closeModal('editCompanyModal');
         showToast('Company updated', 'success');
+        invalidateCompanyCache();
         loadCustomers();
     } catch (e) { showToast('Failed to update company: ' + (e.message || ''), 'error'); }
 }
@@ -4914,6 +4976,7 @@ function switchSettingsTab(name, btn) {
     else if (name === 'tickets') loadTroubleTickets();
     else if (name === 'vendor-dedup') loadVendorDedupSuggestions();
     else if (name === 'company-dedup') loadCompanyDedupSuggestions();
+    else if (name === 'transfer') loadTransferPanel();
 }
 
 // Keep backward compat for dropdown links
@@ -6437,6 +6500,94 @@ async function mergeCompanies(keepId, removeId, btn) {
 }
 
 
+/// ── Mass Account Transfer ───────────────────────────────────────────────
+
+const _transferSelected = new Set();
+
+async function loadTransferPanel() {
+    const src = document.getElementById('transferSourceUser');
+    const tgt = document.getElementById('transferTargetUser');
+    if (!src || !tgt) return;
+    try {
+        const users = await apiFetch('/api/admin/users');
+        const opts = users.map(u => `<option value="${u.id}">${u.name} (${u.email})</option>`).join('');
+        src.innerHTML = '<option value="">Select user...</option>' + opts;
+        tgt.innerHTML = '<option value="">Select user...</option>' + opts;
+    } catch (e) { showToast('Failed to load users', 'error'); }
+}
+
+async function loadTransferPreview() {
+    const sourceId = document.getElementById('transferSourceUser')?.value;
+    const container = document.getElementById('transferSitesContainer');
+    const empty = document.getElementById('transferEmpty');
+    _transferSelected.clear();
+    if (!sourceId) {
+        if (container) container.style.display = 'none';
+        if (empty) empty.style.display = '';
+        return;
+    }
+    try {
+        const data = await apiFetch(`/api/admin/transfer/preview?source_user_id=${sourceId}`);
+        const tbody = document.getElementById('transferSitesBody');
+        if (!data.sites.length) {
+            if (container) container.style.display = 'none';
+            if (empty) { empty.style.display = ''; empty.innerHTML = '<p class="empty">This user has no assigned sites</p>'; }
+            return;
+        }
+        if (empty) empty.style.display = 'none';
+        if (container) container.style.display = '';
+        tbody.innerHTML = data.sites.map(s => `<tr>
+            <td><input type="checkbox" onchange="toggleTransferSite(${s.id},this.checked)"></td>
+            <td>${esc(s.site_name)}</td><td>${esc(s.company_name)}</td>
+            <td>${esc(s.city||'')}</td><td>${esc(s.state||'')}</td>
+            <td>${s.is_active ? 'Yes' : 'No'}</td></tr>`).join('');
+        updateTransferSelectedCount();
+    } catch (e) { showToast('Failed to load preview', 'error'); }
+}
+
+function toggleTransferSite(id, checked) {
+    if (checked) _transferSelected.add(id); else _transferSelected.delete(id);
+    updateTransferSelectedCount();
+}
+
+function toggleTransferSelectAll(checked) {
+    _transferSelected.clear();
+    document.querySelectorAll('#transferSitesBody input[type=checkbox]').forEach(cb => {
+        cb.checked = checked;
+        if (checked) {
+            const row = cb.closest('tr');
+            const id = parseInt(cb.getAttribute('onchange').match(/\d+/)[0]);
+            _transferSelected.add(id);
+        }
+    });
+    updateTransferSelectedCount();
+}
+
+function updateTransferSelectedCount() {
+    const lbl = document.getElementById('transferSelectedCount');
+    if (lbl) lbl.textContent = _transferSelected.size + ' selected';
+    const btn = document.getElementById('transferBtn');
+    if (btn) btn.disabled = _transferSelected.size === 0;
+}
+
+async function executeTransfer() {
+    const sourceId = parseInt(document.getElementById('transferSourceUser')?.value);
+    const targetId = parseInt(document.getElementById('transferTargetUser')?.value);
+    if (!sourceId || !targetId) return showToast('Select both source and target users', 'error');
+    if (sourceId === targetId) return showToast('Source and target must be different', 'error');
+    if (!_transferSelected.size) return showToast('No sites selected', 'error');
+    if (!confirm(`Transfer ${_transferSelected.size} site(s)?`)) return;
+    try {
+        const result = await apiFetch('/api/admin/transfer/execute', {
+            method: 'POST',
+            body: { source_user_id: sourceId, target_user_id: targetId, site_ids: [..._transferSelected] },
+        });
+        showToast(`Transferred ${result.transferred} site(s)${result.skipped ? `, ${result.skipped} skipped` : ''}`, 'success');
+        loadTransferPreview();
+    } catch (e) { showToast('Transfer failed: ' + (e.message || e), 'error'); }
+}
+
+
 /// ── Suggested Accounts (Prospect Pool from prospect_accounts) ───────────
 
 let _suggestedPage = 1;
@@ -6697,6 +6848,8 @@ async function openSuggestedDetail(prospectId) {
     try {
         const detail = await apiFetch('/api/prospects/suggested/' + prospectId);
         if (title) title.textContent = detail.name || 'Account Detail';
+        const mSugTitle = document.getElementById('suggestedDetailMobileTitle');
+        if (mSugTitle) mSugTitle.textContent = detail.name || 'Account Detail';
 
         // Build the AI intelligence view
         let html = '';
@@ -6979,6 +7132,9 @@ async function loadProspecting() {
 }
 
 function renderProspecting() {
+    // Mobile: render card list instead of table
+    if (window.__isMobile) { _renderProspectingMobile(); return; }
+
     const head = document.getElementById('prospectingHead');
     const body = document.getElementById('prospectingBody');
     if (!head || !body) return;
@@ -7081,6 +7237,69 @@ function _healthBadge(health) {
         grey: '<span style="color:#9ca3af">&#x25cf;</span> No Activity',
     };
     return map[health] || map.grey;
+}
+
+function _renderProspectingMobile() {
+    const wrap = document.getElementById('prospectTableWrap');
+    if (!wrap) return;
+    const filter = (document.getElementById('prospectingFilter')?.value || '').toLowerCase();
+    const healthFilter = document.getElementById('prospectHealthFilter')?.value || '';
+    let filtered = _prospectingData;
+
+    if (_prospectingTab === 'my-accounts') {
+        if (filter) filtered = filtered.filter(a => (a.name||'').toLowerCase().includes(filter) || (a.domain||'').toLowerCase().includes(filter));
+        if (healthFilter) filtered = filtered.filter(a => a.health === healthFilter);
+        if (!filtered.length) { wrap.innerHTML = '<p class="m-empty">No accounts — claim sites from Open Pool</p>'; return; }
+        let html = '';
+        for (const a of filtered) {
+            const hc = {green:'m-health-green',yellow:'m-health-yellow',red:'m-health-red'}[a.health] || 'm-health-grey';
+            html += `<div class="m-card ${hc}" onclick="openCustDrawer(${a.company_id})">
+                <div class="m-card-header"><span class="m-card-title">${esc(a.name)}</span><span class="m-card-chevron">›</span></div>
+                ${a.domain ? `<div class="m-card-subtitle">${esc(a.domain)}</div>` : ''}
+                <div class="m-card-body">
+                    <span style="font-size:12px">${esc(a.industry || '')}</span>
+                    <span style="font-size:12px"><b>${a.active_sites||0}</b>/${a.site_count||0} sites</span>
+                    <span style="font-size:12px">${a.last_activity ? fmtRelative(a.last_activity) : 'No activity'}</span>
+                </div>
+            </div>`;
+        }
+        wrap.innerHTML = html;
+    } else if (_prospectingTab === 'pool') {
+        if (filter) filtered = filtered.filter(s => (s.site_name||'').toLowerCase().includes(filter) || (s.company_name||'').toLowerCase().includes(filter));
+        if (!filtered.length) { wrap.innerHTML = '<p class="m-empty">No unassigned sites</p>'; return; }
+        let html = '';
+        for (const s of filtered) {
+            html += `<div class="m-card" onclick="openProspectDrawer(${s.site_id})">
+                <div class="m-card-header"><span class="m-card-title">${esc(s.company_name||'')}</span></div>
+                <div class="m-card-subtitle">${esc(s.site_name||'')}</div>
+                <div class="m-card-body">
+                    <span style="font-size:12px">${esc(s.contact_name||'')}</span>
+                    <span style="font-size:12px">${esc([s.city,s.state].filter(Boolean).join(', '))}</span>
+                </div>
+                <div class="m-card-footer"><span class="m-card-meta">${s.last_activity_at ? fmtRelative(s.last_activity_at) : 'No activity'}</span>
+                    <button class="m-chip m-chip-blue" onclick="event.stopPropagation();claimSite(${s.site_id})">Claim</button>
+                </div>
+            </div>`;
+        }
+        wrap.innerHTML = html;
+    } else {
+        if (filter) filtered = filtered.filter(s => (s.site_name||'').toLowerCase().includes(filter) || (s.company_name||'').toLowerCase().includes(filter));
+        if (!filtered.length) { wrap.innerHTML = '<p class="m-empty">No sites at risk</p>'; return; }
+        let html = '';
+        for (const s of filtered) {
+            const color = s.days_remaining <= 2 ? 'm-health-red' : 'm-health-yellow';
+            html += `<div class="m-card ${color}" onclick="openProspectDrawer(${s.site_id})">
+                <div class="m-card-header"><span class="m-card-title">${esc(s.company_name||'')}</span></div>
+                <div class="m-card-subtitle">${esc(s.site_name||'')}</div>
+                <div class="m-card-body">
+                    <span style="font-size:12px">Owner: ${esc(s.owner_name||'')}</span>
+                    <span style="font-size:12px">${s.days_inactive}d inactive</span>
+                    <span class="m-chip ${s.days_remaining<=2?'m-chip-red':'m-chip-amber'}">${s.days_remaining}d left</span>
+                </div>
+            </div>`;
+        }
+        wrap.innerHTML = html;
+    }
 }
 
 async function toggleAccountExpand(companyId) {
@@ -7313,6 +7532,8 @@ async function _renderProspectDrawerOverview(siteId) {
     try {
         const s = await apiFetch('/api/sites/' + siteId);
         if (title) title.textContent = s.site_name || 'Site';
+        const mPTitle = document.getElementById('prospectDrawerMobileTitle');
+        if (mPTitle) mPTitle.textContent = s.site_name || 'Site';
 
         const contacts = s.contacts || [];
         const contactCount = contacts.length;
@@ -7479,6 +7700,9 @@ Object.assign(window, {
     loadVendorDedupSuggestions, mergeVendors,
     // Company dedup
     loadCompanyDedupSuggestions, previewCompanyMerge, mergeCompanies,
+    // Account transfer
+    loadTransferPanel, loadTransferPreview, toggleTransferSite,
+    toggleTransferSelectAll, updateTransferSelectedCount, executeTransfer,
     // Cross-file calls from app.js
     goToCompany, showBuyPlans, showCustomers, showPerformance,
     showProactiveOffers, showSettings,
@@ -7489,4 +7713,5 @@ Object.assign(window, {
     sendProactiveOffer, convertProactiveOffer, updateProactivePreview, generateProactiveDraft,
     loadProactiveScorecard,
     loadAvailScores,
+    invalidateCompanyCache,
 });

@@ -40,6 +40,45 @@
 
 // AI features enabled for all authenticated users
 
+// ── Mobile detection (cheap matchMedia flag for JS branches) ──────────
+(function() {
+    var mql = window.matchMedia('(max-width:768px) and (hover:none), (max-width:768px) and (pointer:coarse)');
+    window.__isMobile = mql.matches;
+    var handler = function(e) { window.__isMobile = e.matches; };
+    if (mql.addEventListener) mql.addEventListener('change', handler);
+    else if (mql.addListener) mql.addListener(handler);
+})();
+
+// ── Responsive table utility (Phase 7) ────────────────────────────────
+// On mobile: converts rows to .m-card with .m-kv key-value pairs
+// On desktop: returns standard HTML table
+// columns: [{key, label, format?}], rows: [obj], opts: {onclick?}
+function renderResponsiveTable(columns, rows, opts) {
+    opts = opts || {};
+    if (window.__isMobile) {
+        if (!rows.length) return '<p class="m-empty">' + (opts.emptyText || 'No data') + '</p>';
+        return rows.map(function(row) {
+            var kvHtml = columns.map(function(col) {
+                var val = col.format ? col.format(row[col.key], row) : (row[col.key] != null ? row[col.key] : '—');
+                return '<span class="m-kv-key">' + col.label + '</span><span class="m-kv-val">' + val + '</span>';
+            }).join('');
+            var clickAttr = opts.onclick ? ' onclick="' + opts.onclick.replace('{id}', row.id || '') + '"' : '';
+            return '<div class="m-card"' + clickAttr + '><div class="m-kv">' + kvHtml + '</div></div>';
+        }).join('');
+    }
+    // Desktop: standard table
+    var thead = '<thead><tr>' + columns.map(function(c) { return '<th>' + c.label + '</th>'; }).join('') + '</tr></thead>';
+    var tbody = '<tbody>' + rows.map(function(row) {
+        var clickAttr = opts.onclick ? ' onclick="' + opts.onclick.replace('{id}', row.id || '') + '" style="cursor:pointer"' : '';
+        return '<tr' + clickAttr + '>' + columns.map(function(col) {
+            var val = col.format ? col.format(row[col.key], row) : (row[col.key] != null ? row[col.key] : '—');
+            return '<td>' + val + '</td>';
+        }).join('') + '</tr>';
+    }).join('') + '</tbody>';
+    return '<table class="tbl">' + thead + tbody + '</table>';
+}
+window.renderResponsiveTable = renderResponsiveTable;
+
 // ── Early stubs (available before full init for onclick handlers) ──────
 
 function toggleMobileSidebar() {
@@ -48,6 +87,64 @@ function toggleMobileSidebar() {
     if (sb) sb.classList.toggle('mobile-open');
     if (ov) ov.classList.toggle('open');
 }
+
+// ── Mobile bottom-nav navigation + back stack ────────────────────────
+var _mobileNavStack = [];
+
+function mobileTabNav(page, btn) {
+    // Close more popover if open
+    var pop = document.getElementById('mobileMorePopover');
+    if (pop) pop.classList.remove('open');
+    // Highlight active tab
+    document.querySelectorAll('.m-bottomnav-tab').forEach(function(t) {
+        t.classList.toggle('active', t === btn);
+    });
+    // Push to nav stack
+    _mobileNavStack = [page];
+    // Map tab to sidebar nav route
+    var navMap = { reqs:'reqs', customers:'customers', vendors:'vendors', suggested:'suggested' };
+    if (navMap[page]) {
+        var navBtn = document.getElementById({reqs:'navReqs',customers:'navCustomers',vendors:'navVendors',suggested:'navSuggested'}[page]);
+        sidebarNav(navMap[page], navBtn);
+    }
+}
+
+function mobileMoreNav(page) {
+    var pop = document.getElementById('mobileMorePopover');
+    if (pop) pop.classList.remove('open');
+    // Reset tab highlight — "More" stays highlighted for sub-pages
+    document.querySelectorAll('.m-bottomnav-tab').forEach(function(t) {
+        t.classList.toggle('active', t.dataset.nav === 'more');
+    });
+    _mobileNavStack = [page];
+    var navBtnMap = {materials:'navMaterials',buyplans:'navBuyPlans',proactive:'navProactive',dashboard:'navCmdCenter',prospecting:'navSuggested',settings:'navSettings'};
+    var navBtn = document.getElementById(navBtnMap[page] || '');
+    sidebarNav(page, navBtn);
+}
+
+function toggleMobileMore(btn) {
+    var pop = document.getElementById('mobileMorePopover');
+    if (pop) pop.classList.toggle('open');
+}
+
+function mobileBack() {
+    if (_mobileNavStack.length > 1) {
+        _mobileNavStack.pop();
+        var prev = _mobileNavStack[_mobileNavStack.length - 1];
+        mobileTabNav(prev, document.querySelector('.m-bottomnav-tab[data-nav="' + prev + '"]'));
+    }
+}
+
+// Close More popover on any outside click
+document.addEventListener('click', function(e) {
+    var pop = document.getElementById('mobileMorePopover');
+    if (pop && pop.classList.contains('open')) {
+        var moreBtn = document.querySelector('.m-bottomnav-tab[data-nav="more"]');
+        if (!pop.contains(e.target) && moreBtn !== e.target && !moreBtn.contains(e.target)) {
+            pop.classList.remove('open');
+        }
+    }
+});
 
 // Sync active pill state between desktop #mainPills and mobile #mobilePills
 function _syncMobilePills(clicked) {
@@ -796,6 +893,7 @@ window.addEventListener('popstate', (e) => {
         'view-list': () => {
             showView('view-list');
             setMainPill('rfq');
+            _reqFullyLoaded = false; // re-fetch fresh on next nav
             _collapseAllDrillDowns();
             if (drillId) setTimeout(() => toggleDrillDown(drillId), 100);
         },
@@ -1700,17 +1798,21 @@ async function loadDashboard() {
     try {
         const daysParam = _dashPeriod === '30d' ? 30 : _dashPeriod === '90d' ? 90 : 7;
 
+        // Reuse already-loaded req data when available (avoids duplicate fetch)
+        const haveReqs = _reqListData && _reqListData.length > 0;
+
         // Fetch all sales-focused data in parallel
-        const [brief, needsAttn, reqs, quotes, scorecard, hotOffers] = await Promise.all([
+        const [brief, needsAttn, freshReqs, quotes, scorecard, hotOffers] = await Promise.all([
             apiFetch('/api/dashboard/morning-brief').catch(() => null),
             apiFetch(`/api/dashboard/needs-attention?days=${daysParam}`).catch(() => []),
-            apiFetch('/api/requisitions').catch(() => []),
+            haveReqs ? Promise.resolve(null) : apiFetch('/api/requisitions').catch(() => []),
             apiFetch('/api/quotes').catch(() => []),
             apiFetch('/api/proactive/scorecard').catch(() => null),
             apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(() => []),
         ]);
 
-        const reqList = Array.isArray(reqs) ? reqs : [];
+        const reqs = haveReqs ? _reqListData : freshReqs;
+        const reqList = Array.isArray(reqs) ? reqs : (reqs && reqs.requisitions ? reqs.requisitions : []);
         const quoteList = Array.isArray(quotes) ? quotes : [];
         const attnList = Array.isArray(needsAttn) ? needsAttn : [];
         const targetId = _dashUserId || window.userId;
@@ -2267,6 +2369,7 @@ let _reqSearchSeq = 0; // Sequence counter to discard stale responses
 
 let _archiveHasMore = false;
 let _archivePageSize = 200;
+let _reqFullyLoaded = false; // true once all 200 reqs loaded
 
 export async function loadRequisitions(query = '', append = false) {
     // Cancel any in-flight request
@@ -2277,7 +2380,9 @@ export async function loadRequisitions(query = '', append = false) {
     try {
         const status = _currentMainView === 'archive' ? '&status=archive' : '';
         const offset = append ? _reqListData.length : 0;
-        const limit = _currentMainView === 'archive' ? _archivePageSize : 200;
+        // Fast initial paint: load 50 first, then fetch remaining in background
+        const isInitial = !query && !append && _currentMainView !== 'archive' && !_reqFullyLoaded;
+        const limit = _currentMainView === 'archive' ? _archivePageSize : (isInitial ? 50 : 200);
         const url = query
             ? `/api/requisitions?q=${encodeURIComponent(query)}${status}`
             : `/api/requisitions?limit=${limit}&offset=${offset}${status}`;
@@ -2302,6 +2407,20 @@ export async function loadRequisitions(query = '', append = false) {
         _archiveHasMore = _currentMainView === 'archive' && items.length >= limit;
         _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
         renderReqList();
+        // Background: fetch remaining reqs if we only loaded the first 50
+        if (isInitial && items.length >= 50) {
+            _reqFullyLoaded = true;
+            apiFetch(`/api/requisitions?limit=200&offset=0${status}`).then(full => {
+                const fullItems = full.requisitions || full;
+                if (Array.isArray(fullItems) && fullItems.length > _reqListData.length) {
+                    _reqListData = fullItems;
+                    _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
+                    renderReqList();
+                }
+            }).catch(() => {});
+        } else if (!isInitial && !query) {
+            _reqFullyLoaded = true;
+        }
     } catch (e) {
         if (e.name === 'AbortError') return;
         logCatchError('loadRequisitions', e); showToast('Failed to load requisitions', 'error');
@@ -2353,6 +2472,11 @@ function _ddTabLabel(tab) {
 }
 
 async function expandToSubTab(reqId, tabName) {
+    if (window.__isMobile) {
+        _ddActiveTab[reqId] = tabName;
+        _openMobileDrillDown(reqId);
+        return;
+    }
     const drow = document.getElementById('d-' + reqId);
     if (!drow) return;
     if (!drow.classList.contains('open')) {
@@ -4385,6 +4509,11 @@ async function ddDeleteQuote(reqId, quoteId) {
 }
 
 export async function toggleDrillDown(reqId) {
+    // Mobile: open full-screen overlay instead of inline expand
+    if (window.__isMobile) {
+        _openMobileDrillDown(reqId);
+        return;
+    }
     const drow = document.getElementById('d-' + reqId);
     const arrow = document.getElementById('a-' + reqId);
     if (!drow) return;
@@ -4408,6 +4537,88 @@ export async function toggleDrillDown(reqId) {
     const panel = drow.querySelector('.dd-panel');
     if (!panel) return;
     await _loadDdSubTab(reqId, defaultTab, panel);
+}
+
+// ── Mobile full-screen drill-down ─────────────────────────────────────
+function _openMobileDrillDown(reqId) {
+    // Close any existing mobile drill-down
+    const existing = document.getElementById('mobileDrillDown');
+    if (existing) existing.remove();
+
+    const r = _reqListData.find(x => x.id === reqId);
+    const cust = r ? (r.customer_display || r.name || 'RFQ') : 'RFQ';
+    const total = r ? (r.requirement_count || 0) : 0;
+    const offers = r ? (r.offer_count || 0) : 0;
+    const badgeMap = {draft:'m-chip',active:'m-chip-blue',sourcing:'m-chip-blue',quoted:'m-chip-purple',won:'m-chip-green',lost:'m-chip-red'};
+    const bc = badgeMap[r?.status] || 'm-chip';
+    const _sl = {draft:'Draft',active:'Sourcing',sourcing:'Sourcing',quoted:'Quoted',won:'Won',lost:'Lost'};
+
+    // Deadline
+    let dlBadge = '';
+    if (r?.deadline === 'ASAP') dlBadge = '<span class="m-chip m-chip-amber">ASAP</span>';
+    else if (r?.deadline) dlBadge = '<span class="m-chip">' + fmtDate(r.deadline) + '</span>';
+
+    // Build tab pills
+    const tabs = _ddSubTabs(_currentMainView);
+    const defaultTab = _ddActiveTab[reqId] || _ddDefaultTab(_currentMainView);
+    _ddActiveTab[reqId] = defaultTab;
+    const pillsHtml = tabs.map(t =>
+        `<button class="m-tab-pill${t === defaultTab ? ' active' : ''}" data-tab="${t}" onclick="_mobileDdSwitchTab(${reqId},'${t}',this)">${_ddTabLabel(t)}</button>`
+    ).join('');
+
+    const overlay = document.createElement('div');
+    overlay.id = 'mobileDrillDown';
+    overlay.className = 'm-fullscreen';
+    overlay.innerHTML = `
+        <div class="m-detail-header">
+            <button class="m-back-btn" onclick="_closeMobileDrillDown()">&larr;</button>
+            <span class="m-detail-title">${esc(cust)}</span>
+        </div>
+        <div class="m-fullscreen-body">
+            <div style="padding:12px 16px">
+                <div class="m-card" style="cursor:default;margin-bottom:0">
+                    <div class="m-card-header">
+                        <span style="font-weight:600;font-size:13px">${esc(r?.name||'')}</span>
+                        <span class="m-chip ${bc}">${_sl[r?.status]||r?.status||''}</span>
+                    </div>
+                    <div class="m-card-body" style="margin-top:6px">
+                        <span style="font-size:12px"><b>${total}</b> parts</span>
+                        <span style="font-size:12px"><b>${offers}</b> offers</span>
+                        ${dlBadge}
+                    </div>
+                </div>
+            </div>
+            <div class="m-tabs-scroll" id="mobileDdTabs">${pillsHtml}</div>
+            <div id="mobileDdPanel" style="padding:8px 12px">
+                <span style="font-size:12px;color:var(--muted)">Loading\u2026</span>
+            </div>
+        </div>`;
+    document.body.appendChild(overlay);
+
+    // Load the default sub-tab content
+    const panel = document.getElementById('mobileDdPanel');
+    if (panel) _loadDdSubTab(reqId, defaultTab, panel);
+}
+
+function _closeMobileDrillDown() {
+    const el = document.getElementById('mobileDrillDown');
+    if (el) {
+        el.style.animation = 'none';
+        el.style.transform = 'translateY(100%)';
+        el.style.transition = 'transform .2s ease-in';
+        setTimeout(() => el.remove(), 200);
+    }
+}
+
+async function _mobileDdSwitchTab(reqId, tabName, btn) {
+    _ddActiveTab[reqId] = tabName;
+    const tabs = document.getElementById('mobileDdTabs');
+    if (tabs) tabs.querySelectorAll('.m-tab-pill').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
+    const panel = document.getElementById('mobileDdPanel');
+    if (panel) {
+        panel.innerHTML = '<span style="font-size:12px;color:var(--muted)">Loading\u2026</span>';
+        await _loadDdSubTab(reqId, tabName, panel);
+    }
 }
 
 function _renderDdDetails(reqId, targetPanel) {
@@ -5759,7 +5970,13 @@ function renderReqList() {
     if (_currentMainView === 'archive' && _archiveHasMore) {
         loadMoreHtml = `<div style="text-align:center;padding:16px"><button class="btn btn-ghost" onclick="loadRequisitions('',true)">Load more archived RFQs…</button></div>`;
     }
-    el.innerHTML = `<table class="tbl">${thead}<tbody>${rowsHtml}</tbody></table>${loadMoreHtml}`;
+    // Mobile: render cards instead of table
+    if (window.__isMobile) {
+        let mobileHtml = data.map(r => _renderReqRowMobile(r)).join('');
+        el.innerHTML = mobileHtml + loadMoreHtml;
+    } else {
+        el.innerHTML = `<table class="tbl">${thead}<tbody>${rowsHtml}</tbody></table>${loadMoreHtml}`;
+    }
     _populateUserFilter();
     _updateToolbarStats();
     // Restore previously open drill-downs
@@ -6017,6 +6234,77 @@ function _renderReqRow(r) {
         <div class="dd-tabs">${_renderDdTabPills(r.id)}</div>
         <div class="dd-panel"><span style="font-size:11px;color:var(--muted)">${total} parts \u2014 expand for details</span></div>
     </td></tr>`;
+}
+
+// ── Mobile card renderer for RFQ list ─────────────────────────────────
+function _renderReqRowMobile(r) {
+    const total = r.requirement_count || 0;
+    const sourced = r.sourced_count || 0;
+    const offers = r.offer_count || 0;
+    const pct = total > 0 ? Math.round((sourced / total) * 100) : 0;
+
+    // Status badge
+    const badgeMap = {draft:'m-chip',active:'m-chip-blue',sourcing:'m-chip-blue',closed:'m-chip',offers:'m-chip-green',quoted:'m-chip-purple',quoting:'m-chip-purple',archived:'m-chip',won:'m-chip-green',lost:'m-chip-red'};
+    const bc = badgeMap[r.status] || 'm-chip';
+    const _statusLabelsM = {draft:'Draft',active:'Sourcing',sourcing:'Sourcing',closed:'Closed',offers:'Offers',quoted:'Quoted',quoting:'Quoting',archived:'Archived',won:'Won',lost:'Lost'};
+
+    // Customer display
+    let cust = r.customer_display || '';
+    const dp = cust.split(' \u2014 ');
+    if (dp.length === 2 && dp[0].trim() === dp[1].trim()) cust = dp[0].trim();
+    if (!cust) cust = r.name || '';
+
+    // Age
+    let age = '';
+    if (r.created_at) {
+        const days = Math.floor((Date.now() - new Date(r.created_at).getTime()) / 86400000);
+        age = days === 0 ? 'Today' : days === 1 ? '1d ago' : days + 'd ago';
+    }
+
+    // Deadline
+    let dlText = '', dlClass = '';
+    if (r.deadline === 'ASAP') { dlText = 'ASAP'; dlClass = 'm-chip-amber'; }
+    else if (r.deadline) {
+        const d = new Date(r.deadline);
+        const now = new Date(); now.setHours(0,0,0,0);
+        const diff = Math.round((d - now) / 86400000);
+        if (diff < 0) { dlText = 'OVERDUE'; dlClass = 'm-chip-red'; }
+        else if (diff === 0) { dlText = 'DUE TODAY'; dlClass = 'm-chip-red'; }
+        else if (diff <= 3) { dlText = fmtDate(r.deadline); dlClass = 'm-chip-amber'; }
+        else { dlText = fmtDate(r.deadline); dlClass = ''; }
+    }
+
+    // Top 3 MPNs from requirements
+    const mpns = (r.top_mpns || []).slice(0, 3);
+    const mpnChips = mpns.map(m => `<span class="m-chip">${esc(m)}</span>`).join('');
+
+    // Assignee
+    const assignee = r.created_by_name || '';
+
+    // Source progress bar
+    const barColor = pct >= 80 ? 'var(--green)' : pct >= 40 ? 'var(--amber)' : 'var(--red)';
+    const progBar = total > 0
+        ? `<div style="display:flex;align-items:center;gap:6px;flex:1;min-width:100px"><div class="m-score-bar"><div class="m-score-fill" style="width:${pct}%;background:${barColor}"></div></div><span style="font-size:11px;color:var(--muted)">${sourced}/${total}</span></div>`
+        : '';
+
+    return `<div class="m-card" onclick="toggleDrillDown(${r.id})">
+        <div class="m-card-header">
+            <span class="m-card-title">${esc(cust)}</span>
+            <span class="m-chip ${bc}">${_statusLabelsM[r.status] || r.status}</span>
+        </div>
+        <div class="m-card-subtitle">${esc(r.name || '')}</div>
+        <div class="m-card-body">
+            <span style="font-size:12px"><b>${total}</b> parts</span>
+            <span style="font-size:12px"><b>${offers}</b> offers</span>
+            ${dlText ? `<span class="m-chip ${dlClass}" style="font-size:10px">${dlText}</span>` : ''}
+            ${progBar}
+        </div>
+        ${mpnChips ? `<div class="m-chip-row" style="margin-bottom:4px">${mpnChips}</div>` : ''}
+        <div class="m-card-footer">
+            <span class="m-card-meta">${assignee ? esc(assignee) : ''}</span>
+            <span class="m-card-meta">${age}</span>
+        </div>
+    </div>`;
 }
 
 // ── Inline Deadline Editor ───────────────────────────────────────────────
@@ -8747,7 +9035,41 @@ function filterVendorList() {
         </tr>`;
     }
     html += '</tbody></table>';
-    el.innerHTML = html;
+
+    // Mobile: render cards instead of table
+    if (window.__isMobile) {
+        let mHtml = '';
+        for (const c of filtered) {
+            mHtml += _renderVendorCardMobile(c);
+        }
+        el.innerHTML = mHtml || '<p class="m-empty">No vendors match filters</p>';
+    } else {
+        el.innerHTML = html;
+    }
+}
+
+function _renderVendorCardMobile(c) {
+    const score = c.vendor_score != null ? Math.round(c.vendor_score) : 0;
+    const tier = vendorTier(c);
+    const responseRate = c.response_rate != null ? Math.round(c.response_rate) + '%' : '—';
+    const parts = c.sighting_count || 0;
+    const tierColors = {proven:'m-chip-green',developing:'m-chip-blue',caution:'m-chip-amber','new':'m-chip'};
+
+    return `<div class="m-card" onclick="openVendorDrawer(${c.id})">
+        <div class="m-card-header">
+            <span class="m-card-title">${esc(c.display_name)}${c.is_blacklisted ? ' <span style="color:var(--red);font-size:10px">BLOCKED</span>' : ''}</span>
+            <span class="m-chip ${tierColors[tier] || 'm-chip'}">${tier}</span>
+        </div>
+        <div class="m-card-body">
+            <span style="font-size:12px">Score: <b>${score}</b></span>
+            <span style="font-size:12px">Response: <b>${responseRate}</b></span>
+            <span style="font-size:12px"><b>${parts}</b> parts</span>
+        </div>
+        <div class="m-card-footer">
+            <span class="m-card-meta">${c.last_sighting_at ? getRelativeTime(c.last_sighting_at) : '—'}</span>
+            <span class="m-card-chevron">›</span>
+        </div>
+    </div>`;
 }
 
 function sortVendorList(col) {
@@ -8807,6 +9129,8 @@ function _renderVendorDrawerOverview(vendorId) {
     if (!v) { body.innerHTML = '<p class="crm-empty">Vendor not found</p>'; return; }
 
     if (title) title.textContent = v.display_name;
+    const mVTitle = document.getElementById('vendorDrawerMobileTitle');
+    if (mVTitle) mVTitle.textContent = v.display_name;
     const score = v.vendor_score != null ? Math.round(v.vendor_score) : 0;
     const tier = vendorTier(v);
 
@@ -10648,4 +10972,7 @@ Object.assign(window, {
     showDashboard, loadDashboard, loadBuyerDashboard, goToReq,
     // Unified state helpers
     stateLoading, stateEmpty, stateError,
+    // Mobile navigation & drill-down
+    mobileTabNav, mobileMoreNav, toggleMobileMore, mobileBack,
+    _openMobileDrillDown, _closeMobileDrillDown, _mobileDdSwitchTab,
 });

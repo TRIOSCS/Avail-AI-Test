@@ -58,14 +58,20 @@ def vite_css_tags(app_version: str = "") -> Markup:
     url = _manifest_url("styles.css")
     if url:
         tags = [f'<link rel="stylesheet" href="{url}">']
+        mobile_url = _manifest_url("mobile.css")
+        if mobile_url:
+            tags.append(f'<link rel="stylesheet" href="{mobile_url}">')
         # Also include CSS extracted from JS entry points
         for key in ("app.js", "crm.js"):
             tags.extend(f'<link rel="stylesheet" href="{css}">' for css in _manifest_css(key))
         return Markup("\n    ".join(tags))
 
-    # Fallback: raw source file
+    # Fallback: raw source files
     bust = f"?v={app_version}" if app_version else ""
-    return Markup(f'<link rel="stylesheet" href="/static/styles.css{bust}">')
+    return Markup(
+        f'<link rel="stylesheet" href="/static/styles.css{bust}">\n'
+        f'    <link rel="stylesheet" href="/static/mobile.css{bust}">'
+    )
 
 
 def vite_app_url(app_version: str = "") -> str:
@@ -92,17 +98,22 @@ def vite_js_tags(app_version: str = "") -> Markup:
         return Markup(
             f'<script type="module" src="{VITE_DEV_ORIGIN}/@vite/client"></script>\n'
             f'    <script type="module" src="{VITE_DEV_ORIGIN}/app.js"></script>\n'
-            f'    <script type="module" src="{VITE_DEV_ORIGIN}/crm.js"></script>'
+            f'    <script type="module" src="{VITE_DEV_ORIGIN}/crm.js"></script>\n'
+            f'    <script type="module" src="{VITE_DEV_ORIGIN}/touch.js"></script>'
         )
 
     # Try manifest (production)
     app_url = _manifest_url("app.js")
     crm_url = _manifest_url("crm.js")
+    touch_url = _manifest_url("touch.js")
     if app_url and crm_url:
-        return Markup(
+        tags = (
             f'<script type="module" src="{app_url}"></script>\n'
             f'    <script type="module" src="{crm_url}"></script>'
         )
+        if touch_url:
+            tags += f'\n    <script type="module" src="{touch_url}"></script>'
+        return Markup(tags)
 
     # Fallback: raw source with importmap
     bust = f"?v={app_version}" if app_version else ""
@@ -115,5 +126,6 @@ def vite_js_tags(app_version: str = "") -> Markup:
         "}\n"
         "</script>\n"
         f'    <script type="module" src="/static/app.js{bust}"></script>\n'
-        f'    <script type="module" src="/static/crm.js{bust}"></script>'
+        f'    <script type="module" src="/static/crm.js{bust}"></script>\n'
+        f'    <script defer src="/static/touch.js{bust}"></script>'
     )
