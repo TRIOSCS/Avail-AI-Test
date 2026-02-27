@@ -174,6 +174,8 @@ async def create_buy_plan_draft(
     db: Session = Depends(get_db),
 ):
     """Create a buy plan in Draft. Sales can later use 'Ready to send' (PUT submit) to move to Pending."""
+    if not settings.buy_plan_v1_enabled:
+        raise HTTPException(410, "Buy Plan V1 is deprecated. Use V3 buy plans.")
     quote = db.get(Quote, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
@@ -258,6 +260,8 @@ async def submit_buy_plan(
     db: Session = Depends(get_db),
 ):
     """Submit a buy plan when marking a quote as Won (creates plan in Pending in one step)."""
+    if not settings.buy_plan_v1_enabled:
+        raise HTTPException(410, "Buy Plan V1 is deprecated. Use V3 buy plans.")
     quote = db.get(Quote, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")

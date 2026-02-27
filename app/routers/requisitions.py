@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from ..cache.decorators import cached_endpoint, invalidate_prefix
+from ..utils.sql_helpers import escape_like
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_user
 from ..models import (
@@ -362,7 +363,7 @@ def _build_requisition_list(q, status, limit, offset, user, db):
         query = query.filter(Requisition.created_by == user.id)
 
     if q.strip():
-        safe_q = q.strip().replace("%", r"\%").replace("_", r"\_")
+        safe_q = escape_like(q.strip())
         from sqlalchemy import exists, or_
         # Search by req name, customer name, primary MPN, or substitutes
         # Split into separate EXISTS so PostgreSQL can use trigram indexes
