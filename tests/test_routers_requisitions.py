@@ -432,6 +432,46 @@ def test_mark_sighting_unavailable_not_found(client):
     assert resp.status_code == 404
 
 
+def test_mark_sighting_unavailable_forbidden_for_other_sales_user(
+    db_session, test_requisition, sales_user
+):
+    """A sales user who does NOT own the requisition gets 403."""
+    from fastapi.testclient import TestClient
+
+    from app.database import get_db
+    from app.dependencies import require_user
+    from app.main import app
+    from app.models import Requirement, Sighting
+
+    req_item = db_session.query(Requirement).filter_by(
+        requisition_id=test_requisition.id
+    ).first()
+    s = Sighting(
+        requirement_id=req_item.id,
+        vendor_name="Mouser",
+        mpn_matched="LM317T",
+        source_type="api",
+        score=50.0,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(s)
+    db_session.commit()
+    db_session.refresh(s)
+
+    # Override auth to return the sales user (who doesn't own test_requisition)
+    def _override_db():
+        yield db_session
+
+    app.dependency_overrides[get_db] = _override_db
+    app.dependency_overrides[require_user] = lambda: sales_user
+
+    with TestClient(app) as c:
+        resp = c.put(f"/api/sightings/{s.id}/unavailable", json={"unavailable": True})
+    app.dependency_overrides.clear()
+
+    assert resp.status_code == 403
+
+
 # ── Sales Role Access ─────────────────────────────────────────────────
 
 

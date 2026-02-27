@@ -1060,22 +1060,41 @@ async def get_saved_sightings(
     req_card_map: dict[int, set[int]] = {}
     all_card_ids: set[int] = set()
     primary_card_ids: dict[int, int | None] = {}
+
+    # Batch-collect all substitute MPN keys to resolve in one query
+    all_sub_keys: set[str] = set()
+    req_sub_keys: dict[int, list[str]] = {}  # req.id → list of sub_keys
     for r in req.requirements:
-        card_ids: set[int] = set()
-        if r.material_card_id:
-            card_ids.add(r.material_card_id)
-            primary_card_ids[r.id] = r.material_card_id
-        else:
-            primary_card_ids[r.id] = None
-        # Resolve substitute MPNs to material card IDs
+        primary_card_ids[r.id] = r.material_card_id
+        sub_keys = []
         for sub in r.substitutes or []:
             sub_str = (sub if isinstance(sub, str) else "").strip()
             if sub_str:
                 sub_key = normalize_mpn_key(sub_str)
                 if sub_key:
-                    sub_card = db.query(MaterialCard.id).filter_by(normalized_mpn=sub_key).first()
-                    if sub_card:
-                        card_ids.add(sub_card[0])
+                    sub_keys.append(sub_key)
+                    all_sub_keys.add(sub_key)
+        req_sub_keys[r.id] = sub_keys
+
+    # Single batch query for all substitute material cards
+    sub_card_lookup: dict[str, int] = {}
+    if all_sub_keys:
+        rows = (
+            db.query(MaterialCard.id, MaterialCard.normalized_mpn)
+            .filter(MaterialCard.normalized_mpn.in_(all_sub_keys))
+            .all()
+        )
+        sub_card_lookup = {row.normalized_mpn: row.id for row in rows}
+
+    # Build req_card_map using batch results
+    for r in req.requirements:
+        card_ids: set[int] = set()
+        if r.material_card_id:
+            card_ids.add(r.material_card_id)
+        for sub_key in req_sub_keys.get(r.id, []):
+            card_id = sub_card_lookup.get(sub_key)
+            if card_id:
+                card_ids.add(card_id)
         req_card_map[r.id] = card_ids
         all_card_ids |= card_ids
 
@@ -1160,16 +1179,15 @@ async def mark_unavailable(
     s = db.get(Sighting, sighting_id)
     if not s:
         raise HTTPException(404, "Sighting not found")
-    # Verify sighting belongs to a valid requisition
-    req_check = (
+    # Resolve parent requisition and verify user access
+    req = (
         db.query(Requisition)
         .join(Requirement)
-        .filter(
-            Requirement.id == s.requirement_id,
-        )
+        .filter(Requirement.id == s.requirement_id)
+        .first()
     )
-    if not req_check.first():
-        raise HTTPException(403, "Not your sighting")
+    if not req or not get_req_for_user(db, user, req.id):
+        raise HTTPException(403, "Not authorized for this sighting")
     s.is_unavailable = data.unavailable
     db.commit()
     return {"ok": True, "is_unavailable": s.is_unavailable}
@@ -1204,6 +1222,12 @@ async def import_stock_list(
 
     rows = parse_tabular_file(content, fname)
 
+    from ..file_utils import normalize_stock_row
+    from ..search_service import resolve_material_card
+    from ..utils.normalization import normalize_condition as norm_cond
+    from ..utils.normalization import normalize_date_code, normalize_lead_time
+    from ..utils.normalization import normalize_packaging as norm_pkg
+
     # Build a set of MPNs we're looking for in this requisition (keyed by canonical form)
     req_mpns = {}
     for r in req.requirements:
@@ -1217,54 +1241,52 @@ async def import_stock_list(
     matched = 0
     imported = 0
 
-    from ..file_utils import normalize_stock_row
-    from ..utils.normalization import normalize_condition as norm_cond
-    from ..utils.normalization import normalize_date_code, normalize_lead_time
-    from ..utils.normalization import normalize_packaging as norm_pkg
+    try:
+        for row in rows:
+            parsed = normalize_stock_row(row)
+            if not parsed:
+                continue
+            mpn = parsed["mpn"]
+            imported += 1
 
-    for row in rows:
-        parsed = normalize_stock_row(row)
-        if not parsed:
-            continue
-        mpn = parsed["mpn"]
-        imported += 1
+            # Check if this MPN matches any requirement
+            r = req_mpns.get(normalize_mpn_key(mpn))
+            if not r:
+                continue
 
-        # Check if this MPN matches any requirement
-        r = req_mpns.get(normalize_mpn_key(mpn))
-        if not r:
-            continue
+            display_mpn = normalize_mpn(mpn) or mpn
 
-        display_mpn = normalize_mpn(mpn) or mpn
+            # Resolve material card
+            mat_card = resolve_material_card(mpn, db)
 
-        # Resolve material card
-        from ..search_service import resolve_material_card
+            s = Sighting(
+                requirement_id=r.id,
+                material_card_id=mat_card.id if mat_card else None,
+                vendor_name=vendor_name.strip(),
+                vendor_name_normalized=normalize_vendor_name(vendor_name),
+                mpn_matched=display_mpn,
+                manufacturer=parsed.get("manufacturer"),
+                qty_available=parsed.get("qty"),
+                unit_price=parsed.get("price"),
+                currency=parsed.get("currency", "USD"),
+                condition=norm_cond(parsed.get("condition")),
+                packaging=norm_pkg(parsed.get("packaging")),
+                date_code=normalize_date_code(parsed.get("date_code")),
+                lead_time_days=normalize_lead_time(parsed.get("lead_time")),
+                source_type="stock_list",
+                confidence=70,
+                raw_data=row,
+                created_at=datetime.now(timezone.utc),
+            )
+            s.score = 50  # Neutral score for manual imports
+            db.add(s)
+            matched += 1
 
-        mat_card = resolve_material_card(mpn, db)
-
-        s = Sighting(
-            requirement_id=r.id,
-            material_card_id=mat_card.id if mat_card else None,
-            vendor_name=vendor_name.strip(),
-            vendor_name_normalized=normalize_vendor_name(vendor_name),
-            mpn_matched=display_mpn,
-            manufacturer=parsed.get("manufacturer"),
-            qty_available=parsed.get("qty"),
-            unit_price=parsed.get("price"),
-            currency=parsed.get("currency", "USD"),
-            condition=norm_cond(parsed.get("condition")),
-            packaging=norm_pkg(parsed.get("packaging")),
-            date_code=normalize_date_code(parsed.get("date_code")),
-            lead_time_days=normalize_lead_time(parsed.get("lead_time")),
-            source_type="stock_list",
-            confidence=70,
-            raw_data=row,
-            created_at=datetime.now(timezone.utc),
-        )
-        s.score = 50  # Neutral score for manual imports
-        db.add(s)
-        matched += 1
-
-    db.commit()
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception("Stock import failed for requisition %s", req_id)
+        raise HTTPException(500, "Stock import failed — no data was saved")
     return {"imported_rows": imported, "matched_sightings": matched}
 
 
@@ -1280,7 +1302,7 @@ async def list_requisition_attachments(
     db: Session = Depends(get_db),
 ):
     """List all file attachments on a requisition."""
-    req = db.get(Requisition, req_id)
+    req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
     return [
@@ -1305,7 +1327,7 @@ async def upload_requisition_attachment(
     db: Session = Depends(get_db),
 ):
     """Upload a file to OneDrive and attach it to a requisition."""
-    req = db.get(Requisition, req_id)
+    req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
     content = await file.read()
@@ -1357,7 +1379,7 @@ async def attach_requisition_from_onedrive(
     db: Session = Depends(get_db),
 ):
     """Attach an existing OneDrive file to a requisition by item ID."""
-    req = db.get(Requisition, req_id)
+    req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
     body = await request.json()
@@ -1424,9 +1446,12 @@ async def list_requirement_attachments(
     db: Session = Depends(get_db),
 ):
     """List all file attachments on a requirement."""
-    req = db.get(Requirement, req_id)
-    if not req:
+    requirement = db.get(Requirement, req_id)
+    if not requirement:
         raise HTTPException(404, "Requirement not found")
+    parent_req = get_req_for_user(db, user, requirement.requisition_id)
+    if not parent_req:
+        raise HTTPException(403, "Not authorized")
     return [
         {
             "id": a.id,
@@ -1437,7 +1462,7 @@ async def list_requirement_attachments(
             "uploaded_by": a.uploaded_by.name if a.uploaded_by else None,
             "created_at": a.created_at.isoformat() if a.created_at else None,
         }
-        for a in req.attachments
+        for a in requirement.attachments
     ]
 
 
@@ -1449,9 +1474,12 @@ async def upload_requirement_attachment(
     db: Session = Depends(get_db),
 ):
     """Upload a file to OneDrive and attach it to a requirement."""
-    req = db.get(Requirement, req_id)
-    if not req:
+    requirement = db.get(Requirement, req_id)
+    if not requirement:
         raise HTTPException(404, "Requirement not found")
+    parent_req = get_req_for_user(db, user, requirement.requisition_id)
+    if not parent_req:
+        raise HTTPException(403, "Not authorized")
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(400, "File too large (max 10 MB)")

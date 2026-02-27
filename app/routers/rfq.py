@@ -161,30 +161,29 @@ async def get_activity(
     req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     """Combined activity view: contacts + responses + tracking, grouped by vendor."""
-    loop = asyncio.get_running_loop()
-
-    def _q_contacts():
-        from sqlalchemy.orm import joinedload
-        return db.query(Contact).options(
-            joinedload(Contact.user),
-        ).filter_by(requisition_id=req_id).order_by(Contact.created_at.desc()).all()
-
-    def _q_responses():
-        return db.query(VendorResponse).filter_by(requisition_id=req_id).order_by(VendorResponse.received_at.desc()).all()
-
-    def _q_activities():
-        from sqlalchemy.orm import joinedload
-        return db.query(ActivityLog).options(
-            joinedload(ActivityLog.user),
-        ).filter(
+    contacts = (
+        db.query(Contact)
+        .options(joinedload(Contact.user))
+        .filter_by(requisition_id=req_id)
+        .order_by(Contact.created_at.desc())
+        .all()
+    )
+    responses = (
+        db.query(VendorResponse)
+        .filter_by(requisition_id=req_id)
+        .order_by(VendorResponse.received_at.desc())
+        .all()
+    )
+    manual_activities = (
+        db.query(ActivityLog)
+        .options(joinedload(ActivityLog.user))
+        .filter(
             ActivityLog.requisition_id == req_id,
             ActivityLog.vendor_card_id.isnot(None),
-        ).order_by(ActivityLog.created_at.desc()).limit(500).all()
-
-    contacts, responses, manual_activities = await asyncio.gather(
-        loop.run_in_executor(None, _q_contacts),
-        loop.run_in_executor(None, _q_responses),
-        loop.run_in_executor(None, _q_activities),
+        )
+        .order_by(ActivityLog.created_at.desc())
+        .limit(500)
+        .all()
     )
 
     # Build a vendor_card_id → vendor_name lookup for activities
@@ -487,43 +486,46 @@ async def rfq_prepare(
         from ..enrichment_service import find_suggested_contacts
         from ..vendor_utils import merge_emails_into_card, merge_phones_into_card
 
+        _lookup_sem = asyncio.Semaphore(5)
+
         async def _contact_lookup(idx: int):
-            r = results[idx]
-            try:
-                norm = normalize_vendor_name(r["vendor_name"])
-                card = cards_by_norm.get(norm)
-                domain = card.domain if card else None
-                contacts = await asyncio.wait_for(
-                    find_suggested_contacts(
-                        domain=domain or "",
-                        name=r["vendor_name"],
-                    ),
-                    timeout=15,
-                )
-                emails = list(dict.fromkeys(
-                    c["email"] for c in contacts
-                    if c.get("email")
-                ))
-                phones = list(dict.fromkeys(
-                    c["phone"] for c in contacts
-                    if c.get("phone")
-                ))
-                # Track which sources contributed
-                sources = sorted(set(
-                    c.get("source", "") for c in contacts if c.get("email")
-                ))
-                if emails:
-                    r["emails"] = emails
-                    r["phones"] = phones
-                    r["needs_lookup"] = False
-                    r["contact_source"] = "+".join(sources) if sources else "enrichment"
-                    # Persist to VendorCard for future cache hits
-                    if card:
-                        merge_emails_into_card(card, emails)
-                        if phones:
-                            merge_phones_into_card(card, phones)
-            except Exception as e:
-                log.debug("Contact auto-lookup failed for %s: %s", r["vendor_name"], e)
+            async with _lookup_sem:
+                r = results[idx]
+                try:
+                    norm = normalize_vendor_name(r["vendor_name"])
+                    card = cards_by_norm.get(norm)
+                    domain = card.domain if card else None
+                    contacts = await asyncio.wait_for(
+                        find_suggested_contacts(
+                            domain=domain or "",
+                            name=r["vendor_name"],
+                        ),
+                        timeout=15,
+                    )
+                    emails = list(dict.fromkeys(
+                        c["email"] for c in contacts
+                        if c.get("email")
+                    ))
+                    phones = list(dict.fromkeys(
+                        c["phone"] for c in contacts
+                        if c.get("phone")
+                    ))
+                    # Track which sources contributed
+                    sources = sorted(set(
+                        c.get("source", "") for c in contacts if c.get("email")
+                    ))
+                    if emails:
+                        r["emails"] = emails
+                        r["phones"] = phones
+                        r["needs_lookup"] = False
+                        r["contact_source"] = "+".join(sources) if sources else "enrichment"
+                        # Persist to VendorCard for future cache hits
+                        if card:
+                            merge_emails_into_card(card, emails)
+                            if phones:
+                                merge_phones_into_card(card, phones)
+                except Exception as e:
+                    log.debug("Contact auto-lookup failed for %s: %s", r["vendor_name"], e)
 
         await asyncio.gather(
             *[_contact_lookup(i) for i in needs_lookup_indices],
