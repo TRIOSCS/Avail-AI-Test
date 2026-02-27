@@ -76,7 +76,8 @@ def test_merge_reassigns_contacts(db_session):
     db_session.flush()
 
     contact = VendorContact(
-        vendor_card_id=remove.id, name="John", email="john@mouser.com",
+        vendor_card_id=remove.id, full_name="John", email="john@mouser.com",
+        source="manual",
     )
     db_session.add(contact)
     db_session.commit()

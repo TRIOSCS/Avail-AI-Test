@@ -28,7 +28,7 @@ def test_create_company_missing_name(client):
 
 def test_list_companies(client):
     client.post("/api/companies", json={"name": "ListCo Alpha"})
-    client.post("/api/companies", json={"name": "ListCo Beta"})
+    client.post("/api/companies?force=true", json={"name": "ListCo Beta"})
     resp = client.get("/api/companies")
     assert resp.status_code == 200
     names = [c["name"] for c in resp.json()]

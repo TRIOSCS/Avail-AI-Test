@@ -987,13 +987,18 @@ class TestApplyParsedResult:
         assert vr.needs_action is True
 
     def test_with_notification_created(self, db_session, test_user, test_requisition):
-        """When needs_action and 0.5 <= confidence <= 0.8, create ActivityLog."""
+        """When draft offers are extracted, offer_pending_review ActivityLog is created."""
+        from app.models import Requirement
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+
         vr = VendorResponse(
             requisition_id=test_requisition.id,
             vendor_name="Vendor X",
             vendor_email="vendor@x.com",
             subject="RE: RFQ",
-            body="Could you please confirm the quantity? How many?",
+            body="We can offer LM317T at $0.50 each, 1000 pcs available.",
             scanned_by_user_id=test_user.id,
             status="new",
             created_at=datetime.now(timezone.utc),
@@ -1002,17 +1007,17 @@ class TestApplyParsedResult:
         db_session.flush()
 
         parsed = {
-            "sentiment": "neutral",
-            "parts": [],
+            "sentiment": "positive",
+            "parts": [{"mpn": "LM317T", "unit_price": 0.50, "qty": 1000}],
             "confidence": 0.65,
         }
 
         _apply_parsed_result(vr, parsed, db_session)
         db_session.flush()
 
-        # Check ActivityLog was created
+        # Check offer_pending_review notification was created
         activities = db_session.query(ActivityLog).filter(
-            ActivityLog.activity_type == "vendor_reply_review"
+            ActivityLog.activity_type == "offer_pending_review"
         ).all()
         assert len(activities) >= 1
 
@@ -1046,8 +1051,7 @@ class TestApplyParsedResult:
         db.add.assert_not_called()
 
     def test_notification_with_requisition_owner(self, db_session, test_user, test_requisition):
-        """Notification goes to requisition owner, not scanner."""
-        # Create a second user to be the scanner (different from req owner)
+        """Notification goes to requisition owner when draft offers extracted."""
         scanner = User(
             email="scanner@trioscs.com",
             name="Scanner",
@@ -1063,31 +1067,30 @@ class TestApplyParsedResult:
             vendor_name="Vendor Y",
             vendor_email="vendor@y.com",
             subject="RE: RFQ",
-            body="Thanks for reaching out, we will review. Any other questions?",
-            scanned_by_user_id=scanner.id,  # Different from req owner
+            body="We can offer LM317T at $0.75 each",
+            scanned_by_user_id=scanner.id,
             status="new",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(vr)
         db_session.flush()
 
-        parsed = {"parts": [], "confidence": 0.6}
+        parsed = {"parts": [{"mpn": "LM317T", "unit_price": 0.75, "qty": 500}], "confidence": 0.6}
 
         _apply_parsed_result(vr, parsed, db_session)
         db_session.flush()
 
         activity = db_session.query(ActivityLog).filter(
-            ActivityLog.activity_type == "vendor_reply_review"
+            ActivityLog.activity_type == "offer_pending_review"
         ).first()
         assert activity is not None
         # Owner should be the requisition creator, not scanner
         assert activity.user_id == test_user.id
 
-    def test_notification_fallback_to_scanner(self, db_session, test_user, test_requisition):
-        """When requisition has no created_by, fall back to scanned_by_user_id."""
-        # Create a vr without matching requisition
+    def test_no_notification_without_offers(self, db_session, test_user, test_requisition):
+        """No offer_pending_review notification when no draft offers extracted."""
         vr = VendorResponse(
-            requisition_id=None,
+            requisition_id=test_requisition.id,
             vendor_name="Vendor Z",
             vendor_email="vendor@z.com",
             subject="RE: RFQ",
@@ -1105,10 +1108,10 @@ class TestApplyParsedResult:
         db_session.flush()
 
         activity = db_session.query(ActivityLog).filter(
-            ActivityLog.activity_type == "vendor_reply_review"
+            ActivityLog.activity_type == "offer_pending_review"
         ).first()
-        assert activity is not None
-        assert activity.user_id == test_user.id
+        # No offers extracted, so no notification
+        assert activity is None
 
     def test_notification_exception_swallowed(self):
         """If ActivityLog creation fails, no exception propagates."""

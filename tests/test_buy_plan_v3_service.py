@@ -375,7 +375,7 @@ class TestGenerateAiFlags:
             id=1, offer_id=1, offer=offer, margin_pct=50.0,
             requirement_id=None, quantity=100,
         )
-        plan = SimpleNamespace(lines=[line])
+        plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
         stale = [f for f in flags if f["type"] == "stale_offer"]
         assert len(stale) == 1
@@ -386,7 +386,7 @@ class TestGenerateAiFlags:
             id=1, offer_id=None, offer=None, margin_pct=5.0,
             requirement_id=None, quantity=100,
         )
-        plan = SimpleNamespace(lines=[line])
+        plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
         low = [f for f in flags if f["type"] == "low_margin"]
         assert len(low) == 1
@@ -397,7 +397,7 @@ class TestGenerateAiFlags:
             id=1, offer_id=None, offer=None, margin_pct=-5.0,
             requirement_id=None, quantity=100,
         )
-        plan = SimpleNamespace(lines=[line])
+        plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
         low = [f for f in flags if f["type"] == "low_margin"]
         assert low[0]["severity"] == "critical"
@@ -409,7 +409,7 @@ class TestGenerateAiFlags:
             id=1, offer_id=1, offer=offer, margin_pct=50.0,
             requirement_id=None, quantity=100,
         )
-        plan = SimpleNamespace(lines=[line])
+        plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
         assert flags == []
 
@@ -419,13 +419,13 @@ class TestGenerateAiFlags:
             id=1, offer_id=999, offer=None, margin_pct=50.0,
             requirement_id=None, quantity=100,
         )
-        plan = SimpleNamespace(lines=[line])
+        plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
         # No crash — offer not found, just skips the stale check
         assert all(f["type"] != "stale_offer" for f in flags)
 
     def test_none_lines(self, db_session):
-        plan = SimpleNamespace(lines=None)
+        plan = SimpleNamespace(lines=None, quote_id=None)
         flags = generate_ai_flags(plan, db_session)
         assert flags == []
 

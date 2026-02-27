@@ -69,10 +69,8 @@ class TestBuyerBrief:
         assert data["kpis"]["buyplan_po_rate"] == 0
         assert data["new_requirements"] == []
         assert data["offers_to_review"] == []
-        assert data["stale_rfqs"] == []
         assert data["reqs_at_risk"] == []
         assert data["quotes_due_soon"] == []
-        assert data["top_vendors"] == []
         assert data["pipeline"]["active_reqs"] == 0
 
     # 2. Sourcing ratio KPI
@@ -158,23 +156,6 @@ class TestBuyerBrief:
         data = resp.json()
         assert len(data["offers_to_review"]) == 1
         assert data["offers_to_review"][0]["vendor_name"] == "Arrow"
-
-    # 7a. Stale RFQs — only contacts sent 48h+ ago
-    def test_stale_rfqs(self, client, db_session, test_user):
-        r1 = self._make_req(db_session, test_user)
-        # Stale: sent 3 days ago, still "sent"
-        self._make_contact(db_session, r1, test_user, status="sent", days_ago=3)
-        # Not stale: sent 1 day ago
-        self._make_contact(db_session, r1, test_user, status="sent", days_ago=1)
-        # Responded: should be excluded
-        self._make_contact(db_session, r1, test_user, status="responded", days_ago=4)
-        db_session.commit()
-
-        resp = client.get("/api/dashboard/buyer-brief?days=7")
-        data = resp.json()
-        assert len(data["stale_rfqs"]) == 1
-        assert data["stale_rfqs"][0]["vendor_name"] == "Mouser"
-        assert data["stale_rfqs"][0]["wait_days"] >= 2.9
 
     # 7b. Reqs at Risk — no offers after 48h
     def test_reqs_at_risk_no_offers(self, client, db_session, test_user):
@@ -332,36 +313,6 @@ class TestBuyerBrief:
         names = [r["name"] for r in data["new_requirements"]]
         assert "RECENT" in names
         assert "OLD" not in names
-
-    # 15. Top vendors tile
-    def test_top_vendors(self, client, db_session, test_user):
-        r1 = self._make_req(db_session, test_user)
-        # Arrow: 3 offers, Mouser: 1 offer
-        for _ in range(3):
-            o = Offer(
-                requisition_id=r1.id, vendor_name="Arrow", mpn="LM317T",
-                qty_available=100, unit_price=1.50, entered_by_id=test_user.id,
-                status="active", attribution_status="active",
-                created_at=datetime.now(timezone.utc),
-            )
-            db_session.add(o)
-        o2 = Offer(
-            requisition_id=r1.id, vendor_name="Mouser", mpn="NE555",
-            qty_available=50, unit_price=0.75, entered_by_id=test_user.id,
-            status="approved", attribution_status="active",
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(o2)
-        db_session.commit()
-
-        resp = client.get("/api/dashboard/buyer-brief")
-        data = resp.json()
-        tv = data["top_vendors"]
-        assert len(tv) == 2
-        assert tv[0]["vendor_name"] == "Arrow"
-        assert tv[0]["offer_count"] == 3
-        assert tv[1]["vendor_name"] == "Mouser"
-        assert tv[1]["offer_count"] == 1
 
     # 16. Datetime deadline with T
     def test_datetime_deadline(self, client, db_session, test_user):
