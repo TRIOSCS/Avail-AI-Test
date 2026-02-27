@@ -1324,7 +1324,7 @@ function showContacts() {
     loadContacts();
 }
 
-let _dashPeriod = '7d';
+let _dashPeriod = '30d';
 let _dashScope = 'my';           // 'my' or 'team' — universal scope toggle
 let _dashUserId = null;          // specific user to view in CC — null = current user
 let _buyerScope = 'my';          // kept for backward compat in loadBuyerDashboard
@@ -1796,7 +1796,7 @@ async function loadDashboard() {
     }
 
     try {
-        const daysParam = _dashPeriod === '30d' ? 30 : _dashPeriod === '90d' ? 90 : 7;
+        const daysParam = _dashPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _dashPeriod === '90d' ? 90 : 30;
 
         // Reuse already-loaded req data when available (avoids duplicate fetch)
         const haveReqs = _reqListData && _reqListData.length > 0;
@@ -2013,7 +2013,7 @@ async function loadDashboard() {
 
 async function loadBuyerDashboard(el) {
     try {
-        const daysParam = _dashPeriod === '30d' ? 30 : _dashPeriod === '90d' ? 90 : 7;
+        const daysParam = _dashPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _dashPeriod === '90d' ? 90 : 30;
         const [brief, hotOffers] = await Promise.all([
             apiFetch(`/api/dashboard/buyer-brief?days=${daysParam}&scope=${_buyerScope}`).catch(() => null),
             apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(() => []),
@@ -2028,10 +2028,12 @@ async function loadBuyerDashboard(el) {
         const pipeline = brief.pipeline || {};
         const newReqs = brief.new_requirements || [];
         const reviewOffers = brief.offers_to_review || [];
-        const staleRfqs = brief.stale_rfqs || [];
+        const revProfit = brief.revenue_profit || {};
         const reqsAtRisk = brief.reqs_at_risk || [];
         const quotesDue = brief.quotes_due_soon || [];
-        const topVendors = brief.top_vendors || [];
+        const needsResp = brief.needs_response || [];
+        const expiringQ = brief.expiring_quotes || [];
+        const bpPending = brief.buyplans_pending || [];
         const completed = brief.completed_deals || {};
         const recentWins = completed.recent_wins || [];
         const recentLosses = completed.recent_losses || [];
@@ -2122,24 +2124,38 @@ async function loadBuyerDashboard(el) {
         }
         html += '</div>';
 
-        // Card 3a: Stale RFQs — Need Follow-Up
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Stale RFQs &mdash; Follow Up <span class="cc-card-count">${staleRfqs.length}</span></h3>`;
-        if (staleRfqs.length) {
+        // Card 3a: Revenue & Profit (from buy plans)
+        const fmtMoney = v => v ? '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '$0';
+        const rpColor = (revProfit.est_gross_profit || 0) > 0 ? 'var(--green)' : 'var(--text-muted)';
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:${rpColor}">&#9679;</span> Revenue &amp; Profit</h3>`;
+        html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;padding:8px 12px;font-size:0.85rem">
+            <div><span style="color:var(--text-muted)">Est. Revenue</span><div style="font-size:1.25rem;font-weight:700;color:var(--green)">${fmtMoney(revProfit.est_revenue)}</div></div>
+            <div><span style="color:var(--text-muted)">Gross Profit</span><div style="font-size:1.25rem;font-weight:700;color:${rpColor}">${fmtMoney(revProfit.est_gross_profit)}</div></div>
+            <div><span style="color:var(--text-muted)">Avg Margin</span><div style="font-weight:600">${revProfit.margin_pct || 0}%</div></div>
+            <div><span style="color:var(--text-muted)">Buy Plans</span><div style="font-weight:600">${revProfit.plan_count || 0}</div></div>
+            <div style="grid-column:span 2;border-top:1px solid var(--border);padding-top:6px;margin-top:2px">
+                <span style="color:var(--text-muted)">Pipeline</span>
+                <span style="font-weight:600;margin-left:8px">${fmtMoney(revProfit.pipeline_revenue)} rev</span>
+                <span style="color:var(--text-muted);margin:0 4px">/</span>
+                <span style="font-weight:600">${fmtMoney(revProfit.pipeline_profit)} profit</span>
+                <span style="color:var(--text-muted);margin-left:4px">(${revProfit.pipeline_count || 0} plans)</span>
+            </div>
+        </div>`;
+        if (revProfit.recent_plans && revProfit.recent_plans.length) {
             html += '<div class="cc-card-scroll">';
-            html += staleRfqs.map(c => {
-                const days = c.wait_days || 0;
-                const dotColor = days >= 5 ? 'var(--red)' : 'var(--amber)';
-                return `<div class="cc-row" onclick="goToReq(${c.requisition_id})">
-                    <span class="cc-dot" style="background:${dotColor}"></span>
+            html += revProfit.recent_plans.map(bp => {
+                const profit = bp.revenue - bp.cost;
+                const profitColor = profit > 0 ? 'var(--green)' : 'var(--red)';
+                const statusLabel = bp.status === 'completed' ? 'done' : bp.status;
+                return `<div class="cc-row" onclick="goToReq(${bp.requisition_id})">
+                    <span class="cc-dot" style="background:${profitColor}"></span>
                     <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(c.vendor_name)}</span>
-                        <span class="cc-row-detail">${c.contact_type || 'RFQ'} &middot; no reply ${days}d</span>
+                        <span class="cc-row-name">${esc(bp.customer_name || 'BP #' + bp.id)}</span>
+                        <span class="cc-row-detail">${fmtMoney(bp.revenue)} rev &middot; ${bp.margin_pct}% margin &middot; ${statusLabel}</span>
                     </div>
                 </div>`;
             }).join('');
             html += '</div>';
-        } else {
-            html += '<p class="cc-empty">All vendors responded within 48h.</p>';
         }
         html += '</div>';
 
@@ -2185,25 +2201,66 @@ async function loadBuyerDashboard(el) {
         }
         html += '</div>';
 
-        // Card 5: Top Vendors (by offer volume this month)
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--sourcing-color)">&#9679;</span> Top Vendors <span class="cc-card-count">${topVendors.length}</span></h3>`;
-        if (topVendors.length) {
+        // Card 5a: Needs Response (offers received, no quote sent)
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--amber)">&#9679;</span> Needs Quote <span class="cc-card-count">${needsResp.length}</span></h3>`;
+        if (needsResp.length) {
             html += '<div class="cc-card-scroll">';
-            const maxOffers = topVendors[0]?.offer_count || 1;
-            html += topVendors.map((v, i) => {
-                const pct = Math.round(v.offer_count / maxOffers * 100);
-                return `<div class="cc-row">
-                    <span class="cc-rank">${i + 1}</span>
+            html += needsResp.map(r => {
+                return `<div class="cc-row" onclick="goToReq(${r.id})">
+                    <span class="cc-dot" style="background:var(--amber)"></span>
                     <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(v.vendor_name)}</span>
-                        <div class="cc-bar-track"><div class="cc-bar-fill" style="width:${pct}%"></div></div>
+                        <span class="cc-row-name">${esc(r.customer_name || r.name || 'REQ #' + r.id)}</span>
+                        <span class="cc-row-detail">${r.offer_count} offer${r.offer_count !== 1 ? 's' : ''} ready &middot; ${r.age_label || ''}</span>
                     </div>
-                    <span class="cc-row-badge">${v.offer_count}</span>
                 </div>`;
             }).join('');
             html += '</div>';
         } else {
-            html += '<p class="cc-empty">No vendor activity this month.</p>';
+            html += '<p class="cc-empty">All offers have been quoted.</p>';
+        }
+        html += '</div>';
+
+        // Card 5b: Expiring Quotes (sent, no customer response, expiring soon)
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Expiring Quotes <span class="cc-card-count">${expiringQ.length}</span></h3>`;
+        if (expiringQ.length) {
+            html += '<div class="cc-card-scroll">';
+            html += expiringQ.map(q => {
+                const dotColor = q.days_left <= 0 ? 'var(--red)' : q.days_left <= 2 ? 'var(--amber)' : 'var(--text-muted)';
+                const dlLabel = q.days_left <= 0 ? Math.abs(q.days_left) + 'd expired' : q.days_left + 'd left';
+                const val = q.value ? fmtMoney(q.value) : '';
+                return `<div class="cc-row" onclick="goToReq(${q.requisition_id})">
+                    <span class="cc-dot" style="background:${dotColor}"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(q.customer_name || q.quote_number)}</span>
+                        <span class="cc-row-detail">${q.quote_number} &middot; ${dlLabel}</span>
+                    </div>
+                    ${val ? '<span class="cc-row-badge">' + val + '</span>' : ''}
+                </div>`;
+            }).join('');
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No quotes expiring soon.</p>';
+        }
+        html += '</div>';
+
+        // Card 5c: Buy Plans Pending (awaiting approval or PO)
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Buy Plans Pending <span class="cc-card-count">${bpPending.length}</span></h3>`;
+        if (bpPending.length) {
+            html += '<div class="cc-card-scroll">';
+            html += bpPending.map(bp => {
+                const statusLabel = bp.status === 'pending' ? 'awaiting approval' : bp.so_status === 'pending' ? 'SO pending' : bp.status;
+                const dotColor = bp.status === 'pending' ? 'var(--amber)' : 'var(--purple)';
+                return `<div class="cc-row" onclick="goToReq(${bp.requisition_id})">
+                    <span class="cc-dot" style="background:${dotColor}"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(bp.customer_name || 'BP #' + bp.id)}</span>
+                        <span class="cc-row-detail">${fmtMoney(bp.revenue)} &middot; ${bp.margin_pct}% &middot; ${statusLabel}</span>
+                    </div>
+                </div>`;
+            }).join('');
+            html += '</div>';
+        } else {
+            html += '<p class="cc-empty">No buy plans pending.</p>';
         }
         html += '</div>';
 

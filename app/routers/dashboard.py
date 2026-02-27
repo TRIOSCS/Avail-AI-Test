@@ -390,7 +390,7 @@ def hot_offers(
 @router.get("/buyer-brief")
 @cached_endpoint(prefix="buyer_brief", ttl_hours=0.25, key_params=["days", "scope"])
 def buyer_brief(
-    days: int = Query(default=7, ge=1, le=90),
+    days: int = Query(default=30, ge=1, le=366),
     scope: str = Query(default="my", pattern="^(my|team)$"),
     db: Session = Depends(get_db),
     user=Depends(require_user),
@@ -527,31 +527,84 @@ def buyer_brief(
             "age_label": _age_label(age_hours),
         })
 
-    # ── Tile 3a: Stale RFQs — Need Follow-Up (sent 48h+ with no response) ──
-    stale_cutoff = now - timedelta(hours=48)
-    stale_q = (
-        db.query(Contact)
-        .filter(
-            Contact.status == "sent",
-            Contact.created_at >= cutoff,
-            Contact.created_at <= stale_cutoff,
-            _user_filter(Contact.user_id),
+    # ── Tile 3a: Revenue & Profit (from buy plans) ──
+    from ..models.buy_plan import BuyPlanV3
+
+    bp_financials = db.query(
+        func.coalesce(func.sum(BuyPlanV3.total_revenue), 0).label("revenue"),
+        func.coalesce(func.sum(BuyPlanV3.total_cost), 0).label("cost"),
+        func.count(BuyPlanV3.id).label("plan_count"),
+    ).filter(
+        BuyPlanV3.status.in_(("active", "completed")),
+        BuyPlanV3.created_at >= cutoff,
+        _user_filter(BuyPlanV3.submitted_by_id),
+    ).first()
+
+    bp_revenue = float(bp_financials.revenue or 0)
+    bp_cost = float(bp_financials.cost or 0)
+    bp_gross_profit = bp_revenue - bp_cost
+    bp_margin_pct = round((bp_gross_profit / bp_revenue) * 100, 1) if bp_revenue > 0 else 0
+
+    # Pipeline (pending/draft buy plans not yet completed)
+    bp_pipeline = db.query(
+        func.coalesce(func.sum(BuyPlanV3.total_revenue), 0).label("revenue"),
+        func.coalesce(func.sum(BuyPlanV3.total_cost), 0).label("cost"),
+        func.count(BuyPlanV3.id).label("plan_count"),
+    ).filter(
+        BuyPlanV3.status.in_(("draft", "pending", "active")),
+        BuyPlanV3.created_at >= cutoff,
+        _user_filter(BuyPlanV3.submitted_by_id),
+    ).first()
+
+    pipeline_revenue = float(bp_pipeline.revenue or 0)
+    pipeline_profit = pipeline_revenue - float(bp_pipeline.cost or 0)
+
+    # Recent buy plans for drill-down
+    recent_bps = (
+        db.query(
+            BuyPlanV3.id, BuyPlanV3.total_revenue, BuyPlanV3.total_cost,
+            BuyPlanV3.total_margin_pct, BuyPlanV3.status,
+            BuyPlanV3.requisition_id, BuyPlanV3.created_at,
         )
-        .order_by(Contact.created_at.asc())
+        .filter(
+            BuyPlanV3.status.in_(("active", "completed", "pending")),
+            BuyPlanV3.created_at >= cutoff,
+            _user_filter(BuyPlanV3.submitted_by_id),
+        )
+        .order_by(BuyPlanV3.created_at.desc())
         .limit(15)
         .all()
     )
-    stale_rfqs = []
-    for c in stale_q:
-        wait_hours = (now - _ensure_aware(c.created_at)).total_seconds() / 3600 if c.created_at else 0
-        stale_rfqs.append({
-            "id": c.id,
-            "requisition_id": c.requisition_id,
-            "vendor_name": c.vendor_name,
-            "contact_type": c.contact_type,
-            "wait_days": round(wait_hours / 24, 1),
-            "created_at": c.created_at.isoformat() if c.created_at else None,
-        })
+    # Resolve customer names via requisition
+    from ..models.sourcing import Requisition as Req2
+    req_ids = [bp.requisition_id for bp in recent_bps if bp.requisition_id]
+    req_names = {}
+    if req_ids:
+        for r in db.query(Req2.id, Req2.customer_name).filter(Req2.id.in_(req_ids)).all():
+            req_names[r.id] = r.customer_name
+
+    revenue_profit = {
+        "est_revenue": bp_revenue,
+        "est_cost": bp_cost,
+        "est_gross_profit": bp_gross_profit,
+        "margin_pct": bp_margin_pct,
+        "plan_count": bp_financials.plan_count or 0,
+        "pipeline_revenue": pipeline_revenue,
+        "pipeline_profit": pipeline_profit,
+        "pipeline_count": bp_pipeline.plan_count or 0,
+        "recent_plans": [
+            {
+                "id": bp.id,
+                "requisition_id": bp.requisition_id,
+                "customer_name": req_names.get(bp.requisition_id, ""),
+                "revenue": float(bp.total_revenue) if bp.total_revenue else 0,
+                "cost": float(bp.total_cost) if bp.total_cost else 0,
+                "margin_pct": float(bp.total_margin_pct) if bp.total_margin_pct else 0,
+                "status": bp.status,
+            }
+            for bp in recent_bps
+        ],
+    }
 
     # ── Tile 3b: Requisitions at Risk ──
     # Single query: join reqs with offer counts, only load reqs that could be at risk
@@ -692,24 +745,111 @@ def buyer_brief(
     pipeline_won = won_quotes
     pipeline_buyplans = approved_bps
 
-    # ── Tile 6: Top Vendors (by offer volume this month) ──
-    top_vendors_q = (
+    # ── Tile 6a: Needs Response (have offers but no quote sent yet) ──
+    # Reqs with ≥1 active offer but no sent/won quote
+    from ..models.quotes import Quote as Quote2
+    quoted_req_ids = (
+        db.query(Quote2.requisition_id)
+        .filter(Quote2.status.in_(("sent", "won")))
+        .distinct()
+        .subquery()
+    )
+    needs_response_q = (
         db.query(
-            Offer.vendor_name,
+            Requisition.id, Requisition.name, Requisition.customer_name,
+            Requisition.created_at,
             func.count(Offer.id).label("offer_count"),
         )
+        .join(Offer, Offer.requisition_id == Requisition.id)
         .filter(
-            Offer.created_at >= month_start,
+            Requisition.status.in_(("open", "active", "sourcing")),
             Offer.status.in_(("active", "approved")),
+            Requisition.id.notin_(quoted_req_ids),
+            _user_filter(Requisition.created_by),
         )
-        .group_by(Offer.vendor_name)
+        .group_by(Requisition.id)
         .order_by(func.count(Offer.id).desc())
-        .limit(10)
+        .limit(15)
         .all()
     )
-    top_vendors = [
-        {"vendor_name": row.vendor_name, "offer_count": row.offer_count}
-        for row in top_vendors_q
+    needs_response = [
+        {
+            "id": r.id, "name": r.name, "customer_name": r.customer_name,
+            "offer_count": r.offer_count,
+            "age_label": _age_label(
+                (now - _ensure_aware(r.created_at)).total_seconds() / 3600
+            ) if r.created_at else None,
+        }
+        for r in needs_response_q
+    ]
+
+    # ── Tile 6b: Expiring Quotes (sent but no response, going stale) ──
+    expiring_quotes_q = (
+        db.query(
+            Quote.id.label("quote_id"), Quote.quote_number, Quote.subtotal,
+            Quote.sent_at, Quote.validity_days,
+            Requisition.id.label("req_id"), Requisition.name, Requisition.customer_name,
+        )
+        .join(Requisition, Requisition.id == Quote.requisition_id)
+        .filter(
+            Quote.status == "sent",
+            Quote.result.is_(None),
+            Quote.sent_at.isnot(None),
+            _user_filter(Quote.created_by_id),
+        )
+        .order_by(Quote.sent_at.asc())
+        .limit(15)
+        .all()
+    )
+    expiring_quotes = []
+    for q in expiring_quotes_q:
+        sent = _ensure_aware(q.sent_at) if q.sent_at else now
+        validity = q.validity_days or 7
+        expires_at = sent + timedelta(days=validity)
+        days_left = (expires_at - now).days
+        if days_left <= 7:  # Only show quotes expiring within 7 days
+            expiring_quotes.append({
+                "quote_id": q.quote_id, "quote_number": q.quote_number,
+                "requisition_id": q.req_id, "name": q.name,
+                "customer_name": q.customer_name,
+                "value": float(q.subtotal) if q.subtotal else None,
+                "days_left": days_left,
+            })
+    expiring_quotes.sort(key=lambda x: x["days_left"])
+
+    # ── Tile 6c: Buy Plans Pending (awaiting approval or PO) ──
+    from ..models.buy_plan import BuyPlanV3 as BP2
+    pending_bps_q = (
+        db.query(
+            BP2.id, BP2.total_revenue, BP2.total_cost, BP2.total_margin_pct,
+            BP2.status, BP2.so_status, BP2.requisition_id, BP2.created_at,
+        )
+        .filter(
+            BP2.status.in_(("draft", "pending", "active")),
+            _user_filter(BP2.submitted_by_id),
+        )
+        .order_by(BP2.created_at.asc())
+        .limit(15)
+        .all()
+    )
+    pending_req_ids = [bp.requisition_id for bp in pending_bps_q if bp.requisition_id]
+    pending_req_names = {}
+    if pending_req_ids:
+        for r in db.query(Requisition.id, Requisition.customer_name).filter(Requisition.id.in_(pending_req_ids)).all():
+            pending_req_names[r.id] = r.customer_name
+
+    buyplans_pending = [
+        {
+            "id": bp.id, "requisition_id": bp.requisition_id,
+            "customer_name": pending_req_names.get(bp.requisition_id, ""),
+            "revenue": float(bp.total_revenue) if bp.total_revenue else 0,
+            "margin_pct": float(bp.total_margin_pct) if bp.total_margin_pct else 0,
+            "status": bp.status, "so_status": bp.so_status,
+            "age_label": _age_label(
+                (now - _ensure_aware(bp.created_at)).total_seconds() / 3600
+            ) if bp.created_at else None,
+        }
+        for bp in pending_bps_q
     ]
 
     # ── Tile 7: Completed Deals (all-time — never filtered by days window) ──
@@ -793,10 +933,12 @@ def buyer_brief(
         },
         "new_requirements": new_requirements,
         "offers_to_review": offers_to_review,
-        "stale_rfqs": stale_rfqs,
+        "revenue_profit": revenue_profit,
         "reqs_at_risk": reqs_at_risk,
         "quotes_due_soon": quotes_due_soon,
-        "top_vendors": top_vendors,
+        "needs_response": needs_response,
+        "expiring_quotes": expiring_quotes,
+        "buyplans_pending": buyplans_pending,
         "completed_deals": {
             "won_count": all_won,
             "lost_count": all_lost,
