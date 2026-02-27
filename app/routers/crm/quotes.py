@@ -160,28 +160,55 @@ async def create_quote(
         (item.get("qty") or 0) * (item.get("cost_price") or 0)
         for item in line_items
     )
-    quote = Quote(
-        requisition_id=req_id,
-        customer_site_id=req.customer_site_id,
-        quote_number=next_quote_number(db),
-        line_items=line_items,
-        subtotal=total_sell,
-        total_cost=total_cost,
-        total_margin_pct=(
-            round((total_sell - total_cost) / total_sell * 100, 2)
-            if total_sell > 0
-            else 0
-        ),
-        payment_terms=site.payment_terms if site else None,
-        shipping_terms=site.shipping_terms if site else None,
-        created_by_id=user.id,
-    )
-    db.add(quote)
-    old_status = req.status
-    if req.status in ("active", "sourcing", "offers"):
-        req.status = "quoting"
+    from sqlalchemy.exc import IntegrityError
 
+    old_status = req.status
+    for attempt in range(3):
+        quote = Quote(
+            requisition_id=req_id,
+            customer_site_id=req.customer_site_id,
+            quote_number=next_quote_number(db),
+            line_items=line_items,
+            subtotal=total_sell,
+            total_cost=total_cost,
+            total_margin_pct=(
+                round((total_sell - total_cost) / total_sell * 100, 2)
+                if total_sell > 0
+                else 0
+            ),
+            payment_terms=site.payment_terms if site else None,
+            shipping_terms=site.shipping_terms if site else None,
+            created_by_id=user.id,
+        )
+        db.add(quote)
+        if req.status in ("active", "sourcing", "offers"):
+            req.status = "quoting"
+        try:
+            db.commit()
+            break
+        except IntegrityError:
+            db.rollback()
+            req.status = old_status
+            if attempt == 2:
+                raise
+    # Write structured QuoteLine rows (parallel to JSON for backward compat)
+    from ...models import QuoteLine
+    for li in line_items:
+        ql = QuoteLine(
+            quote_id=quote.id,
+            material_card_id=li.get("material_card_id"),
+            offer_id=li.get("offer_id"),
+            mpn=li.get("mpn", ""),
+            manufacturer=li.get("manufacturer"),
+            qty=li.get("qty"),
+            cost_price=li.get("cost_price"),
+            sell_price=li.get("sell_price"),
+            margin_pct=li.get("margin_pct"),
+            currency=li.get("currency", "USD"),
+        )
+        db.add(ql)
     db.commit()
+
     result = quote_to_dict(quote, db)
     result["req_status"] = req.status
     result["status_changed"] = req.status != old_status

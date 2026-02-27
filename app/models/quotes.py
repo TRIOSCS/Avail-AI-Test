@@ -71,6 +71,33 @@ class Quote(Base):
     )
 
 
+class QuoteLine(Base):
+    """Structured line item in a quote — replaces JSON line_items for querying."""
+
+    __tablename__ = "quote_lines"
+    id = Column(Integer, primary_key=True)
+    quote_id = Column(
+        Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False
+    )
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"))
+    mpn = Column(String(255), nullable=False)
+    manufacturer = Column(String(255))
+    qty = Column(Integer)
+    cost_price = Column(Numeric(12, 4))
+    sell_price = Column(Numeric(12, 4))
+    margin_pct = Column(Numeric(5, 2))
+    currency = Column(String(10), default="USD")
+
+    quote = relationship("Quote", backref="quote_lines")
+
+    __table_args__ = (
+        Index("ix_quote_lines_quote", "quote_id"),
+        Index("ix_quote_lines_card", "material_card_id"),
+        Index("ix_quote_lines_mpn", "mpn"),
+    )
+
+
 class BuyPlan(Base):
     """Purchase plan submitted after a quote is won — requires manager approval."""
 

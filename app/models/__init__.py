@@ -47,6 +47,7 @@ from .intelligence import (  # noqa: F401
     ProactiveMatch,
     ProactiveOffer,
     ProactiveThrottle,
+    ReactivationSignal,
 )
 
 # Offers, Contacts, Vendor Responses
@@ -69,7 +70,7 @@ from .performance import (  # noqa: F401
 from .pipeline import ColumnMappingCache, PendingBatch, ProcessedMessage, SyncState  # noqa: F401
 
 # Quotes & Buy Plans (V1 — JSON line_items)
-from .quotes import BuyPlan, Quote  # noqa: F401
+from .quotes import BuyPlan, Quote, QuoteLine  # noqa: F401
 
 # Buy Plans V3 (structured lines, dual approval tracks)
 from .buy_plan import BuyPlanLine, BuyPlanV3, VerificationGroupMember  # noqa: F401

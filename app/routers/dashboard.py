@@ -10,7 +10,7 @@ Depends on: models/crm.py, models/intelligence.py, models/quotes.py
 """
 
 import asyncio
-import logging
+from loguru import logger
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
@@ -21,7 +21,6 @@ from ..cache.decorators import cached_endpoint
 from ..database import get_db
 from ..dependencies import require_user
 
-log = logging.getLogger("avail.dashboard")
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -324,7 +323,7 @@ def morning_brief(
         if result and result.get("text"):
             brief_text = result["text"]
     except Exception as e:
-        log.warning("Morning brief AI generation failed: %s", e)
+        logger.warning("Morning brief AI generation failed: %s", e)
 
     return {
         "text": brief_text,
@@ -1117,3 +1116,34 @@ def _age_label(hours: float) -> str:
     if hours < 24:
         return f"{int(hours)}h ago"
     return f"{int(hours / 24)}d ago"
+
+
+# ── Reactivation Signals ─────────────────────────────────────────────
+
+
+@router.get("/reactivation-signals")
+def reactivation_signals(
+    user=Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return active reactivation signals for the sales dashboard."""
+    from ..models import ReactivationSignal
+
+    signals = (
+        db.query(ReactivationSignal)
+        .filter(ReactivationSignal.dismissed_at.is_(None))
+        .order_by(ReactivationSignal.created_at.desc())
+        .limit(50)
+        .all()
+    )
+    return [
+        {
+            "id": s.id,
+            "company_id": s.company_id,
+            "material_card_id": s.material_card_id,
+            "signal_type": s.signal_type,
+            "reason": s.reason,
+            "created_at": s.created_at.isoformat() if s.created_at else None,
+        }
+        for s in signals
+    ]

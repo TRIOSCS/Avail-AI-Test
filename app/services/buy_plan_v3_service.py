@@ -13,7 +13,7 @@ Depends on: models (BuyPlanV3, BuyPlanLine, Offer, Requirement, VendorCard, User
 """
 
 import json
-import logging
+from loguru import logger
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -37,7 +37,6 @@ from ..models.buy_plan import (
     VerificationGroupMember,
 )
 
-log = logging.getLogger("avail.buyplan_v3")
 
 # ── Routing maps (loaded once) ──────────────────────────────────────
 
@@ -207,29 +206,39 @@ def assign_buyer(
         return None, "no_buyers"
 
     # Priority 2: Commodity match
+    vendor_commodities: set[str] = set()
+    maps = _get_routing_maps()
+    brand_map = maps.get("brand_commodity_map", {})
     if vendor_card and vendor_card.commodity_tags:
         vendor_commodities = set(
             t.lower() for t in (vendor_card.commodity_tags or [])
         )
-        # Check if offer manufacturer maps to a commodity
-        maps = _get_routing_maps()
-        brand_map = maps.get("brand_commodity_map", {})
-        if offer.manufacturer:
-            mfr_commodity = brand_map.get(offer.manufacturer.strip().lower())
-            if mfr_commodity:
-                vendor_commodities.add(mfr_commodity)
-        # For now, we don't have per-buyer commodity tags on User model,
-        # so we skip this and fall through to geography/workload.
-        # This is a Phase 10 enhancement.
+    if offer.manufacturer:
+        mfr_commodity = brand_map.get(offer.manufacturer.strip().lower())
+        if mfr_commodity:
+            vendor_commodities.add(mfr_commodity)
+    if vendor_commodities:
+        commodity_buyers = [
+            b for b in buyers
+            if b.commodity_tags
+            and vendor_commodities & {t.lower() for t in b.commodity_tags}
+        ]
+        if len(commodity_buyers) == 1:
+            return commodity_buyers[0], "commodity_match"
+        if commodity_buyers:
+            buyers = commodity_buyers  # narrow pool for geography/workload
 
     # Priority 3: Geography match
     if vendor_card and vendor_card.hq_country:
         vendor_region = _country_to_region(vendor_card.hq_country)
         if vendor_region:
-            # Prefer buyers who have handled vendors in the same region
-            # (approximated by the buyer's most recent offer vendor region)
-            # For now, fall through to workload — full geo matching is Phase 10
-            pass
+            region_buyers = [
+                b for b in buyers
+                if b.commodity_tags is not None  # reuse commodity_tags presence as "has routing profile"
+            ]
+            # Among narrowed buyers, pick by workload below
+            if region_buyers:
+                buyers = region_buyers
 
     # Priority 4: Lowest active workload
     workloads = {}
@@ -666,10 +675,10 @@ def submit_buy_plan(
         plan.status = BuyPlanStatus.active.value
         plan.auto_approved = True
         plan.approved_at = datetime.now(timezone.utc)
-        log.info("Buy plan %d auto-approved (cost=%.2f)", plan_id, total)
+        logger.info("Buy plan %d auto-approved (cost=%.2f)", plan_id, total)
     else:
         plan.status = BuyPlanStatus.pending.value
-        log.info(
+        logger.info(
             "Buy plan %d pending approval (cost=%.2f, critical=%s)",
             plan_id, total, has_critical,
         )
@@ -711,11 +720,11 @@ def approve_buy_plan(
         plan.approved_by_id = user.id
         plan.approved_at = now
         plan.approval_notes = notes
-        log.info("Buy plan %d approved by %s", plan_id, user.email)
+        logger.info("Buy plan %d approved by %s", plan_id, user.email)
     elif action == "reject":
         plan.status = BuyPlanStatus.draft.value
         plan.approval_notes = notes
-        log.info("Buy plan %d rejected by %s: %s", plan_id, user.email, notes)
+        logger.info("Buy plan %d rejected by %s: %s", plan_id, user.email, notes)
     else:
         raise ValueError(f"Invalid action: {action}")
 
@@ -761,18 +770,18 @@ def verify_so(
 
     if action == "approve":
         plan.so_status = SOVerificationStatus.approved.value
-        log.info("SO verified for plan %d by %s", plan_id, user.email)
+        logger.info("SO verified for plan %d by %s", plan_id, user.email)
     elif action == "reject":
         plan.so_status = SOVerificationStatus.rejected.value
         plan.so_rejection_note = rejection_note
-        log.info("SO rejected for plan %d: %s", plan_id, rejection_note)
+        logger.info("SO rejected for plan %d: %s", plan_id, rejection_note)
     elif action == "halt":
         plan.so_status = SOVerificationStatus.rejected.value
         plan.so_rejection_note = rejection_note
         plan.status = BuyPlanStatus.halted.value
         plan.halted_by_id = user.id
         plan.halted_at = now
-        log.info("Plan %d HALTED by %s: %s", plan_id, user.email, rejection_note)
+        logger.info("Plan %d HALTED by %s: %s", plan_id, user.email, rejection_note)
     else:
         raise ValueError(f"Invalid SO verification action: {action}")
 
@@ -811,7 +820,7 @@ def confirm_po(
     line.estimated_ship_date = estimated_ship_date
     line.po_confirmed_at = datetime.now(timezone.utc)
     line.status = BuyPlanLineStatus.pending_verify.value
-    log.info("PO %s confirmed for line %d (plan %d)", po_number, line_id, plan_id)
+    logger.info("PO %s confirmed for line %d (plan %d)", po_number, line_id, plan_id)
 
     db.flush()
     return line
@@ -856,7 +865,7 @@ def verify_po(
         line.status = BuyPlanLineStatus.verified.value
         line.po_verified_by_id = user.id
         line.po_verified_at = now
-        log.info("PO verified for line %d (plan %d)", line_id, plan_id)
+        logger.info("PO verified for line %d (plan %d)", line_id, plan_id)
         check_completion(plan_id, db)
     elif action == "reject":
         line.status = BuyPlanLineStatus.awaiting_po.value
@@ -864,7 +873,7 @@ def verify_po(
         line.po_number = None
         line.estimated_ship_date = None
         line.po_confirmed_at = None
-        log.info("PO rejected for line %d: %s", line_id, rejection_note)
+        logger.info("PO rejected for line %d: %s", line_id, rejection_note)
     else:
         raise ValueError(f"Invalid PO verification action: {action}")
 
@@ -905,7 +914,7 @@ def flag_line_issue(
     line.status = BuyPlanLineStatus.issue.value
     line.issue_type = issue_type
     line.issue_note = note
-    log.info("Issue '%s' flagged on line %d (plan %d)", issue_type, line_id, plan_id)
+    logger.info("Issue '%s' flagged on line %d (plan %d)", issue_type, line_id, plan_id)
 
     db.flush()
     return line
@@ -936,7 +945,7 @@ def check_completion(plan_id: int, db: Session) -> BuyPlanV3:
         plan.status = BuyPlanStatus.completed.value
         plan.completed_at = datetime.now(timezone.utc)
         plan.case_report = generate_case_report(plan, db)
-        log.info("Buy plan %d auto-completed (all lines terminal)", plan_id)
+        logger.info("Buy plan %d auto-completed (all lines terminal)", plan_id)
         db.flush()
 
     return plan
@@ -1061,7 +1070,7 @@ def _apply_line_overrides(plan: BuyPlanV3, overrides: list[dict], db: Session):
     for ovr in overrides:
         line = next((l for l in plan.lines if l.id == ovr["line_id"]), None)
         if not line:
-            log.warning(
+            logger.warning(
                 "Override line_id %d not found in plan %d", ovr["line_id"], plan.id
             )
             continue

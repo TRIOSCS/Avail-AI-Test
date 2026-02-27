@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from ..utils.encrypted_type import EncryptedText
@@ -32,6 +32,7 @@ class User(Base):
     m365_error_reason = Column(String(255))
     m365_last_healthy = Column(DateTime)
     last_deep_email_scan = Column(DateTime)
+    commodity_tags = Column(JSON, default=list)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisitions = relationship("Requisition", back_populates="creator", foreign_keys="[Requisition.created_by]")
