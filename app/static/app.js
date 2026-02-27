@@ -2425,7 +2425,9 @@ let _reqAbort = null;  // AbortController for in-flight requisition searches
 let _reqSearchSeq = 0; // Sequence counter to discard stale responses
 
 let _archiveHasMore = false;
-let _archivePageSize = 200;
+let _archivePageSize = 75;
+let _archivePage = 1;
+let _archiveTotal = 0;
 let _reqFullyLoaded = false; // true once all 200 reqs loaded
 
 export async function loadRequisitions(query = '', append = false) {
@@ -2435,11 +2437,12 @@ export async function loadRequisitions(query = '', append = false) {
     const signal = _reqAbort.signal;
     const thisSeq = ++_reqSearchSeq;
     try {
-        const status = _currentMainView === 'archive' ? '&status=archive' : '';
-        const offset = append ? _reqListData.length : 0;
+        const isArchive = _currentMainView === 'archive';
+        const status = isArchive ? '&status=archive' : '';
+        const offset = isArchive ? (_archivePage - 1) * _archivePageSize : (append ? _reqListData.length : 0);
         // Fast initial paint: load 50 first, then fetch remaining in background
-        const isInitial = !query && !append && _currentMainView !== 'archive' && !_reqFullyLoaded;
-        const limit = _currentMainView === 'archive' ? _archivePageSize : (isInitial ? 50 : 200);
+        const isInitial = !query && !append && !isArchive && !_reqFullyLoaded;
+        const limit = isArchive ? _archivePageSize : (isInitial ? 50 : 200);
         const url = query
             ? `/api/requisitions?q=${encodeURIComponent(query)}${status}`
             : `/api/requisitions?limit=${limit}&offset=${offset}${status}`;
@@ -2462,6 +2465,7 @@ export async function loadRequisitions(query = '', append = false) {
             for (const k of Object.keys(_ddTabCache)) delete _ddTabCache[k];
         }
         _archiveHasMore = _currentMainView === 'archive' && items.length >= limit;
+        if (_currentMainView === 'archive') _archiveTotal = resp.total || items.length;
         _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
         renderReqList();
         // Background: fetch remaining reqs if we only loaded the first 50
@@ -6028,8 +6032,12 @@ function renderReqList() {
         rowsHtml = data.map(r => _renderReqRow(r)).join('');
     }
     var loadMoreHtml = '';
-    if (_currentMainView === 'archive' && _archiveHasMore) {
-        loadMoreHtml = `<div style="text-align:center;padding:16px"><button class="btn btn-ghost" onclick="loadRequisitions('',true)">Load more archived RFQs…</button></div>`;
+    if (_currentMainView === 'archive' && _archiveTotal > _archivePageSize) {
+        const totalPages = Math.ceil(_archiveTotal / _archivePageSize);
+        let pgHtml = `<span style="font-size:12px;color:var(--muted)">${_archiveTotal} archived &middot; Page ${_archivePage} of ${totalPages}</span>`;
+        if (_archivePage > 1) pgHtml = `<button class="btn btn-ghost btn-sm" onclick="archiveGoPage(${_archivePage - 1})">&laquo; Prev</button> ` + pgHtml;
+        if (_archivePage < totalPages) pgHtml += ` <button class="btn btn-ghost btn-sm" onclick="archiveGoPage(${_archivePage + 1})">Next &raquo;</button>`;
+        loadMoreHtml = `<div style="text-align:center;padding:12px;display:flex;align-items:center;justify-content:center;gap:8px">${pgHtml}</div>`;
     }
     // Mobile: render cards instead of table
     if (window.__isMobile) {
@@ -6060,6 +6068,13 @@ function toggleArchiveGroup(key) {
     if (_archiveGroupsOpen.has(k)) _archiveGroupsOpen.delete(k);
     else _archiveGroupsOpen.add(k);
     renderReqList();
+}
+
+function archiveGoPage(page) {
+    _archivePage = page;
+    _archiveGroupsOpen.clear();
+    loadRequisitions();
+    document.getElementById('reqList')?.scrollTo(0, 0);
 }
 
 function _updateToolbarStats() {
@@ -6714,15 +6729,8 @@ function setMainView(view, btn) {
     } else if (view === 'archive') {
         _reqStatusFilter = 'archive';
         _serverSearchActive = false;
-        _archiveAbort = new AbortController();
-        apiFetch('/api/requisitions?status=archive', { signal: _archiveAbort.signal })
-            .then(resp => {
-                if (_currentMainView !== 'archive') return; // stale
-                _reqListData = resp.requisitions || resp;
-                _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
-                renderReqList();
-            })
-            .catch(e => { if (e.name !== 'AbortError') showToast('Failed to load archived requisitions', 'error'); });
+        _archivePage = 1;
+        loadRequisitions();
     }
 }
 
@@ -11022,7 +11030,7 @@ Object.assign(window, {
     openVendorDrawer, closeVendorDrawer, switchVendorDrawerTab,
     openContactDrawer, closeContactDrawer, sortContactList,
     sortVendorList, threadSearchFilter, toggleAllDrillRows,
-    toggleArchiveGroup, toggleConfirmedQuotes, toggleDrillDown,
+    archiveGoPage, toggleArchiveGroup, toggleConfirmedQuotes, toggleDrillDown,
     toggleGroup, toggleOfferHistory, togglePartsSightings,
     toggleReqSelection, toggleSighting, toggleThreadMessages,
     toggleVendorEmails, toggleVpThreadMessages, unifiedEnrichVendor,
