@@ -18,7 +18,7 @@ depends_on = None
 def upgrade() -> None:
     op.execute(
         """
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_activity_req_channel
+        CREATE INDEX IF NOT EXISTS ix_activity_req_channel
         ON activity_log (requisition_id, channel, created_at)
         WHERE requisition_id IS NOT NULL
         """
