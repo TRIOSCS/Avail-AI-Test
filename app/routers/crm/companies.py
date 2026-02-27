@@ -227,6 +227,122 @@ async def check_company_duplicate(
     return {"matches": matches[:5]}
 
 
+@router.get("/api/companies/{company_id}")
+async def get_company(
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Fetch a single company with sites, contacts, and open req counts."""
+    company = (
+        db.query(Company)
+        .filter(Company.id == company_id)
+        .options(
+            selectinload(Company.sites).joinedload(CustomerSite.owner),
+            selectinload(Company.sites).selectinload(CustomerSite.site_contacts),
+            joinedload(Company.account_owner),
+        )
+        .first()
+    )
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    @cached_endpoint(prefix="company_detail", ttl_hours=1, key_params=["company_id"])
+    def _fetch(company_id, db):
+        # Open req counts per site
+        site_ids = [s.id for s in company.sites if s.is_active]
+        site_open_counts: dict[int, int] = {}
+        if site_ids:
+            count_rows = (
+                db.query(
+                    Requisition.customer_site_id,
+                    sqlfunc.count(Requisition.id),
+                )
+                .filter(
+                    Requisition.status.notin_(["archived", "won", "lost"]),
+                    Requisition.customer_site_id.in_(site_ids),
+                )
+                .group_by(Requisition.customer_site_id)
+                .all()
+            )
+            site_open_counts = {row[0]: row[1] for row in count_rows}
+
+        sites = []
+        for s in company.sites:
+            if not s.is_active:
+                continue
+            open_count = site_open_counts.get(s.id, 0)
+            contacts = [
+                {
+                    "id": sc.id,
+                    "full_name": sc.full_name,
+                    "title": sc.title,
+                    "email": sc.email,
+                    "phone": sc.phone,
+                    "is_primary": sc.is_primary,
+                    "is_active": sc.is_active,
+                }
+                for sc in s.site_contacts
+            ]
+            sites.append(
+                {
+                    "id": s.id,
+                    "site_name": s.site_name,
+                    "owner_id": s.owner_id,
+                    "owner_name": s.owner.name if s.owner else None,
+                    "contact_name": s.contact_name,
+                    "contact_email": s.contact_email,
+                    "contact_phone": s.contact_phone,
+                    "contact_title": s.contact_title,
+                    "payment_terms": s.payment_terms,
+                    "shipping_terms": s.shipping_terms,
+                    "city": s.city,
+                    "state": s.state,
+                    "open_reqs": open_count,
+                    "notes": s.notes,
+                    "contacts": contacts,
+                }
+            )
+        return {
+            "id": company.id,
+            "name": company.name,
+            "website": company.website,
+            "industry": company.industry,
+            "notes": company.notes,
+            "domain": company.domain,
+            "linkedin_url": company.linkedin_url,
+            "legal_name": company.legal_name,
+            "employee_size": company.employee_size,
+            "hq_city": company.hq_city,
+            "hq_state": company.hq_state,
+            "hq_country": company.hq_country,
+            "last_enriched_at": company.last_enriched_at.isoformat()
+            if company.last_enriched_at
+            else None,
+            "enrichment_source": company.enrichment_source,
+            "account_type": company.account_type,
+            "phone": company.phone,
+            "credit_terms": company.credit_terms,
+            "tax_id": company.tax_id,
+            "currency": company.currency,
+            "preferred_carrier": company.preferred_carrier,
+            "is_strategic": company.is_strategic,
+            "brand_tags": company.brand_tags or [],
+            "commodity_tags": company.commodity_tags or [],
+            "account_owner_id": company.account_owner_id,
+            "account_owner_name": (company.account_owner.name if company.account_owner else None)
+            if company.account_owner_id
+            else None,
+            "source": company.source,
+            "created_at": company.created_at.isoformat() if company.created_at else None,
+            "updated_at": company.updated_at.isoformat() if company.updated_at else None,
+            "site_count": len(sites),
+            "sites": sites,
+        }
+
+    return _fetch(company_id=company_id, db=db)
+
+
 @router.post("/api/companies")
 async def create_company(
     payload: CompanyCreate,
@@ -330,6 +446,7 @@ async def update_company(
     db.commit()
     invalidate_prefix("company_list")
     invalidate_prefix("companies_typeahead")
+    invalidate_prefix("company_detail")
     return {"ok": True}
 
 
@@ -348,6 +465,7 @@ async def analyze_company_tags(
 
     await analyze_customer_materials(company_id, db_session=db)
     db.refresh(company)
+    invalidate_prefix("company_detail")
     return {
         "ok": True,
         "brand_tags": company.brand_tags or [],

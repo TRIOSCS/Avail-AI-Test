@@ -29,6 +29,7 @@ async def add_site(
     db.add(site)
     db.commit()
     invalidate_prefix("companies_typeahead")
+    invalidate_prefix("company_detail")
     return {"id": site.id, "site_name": site.site_name}
 
 
@@ -60,6 +61,7 @@ async def update_site(
     for field, value in updates.items():
         setattr(site, field, value)
     db.commit()
+    invalidate_prefix("company_detail")
     return {"ok": True}
 
 

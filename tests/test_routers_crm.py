@@ -279,6 +279,79 @@ class TestCompanies:
         assert "Acme Electronics" in names
 
 
+class TestCompanyDetail:
+    def test_get_company_basic(self, client, db_session, test_company, test_customer_site):
+        """GET /api/companies/{id} returns company with sites."""
+        resp = client.get(f"/api/companies/{test_company.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == test_company.id
+        assert data["name"] == "Acme Electronics"
+        assert data["site_count"] >= 1
+        assert "sites" in data
+        assert "source" in data
+        assert "created_at" in data
+        assert "updated_at" in data
+        site_names = [s["site_name"] for s in data["sites"]]
+        assert "Acme HQ" in site_names
+
+    def test_get_company_not_found(self, client, db_session):
+        """GET /api/companies/999999 returns 404."""
+        resp = client.get("/api/companies/999999")
+        assert resp.status_code == 404
+
+    def test_get_company_sites_include_contacts(self, client, db_session, test_company, test_customer_site):
+        """Site contacts are nested under each site."""
+        sc = SiteContact(
+            customer_site_id=test_customer_site.id,
+            full_name="Bob Smith",
+            email="bob@acme.com",
+            title="Engineer",
+        )
+        db_session.add(sc)
+        db_session.commit()
+
+        resp = client.get(f"/api/companies/{test_company.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        site = [s for s in data["sites"] if s["site_name"] == "Acme HQ"][0]
+        assert "contacts" in site
+        contact_names = [c["full_name"] for c in site["contacts"]]
+        assert "Bob Smith" in contact_names
+
+    def test_get_company_open_reqs_count(self, client, db_session, test_company, test_customer_site, test_user):
+        """open_reqs count is aggregated per site."""
+        req = Requisition(
+            name="REQ-DETAIL-001",
+            customer_name="Acme Electronics",
+            customer_site_id=test_customer_site.id,
+            status="open",
+            created_by=test_user.id,
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        resp = client.get(f"/api/companies/{test_company.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        site = [s for s in data["sites"] if s["site_name"] == "Acme HQ"][0]
+        assert site["open_reqs"] >= 1
+
+    def test_get_company_inactive_sites_excluded(self, client, db_session, test_company):
+        """Inactive sites are filtered out of the response."""
+        active = CustomerSite(company_id=test_company.id, site_name="Active Branch", is_active=True)
+        inactive = CustomerSite(company_id=test_company.id, site_name="Closed Branch", is_active=False)
+        db_session.add_all([active, inactive])
+        db_session.commit()
+
+        resp = client.get(f"/api/companies/{test_company.id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        site_names = [s["site_name"] for s in data["sites"]]
+        assert "Active Branch" in site_names
+        assert "Closed Branch" not in site_names
+
+
 class TestSites:
     def test_add_site(self, client, db_session, test_company):
         resp = client.post(
