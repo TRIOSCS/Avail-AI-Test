@@ -1008,7 +1008,7 @@ class TestApplyParsedResult:
 
         parsed = {
             "sentiment": "positive",
-            "parts": [{"mpn": "LM317T", "unit_price": 0.50, "qty": 1000}],
+            "parts": [{"mpn": "LM317T", "unit_price": 0.50, "qty": 1000, "status": "quoted"}],
             "confidence": 0.65,
         }
 
@@ -1075,7 +1075,7 @@ class TestApplyParsedResult:
         db_session.add(vr)
         db_session.flush()
 
-        parsed = {"parts": [{"mpn": "LM317T", "unit_price": 0.75, "qty": 500}], "confidence": 0.6}
+        parsed = {"parts": [{"mpn": "LM317T", "unit_price": 0.75, "qty": 500, "status": "quoted"}], "confidence": 0.6}
 
         _apply_parsed_result(vr, parsed, db_session)
         db_session.flush()

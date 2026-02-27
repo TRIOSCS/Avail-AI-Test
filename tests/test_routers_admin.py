@@ -588,12 +588,12 @@ class TestAdminVendorDedup:
         assert db_session.get(VendorCard, remove_id) is None
 
     def test_merge_vendors_not_found(self, admin_client):
-        """Merge with invalid IDs returns 404."""
+        """Merge with invalid IDs returns 400 (ValueError caught by router)."""
         resp = admin_client.post(
             "/api/admin/vendor-merge",
             json={"keep_id": 99999, "remove_id": 99998},
         )
-        assert resp.status_code == 404
+        assert resp.status_code == 400
 
     def test_merge_vendors_same_id(self, admin_client, db_session):
         """Cannot merge a vendor with itself."""
@@ -1019,7 +1019,7 @@ class TestCompanyDedup:
         resp = admin_client.post("/api/admin/company-merge", json={
             "keep_id": 99999, "remove_id": 99998,
         })
-        assert resp.status_code == 404
+        assert resp.status_code == 400
 
     def test_merge_companies_same_id(self, admin_client, db_session):
         c = self._make_company(db_session, "Self Corp")

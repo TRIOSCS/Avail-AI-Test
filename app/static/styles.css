@@ -1311,7 +1311,7 @@ body:has(.sidebar:hover) .main{margin-left:var(--sbw)}}
 .sb-cc-header:hover .sb-group-icon{filter:drop-shadow(0 0 6px var(--blue));transform:scale(1.1)}
 .sb-cc-header.active:hover .sb-group-icon{transform:rotate(90deg) scale(1.1)}
 /* Top gradient bar — colored lines above each sidebar section */
-.sb-top-gradient{height:2px;flex-shrink:0;background:#C4941D;transition:background .4s ease;margin:4px 8px 8px;border-radius:1px}
+.sb-top-gradient{height:2px;flex-shrink:0;background:#C4941D;transition:background .4s ease;margin:4px 8px 8px;border-radius:1px;align-self:stretch}
 .sb-top-gradient-cc{background:#3b6ea8}
 .sb-top-gradient-rel{background:var(--relationships-color,#14b8a6)}
 /* Sidebar scroll arrows — appear when nav overflows */
