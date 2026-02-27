@@ -17,6 +17,7 @@ Depends on: models, dependencies, vendor_utils, config
 
 import asyncio
 import ipaddress
+import os
 import re
 import socket
 from datetime import datetime, timezone
@@ -27,6 +28,8 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy import text as sqltext
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
+
+from ..utils.sql_helpers import escape_like
 
 from ..cache.decorators import cached_endpoint
 from ..database import get_db
@@ -105,7 +108,33 @@ def get_or_create_card(vendor_name: str, db: Session) -> VendorCard:
     if card:
         return card
 
-    # Fuzzy match: query existing cards and compare
+    # Fuzzy match: use pg_trgm on PostgreSQL, fall back to thefuzz
+    if not os.environ.get("TESTING"):
+        try:
+            trgm_rows = db.execute(
+                sqltext(
+                    "SELECT id, normalized_name, similarity(normalized_name, :q) AS sim "
+                    "FROM vendor_cards WHERE normalized_name % :q "
+                    "ORDER BY sim DESC LIMIT 5"
+                ),
+                {"q": norm},
+            ).fetchall()
+            if trgm_rows and trgm_rows[0].sim >= 0.6:
+                card = db.get(VendorCard, trgm_rows[0].id)
+                if card:
+                    alts = list(card.alternate_names or [])
+                    if vendor_name not in alts and vendor_name != card.display_name:
+                        alts.append(vendor_name)
+                        card.alternate_names = alts
+                        db.commit()
+                    logger.info(
+                        "pg_trgm matched vendor '%s' to '%s' (sim=%.2f)",
+                        vendor_name, card.display_name, trgm_rows[0].sim,
+                    )
+                    return card
+        except (ProgrammingError, OperationalError):
+            pass  # pg_trgm not available — fall through to thefuzz
+
     try:
         from thefuzz import fuzz
 
@@ -123,7 +152,6 @@ def get_or_create_card(vendor_name: str, db: Session) -> VendorCard:
         if best_score >= 90 and best_card_id:
             card = db.get(VendorCard, best_card_id)
             if card:
-                # Add original name as alternate
                 alts = list(card.alternate_names or [])
                 if vendor_name not in alts and vendor_name != card.display_name:
                     alts.append(vendor_name)
@@ -399,14 +427,14 @@ async def list_vendors(
                         query = fts_query
                     else:
                         # FTS found nothing, fall back to ILIKE
-                        safe_q = q.replace("%", r"\%").replace("_", r"\_")
+                        safe_q = escape_like(q)
                         query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
                 except (ProgrammingError, OperationalError):
                     # FTS not available (e.g., SQLite in tests), fall back to ILIKE
-                    safe_q = q.replace("%", r"\%").replace("_", r"\_")
+                    safe_q = escape_like(q)
                     query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
             else:
-                safe_q = q.replace("%", r"\%").replace("_", r"\_")
+                safe_q = escape_like(q)
                 query = query.filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
         total = query.count()
         cards = query.limit(limit).offset(offset).all()
@@ -470,7 +498,7 @@ async def autocomplete_names(
     if len(q) < 2:
         return []
     limit = min(int(request.query_params.get("limit", "8")), 20)
-    safe_q = q.replace("%", r"\%").replace("_", r"\_")
+    safe_q = escape_like(q)
 
     from sqlalchemy import String, cast
 
@@ -1503,7 +1531,7 @@ async def list_materials(
     def _fetch(q, limit, offset, user, db):
         query = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None)).order_by(MaterialCard.last_searched_at.desc())
         if q:
-            safe_q = q.replace("%", r"\%").replace("_", r"\_")
+            safe_q = escape_like(q)
             query = query.filter(MaterialCard.normalized_mpn.ilike(f"{safe_q}%"))
         total = query.count()
         cards = query.limit(limit).offset(offset).all()
@@ -1980,7 +2008,7 @@ async def get_vendor_offer_history(
         )
     )
     if q:
-        safe_q = q.replace("%", r"\%").replace("_", r"\_")
+        safe_q = escape_like(q)
         query = query.filter(MaterialCard.normalized_mpn.ilike(f"%{safe_q}%"))
 
     total = query.count()
@@ -2035,7 +2063,7 @@ async def get_vendor_confirmed_offers(
 
     query = db.query(Offer).filter(Offer.vendor_card_id == card_id)
     if q:
-        safe_q = q.replace("%", r"\%").replace("_", r"\_")
+        safe_q = escape_like(q)
         query = query.filter(Offer.mpn.ilike(f"%{safe_q}%"))
 
     total = query.count()
@@ -2101,7 +2129,7 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
     mpn_filter = ""
     if q:
         mpn_filter = "AND LOWER(mpn) LIKE :mpn_pattern ESCAPE '\\'"
-        safe_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        safe_q = escape_like(q)
         params["mpn_pattern"] = f"%{safe_q}%"
 
     rows = db.execute(

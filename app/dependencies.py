@@ -18,17 +18,16 @@ Called by: all routers
 Depends on: models, database, config
 """
 
-import logging
+from loguru import logger
 from datetime import datetime, timedelta, timezone
 
 import sqlalchemy as sa
 from fastapi import Depends, HTTPException, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from .database import get_db
 from .models import Requisition, User
 
-log = logging.getLogger(__name__)
 
 
 # ── Authentication ────────────────────────────────────────────────────
@@ -104,11 +103,18 @@ def user_reqs_query(db: Session, user: User):
     return q
 
 
-def get_req_for_user(db: Session, user: User, req_id: int) -> Requisition:
-    """Get a single requisition with role-based access check."""
+def get_req_for_user(db: Session, user: User, req_id: int, options=None) -> Requisition:
+    """Get a single requisition with role-based access check.
+
+    Args:
+        options: Additional SQLAlchemy loader options (e.g., joinedload).
+                 Defaults to selectinload(Requisition.requirements).
+    """
+    load_opts = options or [selectinload(Requisition.requirements)]
+    q = db.query(Requisition).options(*load_opts).filter_by(id=req_id)
     if user.role == "sales":
-        return db.query(Requisition).filter_by(id=req_id, created_by=user.id).first()
-    return db.query(Requisition).filter_by(id=req_id).first()
+        q = q.filter_by(created_by=user.id)
+    return q.first()
 
 
 # ── Token Management ──────────────────────────────────────────────────
