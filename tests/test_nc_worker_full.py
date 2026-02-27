@@ -2148,9 +2148,14 @@ class TestWorkerMainLoop:
         mock_scheduler.is_business_hours.return_value = True
         mock_scheduler.time_for_break.return_value = False
 
+        # SESSION_EXPIRED uses `continue` without sleeping — trigger shutdown from health check
+        async def health_then_shutdown(*args, **kwargs):
+            worker_mod._shutdown_requested = True
+            return "SESSION_EXPIRED"
+
         mock_breaker = MagicMock()
         mock_breaker.should_stop.return_value = False
-        mock_breaker.check_page_health = AsyncMock(return_value="SESSION_EXPIRED")
+        mock_breaker.check_page_health = AsyncMock(side_effect=health_then_shutdown)
 
         search_result = {"html": "", "total_count": 0, "url": "", "duration_ms": 100}
 
@@ -2161,12 +2166,12 @@ class TestWorkerMainLoop:
                 with patch(self._SESSION, return_value=mock_session):
                     with patch(self._SCHEDULER, return_value=mock_scheduler):
                         with patch(self._BREAKER, return_value=mock_breaker):
-                            with patch("asyncio.sleep", side_effect=mock_sleep):
+                            with patch("asyncio.sleep", new_callable=AsyncMock):
                                 with patch(self._QUEUE_RECOVER):
                                     with patch(self._AI_GATE, new_callable=AsyncMock):
                                         with patch(self._QUEUE_NEXT, return_value=queue_item):
                                             with patch(self._SEARCH, new_callable=AsyncMock, return_value=search_result):
-                                                with patch(self._QUEUE_MARK) as mock_mark:
+                                                with patch(self._QUEUE_MARK):
                                                     await worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
