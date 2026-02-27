@@ -7,7 +7,16 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
-from .models import ActivityLog, Contact, Offer, PendingBatch, ProcessedMessage, Requirement, Requisition, VendorResponse
+from .models import (
+    ActivityLog,
+    Contact,
+    Offer,
+    PendingBatch,
+    ProcessedMessage,
+    Requirement,
+    Requisition,
+    VendorResponse,
+)
 from .services.credential_service import get_credential_cached
 from .vendor_utils import normalize_vendor_name
 

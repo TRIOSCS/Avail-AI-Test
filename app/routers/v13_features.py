@@ -816,7 +816,6 @@ async def prospecting_my_accounts(
 
     now = datetime.now(timezone.utc)
     thirty_days = now - timedelta(days=30)
-    ninety_days = now - timedelta(days=90)
 
     # Get all companies that have at least one site owned by this user
     rows = (
