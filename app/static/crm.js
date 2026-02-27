@@ -75,20 +75,26 @@ function _setTopViewLabel(label) {
     const bc = document.getElementById('topBreadcrumb');
     const bcText = document.getElementById('topBreadcrumbText');
     const bcBack = bc?.querySelector('.breadcrumb-back');
+    const bcSep = bc?.querySelector('.breadcrumb-sep');
     if (bc) bc.style.display = label ? 'flex' : 'none';
     if (bcText) bcText.textContent = label || '';
-    // Hide back button when just showing view name (not drilled down)
+    // Hide back button + separator when just showing view name (not drilled down)
     if (bcBack) bcBack.style.display = 'none';
+    if (bcSep) bcSep.style.display = 'none';
 }
 
-function _setTopDrillLabel(label) {
+function _setTopDrillLabel(label, backLabel) {
     const bc = document.getElementById('topBreadcrumb');
     const bcText = document.getElementById('topBreadcrumbText');
     const bcBack = bc?.querySelector('.breadcrumb-back');
+    const bcSep = bc?.querySelector('.breadcrumb-sep');
+    const bcBackLabel = document.getElementById('breadcrumbBackLabel');
     if (bc) bc.style.display = 'flex';
     if (bcText) bcText.textContent = label || '';
-    // Show back button when drilled into a record
+    if (bcBackLabel) bcBackLabel.textContent = backLabel || 'Accounts';
+    // Show back button + separator when drilled into a record
     if (bcBack) bcBack.style.display = '';
+    if (bcSep) bcSep.style.display = '';
 }
 
 // ── Abort all CRM fetches (called from showView on tab switch) ────────
@@ -255,6 +261,8 @@ async function goToCompany(companyId) {
 }
 
 let _selectedCustId = null;
+let _currentCustTab = 'overview'; // persist tab across account switches
+const _autoAnalyzedTags = new Set(); // companies already auto-analyzed this session
 
 function _custHealthColor(c) {
     const enrichDays = window.daysSince ? window.daysSince(c.last_enriched_at) : 999;
@@ -514,7 +522,7 @@ async function openCustDrawer(companyId, tab) {
             } catch (_e) { /* will show "Account not found" in drawer */ }
         }
     }
-    const targetTab = tab || 'overview';
+    const targetTab = tab || _currentCustTab || 'overview';
     switchCustDrawerTab(targetTab);
     // Highlight correct tab button
     const tabNames = ['overview', 'contacts', 'sites', 'activity', 'pipeline'];
@@ -606,6 +614,7 @@ function _miniListKeyNav(event) {
 
 function closeCustDrawer() {
     _selectedCustId = null;
+    _currentCustTab = 'overview'; // reset tab on full close
     const backdrop = document.getElementById('custDrawerBackdrop');
     const drawer = document.getElementById('custDrawer');
     const viewEl = document.getElementById('view-customers');
@@ -626,15 +635,7 @@ async function analyzeCustomerTags(companyId) {
     if (btn) { btn.disabled = true; btn.textContent = 'Analyzing...'; }
     try {
         const result = await apiFetch('/api/companies/' + companyId + '/analyze-tags', { method: 'POST' });
-        // Update local cache
-        const c = crmCustomers.find(x => x.id === companyId);
-        if (c) { c.brand_tags = result.brand_tags || []; c.commodity_tags = result.commodity_tags || []; }
-        const container = document.getElementById('custTags-' + companyId);
-        if (container) {
-            const tags = (result.brand_tags || []).map(t => '<span class="tag tag-brand">' + esc(t) + '</span>').join('') +
-                (result.commodity_tags || []).map(t => '<span class="tag tag-commodity">' + esc(t) + '</span>').join('');
-            container.innerHTML = tags || '<span style="font-size:11px;color:var(--muted)">No focus areas detected</span>';
-        }
+        _applyTagResult(companyId, result);
         showToast('Tags analyzed', 'success');
     } catch (e) {
         showToast('Tag analysis failed', 'error');
@@ -644,7 +645,65 @@ async function analyzeCustomerTags(companyId) {
     }
 }
 
+async function _autoAnalyzeTags(companyId) {
+    try {
+        const result = await apiFetch('/api/companies/' + companyId + '/analyze-tags', { method: 'POST' });
+        _applyTagResult(companyId, result);
+    } catch (_e) {
+        const container = document.getElementById('custTags-' + companyId);
+        if (container) container.innerHTML = '<span style="font-size:11px;color:var(--muted)">No focus areas detected</span>';
+    }
+}
+
+function _applyTagResult(companyId, result) {
+    const c = crmCustomers.find(x => x.id === companyId);
+    if (c) { c.brand_tags = result.brand_tags || []; c.commodity_tags = result.commodity_tags || []; }
+    const container = document.getElementById('custTags-' + companyId);
+    if (container) {
+        const tags = (result.brand_tags || []).map(t => '<span class="tag tag-brand">' + esc(t) + '</span>').join('') +
+            (result.commodity_tags || []).map(t => '<span class="tag tag-commodity">' + esc(t) + '</span>').join('');
+        container.innerHTML = tags || '<span style="font-size:11px;color:var(--muted)">No focus areas detected</span>';
+    }
+}
+
+async function _autoLoadAccountSummary(companyId) {
+    const container = document.getElementById('custSummary-' + companyId);
+    if (!container) return;
+    try {
+        const result = await apiFetch('/api/companies/' + companyId + '/summarize', { method: 'POST' });
+        // Check if user navigated away
+        if (_selectedCustId !== companyId) return;
+        const headerEl = container.closest('.ai-summary-card')?.querySelector('h4');
+        if (headerEl) headerEl.innerHTML = '✦ AI Account Intelligence';
+        if (!result.situation && !result.development && (!result.next_steps || !result.next_steps.length)) {
+            container.innerHTML = '<span style="color:var(--muted)">Not enough data to generate a summary yet. Add contacts, send RFQs, and log activity to build account intelligence.</span>';
+            return;
+        }
+        let html = '';
+        if (result.situation) {
+            html += '<div class="ai-summary-section"><div class="ai-summary-label">Situation</div><div class="ai-summary-text">' + esc(result.situation) + '</div></div>';
+        }
+        if (result.development) {
+            html += '<div class="ai-summary-section"><div class="ai-summary-label">Account Development</div><div class="ai-summary-text">' + esc(result.development) + '</div></div>';
+        }
+        if (result.next_steps && result.next_steps.length) {
+            html += '<div class="ai-summary-section"><div class="ai-summary-label">Recommended Actions</div><ul style="margin:4px 0 0;padding-left:18px">';
+            for (const step of result.next_steps) {
+                html += '<li class="ai-summary-text">' + esc(step) + '</li>';
+            }
+            html += '</ul></div>';
+        }
+        container.innerHTML = html;
+    } catch (_e) {
+        if (_selectedCustId !== companyId) return;
+        container.innerHTML = '<span style="color:var(--muted)">Could not generate summary</span>';
+        const headerEl = container.closest('.ai-summary-card')?.querySelector('h4');
+        if (headerEl) headerEl.innerHTML = '✦ AI Account Intelligence';
+    }
+}
+
 function switchCustDrawerTab(tab, btn) {
+    _currentCustTab = tab; // persist for account switches
     document.querySelectorAll('#custDrawerTabs .drawer-tab').forEach(t => t.classList.remove('active'));
     if (btn) btn.classList.add('active');
     if (!_selectedCustId) return;
@@ -693,6 +752,14 @@ function _renderCustDrawerOverview(companyId) {
         </div>
     </div>`;
 
+    // AI Account Summary (auto-loaded)
+    html += `<div class="drawer-section" id="custSummarySection-${c.id}" style="border-bottom:1px solid var(--border)">
+        <div class="ai-summary-card">
+            <h4><span class="spinner-dot"></span> AI Account Intelligence</h4>
+            <div id="custSummary-${c.id}" style="color:var(--muted);font-size:11px">Analyzing account…</div>
+        </div>
+    </div>`;
+
     // Two-column grid for details + notes
     html += '<div class="drawer-overview-grid">';
 
@@ -709,15 +776,12 @@ function _renderCustDrawerOverview(companyId) {
         ${c.credit_terms ? '<div class="drawer-field"><span class="drawer-field-label">Credit Terms</span><span class="drawer-field-value">'+esc(c.credit_terms)+'</span></div>' : ''}
         ${c.linkedin_url ? '<div class="drawer-field"><span class="drawer-field-label">LinkedIn</span><span class="drawer-field-value"><a href="'+escAttr(c.linkedin_url)+'" target="_blank">View Profile</a></span></div>' : ''}
         <div style="margin-top:12px;border-top:1px solid var(--border);padding-top:10px">
-            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-                <div class="drawer-section-title" style="margin:0">Focus Areas</div>
-                <button class="btn btn-ghost btn-sm" id="analyzeTags-${c.id}" onclick="analyzeCustomerTags(${c.id})">Analyze Tags</button>
-            </div>
+            <div class="drawer-section-title" style="margin-bottom:6px">Focus Areas</div>
             <div id="custTags-${c.id}">
                 ${(c.brand_tags && c.brand_tags.length) || (c.commodity_tags && c.commodity_tags.length) ?
                     (c.brand_tags || []).map(t => '<span class="tag tag-brand">' + esc(t) + '</span>').join('') +
                     (c.commodity_tags || []).map(t => '<span class="tag tag-commodity">' + esc(t) + '</span>').join('')
-                    : '<span style="font-size:11px;color:var(--muted)">No tags yet — click Analyze Tags</span>'}
+                    : '<span class="ai-auto-loading" style="font-size:11px;color:var(--muted)"><span class="spinner-dot"></span> Analyzing focus areas…</span>'}
             </div>
         </div>
     </div>`;
@@ -741,6 +805,14 @@ function _renderCustDrawerOverview(companyId) {
     body.innerHTML = html;
     // Load recent notes asynchronously
     _loadCustRecentNotes(c.id);
+    // Auto-analyze tags if empty and not yet attempted this session
+    const hasTags = (c.brand_tags && c.brand_tags.length) || (c.commodity_tags && c.commodity_tags.length);
+    if (!hasTags && !_autoAnalyzedTags.has(c.id)) {
+        _autoAnalyzedTags.add(c.id);
+        _autoAnalyzeTags(c.id);
+    }
+    // Auto-load AI summary
+    _autoLoadAccountSummary(c.id);
 }
 
 async function _renderCustDrawerSites(companyId) {

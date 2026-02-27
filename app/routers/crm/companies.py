@@ -499,6 +499,25 @@ async def update_company(
     return {"ok": True}
 
 
+@router.post("/api/companies/{company_id}/summarize")
+async def summarize_company(
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Generate an AI-powered strategic account summary."""
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    from ...services.account_summary_service import generate_account_summary
+
+    result = await generate_account_summary(company_id, db)
+    if not result:
+        return {"situation": "", "development": "", "next_steps": []}
+    return result
+
+
 @router.post("/api/companies/{company_id}/analyze-tags")
 async def analyze_company_tags(
     company_id: int,

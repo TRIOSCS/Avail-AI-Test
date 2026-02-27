@@ -48,7 +48,8 @@
             <button type="button" class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
         </div>
         <div id="topBreadcrumb" class="top-breadcrumb" style="display:none">
-            <button class="breadcrumb-back" onclick="closeCustDrawer();closeProspectDrawer()" title="Back">&larr;</button>
+            <button class="breadcrumb-back" onclick="closeCustDrawer();closeProspectDrawer()" title="Back to list">&larr; <span id="breadcrumbBackLabel">Accounts</span></button>
+            <span class="breadcrumb-sep">›</span>
             <span class="breadcrumb-text" id="topBreadcrumbText"></span>
         </div>
         <div class="tb-group">
@@ -275,7 +276,7 @@
             </div>
             <div class="drawer-header m-desktop-only">
                 <h3 id="custDrawerTitle">Account</h3>
-                <button class="drawer-close" onclick="closeCustDrawer()">&times;</button>
+                <button class="drawer-close" onclick="closeCustDrawer()" title="Close account view">&times; Close</button>
             </div>
             <div class="drawer-tabs" id="custDrawerTabs">
                 <button class="drawer-tab active" onclick="switchCustDrawerTab('overview',this)">Overview</button>
