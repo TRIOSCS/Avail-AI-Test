@@ -2467,7 +2467,9 @@ export async function loadRequisitions(query = '', append = false) {
         // Background: fetch remaining reqs if we only loaded the first 50
         if (isInitial && items.length >= 50) {
             _reqFullyLoaded = true;
+            const bgView = _currentMainView;
             apiFetch(`/api/requisitions?limit=200&offset=0${status}`).then(full => {
+                if (_currentMainView !== bgView) return; // stale — user switched tabs
                 const fullItems = full.requisitions || full;
                 if (Array.isArray(fullItems) && fullItems.length > _reqListData.length) {
                     _reqListData = fullItems;
@@ -6655,6 +6657,7 @@ function _cancelTabInflight() {
     if (_archiveAbort) { try { _archiveAbort.abort(); } catch(e){} _archiveAbort = null; }
     if (_followUpsAbort) { try { _followUpsAbort.abort(); } catch(e){} _followUpsAbort = null; }
     if (_pollAbort) { try { _pollAbort.abort(); } catch(e){} _pollAbort = null; }
+    if (_reqAbort) { try { _reqAbort.abort(); } catch(e){} _reqAbort = null; }
     // Cancel in-flight score fetches
     for (const k of Object.keys(_ddScoreAborts)) {
         try { _ddScoreAborts[k].abort(); } catch(e){}
@@ -6670,6 +6673,10 @@ function _cancelTabInflight() {
 function setMainView(view, btn) {
     // Cancel any in-flight requests from previous tab
     _cancelTabInflight();
+
+    // Clear stale data from previous tab so we always fetch fresh for the new view
+    _reqListData = [];
+    _reqFullyLoaded = false;
 
     _currentMainView = view;
     // Reset per-RFQ active tab so each view opens its own default sub-tab
