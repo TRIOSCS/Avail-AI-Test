@@ -1225,11 +1225,17 @@ def generate_case_report(plan: BuyPlanV3, db: Session) -> str:
         vendor_summary.append(f"  - {vendor}: {len(vlines)} lines, {v_qty:,} pcs, ${v_cost:,.2f}")
 
     # ── Timeline
+    def _tz_aware(dt):
+        """Ensure datetime is UTC-aware for safe subtraction."""
+        if dt and dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+
     timeline = []
-    created = plan.created_at
-    submitted = plan.submitted_at
-    approved = plan.approved_at
-    completed = plan.completed_at
+    created = _tz_aware(plan.created_at)
+    submitted = _tz_aware(plan.submitted_at)
+    approved = _tz_aware(plan.approved_at)
+    completed = _tz_aware(plan.completed_at)
 
     if created and submitted:
         days = (submitted - created).days
@@ -1249,7 +1255,7 @@ def generate_case_report(plan: BuyPlanV3, db: Session) -> str:
     po_times = []
     for line in lines:
         if line.po_confirmed_at and approved:
-            delta = (line.po_confirmed_at - approved).total_seconds() / 3600
+            delta = (_tz_aware(line.po_confirmed_at) - approved).total_seconds() / 3600
             po_times.append(delta)
     avg_po_hrs = round(sum(po_times) / len(po_times), 1) if po_times else None
 
