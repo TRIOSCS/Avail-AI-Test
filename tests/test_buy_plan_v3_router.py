@@ -549,3 +549,312 @@ class TestVerificationGroup:
             json={"user_id": test_user.id, "action": "add"},
         )
         assert r.status_code == 403
+
+
+# ── Intelligence: AI Flags ──────────────────────────────────────────
+
+
+class TestEnhancedAIFlags:
+    def test_stale_offer_flag(
+        self, db_session: Session, test_quote: Quote, test_user: User
+    ):
+        """Offers older than threshold trigger a stale_offer flag."""
+        from app.services.buy_plan_v3_service import generate_ai_flags
+
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_quote.requisition_id
+        ).first()
+        old_offer = _make_offer(
+            db_session, test_quote.requisition_id, req.id,
+            created_at=datetime(2025, 1, 1, tzinfo=timezone.utc),
+        )
+        plan = BuyPlanV3(
+            quote_id=test_quote.id,
+            requisition_id=test_quote.requisition_id,
+            status=BuyPlanStatus.draft.value,
+        )
+        db_session.add(plan)
+        db_session.flush()
+        line = BuyPlanLine(
+            buy_plan_id=plan.id, requirement_id=req.id,
+            offer_id=old_offer.id, quantity=100,
+            unit_cost=0.50, unit_sell=0.75, margin_pct=33.33,
+            status=BuyPlanLineStatus.awaiting_po.value,
+        )
+        db_session.add(line)
+        db_session.flush()
+        plan.lines = [line]
+        line.offer = old_offer
+
+        flags = generate_ai_flags(plan, db_session)
+        stale = [f for f in flags if f["type"] == "stale_offer"]
+        assert len(stale) == 1
+        assert "days old" in stale[0]["message"]
+
+    def test_low_margin_flag(
+        self, db_session: Session, test_quote: Quote, test_user: User
+    ):
+        """Lines with margin below threshold trigger a low_margin flag."""
+        from app.services.buy_plan_v3_service import generate_ai_flags
+
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_quote.requisition_id
+        ).first()
+        offer = _make_offer(db_session, test_quote.requisition_id, req.id)
+        plan = BuyPlanV3(
+            quote_id=test_quote.id,
+            requisition_id=test_quote.requisition_id,
+            status=BuyPlanStatus.draft.value,
+        )
+        db_session.add(plan)
+        db_session.flush()
+        line = BuyPlanLine(
+            buy_plan_id=plan.id, requirement_id=req.id,
+            offer_id=offer.id, quantity=100,
+            unit_cost=0.95, unit_sell=1.00, margin_pct=5.0,
+            status=BuyPlanLineStatus.awaiting_po.value,
+        )
+        db_session.add(line)
+        db_session.flush()
+        plan.lines = [line]
+        line.offer = offer
+
+        flags = generate_ai_flags(plan, db_session)
+        low = [f for f in flags if f["type"] == "low_margin"]
+        assert len(low) == 1
+        assert "5.0%" in low[0]["message"]
+
+    def test_better_offer_flag(
+        self, db_session: Session, test_quote: Quote, test_user: User
+    ):
+        """When a cheaper alternative exists, a better_offer flag is raised."""
+        from app.services.buy_plan_v3_service import generate_ai_flags
+
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_quote.requisition_id
+        ).first()
+        expensive = _make_offer(
+            db_session, test_quote.requisition_id, req.id,
+            vendor_name="Expensive Co", unit_price=1.00,
+        )
+        _make_offer(
+            db_session, test_quote.requisition_id, req.id,
+            vendor_name="Cheap Co", unit_price=0.80,
+        )
+        plan = BuyPlanV3(
+            quote_id=test_quote.id,
+            requisition_id=test_quote.requisition_id,
+            status=BuyPlanStatus.draft.value,
+        )
+        db_session.add(plan)
+        db_session.flush()
+        line = BuyPlanLine(
+            buy_plan_id=plan.id, requirement_id=req.id,
+            offer_id=expensive.id, quantity=100,
+            unit_cost=1.00, unit_sell=1.50, margin_pct=33.33,
+            status=BuyPlanLineStatus.awaiting_po.value,
+        )
+        db_session.add(line)
+        db_session.flush()
+        plan.lines = [line]
+        line.offer = expensive
+
+        flags = generate_ai_flags(plan, db_session)
+        better = [f for f in flags if f["type"] == "better_offer"]
+        assert len(better) == 1
+        assert "Cheap Co" in better[0]["message"]
+
+    def test_quantity_gap_flag(
+        self, db_session: Session, test_quote: Quote, test_user: User
+    ):
+        """When allocated qty < required qty, a quantity_gap flag is raised."""
+        from app.services.buy_plan_v3_service import generate_ai_flags
+
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_quote.requisition_id
+        ).first()
+        req.target_qty = 1000
+        db_session.flush()
+
+        offer = _make_offer(db_session, test_quote.requisition_id, req.id)
+        plan = BuyPlanV3(
+            quote_id=test_quote.id,
+            requisition_id=test_quote.requisition_id,
+            status=BuyPlanStatus.draft.value,
+        )
+        db_session.add(plan)
+        db_session.flush()
+        line = BuyPlanLine(
+            buy_plan_id=plan.id, requirement_id=req.id,
+            offer_id=offer.id, quantity=500,  # less than 1000
+            unit_cost=0.50, unit_sell=0.75,
+            status=BuyPlanLineStatus.awaiting_po.value,
+        )
+        db_session.add(line)
+        db_session.flush()
+        plan.lines = [line]
+        line.offer = offer
+        line.requirement = req
+
+        flags = generate_ai_flags(plan, db_session)
+        gap = [f for f in flags if f["type"] == "quantity_gap"]
+        assert len(gap) == 1
+        assert "gap: 500" in gap[0]["message"]
+
+
+# ── Intelligence: Favoritism ────────────────────────────────────────
+
+
+class TestFavoritism:
+    def test_favoritism_detected(
+        self, db_session: Session, test_quote: Quote, test_user: User,
+        admin_user: User,
+    ):
+        """When one buyer gets >60% of lines, favoritism is flagged."""
+        from app.services.buy_plan_v3_service import detect_favoritism
+
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_quote.requisition_id
+        ).first()
+        offer = _make_offer(db_session, test_quote.requisition_id, req.id)
+
+        # Create 3 plans all assigned to test_user (same buyer)
+        for i in range(3):
+            plan = BuyPlanV3(
+                quote_id=test_quote.id,
+                requisition_id=test_quote.requisition_id,
+                status="active",
+                submitted_by_id=admin_user.id,
+            )
+            db_session.add(plan)
+            db_session.flush()
+            line = BuyPlanLine(
+                buy_plan_id=plan.id, requirement_id=req.id,
+                offer_id=offer.id, quantity=100,
+                unit_cost=0.50, buyer_id=test_user.id,
+                status=BuyPlanLineStatus.awaiting_po.value,
+            )
+            db_session.add(line)
+
+        db_session.commit()
+        findings = detect_favoritism(admin_user.id, db_session)
+        assert len(findings) == 1
+        assert findings[0]["buyer_id"] == test_user.id
+        assert findings[0]["pct"] == 100.0
+
+    def test_favoritism_not_enough_data(
+        self, db_session: Session, test_quote: Quote, admin_user: User,
+    ):
+        """Less than 3 plans returns no findings."""
+        from app.services.buy_plan_v3_service import detect_favoritism
+
+        findings = detect_favoritism(admin_user.id, db_session)
+        assert findings == []
+
+    def test_favoritism_endpoint(
+        self, db_session: Session, test_user: User, admin_user: User,
+    ):
+        """GET /api/buy-plans-v3/favoritism/{user_id} works for admins."""
+        c = _make_client(db_session, admin_user)
+        r = c.get(f"/api/buy-plans-v3/favoritism/{test_user.id}")
+        assert r.status_code == 200
+        assert "findings" in r.json()
+
+    def test_favoritism_non_admin_rejected(
+        self, db_session: Session, test_user: User,
+    ):
+        """Non-admin/manager users cannot access favoritism report."""
+        c = _make_client(db_session, test_user)
+        r = c.get(f"/api/buy-plans-v3/favoritism/{test_user.id}")
+        assert r.status_code == 403
+
+
+# ── Intelligence: Case Report ───────────────────────────────────────
+
+
+class TestCaseReport:
+    def test_case_report_on_completion(
+        self, db_session: Session, test_quote: Quote, test_user: User,
+    ):
+        """Case report is generated when plan auto-completes."""
+        from app.services.buy_plan_v3_service import check_completion
+
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_quote.requisition_id
+        ).first()
+        offer = _make_offer(db_session, test_quote.requisition_id, req.id)
+        plan = BuyPlanV3(
+            quote_id=test_quote.id,
+            requisition_id=test_quote.requisition_id,
+            status=BuyPlanStatus.active.value,
+            so_status=SOVerificationStatus.approved.value,
+            submitted_by_id=test_user.id,
+            submitted_at=datetime.now(timezone.utc),
+            total_cost=500.0, total_revenue=750.0,
+            sales_order_number="SO-001",
+        )
+        db_session.add(plan)
+        db_session.flush()
+        line = BuyPlanLine(
+            buy_plan_id=plan.id, requirement_id=req.id,
+            offer_id=offer.id, quantity=100,
+            unit_cost=0.50, unit_sell=0.75,
+            buyer_id=test_user.id,
+            status=BuyPlanLineStatus.verified.value,
+        )
+        db_session.add(line)
+        db_session.commit()
+
+        result = check_completion(plan.id, db_session)
+        assert result.status == "completed"
+        assert result.case_report is not None
+        assert "CASE REPORT" in result.case_report
+        assert "SO-001" in result.case_report
+
+    def test_case_report_endpoint(
+        self, db_session: Session, test_quote: Quote, test_user: User,
+    ):
+        """POST /api/buy-plans-v3/{id}/case-report regenerates the report."""
+        req = db_session.query(Requirement).filter_by(
+            requisition_id=test_quote.requisition_id
+        ).first()
+        offer = _make_offer(db_session, test_quote.requisition_id, req.id)
+        plan = BuyPlanV3(
+            quote_id=test_quote.id,
+            requisition_id=test_quote.requisition_id,
+            status="completed",
+            so_status="approved",
+            total_cost=500.0, total_revenue=750.0,
+            submitted_by_id=test_user.id,
+            completed_at=datetime.now(timezone.utc),
+        )
+        db_session.add(plan)
+        db_session.flush()
+        line = BuyPlanLine(
+            buy_plan_id=plan.id, requirement_id=req.id,
+            offer_id=offer.id, quantity=100,
+            unit_cost=0.50, status="verified",
+        )
+        db_session.add(line)
+        db_session.commit()
+
+        c = _make_client(db_session, test_user)
+        r = c.post(f"/api/buy-plans-v3/{plan.id}/case-report")
+        assert r.status_code == 200
+        assert "CASE REPORT" in r.json()["case_report"]
+
+    def test_case_report_not_completed_rejected(
+        self, db_session: Session, test_quote: Quote, test_user: User,
+    ):
+        """Case report endpoint rejects non-completed plans."""
+        plan = BuyPlanV3(
+            quote_id=test_quote.id,
+            requisition_id=test_quote.requisition_id,
+            status="active",
+        )
+        db_session.add(plan)
+        db_session.commit()
+
+        c = _make_client(db_session, test_user)
+        r = c.post(f"/api/buy-plans-v3/{plan.id}/case-report")
+        assert r.status_code == 400

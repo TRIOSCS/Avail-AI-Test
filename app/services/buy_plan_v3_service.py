@@ -473,26 +473,37 @@ def generate_ai_flags(plan: BuyPlanV3, db: Session) -> list[dict]:
     - Stale offer (>N days old)
     - Low margin (below threshold)
     - Quantity gap (splits don't cover full requirement qty)
+    - Better offer available (cheaper alternative not selected)
     - Geography mismatch (vendor in different region from customer)
     """
     flags = []
     now = datetime.now(timezone.utc)
     stale_days = settings.buyplan_stale_offer_days
     min_margin = settings.buyplan_min_margin_pct
+    better_pct = settings.buyplan_better_offer_pct
+
+    # Determine customer region for geo mismatch
+    customer_region = None
+    if plan.quote_id:
+        quote = db.get(Quote, plan.quote_id)
+        if quote and quote.customer_site:
+            customer_region = _country_to_region(
+                quote.customer_site.country or quote.customer_site.state
+            )
 
     for line in (plan.lines or []):
+        offer = line.offer or (db.get(Offer, line.offer_id) if line.offer_id else None)
+
         # ── Stale offer check
-        if line.offer_id:
-            offer = line.offer or db.get(Offer, line.offer_id)
-            if offer and offer.created_at:
-                age = (now - offer.created_at.replace(tzinfo=timezone.utc)).days
-                if age > stale_days:
-                    flags.append({
-                        "type": "stale_offer",
-                        "severity": "warning",
-                        "line_id": line.id,
-                        "message": f"Offer is {age} days old (threshold: {stale_days})",
-                    })
+        if offer and offer.created_at:
+            age = (now - offer.created_at.replace(tzinfo=timezone.utc)).days
+            if age > stale_days:
+                flags.append({
+                    "type": "stale_offer",
+                    "severity": "warning",
+                    "line_id": line.id,
+                    "message": f"Offer is {age} days old (threshold: {stale_days})",
+                })
 
         # ── Low margin check
         if line.margin_pct is not None and float(line.margin_pct) < min_margin:
@@ -503,11 +514,83 @@ def generate_ai_flags(plan: BuyPlanV3, db: Session) -> list[dict]:
                 "message": f"Margin {line.margin_pct}% below {min_margin}% threshold",
             })
 
+        # ── Better offer available check
+        if offer and line.requirement_id:
+            _check_better_offer(line, offer, better_pct, flags, db)
+
+        # ── Geography mismatch check
+        if offer and customer_region:
+            _check_geo_mismatch(line, offer, customer_region, flags, db)
+
     # ── Quantity gap check (plan-level)
     if plan.lines:
         _check_quantity_gaps(plan, flags, db)
 
     return flags
+
+
+def _check_better_offer(
+    line: BuyPlanLine, selected: Offer, threshold_pct: float,
+    flags: list[dict], db: Session,
+):
+    """Flag if a cheaper offer exists for the same requirement."""
+    if not selected.unit_price or float(selected.unit_price) <= 0:
+        return
+    selected_price = float(selected.unit_price)
+    threshold = selected_price * (1 - threshold_pct / 100)
+
+    alternatives = (
+        db.query(Offer)
+        .filter(
+            Offer.requirement_id == line.requirement_id,
+            Offer.status == "active",
+            Offer.id != selected.id,
+        )
+        .all()
+    )
+    for alt in alternatives:
+        if not alt.unit_price or float(alt.unit_price) <= 0:
+            continue
+        if float(alt.unit_price) <= threshold:
+            savings_pct = round(
+                (1 - float(alt.unit_price) / selected_price) * 100, 1
+            )
+            flags.append({
+                "type": "better_offer",
+                "severity": "info",
+                "line_id": line.id,
+                "message": (
+                    f"{alt.vendor_name} offers ${float(alt.unit_price):.4f} "
+                    f"({savings_pct}% cheaper than selected ${selected_price:.4f})"
+                ),
+            })
+            break  # one flag per line is enough
+
+
+def _check_geo_mismatch(
+    line: BuyPlanLine, offer: Offer, customer_region: str,
+    flags: list[dict], db: Session,
+):
+    """Flag if selected vendor is in a different region from the customer."""
+    vendor_card = offer.vendor_card or (
+        db.query(VendorCard).filter_by(
+            normalized_name=(offer.vendor_name or "").strip().lower()
+        ).first()
+        if offer.vendor_name else None
+    )
+    if not vendor_card or not vendor_card.hq_country:
+        return
+    vendor_region = _country_to_region(vendor_card.hq_country)
+    if vendor_region and vendor_region != customer_region:
+        flags.append({
+            "type": "geo_mismatch",
+            "severity": "info",
+            "line_id": line.id,
+            "message": (
+                f"Vendor {offer.vendor_name} is in {vendor_region}, "
+                f"customer is in {customer_region}"
+            ),
+        })
 
 
 def _check_quantity_gaps(plan: BuyPlanV3, flags: list[dict], db: Session):
@@ -852,6 +935,7 @@ def check_completion(plan_id: int, db: Session) -> BuyPlanV3:
     if all_terminal and plan.so_status == SOVerificationStatus.approved.value:
         plan.status = BuyPlanStatus.completed.value
         plan.completed_at = datetime.now(timezone.utc)
+        plan.case_report = generate_case_report(plan, db)
         log.info("Buy plan %d auto-completed (all lines terminal)", plan_id)
         db.flush()
 
@@ -1035,3 +1119,198 @@ def _is_stock_sale(plan: BuyPlanV3, db: Session) -> bool:
         if vendor not in stock_names:
             return False
     return True
+
+
+# ── Intelligence: Favoritism Detection ─────────────────────────────
+
+
+def detect_favoritism(salesperson_id: int, db: Session) -> list[dict]:
+    """Detect if a salesperson disproportionately routes work to specific buyers.
+
+    Looks at all completed/active V3 buy plans submitted by this salesperson
+    and calculates buyer assignment distribution. Flags if any buyer receives
+    more than the configured threshold percentage.
+
+    Returns list of findings: [{buyer_id, buyer_name, pct, plan_count, severity}]
+    """
+    threshold = settings.buyplan_favoritism_threshold_pct
+
+    # Get all plans by this salesperson
+    plans = (
+        db.query(BuyPlanV3)
+        .filter(
+            BuyPlanV3.submitted_by_id == salesperson_id,
+            BuyPlanV3.status.in_(["active", "completed", "pending"]),
+        )
+        .options(joinedload(BuyPlanV3.lines))
+        .all()
+    )
+    if len(plans) < 3:
+        return []  # not enough data to detect patterns
+
+    # Count lines per buyer
+    buyer_counts: dict[int, int] = {}
+    total_lines = 0
+    for plan in plans:
+        for line in (plan.lines or []):
+            if line.buyer_id:
+                buyer_counts[line.buyer_id] = buyer_counts.get(line.buyer_id, 0) + 1
+                total_lines += 1
+
+    if total_lines == 0:
+        return []
+
+    findings = []
+    for buyer_id, count in buyer_counts.items():
+        pct = round(count / total_lines * 100, 1)
+        if pct >= threshold:
+            buyer = db.get(User, buyer_id)
+            findings.append({
+                "buyer_id": buyer_id,
+                "buyer_name": buyer.name if buyer else "Unknown",
+                "pct": pct,
+                "line_count": count,
+                "total_lines": total_lines,
+                "plan_count": len(plans),
+                "severity": "warning",
+                "message": (
+                    f"{buyer.name if buyer else 'Unknown'} receives {pct}% of "
+                    f"line assignments ({count}/{total_lines} lines across "
+                    f"{len(plans)} plans)"
+                ),
+            })
+
+    return findings
+
+
+# ── Intelligence: Case Report ──────────────────────────────────────
+
+
+def generate_case_report(plan: BuyPlanV3, db: Session) -> str:
+    """Generate a structured case report when a buy plan completes.
+
+    Captures: deal metadata, margin analysis, vendor selection, timeline,
+    issue tracking. Stored in plan.case_report for post-deal analysis.
+    """
+    now = datetime.now(timezone.utc)
+    lines = plan.lines or []
+    quote = db.get(Quote, plan.quote_id) if plan.quote_id else None
+
+    # ── Customer info
+    customer = "Unknown"
+    quote_number = "—"
+    if quote:
+        quote_number = quote.quote_number or "—"
+        if quote.customer_site:
+            site = quote.customer_site
+            co = site.company if hasattr(site, "company") and site.company else None
+            customer = co.name if co else (site.site_name or "Unknown")
+
+    # ── Financials
+    total_cost = float(plan.total_cost or 0)
+    total_revenue = float(plan.total_revenue or 0)
+    margin_pct = float(plan.total_margin_pct or 0)
+
+    # ── Vendor breakdown
+    vendor_lines: dict[str, list] = {}
+    for line in lines:
+        offer = line.offer or (db.get(Offer, line.offer_id) if line.offer_id else None)
+        vendor = offer.vendor_name if offer else "Unknown"
+        vendor_lines.setdefault(vendor, []).append(line)
+
+    vendor_summary = []
+    for vendor, vlines in vendor_lines.items():
+        v_cost = sum(float(l.unit_cost or 0) * (l.quantity or 0) for l in vlines)
+        v_qty = sum(l.quantity or 0 for l in vlines)
+        vendor_summary.append(f"  - {vendor}: {len(vlines)} lines, {v_qty:,} pcs, ${v_cost:,.2f}")
+
+    # ── Timeline
+    timeline = []
+    created = plan.created_at
+    submitted = plan.submitted_at
+    approved = plan.approved_at
+    completed = plan.completed_at
+
+    if created and submitted:
+        days = (submitted - created).days
+        timeline.append(f"  Build → Submit: {days} day{'s' if days != 1 else ''}")
+    if submitted and approved:
+        days = (approved - submitted).days
+        hrs = int((approved - submitted).total_seconds() / 3600)
+        timeline.append(f"  Submit → Approve: {hrs}h ({days}d)")
+    if approved and completed:
+        days = (approved - completed).days if completed > approved else (completed - approved).days
+        timeline.append(f"  Approve → Complete: {abs(days)} day{'s' if abs(days) != 1 else ''}")
+    if created and completed:
+        total_days = (completed - created).days
+        timeline.append(f"  Total cycle: {total_days} day{'s' if total_days != 1 else ''}")
+
+    # ── PO timing (avg days from approval to PO confirm)
+    po_times = []
+    for line in lines:
+        if line.po_confirmed_at and approved:
+            delta = (line.po_confirmed_at - approved).total_seconds() / 3600
+            po_times.append(delta)
+    avg_po_hrs = round(sum(po_times) / len(po_times), 1) if po_times else None
+
+    # ── Issues encountered
+    issues = []
+    for line in lines:
+        if line.issue_type:
+            offer = line.offer
+            mpn = offer.mpn if offer else "—"
+            issues.append(f"  - {mpn}: {line.issue_type} — {line.issue_note or 'no note'}")
+
+    # ── AI flags summary
+    flag_lines = []
+    for f in (plan.ai_flags or []):
+        if isinstance(f, dict):
+            flag_lines.append(f"  - [{f.get('severity', '?')}] {f.get('type', '?')}: {f.get('message', '')}")
+
+    # ── Rejections
+    rejections = []
+    if plan.so_rejection_note:
+        rejections.append(f"  - SO rejected: {plan.so_rejection_note}")
+    for line in lines:
+        if line.po_rejection_note:
+            rejections.append(f"  - PO rejected (line {line.id}): {line.po_rejection_note}")
+
+    # ── Build report
+    submitter = db.get(User, plan.submitted_by_id) if plan.submitted_by_id else None
+    approver = db.get(User, plan.approved_by_id) if plan.approved_by_id else None
+
+    report = f"""CASE REPORT — Buy Plan #{plan.id}
+{'=' * 50}
+
+DEAL OVERVIEW
+  Customer: {customer}
+  Quote: {quote_number}
+  SO#: {plan.sales_order_number or '—'}
+  Salesperson: {submitter.name if submitter else '—'}
+  Approver: {approver.name if approver else ('Auto-approved' if plan.auto_approved else '—')}
+
+FINANCIALS
+  Total Cost: ${total_cost:,.2f}
+  Total Revenue: ${total_revenue:,.2f}
+  Margin: {margin_pct:.1f}%
+  Lines: {len(lines)}
+
+VENDORS ({len(vendor_lines)} total)
+{chr(10).join(vendor_summary) if vendor_summary else '  None'}
+
+TIMELINE
+{chr(10).join(timeline) if timeline else '  No timeline data'}
+  Avg PO turnaround: {f'{avg_po_hrs}h' if avg_po_hrs is not None else '—'}
+
+AI FLAGS ({len(flag_lines)})
+{chr(10).join(flag_lines) if flag_lines else '  None'}
+
+ISSUES ({len(issues)})
+{chr(10).join(issues) if issues else '  None'}
+
+REJECTIONS ({len(rejections)})
+{chr(10).join(rejections) if rejections else '  None'}
+
+Generated: {now.strftime('%Y-%m-%d %H:%M UTC')}
+"""
+    return report.strip()

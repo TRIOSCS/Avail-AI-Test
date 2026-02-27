@@ -209,6 +209,12 @@ class Settings:
     buyplan_nudge_buyer_hours: int = int(os.getenv("BUYPLAN_NUDGE_BUYER_HOURS", "4"))
     buyplan_escalate_manager_hours: int = int(os.getenv("BUYPLAN_ESCALATE_MANAGER_HOURS", "8"))
     buyplan_nudge_ops_hours: int = int(os.getenv("BUYPLAN_NUDGE_OPS_HOURS", "2"))
+    buyplan_favoritism_threshold_pct: float = float(
+        os.getenv("BUYPLAN_FAVORITISM_THRESHOLD_PCT", "60")
+    )
+    buyplan_better_offer_pct: float = float(
+        os.getenv("BUYPLAN_BETTER_OFFER_PCT", "5")
+    )
 
     # Contact intelligence
     contact_scoring_enabled: bool = (

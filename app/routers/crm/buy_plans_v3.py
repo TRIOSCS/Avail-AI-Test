@@ -60,7 +60,9 @@ from ...services.buy_plan_v3_service import (
     build_buy_plan,
     check_completion,
     confirm_po,
+    detect_favoritism,
     flag_line_issue,
+    generate_case_report,
     resubmit_buy_plan,
     submit_buy_plan,
     verify_po,
@@ -263,6 +265,50 @@ async def update_verification_group(
             member.is_active = False
             db.commit()
         return {"ok": True, "action": "removed", "user_id": body.user_id}
+
+
+# ── Intelligence ─────────────────────────────────────────────────────
+
+
+@router.get("/api/buy-plans-v3/favoritism/{user_id}")
+async def get_favoritism_report(
+    user_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Detect buyer favoritism patterns for a salesperson (manager/admin only)."""
+    if user.role not in ("manager", "admin"):
+        raise HTTPException(403, "Manager or admin role required")
+    target = db.get(User, user_id)
+    if not target:
+        raise HTTPException(404, "User not found")
+    findings = detect_favoritism(user_id, db)
+    return {"user_id": user_id, "user_name": target.name, "findings": findings}
+
+
+@router.post("/api/buy-plans-v3/{plan_id}/case-report")
+async def regenerate_case_report(
+    plan_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Regenerate the case report for a completed buy plan."""
+    plan = (
+        db.query(BuyPlanV3)
+        .options(
+            joinedload(BuyPlanV3.lines).joinedload(BuyPlanLine.offer),
+            joinedload(BuyPlanV3.quote),
+        )
+        .filter(BuyPlanV3.id == plan_id)
+        .first()
+    )
+    if not plan:
+        raise HTTPException(404, "Buy plan not found")
+    if plan.status != "completed":
+        raise HTTPException(400, "Case report only available for completed plans")
+    plan.case_report = generate_case_report(plan, db)
+    db.commit()
+    return {"ok": True, "plan_id": plan.id, "case_report": plan.case_report}
 
 
 # ── Build ────────────────────────────────────────────────────────────
