@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-import logging
+from loguru import logger
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
@@ -20,7 +20,6 @@ from .models import (
 from .services.credential_service import get_credential_cached
 from .vendor_utils import normalize_vendor_name
 
-log = logging.getLogger(__name__)
 
 
 def _build_html_body(plain_text: str) -> str:
@@ -60,7 +59,7 @@ async def send_batch_rfq(
                         g["body"] = result
                     idx += 1
         except Exception as e:
-            log.warning(f"AI rephrase failed, using original bodies: {e}")
+            logger.warning(f"AI rephrase failed, using original bodies: {e}")
 
     # Build payloads and send all emails in parallel
     avail_token = f"[ref:{requisition_id}]"
@@ -100,13 +99,13 @@ async def send_batch_rfq(
         tagged_subject = group.pop("_tagged_subject")
 
         if isinstance(send_result, Exception):
-            log.error(f"Send error to {email}: {send_result}")
+            logger.error(f"Send error to {email}: {send_result}")
             results.append({"vendor_name": group["vendor_name"], "vendor_email": email,
                             "status": "error", "error": str(send_result)[:200]})
             continue
 
         if "error" in send_result:
-            log.error(f"Send failed to {email}: {send_result}")
+            logger.error(f"Send failed to {email}: {send_result}")
             results.append({"vendor_name": group["vendor_name"], "vendor_email": email,
                             "status": "failed", "error": str(send_result.get("detail", ""))[:200]})
             continue
@@ -144,23 +143,28 @@ async def send_batch_rfq(
 
 
 async def _find_sent_message(gc, subject: str) -> dict | None:
-    """Find the just-sent message in Sent Items to get its ID and conversationId."""
-    try:
-        await asyncio.sleep(1)  # Brief delay for Graph to process
-        data = await gc.get_json(
-            "/me/mailFolders/sentItems/messages",
-            params={
-                "$top": "5",
-                "$orderby": "sentDateTime desc",
-                "$select": "id,conversationId,subject",
-            },
-        )
-        msgs = data.get("value", []) if data else []
-        for m in msgs:
-            if m.get("subject", "").strip() == subject.strip():
-                return m
-    except Exception as e:
-        log.debug(f"Sent message lookup failed: {e}")
+    """Find the just-sent message in Sent Items to get its ID and conversationId.
+
+    Retries with exponential backoff (1s, 2s, 4s) to handle Graph API propagation delays.
+    """
+    delays = [1, 2, 4]
+    for delay in delays:
+        try:
+            await asyncio.sleep(delay)
+            data = await gc.get_json(
+                "/me/mailFolders/sentItems/messages",
+                params={
+                    "$top": "5",
+                    "$orderby": "sentDateTime desc",
+                    "$select": "id,conversationId,subject",
+                },
+            )
+            msgs = data.get("value", []) if data else []
+            for m in msgs:
+                if m.get("subject", "").strip() == subject.strip():
+                    return m
+        except Exception as e:
+            logger.debug(f"Sent message lookup attempt failed: {e}")
     return None
 
 
@@ -264,7 +268,7 @@ async def poll_inbox(
                     db.add(sync)
                 db.flush()
         except Exception as e:
-            log.warning(f"Delta query failed, falling back to full scan: {e}")
+            logger.warning(f"Delta query failed, falling back to full scan: {e}")
             # Clear stale delta token so next poll starts fresh
             if sync and sync.delta_token:
                 sync.delta_token = None
@@ -285,7 +289,7 @@ async def poll_inbox(
             )
             messages = data.get("value", []) if data else []
         except Exception as e:
-            log.error(f"Inbox poll failed: {e}")
+            logger.error(f"Inbox poll failed: {e}")
             return []
 
     # ── H2: Dedup via processed_messages table (belt-and-suspenders) ──
@@ -462,7 +466,7 @@ async def poll_inbox(
                 }
             )
         except Exception as e:
-            log.error(f"Failed to save inbox message {msg_id[:20]}: {e}")
+            logger.error(f"Failed to save inbox message {msg_id[:20]}: {e}")
             db.rollback()
             continue
 
@@ -471,14 +475,14 @@ async def poll_inbox(
         try:
             await _submit_parse_batch(pending_parse, db)
         except Exception as e:
-            log.warning(f"Batch submit failed, falling back to sequential: {e}")
+            logger.warning(f"Batch submit failed, falling back to sequential: {e}")
             await _parse_sequential_fallback(pending_parse, db)
 
     # Single commit for all new responses
     try:
         db.commit()
     except Exception as e:
-        log.error(f"Batch commit failed during inbox poll: {e}")
+        logger.error(f"Batch commit failed during inbox poll: {e}")
         db.rollback()
         return []
 
@@ -760,7 +764,7 @@ async def _submit_parse_batch(
         submitted_at=datetime.now(timezone.utc),
     )
     db.add(pb)
-    log.info(f"Submitted batch {batch_id} with {len(requests)} email parse requests")
+    logger.info(f"Submitted batch {batch_id} with {len(requests)} email parse requests")
 
 
 async def _parse_sequential_fallback(
@@ -777,7 +781,7 @@ async def _parse_sequential_fallback(
                 if parsed:
                     _apply_parsed_result(vr, parsed, db)
             except Exception as e:
-                log.warning(f"Sequential AI parse failed for VR {vr.id}: {e}")
+                logger.warning(f"Sequential AI parse failed for VR {vr.id}: {e}")
 
     await asyncio.gather(*[_parse_one(vr) for vr in pending])
 
@@ -880,7 +884,7 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                             subject=f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} — {draft.get('mpn', '?')}",
                         ))
         except Exception as e:
-            log.warning(f"Failed to auto-create draft offers: {e}")
+            logger.warning(f"Failed to auto-create draft offers: {e}")
 
 
 async def process_batch_results(db: Session) -> int:
@@ -906,7 +910,7 @@ async def process_batch_results(db: Session) -> int:
         try:
             results = await claude_batch_results(pb.batch_id)
         except Exception as e:
-            log.warning(f"Batch results check failed for {pb.batch_id}: {e}")
+            logger.warning(f"Batch results check failed for {pb.batch_id}: {e}")
             # Mark as failed if submitted >24h ago
             if pb.submitted_at and datetime.now(timezone.utc) - pb.submitted_at > timedelta(hours=24):
                 pb.status = "failed"
@@ -941,7 +945,7 @@ async def process_batch_results(db: Session) -> int:
                     try:
                         parsed_data = json.loads(parsed_data)
                     except (json.JSONDecodeError, TypeError):
-                        log.warning(f"Batch item {custom_id}: unparseable string result")
+                        logger.warning(f"Batch item {custom_id}: unparseable string result")
                         continue
                 if not isinstance(parsed_data, dict):
                     continue
@@ -965,9 +969,9 @@ async def process_batch_results(db: Session) -> int:
 
         try:
             db.commit()
-            log.info(f"Batch {pb.batch_id} applied: {applied}/{len(request_map)} results")
+            logger.info(f"Batch {pb.batch_id} applied: {applied}/{len(request_map)} results")
         except Exception as e:
-            log.error(f"Batch results commit failed for {pb.batch_id}: {e}")
+            logger.error(f"Batch results commit failed for {pb.batch_id}: {e}")
             db.rollback()
 
     return total_applied

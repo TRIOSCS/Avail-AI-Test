@@ -292,6 +292,7 @@ async def create_offer(
                         card.alternate_names = alts
 
     # 4) No match — create new card
+    _enrich_new_card = None
     if not card:
         domain = ""
         if payload.vendor_website:
@@ -316,11 +317,7 @@ async def create_offer(
             or get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
             or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
         ):
-            from ...routers.vendors import _background_enrich_vendor
-
-            asyncio.create_task(
-                _background_enrich_vendor(card.id, domain, card.display_name)
-            )
+            _enrich_new_card = (card.id, domain, card.display_name)
     # Resolve material card for this MPN
     from ...search_service import resolve_material_card
     from ...utils.normalization import normalize_mpn_key
@@ -359,6 +356,12 @@ async def create_offer(
     if req.status in ("active", "sourcing"):
         req.status = "offers"
     db.commit()
+
+    # Background vendor enrichment — fire after commit so card is persisted
+    if _enrich_new_card:
+        from ...routers.vendors import _background_enrich_vendor
+
+        asyncio.create_task(_background_enrich_vendor(*_enrich_new_card))
 
     # Teams: competitive quote alert if >20% below current best price
     try:

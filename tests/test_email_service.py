@@ -403,6 +403,32 @@ class TestFindSentMessage:
             result = await _find_sent_message(gc, " RFQ [ref:10] ")
         assert result["id"] == "msg-1"
 
+    @pytest.mark.asyncio
+    async def test_retries_on_miss_then_finds(self):
+        """Verify retry loop: returns None twice, then finds the message on 3rd attempt."""
+        gc = AsyncMock()
+        gc.get_json.side_effect = [
+            {"value": []},
+            {"value": []},
+            {"value": [{"id": "msg-1", "conversationId": "conv-1", "subject": "Test Subject"}]},
+        ]
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            result = await _find_sent_message(gc, "Test Subject")
+        assert result["id"] == "msg-1"
+        assert gc.get_json.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_early_return_on_first_match(self):
+        """Verify function returns on first successful match without exhausting retries."""
+        gc = AsyncMock()
+        gc.get_json.return_value = {
+            "value": [{"id": "msg-1", "conversationId": "conv-1", "subject": "Quick Find"}],
+        }
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            result = await _find_sent_message(gc, "Quick Find")
+        assert result["id"] == "msg-1"
+        assert gc.get_json.call_count == 1
+
 
 # ── send_batch_rfq ───────────────────────────────────────────────────
 

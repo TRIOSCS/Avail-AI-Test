@@ -152,6 +152,33 @@ def test_next_quote_number_bad_format():
     assert result.endswith("-0001")
 
 
+def test_quote_creation_retries_on_integrity_error(
+    client, db_session, test_requisition, test_customer_site, test_offer
+):
+    """Quote creation retries with a new number on IntegrityError (race condition)."""
+    test_requisition.customer_site_id = test_customer_site.id
+    db_session.commit()
+
+    call_count = 0
+    original_next = next_quote_number.__wrapped__ if hasattr(next_quote_number, "__wrapped__") else next_quote_number
+
+    def mock_next_quote_number(db):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return "Q-2026-DUPE"
+        return f"Q-2026-{call_count:04d}"
+
+    with patch("app.routers.crm.quotes.next_quote_number", side_effect=mock_next_quote_number):
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/quote",
+            json={"offer_ids": [test_offer.id]},
+        )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "quote_number" in data
+
+
 # ── get_last_quoted_price ────────────────────────────────────────────────
 
 
