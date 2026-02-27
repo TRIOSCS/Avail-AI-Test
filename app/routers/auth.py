@@ -35,7 +35,7 @@ router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
 AZURE_AUTH = f"https://login.microsoftonline.com/{settings.azure_tenant_id}/oauth2/v2.0"
-SCOPES = "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read Files.ReadWrite Chat.ReadWrite Calendars.Read ChannelMessage.Send Team.ReadBasic.All"
+SCOPES = "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read Files.ReadWrite Chat.ReadWrite Calendars.Read ChannelMessage.Send Team.ReadBasic.All Channel.ReadBasic.All"
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -97,11 +97,12 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
         logger.error(f"Azure token exchange failed: {e}")
         return RedirectResponse("/")
     if resp.status_code != 200:
+        logger.error(f"Azure token exchange returned {resp.status_code}: {resp.text[:500]}")
         return RedirectResponse("/")
     tokens = resp.json()
     access_token = tokens.get("access_token")
     if not access_token:
-        logger.error("Azure token response missing access_token")
+        logger.error(f"Azure token response missing access_token: {list(tokens.keys())}")
         return RedirectResponse("/")
 
 

@@ -82,6 +82,7 @@ async def post_to_channel(team_id: str, channel_id: str, card: dict, token: str)
 
     Returns True on success, False on any failure.
     """
+    import json as _json
     from app.utils.graph_client import GraphClient
 
     payload = {
@@ -90,7 +91,7 @@ async def post_to_channel(team_id: str, channel_id: str, card: dict, token: str)
             {
                 "id": "card",
                 "contentType": "application/vnd.microsoft.card.adaptive",
-                "content": card,
+                "content": _json.dumps(card),
             }
         ],
     }
