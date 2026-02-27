@@ -2926,21 +2926,62 @@ function renderBuyPlanV3Status(targetId) {
     if (bp.approval_notes) notesHtml += '<div style="background:#f0fdf4;padding:8px 10px;border-left:3px solid #16a34a;border-radius:4px;margin-bottom:8px;font-size:12px"><strong>Manager:</strong> ' + esc(bp.approval_notes) + '</div>';
     if (bp.so_rejection_note) notesHtml += '<div style="background:#fef2f2;padding:8px 10px;border-left:3px solid var(--red);border-radius:4px;margin-bottom:8px;font-size:12px"><strong>SO Rejected:</strong> ' + esc(bp.so_rejection_note) + '</div>';
 
-    // Lines table — editable for draft (salesperson) and pending (manager overrides)
+    // Role checks
     const canApprove = window.__isAdmin || window.userRole === 'manager';
+    const isBuyer = ['buyer','trader','manager','admin'].includes(window.userRole);
     const isPending = bp.status === 'pending';
+    const isActive = bp.status === 'active';
+    const isHalted = bp.status === 'halted';
     const isEditable = isDraft || (isPending && canApprove);
+
+    // Lines table — varies by status and role
     const lines = bp.lines || [];
+    let extraHeaders = '';
+    if (isPending && canApprove) extraHeaders = '<th>Mgr Note</th>';
+    if (isActive && isBuyer) extraHeaders = '<th>PO / Action</th>';
+    if (isActive && !isBuyer) extraHeaders = '';
+
     let linesHtml = lines.map(l => {
         const showCompare = isDraft || (isPending && canApprove);
         const compareBtn = showCompare ? ' <a href="javascript:void(0)" onclick="openOfferComparisonV3(' + bp.id + ',' + l.requirement_id + ',' + l.id + ')" style="font-size:10px;color:#2563eb;text-decoration:underline">compare</a>' : '';
         const qtyCell = isEditable
             ? '<input type="number" class="bpv3-qty" data-line-id="' + l.id + '" value="' + (l.quantity||0) + '" min="1" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;text-align:right">'
             : (l.quantity||0).toLocaleString();
-        // Manager note input on pending lines
-        const noteCell = (isPending && canApprove)
-            ? '<td><input type="text" class="bpv3-mgr-note" data-line-id="' + l.id + '" placeholder="Note\u2026" value="' + (l.manager_note ? l.manager_note.replace(/"/g,'&quot;') : '') + '" style="width:100px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:10px"></td>'
-            : '';
+
+        // Extra cells based on context
+        let extraCell = '';
+        if (isPending && canApprove) {
+            extraCell = '<td><input type="text" class="bpv3-mgr-note" data-line-id="' + l.id + '" placeholder="Note\u2026" value="' + (l.manager_note ? l.manager_note.replace(/"/g,'&quot;') : '') + '" style="width:100px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:10px"></td>';
+        }
+        if (isActive && isBuyer) {
+            if (l.status === 'awaiting_po') {
+                extraCell = '<td>'
+                    + '<div style="display:flex;gap:4px;align-items:center">'
+                    + '<input type="text" class="bpv3-po" data-line-id="' + l.id + '" placeholder="PO#" style="width:80px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:10px">'
+                    + '<input type="date" class="bpv3-ship" data-line-id="' + l.id + '" style="width:110px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:10px">'
+                    + '<button class="btn btn-primary btn-sm" style="font-size:10px;padding:3px 8px" onclick="confirmPOV3(' + bp.id + ',' + l.id + ')">Confirm</button>'
+                    + '</div>'
+                    + '<div style="margin-top:4px"><a href="javascript:void(0)" onclick="openFlagIssueV3(' + bp.id + ',' + l.id + ')" style="font-size:10px;color:var(--red);text-decoration:underline">Flag issue</a></div>'
+                    + '</td>';
+            } else if (l.status === 'pending_verify') {
+                extraCell = '<td><span style="font-size:11px">' + esc(l.po_number) + '</span> <span style="color:var(--amber);font-size:10px">awaiting ops verify</span></td>';
+            } else if (l.status === 'verified') {
+                extraCell = '<td><span style="font-size:11px;color:var(--green)">' + esc(l.po_number) + ' \u2713</span></td>';
+            } else if (l.status === 'issue') {
+                const issueLabels = {sold_out:'Sold Out',price_changed:'Price Changed',lead_time_changed:'Lead Time Changed',other:'Other'};
+                extraCell = '<td><span style="font-size:11px;color:var(--red)">' + (issueLabels[l.issue_type]||l.issue_type) + '</span>'
+                    + (l.issue_note ? '<div style="font-size:10px;color:var(--muted)">' + esc(l.issue_note) + '</div>' : '') + '</td>';
+            }
+        }
+        // Ops PO verification inline
+        if (isActive && l.status === 'pending_verify' && canApprove) {
+            extraCell = '<td><span style="font-size:11px">' + esc(l.po_number) + '</span>'
+                + '<div style="display:flex;gap:4px;margin-top:4px">'
+                + '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" onclick="verifyPOV3(' + bp.id + ',' + l.id + ',\'approve\')">Verify</button>'
+                + '<button class="btn btn-danger btn-sm" style="font-size:10px;padding:2px 6px" onclick="openRejectPOV3(' + bp.id + ',' + l.id + ')">Reject</button>'
+                + '</div></td>';
+        }
+
         return '<tr data-line-id="' + l.id + '">'
             + '<td>' + esc(l.mpn) + compareBtn + '</td>'
             + '<td>' + esc(l.vendor_name || '\u2014') + '</td>'
@@ -2951,14 +2992,14 @@ function renderBuyPlanV3Status(targetId) {
             + '<td class="mono">' + (l.margin_pct != null ? Number(l.margin_pct).toFixed(1) + '%' : '\u2014') + '</td>'
             + '<td>' + esc(l.lead_time || '\u2014') + '</td>'
             + (isDraft ? '' : '<td>' + _bpV3LineBadge(l.status) + '</td>')
-            + noteCell
+            + extraCell
             + '</tr>';
     }).join('');
-    // Extra header for manager note column
-    const noteHeader = (isPending && canApprove) ? '<th>Mgr Note</th>' : '';
 
-    // Actions
+    // ── Actions block ──
     let actionsHtml = '';
+
+    // Draft: salesperson submit form
     if (isDraft) {
         actionsHtml = '<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">'
             + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">'
@@ -2972,7 +3013,8 @@ function renderBuyPlanV3Status(targetId) {
             + '<div style="display:flex;gap:8px"><button class="btn btn-primary" onclick="submitBuyPlanV3()">Submit Buy Plan</button></div>'
             + '</div>';
     }
-    // Manager approval actions for pending plans
+
+    // Pending: manager approve/reject
     if (isPending && canApprove) {
         actionsHtml = '<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">'
             + '<div class="field" style="margin-bottom:10px"><label style="font-weight:600;font-size:12px">Manager Notes</label>'
@@ -2990,6 +3032,42 @@ function renderBuyPlanV3Status(targetId) {
             + '</div>';
     }
 
+    // Active: ops SO verification (when so_status is pending)
+    if (isActive && bp.so_status === 'pending' && canApprove) {
+        actionsHtml += '<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">'
+            + '<div style="font-weight:600;font-size:12px;margin-bottom:8px">SO Verification</div>'
+            + '<p style="font-size:12px;color:var(--muted);margin-bottom:8px">Verify that SO# <strong>' + esc(bp.sales_order_number) + '</strong> was properly set up in Acctivate.</p>'
+            + '<div style="display:flex;gap:8px;align-items:center">'
+            + '<button class="btn btn-success btn-sm" onclick="verifySOV3(\'approve\')">Verify SO</button>'
+            + '<button class="btn btn-danger btn-sm" onclick="openRejectSOV3()">Reject SO</button>'
+            + '<button class="btn btn-ghost btn-sm" onclick="openHaltSOV3()">Halt</button>'
+            + '</div>'
+            + '<div id="bpV3SORejectForm" style="display:none;margin-top:8px;padding:8px;border:1px solid var(--red);border-radius:6px;background:#fef2f2">'
+            + '<textarea id="bpV3SORejectNote" placeholder="Reason\u2026" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;min-height:30px;margin-bottom:6px"></textarea>'
+            + '<div style="display:flex;gap:6px"><button class="btn btn-danger btn-sm" onclick="verifySOV3(\'reject\')">Confirm Reject</button>'
+            + '<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'bpV3SORejectForm\').style.display=\'none\'">Cancel</button></div></div>'
+            + '<div id="bpV3SOHaltForm" style="display:none;margin-top:8px;padding:8px;border:1px solid var(--amber);border-radius:6px;background:#fffbeb">'
+            + '<textarea id="bpV3SOHaltNote" placeholder="Reason to halt\u2026" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:4px;font-size:12px;min-height:30px;margin-bottom:6px"></textarea>'
+            + '<div style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" style="border-color:var(--amber);color:var(--amber)" onclick="verifySOV3(\'halt\')">Confirm Halt</button>'
+            + '<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'bpV3SOHaltForm\').style.display=\'none\'">Cancel</button></div></div>'
+            + '</div>';
+    }
+
+    // Halted: resubmit for salesperson
+    if (isHalted && (bp.submitted_by_id === window.__userId || canApprove)) {
+        actionsHtml += '<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">'
+            + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">'
+            + '<div class="field" style="flex:1;min-width:180px"><label style="font-weight:600;font-size:12px">Corrected SO#</label>'
+            + '<input type="text" id="bpV3ResubSO" value="' + (bp.sales_order_number||'').replace(/"/g,'&quot;') + '" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)"></div>'
+            + '<div class="field" style="flex:1;min-width:180px"><label style="font-weight:600;font-size:12px">Customer PO#</label>'
+            + '<input type="text" id="bpV3ResubCustPO" value="' + (bp.customer_po_number||'').replace(/"/g,'&quot;') + '" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)"></div>'
+            + '</div>'
+            + '<div class="field" style="margin-bottom:10px"><label style="font-weight:600;font-size:12px">Notes</label>'
+            + '<textarea id="bpV3ResubNotes" rows="2" placeholder="Corrections made\u2026" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)"></textarea></div>'
+            + '<button class="btn btn-primary" onclick="resubmitBuyPlanV3()">Resubmit</button>'
+            + '</div>';
+    }
+
     el.innerHTML = '<div class="card" style="margin-top:16px;border-left:4px solid ' + statusColor + '">'
         + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
         + '<div><strong>Buy Plan V3</strong>'
@@ -3003,7 +3081,7 @@ function renderBuyPlanV3Status(targetId) {
         + summaryHtml + flagsHtml + contextHtml + marginHtml + notesHtml
         + '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="tbl" style="margin-bottom:0"><thead><tr>'
         + '<th>MPN</th><th>Vendor</th><th>Score</th><th>Buyer</th><th>Qty</th><th>Unit Cost</th><th>Margin</th><th>Lead</th>'
-        + (isDraft ? '' : '<th>Status</th>') + noteHeader
+        + (isDraft ? '' : '<th>Status</th>') + extraHeaders
         + '</tr></thead><tbody>' + linesHtml + '</tbody></table></div>'
         + actionsHtml + '</div>';
 }
@@ -3101,6 +3179,135 @@ async function rejectBuyPlanV3() {
         logCatchError('rejectBuyPlanV3', e);
         showToast('Failed to reject: ' + (e.message || e), 'error');
     } finally { rejectBuyPlanV3._busy = false; }
+}
+
+// ── Buyer PO Execution ───────────────────────────────────────────────
+
+async function confirmPOV3(planId, lineId) {
+    const poInput = document.querySelector('.bpv3-po[data-line-id="' + lineId + '"]');
+    const shipInput = document.querySelector('.bpv3-ship[data-line-id="' + lineId + '"]');
+    const po = (poInput?.value || '').trim();
+    const ship = (shipInput?.value || '').trim();
+    if (!po) { showToast('PO number is required', 'error'); poInput?.focus(); return; }
+    if (!ship) { showToast('Estimated ship date is required', 'error'); shipInput?.focus(); return; }
+    try {
+        await apiFetch('/api/buy-plans-v3/' + planId + '/lines/' + lineId + '/confirm-po', {
+            method: 'POST', body: { po_number: po, estimated_ship_date: ship + 'T00:00:00Z' }
+        });
+        showToast('PO confirmed', 'success');
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + planId);
+        renderBuyPlanV3Status();
+    } catch (e) { showToast('Failed: ' + (e.message || e), 'error'); }
+}
+
+function openFlagIssueV3(planId, lineId) {
+    const existing = document.getElementById('bpV3IssueForm-' + lineId);
+    if (existing) { existing.style.display = ''; return; }
+    const row = document.querySelector('tr[data-line-id="' + lineId + '"]');
+    if (!row) return;
+    const cell = row.querySelector('td:last-child');
+    const form = document.createElement('div');
+    form.id = 'bpV3IssueForm-' + lineId;
+    form.style.cssText = 'margin-top:6px;padding:6px;border:1px solid var(--red);border-radius:6px;background:#fef2f2';
+    form.innerHTML = '<select class="bpv3-issue-type" style="padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;margin-bottom:4px;width:100%">'
+        + '<option value="sold_out">Sold Out</option><option value="price_changed">Price Changed</option>'
+        + '<option value="lead_time_changed">Lead Time Changed</option><option value="other">Other</option></select>'
+        + '<input class="bpv3-issue-note" placeholder="Note\u2026" style="width:100%;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;margin-bottom:4px">'
+        + '<div style="display:flex;gap:4px"><button class="btn btn-danger btn-sm" style="font-size:10px;padding:2px 6px" onclick="submitFlagIssueV3(' + planId + ',' + lineId + ')">Flag</button>'
+        + '<button class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px" onclick="this.closest(\'div[id^=bpV3IssueForm]\').style.display=\'none\'">Cancel</button></div>';
+    cell.appendChild(form);
+}
+
+async function submitFlagIssueV3(planId, lineId) {
+    const form = document.getElementById('bpV3IssueForm-' + lineId);
+    if (!form) return;
+    const issueType = form.querySelector('.bpv3-issue-type')?.value || 'other';
+    const note = (form.querySelector('.bpv3-issue-note')?.value || '').trim() || null;
+    if (issueType === 'other' && !note) { showToast('Note required for "Other" issue', 'error'); return; }
+    try {
+        await apiFetch('/api/buy-plans-v3/' + planId + '/lines/' + lineId + '/issue', {
+            method: 'POST', body: { issue_type: issueType, note }
+        });
+        showToast('Issue flagged', 'info');
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + planId);
+        renderBuyPlanV3Status();
+    } catch (e) { showToast('Failed: ' + (e.message || e), 'error'); }
+}
+
+// ── Ops Verification ────────────────────────────────────────────────
+
+function openRejectSOV3() {
+    document.getElementById('bpV3SOHaltForm') && (document.getElementById('bpV3SOHaltForm').style.display = 'none');
+    const f = document.getElementById('bpV3SORejectForm');
+    if (f) { f.style.display = ''; f.querySelector('textarea')?.focus(); }
+}
+
+function openHaltSOV3() {
+    document.getElementById('bpV3SORejectForm') && (document.getElementById('bpV3SORejectForm').style.display = 'none');
+    const f = document.getElementById('bpV3SOHaltForm');
+    if (f) { f.style.display = ''; f.querySelector('textarea')?.focus(); }
+}
+
+async function verifySOV3(action) {
+    if (!_currentBuyPlanV3) return;
+    const noteEl = action === 'reject' ? document.getElementById('bpV3SORejectNote')
+        : action === 'halt' ? document.getElementById('bpV3SOHaltNote') : null;
+    const note = noteEl ? (noteEl.value || '').trim() : null;
+    if ((action === 'reject' || action === 'halt') && !note) {
+        showToast('A note is required', 'error'); noteEl?.focus(); return;
+    }
+    try {
+        await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/verify-so', {
+            method: 'POST', body: { action, rejection_note: note }
+        });
+        showToast(action === 'approve' ? 'SO verified' : 'SO ' + action + 'ed', action === 'approve' ? 'success' : 'info');
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id);
+        renderBuyPlanV3Status();
+    } catch (e) { showToast('Failed: ' + (e.message || e), 'error'); }
+}
+
+async function verifyPOV3(planId, lineId, action) {
+    try {
+        await apiFetch('/api/buy-plans-v3/' + planId + '/lines/' + lineId + '/verify-po', {
+            method: 'POST', body: { action }
+        });
+        showToast('PO ' + (action === 'approve' ? 'verified' : 'rejected'), action === 'approve' ? 'success' : 'info');
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + planId);
+        renderBuyPlanV3Status();
+    } catch (e) { showToast('Failed: ' + (e.message || e), 'error'); }
+}
+
+function openRejectPOV3(planId, lineId) {
+    const note = prompt('Reason for rejecting this PO:');
+    if (note === null) return;
+    if (!note.trim()) { showToast('Reason is required', 'error'); return; }
+    apiFetch('/api/buy-plans-v3/' + planId + '/lines/' + lineId + '/verify-po', {
+        method: 'POST', body: { action: 'reject', rejection_note: note.trim() }
+    }).then(() => {
+        showToast('PO rejected', 'info');
+        return apiFetch('/api/buy-plans-v3/' + planId);
+    }).then(plan => {
+        _currentBuyPlanV3 = plan;
+        renderBuyPlanV3Status();
+    }).catch(e => showToast('Failed: ' + (e.message || e), 'error'));
+}
+
+// ── Resubmit ────────────────────────────────────────────────────────
+
+async function resubmitBuyPlanV3() {
+    if (!_currentBuyPlanV3) return;
+    const soNum = (document.getElementById('bpV3ResubSO')?.value || '').trim();
+    if (!soNum) { showToast('SO# is required', 'error'); return; }
+    const custPO = (document.getElementById('bpV3ResubCustPO')?.value || '').trim() || null;
+    const notes = (document.getElementById('bpV3ResubNotes')?.value || '').trim() || null;
+    try {
+        const res = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/resubmit', {
+            method: 'POST', body: { sales_order_number: soNum, customer_po_number: custPO, salesperson_notes: notes }
+        });
+        showToast(res.auto_approved ? 'Resubmitted and auto-approved!' : 'Resubmitted for approval', 'success');
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + res.plan_id);
+        renderBuyPlanV3Status();
+    } catch (e) { showToast('Failed: ' + (e.message || e), 'error'); }
 }
 
 async function openOfferComparisonV3(planId, reqId, currentLineId) {
@@ -7713,7 +7920,7 @@ Object.assign(window, {
     _toggleActivityDetail,
     applyMarkup, approveBuyPlan, approveBuyPlanV3, approveEnrichItem,
     autoCreateSiteAndSelect, autoLogCrmCall,
-    browseOneDrive, cancelBuyPlan, cancelCredEdit, cancelEnrichJob,
+    browseOneDrive, cancelBuyPlan, cancelCredEdit, cancelEnrichJob, confirmPOV3,
     completeBuyPlan, convertProactiveOffer, copyPromptToClipboard,
     copyQuoteTable, deleteAIContact, deleteAdminUser, deleteCredential,
     deleteOffer, deleteOfferAttachment, deleteSiteContact,
@@ -7722,13 +7929,14 @@ Object.assign(window, {
     loadQuote, loadSpecificQuote, loadSalespersonScorecard,
     loadTroubleTickets, markQuoteResult, onSourcesSearch,
     openAddSiteContact, openAddSiteModal, openBuyPlanDetail, openBuyPlanDetailV3,
-    openOfferComparisonV3, openRejectBuyPlanV3,
+    openFlagIssueV3, openHaltSOV3,
+    openOfferComparisonV3, openRejectBuyPlanV3, openRejectPOV3, openRejectSOV3,
     openEditCompany, openEditOffer, openEditSiteContact,
     openEditSiteModal, openLogNoteModal, openLostModal,
     openOfferGallery, openPricingHistory, openProactiveSendModal,
     openRejectBuyPlanModal, quickCreateCompany,
     refreshBuyerLeaderboard, refreshTeamsChannels,
-    refreshVendorScorecards, regeneratePrompt, rejectBuyPlan, rejectBuyPlanV3,
+    refreshVendorScorecards, regeneratePrompt, rejectBuyPlan, rejectBuyPlanV3, resubmitBuyPlanV3,
     rejectEnrichItem, reopenQuote, resubmitBuyPlan, reviseQuote,
     saveAIContact, saveBuyPlanPOs, saveConfig, saveCredential,
     saveParsedOffers, saveQuoteDraft, saveTeamsConfig, scToggle,
@@ -7739,7 +7947,7 @@ Object.assign(window, {
     toggleSourceStatus, tokenApprovePlan, tokenRejectPlan,
     triggerDeepScan, unifiedEnrichCompany, updateQuoteLine,
     updateQuoteLineField, updateTicketStatus, updateUserField,
-    verifyBuyPlanPOs, viewTicketDetail,
+    verifyBuyPlanPOs, verifyPOV3, verifySOV3, viewTicketDetail,
     openSuggestedContacts,
     // HTML template inline handlers
     addSelectedSuggestedContacts, addSite, bulkApproveSelected,
@@ -7749,7 +7957,7 @@ Object.assign(window, {
     openNewCompanyModal, renderBuyPlansList, saveEditCompany,
     saveLogCall, saveLogNote, saveSiteContact, searchSuggestedContacts,
     sendProactiveOffer, setBpFilter, startBackfill, startEmailBackfill,
-    startWebsiteScrape, submitBuyPlan, submitBuyPlanV3, submitLost, swapLineOfferV3, switchEnrichTab,
+    startWebsiteScrape, submitBuyPlan, submitBuyPlanV3, submitFlagIssueV3, submitLost, swapLineOfferV3, switchEnrichTab,
     switchPerfTab, switchProactiveTab, switchSettingsTab,
     toggleCustUnassigned, updateOffer,
     selectCustomer, renderCustomerDetail, saveCustNotes,
