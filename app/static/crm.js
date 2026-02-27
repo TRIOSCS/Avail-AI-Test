@@ -1948,7 +1948,7 @@ async function loadQuote() {
         if (currentReqId !== reqId) return;
         renderQuote();
         updateQuoteTabBadge();
-        if (crmQuote && crmQuote.status === 'won') loadBuyPlan();
+        if (crmQuote && crmQuote.status === 'won') loadBuyPlanV3();
     } catch (e) { console.error('loadQuote:', e); crmQuote = null; renderQuote(); }
 }
 
@@ -2984,18 +2984,15 @@ async function submitBuyPlanV3() {
     const soNum = (document.getElementById('bpV3SO')?.value || '').trim();
     if (!soNum) { showToast('Acctivate SO# is required', 'error'); document.getElementById('bpV3SO')?.focus(); return; }
 
-    // Collect line edits (quantities the salesperson may have changed)
+    // Collect line edits (quantity changes + vendor swaps)
     const lineEdits = [];
-    document.querySelectorAll('.bpv3-qty').forEach(input => {
-        const lineId = parseInt(input.dataset.lineId);
-        const line = (_currentBuyPlanV3.lines || []).find(l => l.id === lineId);
-        if (line) {
-            const newQty = parseInt(input.value) || line.quantity;
-            if (newQty !== line.quantity) {
-                lineEdits.push({ requirement_id: line.requirement_id, offer_id: line.offer_id, quantity: newQty });
-            }
+    for (const line of (_currentBuyPlanV3.lines || [])) {
+        const qtyInput = document.querySelector('.bpv3-qty[data-line-id="' + line.id + '"]');
+        const newQty = qtyInput ? (parseInt(qtyInput.value) || line.quantity) : line.quantity;
+        if (line._swapped || newQty !== line.quantity) {
+            lineEdits.push({ requirement_id: line.requirement_id, offer_id: line.offer_id, quantity: newQty });
         }
-    });
+    }
 
     const custPO = (document.getElementById('bpV3CustPO')?.value || '').trim() || null;
     const notes = (document.getElementById('bpV3Notes')?.value || '').trim() || null;
@@ -7633,10 +7630,10 @@ Object.assign(window, {
     copyQuoteTable, deleteAIContact, deleteAdminUser, deleteCredential,
     deleteOffer, deleteOfferAttachment, deleteSiteContact,
     dismissProactiveGroup, editCredential,
-    eqToggleAll, eqToggleItem, loadBuyPlans, loadBuyerLeaderboard, toggleBpMyOnly,
+    eqToggleAll, eqToggleItem, loadBuyPlans, loadBuyPlanV3, loadBuyerLeaderboard, toggleBpMyOnly,
     loadQuote, loadSpecificQuote, loadSalespersonScorecard,
     loadTroubleTickets, markQuoteResult, onSourcesSearch,
-    openAddSiteContact, openAddSiteModal, openBuyPlanDetail,
+    openAddSiteContact, openAddSiteModal, openBuyPlanDetail, openOfferComparisonV3,
     openEditCompany, openEditOffer, openEditSiteContact,
     openEditSiteModal, openLogNoteModal, openLostModal,
     openOfferGallery, openPricingHistory, openProactiveSendModal,
@@ -7663,7 +7660,7 @@ Object.assign(window, {
     openNewCompanyModal, renderBuyPlansList, saveEditCompany,
     saveLogCall, saveLogNote, saveSiteContact, searchSuggestedContacts,
     sendProactiveOffer, setBpFilter, startBackfill, startEmailBackfill,
-    startWebsiteScrape, submitBuyPlan, submitLost, switchEnrichTab,
+    startWebsiteScrape, submitBuyPlan, submitBuyPlanV3, submitLost, swapLineOfferV3, switchEnrichTab,
     switchPerfTab, switchProactiveTab, switchSettingsTab,
     toggleCustUnassigned, updateOffer,
     selectCustomer, renderCustomerDetail, saveCustNotes,

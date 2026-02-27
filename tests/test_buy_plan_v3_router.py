@@ -186,6 +186,18 @@ class TestGetListEndpoints:
         r2 = c.get("/api/buy-plans-v3?status=completed")
         assert r2.json()["count"] == 0
 
+    def test_list_filter_quote_id(
+        self, db_session: Session, test_quote: Quote, test_user: User
+    ):
+        _make_draft_plan(db_session, test_quote, test_user)
+        c = _make_client(db_session, test_user)
+        r = c.get(f"/api/buy-plans-v3?quote_id={test_quote.id}")
+        assert r.status_code == 200
+        assert r.json()["count"] >= 1
+
+        r2 = c.get("/api/buy-plans-v3?quote_id=99999")
+        assert r2.json()["count"] == 0
+
 
 # ── Submit ───────────────────────────────────────────────────────────
 

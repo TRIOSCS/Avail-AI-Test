@@ -287,6 +287,7 @@ async def list_buy_plans_v3(
     status: str | None = Query(None),
     so_status: str | None = Query(None),
     buyer_id: int | None = Query(None),
+    quote_id: int | None = Query(None),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -306,6 +307,8 @@ async def list_buy_plans_v3(
         q = q.filter(BuyPlanV3.so_status == so_status)
     if buyer_id:
         q = q.join(BuyPlanLine).filter(BuyPlanLine.buyer_id == buyer_id)
+    if quote_id:
+        q = q.filter(BuyPlanV3.quote_id == quote_id)
 
     # Sales users see only their own plans
     if user.role == "sales":
