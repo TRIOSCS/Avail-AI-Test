@@ -4086,15 +4086,15 @@ function ddOnContactSelect(reqId) {
     const form = document.getElementById('ddNewContactForm-' + reqId);
     if (val === '__add_new__') {
         if (form) form.style.display = 'block';
-        document.getElementById('ddSendEmail-' + reqId).value = '';
-        document.getElementById('ddSendName-' + reqId).value = '';
+        const emailEl = document.getElementById('ddSendEmail-' + reqId); if (emailEl) emailEl.value = '';
+        const nameEl = document.getElementById('ddSendName-' + reqId); if (nameEl) nameEl.value = '';
         document.getElementById('ddNewEmail-' + reqId)?.focus();
         return;
     }
     if (form) form.style.display = 'none';
     const opt = sel.options[sel.selectedIndex];
-    document.getElementById('ddSendEmail-' + reqId).value = opt.value;
-    document.getElementById('ddSendName-' + reqId).value = opt.dataset.name || '';
+    const emailEl2 = document.getElementById('ddSendEmail-' + reqId); if (emailEl2) emailEl2.value = opt.value;
+    const nameEl2 = document.getElementById('ddSendName-' + reqId); if (nameEl2) nameEl2.value = opt.dataset.name || '';
     ddRefreshPreview(reqId);
 }
 
@@ -4124,9 +4124,9 @@ async function ddAddNewContact(reqId) {
             sel.insertBefore(opt, sel.querySelector('option[value="__add_new__"]'));
             sel.value = email;
         }
-        document.getElementById('ddSendEmail-' + reqId).value = email;
-        document.getElementById('ddSendName-' + reqId).value = name;
-        document.getElementById('ddNewContactForm-' + reqId).style.display = 'none';
+        const seEl = document.getElementById('ddSendEmail-' + reqId); if (seEl) seEl.value = email;
+        const snEl = document.getElementById('ddSendName-' + reqId); if (snEl) snEl.value = name;
+        const ncfEl = document.getElementById('ddNewContactForm-' + reqId); if (ncfEl) ncfEl.style.display = 'none';
         // Also update the cached quote data
         if (!q.site_contacts) q.site_contacts = [];
         q.site_contacts.push({ email, full_name: name, title, is_primary: true });
@@ -4162,7 +4162,7 @@ async function ddEnrichNewContact(reqId, email, name) {
                 });
                 // Update name in the send modal if enrichment found a better name
                 if (match.full_name && !name) {
-                    document.getElementById('ddSendName-' + reqId).value = match.full_name;
+                    const snEl = document.getElementById('ddSendName-' + reqId); if (snEl) snEl.value = match.full_name;
                     const sel = document.getElementById('ddSendContact-' + reqId);
                     if (sel) {
                         for (const opt of sel.options) {
@@ -4214,11 +4214,10 @@ function ddPickEnrichedContact(reqId, el) {
     const name = el.dataset.name;
     const title = el.dataset.title;
     const phone = el.dataset.phone;
-    document.getElementById('ddNewEmail-' + reqId).value = email;
-    document.getElementById('ddNewName-' + reqId).value = name;
-    document.getElementById('ddNewTitle-' + reqId).value = title;
-    document.getElementById('ddNewPhone-' + reqId).value = phone;
-    document.getElementById('ddEnrichResults-' + reqId).style.display = 'none';
+    const _s = (id, v) => { const e = document.getElementById(id); if (e) e.value = v; };
+    _s('ddNewEmail-' + reqId, email); _s('ddNewName-' + reqId, name);
+    _s('ddNewTitle-' + reqId, title); _s('ddNewPhone-' + reqId, phone);
+    const erEl = document.getElementById('ddEnrichResults-' + reqId); if (erEl) erEl.style.display = 'none';
 }
 
 function ddRefreshPreview(reqId) {
@@ -5098,12 +5097,13 @@ function ddUploadFile(rfqId) {
 
 // ── Bulk Paste from Spreadsheet ──────────────────────────────────────────
 function ddPasteRows(rfqId) {
-    document.getElementById('pasteTargetRfqId').value = rfqId;
-    document.getElementById('pasteTsvInput').value = '';
-    document.getElementById('pastePreview').textContent = '';
-    document.getElementById('pasteSubmitBtn').disabled = true;
-    document.getElementById('pastePartsModal').classList.add('open');
-    setTimeout(() => document.getElementById('pasteTsvInput').focus(), 100);
+    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _s('pasteTargetRfqId', 'value', rfqId);
+    _s('pasteTsvInput', 'value', '');
+    _s('pastePreview', 'textContent', '');
+    _s('pasteSubmitBtn', 'disabled', true);
+    document.getElementById('pastePartsModal')?.classList.add('open');
+    setTimeout(() => document.getElementById('pasteTsvInput')?.focus(), 100);
 }
 
 function _parseTsvInput(text) {
@@ -5159,10 +5159,11 @@ function _parseTsvInput(text) {
 }
 
 function _previewPaste() {
-    const text = document.getElementById('pasteTsvInput').value;
+    const text = document.getElementById('pasteTsvInput')?.value || '';
     const parts = _parseTsvInput(text);
     const preview = document.getElementById('pastePreview');
     const btn = document.getElementById('pasteSubmitBtn');
+    if (!preview || !btn) return;
     if (parts.length === 0) {
         preview.textContent = 'No parts detected';
         btn.disabled = true;
@@ -5175,8 +5176,8 @@ function _previewPaste() {
 }
 
 async function submitPastedRows() {
-    const rfqId = parseInt(document.getElementById('pasteTargetRfqId').value);
-    const text = document.getElementById('pasteTsvInput').value;
+    const rfqId = parseInt(document.getElementById('pasteTargetRfqId')?.value);
+    const text = document.getElementById('pasteTsvInput')?.value || '';
     const parts = _parseTsvInput(text);
     if (!parts.length || !rfqId) return;
 
@@ -5827,32 +5828,33 @@ function _loRenderSuggestions(vendors) {
 document.addEventListener('DOMContentLoaded', _initLoVendorAutocomplete);
 
 async function submitLogOffer() {
-    const reqId = parseInt(document.getElementById('loReqId').value);
+    const _v = id => document.getElementById(id)?.value || '';
+    const reqId = parseInt(_v('loReqId'));
     const partSel = document.getElementById('loReqPart');
-    const reqPartId = partSel.value ? parseInt(partSel.value) : null;
-    const mpn = partSel.selectedOptions[0]?.dataset?.mpn || partSel.selectedOptions[0]?.textContent || '';
-    const vendor = document.getElementById('loVendor').value.trim();
+    const reqPartId = partSel?.value ? parseInt(partSel.value) : null;
+    const mpn = partSel?.selectedOptions[0]?.dataset?.mpn || partSel?.selectedOptions[0]?.textContent || '';
+    const vendor = _v('loVendor').trim();
     if (!vendor) { showToast('Vendor name is required', 'error'); return; }
     if (!mpn) { showToast('Select a part', 'error'); return; }
     const btn = document.getElementById('loSubmitBtn');
-    btn.disabled = true; btn.textContent = 'Saving\u2026';
+    if (btn) { btn.disabled = true; btn.textContent = 'Saving\u2026'; }
     try {
         const body = {
             mpn: mpn,
             vendor_name: vendor,
             vendor_card_id: _loVendorCardId || null,
             requirement_id: reqPartId,
-            qty_available: parseInt(document.getElementById('loQty').value) || null,
-            unit_price: parseFloat(document.getElementById('loPrice').value) || null,
-            lead_time: document.getElementById('loLead').value.trim() || null,
-            moq: parseInt(document.getElementById('loMoq').value) || null,
-            condition: document.getElementById('loCond').value || 'new',
-            date_code: document.getElementById('loDc').value.trim() || null,
-            packaging: document.getElementById('loPkg').value.trim() || null,
-            manufacturer: document.getElementById('loMfr').value.trim() || null,
-            warranty: document.getElementById('loWarranty').value.trim() || null,
-            country_of_origin: document.getElementById('loCOO').value.trim() || null,
-            notes: document.getElementById('loNotes').value.trim() || null,
+            qty_available: parseInt(_v('loQty')) || null,
+            unit_price: parseFloat(_v('loPrice')) || null,
+            lead_time: _v('loLead').trim() || null,
+            moq: parseInt(_v('loMoq')) || null,
+            condition: _v('loCond') || 'new',
+            date_code: _v('loDc').trim() || null,
+            packaging: _v('loPkg').trim() || null,
+            manufacturer: _v('loMfr').trim() || null,
+            warranty: _v('loWarranty').trim() || null,
+            country_of_origin: _v('loCOO').trim() || null,
+            notes: _v('loNotes').trim() || null,
             source: 'manual',
             status: 'active',
         };
@@ -6964,7 +6966,7 @@ async function loadFollowUpsPanel() {
 }
 
 async function createRequisition() {
-    const name = document.getElementById('nrName').value.trim();
+    const name = document.getElementById('nrName')?.value?.trim() || '';
     if (!name) { showToast('Please enter a requisition name', 'error'); return; }
     const siteId = document.getElementById('nrSiteId')?.value || null;
     if (!siteId) { showToast('Please select a customer account', 'error'); return; }
@@ -6976,24 +6978,22 @@ async function createRequisition() {
             method: 'POST', body: { name, customer_site_id: parseInt(siteId), deadline }
         });
         closeModal('newReqModal');
-        document.getElementById('nrName').value = '';
-        document.getElementById('nrSiteSearch').value = '';
-        document.getElementById('nrSiteId').value = '';
-        document.getElementById('nrDeadline').value = '';
-        document.getElementById('nrAsap').checked = false;
-        document.getElementById('nrSiteSelected').style.display = 'none';
-        document.getElementById('nrContactField').style.display = 'none';
+        const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+        _s('nrName', 'value', ''); _s('nrSiteSearch', 'value', ''); _s('nrSiteId', 'value', '');
+        _s('nrDeadline', 'value', ''); _s('nrAsap', 'checked', false);
+        const nrSS = document.getElementById('nrSiteSelected'); if (nrSS) nrSS.style.display = 'none';
+        const nrCF = document.getElementById('nrContactField'); if (nrCF) nrCF.style.display = 'none';
         await loadRequisitions();
         toggleDrillDown(data.id);
     } catch (e) { showToast('Failed to create requisition', 'error'); }
 }
 
 function clearNrSite() {
-    document.getElementById('nrSiteId').value = '';
-    document.getElementById('nrSiteSearch').value = '';
-    document.getElementById('nrSiteSearch').style.display = '';
-    document.getElementById('nrSiteSelected').style.display = 'none';
-    document.getElementById('nrContactField').style.display = 'none';
+    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _s('nrSiteId', 'value', ''); _s('nrSiteSearch', 'value', '');
+    const ss = document.getElementById('nrSiteSearch'); if (ss) ss.style.display = '';
+    const sel = document.getElementById('nrSiteSelected'); if (sel) sel.style.display = 'none';
+    const cf = document.getElementById('nrContactField'); if (cf) cf.style.display = 'none';
 }
 
 async function toggleArchive(id) {
@@ -7252,28 +7252,29 @@ async function deleteReq(id) {
 
 
 function showFileReady(inputId, readyId, nameId) {
-    const file = document.getElementById(inputId).files[0];
+    const inputEl = document.getElementById(inputId);
+    const file = inputEl?.files?.[0];
     const readyEl = document.getElementById(readyId);
     const nameEl = document.getElementById(nameId);
     if (file) {
-        nameEl.textContent = file.name;
-        readyEl.style.display = '';
+        if (nameEl) nameEl.textContent = file.name;
+        if (readyEl) readyEl.style.display = '';
     } else {
-        readyEl.style.display = 'none';
+        if (readyEl) readyEl.style.display = 'none';
     }
 }
 
 function clearFileInput(inputId, readyId) {
-    document.getElementById(inputId).value = '';
-    document.getElementById(readyId).style.display = 'none';
+    const inputEl = document.getElementById(inputId); if (inputEl) inputEl.value = '';
+    const readyEl = document.getElementById(readyId); if (readyEl) readyEl.style.display = 'none';
 }
 
 async function doUpload() {
-    const file = document.getElementById('fileInput').files[0];
+    const file = document.getElementById('fileInput')?.files?.[0];
     if (!file || !currentReqId) return;
     const st = document.getElementById('uploadStatus');
-    st.className = 'ustatus load'; st.textContent = 'Uploading…'; st.style.display = 'block';
-    document.getElementById('uploadReady').style.display = 'none';
+    if (st) { st.className = 'ustatus load'; st.textContent = 'Uploading…'; st.style.display = 'block'; }
+    const ur = document.getElementById('uploadReady'); if (ur) ur.style.display = 'none';
     const fd = new FormData(); fd.append('file', file);
     try {
         const data = await apiFetch(`/api/requisitions/${currentReqId}/upload`, { method: 'POST', body: fd });
@@ -7283,7 +7284,7 @@ async function doUpload() {
     } catch (e) {
         st.className = 'ustatus err'; st.textContent = 'Upload error: ' + e.message;
     }
-    document.getElementById('fileInput').value = '';
+    const fi = document.getElementById('fileInput'); if (fi) fi.value = '';
 }
 
 // ── Search ──────────────────────────────────────────────────────────────
@@ -7800,8 +7801,8 @@ async function openBatchRfqModal(prebuiltGroups) {
     if (!groups.length) return;
 
     const modal = document.getElementById('rfqModal');
-    document.getElementById('rfqPrepare').style.display = '';
-    document.getElementById('rfqReady').style.display = 'none';
+    const rfqPrep = document.getElementById('rfqPrepare'); if (rfqPrep) rfqPrep.style.display = '';
+    const rfqRdy = document.getElementById('rfqReady'); if (rfqRdy) rfqRdy.style.display = 'none';
     rfqCondition = 'any';
     document.querySelectorAll('.rfq-cond-btn').forEach((b,i) => {
         b.classList.toggle('active', i === 0);
@@ -7853,7 +7854,8 @@ async function openBatchRfqModal(prebuiltGroups) {
         // Prevent backdrop click from closing modal during lookup
         modal.dataset.loading = '1';
         try {
-            document.getElementById('rfqPrepareStatus').textContent = `Finding contacts for ${needsLookup.length} vendor(s)…`;
+            const rfqStatus = document.getElementById('rfqPrepareStatus');
+            if (rfqStatus) rfqStatus.textContent = `Finding contacts for ${needsLookup.length} vendor(s)…`;
             needsLookup.forEach(v => { v.lookup_status = 'loading'; });
             _renderRfqPrepareProgress();
             // Look up all vendors in parallel instead of one-at-a-time
@@ -7875,7 +7877,7 @@ async function openBatchRfqModal(prebuiltGroups) {
                     v.lookup_status = 'no_email';
                 }
                 done++;
-                document.getElementById('rfqPrepareStatus').textContent = `Finding contacts… ${done}/${needsLookup.length} done`;
+                const st = document.getElementById('rfqPrepareStatus'); if (st) st.textContent = `Finding contacts… ${done}/${needsLookup.length} done`;
                 _renderRfqPrepareProgress();
             }));
         } finally {
@@ -7883,8 +7885,8 @@ async function openBatchRfqModal(prebuiltGroups) {
         }
     }
 
-    document.getElementById('rfqPrepare').style.display = 'none';
-    document.getElementById('rfqReady').style.display = '';
+    const prep2 = document.getElementById('rfqPrepare'); if (prep2) prep2.style.display = 'none';
+    const rdy2 = document.getElementById('rfqReady'); if (rdy2) rdy2.style.display = '';
     renderRfqVendors();
     renderRfqMessage();
 }
@@ -7974,7 +7976,7 @@ function renderRfqVendors() {
     let summary = `${ready} of ${rfqVendorData.length} vendors ready to send`;
     if (excluded > 0) summary += ` · ${excluded} unchecked`;
     if (exhausted > 0) summary += ` · ${exhausted} skipped (already contacted)`;
-    document.getElementById('rfqSummary').textContent = summary;
+    const rfqSum = document.getElementById('rfqSummary'); if (rfqSum) rfqSum.textContent = summary;
 }
 
 function _vendorHasPartsToSend(v) {
@@ -8065,14 +8067,16 @@ function renderRfqMessage() {
     // Subject uses all unique parts across all vendors being sent
     const allParts = [...new Set(rfqAllParts)];
     const condTag = rfqCondition !== 'any' ? ` [${rfqCondition.toUpperCase()}]` : '';
-    document.getElementById('rfqSubject').value = `RFQ: ${allParts.slice(0, 5).join(', ')}${allParts.length > 5 ? '…' : ''}${condTag} — ${currentReqName}`;
+    const rfqSubj = document.getElementById('rfqSubject');
+    if (rfqSubj) rfqSubj.value = `RFQ: ${allParts.slice(0, 5).join(', ')}${allParts.length > 5 ? '…' : ''}${condTag} — ${currentReqName}`;
 
     // Preview body shows a sample for the first vendor with parts to send
+    const rfqBod = document.getElementById('rfqBody');
     const sample = rfqVendorData.find(v => _vendorHasPartsToSend(v));
     if (sample) {
-        document.getElementById('rfqBody').value = buildVendorBody(sample) || '';
+        if (rfqBod) rfqBod.value = buildVendorBody(sample) || '';
     } else {
-        document.getElementById('rfqBody').value = '(No vendors with new parts to send)';
+        if (rfqBod) rfqBod.value = '(No vendors with new parts to send)';
     }
     // Show AI Draft button for admins
     const aiWrap = document.getElementById('aiDraftWrap');
@@ -8122,12 +8126,12 @@ function rfqRemoveVendor(idx) {
 async function sendBatchRfq() {
     const btn = document.getElementById('rfqSendBtn');
     await guardBtn(btn, 'Sending…', async () => {
-        const subject = document.getElementById('rfqSubject').value;
+        const subject = document.getElementById('rfqSubject')?.value || '';
         // Build per-vendor payloads with personalized body
         const sendable = rfqVendorData.filter(g => g.included && g.selected_email && _vendorHasPartsToSend(g));
         if (!sendable.length) { showToast('No vendors with email and new parts to send', 'error'); return; }
         const payload = sendable.map(g => {
-            const body = document.getElementById('rfqBody').value;
+            const body = document.getElementById('rfqBody')?.value || '';
             // All parts being sent (for contact tracking)
             let sentParts = [...g.new_listing, ...g.new_other];
             if (g.include_repeats) sentParts = [...sentParts, ...g.repeat_listing, ...g.repeat_other];
@@ -8502,7 +8506,7 @@ async function deleteVendor(cardId, name) {
     try {
         await apiFetch(`/api/vendors/${cardId}`, { method: 'DELETE' });
         showToast('Vendor deleted', 'success');
-        document.getElementById('vendorPopup').classList.remove('open');
+        document.getElementById('vendorPopup')?.classList.remove('open');
         if (typeof loadVendorList === 'function') loadVendorList();
     } catch (e) { showToast('Failed to delete vendor: ' + e.message, 'error'); }
 }
@@ -8517,7 +8521,7 @@ function vpSetRating(n) {
 
 async function vpSubmitReview(cardId) {
     if (vpRating === 0) { showToast('Please select a rating', 'error'); return; }
-    const comment = document.getElementById('vpComment').value.trim();
+    const comment = document.getElementById('vpComment')?.value?.trim() || '';
     try {
         await apiFetch(`/api/vendors/${cardId}/reviews`, { method: 'POST', body: { rating: vpRating, comment } });
         vpRating = 0; openVendorPopup(cardId);
@@ -8623,7 +8627,7 @@ async function openContactTimeline(cardId, contactId, contactName) {
                 </div>
             </div>`;
         }).join('') + '</div>';
-    } catch(e) { document.getElementById('contactTimelineContent').innerHTML = '<p class="vp-muted">Error loading timeline</p>'; }
+    } catch(e) { const ctc = document.getElementById('contactTimelineContent'); if (ctc) ctc.innerHTML = '<p class="vp-muted">Error loading timeline</p>'; }
 }
 
 async function loadContactNudges(cardId) {
@@ -8649,11 +8653,11 @@ async function loadContactNudges(cardId) {
 }
 
 function openAddVendorContact(cardId) {
-    document.getElementById('vcCardId').value = cardId;
-    document.getElementById('vcContactId').value = '';
-    document.getElementById('vendorContactModalTitle').textContent = 'Add Vendor Contact';
-    ['vcFullName','vcTitle','vcEmail','vcPhone','vcLabel'].forEach(id => document.getElementById(id).value = '');
-    document.getElementById('vcLabel').value = 'Sales';
+    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _s('vcCardId', 'value', cardId); _s('vcContactId', 'value', '');
+    _s('vendorContactModalTitle', 'textContent', 'Add Vendor Contact');
+    ['vcFullName','vcTitle','vcEmail','vcPhone','vcLabel'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    _s('vcLabel', 'value', 'Sales');
     openModal('vendorContactModal', 'vcEmail');
 }
 
@@ -8662,27 +8666,26 @@ async function openEditVendorContact(cardId, contactId) {
         const contacts = await apiFetch('/api/vendors/' + cardId + '/contacts');
         const c = contacts.find(x => x.id === contactId);
         if (!c) { showToast('Contact not found', 'error'); return; }
-        document.getElementById('vcCardId').value = cardId;
-        document.getElementById('vcContactId').value = contactId;
-        document.getElementById('vendorContactModalTitle').textContent = 'Edit Vendor Contact';
-        document.getElementById('vcFullName').value = c.full_name || '';
-        document.getElementById('vcTitle').value = c.title || '';
-        document.getElementById('vcEmail').value = c.email || '';
-        document.getElementById('vcPhone').value = c.phone || '';
-        document.getElementById('vcLabel').value = c.label || '';
+        const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+        _s('vcCardId', 'value', cardId); _s('vcContactId', 'value', contactId);
+        _s('vendorContactModalTitle', 'textContent', 'Edit Vendor Contact');
+        _s('vcFullName', 'value', c.full_name || ''); _s('vcTitle', 'value', c.title || '');
+        _s('vcEmail', 'value', c.email || ''); _s('vcPhone', 'value', c.phone || '');
+        _s('vcLabel', 'value', c.label || '');
         openModal('vendorContactModal', 'vcFullName');
     } catch(e) { logCatchError('openEditVendorContact', e); showToast('Error loading contact', 'error'); }
 }
 
 async function saveVendorContact() {
-    const cardId = document.getElementById('vcCardId').value;
-    const contactId = document.getElementById('vcContactId').value;
+    const _v = id => document.getElementById(id)?.value || '';
+    const cardId = _v('vcCardId');
+    const contactId = _v('vcContactId');
     const body = {
-        full_name: document.getElementById('vcFullName').value.trim() || null,
-        title: document.getElementById('vcTitle').value.trim() || null,
-        email: document.getElementById('vcEmail').value.trim(),
-        phone: document.getElementById('vcPhone').value.trim() || null,
-        label: document.getElementById('vcLabel').value.trim() || 'Sales',
+        full_name: _v('vcFullName').trim() || null,
+        title: _v('vcTitle').trim() || null,
+        email: _v('vcEmail').trim(),
+        phone: _v('vcPhone').trim() || null,
+        label: _v('vcLabel').trim() || 'Sales',
     };
     if (!body.email) { showToast('Email is required', 'error'); return; }
     try {
@@ -8791,14 +8794,15 @@ function placeVendorCall(cardId, vendorName, reqId, phone) {
 }
 
 async function saveVendorLogCall() {
-    const cardId = document.getElementById('vlcCardId').value;
-    const dur = parseInt(document.getElementById('vlcDuration').value);
+    const _v = id => document.getElementById(id)?.value || '';
+    const cardId = _v('vlcCardId');
+    const dur = parseInt(_v('vlcDuration'));
     const data = {
-        phone: document.getElementById('vlcPhone').value.trim() || null,
-        contact_name: document.getElementById('vlcContactName').value.trim() || null,
-        direction: document.getElementById('vlcDirection').value,
+        phone: _v('vlcPhone').trim() || null,
+        contact_name: _v('vlcContactName').trim() || null,
+        direction: _v('vlcDirection'),
         duration_seconds: isNaN(dur) ? null : dur,
-        notes: document.getElementById('vlcNotes').value.trim() || null,
+        notes: _v('vlcNotes').trim() || null,
     };
     if (window._vlcReqId) data.requisition_id = window._vlcReqId;
     try {
@@ -8815,19 +8819,20 @@ async function saveVendorLogCall() {
 }
 
 function openVendorLogNoteModal(cardId, vendorName, reqId) {
-    document.getElementById('vlnCardId').value = cardId;
-    document.getElementById('vlnVendorName').textContent = vendorName;
-    ['vlnContactName','vlnNotes'].forEach(id => document.getElementById(id).value = '');
+    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _s('vlnCardId', 'value', cardId); _s('vlnVendorName', 'textContent', vendorName);
+    ['vlnContactName','vlnNotes'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     window._vlnReqId = reqId || null;
     openModal('vendorLogNoteModal', 'vlnNotes');
 }
 
 async function saveVendorLogNote() {
-    const cardId = document.getElementById('vlnCardId').value;
-    const notes = document.getElementById('vlnNotes').value.trim();
+    const _v = id => document.getElementById(id)?.value || '';
+    const cardId = _v('vlnCardId');
+    const notes = _v('vlnNotes').trim();
     if (!notes) { showToast('Note text is required', 'error'); return; }
     const data = {
-        contact_name: document.getElementById('vlnContactName').value.trim() || null,
+        contact_name: _v('vlnContactName').trim() || null,
         notes: notes,
     };
     if (window._vlnReqId) data.requisition_id = window._vlnReqId;
@@ -9567,7 +9572,7 @@ async function openMaterialPopup(cardId) {
     }
     html += '</div>';
 
-    document.getElementById('materialPopupContent').innerHTML = html;
+    const mpc = document.getElementById('materialPopupContent'); if (mpc) mpc.innerHTML = html;
     openModal('materialPopup');
 }
 
@@ -9617,7 +9622,7 @@ async function deleteMaterial(cardId, mpn) {
     try {
         await apiFetch(`/api/materials/${cardId}`, { method: 'DELETE' });
         showToast('Material deleted', 'success');
-        document.getElementById('materialPopup').classList.remove('open');
+        document.getElementById('materialPopup')?.classList.remove('open');
         if (typeof loadMaterialList === 'function') loadMaterialList();
     } catch (e) { showToast('Failed to delete material: ' + e.message, 'error'); }
 }
@@ -9677,10 +9682,9 @@ function renderActivityCards() {
     }
 
     // Show compact summary — only non-zero stats
-    document.getElementById('actStatSent').textContent = summary.sent || 0;
-    document.getElementById('actStatReplied').textContent = summary.replied || 0;
-    document.getElementById('actStatOpened').textContent = summary.opened || 0;
-    document.getElementById('actStatAwaiting').textContent = summary.awaiting || 0;
+    const _s = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    _s('actStatSent', summary.sent || 0); _s('actStatReplied', summary.replied || 0);
+    _s('actStatOpened', summary.opened || 0); _s('actStatAwaiting', summary.awaiting || 0);
     summaryEl.style.display = 'flex';
     // Hide zero-count stat cards
     summaryEl.querySelectorAll('.act-stat').forEach(function(card) {
@@ -10018,11 +10022,11 @@ async function viewThread(vendorName) {
         m.addEventListener('click', e => { if (e.target === m) closeModal('threadModal'); });
         document.body.appendChild(m);
     }
-    document.getElementById('threadTitle').textContent = `Thread: ${vendorName}`;
-    document.getElementById('threadContent').innerHTML = html;
-    document.getElementById('threadSearch').value = '';
-    document.getElementById('threadModal').classList.add('open');
-    document.getElementById('threadSearch').focus();
+    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _s('threadTitle', 'textContent', `Thread: ${vendorName}`);
+    _s('threadContent', 'innerHTML', html); _s('threadSearch', 'value', '');
+    document.getElementById('threadModal')?.classList.add('open');
+    document.getElementById('threadSearch')?.focus();
 }
 
 
@@ -10065,9 +10069,10 @@ function openSentEmailsModal() {
             </div>`;
         }
     }
-    document.getElementById('emailListTitle').textContent = `Sent Emails (${allSent.length})`;
-    document.getElementById('emailListContent').innerHTML = html;
-    document.getElementById('emailListModal').classList.add('open');
+    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _s('emailListTitle', 'textContent', `Sent Emails (${allSent.length})`);
+    _s('emailListContent', 'innerHTML', html);
+    document.getElementById('emailListModal')?.classList.add('open');
 }
 
 function openRepliedEmailsModal() {
@@ -10113,9 +10118,10 @@ function openRepliedEmailsModal() {
             </div>`;
         }
     }
-    document.getElementById('emailListTitle').textContent = `Replies Received (${allReplies.length})`;
-    document.getElementById('emailListContent').innerHTML = html;
-    document.getElementById('emailListModal').classList.add('open');
+    const _sr = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _sr('emailListTitle', 'textContent', `Replies Received (${allReplies.length})`);
+    _sr('emailListContent', 'innerHTML', html);
+    document.getElementById('emailListModal')?.classList.add('open');
 }
 
 // ── Stock List Import ────────────────────────────────────────────────────
@@ -10139,7 +10145,7 @@ async function doStockImport() {
     }
 
     statusEl.className = 'ustatus load'; statusEl.textContent = 'Importing...'; statusEl.style.display = 'block';
-    document.getElementById('stockFileReady').style.display = 'none';
+    const sfr = document.getElementById('stockFileReady'); if (sfr) sfr.style.display = 'none';
 
     try {
         const form = new FormData();
@@ -10469,9 +10475,12 @@ function _notifClickAction(n) {
     // Offer pending review → navigate to RFQ view then open offers tab
     if (n.type === 'offer_pending_review' && n.requisition_id)
         return close + `sidebarNav('reqs',document.getElementById('navReqs'));setTimeout(()=>{toggleDrillDown(${n.requisition_id});setTimeout(()=>_switchDdTab(${n.requisition_id},'offers'),400)},300)`;
-    // Buy plan notifications → open buy plan detail
-    if (n.type && n.type.startsWith('buyplan_') && n.requisition_id)
-        return close + `showBuyPlans();setTimeout(()=>openBuyPlanDetail(${n.requisition_id}),300)`;
+    // Buy plan notifications → open buy plan detail V3
+    if (n.type && n.type.startsWith('buyplan_') && n.buy_plan_id)
+        return close + `showBuyPlans();setTimeout(()=>openBuyPlanDetailV3(${n.buy_plan_id}),300)`;
+    // Quote won/lost → navigate to RFQ view then open quotes tab
+    if ((n.type === 'quote_won' || n.type === 'quote_lost') && n.requisition_id)
+        return close + `sidebarNav('reqs',document.getElementById('navReqs'));setTimeout(()=>{toggleDrillDown(${n.requisition_id});setTimeout(()=>_switchDdTab(${n.requisition_id},'quotes'),400)},300)`;
     // Vendor-related → open vendor popup
     if (n.vendor_card_id)
         return close + `openVendorPopup(${n.vendor_card_id})`;
@@ -10494,25 +10503,52 @@ async function loadNotifications() {
         const header = `<div style="display:flex;justify-content:flex-end;padding:4px 0;border-bottom:1px solid var(--card2)">
             <button onclick="markAllNotifsRead()" style="font-size:11px;color:var(--teal);background:none;border:none;cursor:pointer;padding:2px 6px">Mark all read</button>
         </div>`;
-        el.innerHTML = header + items.map(n => {
-            const color = _notifBadgeColor(n.type);
-            const notesHtml = n.notes ? `<div class="notif-item-notes">${esc(n.notes)}</div>` : '';
-            const hasLink = n.requisition_id || n.company_id || n.vendor_card_id;
-            return `<div class="notif-item" onclick="${_notifClickAction(n)}">
-                <div class="notif-item-body">
-                    <div class="notif-item-top">
-                        <span class="notif-item-badge" style="background:${color}">${_notifLabel(n.type)}</span>
-                        <span class="notif-item-subject">${esc(n.subject || 'Notification')}</span>
-                    </div>
-                    <div class="notif-item-meta">
-                        <span>${esc(n.company_name || '')}</span>
-                        <span>${n.created_at ? fmtDateTime(n.created_at) : ''}</span>
-                    </div>
-                    ${notesHtml}
+        // Group by type with priority ordering
+        const priority = ['buyplan_pending','buyplan_approved','offer_pending_review','quote_won','quote_lost','competitive_quote','proactive_match','buyplan_rejected','buyplan_completed','buyplan_cancelled','ownership_warning'];
+        const groups = {};
+        items.forEach(n => { (groups[n.type] = groups[n.type] || []).push(n); });
+        const sortedTypes = Object.keys(groups).sort((a,b) => {
+            const ai = priority.indexOf(a), bi = priority.indexOf(b);
+            return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+        });
+        let html = header;
+        sortedTypes.forEach((type, gi) => {
+            const group = groups[type];
+            const color = _notifBadgeColor(type);
+            const label = _notifLabel(type);
+            const collapsed = gi > 0;
+            const gid = 'notifGrp_' + type;
+            html += `<div class="notif-group">
+                <div class="notif-group-header" onclick="this.classList.toggle('collapsed');document.getElementById('${gid}').classList.toggle('hidden')" style="display:flex;align-items:center;gap:6px;padding:6px 8px;cursor:pointer;border-bottom:1px solid var(--card2);background:var(--card1)">
+                    <span class="notif-item-badge" style="background:${color}">${label}</span>
+                    <span style="font-size:12px;color:var(--fg2)">${group.length} notification${group.length>1?'s':''}</span>
+                    <span class="notif-group-arrow" style="margin-left:auto;font-size:10px;color:var(--fg3)">${collapsed?'\u25b6':'\u25bc'}</span>
                 </div>
-                ${hasLink ? '<span class="notif-item-arrow">\u203a</span>' : ''}
-            </div>`;
-        }).join('');
+                <div id="${gid}" class="${collapsed ? 'hidden' : ''}">
+            `;
+            group.slice(0, 5).forEach(n => {
+                const notesHtml = n.notes ? `<div class="notif-item-notes">${esc(n.notes)}</div>` : '';
+                const hasLink = n.requisition_id || n.company_id || n.vendor_card_id || n.buy_plan_id;
+                html += `<div class="notif-item" onclick="${_notifClickAction(n)}">
+                    <div class="notif-item-body">
+                        <div class="notif-item-top">
+                            <span class="notif-item-subject">${esc(n.subject || 'Notification')}</span>
+                        </div>
+                        <div class="notif-item-meta">
+                            <span>${esc(n.company_name || '')}</span>
+                            <span>${n.created_at ? fmtDateTime(n.created_at) : ''}</span>
+                        </div>
+                        ${notesHtml}
+                    </div>
+                    ${hasLink ? '<span class="notif-item-arrow">\u203a</span>' : ''}
+                </div>`;
+            });
+            if (group.length > 5) {
+                html += `<div style="padding:4px 8px;font-size:11px;color:var(--fg3)">+ ${group.length - 5} more</div>`;
+            }
+            html += '</div></div>';
+        });
+        el.innerHTML = html;
     } catch { el.innerHTML = '<p class="empty" style="font-size:12px">Failed to load</p>'; }
 }
 
@@ -10531,9 +10567,8 @@ async function loadNotificationBadge() {
     const badge = document.getElementById('notifBadge');
     if (!badge) return;
     try {
-        const data = await apiFetch('/api/sales/notifications');
-        const items = Array.isArray(data) ? data : (data.notifications || []);
-        const count = items.length;
+        const data = await apiFetch('/api/sales/notifications/count');
+        const count = data.count || 0;
         badge.textContent = count;
         badge.style.display = count > 0 ? 'flex' : 'none';
     } catch { badge.style.display = 'none'; }
@@ -10747,8 +10782,8 @@ async function aiDraftRfq(btn) {
             showToast('AI draft failed: ' + e.message, 'error');
             return;
         }
-        if (data.subject) document.getElementById('rfqSubject').value = data.subject;
-        if (data.body) document.getElementById('rfqBody').value = data.body;
+        if (data.subject) { const s = document.getElementById('rfqSubject'); if (s) s.value = data.subject; }
+        if (data.body) { const b = document.getElementById('rfqBody'); if (b) b.value = data.body; }
         showToast('AI draft generated');
     });
 }
@@ -10946,7 +10981,7 @@ function _showAiModal(title, contentHtml) {
         modal.innerHTML = '<div class="modal" style="max-width:700px"><div id="aiModalContent"></div><div class="mactions"><button type="button" class="btn btn-ghost" onclick="closeModal(\'aiModal\')">Close</button></div></div>';
         document.body.appendChild(modal);
     }
-    document.getElementById('aiModalContent').innerHTML = contentHtml;
+    const amc = document.getElementById('aiModalContent'); if (amc) amc.innerHTML = contentHtml;
     openModal('aiModal');
 }
 

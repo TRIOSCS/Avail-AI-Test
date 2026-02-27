@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from ...database import get_db
 from ...dependencies import require_user
-from ...models import CustomerSite, Offer, Quote, Requisition, User
+from ...models import ActivityLog, CustomerSite, Offer, Quote, Requisition, User
 from ...schemas.crm import QuoteCreate, QuoteReopen, QuoteResult, QuoteSendOverride, QuoteUpdate
 from ...schemas.responses import QuoteDetailResponse
 from ._helpers import (
@@ -363,6 +363,24 @@ async def quote_result(
     # CPH hook: record purchase history when quote is won
     if payload.result == "won":
         _record_quote_won_history(db, req, quote)
+
+    # Notify requisition creator about quote outcome
+    notify_user_id = req.created_by if req else None
+    if notify_user_id and payload.result in ("won", "lost"):
+        customer = req.customer_name or (req.name if req else "") or ""
+        if payload.result == "won":
+            subj = f"Quote won: {customer} — ${quote.subtotal or 0:,.0f}"
+        else:
+            subj = f"Quote lost: {customer} — {payload.reason or 'no reason'}"
+        db.add(ActivityLog(
+            user_id=notify_user_id,
+            activity_type=f"quote_{payload.result}",
+            channel="system",
+            requisition_id=req.id if req else None,
+            quote_id=quote.id,
+            contact_name=customer,
+            subject=subj,
+        ))
 
     db.commit()
     return {

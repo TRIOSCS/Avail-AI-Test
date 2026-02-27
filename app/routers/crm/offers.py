@@ -383,16 +383,27 @@ async def create_offer(
                     best_price=float(best_price),
                     requisition_id=req_id,
                 ))
-                # In-app notification for requisition owner
+                # Deduplicated in-app notification for requisition owner
                 if req.created_by:
-                    db.add(ActivityLog(
-                        user_id=req.created_by,
-                        activity_type="competitive_quote",
-                        channel="system",
-                        requisition_id=req_id,
-                        contact_name=offer.vendor_name,
-                        subject=f"Competitive quote: {offer.vendor_name} — {offer.mpn} at ${offer.unit_price} ({pct}% below best)",
-                    ))
+                    existing_notif = db.query(ActivityLog).filter(
+                        ActivityLog.user_id == req.created_by,
+                        ActivityLog.activity_type == "competitive_quote",
+                        ActivityLog.requisition_id == req_id,
+                        ActivityLog.dismissed_at.is_(None),
+                    ).first()
+                    new_subj = f"Competitive quote: {offer.vendor_name} — {offer.mpn} at ${offer.unit_price} ({pct}% below best)"
+                    if existing_notif:
+                        existing_notif.subject = new_subj
+                        existing_notif.created_at = datetime.now(timezone.utc)
+                    else:
+                        db.add(ActivityLog(
+                            user_id=req.created_by,
+                            activity_type="competitive_quote",
+                            channel="system",
+                            requisition_id=req_id,
+                            contact_name=offer.vendor_name,
+                            subject=new_subj,
+                        ))
                     db.commit()
     except Exception:
         logger.debug("Activity event creation failed", exc_info=True)

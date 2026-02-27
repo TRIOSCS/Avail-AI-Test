@@ -1378,13 +1378,14 @@ const debouncedCheckDupCompany = debounce(async (val) => {
 }, 400);
 
 async function createCompany(forceCreate) {
-    const name = document.getElementById('ncName').value.trim();
+    const _v = id => document.getElementById(id)?.value || '';
+    const name = _v('ncName').trim();
     if (!name) return;
     const btn = document.querySelector('#newCompanyModal .btn-primary');
     const body = {
-        name, website: document.getElementById('ncWebsite').value.trim(),
-        linkedin_url: document.getElementById('ncLinkedin').value.trim() || null,
-        industry: document.getElementById('ncIndustry').value.trim(),
+        name, website: _v('ncWebsite').trim(),
+        linkedin_url: _v('ncLinkedin').trim() || null,
+        industry: _v('ncIndustry').trim(),
     };
     const qs = forceCreate ? '?force=true' : '';
     await guardBtn(btn, 'Creating…', async () => {
@@ -1493,9 +1494,9 @@ async function saveEditCompany() {
 }
 
 function openAddSiteModal(companyId, companyName) {
-    document.getElementById('asSiteCompanyId').value = companyId;
-    delete document.getElementById('asSiteCompanyId').dataset.editSiteId;
-    document.getElementById('asSiteCompanyName').textContent = companyName;
+    const cidEl = document.getElementById('asSiteCompanyId');
+    if (cidEl) { cidEl.value = companyId; delete cidEl.dataset.editSiteId; }
+    const cnEl = document.getElementById('asSiteCompanyName'); if (cnEl) cnEl.textContent = companyName;
     document.querySelector('#addSiteModal h2').innerHTML = 'Add Site to <span id="asSiteCompanyName">' + esc(companyName) + '</span>';
     ['asSiteName','asSiteAddr1','asSiteAddr2','asSiteCity','asSiteState','asSiteZip','asSitePayTerms','asSiteShipTerms','asSiteTimezone','asSiteRecvHours','asSiteCarrierAcct'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     const asSiteCountry = document.getElementById('asSiteCountry'); if (asSiteCountry) asSiteCountry.value = 'US';
@@ -1529,7 +1530,7 @@ async function addSite() {
         const editId = document.getElementById('asSiteCompanyId')?.dataset?.editSiteId;
         if (editId) {
             await apiFetch('/api/sites/' + editId, { method: 'PUT', body: data });
-            delete document.getElementById('asSiteCompanyId').dataset.editSiteId;
+            const cidEl = document.getElementById('asSiteCompanyId'); if (cidEl) delete cidEl.dataset.editSiteId;
             showToast('Site updated', 'success');
         } else {
             await apiFetch('/api/companies/' + companyId + '/sites', { method: 'POST', body: data });
@@ -1547,24 +1548,18 @@ async function addSite() {
 async function openEditSiteModal(siteId) {
     try {
         const s = await apiFetch('/api/sites/' + siteId);
-        document.getElementById('asSiteCompanyId').value = s.company_id;
-        document.getElementById('asSiteCompanyId').dataset.editSiteId = siteId;
-        document.getElementById('asSiteCompanyName').textContent = s.company_name || 'Unknown';
-        document.getElementById('asSiteName').value = s.site_name || '';
-        document.getElementById('asSiteOwner').value = s.owner_id || '';
-        document.getElementById('asSiteAddr1').value = s.address_line1 || '';
-        document.getElementById('asSiteAddr2').value = s.address_line2 || '';
-        document.getElementById('asSiteCity').value = s.city || '';
-        document.getElementById('asSiteState').value = s.state || '';
-        document.getElementById('asSiteZip').value = s.zip || '';
-        document.getElementById('asSiteCountry').value = s.country || 'US';
-        document.getElementById('asSitePayTerms').value = s.payment_terms || '';
-        document.getElementById('asSiteShipTerms').value = s.shipping_terms || '';
-        document.getElementById('asSiteType').value = s.site_type || '';
-        document.getElementById('asSiteTimezone').value = s.timezone || '';
-        document.getElementById('asSiteRecvHours').value = s.receiving_hours || '';
-        document.getElementById('asSiteCarrierAcct').value = s.carrier_account || '';
-        document.getElementById('asSiteNotes').value = s.notes || '';
+        const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+        const cidEl = document.getElementById('asSiteCompanyId');
+        if (cidEl) { cidEl.value = s.company_id; cidEl.dataset.editSiteId = siteId; }
+        _s('asSiteCompanyName', 'textContent', s.company_name || 'Unknown');
+        _s('asSiteName', 'value', s.site_name || ''); _s('asSiteOwner', 'value', s.owner_id || '');
+        _s('asSiteAddr1', 'value', s.address_line1 || ''); _s('asSiteAddr2', 'value', s.address_line2 || '');
+        _s('asSiteCity', 'value', s.city || ''); _s('asSiteState', 'value', s.state || '');
+        _s('asSiteZip', 'value', s.zip || ''); _s('asSiteCountry', 'value', s.country || 'US');
+        _s('asSitePayTerms', 'value', s.payment_terms || ''); _s('asSiteShipTerms', 'value', s.shipping_terms || '');
+        _s('asSiteType', 'value', s.site_type || ''); _s('asSiteTimezone', 'value', s.timezone || '');
+        _s('asSiteRecvHours', 'value', s.receiving_hours || ''); _s('asSiteCarrierAcct', 'value', s.carrier_account || '');
+        _s('asSiteNotes', 'value', s.notes || '');
         openModal('addSiteModal');
         document.querySelector('#addSiteModal h2').innerHTML = 'Edit Site — <span>' + esc(s.site_name || '') + '</span>';
     } catch (e) { console.error('openEditSiteModal:', e); showToast('Error loading site', 'error'); }
@@ -1765,10 +1760,12 @@ function openOfferGallery(offerId) {
     function show(i) {
         idx = i;
         const img = images[idx];
-        document.getElementById('galImg').src = img.onedrive_url || '';
-        document.getElementById('galCaption').textContent = img.file_name + ' (' + (idx+1) + '/' + images.length + ')';
-        document.getElementById('galPrev').style.visibility = images.length > 1 ? 'visible' : 'hidden';
-        document.getElementById('galNext').style.visibility = images.length > 1 ? 'visible' : 'hidden';
+        const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+        _s('galImg', 'src', img.onedrive_url || '');
+        _s('galCaption', 'textContent', img.file_name + ' (' + (idx+1) + '/' + images.length + ')');
+        const vis = images.length > 1 ? 'visible' : 'hidden';
+        const gp = document.getElementById('galPrev'); if (gp) gp.style.visibility = vis;
+        const gn = document.getElementById('galNext'); if (gn) gn.style.visibility = vis;
     }
     show(0);
 
@@ -1776,9 +1773,9 @@ function openOfferGallery(offerId) {
         document.removeEventListener('keydown', galKey);
         gal.remove();
     }
-    document.getElementById('galClose').onclick = closeGallery;
-    document.getElementById('galPrev').onclick = (e) => { e.stopPropagation(); show((idx - 1 + images.length) % images.length); };
-    document.getElementById('galNext').onclick = (e) => { e.stopPropagation(); show((idx + 1) % images.length); };
+    const gc = document.getElementById('galClose'); if (gc) gc.onclick = closeGallery;
+    const gp = document.getElementById('galPrev'); if (gp) gp.onclick = (e) => { e.stopPropagation(); show((idx - 1 + images.length) % images.length); };
+    const gn = document.getElementById('galNext'); if (gn) gn.onclick = (e) => { e.stopPropagation(); show((idx + 1) % images.length); };
     gal.onclick = (e) => { if (e.target === gal) closeGallery(); };
     // Keyboard nav
     function galKey(e) {
@@ -1894,41 +1891,36 @@ function openEditOffer(offerId) {
         if (offer) break;
     }
     if (!offer) return;
-    document.getElementById('eoOfferId').value = offerId;
-    document.getElementById('eoVendor').value = offer.vendor_name || '';
-    document.getElementById('eoQty').value = offer.qty_available || '';
-    document.getElementById('eoPrice').value = offer.unit_price || '';
-    document.getElementById('eoLead').value = offer.lead_time || '';
-    document.getElementById('eoCond').value = offer.condition || 'New';
-    document.getElementById('eoDC').value = offer.date_code || '';
-    document.getElementById('eoFirmware').value = offer.firmware || '';
-    document.getElementById('eoHardware').value = offer.hardware_code || '';
-    document.getElementById('eoPackaging').value = offer.packaging || '';
-    document.getElementById('eoMoq').value = offer.moq || '';
-    document.getElementById('eoWarranty').value = offer.warranty || '';
-    document.getElementById('eoCOO').value = offer.country_of_origin || '';
-    document.getElementById('eoNotes').value = offer.notes || '';
-    document.getElementById('eoStatus').value = offer.status || 'active';
+    const _s = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    _s('eoOfferId', offerId); _s('eoVendor', offer.vendor_name || '');
+    _s('eoQty', offer.qty_available || ''); _s('eoPrice', offer.unit_price || '');
+    _s('eoLead', offer.lead_time || ''); _s('eoCond', offer.condition || 'New');
+    _s('eoDC', offer.date_code || ''); _s('eoFirmware', offer.firmware || '');
+    _s('eoHardware', offer.hardware_code || ''); _s('eoPackaging', offer.packaging || '');
+    _s('eoMoq', offer.moq || ''); _s('eoWarranty', offer.warranty || '');
+    _s('eoCOO', offer.country_of_origin || ''); _s('eoNotes', offer.notes || '');
+    _s('eoStatus', offer.status || 'active');
     openModal('editOfferModal');
 }
 
 async function updateOffer() {
-    const offerId = document.getElementById('eoOfferId').value;
+    const _v = id => document.getElementById(id)?.value || '';
+    const offerId = _v('eoOfferId');
     const data = {
-        vendor_name: document.getElementById('eoVendor').value.trim(),
-        qty_available: parseInt(document.getElementById('eoQty').value) || null,
-        unit_price: parseFloat(document.getElementById('eoPrice').value) || null,
-        lead_time: document.getElementById('eoLead').value.trim() || null,
-        condition: document.getElementById('eoCond').value,
-        date_code: document.getElementById('eoDC').value.trim() || null,
-        firmware: document.getElementById('eoFirmware').value.trim() || null,
-        hardware_code: document.getElementById('eoHardware').value.trim() || null,
-        packaging: document.getElementById('eoPackaging').value.trim() || null,
-        moq: parseInt(document.getElementById('eoMoq').value) || null,
-        warranty: document.getElementById('eoWarranty').value.trim() || null,
-        country_of_origin: document.getElementById('eoCOO').value.trim() || null,
-        notes: document.getElementById('eoNotes').value.trim() || null,
-        status: document.getElementById('eoStatus').value,
+        vendor_name: _v('eoVendor').trim(),
+        qty_available: parseInt(_v('eoQty')) || null,
+        unit_price: parseFloat(_v('eoPrice')) || null,
+        lead_time: _v('eoLead').trim() || null,
+        condition: _v('eoCond'),
+        date_code: _v('eoDC').trim() || null,
+        firmware: _v('eoFirmware').trim() || null,
+        hardware_code: _v('eoHardware').trim() || null,
+        packaging: _v('eoPackaging').trim() || null,
+        moq: parseInt(_v('eoMoq')) || null,
+        warranty: _v('eoWarranty').trim() || null,
+        country_of_origin: _v('eoCOO').trim() || null,
+        notes: _v('eoNotes').trim() || null,
+        status: _v('eoStatus'),
     };
     try {
         await apiFetch('/api/offers/' + offerId, { method: 'PUT', body: data });
@@ -2163,10 +2155,10 @@ async function saveQuoteDraft() {
         await apiFetch('/api/quotes/' + crmQuote.id, {
             method: 'PUT', body: {
                 line_items: crmQuote.line_items,
-                payment_terms: document.getElementById('qtTerms').value,
-                shipping_terms: document.getElementById('qtShip').value,
-                validity_days: parseInt(document.getElementById('qtValid').value) || 7,
-                notes: document.getElementById('qtNotes').value,
+                payment_terms: document.getElementById('qtTerms')?.value || '',
+                shipping_terms: document.getElementById('qtShip')?.value || '',
+                validity_days: parseInt(document.getElementById('qtValid')?.value) || 7,
+                notes: document.getElementById('qtNotes')?.value || '',
             }
         });
         showToast('Draft saved', 'success');
@@ -2232,25 +2224,26 @@ function sendQuoteEmail() {
     manOpt.textContent = 'Enter email manually...';
     sel.appendChild(manOpt);
 
-    document.getElementById('sqQuoteNum').textContent = q.quote_number + ' Rev ' + q.revision;
-    document.getElementById('sqManualEmail').value = '';
+    const sqNum = document.getElementById('sqQuoteNum'); if (sqNum) sqNum.textContent = q.quote_number + ' Rev ' + q.revision;
+    const sqMan = document.getElementById('sqManualEmail'); if (sqMan) sqMan.value = '';
     onSqContactChange();
     openModal('sendQuoteModal');
 }
 
 function onSqContactChange() {
     var sel = document.getElementById('sqContactSelect');
+    if (!sel) return;
     var manual = sel.value === '__manual__';
-    document.getElementById('sqManualRow').style.display = manual ? '' : 'none';
-    if (manual) setTimeout(function() { document.getElementById('sqManualEmail').focus(); }, 50);
+    const mr = document.getElementById('sqManualRow'); if (mr) mr.style.display = manual ? '' : 'none';
+    if (manual) setTimeout(function() { document.getElementById('sqManualEmail')?.focus(); }, 50);
 }
 
 async function confirmSendQuote() {
     if (!crmQuote) return;
     var sel = document.getElementById('sqContactSelect');
     var toEmail, toName;
-    if (sel.value === '__manual__') {
-        toEmail = document.getElementById('sqManualEmail').value.trim();
+    if (sel?.value === '__manual__') {
+        toEmail = document.getElementById('sqManualEmail')?.value?.trim() || '';
         toName = '';
         if (!toEmail) { showToast('Enter an email address', 'error'); return; }
     } else {
@@ -2412,7 +2405,7 @@ function updateBpTotals() {
         const totalCell = row.querySelector('.bp-line-total');
         if (totalCell) totalCell.textContent = '$' + lineTotal.toFixed(2);
     });
-    document.getElementById('bpTotal').textContent = '$' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    const bpTot = document.getElementById('bpTotal'); if (bpTot) bpTot.textContent = '$' + total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
 }
 
 async function submitBuyPlan() {
@@ -3621,8 +3614,8 @@ async function submitLost() {
         const lostData = await apiFetch('/api/quotes/' + crmQuote.id + '/result', {
             method: 'POST', body: {
                 result: 'lost',
-                reason: document.getElementById('lostReason').value,
-                notes: document.getElementById('lostNotes').value,
+                reason: document.getElementById('lostReason')?.value || '',
+                notes: document.getElementById('lostNotes')?.value || '',
             }
         });
         closeModal('lostModal');
@@ -3661,12 +3654,13 @@ async function reopenQuote(revise) {
 
 async function openPricingHistory(mpn) {
     openModal('phModal');
-    document.getElementById('phMpn').textContent = mpn;
-    document.getElementById('phContent').innerHTML = '<p class="empty">Loading...</p>';
+    const phMpn = document.getElementById('phMpn'); if (phMpn) phMpn.textContent = mpn;
+    const phContent = document.getElementById('phContent');
+    if (phContent) phContent.innerHTML = '<p class="empty">Loading...</p>';
     try {
         const data = await apiFetch('/api/pricing-history/' + encodeURIComponent(mpn));
         if (!data.history?.length) {
-            document.getElementById('phContent').innerHTML = '<p class="empty">No pricing history for this MPN</p>';
+            if (phContent) phContent.innerHTML = '<p class="empty">No pricing history for this MPN</p>';
             return;
         }
         let html = '<table class="tbl"><thead><tr><th>Date</th><th>Qty</th><th>Sell</th><th>Margin</th><th>Customer</th><th>Result</th></tr></thead><tbody>';
@@ -3675,8 +3669,8 @@ async function openPricingHistory(mpn) {
         });
         html += '</tbody></table>';
         html += '<div class="ph-summary">Avg: $' + Number(data.avg_price||0).toFixed(4) + ' · Margin: ' + Number(data.avg_margin||0).toFixed(1) + '%' + (data.price_range ? ' · Range: $'+Number(data.price_range[0]).toFixed(4)+' – $'+Number(data.price_range[1]).toFixed(4) : '') + '</div>';
-        document.getElementById('phContent').innerHTML = html;
-    } catch (e) { logCatchError('pricingHistory', e); document.getElementById('phContent').innerHTML = '<p class="empty">Error loading pricing</p>'; }
+        if (phContent) phContent.innerHTML = html;
+    } catch (e) { logCatchError('pricingHistory', e); if (phContent) phContent.innerHTML = '<p class="empty">Error loading pricing</p>'; }
 }
 
 // ── Clone Requisition ──────────────────────────────────────────────────
@@ -3768,14 +3762,13 @@ function filterSiteTypeahead(query) {
 }
 
 function selectSite(id, label) {
-    document.getElementById('nrSiteId').value = id;
-    document.getElementById('nrSiteSearch').value = label;
-    document.getElementById('nrSiteSearch').style.display = 'none';
-    document.getElementById('nrSiteList').classList.remove('show');
+    const siEl = document.getElementById('nrSiteId'); if (siEl) siEl.value = id;
+    const ssEl = document.getElementById('nrSiteSearch'); if (ssEl) { ssEl.value = label; ssEl.style.display = 'none'; }
+    document.getElementById('nrSiteList')?.classList.remove('show');
     // Show selected badge
     const sel = document.getElementById('nrSiteSelected');
     if (sel) {
-        document.getElementById('nrSiteSelectedLabel').textContent = label;
+        const lbl = document.getElementById('nrSiteSelectedLabel'); if (lbl) lbl.textContent = label;
         sel.style.display = '';
     }
     // Load contacts for the selected site's company
@@ -3796,8 +3789,8 @@ async function autoCreateSiteAndSelect(companyId, companyName) {
 
 async function quickCreateCompany(prefill) {
     // Close typeahead, open the new company modal with pre-filled name
-    document.getElementById('nrSiteList').classList.remove('show');
-    document.getElementById('ncName').value = prefill || '';
+    document.getElementById('nrSiteList')?.classList.remove('show');
+    const ncN = document.getElementById('ncName'); if (ncN) ncN.value = prefill || '';
     // Mark that we came from the req modal so we can auto-select after
     window._quickCreateFromReq = true;
     openModal('newCompanyModal', 'ncName');
@@ -3845,20 +3838,21 @@ function openSuggestedContacts(type, id, domain, name) {
     scContext = { type, id, domain, name };
     scResults = [];
     scSelected.clear();
-    document.getElementById('scModalTitle').textContent = 'Suggested Contacts — ' + (name || domain);
-    document.getElementById('scModalSubtitle').textContent = type === 'vendor'
+    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _s('scModalTitle', 'textContent', 'Suggested Contacts — ' + (name || domain));
+    _s('scModalSubtitle', 'textContent', type === 'vendor'
         ? 'Select contacts to add to this vendor card'
-        : 'Select a contact to set as the site\'s primary contact';
-    document.getElementById('scTitleFilter').value = '';
-    document.getElementById('scResults').innerHTML = '<p class="empty">Click Search to find contacts at ' + esc(domain) + '</p>';
-    document.getElementById('scAddBtn').style.display = 'none';
+        : 'Select a contact to set as the site\'s primary contact');
+    _s('scTitleFilter', 'value', '');
+    _s('scResults', 'innerHTML', '<p class="empty">Click Search to find contacts at ' + esc(domain) + '</p>');
+    const scBtn = document.getElementById('scAddBtn'); if (scBtn) scBtn.style.display = 'none';
     openModal('suggestedContactsModal', 'scTitleFilter');
 }
 
 async function searchSuggestedContacts() {
     const domain = scContext.domain;
     if (!domain) return;
-    const title = document.getElementById('scTitleFilter').value.trim();
+    const title = document.getElementById('scTitleFilter')?.value?.trim() || '';
     const el = document.getElementById('scResults');
     el.innerHTML = '<p class="empty" style="padding:12px">Searching…</p>';
     scSelected.clear();
@@ -3880,7 +3874,7 @@ function renderSuggestedContacts() {
     const el = document.getElementById('scResults');
     if (!scResults.length) {
         el.innerHTML = '<p class="empty" style="padding:12px">No contacts found — try a different title filter or check the domain</p>';
-        document.getElementById('scAddBtn').style.display = 'none';
+        const scBtn = document.getElementById('scAddBtn'); if (scBtn) scBtn.style.display = 'none';
         return;
     }
     el.innerHTML = scResults.map((c, i) => {
@@ -4329,11 +4323,11 @@ function renderIntelCard(intel, el) {
 // ── Site Contacts CRUD ─────────────────────────────────────────────────
 
 function openAddSiteContact(siteId) {
-    document.getElementById('scSiteId').value = siteId;
-    document.getElementById('scContactId').value = '';
-    document.getElementById('siteContactModalTitle').textContent = 'Add Contact';
+    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _s('scSiteId', 'value', siteId); _s('scContactId', 'value', '');
+    _s('siteContactModalTitle', 'textContent', 'Add Contact');
     ['scFullName','scTitle','scEmail','scPhone','scNotes'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-    document.getElementById('scPrimary').checked = false;
+    _s('scPrimary', 'checked', false);
     openModal('siteContactModal', 'scFullName');
 }
 
@@ -4342,29 +4336,27 @@ async function openEditSiteContact(siteId, contactId) {
         const contacts = await apiFetch('/api/sites/' + siteId + '/contacts');
         const c = contacts.find(x => x.id === contactId);
         if (!c) { showToast('Contact not found', 'error'); return; }
-        document.getElementById('scSiteId').value = siteId;
-        document.getElementById('scContactId').value = contactId;
-        document.getElementById('siteContactModalTitle').textContent = 'Edit Contact';
-        document.getElementById('scFullName').value = c.full_name || '';
-        document.getElementById('scTitle').value = c.title || '';
-        document.getElementById('scEmail').value = c.email || '';
-        document.getElementById('scPhone').value = c.phone || '';
-        document.getElementById('scNotes').value = c.notes || '';
-        document.getElementById('scPrimary').checked = !!c.is_primary;
+        const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+        _s('scSiteId', 'value', siteId); _s('scContactId', 'value', contactId);
+        _s('siteContactModalTitle', 'textContent', 'Edit Contact');
+        _s('scFullName', 'value', c.full_name || ''); _s('scTitle', 'value', c.title || '');
+        _s('scEmail', 'value', c.email || ''); _s('scPhone', 'value', c.phone || '');
+        _s('scNotes', 'value', c.notes || ''); _s('scPrimary', 'checked', !!c.is_primary);
         openModal('siteContactModal', 'scFullName');
     } catch (e) { logCatchError('openEditSiteContact', e); showToast('Error loading contact', 'error'); }
 }
 
 async function saveSiteContact() {
-    const siteId = document.getElementById('scSiteId').value;
-    const contactId = document.getElementById('scContactId').value;
+    const _v = id => document.getElementById(id)?.value || '';
+    const siteId = _v('scSiteId');
+    const contactId = _v('scContactId');
     const data = {
-        full_name: document.getElementById('scFullName').value.trim(),
-        title: document.getElementById('scTitle').value.trim() || null,
-        email: document.getElementById('scEmail').value.trim() || null,
-        phone: document.getElementById('scPhone').value.trim() || null,
-        notes: document.getElementById('scNotes').value.trim() || null,
-        is_primary: document.getElementById('scPrimary').checked,
+        full_name: _v('scFullName').trim(),
+        title: _v('scTitle').trim() || null,
+        email: _v('scEmail').trim() || null,
+        phone: _v('scPhone').trim() || null,
+        notes: _v('scNotes').trim() || null,
+        is_primary: document.getElementById('scPrimary')?.checked || false,
     };
     if (!data.full_name) { showToast('Name is required', 'error'); return; }
     try {
@@ -4448,13 +4440,14 @@ async function loadCompanyActivities(companyId) {
 }
 
 async function saveLogCall() {
-    const companyId = document.getElementById('lcCompanyId').value;
+    const _v = id => document.getElementById(id)?.value || '';
+    const companyId = _v('lcCompanyId');
     const data = {
-        phone: document.getElementById('lcPhone').value.trim() || null,
-        contact_name: document.getElementById('lcContactName').value.trim() || null,
-        direction: document.getElementById('lcDirection').value,
-        duration_seconds: parseInt(document.getElementById('lcDuration').value) || null,
-        notes: document.getElementById('lcNotes').value.trim() || null,
+        phone: _v('lcPhone').trim() || null,
+        contact_name: _v('lcContactName').trim() || null,
+        direction: _v('lcDirection'),
+        duration_seconds: parseInt(_v('lcDuration')) || null,
+        notes: _v('lcNotes').trim() || null,
     };
     try {
         await apiFetch('/api/companies/' + companyId + '/activities/call', {
@@ -4473,18 +4466,19 @@ async function saveLogCall() {
 }
 
 function openLogNoteModal(companyId, companyName) {
-    document.getElementById('lnCompanyId').value = companyId;
-    document.getElementById('lnCompanyName').textContent = companyName;
+    const _s = (id, prop, v) => { const el = document.getElementById(id); if (el) el[prop] = v; };
+    _s('lnCompanyId', 'value', companyId); _s('lnCompanyName', 'textContent', companyName);
     ['lnContactName','lnNotes'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
     openModal('logNoteModal', 'lnNotes');
 }
 
 async function saveLogNote() {
-    const companyId = document.getElementById('lnCompanyId').value;
-    const notes = document.getElementById('lnNotes').value.trim();
+    const _v = id => document.getElementById(id)?.value || '';
+    const companyId = _v('lnCompanyId');
+    const notes = _v('lnNotes').trim();
     if (!notes) { showToast('Note text is required', 'error'); return; }
     const data = {
-        contact_name: document.getElementById('lnContactName').value.trim() || null,
+        contact_name: _v('lnContactName').trim() || null,
         notes: notes,
     };
     try {
@@ -4531,9 +4525,10 @@ function switchProactiveTab(tab, btn) {
     else document.querySelectorAll('#proactiveTabs .tab').forEach(t => {
         if (t.textContent.toLowerCase().includes(tab)) t.classList.add('on');
     });
-    document.getElementById('proactiveMatchesPanel').style.display = tab === 'matches' ? '' : 'none';
-    document.getElementById('proactiveSentPanel').style.display = tab === 'sent' ? '' : 'none';
-    document.getElementById('proactiveScorecardPanel').style.display = tab === 'scorecard' ? '' : 'none';
+    const _p = (id, v) => { const el = document.getElementById(id); if (el) el.style.display = v; };
+    _p('proactiveMatchesPanel', tab === 'matches' ? '' : 'none');
+    _p('proactiveSentPanel', tab === 'sent' ? '' : 'none');
+    _p('proactiveScorecardPanel', tab === 'scorecard' ? '' : 'none');
     if (tab === 'matches') loadProactiveMatches();
     else if (tab === 'sent') loadProactiveSent();
     else if (tab === 'scorecard') loadProactiveScorecard();
@@ -4804,9 +4799,8 @@ async function openProactiveSendModal(siteId) {
     const companyName = group ? group.company_name : '';
 
     // Populate modal
-    document.getElementById('psSiteId').value = siteId;
-    document.getElementById('psSubject').value = 'Parts Available — ' + companyName;
-    document.getElementById('psNotes').value = '';
+    const _s = (id, v) => { const el = document.getElementById(id); if (el) el.value = v; };
+    _s('psSiteId', siteId); _s('psSubject', 'Parts Available — ' + companyName); _s('psNotes', '');
 
     // Render contacts
     const contactsEl = document.getElementById('psContacts');
@@ -4878,7 +4872,7 @@ async function generateProactiveDraft() {
                 match_ids: _proactiveSendMatchIds,
                 contact_ids: contactIds,
                 sell_prices: sellPrices,
-                notes: document.getElementById('psNotes').value.trim() || null,
+                notes: document.getElementById('psNotes')?.value?.trim() || null,
             }
         });
         if (result.html) {
@@ -4886,7 +4880,7 @@ async function generateProactiveDraft() {
             _proactiveDraftHtml = result.html;
         }
         if (result.subject) {
-            document.getElementById('psSubject').value = result.subject;
+            const psS = document.getElementById('psSubject'); if (psS) psS.value = result.subject;
         }
         if (status) status.textContent = 'Draft generated — edit as needed';
     } catch (e) {
@@ -4944,8 +4938,8 @@ async function sendProactiveOffer() {
                     match_ids: _proactiveSendMatchIds,
                     contact_ids: contactIds,
                     sell_prices: sellPrices,
-                    subject: document.getElementById('psSubject').value.trim(),
-                    notes: document.getElementById('psNotes').value.trim() || null,
+                    subject: document.getElementById('psSubject')?.value?.trim() || '',
+                    notes: document.getElementById('psNotes')?.value?.trim() || null,
                     email_html: emailHtml,
                 }
             });
@@ -5105,9 +5099,10 @@ function switchPerfTab(tab, btn) {
     document.querySelectorAll('#perfTabs .fp').forEach(t => t.classList.remove('on'));
     if (btn) btn.classList.add('on');
     else document.querySelector(`#perfTabs .fp[onclick*="${tab}"]`)?.classList.add('on');
-    document.getElementById('perfVendorPanel').style.display = tab === 'vendors' ? '' : 'none';
-    document.getElementById('perfBuyerPanel').style.display = tab === 'buyers' ? '' : 'none';
-    document.getElementById('perfSalesPanel').style.display = tab === 'sales' ? '' : 'none';
+    const _p = (id, v) => { const el = document.getElementById(id); if (el) el.style.display = v; };
+    _p('perfVendorPanel', tab === 'vendors' ? '' : 'none');
+    _p('perfBuyerPanel', tab === 'buyers' ? '' : 'none');
+    _p('perfSalesPanel', tab === 'sales' ? '' : 'none');
     const availPanel = document.getElementById('perfAvailScorePanel');
     if (availPanel) availPanel.style.display = tab === 'avail-score' ? '' : 'none';
     const digestPanel = document.getElementById('perfDigestPanel');
@@ -5834,14 +5829,13 @@ function onSourcesSearch(val) {
 }
 
 function editCredential(sourceId, varName) {
-    document.getElementById(`cred-edit-${sourceId}-${varName}`).style.display = '';
+    const editEl = document.getElementById(`cred-edit-${sourceId}-${varName}`); if (editEl) editEl.style.display = '';
     const input = document.getElementById(`cred-input-${sourceId}-${varName}`);
-    input.value = '';
-    input.focus();
+    if (input) { input.value = ''; input.focus(); }
 }
 
 function cancelCredEdit(sourceId, varName) {
-    document.getElementById(`cred-edit-${sourceId}-${varName}`).style.display = 'none';
+    const editEl = document.getElementById(`cred-edit-${sourceId}-${varName}`); if (editEl) editEl.style.display = 'none';
 }
 
 async function saveCredential(sourceId, varName) {
@@ -6101,14 +6095,15 @@ async function deleteAdminUser(userId, name) {
 }
 
 async function createUser() {
-    const name = document.getElementById('newUserName').value.trim();
-    const email = document.getElementById('newUserEmail').value.trim();
-    const role = document.getElementById('newUserRole').value;
+    const _v = id => document.getElementById(id)?.value || '';
+    const name = _v('newUserName').trim();
+    const email = _v('newUserEmail').trim();
+    const role = _v('newUserRole');
     if (!name || !email) { showToast('Name and email are required', 'error'); return; }
     try {
         await apiFetch('/api/admin/users', {method:'POST', body:{name, email, role}});
-        document.getElementById('newUserName').value = '';
-        document.getElementById('newUserEmail').value = '';
+        const nuN = document.getElementById('newUserName'); if (nuN) nuN.value = '';
+        const nuE = document.getElementById('newUserEmail'); if (nuE) nuE.value = '';
         _userListCache = null;  // Invalidate cache
         showToast('User created successfully', 'success');
         if (typeof loadAdminUsers === 'function') loadAdminUsers();
@@ -6265,9 +6260,10 @@ window.addEventListener('beforeunload', () => {
 function switchEnrichTab(tab, btn) {
     document.querySelectorAll('#enrichTabs .tab').forEach(t => t.classList.remove('on'));
     btn.classList.add('on');
-    document.getElementById('enrichQueuePanel').style.display = tab === 'queue' ? '' : 'none';
-    document.getElementById('enrichBackfillPanel').style.display = tab === 'backfill' ? '' : 'none';
-    document.getElementById('enrichJobsPanel').style.display = tab === 'jobs' ? '' : 'none';
+    const _p = (id, v) => { const el = document.getElementById(id); if (el) el.style.display = v; };
+    _p('enrichQueuePanel', tab === 'queue' ? '' : 'none');
+    _p('enrichBackfillPanel', tab === 'backfill' ? '' : 'none');
+    _p('enrichJobsPanel', tab === 'jobs' ? '' : 'none');
     const m365Panel = document.getElementById('enrichM365Panel');
     if (m365Panel) m365Panel.style.display = tab === 'm365' ? '' : 'none';
 

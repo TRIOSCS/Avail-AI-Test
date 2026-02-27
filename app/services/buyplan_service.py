@@ -71,6 +71,7 @@ def log_buyplan_activity(
             activity_type=activity_type,
             channel="system",
             requisition_id=plan.requisition_id,
+            buy_plan_id=plan.id,
             subject=f"Buy plan #{plan.id}: {detail}" if detail else f"Buy plan #{plan.id}",
             notes=f"plan_id={plan.id} status={plan.status}",
         )
@@ -190,6 +191,7 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
                 user_id=admin.id,
                 activity_type="buyplan_pending",
                 channel="system",
+                buy_plan_id=plan.id,
                 subject=f"Buy plan #{plan.id} awaiting approval — {submitter_name}",
             )
         )
@@ -325,6 +327,7 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
                 user_id=buyer.id,
                 activity_type="buyplan_approved",
                 channel="system",
+                buy_plan_id=plan.id,
                 subject=f"Buy plan #{plan.id} approved — create POs",
             )
         )
@@ -400,6 +403,7 @@ async def notify_buyplan_rejected(plan: BuyPlan, db: Session):
             user_id=submitter.id,
             activity_type="buyplan_rejected",
             channel="system",
+            buy_plan_id=plan.id,
             subject=f"Buy plan #{plan.id} rejected — {plan.rejection_reason or 'no reason given'}",
         )
     )
@@ -505,6 +509,7 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
                 user_id=submitter.id,
                 activity_type="buyplan_completed",
                 channel="system",
+                buy_plan_id=plan.id,
                 subject=f"Stock sale #{plan.id} approved and completed — no PO required",
             )
         )
@@ -569,6 +574,7 @@ async def notify_buyplan_completed(plan: BuyPlan, db: Session, completer_name: s
             user_id=submitter.id,
             activity_type="buyplan_completed",
             channel="system",
+            buy_plan_id=plan.id,
             subject=f"Buy plan #{plan.id} completed",
         )
     )
@@ -600,6 +606,7 @@ async def notify_buyplan_cancelled(plan: BuyPlan, db: Session):
                 user_id=target.id,
                 activity_type="buyplan_cancelled",
                 channel="system",
+                buy_plan_id=plan.id,
                 subject=f"Buy plan #{plan.id} cancelled by {canceller_name}{reason_text}",
             )
         )

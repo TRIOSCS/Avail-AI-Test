@@ -850,16 +850,26 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
                 db.add(offer)
                 db.flush()
 
-                # Create notification for each draft offer
+                # Deduplicated notification — update existing if unread, else create new
                 if owner_id:
-                    db.add(ActivityLog(
-                        user_id=owner_id,
-                        activity_type="offer_pending_review",
-                        channel="system",
-                        requisition_id=vr.requisition_id,
-                        contact_name=vr.vendor_name,
-                        subject=f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} — {draft.get('mpn', '?')}",
-                    ))
+                    existing_notif = db.query(ActivityLog).filter(
+                        ActivityLog.user_id == owner_id,
+                        ActivityLog.activity_type == "offer_pending_review",
+                        ActivityLog.requisition_id == vr.requisition_id,
+                        ActivityLog.dismissed_at.is_(None),
+                    ).first()
+                    if existing_notif:
+                        existing_notif.subject = f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} — {draft.get('mpn', '?')}"
+                        existing_notif.created_at = datetime.now(timezone.utc)
+                    else:
+                        db.add(ActivityLog(
+                            user_id=owner_id,
+                            activity_type="offer_pending_review",
+                            channel="system",
+                            requisition_id=vr.requisition_id,
+                            contact_name=vr.vendor_name,
+                            subject=f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} — {draft.get('mpn', '?')}",
+                        ))
         except Exception as e:
             log.warning(f"Failed to auto-create draft offers: {e}")
 

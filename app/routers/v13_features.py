@@ -599,6 +599,8 @@ async def sales_notifications(
             "company_name": n.contact_name,
             "requisition_id": n.requisition_id,
             "vendor_card_id": n.vendor_card_id,
+            "buy_plan_id": n.buy_plan_id,
+            "quote_id": n.quote_id,
             "subject": n.subject,
             "notes": n.notes,
             "created_at": n.created_at.isoformat() if n.created_at else None,
@@ -639,6 +641,22 @@ async def mark_all_notifications_read(
     )
     db.commit()
     return {"ok": True}
+
+
+@router.get("/api/sales/notifications/count")
+async def notification_count(
+    user: User = Depends(require_user), db: Session = Depends(get_db)
+):
+    """Lightweight unread notification count for badge display."""
+    from sqlalchemy import func
+
+    count = db.query(func.count(ActivityLog.id)).filter(
+        ActivityLog.user_id == user.id,
+        ActivityLog.activity_type.in_(_NOTIFICATION_TYPES),
+        ActivityLog.dismissed_at.is_(None),
+        ActivityLog.created_at >= datetime.now(timezone.utc) - timedelta(days=14),
+    ).scalar()
+    return {"count": count}
 
 
 # ═══════════════════════════════════════════════════════════════════════
