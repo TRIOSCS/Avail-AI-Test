@@ -2926,24 +2926,36 @@ function renderBuyPlanV3Status(targetId) {
     if (bp.approval_notes) notesHtml += '<div style="background:#f0fdf4;padding:8px 10px;border-left:3px solid #16a34a;border-radius:4px;margin-bottom:8px;font-size:12px"><strong>Manager:</strong> ' + esc(bp.approval_notes) + '</div>';
     if (bp.so_rejection_note) notesHtml += '<div style="background:#fef2f2;padding:8px 10px;border-left:3px solid var(--red);border-radius:4px;margin-bottom:8px;font-size:12px"><strong>SO Rejected:</strong> ' + esc(bp.so_rejection_note) + '</div>';
 
-    // Lines table
+    // Lines table — editable for draft (salesperson) and pending (manager overrides)
+    const canApprove = window.__isAdmin || window.userRole === 'manager';
+    const isPending = bp.status === 'pending';
+    const isEditable = isDraft || (isPending && canApprove);
     const lines = bp.lines || [];
     let linesHtml = lines.map(l => {
-        const compareBtn = isDraft ? ' <a href="javascript:void(0)" onclick="openOfferComparisonV3(' + bp.id + ',' + l.requirement_id + ',' + l.id + ')" style="font-size:10px;color:#2563eb;text-decoration:underline">compare</a>' : '';
+        const showCompare = isDraft || (isPending && canApprove);
+        const compareBtn = showCompare ? ' <a href="javascript:void(0)" onclick="openOfferComparisonV3(' + bp.id + ',' + l.requirement_id + ',' + l.id + ')" style="font-size:10px;color:#2563eb;text-decoration:underline">compare</a>' : '';
+        const qtyCell = isEditable
+            ? '<input type="number" class="bpv3-qty" data-line-id="' + l.id + '" value="' + (l.quantity||0) + '" min="1" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;text-align:right">'
+            : (l.quantity||0).toLocaleString();
+        // Manager note input on pending lines
+        const noteCell = (isPending && canApprove)
+            ? '<td><input type="text" class="bpv3-mgr-note" data-line-id="' + l.id + '" placeholder="Note\u2026" value="' + (l.manager_note ? l.manager_note.replace(/"/g,'&quot;') : '') + '" style="width:100px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:10px"></td>'
+            : '';
         return '<tr data-line-id="' + l.id + '">'
             + '<td>' + esc(l.mpn) + compareBtn + '</td>'
             + '<td>' + esc(l.vendor_name || '\u2014') + '</td>'
             + '<td>' + _bpV3ScoreBadge(l.ai_score) + '</td>'
             + '<td style="font-size:11px">' + esc(l.buyer_name || '\u2014') + '</td>'
-            + '<td class="mono">' + (isDraft
-                ? '<input type="number" class="bpv3-qty" data-line-id="' + l.id + '" value="' + (l.quantity||0) + '" min="1" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;text-align:right">'
-                : (l.quantity||0).toLocaleString()) + '</td>'
+            + '<td class="mono">' + qtyCell + '</td>'
             + '<td class="mono">$' + Number(l.unit_cost||0).toFixed(4) + '</td>'
             + '<td class="mono">' + (l.margin_pct != null ? Number(l.margin_pct).toFixed(1) + '%' : '\u2014') + '</td>'
             + '<td>' + esc(l.lead_time || '\u2014') + '</td>'
             + (isDraft ? '' : '<td>' + _bpV3LineBadge(l.status) + '</td>')
+            + noteCell
             + '</tr>';
     }).join('');
+    // Extra header for manager note column
+    const noteHeader = (isPending && canApprove) ? '<th>Mgr Note</th>' : '';
 
     // Actions
     let actionsHtml = '';
@@ -2960,6 +2972,23 @@ function renderBuyPlanV3Status(targetId) {
             + '<div style="display:flex;gap:8px"><button class="btn btn-primary" onclick="submitBuyPlanV3()">Submit Buy Plan</button></div>'
             + '</div>';
     }
+    // Manager approval actions for pending plans
+    if (isPending && canApprove) {
+        actionsHtml = '<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">'
+            + '<div class="field" style="margin-bottom:10px"><label style="font-weight:600;font-size:12px">Manager Notes</label>'
+            + '<textarea id="bpV3MgrNotes" rows="2" placeholder="Approval notes, instructions for buyers\u2026" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)"></textarea></div>'
+            + '<div style="display:flex;gap:8px;align-items:center">'
+            + '<button class="btn btn-success" onclick="approveBuyPlanV3()">Approve</button>'
+            + '<button class="btn btn-danger" onclick="openRejectBuyPlanV3()">Reject</button>'
+            + '</div>'
+            + '<div id="bpV3RejectForm" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--red);border-radius:8px;background:#fef2f2">'
+            + '<div style="font-weight:600;font-size:12px;margin-bottom:6px;color:var(--red)">Reject Buy Plan</div>'
+            + '<textarea id="bpV3RejectReason" placeholder="Reason for rejection\u2026" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;min-height:40px;margin-bottom:8px"></textarea>'
+            + '<div style="display:flex;gap:8px"><button class="btn btn-danger btn-sm" onclick="rejectBuyPlanV3()">Confirm Reject</button>'
+            + '<button class="btn btn-ghost btn-sm" onclick="document.getElementById(\'bpV3RejectForm\').style.display=\'none\'">Cancel</button></div>'
+            + '</div>'
+            + '</div>';
+    }
 
     el.innerHTML = '<div class="card" style="margin-top:16px;border-left:4px solid ' + statusColor + '">'
         + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
@@ -2974,7 +3003,7 @@ function renderBuyPlanV3Status(targetId) {
         + summaryHtml + flagsHtml + contextHtml + marginHtml + notesHtml
         + '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="tbl" style="margin-bottom:0"><thead><tr>'
         + '<th>MPN</th><th>Vendor</th><th>Score</th><th>Buyer</th><th>Qty</th><th>Unit Cost</th><th>Margin</th><th>Lead</th>'
-        + (isDraft ? '' : '<th>Status</th>')
+        + (isDraft ? '' : '<th>Status</th>') + noteHeader
         + '</tr></thead><tbody>' + linesHtml + '</tbody></table></div>'
         + actionsHtml + '</div>';
 }
@@ -3012,6 +3041,66 @@ async function submitBuyPlanV3() {
             showToast('Failed to submit: ' + (e.message || e), 'error');
         }
     });
+}
+
+async function approveBuyPlanV3() {
+    if (!_currentBuyPlanV3 || _currentBuyPlanV3.status !== 'pending') return;
+    if (approveBuyPlanV3._busy) return; approveBuyPlanV3._busy = true;
+
+    // Collect line overrides (qty changes, vendor swaps, manager notes)
+    const overrides = [];
+    for (const line of (_currentBuyPlanV3.lines || [])) {
+        const qtyInput = document.querySelector('.bpv3-qty[data-line-id="' + line.id + '"]');
+        const noteInput = document.querySelector('.bpv3-mgr-note[data-line-id="' + line.id + '"]');
+        const newQty = qtyInput ? (parseInt(qtyInput.value) || line.quantity) : line.quantity;
+        const note = noteInput ? noteInput.value.trim() : '';
+        if (line._swapped || newQty !== line.quantity || note) {
+            const o = { line_id: line.id };
+            if (line._swapped) o.offer_id = line.offer_id;
+            if (newQty !== line.quantity) o.quantity = newQty;
+            if (note) o.manager_note = note;
+            overrides.push(o);
+        }
+    }
+
+    const notes = (document.getElementById('bpV3MgrNotes')?.value || '').trim() || null;
+    const btn = document.querySelector('#' + _bpV3RenderTarget + ' .btn-success');
+    try {
+        await guardBtn(btn, 'Approving\u2026', async () => {
+            const body = { action: 'approve', notes };
+            if (overrides.length) body.line_overrides = overrides;
+            await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/approve', { method: 'POST', body });
+            showToast('Buy plan approved \u2014 buyers notified', 'success');
+            _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id);
+            renderBuyPlanV3Status();
+        });
+    } catch (e) {
+        logCatchError('approveBuyPlanV3', e);
+        showToast('Failed to approve: ' + (e.message || e), 'error');
+    } finally { approveBuyPlanV3._busy = false; }
+}
+
+function openRejectBuyPlanV3() {
+    const form = document.getElementById('bpV3RejectForm');
+    if (form) { form.style.display = ''; form.querySelector('textarea')?.focus(); }
+}
+
+async function rejectBuyPlanV3() {
+    if (!_currentBuyPlanV3 || _currentBuyPlanV3.status !== 'pending') return;
+    const reason = (document.getElementById('bpV3RejectReason')?.value || '').trim();
+    if (!reason) { showToast('Rejection reason is required', 'error'); return; }
+    if (rejectBuyPlanV3._busy) return; rejectBuyPlanV3._busy = true;
+    try {
+        await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/approve', {
+            method: 'POST', body: { action: 'reject', notes: reason }
+        });
+        showToast('Buy plan rejected', 'info');
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id);
+        renderBuyPlanV3Status();
+    } catch (e) {
+        logCatchError('rejectBuyPlanV3', e);
+        showToast('Failed to reject: ' + (e.message || e), 'error');
+    } finally { rejectBuyPlanV3._busy = false; }
 }
 
 async function openOfferComparisonV3(planId, reqId, currentLineId) {
@@ -3090,11 +3179,12 @@ async function showBuyPlans() {
 
 async function loadBuyPlans() {
     var bpl = document.getElementById('buyPlansList');
-    if (bpl && !_buyPlans.length) bpl.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading buy plans…</div>';
+    if (bpl && !_buyPlans.length) bpl.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading buy plans\u2026</div>';
     try {
-        let url = '/api/buy-plans';
+        let url = '/api/buy-plans-v3';
         if (_bpFilter) url += '?status=' + encodeURIComponent(_bpFilter);
-        _buyPlans = await apiFetch(url);
+        const resp = await apiFetch(url);
+        _buyPlans = resp.items || [];
         renderBuyPlansList();
     } catch (e) {
         showToast('Failed to load buy plans', 'error');
@@ -3139,40 +3229,39 @@ function renderBuyPlansList() {
     // "My Assignments" filter
     if (_bpMyOnly && window.__userName) {
         const myName = window.__userName.toLowerCase();
-        data = data.filter(bp => (bp.submitted_by || '').toLowerCase() === myName);
+        data = data.filter(bp => (bp.submitted_by_name || '').toLowerCase() === myName);
     }
     // Search filter
     const q = (document.getElementById('bpSearch') || {}).value || '';
     if (q) {
         const lq = q.toLowerCase();
-        data = data.filter(bp => (bp.requisition_name || '').toLowerCase().includes(lq)
-            || (bp.customer_name || '').toLowerCase().includes(lq)
+        data = data.filter(bp => (bp.customer_name || '').toLowerCase().includes(lq)
+            || (bp.quote_number || '').toLowerCase().includes(lq)
             || (bp.sales_order_number || '').toLowerCase().includes(lq)
-            || (bp.submitted_by || '').toLowerCase().includes(lq));
+            || (bp.submitted_by_name || '').toLowerCase().includes(lq));
     }
 
     if (!data.length) {
-        el.innerHTML = stateEmpty('No buy plans found', 'Create a buy plan from the offers tab on any requisition');
+        el.innerHTML = stateEmpty('No buy plans found', 'Build a buy plan by marking a quote as won');
         return;
     }
 
-    // Workflow: Draft -> Pending -> Approved -> Completed
-    const statusLabels = {draft:'Draft',pending_approval:'Pending',approved:'Approved',po_entered:'Approved',po_confirmed:'Approved',complete:'Completed',rejected:'Rejected',cancelled:'Cancelled'};
-    const statusBadge = {draft:'b-draft',pending_approval:'b-pend',approved:'b-appr',po_entered:'b-appr',po_confirmed:'b-appr',complete:'b-comp',rejected:'b-rej',cancelled:'b-canc'};
+    const statusLabels = {draft:'Draft',pending:'Pending',active:'Active',halted:'Halted',completed:'Completed',cancelled:'Cancelled'};
+    const statusBadge = {draft:'b-draft',pending:'b-pend',active:'b-appr',halted:'b-rej',completed:'b-comp',cancelled:'b-canc'};
 
     // Sort
     if (_bpSortCol) {
         data.sort((a, b) => {
             let va, vb;
             switch (_bpSortCol) {
-                case 'req': va = (a.requisition_name || ''); vb = (b.requisition_name || ''); break;
+                case 'req': va = (a.quote_number || ''); vb = (b.quote_number || ''); break;
                 case 'status': va = (a.status || ''); vb = (b.status || ''); break;
                 case 'customer': va = (a.customer_name || ''); vb = (b.customer_name || ''); break;
-                case 'items': va = (a.line_items || []).length; vb = (b.line_items || []).length; break;
-                case 'total': va = (a.line_items || []).reduce((s, li) => s + (Number(li.plan_qty || li.qty)||0) * (Number(li.cost_price)||0), 0); vb = (b.line_items || []).reduce((s, li) => s + (Number(li.plan_qty || li.qty)||0) * (Number(li.cost_price)||0), 0); break;
+                case 'items': va = a.line_count || 0; vb = b.line_count || 0; break;
+                case 'total': va = a.total_cost || 0; vb = b.total_cost || 0; break;
                 case 'so': va = (a.sales_order_number || ''); vb = (b.sales_order_number || ''); break;
-                case 'by': va = (a.submitted_by || ''); vb = (b.submitted_by || ''); break;
-                case 'date': va = (a.submitted_at || ''); vb = (b.submitted_at || ''); break;
+                case 'by': va = (a.submitted_by_name || ''); vb = (b.submitted_by_name || ''); break;
+                case 'date': va = (a.created_at || ''); vb = (b.created_at || ''); break;
                 default: va = 0; vb = 0;
             }
             if (typeof va === 'string') return _bpSortDir === 'asc' ? va.localeCompare(vb) : vb.localeCompare(va);
@@ -3184,10 +3273,10 @@ function renderBuyPlansList() {
     const sa = (col) => `<span class="sort-arrow">${_bpSortArrow(col)}</span>`;
 
     let html = `<div style="padding:0 16px"><table class="tbl"><thead><tr>
-        <th onclick="sortBpList('req')"${thC('req')}>Requisition ${sa('req')}</th>
+        <th onclick="sortBpList('req')"${thC('req')}>Quote ${sa('req')}</th>
         <th onclick="sortBpList('status')"${thC('status')}>Status ${sa('status')}</th>
         <th onclick="sortBpList('customer')"${thC('customer')}>Customer ${sa('customer')}</th>
-        <th onclick="sortBpList('items')"${thC('items')}>Items ${sa('items')}</th>
+        <th onclick="sortBpList('items')"${thC('items')}>Lines ${sa('items')}</th>
         <th onclick="sortBpList('total')"${thC('total')}>Total Cost ${sa('total')}</th>
         <th onclick="sortBpList('so')"${thC('so')}>SO# ${sa('so')}</th>
         <th onclick="sortBpList('by')"${thC('by')}>Submitted By ${sa('by')}</th>
@@ -3197,17 +3286,16 @@ function renderBuyPlansList() {
     for (const bp of data) {
         const label = statusLabels[bp.status] || bp.status;
         const bc = statusBadge[bp.status] || 'b-draft';
-        const itemCount = (bp.line_items || []).length;
-        const total = (bp.line_items || []).reduce((s, li) => s + (Number(li.plan_qty || li.qty)||0) * (Number(li.cost_price)||0), 0);
-        html += `<tr onclick="openBuyPlanDetail(${bp.id})">
-            <td><b class="cust-link">${esc(bp.requisition_name || 'Req #' + bp.requisition_id)}</b></td>
-            <td><span class="badge ${bc}">${label}</span>${bp.is_stock_sale ? ' <span class="badge b-stock">Stock</span>' : ''}</td>
+        const flagIcon = bp.ai_flag_count ? ' <span style="color:var(--amber)" title="' + bp.ai_flag_count + ' flag(s)">\u26a0\ufe0f</span>' : '';
+        html += `<tr onclick="openBuyPlanDetailV3(${bp.id})" style="cursor:pointer">
+            <td><b class="cust-link">${esc(bp.quote_number || 'Q-' + bp.quote_id)}</b></td>
+            <td><span class="badge ${bc}">${label}</span>${bp.is_stock_sale ? ' <span class="badge b-stock">Stock</span>' : ''}${bp.auto_approved ? ' <span class="badge b-appr" style="font-size:9px">Auto</span>' : ''}${flagIcon}</td>
             <td>${esc(bp.customer_name || '\u2014')}</td>
-            <td class="mono">${itemCount}</td>
-            <td class="mono">$${total.toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2})}</td>
+            <td class="mono">${bp.line_count || 0}</td>
+            <td class="mono">${_fmtMoney(bp.total_cost)}</td>
             <td class="mono">${esc(bp.sales_order_number || '\u2014')}</td>
-            <td>${esc(bp.submitted_by || '\u2014')}</td>
-            <td style="font-size:11px;color:var(--muted)">${bp.submitted_at ? fmtDateTime(bp.submitted_at) : '\u2014'}</td>
+            <td>${esc(bp.submitted_by_name || '\u2014')}</td>
+            <td style="font-size:11px;color:var(--muted)">${bp.created_at ? fmtDateTime(bp.created_at) : '\u2014'}</td>
         </tr>`;
     }
 
@@ -3215,18 +3303,18 @@ function renderBuyPlansList() {
     el.innerHTML = html;
 }
 
-async function openBuyPlanDetail(planId) {
-    try {
-        _currentBuyPlan = await apiFetch('/api/buy-plans/' + planId);
-    } catch (e) { showToast('Failed to load buy plan', 'error'); return; }
-    // Re-render inline — reuse renderBuyPlanStatus into a detail overlay
+async function openBuyPlanDetailV3(planId) {
     const el = document.getElementById('buyPlansList');
-    const backBtn = `<button class="btn btn-ghost" onclick="loadBuyPlans()" style="margin-bottom:12px">\u2190 Back to list</button>`;
+    el.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading\u2026</div>';
+    try {
+        _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + planId);
+    } catch (e) { showToast('Failed to load buy plan', 'error'); el.innerHTML = ''; return; }
+    const backBtn = '<button class="btn btn-ghost" onclick="loadBuyPlans()" style="margin-bottom:12px">\u2190 Back to list</button>';
     el.innerHTML = backBtn;
     const section = document.createElement('div');
-    section.id = 'buyPlanDetailSection';
+    section.id = 'buyPlanDetailV3Section';
     el.appendChild(section);
-    renderBuyPlanStatus('buyPlanDetailSection');
+    renderBuyPlanV3Status('buyPlanDetailV3Section');
 }
 
 // ── Token-Based Approval ────────────────────────────────────────────────
@@ -7623,7 +7711,7 @@ Object.assign(window, {
     _debouncedFilterDrawerContacts, _debouncedLoadVendorScorecards,
     _debouncedUpdateBpTotals, _debouncedUpdateProactivePreview,
     _toggleActivityDetail,
-    applyMarkup, approveBuyPlan, approveEnrichItem,
+    applyMarkup, approveBuyPlan, approveBuyPlanV3, approveEnrichItem,
     autoCreateSiteAndSelect, autoLogCrmCall,
     browseOneDrive, cancelBuyPlan, cancelCredEdit, cancelEnrichJob,
     completeBuyPlan, convertProactiveOffer, copyPromptToClipboard,
@@ -7633,13 +7721,14 @@ Object.assign(window, {
     eqToggleAll, eqToggleItem, loadBuyPlans, loadBuyPlanV3, loadBuyerLeaderboard, toggleBpMyOnly,
     loadQuote, loadSpecificQuote, loadSalespersonScorecard,
     loadTroubleTickets, markQuoteResult, onSourcesSearch,
-    openAddSiteContact, openAddSiteModal, openBuyPlanDetail, openOfferComparisonV3,
+    openAddSiteContact, openAddSiteModal, openBuyPlanDetail, openBuyPlanDetailV3,
+    openOfferComparisonV3, openRejectBuyPlanV3,
     openEditCompany, openEditOffer, openEditSiteContact,
     openEditSiteModal, openLogNoteModal, openLostModal,
     openOfferGallery, openPricingHistory, openProactiveSendModal,
     openRejectBuyPlanModal, quickCreateCompany,
     refreshBuyerLeaderboard, refreshTeamsChannels,
-    refreshVendorScorecards, regeneratePrompt, rejectBuyPlan,
+    refreshVendorScorecards, regeneratePrompt, rejectBuyPlan, rejectBuyPlanV3,
     rejectEnrichItem, reopenQuote, resubmitBuyPlan, reviseQuote,
     saveAIContact, saveBuyPlanPOs, saveConfig, saveCredential,
     saveParsedOffers, saveQuoteDraft, saveTeamsConfig, scToggle,

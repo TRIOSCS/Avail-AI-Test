@@ -504,9 +504,9 @@
             <div class="fpills" id="bpStatusPills">
                 <button type="button" class="fp on" data-bp-status="" onclick="setBpFilter('',this)">All</button>
                 <button type="button" class="fp" data-bp-status="draft" onclick="setBpFilter('draft',this)">Draft</button>
-                <button type="button" class="fp" data-bp-status="pending_approval" onclick="setBpFilter('pending_approval',this)">Pending</button>
-                <button type="button" class="fp" data-bp-status="approved" onclick="setBpFilter('approved',this)">Approved</button>
-                <button type="button" class="fp" data-bp-status="complete" onclick="setBpFilter('complete',this)">Completed</button>
+                <button type="button" class="fp" data-bp-status="pending" onclick="setBpFilter('pending',this)">Pending</button>
+                <button type="button" class="fp" data-bp-status="active" onclick="setBpFilter('active',this)">Active</button>
+                <button type="button" class="fp" data-bp-status="completed" onclick="setBpFilter('completed',this)">Completed</button>
             </div>
             <input class="sbox sbox-med" id="bpSearch" placeholder="Search buy plans…" aria-label="Search buy plans" oninput="renderBuyPlansList()">
             <label style="display:flex;align-items:center;gap:4px;font-size:12px;white-space:nowrap;cursor:pointer"><input type="checkbox" id="bpMyOnly" onchange="toggleBpMyOnly(this.checked)"> My Tasks</label>
@@ -1092,9 +1092,9 @@
                     <span class="chip" onclick="setDashScope('team',this)">Team</span>
                 </div>
                 <div class="chip-row" style="margin:0" id="dashPeriodPills">
-                    <span class="chip on" onclick="setDashPeriod('7d',this)">7 Days</span>
-                    <span class="chip" onclick="setDashPeriod('30d',this)">30 Days</span>
+                    <span class="chip on" onclick="setDashPeriod('30d',this)">30 Days</span>
                     <span class="chip" onclick="setDashPeriod('90d',this)">90 Days</span>
+                    <span class="chip" onclick="setDashPeriod('ytd',this)">YTD</span>
                 </div>
             </div>
         </div>
