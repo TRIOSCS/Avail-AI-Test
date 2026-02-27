@@ -104,12 +104,17 @@
 <aside class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
     <button type="button" class="sb-scroll-arrow sb-scroll-up" id="sbScrollUp" onclick="document.querySelector('.sidebar-nav').scrollBy({top:-80,behavior:'smooth'})" aria-label="Scroll up"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="18 15 12 9 6 15"/></svg></button>
     <nav class="sidebar-nav">
-        <!-- Command Center — pinned section header above all groups -->
+        <!-- Command Center — expandable group with Dashboard + Scorecard -->
         <div class="sb-nav-group sb-cc-group" data-section="cc" style="--section-color:var(--blue);--section-dot:linear-gradient(135deg,#3b6ea8,#1e3a5f);--section-border:rgba(59,110,168,.18)">
             <div class="sb-section-dot"></div>
-            <div class="sb-group-header sb-cc-header" id="navCmdCenter" onclick="sidebarNav('dashboard',this)" data-tip="Command Center">
+            <div class="sb-group-header sb-cc-header" id="navCmdCenter" onclick="toggleSidebarGroup(this)" data-tip="Command Center">
                 <span class="sb-group-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><polygon points="7.5,1 12.5,3.8 12.5,9.4 7.5,12.2 2.5,9.4 2.5,3.8"/><polygon points="16.5,1 21.5,3.8 21.5,9.4 16.5,12.2 11.5,9.4 11.5,3.8"/><polygon points="12,10.8 17,13.6 17,19.2 12,22 7,19.2 7,13.6"/></svg></span>
                 <span class="sb-group-label">Command Center</span>
+                <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
+            </div>
+            <div class="sb-group-items">
+                <button type="button" class="sb-nav-btn" id="navDashboard" data-tip="Dashboard" onclick="sidebarNav('dashboard',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></span> Dashboard</button>
+                <button type="button" class="sb-nav-btn" id="navScorecard" data-tip="Scorecard" onclick="sidebarNav('scorecard',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="18" y="3" width="4" height="18"/><rect x="10" y="8" width="4" height="13"/><rect x="2" y="13" width="4" height="8"/></svg></span> Scorecard</button>
             </div>
         </div>
         <div class="sb-top-gradient" data-section="sourcing"></div>
@@ -1099,42 +1104,31 @@
             </div>
         </div>
         <div id="dashboardContent" aria-live="polite"><p class="empty">Loading…</p></div>
-        <!-- Scorecards section — visible in Team scope -->
-        <div id="dashScorecardsSection" style="display:none">
-            <div style="padding:16px 0 8px;border-top:1px solid var(--border);margin-top:16px">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px">
-                    <h3 style="margin:0;font-size:15px;color:var(--muted)">Scorecards</h3>
-                    <div class="fpills fpills-sm" id="dashPerfTabs">
-                        <button type="button" class="fp fp-sm on" onclick="switchDashPerfTab('leaderboard',this)">Leaderboard</button>
-                        <button type="button" class="fp fp-sm" onclick="switchDashPerfTab('vendors',this)">Vendor</button>
-                        <button type="button" class="fp fp-sm" onclick="switchDashPerfTab('buyers',this)">Buyer</button>
-                        <button type="button" class="fp fp-sm" onclick="switchDashPerfTab('sales',this)">Sales</button>
-                        <button type="button" class="fp fp-sm" onclick="switchDashPerfTab('avail-score',this)">Avail Score</button>
-                        <button type="button" class="fp fp-sm" id="dashPerfDigestTab" onclick="switchDashPerfTab('digest',this)" style="display:none">Digest</button>
-                    </div>
-                </div>
-                <div id="dashPerfContent"><p class="empty">Loading...</p></div>
-            </div>
-        </div>
     </div>
 
-    <!-- VIEW: Performance Tracking -->
-    <div id="view-performance" style="display:none">
-        <div class="view-toolbar">
-            <h2>Scorecards</h2>
+    <!-- VIEW: Scorecard -->
+    <div id="view-scorecard" style="display:none">
+        <div class="sc-header">
+            <h2>Scorecard</h2>
+            <div class="sc-controls">
+                <div class="chip-row" id="scPeriodPills">
+                    <span class="chip on" onclick="setScPeriod('30d',this)">30 Days</span>
+                    <span class="chip" onclick="setScPeriod('90d',this)">90 Days</span>
+                    <span class="chip" onclick="setScPeriod('ytd',this)">YTD</span>
+                </div>
+            </div>
         </div>
-        <div class="fpills" id="perfTabs" style="margin:0 16px 12px">
-            <button type="button" class="fp on" onclick="switchPerfTab('vendors',this)">Vendor Scorecard</button>
-            <button type="button" class="fp" onclick="switchPerfTab('buyers',this)">Buyer Leaderboard</button>
-            <button type="button" class="fp" onclick="switchPerfTab('sales',this)">Salesperson Scorecard</button>
-            <button type="button" class="fp" onclick="switchPerfTab('avail-score',this)">Avail Score</button>
-            <button type="button" class="fp" id="perfDigestTab" onclick="switchPerfTab('digest',this)" style="display:none">Team Digest</button>
+        <div id="scPersonalSummary"></div>
+        <div class="fpills" id="scTabs" style="margin:0 16px 12px">
+            <button type="button" class="fp on" onclick="switchScTab('leaderboard',this)">Leaderboard</button>
+            <button type="button" class="fp" onclick="switchScTab('vendors',this)">Vendor</button>
+            <button type="button" class="fp" onclick="switchScTab('buyers',this)">Buyer</button>
+            <button type="button" class="fp" onclick="switchScTab('sales',this)">Sales</button>
+            <button type="button" class="fp" onclick="switchScTab('avail-score',this)">Avail Score</button>
+            <button type="button" class="fp" onclick="switchScTab('outcomes',this)">Outcomes</button>
+            <button type="button" class="fp" id="scDigestTab" onclick="switchScTab('digest',this)" style="display:none">Digest</button>
         </div>
-        <div id="perfVendorPanel"><p class="empty">Loading...</p></div>
-        <div id="perfBuyerPanel" style="display:none"><p class="empty">Loading...</p></div>
-        <div id="perfSalesPanel" style="display:none"><p class="empty">Loading...</p></div>
-        <div id="perfAvailScorePanel" style="display:none"><p class="empty">Loading...</p></div>
-        <div id="perfDigestPanel" style="display:none"><p class="empty">Loading...</p></div>
+        <div id="scContent"><p class="empty">Loading...</p></div>
     </div>
 
 

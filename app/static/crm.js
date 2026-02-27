@@ -5087,31 +5087,8 @@ let _perfVendorSort = 'composite_score';
 let _perfVendorOrder = 'desc';
 
 function showPerformance() {
-    showView('view-performance');
-    setCurrentReqId(null);
-    // Show digest tab for admins
-    const digestTab = document.getElementById('perfDigestTab');
-    if (digestTab) digestTab.style.display = window.__isAdmin ? '' : 'none';
-    switchPerfTab('vendors');
-}
-
-function switchPerfTab(tab, btn) {
-    document.querySelectorAll('#perfTabs .fp').forEach(t => t.classList.remove('on'));
-    if (btn) btn.classList.add('on');
-    else document.querySelector(`#perfTabs .fp[onclick*="${tab}"]`)?.classList.add('on');
-    const _p = (id, v) => { const el = document.getElementById(id); if (el) el.style.display = v; };
-    _p('perfVendorPanel', tab === 'vendors' ? '' : 'none');
-    _p('perfBuyerPanel', tab === 'buyers' ? '' : 'none');
-    _p('perfSalesPanel', tab === 'sales' ? '' : 'none');
-    const availPanel = document.getElementById('perfAvailScorePanel');
-    if (availPanel) availPanel.style.display = tab === 'avail-score' ? '' : 'none';
-    const digestPanel = document.getElementById('perfDigestPanel');
-    if (digestPanel) digestPanel.style.display = tab === 'digest' ? '' : 'none';
-    if (tab === 'vendors') loadVendorScorecards();
-    else if (tab === 'buyers') loadBuyerLeaderboard();
-    else if (tab === 'sales') loadSalespersonScorecard();
-    else if (tab === 'avail-score') loadAvailScores();
-    else if (tab === 'digest') loadManagerDigest();
+    // Redirect to scorecard page (backward compat)
+    sidebarNav('scorecard', document.getElementById('navScorecard'));
 }
 
 async function loadManagerDigest() {
@@ -5773,6 +5750,7 @@ function togglePlannedSources() {
 
 async function loadSettingsSources() {
     const el = document.getElementById('settingsSourcesList');
+    if (!el) return;
     el.innerHTML = '<p class="empty">Loading data sources...</p>';
     try {
         const res = await apiFetch('/api/sources');
@@ -5928,6 +5906,7 @@ async function toggleSourceActive(sourceId) {
 
 async function loadSettingsHealth() {
     const el = document.getElementById('settingsHealthContent');
+    if (!el) return;
     el.innerHTML = '<p class="empty">Loading...</p>';
     try {
         const data = await apiFetch('/api/admin/health');
@@ -5979,6 +5958,7 @@ async function loadSettingsHealth() {
 
 async function loadSettingsConfig() {
     const el = document.getElementById('settingsConfigContent');
+    if (!el) return;
     el.innerHTML = '<p class="empty">Loading...</p>';
     try {
         const configs = await apiFetch('/api/admin/config');
@@ -6036,6 +6016,7 @@ let _adminUsers = [];
 
 async function loadAdminUsers() {
     const el = document.getElementById('adminUsersList');
+    if (!el) return;
     el.innerHTML = '<p class="empty">Loading...</p>';
     try {
         _adminUsers = await apiFetch('/api/admin/users');
@@ -6122,6 +6103,7 @@ async function createUser() {
 
 async function loadTeamsConfig() {
     const el = document.getElementById('teamsConfigContent');
+    if (!el) return;
     el.innerHTML = '<p class="empty">Loading Teams configuration...</p>';
     try {
         const config = await apiFetch('/api/admin/teams/config');
@@ -7924,7 +7906,7 @@ Object.assign(window, {
     eqToggleAll, eqToggleItem, loadBuyPlans, loadBuyPlanV3, loadBuyerLeaderboard, toggleBpMyOnly,
     loadQuote, loadSpecificQuote, loadSalespersonScorecard,
     loadTroubleTickets, markQuoteResult, onSourcesSearch,
-    openAddSiteContact, openAddSiteModal, openBuyPlanDetail, openBuyPlanDetailV3,
+    openAddSiteContact, openAddSiteModal, openBuyPlanDetailV3,
     openFlagIssueV3, openHaltSOV3,
     openOfferComparisonV3, openRejectBuyPlanV3, openRejectPOV3, openRejectSOV3,
     openEditCompany, openEditOffer, openEditSiteContact,
@@ -7954,7 +7936,7 @@ Object.assign(window, {
     saveLogCall, saveLogNote, saveSiteContact, searchSuggestedContacts,
     sendProactiveOffer, setBpFilter, startBackfill, startEmailBackfill,
     startWebsiteScrape, submitBuyPlan, submitBuyPlanV3, submitFlagIssueV3, submitLost, swapLineOfferV3, switchEnrichTab,
-    switchPerfTab, switchProactiveTab, switchSettingsTab,
+    switchProactiveTab, switchSettingsTab,
     toggleCustUnassigned, updateOffer,
     selectCustomer, renderCustomerDetail, saveCustNotes,
     logCustNote, saveContactNotes, logContactNote, _loadContactRecentNotes, toggleContactArchive,
