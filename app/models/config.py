@@ -24,6 +24,8 @@ class ApiSource(Base):
     credentials = Column(JSON, default=dict)
     last_success = Column(DateTime)
     last_error = Column(String(500))
+    last_error_at = Column(DateTime)
+    error_count_24h = Column(Integer, default=0, server_default="0")
     total_searches = Column(Integer, default=0)
     total_results = Column(Integer, default=0)
     avg_response_ms = Column(Integer, default=0)

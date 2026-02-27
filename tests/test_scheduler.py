@@ -370,7 +370,7 @@ def test_get_valid_token_refreshes_when_near_expiry(db_session, test_user):
     test_user.refresh_token = "rt_123"
     db_session.commit()
 
-    with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
+    with patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.return_value = "fresh_token_xyz"
         from app.scheduler import get_valid_token
         token = asyncio.run(
@@ -389,7 +389,7 @@ def test_get_valid_token_refreshes_when_expired(db_session, test_user):
     test_user.refresh_token = "rt_456"
     db_session.commit()
 
-    with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
+    with patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.return_value = "new_token"
         from app.scheduler import get_valid_token
         token = asyncio.run(
@@ -405,7 +405,7 @@ def test_get_valid_token_sets_error_when_refresh_fails(db_session, test_user):
     test_user.refresh_token = "rt_bad"
     db_session.commit()
 
-    with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
+    with patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.return_value = None
         from app.scheduler import get_valid_token
         token = asyncio.run(
@@ -422,7 +422,7 @@ def test_get_valid_token_no_token_no_expiry(db_session, test_user):
     test_user.refresh_token = "rt_789"
     db_session.commit()
 
-    with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
+    with patch("app.utils.token_manager.refresh_user_token", new_callable=AsyncMock) as mock_refresh:
         mock_refresh.return_value = "brand_new_token"
         from app.scheduler import get_valid_token
         token = asyncio.run(
@@ -441,7 +441,7 @@ def test_refresh_user_token_success(db_session, test_user):
     test_user.m365_connected = True
     db_session.commit()
 
-    with patch("app.scheduler._refresh_access_token", new_callable=AsyncMock) as mock_aat:
+    with patch("app.utils.token_manager._refresh_access_token", new_callable=AsyncMock) as mock_aat:
         mock_aat.return_value = ("new_access_token", "new_refresh_token")
         from app.scheduler import refresh_user_token
         result = asyncio.run(
@@ -472,7 +472,7 @@ def test_refresh_user_token_failure_disconnects_user(db_session, test_user):
     test_user.m365_connected = True
     db_session.commit()
 
-    with patch("app.scheduler._refresh_access_token", new_callable=AsyncMock) as mock_aat:
+    with patch("app.utils.token_manager._refresh_access_token", new_callable=AsyncMock) as mock_aat:
         mock_aat.return_value = None
         from app.scheduler import refresh_user_token
         result = asyncio.run(
@@ -487,7 +487,7 @@ def test_refresh_user_token_keeps_old_refresh_when_none_returned(db_session, tes
     test_user.refresh_token = "rt_keep_me"
     db_session.commit()
 
-    with patch("app.scheduler._refresh_access_token", new_callable=AsyncMock) as mock_aat:
+    with patch("app.utils.token_manager._refresh_access_token", new_callable=AsyncMock) as mock_aat:
         mock_aat.return_value = ("new_at", None)  # no new refresh token
         from app.scheduler import refresh_user_token
         result = asyncio.run(
@@ -509,7 +509,7 @@ def test_refresh_access_token_success():
         "refresh_token": "rt_new",
     }
 
-    with patch("app.scheduler.http") as mock_http:
+    with patch("app.utils.token_manager.http") as mock_http:
         mock_http.post = AsyncMock(return_value=mock_response)
         from app.scheduler import _refresh_access_token
         result = asyncio.run(
@@ -524,7 +524,7 @@ def test_refresh_access_token_failure_returns_none():
     mock_response.status_code = 400
     mock_response.text = "invalid_grant: The refresh token has expired"
 
-    with patch("app.scheduler.http") as mock_http:
+    with patch("app.utils.token_manager.http") as mock_http:
         mock_http.post = AsyncMock(return_value=mock_response)
         from app.scheduler import _refresh_access_token
         result = asyncio.run(
@@ -535,7 +535,7 @@ def test_refresh_access_token_failure_returns_none():
 
 def test_refresh_access_token_exception_returns_none():
     """Network error during refresh returns None."""
-    with patch("app.scheduler.http") as mock_http:
+    with patch("app.utils.token_manager.http") as mock_http:
         mock_http.post = AsyncMock(side_effect=Exception("Connection refused"))
         from app.scheduler import _refresh_access_token
         result = asyncio.run(
@@ -3898,3 +3898,38 @@ def test_contact_status_compute_error_handler(scheduler_db):
         from app.scheduler import _job_contact_status_compute
         # Should not raise
         asyncio.run(_job_contact_status_compute())
+
+
+# ── Reset Connector Errors ─────────────────────────────────────────────
+
+
+def test_reset_connector_errors(scheduler_db):
+    """_job_reset_connector_errors zeroes error_count_24h on all sources."""
+    from app.models import ApiSource
+
+    src1 = ApiSource(
+        name="src_a", display_name="A", category="dist",
+        source_type="api", status="live", error_count_24h=5,
+    )
+    src2 = ApiSource(
+        name="src_b", display_name="B", category="broker",
+        source_type="api", status="live", error_count_24h=0,
+    )
+    scheduler_db.add_all([src1, src2])
+    scheduler_db.commit()
+
+    from app.scheduler import _job_reset_connector_errors
+    asyncio.run(_job_reset_connector_errors())
+
+    scheduler_db.refresh(src1)
+    scheduler_db.refresh(src2)
+    assert src1.error_count_24h == 0
+    assert src2.error_count_24h == 0
+
+
+def test_reset_connector_errors_registered():
+    """configure_scheduler registers the reset_connector_errors job."""
+    configure_scheduler()
+    job_ids = [j.id for j in scheduler.get_jobs()]
+    assert "reset_connector_errors" in job_ids
+    scheduler.remove_all_jobs()

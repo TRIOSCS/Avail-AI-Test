@@ -168,6 +168,46 @@ def api_health(
     return get_system_health(db)
 
 
+# ── Connector Health Dashboard (admin) ────────────────────────────────
+
+
+@router.get("/api/admin/connector-health")
+@limiter.limit("30/minute")
+def api_connector_health(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Return per-connector health metrics with auto-degraded status."""
+    sources = db.query(ApiSource).order_by(ApiSource.name).all()
+    result = []
+    for src in sources:
+        total = src.total_searches or 0
+        total_results = src.total_results or 0
+        errors_24h = src.error_count_24h or 0
+        # Auto-flag degraded: >50% failure rate over last 24h (min 4 searches)
+        status = src.status or "pending"
+        if errors_24h >= 4 and total > 0:
+            recent_success = max(0, total - errors_24h)
+            if errors_24h > recent_success:
+                status = "degraded"
+        result.append({
+            "id": src.id,
+            "name": src.name,
+            "display_name": src.display_name,
+            "status": status,
+            "is_active": src.is_active,
+            "avg_response_ms": src.avg_response_ms or 0,
+            "total_searches": total,
+            "total_results": total_results,
+            "last_success": src.last_success.isoformat() if src.last_success else None,
+            "last_error": src.last_error,
+            "last_error_at": src.last_error_at.isoformat() if src.last_error_at else None,
+            "error_count_24h": errors_24h,
+        })
+    return {"connectors": result}
+
+
 # ── Credential Management (admin) ─────────────────────────────────────
 
 

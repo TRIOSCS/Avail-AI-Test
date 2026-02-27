@@ -10,7 +10,7 @@
 import asyncio
 import hashlib
 import json
-import logging
+from loguru import logger
 import os
 import time
 from datetime import datetime, timezone
@@ -60,7 +60,6 @@ _CONNECTOR_SOURCE_MAP = {
     "TMEConnector": "tme",
 }
 
-log = logging.getLogger(__name__)
 
 # ── Search result cache (Redis, 15-min TTL) ─────────────────────────────
 
@@ -171,7 +170,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         if stat["status"] == "ok" and not stat.get("error")
     }
     sightings = _save_sightings(fresh, req, db, succeeded_sources)
-    log.info(f"Req {req.id} ({pns[0]}): {len(sightings)} fresh sightings")
+    logger.info(f"Req {req.id} ({pns[0]}): {len(sightings)} fresh sightings")
 
     # 3. Material card upsert (errors won't break search)
     card_ids = set()
@@ -181,7 +180,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             if card:
                 card_ids.add(card.id)
         except Exception as e:
-            log.error("MATERIAL_CARD_UPSERT_FAIL: mpn=%s error=%s", pn, e)
+            logger.error("MATERIAL_CARD_UPSERT_FAIL: mpn=%s error=%s", pn, e)
             db.rollback()
 
     # 4. Historical vendors from material cards
@@ -198,6 +197,22 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
 
     for h in history:
         results.append(_history_to_result(h, now))
+
+    # 6. Cross-references: group results by material_card_id to show alternate MPNs
+    card_mpns: dict[int, set[str]] = {}
+    for r in results:
+        cid = r.get("material_card_id")
+        mpn = r.get("mpn") or r.get("mpn_matched", "")
+        if cid and mpn:
+            card_mpns.setdefault(cid, set()).add(mpn.upper())
+    for r in results:
+        cid = r.get("material_card_id")
+        mpn = (r.get("mpn") or r.get("mpn_matched", "")).upper()
+        if cid and cid in card_mpns:
+            xrefs = sorted(card_mpns[cid] - {mpn})
+            r["cross_references"] = xrefs
+        else:
+            r["cross_references"] = []
 
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
     return {"sightings": results, "source_stats": source_stats}
@@ -297,7 +312,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         # Merge cached stats with disabled/skipped entries
         cached_stats_map = {s["source"]: s for s in cached_stats}
         source_stats_map.update(cached_stats_map)
-        log.info("Search cache HIT for %s (%d results)", pns[0] if pns else "?", len(cached_results))
+        logger.info("Search cache HIT for %s (%d results)", pns[0] if pns else "?", len(cached_results))
         return cached_results, list(source_stats_map.values())
 
     # Run ALL connectors × ALL part numbers in parallel.
@@ -319,13 +334,20 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
             return hits
         except Exception as e:
             elapsed_ms = int((time.time() - start) * 1000)
-            log.warning(f"Search {pn} via {conn.__class__.__name__}: {e}")
+            logger.warning(f"Search {pn} via {conn.__class__.__name__}: {e}")
             if source_name:
                 stats_updates.append((source_name, 0, elapsed_ms, str(e)[:500]))
             return []
 
-    # Fire all connector×PN combos in parallel
-    tasks = [_run_one(conn, pn) for pn in pns for conn in connectors]
+    # Fire all connector×PN combos in parallel (with concurrency limit)
+    from .config import settings
+    sem = asyncio.Semaphore(settings.search_concurrency_limit)
+
+    async def _throttled(conn, pn):
+        async with sem:
+            return await _run_one(conn, pn)
+
+    tasks = [_throttled(conn, pn) for pn in pns for conn in connectors]
     results_lists = await asyncio.gather(*tasks, return_exceptions=True)
 
     # Apply stats to DB in one pass — safe, sequential, after gather completes
@@ -355,6 +377,8 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 src.last_error = None
             else:
                 src.last_error = error
+                src.last_error_at = datetime.now(timezone.utc)
+                src.error_count_24h = (src.error_count_24h or 0) + 1
         db.commit()
     except Exception:
         db.rollback()
@@ -480,7 +504,7 @@ def _save_sightings(
         if clean_price is None and isinstance(raw_price, (int, float)) and raw_price > 0:
             clean_price = float(raw_price)
 
-        raw_currency = r.get("currency") or r.get("unit_price")
+        raw_currency = r.get("currency") or "USD"
         clean_currency = detect_currency(raw_currency) if raw_currency else "USD"
 
         clean_condition = normalize_condition(r.get("condition"))
@@ -604,7 +628,7 @@ def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
     try:
         db.commit()
     except Exception as e:
-        log.warning("Failed to propagate vendor emails: %s", e)
+        logger.warning("Failed to propagate vendor emails: %s", e)
         db.rollback()
 
 
@@ -742,7 +766,7 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
         MaterialCard.deleted_at.is_(None)
     ).first()
     if card:
-        log.debug("MC_METRIC: action=resolved mpn=%s card_id=%d", norm, card.id)
+        logger.debug("MC_METRIC: action=resolved mpn=%s card_id=%d", norm, card.id)
         return card
 
     display = normalize_mpn(mpn) or mpn.strip()
@@ -761,16 +785,16 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
         # Re-fetch (unfiltered — may be soft-deleted and needs restoring)
         card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
         if card is None:
-            log.error("MATERIAL_CARD_RESOLVE_FAIL: card missing after ON CONFLICT for mpn=%s", norm)
+            logger.error("MATERIAL_CARD_RESOLVE_FAIL: card missing after ON CONFLICT for mpn=%s", norm)
         elif card.deleted_at is not None:
             # Restore soft-deleted card
             card.deleted_at = None
-            log.info("MC_METRIC: action=restored mpn=%s card_id=%d", norm, card.id)
+            logger.info("MC_METRIC: action=restored mpn=%s card_id=%d", norm, card.id)
             _audit_card_created(db, card)
         elif result.rowcount == 0:
-            log.info("MC_METRIC: action=race_resolved mpn=%s card_id=%d", norm, card.id)
+            logger.info("MC_METRIC: action=race_resolved mpn=%s card_id=%d", norm, card.id)
         else:
-            log.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
+            logger.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
             _audit_card_created(db, card)
         return card
     else:
@@ -781,18 +805,18 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
             card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0)
             db.add(card)
             db.flush()
-            log.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
+            logger.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
             _audit_card_created(db, card)
             return card
         except IntegrityError:
             db.rollback()
-            log.info("MC_METRIC: action=race_resolved mpn=%s", norm)
+            logger.info("MC_METRIC: action=race_resolved mpn=%s", norm)
             card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
             # Restore if soft-deleted
             if card and card.deleted_at is not None:
                 card.deleted_at = None
                 db.flush()
-                log.info("MC_METRIC: action=restored mpn=%s card_id=%d", norm, card.id)
+                logger.info("MC_METRIC: action=restored mpn=%s card_id=%d", norm, card.id)
             return card
 
 

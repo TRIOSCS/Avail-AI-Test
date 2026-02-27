@@ -1173,3 +1173,67 @@ class TestCompanyDedup:
         # Both site owners retained
         assert db_session.get(CustomerSite, s_keep.id).owner_id == admin_user.id
         assert db_session.get(CustomerSite, s_remove_id).owner_id == user2.id
+
+
+# ── Connector Health ──────────────────────────────────────────────────
+
+
+class TestConnectorHealth:
+    def test_connector_health_empty(self, admin_client):
+        resp = admin_client.get("/api/admin/connector-health")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "connectors" in data
+        assert isinstance(data["connectors"], list)
+
+    def test_connector_health_returns_fields(self, admin_client, db_session):
+        src = ApiSource(
+            name="test_src", display_name="Test Source",
+            category="distributor", source_type="api", status="live",
+            is_active=True, total_searches=100, total_results=500,
+            avg_response_ms=250, error_count_24h=2,
+        )
+        db_session.add(src)
+        db_session.commit()
+
+        resp = admin_client.get("/api/admin/connector-health")
+        assert resp.status_code == 200
+        connectors = resp.json()["connectors"]
+        match = [c for c in connectors if c["name"] == "test_src"]
+        assert len(match) == 1
+        c = match[0]
+        assert c["status"] == "live"
+        assert c["total_searches"] == 100
+        assert c["total_results"] == 500
+        assert c["avg_response_ms"] == 250
+        assert c["error_count_24h"] == 2
+        assert c["last_error"] is None
+        assert c["last_error_at"] is None
+
+    def test_connector_health_auto_degraded(self, admin_client, db_session):
+        src = ApiSource(
+            name="bad_src", display_name="Bad Source",
+            category="broker", source_type="api", status="live",
+            is_active=True, total_searches=10, error_count_24h=8,
+        )
+        db_session.add(src)
+        db_session.commit()
+
+        resp = admin_client.get("/api/admin/connector-health")
+        connectors = resp.json()["connectors"]
+        match = [c for c in connectors if c["name"] == "bad_src"][0]
+        assert match["status"] == "degraded"
+
+    def test_connector_health_not_degraded_low_errors(self, admin_client, db_session):
+        src = ApiSource(
+            name="ok_src", display_name="OK Source",
+            category="distributor", source_type="api", status="live",
+            is_active=True, total_searches=100, error_count_24h=3,
+        )
+        db_session.add(src)
+        db_session.commit()
+
+        resp = admin_client.get("/api/admin/connector-health")
+        connectors = resp.json()["connectors"]
+        match = [c for c in connectors if c["name"] == "ok_src"][0]
+        assert match["status"] == "live"

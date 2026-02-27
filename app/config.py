@@ -216,6 +216,12 @@ class Settings:
         os.getenv("BUYPLAN_BETTER_OFFER_PCT", "5")
     )
 
+    # Search concurrency
+    search_concurrency_limit: int = int(os.getenv("SEARCH_CONCURRENCY_LIMIT", "10"))
+
+    # Buy Plan V1 deprecation
+    buy_plan_v1_enabled: bool = os.getenv("BUY_PLAN_V1_ENABLED", "true").lower() == "true"
+
     # Contact intelligence
     contact_scoring_enabled: bool = (
         os.getenv("CONTACT_SCORING_ENABLED", "true").lower() == "true"

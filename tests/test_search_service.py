@@ -1207,6 +1207,25 @@ class TestSaveSightings:
         result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
         assert result[0].unit_price is not None
 
+    def test_currency_fallback_to_usd(self, db_session):
+        """When currency is None, default to 'USD' instead of falling back to unit_price."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        fresh = [
+            {
+                "vendor_name": "Arrow",
+                "mpn_matched": "LM317T",
+                "source_type": "nexar",
+                "unit_price": 1.25,
+                "currency": None,
+                "confidence": 0,
+            }
+        ]
+        result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
+        assert result[0].currency == "USD"
+
     def test_no_needed_names_empty_vendor_score_map(self, db_session):
         """When all vendor names are blank, vendor_score_map is empty."""
         user = _make_user(db_session)
@@ -1882,7 +1901,7 @@ class TestFetchFresh:
 
     @pytest.mark.asyncio
     async def test_api_source_error_stats(self, db_session):
-        """ApiSource.last_error is updated on connector failure."""
+        """ApiSource.last_error, last_error_at, error_count_24h updated on failure."""
         src = _make_api_source(db_session, "nexar")
 
         with patch("app.services.credential_service.get_credential", return_value="fake-key"), \
@@ -1904,6 +1923,8 @@ class TestFetchFresh:
 
         db_session.refresh(src)
         assert src.last_error == "API timeout"
+        assert src.last_error_at is not None
+        assert src.error_count_24h == 1
 
     @pytest.mark.asyncio
     async def test_avg_response_ms_calculated(self, db_session):
@@ -2240,3 +2261,55 @@ class TestSearchRequirement:
             if s["vendor_name"] == "Arrow":
                 assert s["is_historical"] is False
                 assert s["is_material_history"] is False
+
+
+class TestSearchThrottling:
+    @pytest.mark.asyncio
+    async def test_semaphore_limits_concurrency(self, db_session):
+        """Search concurrency is limited by settings.search_concurrency_limit."""
+        import asyncio
+
+        max_concurrent = 0
+        current_concurrent = 0
+        lock = asyncio.Lock()
+
+        original_search = AsyncMock(return_value=[
+            {"vendor_name": "Test", "mpn_matched": "X", "vendor_sku": "1"},
+        ])
+
+        async def _tracking_search(pn):
+            nonlocal max_concurrent, current_concurrent
+            async with lock:
+                current_concurrent += 1
+                max_concurrent = max(max_concurrent, current_concurrent)
+            await asyncio.sleep(0.01)
+            result = await original_search(pn)
+            async with lock:
+                current_concurrent -= 1
+            return result
+
+        with patch("app.services.credential_service.get_credential", return_value="fake-key"), \
+             patch("app.search_service.NexarConnector") as MockNexar, \
+             patch("app.search_service.BrokerBinConnector") as MockBB, \
+             patch("app.search_service.EbayConnector") as MockEbay, \
+             patch("app.search_service.DigiKeyConnector") as MockDK, \
+             patch("app.search_service.MouserConnector") as MockMouser, \
+             patch("app.search_service.OEMSecretsConnector") as MockOEM, \
+             patch("app.search_service.SourcengineConnector") as MockSrc, \
+             patch("app.search_service.Element14Connector") as MockE14, \
+             patch("app.search_service.TMEConnector") as MockTME, \
+             patch("app.config.settings") as mock_settings:
+
+            mock_settings.search_concurrency_limit = 2
+
+            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14, MockTME]
+            _setup_mock_connectors(mocks)
+            MockNexar.return_value.search = _tracking_search
+
+            _make_api_source(db_session, "nexar")
+            # Search 5 PNs — only nexar is active, so 5 tasks
+            results, stats = await _fetch_fresh(
+                ["PN1", "PN2", "PN3", "PN4", "PN5"], db_session
+            )
+
+        assert max_concurrent <= 2
