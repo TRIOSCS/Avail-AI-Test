@@ -5,12 +5,11 @@ Gracefully returns empty results when API key is not configured.
 """
 
 import asyncio
-import logging
+from loguru import logger
 
 from app.config import settings
 from app.http_client import http
 
-log = logging.getLogger("avail.hunter")
 
 HUNTER_BASE = "https://api.hunter.io/v2"
 _semaphore = asyncio.Semaphore(5)
@@ -36,7 +35,7 @@ async def verify_email(email: str) -> dict | None:
                 timeout=20,
             )
             if resp.status_code != 200:
-                log.warning("Hunter verify failed: %s %s", resp.status_code, resp.text[:200])
+                logger.warning("Hunter verify failed: %s %s", resp.status_code, resp.text[:200])
                 return None
 
             data = resp.json().get("data", {})
@@ -47,7 +46,7 @@ async def verify_email(email: str) -> dict | None:
                 "sources": data.get("sources", 0),
             }
         except Exception as e:
-            log.warning("Hunter verify error: %s", e)
+            logger.warning("Hunter verify error: %s", e)
             return None
 
 
@@ -76,7 +75,7 @@ async def find_domain_emails(domain: str, limit: int = 10) -> list[dict]:
                 timeout=30,
             )
             if resp.status_code != 200:
-                log.warning("Hunter domain search failed: %s %s", resp.status_code, resp.text[:200])
+                logger.warning("Hunter domain search failed: %s %s", resp.status_code, resp.text[:200])
                 return []
 
             data = resp.json().get("data", {})
@@ -103,5 +102,5 @@ async def find_domain_emails(domain: str, limit: int = 10) -> list[dict]:
 
             return contacts
         except Exception as e:
-            log.warning("Hunter domain search error: %s", e)
+            logger.warning("Hunter domain search error: %s", e)
             return []

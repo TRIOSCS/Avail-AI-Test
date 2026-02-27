@@ -7,9 +7,8 @@ Used by:
 
 import csv
 import io
-import logging
+from loguru import logger
 
-log = logging.getLogger(__name__)
 
 
 def parse_tabular_file(content: bytes, filename: str) -> list[dict]:
@@ -29,7 +28,7 @@ def parse_tabular_file(content: bytes, filename: str) -> list[dict]:
             delimiter = "\t" if fname.endswith(".tsv") else ","
             rows = _parse_csv(content, delimiter)
     except Exception as e:
-        log.warning(f"File parse error ({filename}): {e}")
+        logger.warning(f"File parse error ({filename}): {e}")
 
     return rows
 

@@ -1,6 +1,6 @@
 """Admin service — user management, system config, health."""
 
-import logging
+from loguru import logger
 import os
 import time
 from datetime import datetime, timezone
@@ -23,7 +23,6 @@ from ..models import (
     VendorCard,
 )
 
-log = logging.getLogger(__name__)
 
 
 # ── User Management ──────────────────────────────────────────────────
@@ -58,7 +57,7 @@ def update_user(db: Session, user_id: int, updates: dict, admin_user: User) -> d
         if target.id == admin_user.id and not updates["is_active"]:
             return {"error": "Cannot deactivate yourself", "status": 400}
         target.is_active = updates["is_active"]
-        log.info(
+        logger.info(
             f"Admin {admin_user.email} set user {target.email} is_active={updates['is_active']}"
         )
 
@@ -72,7 +71,7 @@ def update_user(db: Session, user_id: int, updates: dict, admin_user: User) -> d
             }
         old_role = target.role
         target.role = updates["role"]
-        log.info(
+        logger.info(
             f"Admin {admin_user.email} changed {target.email} role: {old_role} -> {updates['role']}"
         )
 
@@ -149,7 +148,7 @@ def set_config_value(db: Session, key: str, value: str, admin_email: str) -> dic
     # Invalidate in-memory cache so next read picks up the change
     global _config_cache_ts
     _config_cache_ts = 0
-    log.info(f"Config {key} changed: {old_value} -> {value} by {admin_email}")
+    logger.info(f"Config {key} changed: {old_value} -> {value} by {admin_email}")
     return {"key": row.key, "value": row.value, "updated_by": row.updated_by}
 
 
@@ -218,8 +217,8 @@ def get_system_health(db: Session) -> dict:
                     "total_results": s.total_results,
                 }
             )
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Admin health: connector stats query failed: %s", e)
 
     return {
         "version": APP_VERSION,

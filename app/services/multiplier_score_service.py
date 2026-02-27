@@ -15,7 +15,7 @@ Called by: scheduler.py (daily), routers/performance.py (on-demand)
 Depends on: models (Offer, Quote, BuyPlan, Contact, StockListHash, etc.)
 """
 
-import logging
+from loguru import logger
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import func as sqlfunc
@@ -34,7 +34,6 @@ from ..models import (
 )
 from ..models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot
 
-log = logging.getLogger("avail.multiplier_score")
 
 # ── Point values ─────────────────────────────────────────────────────
 # Buyer offer pipeline (non-stacking — highest tier only)
@@ -207,7 +206,7 @@ def compute_buyer_multiplier(
     bonus_points = pts_rfqs + pts_stock
     total_points = offer_points + bonus_points
 
-    log.debug("Buyer multiplier user=%d: %d offers, %.1f offer_pts, %.1f bonus_pts",
+    logger.debug("Buyer multiplier user=%d: %d offers, %.1f offer_pts, %.1f bonus_pts",
               user_id, len(all_offers), offer_points, bonus_points)
 
     return {
@@ -317,7 +316,7 @@ def compute_sales_multiplier(db: Session, user_id: int, month: date) -> dict:
     bonus_points = pts_accounts
     total_points = offer_points + bonus_points
 
-    log.debug("Sales multiplier user=%d: %.1f offer_pts, %.1f bonus_pts",
+    logger.debug("Sales multiplier user=%d: %.1f offer_pts, %.1f bonus_pts",
               user_id, offer_points, bonus_points)
 
     return {
@@ -368,7 +367,7 @@ def compute_all_multiplier_scores(db: Session, month: date | None = None) -> dic
             result["user_name"] = user.name
             buyer_results.append(result)
         except Exception as e:
-            log.error("Multiplier error for buyer %s: %s", user.id, e)
+            logger.error("Multiplier error for buyer %s: %s", user.id, e)
 
     sales_results = []
     for user in sales + multi_role:
@@ -377,7 +376,7 @@ def compute_all_multiplier_scores(db: Session, month: date | None = None) -> dic
             result["user_name"] = user.name
             sales_results.append(result)
         except Exception as e:
-            log.error("Multiplier error for sales %s: %s", user.id, e)
+            logger.error("Multiplier error for sales %s: %s", user.id, e)
 
     # Attach Avail Scores and determine bonuses
     _attach_avail_scores_and_rank(db, buyer_results, month, "buyer")
@@ -390,7 +389,7 @@ def compute_all_multiplier_scores(db: Session, month: date | None = None) -> dic
             saved += _upsert_multiplier(db, r, month)
 
     db.commit()
-    log.info("Multiplier scores: %d buyers, %d sales, %d saved",
+    logger.info("Multiplier scores: %d buyers, %d sales, %d saved",
              len(buyer_results), len(sales_results), saved)
     return {"buyers": len(buyer_results), "sales": len(sales_results), "saved": saved}
 

@@ -11,7 +11,7 @@ Called by: scheduler.py (_job_integrity_check)
 Depends on: models (MaterialCard, Requirement, Sighting, Offer), search_service
 """
 
-import logging
+from loguru import logger
 from datetime import datetime, timezone
 
 from sqlalchemy import func, text
@@ -21,7 +21,6 @@ from ..models import MaterialCard, MaterialCardAudit, MaterialVendorHistory, Off
 from ..utils.normalization import normalize_mpn_key
 from .audit_service import log_audit
 
-log = logging.getLogger(__name__)
 
 
 # ── Integrity Checks ─────────────────────────────────────────────────
@@ -164,7 +163,7 @@ def heal_orphaned_records(db: Session, batch_size: int = 500) -> dict:
                           entity_type="requirement", entity_id=r.id,
                           normalized_mpn=card.normalized_mpn, created_by="scheduler")
         except Exception as e:
-            log.warning("INTEGRITY_HEAL_FAIL: requirement id=%s mpn=%s error=%s", r.id, r.primary_mpn, e)
+            logger.warning("INTEGRITY_HEAL_FAIL: requirement id=%s mpn=%s error=%s", r.id, r.primary_mpn, e)
             db.rollback()
 
     # --- Sightings ---
@@ -188,7 +187,7 @@ def heal_orphaned_records(db: Session, batch_size: int = 500) -> dict:
                           entity_type="sighting", entity_id=s.id,
                           normalized_mpn=card.normalized_mpn, created_by="scheduler")
         except Exception as e:
-            log.warning("INTEGRITY_HEAL_FAIL: sighting id=%s mpn=%s error=%s", s.id, s.mpn_matched, e)
+            logger.warning("INTEGRITY_HEAL_FAIL: sighting id=%s mpn=%s error=%s", s.id, s.mpn_matched, e)
             db.rollback()
 
     # --- Offers ---
@@ -212,12 +211,12 @@ def heal_orphaned_records(db: Session, batch_size: int = 500) -> dict:
                           entity_type="offer", entity_id=o.id,
                           normalized_mpn=card.normalized_mpn, created_by="scheduler")
         except Exception as e:
-            log.warning("INTEGRITY_HEAL_FAIL: offer id=%s mpn=%s error=%s", o.id, o.mpn, e)
+            logger.warning("INTEGRITY_HEAL_FAIL: offer id=%s mpn=%s error=%s", o.id, o.mpn, e)
             db.rollback()
 
     if any(v > 0 for v in healed.values()):
         db.commit()
-        log.info(
+        logger.info(
             "INTEGRITY_HEALED: requirements=%d sightings=%d offers=%d",
             healed["requirements"],
             healed["sightings"],
@@ -254,7 +253,7 @@ def clear_dangling_fks(db: Session) -> dict:
 
     if any(v > 0 for v in cleared.values()):
         db.commit()
-        log.warning(
+        logger.warning(
             "INTEGRITY_CLEARED_DANGLING: requirements=%d sightings=%d offers=%d",
             cleared["requirements"],
             cleared["sightings"],
@@ -286,7 +285,7 @@ def run_integrity_check(db: Session) -> dict:
     total_dangling = sum(dangling.values())
 
     # --- Log check results (structured metrics) ---
-    log.info(
+    logger.info(
         "MC_METRIC: action=integrity_check orphaned_req=%d orphaned_sight=%d "
         "orphaned_offer=%d dangling_total=%d dup_cards=%d vh_dupes=%d",
         orphaned_req, orphaned_sight, orphaned_offer,
@@ -294,7 +293,7 @@ def run_integrity_check(db: Session) -> dict:
     )
 
     if total_orphaned == 0 and total_dangling == 0 and dup_cards == 0:
-        log.info("INTEGRITY_CHECK: all checks passed")
+        logger.info("INTEGRITY_CHECK: all checks passed")
     else:
         level = "critical" if (total_orphaned > 50 or total_dangling > 0 or dup_cards > 0) else "warning"
         msg = (
@@ -307,9 +306,9 @@ def run_integrity_check(db: Session) -> dict:
             dup_cards, vh_dupes,
         )
         if level == "critical":
-            log.critical(msg, *args)
+            logger.critical(msg, *args)
         else:
-            log.warning(msg, *args)
+            logger.warning(msg, *args)
 
     # --- Self-heal ---
     heal_result = {"requirements": 0, "sightings": 0, "offers": 0}
@@ -325,7 +324,7 @@ def run_integrity_check(db: Session) -> dict:
     # --- Compute linkage percentages ---
     linkage = _compute_linkage_coverage(db)
     for entity, cov in linkage.items():
-        log.info("MC_METRIC: action=linkage_pct entity=%s pct=%s total=%d linked=%d",
+        logger.info("MC_METRIC: action=linkage_pct entity=%s pct=%s total=%d linked=%d",
                  entity, cov["pct"], cov["total"], cov["linked"])
 
     # --- Determine overall status ---

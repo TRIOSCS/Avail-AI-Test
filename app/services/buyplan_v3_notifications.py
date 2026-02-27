@@ -18,7 +18,7 @@ Depends on: models, config, utils/graph_client, buyplan_service (_post_teams_cha
 
 import asyncio
 import html as html_mod
-import logging
+from loguru import logger
 
 from sqlalchemy.orm import Session
 
@@ -26,7 +26,6 @@ from ..config import settings
 from ..models import ActivityLog, User
 from ..models.buy_plan import BuyPlanV3
 
-log = logging.getLogger("avail.buyplan_v3_notify")
 
 
 # ── Background runner ────────────────────────────────────────────────
@@ -44,7 +43,7 @@ def run_v3_notify_bg(coro_factory, plan_id: int, **kwargs):
             if bg_plan:
                 await coro_factory(bg_plan, bg_db, **kwargs)
         except Exception:
-            log.exception("Background %s failed for V3 plan %s", coro_factory.__name__, plan_id)
+            logger.exception("Background %s failed for V3 plan %s", coro_factory.__name__, plan_id)
         finally:
             bg_db.close()
 
@@ -127,9 +126,9 @@ async def _send_email(user: User, subject: str, html_body: str, db: Session):
             },
             "saveToSentItems": "false",
         })
-        log.info("V3 buy plan email sent to %s", user.email)
+        logger.info("V3 buy plan email sent to %s", user.email)
     except Exception as e:
-        log.error("Failed to send V3 buy plan email to %s: %s", user.email, e)
+        logger.error("Failed to send V3 buy plan email to %s: %s", user.email, e)
 
 
 # ── Reuse V1 Teams helpers ───────────────────────────────────────────

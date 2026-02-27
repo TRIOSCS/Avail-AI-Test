@@ -88,8 +88,8 @@ def merge_vendor_cards(keep_id: int, remove_id: int, db: Session) -> dict:
                 {col: keep.id}, synchronize_session="fetch"
             )
             reassigned += count
-        except Exception:
-            pass  # Table may not exist in test DB
+        except Exception as e:
+            logger.debug("Vendor merge: skipped %s.%s reassignment: %s", model.__tablename__, col, e)
 
     # Delete the removed card
     db.delete(remove)

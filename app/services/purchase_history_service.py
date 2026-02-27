@@ -4,7 +4,7 @@ Provides upsert_purchase() — called by offer/quote won hooks
 and future import scripts to maintain the customer_part_history table.
 """
 
-import logging
+from loguru import logger
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from ..models import CustomerPartHistory, MaterialCard
 
-log = logging.getLogger(__name__)
 
 
 def upsert_purchase(
@@ -66,7 +65,7 @@ def upsert_purchase(
             existing.total_quantity = (existing.total_quantity or 0) + qty
         if source_ref:
             existing.source_ref = source_ref
-        log.info(
+        logger.info(
             "CPH_UPSERT: updated company=%d card=%d source=%s count=%d",
             company_id, material_card_id, source, existing.purchase_count,
         )
@@ -86,7 +85,7 @@ def upsert_purchase(
         source_ref=source_ref,
     )
     db.add(record)
-    log.info(
+    logger.info(
         "CPH_UPSERT: created company=%d card=%d source=%s",
         company_id, material_card_id, source,
     )

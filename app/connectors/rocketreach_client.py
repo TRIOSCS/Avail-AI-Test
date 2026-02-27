@@ -5,12 +5,11 @@ Gracefully returns empty results when API key is not configured.
 """
 
 import asyncio
-import logging
+from loguru import logger
 
 from app.config import settings
 from app.http_client import http
 
-log = logging.getLogger("avail.rocketreach")
 
 ROCKETREACH_BASE = "https://api.rocketreach.co/api/v2"
 _semaphore = asyncio.Semaphore(3)
@@ -55,7 +54,7 @@ async def search_company_contacts(
                 timeout=30,
             )
             if resp.status_code != 200:
-                log.warning("RocketReach search failed: %s %s", resp.status_code, resp.text[:200])
+                logger.warning("RocketReach search failed: %s %s", resp.status_code, resp.text[:200])
                 return []
 
             data = resp.json()
@@ -77,5 +76,5 @@ async def search_company_contacts(
                 })
             return contacts
         except Exception as e:
-            log.warning("RocketReach search error: %s", e)
+            logger.warning("RocketReach search error: %s", e)
             return []

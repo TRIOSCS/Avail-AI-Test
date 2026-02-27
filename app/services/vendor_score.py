@@ -14,13 +14,12 @@ blended 80/20 with buyer review ratings to produce the final vendor_score.
 Cold start: vendors with < 5 offers get vendor_score=None, is_new_vendor=True.
 """
 
-import logging
+from loguru import logger
 from datetime import datetime, timezone
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-log = logging.getLogger(__name__)
 
 MIN_OFFERS_FOR_SCORE = 5
 ADVANCEMENT_WEIGHT = 0.80
@@ -247,13 +246,13 @@ async def compute_all_vendor_scores(db: Session) -> dict:
         try:
             db.flush()
         except Exception as e:
-            log.error(f"Vendor scoring flush failed at offset {batch_offset}: {e}")
+            logger.error(f"Vendor scoring flush failed at offset {batch_offset}: {e}")
 
     try:
         db.commit()
-        log.info(f"Vendor scoring: updated {updated} vendor cards, skipped {skipped}")
+        logger.info(f"Vendor scoring: updated {updated} vendor cards, skipped {skipped}")
     except Exception as e:
-        log.error(f"Vendor scoring commit failed: {e}")
+        logger.error(f"Vendor scoring commit failed: {e}")
         db.rollback()
         return {"updated": 0, "skipped": skipped}
 

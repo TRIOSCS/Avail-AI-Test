@@ -16,7 +16,7 @@ Depends on: utils/graph_client.py, models.py, services/activity_service.py
 """
 
 import asyncio
-import logging
+from loguru import logger
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -26,7 +26,6 @@ from sqlalchemy.orm import Session
 from app.models import Contact, Requirement, Sighting, VendorCard, VendorContact, VendorResponse
 from app.utils.graph_client import GraphClient
 
-log = logging.getLogger("avail.email_threads")
 
 # ── In-memory cache ────────────────────────────────────────────────────
 # key → (timestamp, data)
@@ -229,7 +228,7 @@ async def fetch_threads_for_requirement(
                             conv_id, external_msgs, "conversation_id"
                         )
             except Exception as e:
-                log.warning(f"Graph query failed for conversationId {conv_id[:20]}: {e}")
+                logger.warning(f"Graph query failed for conversationId {conv_id[:20]}: {e}")
 
     # ── Tier 1b: ConversationId match via VendorResponse records ──
     vendor_responses = (
@@ -267,7 +266,7 @@ async def fetch_threads_for_requirement(
                             conv_id, external_msgs, "conversation_id"
                         )
             except Exception as e:
-                log.warning(f"Graph query failed for VR conversationId: {e}")
+                logger.warning(f"Graph query failed for VR conversationId: {e}")
 
     # ── Tier 2: Subject [ref:{req_id}] token (also legacy [AVAIL-{req_id}]) ──
     req_id = requirement.requisition_id
@@ -301,7 +300,7 @@ async def fetch_threads_for_requirement(
                 if external_msgs:
                     threads[cid] = _build_thread_summary(cid, external_msgs, "subject_token")
         except Exception as e:
-            log.warning(f"Graph subject search failed for {avail_token}: {e}")
+            logger.warning(f"Graph subject search failed for {avail_token}: {e}")
 
     # ── Tier 3: Part number match ──
     part_number = requirement.primary_mpn
@@ -335,7 +334,7 @@ async def fetch_threads_for_requirement(
                         cid, external_msgs, "part_number"
                     )
         except Exception as e:
-            log.warning(f"Graph part number search failed for {part_number}: {e}")
+            logger.warning(f"Graph part number search failed for {part_number}: {e}")
 
     # ── Tier 4: Vendor domain match ──
     # Find vendors with sightings for this requirement
@@ -399,7 +398,7 @@ async def fetch_threads_for_requirement(
                     )
             return domain_threads
         except Exception as e:
-            log.warning(f"Graph domain search failed for {domain}: {e}")
+            logger.warning(f"Graph domain search failed for {domain}: {e}")
             return {}
 
     if search_domains:
@@ -472,7 +471,7 @@ async def fetch_thread_messages(
             max_items=100,
         )
     except Exception as e:
-        log.error(f"Failed to fetch thread messages for {conversation_id[:20]}: {e}")
+        logger.error(f"Failed to fetch thread messages for {conversation_id[:20]}: {e}")
         return []
 
     result = []
@@ -589,7 +588,7 @@ async def fetch_threads_for_vendor(
                     )
             return domain_threads
         except Exception as e:
-            log.warning(f"Graph vendor search failed for domain {domain}: {e}")
+            logger.warning(f"Graph vendor search failed for domain {domain}: {e}")
             return {}
 
     search_domains = list(domains)[:5]

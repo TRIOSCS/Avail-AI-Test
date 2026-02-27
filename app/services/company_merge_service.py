@@ -117,8 +117,8 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
                 {col: keep.id}, synchronize_session="fetch"
             )
             reassigned += count
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning("Company merge: failed to reassign %s.%s: %s", model.__tablename__, col, e)
 
     # 9. Delete removed company
     db.delete(remove)
@@ -128,8 +128,8 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
     try:
         from ..cache.decorators import invalidate_prefix
         invalidate_prefix("company_list")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Company merge: cache invalidation failed: %s", e)
 
     logger.info(
         "Company merge: kept %d (%s), removed %d (%s), "

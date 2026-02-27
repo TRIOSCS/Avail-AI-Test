@@ -131,8 +131,8 @@ def detect_warm_intros(prospect: ProspectAccount, db: Session) -> dict:
         if sighting_count > 0 and not result["has_warm_intro"]:
             result["has_warm_intro"] = True
             result["warmth"] = "warm"
-    except Exception:
-        pass  # Sighting model may not exist in test DB
+    except Exception as e:
+        logger.debug("Warm intro sighting lookup failed: %s", e)
 
     return result
 

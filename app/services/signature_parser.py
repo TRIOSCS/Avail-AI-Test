@@ -4,11 +4,10 @@ Uses regex for fast extraction, falls back to Claude AI for complex signatures.
 Caches results in EmailSignatureExtract table to avoid re-parsing.
 """
 
-import logging
+from loguru import logger
 import re
 from datetime import datetime, timezone
 
-log = logging.getLogger("avail.signature_parser")
 
 # ── Regex patterns for signature extraction ──────────────────────────
 
@@ -245,7 +244,7 @@ async def parse_signature_ai(body: str, sender_name: str = "", sender_email: str
         result["confidence"] = min(0.5 + (fields_found * 0.08), 0.95)
         return result
     except Exception as e:
-        log.warning("AI signature parsing failed: %s", e)
+        logger.warning("AI signature parsing failed: %s", e)
         return {"confidence": 0.0}
 
 
@@ -299,7 +298,7 @@ async def parse_signature_gradient(body: str, sender_name: str = "", sender_emai
         result["confidence"] = min(0.5 + (fields_found * 0.08), 0.95)
         return result
     except Exception as e:
-        log.warning("Gradient signature parsing failed: %s", e)
+        logger.warning("Gradient signature parsing failed: %s", e)
         return {"confidence": 0.0}
 
 
@@ -320,8 +319,8 @@ async def extract_signature(body: str, sender_name: str = "", sender_email: str 
             if gradient_result.get("confidence", 0) > regex_result.get("confidence", 0):
                 gradient_result["extraction_method"] = "gradient_ai"
                 return gradient_result
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Gradient signature parse failed: %s", e)
 
     # Fallback to Claude (secondary AI path)
     try:
@@ -329,8 +328,8 @@ async def extract_signature(body: str, sender_name: str = "", sender_email: str 
         if ai_result.get("confidence", 0) > regex_result.get("confidence", 0):
             ai_result["extraction_method"] = "claude_ai"
             return ai_result
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Claude signature parse failed: %s", e)
 
     regex_result["extraction_method"] = "regex"
     return regex_result
@@ -378,5 +377,5 @@ def cache_signature_extract(db, sender_email: str, extract: dict) -> None:
     try:
         db.flush()
     except Exception as e:
-        log.debug("Signature cache flush error: %s", e)
+        logger.debug("Signature cache flush error: %s", e)
         db.rollback()

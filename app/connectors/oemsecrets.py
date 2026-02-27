@@ -4,7 +4,7 @@ Returns pricing/stock from DigiKey, Mouser, Arrow, Avnet, Farnell, RS,
 Future, TME, and many more in a single API call.
 """
 
-import logging
+from loguru import logger
 
 import httpx
 
@@ -12,7 +12,6 @@ from ..http_client import http
 from ..utils import safe_float, safe_int
 from .sources import BaseConnector
 
-log = logging.getLogger(__name__)
 
 
 class OEMSecretsConnector(BaseConnector):
@@ -37,13 +36,13 @@ class OEMSecretsConnector(BaseConnector):
 
         r = await http.get(self.SEARCH_URL, params=params, timeout=httpx.Timeout(self.timeout, connect=5.0))
         if r.status_code != 200:
-            log.warning(f"OEMSecrets: HTTP {r.status_code} for {part_number}: {r.text[:200]}")
+            logger.warning(f"OEMSecrets: HTTP {r.status_code} for {part_number}: {r.text[:200]}")
             r.raise_for_status()
 
         try:
             data = r.json()
         except Exception:
-            log.warning(f"OEMSecrets: non-JSON response for {part_number}: {r.text[:200]}")
+            logger.warning(f"OEMSecrets: non-JSON response for {part_number}: {r.text[:200]}")
             return []
 
         return self._parse(data, part_number)
@@ -112,5 +111,5 @@ class OEMSecretsConnector(BaseConnector):
                 }
             )
 
-        log.info(f"OEMSecrets: {pn} -> {len(results)} results")
+        logger.info(f"OEMSecrets: {pn} -> {len(results)} results")
         return results

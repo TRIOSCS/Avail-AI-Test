@@ -9,7 +9,7 @@ Depends on: models, config, utils/graph_client
 """
 
 import html
-import logging
+from loguru import logger
 import secrets
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -35,7 +35,6 @@ from ..models import (
     VendorCard,
 )
 
-log = logging.getLogger("avail.proactive")
 
 _last_proactive_scan = datetime.min.replace(tzinfo=timezone.utc)
 
@@ -158,7 +157,7 @@ def scan_new_offers_for_matches(db: Session) -> dict:
         try:
             db.commit()
         except Exception as e:
-            log.error(f"Failed to commit proactive matches: {e}")
+            logger.error(f"Failed to commit proactive matches: {e}")
             db.rollback()
             return {"scanned": len(new_offers), "matches_created": 0}
 
@@ -474,9 +473,9 @@ async def send_proactive_offer(
                 "saveToSentItems": "true",
             },
         )
-        log.info(f"Proactive offer #{po.id} sent to {', '.join(recipient_emails)}")
+        logger.info(f"Proactive offer #{po.id} sent to {', '.join(recipient_emails)}")
     except Exception as e:
-        log.error(f"Failed to send proactive offer email: {e}")
+        logger.error(f"Failed to send proactive offer email: {e}")
 
     # Update match statuses
     for m in matches:

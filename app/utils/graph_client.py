@@ -10,11 +10,10 @@ Usage:
 """
 
 import asyncio
-import logging
+from loguru import logger
 
 from app.http_client import http
 
-log = logging.getLogger("avail.graph")
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
@@ -154,14 +153,14 @@ class GraphClient:
                     wait = int(
                         resp.headers.get("Retry-After", BACKOFF_BASE ** (attempt + 1))
                     )
-                    log.warning(f"Graph 429 — retry in {wait}s (attempt {attempt + 1})")
+                    logger.warning(f"Graph 429 — retry in {wait}s (attempt {attempt + 1})")
                     await asyncio.sleep(wait)
                     continue
 
                 # Server error — exponential backoff
                 if resp.status_code >= 500:
                     wait = BACKOFF_BASE ** (attempt + 1)
-                    log.warning(
+                    logger.warning(
                         f"Graph {resp.status_code} — retry in {wait}s (attempt {attempt + 1})"
                     )
                     await asyncio.sleep(wait)
@@ -169,21 +168,21 @@ class GraphClient:
 
                 # 410 Gone — delta token expired, caller must discard and re-sync
                 if resp.status_code == 410:
-                    log.warning("Graph 410 SyncStateNotFound — delta token expired")
+                    logger.warning("Graph 410 SyncStateNotFound — delta token expired")
                     raise GraphSyncStateExpired(resp.text[:300])
 
                 # Client error (400, 401, 403, 404) — don't retry
-                log.error(f"Graph {resp.status_code}: {resp.text[:300]}")
+                logger.error(f"Graph {resp.status_code}: {resp.text[:300]}")
                 return {"error": resp.status_code, "detail": resp.text[:300]}
 
             except Exception as e:
                 last_error = e
                 wait = BACKOFF_BASE ** (attempt + 1)
-                log.warning(f"Graph connection error — retry in {wait}s: {e}")
+                logger.warning(f"Graph connection error — retry in {wait}s: {e}")
                 await asyncio.sleep(wait)
 
         # All retries exhausted
-        log.error(f"Graph request failed after {MAX_RETRIES} retries: {url}")
+        logger.error(f"Graph request failed after {MAX_RETRIES} retries: {url}")
         if last_error:
             raise last_error
         return {"error": "max_retries", "detail": "All retries exhausted"}

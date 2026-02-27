@@ -1,12 +1,11 @@
 """Sourcengine API connector — B2B electronic component marketplace."""
 
-import logging
+from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
 from .sources import BaseConnector
 
-log = logging.getLogger(__name__)
 
 
 class SourcengineConnector(BaseConnector):
@@ -96,5 +95,5 @@ class SourcengineConnector(BaseConnector):
                 }
             )
 
-        log.info(f"Sourcengine: {pn} -> {len(results)} results")
+        logger.info(f"Sourcengine: {pn} -> {len(results)} results")
         return results

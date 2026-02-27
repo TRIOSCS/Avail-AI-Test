@@ -15,7 +15,7 @@ Usage:
 """
 
 import hmac
-import logging
+from loguru import logger
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
@@ -25,7 +25,6 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import GraphSubscription, User
 
-log = logging.getLogger("avail.webhook")
 
 # Graph webhook subscriptions for mail expire after max 3 days (4230 min)
 SUBSCRIPTION_LIFETIME_HOURS = 70  # ~3 days, renew before expiry
@@ -52,7 +51,7 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
 
     token = await get_valid_token(user, db)
     if not token:
-        log.warning(f"No valid token for {user.email}, skipping subscription")
+        logger.warning(f"No valid token for {user.email}, skipping subscription")
         return None
 
     # Check for existing active subscription
@@ -65,7 +64,7 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
         .first()
     )
     if existing:
-        log.debug(
+        logger.debug(
             f"Active subscription exists for {user.email}: {existing.subscription_id}"
         )
         return existing
@@ -89,12 +88,12 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
     try:
         result = await gc.post_json("/subscriptions", payload)
     except Exception as e:
-        log.error(f"Failed to create subscription for {user.email}: {e}")
+        logger.error(f"Failed to create subscription for {user.email}: {e}")
         return None
 
     sub_id = result.get("id")
     if not sub_id:
-        log.error(f"No subscription ID in response for {user.email}: {result}")
+        logger.error(f"No subscription ID in response for {user.email}: {result}")
         return None
 
     record = GraphSubscription(
@@ -108,7 +107,7 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
     db.add(record)
     db.commit()
 
-    log.info(
+    logger.info(
         f"Created Graph subscription {sub_id} for {user.email}, expires {expiration}"
     )
     return record
@@ -142,7 +141,7 @@ async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
             },
         )
     except Exception as e:
-        log.error(f"Failed to renew subscription {sub.subscription_id}: {e}")
+        logger.error(f"Failed to renew subscription {sub.subscription_id}: {e}")
         # Subscription may have expired — delete and let scheduler recreate
         db.delete(sub)
         db.commit()
@@ -150,7 +149,7 @@ async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
 
     sub.expiration_dt = new_expiration
     db.commit()
-    log.info(f"Renewed subscription {sub.subscription_id} until {new_expiration}")
+    logger.info(f"Renewed subscription {sub.subscription_id} until {new_expiration}")
     return True
 
 
@@ -234,20 +233,20 @@ def validate_notifications(payload: dict, db: Session) -> list[dict]:
             .first()
         )
         if not sub:
-            log.warning(f"Unknown subscription {sub_id}, ignoring")
+            logger.warning(f"Unknown subscription {sub_id}, ignoring")
             continue
 
         # Timing-safe clientState comparison
         if sub.client_state:
             if not hmac.compare_digest(sub.client_state, client_state or ""):
-                log.warning(f"Client state mismatch for {sub_id}, ignoring")
+                logger.warning(f"Client state mismatch for {sub_id}, ignoring")
                 continue
 
         # Replay protection
         resource = notif.get("resource", "")
         replay_key = f"{sub_id}:{resource}"
         if replay_key in _seen_notifications:
-            log.warning(f"Replay detected for {replay_key}, ignoring")
+            logger.warning(f"Replay detected for {replay_key}, ignoring")
             continue
         _seen_notifications[replay_key] = now
 
@@ -303,10 +302,10 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
                 .first()
             )
             if not sub:
-                log.warning(f"Unknown subscription {sub_id}, ignoring")
+                logger.warning(f"Unknown subscription {sub_id}, ignoring")
                 continue
             if sub.client_state and sub.client_state != client_state:
-                log.warning(f"Client state mismatch for {sub_id}, ignoring")
+                logger.warning(f"Client state mismatch for {sub_id}, ignoring")
                 continue
 
             user = db.get(User, sub.user_id)
@@ -344,7 +343,7 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
                 },
             )
         except Exception as e:
-            log.error(f"Failed to fetch message for notification: {e}")
+            logger.error(f"Failed to fetch message for notification: {e}")
             continue
 
         if msg.get("isDraft"):
@@ -385,11 +384,11 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
                 scanned_by_user_id=user.id,
             )
             if new_responses:
-                log.info(
+                logger.info(
                     f"Webhook-triggered poll [{user.email}]: {len(new_responses)} new response(s)"
                 )
         except Exception as e:
-            log.error(f"Webhook-triggered poll failed for {user.email}: {e}")
+            logger.error(f"Webhook-triggered poll failed for {user.email}: {e}")
 
 
 # ═══════════════════════════════════════════════════════════════════════

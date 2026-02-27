@@ -1,14 +1,13 @@
 """SQLAlchemy TypeDecorator for transparent Fernet encryption of text columns."""
 
 import base64
-import logging
+from loguru import logger
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from sqlalchemy import Text, TypeDecorator
 
-log = logging.getLogger(__name__)
 
 
 def _get_fernet():
@@ -36,7 +35,7 @@ class EncryptedText(TypeDecorator):
             f = _get_fernet()
             return f.encrypt(value.encode()).decode()
         except Exception:
-            log.warning("Failed to encrypt value, storing as-is")
+            logger.warning("Failed to encrypt value, storing as-is")
             return value
 
     def process_result_value(self, value, dialect):
@@ -49,5 +48,5 @@ class EncryptedText(TypeDecorator):
             # Value may be stored in plaintext (pre-migration data)
             return value
         except Exception:
-            log.warning("Unexpected decryption error, returning raw value")
+            logger.warning("Unexpected decryption error, returning raw value")
             return value

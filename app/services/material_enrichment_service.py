@@ -1,6 +1,6 @@
 """AI-powered material card enrichment — description + commodity classification."""
 
-import logging
+from loguru import logger
 from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from ..models import MaterialCard
 from ..services.specialty_detector import COMMODITY_MAP
 
-log = logging.getLogger(__name__)
 
 VALID_CATEGORIES = sorted(COMMODITY_MAP.keys()) + ["other"]
 
@@ -105,12 +104,12 @@ async def _enrich_batch(
             timeout=60,
         )
     except Exception as e:
-        log.error("Material enrichment Claude call failed: %s", e)
+        logger.error("Material enrichment Claude call failed: %s", e)
         stats["errors"] += len(cards)
         return
 
     if not result or "parts" not in result:
-        log.warning("Material enrichment: empty or invalid response")
+        logger.warning("Material enrichment: empty or invalid response")
         stats["errors"] += len(cards)
         return
 
@@ -132,13 +131,13 @@ async def _enrich_batch(
             card.enriched_at = now
             stats["enriched"] += 1
         except Exception as e:
-            log.warning("Failed to apply enrichment for card %d: %s", card.id, e)
+            logger.warning("Failed to apply enrichment for card %d: %s", card.id, e)
             stats["errors"] += 1
 
     try:
         db.commit()
     except Exception as e:
-        log.error("Material enrichment commit failed: %s", e)
+        logger.error("Material enrichment commit failed: %s", e)
         db.rollback()
         stats["errors"] += len(cards)
         stats["enriched"] -= len(cards)

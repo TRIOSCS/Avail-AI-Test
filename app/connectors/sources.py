@@ -1,7 +1,7 @@
 """API connectors — Nexar (Octopart) and BrokerBin."""
 
 import asyncio
-import logging
+from loguru import logger
 import random
 import time
 from abc import ABC, abstractmethod
@@ -11,7 +11,6 @@ import httpx
 
 from ..utils import safe_float, safe_int
 
-log = logging.getLogger(__name__)
 
 
 # ── Async-compatible circuit breaker ─────────────────────────────────
@@ -64,7 +63,7 @@ class BaseConnector(ABC):
     async def search(self, part_number: str) -> list[dict]:
         # Short-circuit if the breaker is open (service is known-down)
         if self._breaker.current_state == "open":
-            log.warning(
+            logger.warning(
                 f"{self.__class__.__name__} circuit breaker OPEN — skipping {part_number}"
             )
             return []
@@ -78,7 +77,7 @@ class BaseConnector(ABC):
             except (httpx.ConnectTimeout, httpx.ConnectError) as e:
                 # Server unreachable — no point retrying
                 self._breaker.record_failure()
-                log.warning(
+                logger.warning(
                     f"{self.__class__.__name__} failed for {part_number}: {type(e).__name__}"
                 )
                 raise
@@ -88,7 +87,7 @@ class BaseConnector(ABC):
                 if attempt < self.max_retries:
                     await asyncio.sleep(2**attempt + random.uniform(0, 1))
                 else:
-                    log.warning(
+                    logger.warning(
                         f"{self.__class__.__name__} failed for {part_number}: {e}"
                     )
         raise last_err  # propagate so caller can track the error
@@ -217,7 +216,7 @@ class NexarConnector(BaseConnector):
                 timeout=self.timeout,
             )
             if r.status_code != 200:
-                log.warning(f"Nexar REST v4: HTTP {r.status_code} for {part_number}")
+                logger.warning(f"Nexar REST v4: HTTP {r.status_code} for {part_number}")
                 return None
 
             data = r.json()
@@ -227,14 +226,14 @@ class NexarConnector(BaseConnector):
                 err = data["error"]
                 err_str = err if isinstance(err, str) else str(err)
                 if "not found" in err_str or "no token" in err_str:
-                    log.warning(f"Nexar REST v4: auth error for {part_number}: {err_str[:120]}")
+                    logger.warning(f"Nexar REST v4: auth error for {part_number}: {err_str[:120]}")
                     return None
-                log.warning(f"Nexar REST v4: error for {part_number}: {err_str[:120]}")
+                logger.warning(f"Nexar REST v4: error for {part_number}: {err_str[:120]}")
                 return None
 
             return self._parse_rest_v4(data, part_number)
         except Exception as e:
-            log.warning(f"Nexar REST v4 failed for {part_number}: {e}")
+            logger.warning(f"Nexar REST v4 failed for {part_number}: {e}")
             return None
 
     def _parse_rest_v4(self, data: dict, pn: str) -> list[dict]:
@@ -295,7 +294,7 @@ class NexarConnector(BaseConnector):
                         "vendor_sku": sku,
                     })
 
-        log.info(f"Nexar REST v4: {pn} -> {len(results)} seller results")
+        logger.info(f"Nexar REST v4: {pn} -> {len(results)} seller results")
         return results
 
     async def _do_search(self, part_number: str) -> list[dict]:
@@ -316,10 +315,10 @@ class NexarConnector(BaseConnector):
         errors = data.get("errors", [])
         if errors:
             msg = errors[0].get("message", "")
-            log.warning(f"Nexar query error for {part_number}: {msg[:120]}")
+            logger.warning(f"Nexar query error for {part_number}: {msg[:120]}")
             # Fall back to aggregate query if sellers field is not authorized
             if "not authorized" in msg.lower() and "sellers" in msg.lower():
-                log.info(f"Nexar: falling back to aggregate query for {part_number}")
+                logger.info(f"Nexar: falling back to aggregate query for {part_number}")
                 data = await self._run_query(self.AGGREGATE_QUERY, part_number)
                 results_data = (
                     (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
@@ -429,7 +428,7 @@ class NexarConnector(BaseConnector):
                         }
                     )
 
-        log.info(f"Nexar: {pn} -> {len(results)} seller results")
+        logger.info(f"Nexar: {pn} -> {len(results)} seller results")
         return results
 
     def _parse_aggregate(self, results_data: list, pn: str) -> list[dict]:
@@ -473,7 +472,7 @@ class NexarConnector(BaseConnector):
                 "category": category,
             })
 
-        log.info(f"Nexar: {pn} -> {len(results)} aggregate results (totalAvail + medianPrice)")
+        logger.info(f"Nexar: {pn} -> {len(results)} aggregate results (totalAvail + medianPrice)")
         return results
 
 
@@ -514,7 +513,7 @@ class BrokerBinConnector(BaseConnector):
         r = await http_redirect.get(self.API_URL, params=params, headers=headers, timeout=self.timeout)
 
         if r.status_code != 200:
-            log.warning(
+            logger.warning(
                 f"BrokerBin: HTTP {r.status_code} for {part_number}: {r.text[:200]}"
             )
             return []
@@ -522,7 +521,7 @@ class BrokerBinConnector(BaseConnector):
         try:
             body = r.json()
         except Exception:
-            log.warning(f"BrokerBin: non-JSON response for {part_number}")
+            logger.warning(f"BrokerBin: non-JSON response for {part_number}")
             return []
 
         items = body.get("data", [])
@@ -539,7 +538,7 @@ class BrokerBinConnector(BaseConnector):
 
             # Log all available fields from first result (once per search)
             if not results:
-                log.info(f"BrokerBin fields for {part_number}: {list(item.keys())}")
+                logger.info(f"BrokerBin fields for {part_number}: {list(item.keys())}")
 
             qty = safe_int(item.get("qty"))
             price = safe_float(item.get("price"))
@@ -579,5 +578,5 @@ class BrokerBinConnector(BaseConnector):
             )
 
         total = (body.get("meta") or {}).get("total", len(results))
-        log.info(f"BrokerBin: {part_number} -> {len(results)} results (total: {total})")
+        logger.info(f"BrokerBin: {part_number} -> {len(results)} results (total: {total})")
         return results

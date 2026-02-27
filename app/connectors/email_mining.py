@@ -15,13 +15,12 @@ Hardening:
 Enriches VendorCards with verified contact info from real correspondence.
 """
 
-import logging
+from loguru import logger
 import re
 from datetime import datetime, timedelta, timezone
 
 from app.utils.graph_client import GraphSyncStateExpired
 
-log = logging.getLogger(__name__)
 
 # Common stock list file extensions
 STOCK_LIST_EXTENSIONS = {".xlsx", ".xls", ".csv", ".tsv"}
@@ -181,7 +180,7 @@ class EmailMiner:
         if sync:
             sync.delta_token = None
             self.db.flush()
-            log.info(f"Cleared stale delta token for {folder} (user {self.user_id})")
+            logger.info(f"Cleared stale delta token for {folder} (user {self.user_id})")
 
     # ══════════════════════════════════════════════════════════════════
     #  Inbound: Vendor Contact Mining
@@ -222,14 +221,14 @@ class EmailMiner:
                 used_delta = True
                 if new_token:
                     self._save_delta_token("inbox_mining", new_token)
-                log.info(f"Delta scan (mining): {len(messages)} changes")
+                logger.info(f"Delta scan (mining): {len(messages)} changes")
             except GraphSyncStateExpired:
-                log.warning("Delta token expired for inbox mining — clearing and falling back")
+                logger.warning("Delta token expired for inbox mining — clearing and falling back")
                 self._clear_delta_token("inbox_mining")
                 messages = []
                 used_delta = False
             except Exception as e:
-                log.warning(
+                logger.warning(
                     f"Delta query failed for mining, falling back to search: {e}"
                 )
                 messages = []
@@ -450,14 +449,14 @@ class EmailMiner:
                 used_delta = True
                 if new_token:
                     self._save_delta_token("sent_items", new_token)
-                log.info(f"Delta scan (sent): {len(messages)} changes")
+                logger.info(f"Delta scan (sent): {len(messages)} changes")
             except GraphSyncStateExpired:
-                log.warning("Delta token expired for sent items — clearing and falling back")
+                logger.warning("Delta token expired for sent items — clearing and falling back")
                 self._clear_delta_token("sent_items")
                 messages = []
                 used_delta = False
             except Exception as e:
-                log.warning(f"Delta query failed for SentItems, falling back: {e}")
+                logger.warning(f"Delta query failed for SentItems, falling back: {e}")
                 messages = []
                 used_delta = False
 
@@ -479,7 +478,7 @@ class EmailMiner:
                 )
                 messages = results
             except Exception as e:
-                log.warning(f"SentItems search failed: {e}")
+                logger.warning(f"SentItems search failed: {e}")
                 return {
                     "messages_scanned": 0,
                     "rfqs_detected": 0,
@@ -571,7 +570,7 @@ class EmailMiner:
                 "/me/messages", params=params, max_items=max_messages
             )
         except Exception as e:
-            log.warning("Deep scan inbox error: %s", e)
+            logger.warning("Deep scan inbox error: %s", e)
             return {
                 "messages_scanned": 0,
                 "signatures_extracted": 0,
@@ -680,7 +679,7 @@ class EmailMiner:
             try:
                 self.db.commit()
             except Exception as e:
-                log.warning("Deep scan commit error: %s", e)
+                logger.warning("Deep scan commit error: %s", e)
                 self.db.rollback()
 
         return {
@@ -705,7 +704,7 @@ class EmailMiner:
                 "/me/messages", params=params, max_items=limit
             )
         except Exception as e:
-            log.warning(f"Email search error: {e}")
+            logger.warning(f"Email search error: {e}")
             return []
 
     def _extract_vendor_info(

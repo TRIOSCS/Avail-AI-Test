@@ -8,7 +8,7 @@ unavailable (e.g., during development without Docker).
 """
 
 import json
-import logging
+from loguru import logger
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -16,7 +16,6 @@ from sqlalchemy import text
 
 from app.database import SessionLocal
 
-log = logging.getLogger("avail.cache")
 
 # Lazy-initialized Redis client
 _redis_client = None
@@ -39,7 +38,7 @@ def _get_redis():
     try:
         from app.config import settings
         if settings.cache_backend == "postgres":
-            log.info("Cache backend set to postgres — skipping Redis")
+            logger.info("Cache backend set to postgres — skipping Redis")
             return None
 
         import redis
@@ -51,9 +50,9 @@ def _get_redis():
             retry_on_timeout=True,
         )
         _redis_client.ping()
-        log.info("Redis cache connected: %s", settings.redis_url)
+        logger.info("Redis cache connected: %s", settings.redis_url)
     except Exception as e:
-        log.warning("Redis unavailable, falling back to PostgreSQL cache: %s", e)
+        logger.warning("Redis unavailable, falling back to PostgreSQL cache: %s", e)
         _redis_client = None
 
     return _redis_client
@@ -70,7 +69,7 @@ def get_cached(cache_key: str) -> dict | None:
                 return json.loads(data)
             return None
         except Exception as e:
-            log.debug("Redis read error for %s: %s", cache_key, e)
+            logger.debug("Redis read error for %s: %s", cache_key, e)
 
     # Fall back to PostgreSQL
     try:
@@ -87,7 +86,7 @@ def get_cached(cache_key: str) -> dict | None:
             if row:
                 return row[0]  # JSONB column returns as dict
     except Exception as e:
-        log.debug("Cache read error for %s: %s", cache_key, e)
+        logger.debug("Cache read error for %s: %s", cache_key, e)
     return None
 
 
@@ -102,7 +101,7 @@ def set_cached(cache_key: str, data: dict, ttl_days: float = 7) -> None:
             r.setex(f"{_REDIS_PREFIX}{cache_key}", ttl_seconds, json.dumps(data))
             return  # Success — skip PG write
         except Exception as e:
-            log.debug("Redis write error for %s: %s", cache_key, e)
+            logger.debug("Redis write error for %s: %s", cache_key, e)
 
     # Fall back to PostgreSQL
     try:
@@ -127,7 +126,7 @@ def set_cached(cache_key: str, data: dict, ttl_days: float = 7) -> None:
             )
             db.commit()
     except Exception as e:
-        log.warning("Cache write error for %s: %s", cache_key, e)
+        logger.warning("Cache write error for %s: %s", cache_key, e)
 
 
 def invalidate(cache_key: str) -> None:
@@ -138,7 +137,7 @@ def invalidate(cache_key: str) -> None:
         try:
             r.delete(f"{_REDIS_PREFIX}{cache_key}")
         except Exception as e:
-            log.debug("Redis invalidate error for %s: %s", cache_key, e)
+            logger.debug("Redis invalidate error for %s: %s", cache_key, e)
 
     # Also clean PostgreSQL (may have stale entry)
     try:
@@ -149,7 +148,7 @@ def invalidate(cache_key: str) -> None:
             )
             db.commit()
     except Exception as e:
-        log.debug("Cache invalidate error for %s: %s", cache_key, e)
+        logger.debug("Cache invalidate error for %s: %s", cache_key, e)
 
 
 def flush_enrichment_cache() -> int:
@@ -173,7 +172,7 @@ def flush_enrichment_cache() -> int:
                 if cursor == 0:
                     break
         except Exception as e:
-            log.debug("Redis flush enrich error: %s", e)
+            logger.debug("Redis flush enrich error: %s", e)
 
     # PostgreSQL: delete all enrich:* entries
     try:
@@ -184,10 +183,10 @@ def flush_enrichment_cache() -> int:
             db.commit()
             count += result.rowcount
     except Exception as e:
-        log.warning("Cache flush enrich error: %s", e)
+        logger.warning("Cache flush enrich error: %s", e)
 
     if count:
-        log.info("Flushed %d enrichment cache entries for monthly refresh", count)
+        logger.info("Flushed %d enrichment cache entries for monthly refresh", count)
     return count
 
 
@@ -216,9 +215,9 @@ def cleanup_expired() -> int:
                 if result.rowcount < BATCH_SIZE:
                     break
             if count:
-                log.info("Cache cleanup: removed %d expired entries from PostgreSQL", count)
+                logger.info("Cache cleanup: removed %d expired entries from PostgreSQL", count)
     except Exception as e:
-        log.warning("Cache cleanup error: %s", e)
+        logger.warning("Cache cleanup error: %s", e)
 
     # Redis handles expiration automatically via TTL — no cleanup needed
     return count

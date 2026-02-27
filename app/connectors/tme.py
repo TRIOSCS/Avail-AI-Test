@@ -10,14 +10,13 @@ Depends on: BaseConnector, httpx, hmac
 import base64
 import hashlib
 import hmac
-import logging
+from loguru import logger
 import urllib.parse
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
 from .sources import BaseConnector
 
-log = logging.getLogger(__name__)
 
 
 class TMEConnector(BaseConnector):
@@ -72,7 +71,7 @@ class TMEConnector(BaseConnector):
 
         products = (data.get("Data") or {}).get("ProductList", [])
         if not products:
-            log.info(f"TME: {part_number} -> 0 results")
+            logger.info(f"TME: {part_number} -> 0 results")
             return []
 
         # Step 2: Fetch prices for found products
@@ -101,7 +100,7 @@ class TMEConnector(BaseConnector):
             r.raise_for_status()
             data = r.json()
         except Exception as e:
-            log.warning(f"TME price fetch failed: {e}")
+            logger.warning(f"TME price fetch failed: {e}")
             return {}
 
         result = {}
@@ -144,5 +143,5 @@ class TMEConnector(BaseConnector):
                 "description": desc[:500] if desc else "",
             })
 
-        log.info(f"TME: {pn} -> {len(results)} results")
+        logger.info(f"TME: {pn} -> {len(results)} results")
         return results

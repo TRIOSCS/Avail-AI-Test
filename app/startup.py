@@ -10,14 +10,13 @@ Called by: main.py lifespan
 Depends on: database.py (engine), models.py (Base)
 """
 
-import logging
+from loguru import logger
 
 from sqlalchemy import text as sqltext
 
 from .database import engine
 from .database import SessionLocal
 
-log = logging.getLogger(__name__)
 
 
 def run_startup_migrations() -> None:
@@ -25,13 +24,13 @@ def run_startup_migrations() -> None:
     import os
 
     if os.environ.get("TESTING"):
-        log.info("TESTING mode — skipping startup migrations")
+        logger.info("TESTING mode — skipping startup migrations")
         return
 
     # Create all tables/columns/indexes defined in ORM models (no-op if they exist)
     from .models import Base
     Base.metadata.create_all(bind=engine, checkfirst=True)
-    log.info("ORM schema sync complete (create_all checkfirst=True)")
+    logger.info("ORM schema sync complete (create_all checkfirst=True)")
 
     with engine.connect() as conn:
         _add_missing_columns(conn)
@@ -47,7 +46,7 @@ def run_startup_migrations() -> None:
     # _create_default_user_if_env_set()  # Disabled for server push; re-enable when needed
     _backfill_sighting_offer_normalized_mpn()
     _backfill_sighting_vendor_normalized()
-    log.info("Startup migrations complete")
+    logger.info("Startup migrations complete")
 
 
 def _create_default_user_if_env_set() -> None:
@@ -72,7 +71,7 @@ def _create_default_user_if_env_set() -> None:
     try:
         existing = db.query(User).filter_by(email=email).first()
         if existing:
-            log.info("Default user %s already exists, skipping creation", email)
+            logger.info("Default user %s already exists, skipping creation", email)
             return
 
         # PBKDF2-HMAC-SHA256 with random salt
@@ -83,9 +82,9 @@ def _create_default_user_if_env_set() -> None:
         user = User(email=email.lower(), name=email.split("@")[0], role=role, password_hash=store)
         db.add(user)
         db.commit()
-        log.info("Created default user %s with role %s", email, role)
+        logger.info("Created default user %s with role %s", email, role)
     except Exception:
-        log.exception("Failed creating default user")
+        logger.exception("Failed creating default user")
     finally:
         db.close()
 
@@ -222,7 +221,7 @@ def _exec(conn, stmt: str, params: dict | None = None) -> None:
         conn.execute(sqltext(stmt), params or {})
         conn.commit()
     except Exception as e:
-        log.warning("DDL failed: %s", e)
+        logger.warning("DDL failed: %s", e)
         conn.rollback()
 
 
@@ -344,9 +343,9 @@ def _seed_site_contacts(conn) -> None:
         """)
         )
         conn.commit()
-        log.info("Seeded site_contacts from existing customer_sites data")
+        logger.info("Seeded site_contacts from existing customer_sites data")
     except Exception as e:
-        log.warning("Seed site_contacts failed: %s", e)
+        logger.warning("Seed site_contacts failed: %s", e)
         conn.rollback()
 
 
@@ -378,9 +377,9 @@ def _backfill_normalized_mpn() -> None:
                             {"nk": nk, "id": r[0]},
                         )
                 conn.commit()
-                log.info("Backfilled normalized_mpn on %d requirements", len(rows))
+                logger.info("Backfilled normalized_mpn on %d requirements", len(rows))
         except Exception as e:
-            log.warning("Backfill requirements.normalized_mpn failed: %s", e)
+            logger.warning("Backfill requirements.normalized_mpn failed: %s", e)
             conn.rollback()
 
         # 2. Backfill material_cards.normalized_mpn where NULL only (skip full re-scan)
@@ -404,9 +403,9 @@ def _backfill_normalized_mpn() -> None:
                         updated += 1
             if updated:
                 conn.commit()
-                log.info("Backfilled normalized_mpn on %d material_cards", updated)
+                logger.info("Backfilled normalized_mpn on %d material_cards", updated)
         except Exception as e:
-            log.warning("Backfill material_cards.normalized_mpn failed: %s", e)
+            logger.warning("Backfill material_cards.normalized_mpn failed: %s", e)
             conn.rollback()
 
 
@@ -561,9 +560,9 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
                             {"nk": nk, "id": r[0]},
                         )
                 conn.commit()
-                log.info("Backfilled normalized_mpn on %d sightings", len(rows))
+                logger.info("Backfilled normalized_mpn on %d sightings", len(rows))
         except Exception as e:
-            log.warning("Backfill sightings.normalized_mpn failed: %s", e)
+            logger.warning("Backfill sightings.normalized_mpn failed: %s", e)
             conn.rollback()
 
         # Offers: compute from mpn
@@ -583,9 +582,9 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
                             {"nk": nk, "id": r[0]},
                         )
                 conn.commit()
-                log.info("Backfilled normalized_mpn on %d offers", len(rows))
+                logger.info("Backfilled normalized_mpn on %d offers", len(rows))
         except Exception as e:
-            log.warning("Backfill offers.normalized_mpn failed: %s", e)
+            logger.warning("Backfill offers.normalized_mpn failed: %s", e)
             conn.rollback()
 
 
@@ -627,8 +626,8 @@ def _backfill_sighting_vendor_normalized() -> None:
                     conn.commit()
                 total += len(batch)
             except Exception as e:
-                log.warning("Backfill sightings.vendor_name_normalized failed: %s", e)
+                logger.warning("Backfill sightings.vendor_name_normalized failed: %s", e)
                 conn.rollback()
                 break
         if total:
-            log.info("Backfilled vendor_name_normalized on %d sightings", total)
+            logger.info("Backfilled vendor_name_normalized on %d sightings", total)

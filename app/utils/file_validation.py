@@ -8,9 +8,8 @@ international vendors.
 """
 
 import hashlib
-import logging
+from loguru import logger
 
-log = logging.getLogger("avail.file_validation")
 
 # Maximum file size for processing (10 MB)
 MAX_FILE_SIZE = 10 * 1024 * 1024
@@ -58,7 +57,7 @@ def validate_file(content: bytes, filename: str) -> tuple[bool, str | None]:
             if ext in (".xlsx", ".xls"):
                 return False, f"File claims to be {ext} but detected as {mime}"
     except ImportError:
-        log.warning("filetype library not installed — falling back to extension check")
+        logger.warning("filetype library not installed — falling back to extension check")
 
     # Text files (CSV/TSV) — can't detect by magic bytes, use extension + encoding
     if ext in (".csv", ".tsv", ".txt"):
@@ -88,12 +87,12 @@ def detect_encoding(content: bytes) -> str | None:
         best = results.best()
         if best:
             encoding = best.encoding
-            log.debug(f"Detected encoding: {encoding}")
+            logger.debug(f"Detected encoding: {encoding}")
             return encoding
     except ImportError:
-        log.warning("charset-normalizer not installed — using utf-8-sig fallback")
+        logger.warning("charset-normalizer not installed — using utf-8-sig fallback")
     except Exception as e:
-        log.debug(f"Encoding detection error: {e}")
+        logger.debug(f"Encoding detection error: {e}")
 
     # Fallback: try common encodings
     for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252", "gb2312", "shift_jis"):

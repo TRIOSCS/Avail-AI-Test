@@ -17,13 +17,12 @@ is surfaced in the UI as a color-coded ring (green ≥70, yellow 40-69, red <40)
 Integration: 20% weight in the master vendor ranking algorithm.
 """
 
-import logging
+from loguru import logger
 from datetime import datetime, timezone
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-log = logging.getLogger(__name__)
 
 # ── Weights ──
 W_RESPONSE_RATE = 0.30
@@ -323,15 +322,15 @@ async def compute_all_engagement_scores(db: Session) -> dict:
         try:
             db.flush()
         except Exception as e:
-            log.error(f"Engagement scoring flush failed at offset {offset}: {e}")
+            logger.error(f"Engagement scoring flush failed at offset {offset}: {e}")
 
     try:
         db.commit()
-        log.info(
+        logger.info(
             f"Engagement scoring: updated {updated} vendor cards, skipped {skipped}"
         )
     except Exception as e:
-        log.error(f"Engagement scoring commit failed: {e}")
+        logger.error(f"Engagement scoring commit failed: {e}")
         db.rollback()
         return {"updated": 0, "skipped": skipped}
 
@@ -427,9 +426,9 @@ def apply_outbound_stats(db: Session, vendors_contacted: dict[str, int]):
     if updated:
         try:
             db.flush()
-            log.info(f"Applied outbound stats to {updated} vendor card(s)")
+            logger.info(f"Applied outbound stats to {updated} vendor card(s)")
         except Exception as e:
-            log.error(f"Outbound stats flush failed: {e}")
+            logger.error(f"Outbound stats flush failed: {e}")
             db.rollback()
 
     return updated

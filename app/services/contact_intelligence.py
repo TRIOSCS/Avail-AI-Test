@@ -12,13 +12,12 @@ Core functions:
   - generate_contact_summary: Relationship summary
 """
 
-import logging
+from loguru import logger
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
-log = logging.getLogger("avail.contact_intelligence")
 
 
 # ── Name splitting ──────────────────────────────────────────────────
@@ -85,7 +84,7 @@ def process_inbound_email_contact(
         if sig_data and sig_data.get("confidence", 0) > 0:
             cache_signature_extract(db, email_lower, sig_data)
     except Exception as e:
-        log.debug("Signature extraction failed for %s: %s", email_lower, e)
+        logger.debug("Signature extraction failed for %s: %s", email_lower, e)
 
     # 2. Find matching VendorCard by domain
     card = db.query(VendorCard).filter(VendorCard.domain == domain).first()
@@ -160,7 +159,7 @@ def process_inbound_email_contact(
         try:
             db.flush()
         except Exception as e:
-            log.debug("VendorContact flush conflict for %s: %s", email_lower, e)
+            logger.debug("VendorContact flush conflict for %s: %s", email_lower, e)
             db.rollback()
             return None
 
@@ -185,7 +184,7 @@ def process_inbound_email_contact(
     try:
         db.flush()
     except Exception as e:
-        log.debug("ActivityLog flush error: %s", e)
+        logger.debug("ActivityLog flush error: %s", e)
         db.rollback()
 
     return vc
@@ -268,7 +267,7 @@ def log_pipeline_event(
     try:
         db.flush()
     except Exception as e:
-        log.debug("Pipeline event flush error: %s", e)
+        logger.debug("Pipeline event flush error: %s", e)
         db.rollback()
         return None
 
@@ -498,7 +497,7 @@ def compute_all_contact_scores(db: Session) -> dict:
                 db.flush()
                 batch = []
             except Exception as e:
-                log.warning("Batch score flush error: %s", e)
+                logger.warning("Batch score flush error: %s", e)
                 db.rollback()
                 skipped += len(batch)
                 batch = []
@@ -508,14 +507,14 @@ def compute_all_contact_scores(db: Session) -> dict:
         try:
             db.flush()
         except Exception as e:
-            log.warning("Final score flush error: %s", e)
+            logger.warning("Final score flush error: %s", e)
             db.rollback()
             skipped += len(batch)
 
     try:
         db.commit()
     except Exception as e:
-        log.error("Score commit error: %s", e)
+        logger.error("Score commit error: %s", e)
         db.rollback()
 
     return {"updated": updated, "skipped": skipped}
@@ -589,7 +588,7 @@ def generate_contact_nudges(db: Session, vendor_card_id: int) -> list[dict]:
         try:
             nudges = _enrich_nudges_with_ai(db, nudges, vendor_card_id)
         except Exception as e:
-            log.debug("Gradient nudge enrichment skipped: %s", e)
+            logger.debug("Gradient nudge enrichment skipped: %s", e)
 
     return nudges
 
@@ -620,8 +619,8 @@ def _enrich_nudges_with_ai(db: Session, nudges: list[dict], vendor_card_id: int)
             )
             if result and isinstance(result, dict) and result.get("message"):
                 nudge["message"] = result["message"]
-        except Exception:
-            pass  # Keep template message
+        except Exception as e:
+            logger.debug("AI nudge generation failed, using template: %s", e)
 
     return nudges
 
@@ -676,7 +675,7 @@ def generate_contact_summary(db: Session, vendor_card_id: int, contact_id: int) 
             if result:
                 return result
     except Exception as e:
-        log.debug("Gradient summary failed: %s", e)
+        logger.debug("Gradient summary failed: %s", e)
 
     # Fallback: template-based summary
     trend_desc = {

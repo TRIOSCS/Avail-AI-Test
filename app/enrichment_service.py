@@ -6,7 +6,7 @@ as enrichment providers. AI runs last to fill any remaining gaps.
 """
 
 import asyncio
-import logging
+from loguru import logger
 import re
 from datetime import datetime, timezone
 from typing import Optional
@@ -16,7 +16,6 @@ from .services.ai_service import enrich_contacts_websearch
 from .services.credential_service import get_credential_cached
 from .utils.claude_client import claude_json, claude_text
 
-log = logging.getLogger("avail.enrichment")
 
 
 # ── Normalization ────────────────────────────────────────────────────────
@@ -189,7 +188,7 @@ async def normalize_company_input(name: str, domain: str = "") -> tuple[str, str
             if fixed and fixed.strip().strip('"'):
                 clean_name = fixed.strip().strip('"')
         except Exception as e:
-            log.debug("Typo fix skipped: %s", e)
+            logger.debug("Typo fix skipped: %s", e)
 
     return clean_name, clean_domain
 
@@ -268,7 +267,7 @@ CLAY_BASE = "https://api.clay.com/v3/sources"
 async def _clay_find_company(domain: str) -> Optional[dict]:
     """Look up a company on Clay by domain. Returns normalized company data."""
     if not get_credential_cached("clay_enrichment", "CLAY_API_KEY"):
-        log.debug("Clay API key not configured — skipping")
+        logger.debug("Clay API key not configured — skipping")
         return None
     try:
         resp = await http.post(
@@ -281,7 +280,7 @@ async def _clay_find_company(domain: str) -> Optional[dict]:
             timeout=15,
         )
         if resp.status_code != 200:
-            log.warning(
+            logger.warning(
                 "Clay company lookup failed: %s %s",
                 resp.status_code,
                 resp.text[:200],
@@ -305,7 +304,7 @@ async def _clay_find_company(domain: str) -> Optional[dict]:
                 "website": data.get("website"),
             }
     except Exception as e:
-        log.error("Clay company lookup error: %s", e)
+        logger.error("Clay company lookup error: %s", e)
         return None
 
 
@@ -327,7 +326,7 @@ async def _clay_find_contacts(domain: str, title_filter: str = "") -> list[dict]
             timeout=20,
         )
         if resp.status_code != 200:
-            log.warning("Clay contacts lookup failed: %s", resp.status_code)
+            logger.warning("Clay contacts lookup failed: %s", resp.status_code)
             return []
         people = resp.json().get("people") or resp.json().get("contacts") or []
         return [
@@ -345,7 +344,7 @@ async def _clay_find_contacts(domain: str, title_filter: str = "") -> list[dict]
             if p.get("name") or p.get("full_name")
         ]
     except Exception as e:
-        log.error("Clay contacts lookup error: %s", e)
+        logger.error("Clay contacts lookup error: %s", e)
         return []
 
 
@@ -357,7 +356,7 @@ EXPLORIUM_BASE = "https://api.explorium.ai/v1"
 async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]:
     """Look up a company on Explorium by domain. Returns normalized company data."""
     if not get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY"):
-        log.debug("Explorium API key not configured — skipping")
+        logger.debug("Explorium API key not configured — skipping")
         return None
     try:
         resp = await http.post(
@@ -370,7 +369,7 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
             timeout=15,
         )
         if resp.status_code != 200:
-            log.warning("Explorium company lookup failed: %s", resp.status_code)
+            logger.warning("Explorium company lookup failed: %s", resp.status_code)
             return None
         data = resp.json()
         firmo = {
@@ -394,7 +393,7 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
             "revenue_range": firmo.get("yearly_revenue_range"),
         }
     except Exception as e:
-        log.error("Explorium company lookup error: %s", e)
+        logger.error("Explorium company lookup error: %s", e)
         return None
 
 
@@ -433,7 +432,7 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
             if p.get("full_name")
         ]
     except Exception as e:
-        log.error("Explorium contacts lookup error: %s", e)
+        logger.error("Explorium contacts lookup error: %s", e)
         return []
 
 
@@ -487,7 +486,7 @@ async def _gradient_find_company(domain: str, name: str = "") -> Optional[dict]:
             "website": data.get("website"),
         }
     except Exception as e:
-        log.debug("Gradient company lookup error: %s", e)
+        logger.debug("Gradient company lookup error: %s", e)
         return None
 
 
@@ -506,7 +505,7 @@ COMPANY_SEARCH_SYSTEM = (
 async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
     """Look up a company using Claude + web search. Returns normalized company data."""
     if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
-        log.debug("Anthropic API key not configured — skipping AI enrichment")
+        logger.debug("Anthropic API key not configured — skipping AI enrichment")
         return None
     try:
         prompt = (
@@ -532,7 +531,7 @@ async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
             timeout=60,
         )
         if not data or not isinstance(data, dict):
-            log.warning("AI company lookup returned no data for %s", domain)
+            logger.warning("AI company lookup returned no data for %s", domain)
             return None
         return {
             "source": "ai",
@@ -547,7 +546,7 @@ async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
             "website": data.get("website"),
         }
     except Exception as e:
-        log.error("AI company lookup error: %s", e)
+        logger.error("AI company lookup error: %s", e)
         return None
 
 
@@ -584,7 +583,7 @@ async def _ai_find_contacts(
             if c.get("full_name")
         ]
     except Exception as e:
-        log.error("AI contacts lookup error: %s", e)
+        logger.error("AI contacts lookup error: %s", e)
         return []
 
 
@@ -634,7 +633,7 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
             from .connectors.apollo_client import enrich_company as apollo_enrich
             return await apollo_enrich(domain)
         except Exception as e:
-            log.debug("Apollo company enrichment skipped: %s", e)
+            logger.debug("Apollo company enrichment skipped: %s", e)
             return None
 
     async def _safe_clearbit(domain: str):
@@ -642,7 +641,7 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
             from .connectors.clearbit_client import enrich_company as clearbit_enrich
             return await clearbit_enrich(domain)
         except Exception as e:
-            log.debug("Clearbit enrichment skipped: %s", e)
+            logger.debug("Clearbit enrichment skipped: %s", e)
             return None
 
     clay_result, apollo_result, exp_result, cb_result, grad_result = await asyncio.gather(
@@ -724,7 +723,7 @@ async def find_suggested_contacts(
                 if hc.get("full_name")
             ]
         except Exception as e:
-            log.debug("Hunter contacts skipped: %s", e)
+            logger.debug("Hunter contacts skipped: %s", e)
             return []
 
     async def _safe_rocketreach(domain: str) -> list[dict]:
@@ -749,7 +748,7 @@ async def find_suggested_contacts(
                 if rc.get("full_name")
             ]
         except Exception as e:
-            log.debug("RocketReach contacts skipped: %s", e)
+            logger.debug("RocketReach contacts skipped: %s", e)
             return []
 
     async def _safe_apollo_contacts(domain: str) -> list[dict]:
@@ -776,7 +775,7 @@ async def find_suggested_contacts(
                 if ac.get("full_name")
             ]
         except Exception as e:
-            log.debug("Apollo contacts skipped: %s", e)
+            logger.debug("Apollo contacts skipped: %s", e)
             return []
 
     # Run all 6 sources concurrently
@@ -793,7 +792,7 @@ async def find_suggested_contacts(
     all_contacts = []
     for r in results:
         if isinstance(r, Exception):
-            log.debug("Contact provider failed: %s", r)
+            logger.debug("Contact provider failed: %s", r)
             continue
         all_contacts.extend(r)
 

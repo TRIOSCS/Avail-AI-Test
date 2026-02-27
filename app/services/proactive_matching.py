@@ -6,7 +6,7 @@ Falls back to archived requisitions for customers without CPH data.
 Scoring: composite of recency (40%), frequency (30%), margin potential (30%).
 """
 
-import logging
+from loguru import logger
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
@@ -26,7 +26,6 @@ from ..models import (
 )
 from ..models.purchase_history import CustomerPartHistory
 
-log = logging.getLogger("avail.proactive_matching")
 
 _last_scan_at = datetime.min.replace(tzinfo=timezone.utc)
 
@@ -337,7 +336,7 @@ def run_proactive_scan(db: Session) -> dict:
         try:
             db.commit()
         except Exception as e:
-            log.error("Failed to commit proactive matches: %s", e)
+            logger.error("Failed to commit proactive matches: %s", e)
             db.rollback()
             return {
                 "scanned_offers": len(new_offers),
@@ -345,7 +344,7 @@ def run_proactive_scan(db: Session) -> dict:
                 "matches_created": 0,
             }
 
-    log.info(
+    logger.info(
         "Proactive scan: %d offers, %d sightings → %d matches",
         len(new_offers), len(new_sightings), total_matches,
     )

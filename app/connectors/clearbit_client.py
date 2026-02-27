@@ -5,12 +5,11 @@ Gracefully returns empty results when API key is not configured.
 """
 
 import asyncio
-import logging
+from loguru import logger
 
 from app.config import settings
 from app.http_client import http
 
-log = logging.getLogger("avail.clearbit")
 
 _semaphore = asyncio.Semaphore(5)
 
@@ -38,10 +37,10 @@ async def enrich_company(domain: str) -> dict | None:
             )
             if resp.status_code == 202:
                 # Async lookup — not ready yet
-                log.debug("Clearbit company lookup queued for %s", domain)
+                logger.debug("Clearbit company lookup queued for %s", domain)
                 return None
             if resp.status_code != 200:
-                log.warning("Clearbit company failed: %s %s", resp.status_code, resp.text[:200])
+                logger.warning("Clearbit company failed: %s %s", resp.status_code, resp.text[:200])
                 return None
 
             data = resp.json()
@@ -66,7 +65,7 @@ async def enrich_company(domain: str) -> dict | None:
                 "source": "clearbit",
             }
         except Exception as e:
-            log.warning("Clearbit company error: %s", e)
+            logger.warning("Clearbit company error: %s", e)
             return None
 
 

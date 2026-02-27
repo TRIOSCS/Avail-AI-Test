@@ -13,7 +13,7 @@ Each part in a multi-part reply gets its own classification:
 """
 
 import json
-import logging
+from loguru import logger
 
 from app.utils.claude_client import claude_structured
 from app.utils.normalization import (
@@ -28,7 +28,6 @@ from app.utils.normalization import (
     normalize_quantity,
 )
 
-log = logging.getLogger("avail.response_parser")
 
 # ── Confidence thresholds ─────────────────────────────────────────────
 
@@ -163,7 +162,7 @@ async def parse_vendor_response(
     # retry with Sonnet + thinking to attempt higher-confidence extraction
     confidence = result.get("confidence", 0)
     if CONFIDENCE_REVIEW <= confidence < CONFIDENCE_AUTO:
-        log.info(
+        logger.info(
             f"Ambiguous confidence {confidence:.2f} — retrying with extended thinking"
         )
         retry = await claude_structured(
@@ -176,7 +175,7 @@ async def parse_vendor_response(
             timeout=60,
         )
         if retry and retry.get("confidence", 0) > confidence:
-            log.info(
+            logger.info(
                 f"Extended thinking upgraded confidence: {confidence:.2f} → {retry['confidence']:.2f}"
             )
             result = retry

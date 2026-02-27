@@ -9,13 +9,12 @@ API docs: https://docs.apollo.io/reference/people-enrichment
 Gracefully returns empty results when API key is not configured.
 """
 
-import logging
+from loguru import logger
 from typing import Any
 
 from app.config import settings
 from app.http_client import http
 
-log = logging.getLogger("avail.apollo")
 
 APOLLO_BASE = "https://api.apollo.io/api/v1"
 
@@ -79,7 +78,7 @@ async def search_contacts(
         )
 
         if resp.status_code != 200:
-            log.warning(
+            logger.warning(
                 f"Apollo search failed: {resp.status_code} {resp.text[:200]}"
             )
             return []
@@ -125,7 +124,7 @@ async def search_contacts(
         return contacts
 
     except Exception as e:
-        log.warning(f"Apollo API error: {e}")
+        logger.warning(f"Apollo API error: {e}")
         return []
 
 
@@ -187,7 +186,7 @@ async def enrich_person(
         )
 
         if resp.status_code != 200:
-            log.warning(f"Apollo enrich failed: {resp.status_code} {resp.text[:200]}")
+            logger.warning(f"Apollo enrich failed: {resp.status_code} {resp.text[:200]}")
             return None
 
         data = resp.json()
@@ -229,7 +228,7 @@ async def enrich_person(
         }
 
     except Exception as e:
-        log.warning(f"Apollo enrich error: {e}")
+        logger.warning(f"Apollo enrich error: {e}")
         return None
 
 
@@ -252,7 +251,7 @@ async def enrich_company(domain: str) -> dict | None:
         )
 
         if resp.status_code != 200:
-            log.warning("Apollo company enrich failed: %s %s", resp.status_code, resp.text[:200])
+            logger.warning("Apollo company enrich failed: %s %s", resp.status_code, resp.text[:200])
             return None
 
         data = resp.json()
@@ -280,7 +279,7 @@ async def enrich_company(domain: str) -> dict | None:
         }
 
     except Exception as e:
-        log.warning("Apollo company enrich error: %s", e)
+        logger.warning("Apollo company enrich error: %s", e)
         return None
 
 

@@ -6,13 +6,12 @@ Events: created, linked, unlinked, deleted, merged, healed, restored, soft_delet
 All functions accept a db Session and do NOT commit — caller is responsible for commit.
 """
 
-import logging
+from loguru import logger
 
 from sqlalchemy.orm import Session
 
 from ..models import MaterialCardAudit
 
-log = logging.getLogger(__name__)
 
 
 def log_audit(

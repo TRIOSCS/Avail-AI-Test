@@ -7,7 +7,7 @@ Usage:
     from app.services.activity_service import log_email_activity, log_call_activity, match_contact
 """
 
-import logging
+from loguru import logger
 from datetime import datetime, timezone
 
 from sqlalchemy import func
@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
 
-log = logging.getLogger("avail.activity")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -198,11 +197,11 @@ def log_email_activity(
         # Update last_activity_at on the matched entity
         _update_last_activity(match, db, user_id)
         _update_vendor_contact_stats(match, db)
-        log.info(
+        logger.info(
             f"Activity logged: {activity_type} → {match['type']} '{match['name']}' by user {user_id}"
         )
     else:
-        log.info(
+        logger.info(
             f"Activity logged (unmatched): {activity_type} for {email_addr} by user {user_id}"
         )
 
@@ -249,11 +248,11 @@ def log_call_activity(
     if match:
         _update_last_activity(match, db, user_id)
         _update_vendor_contact_stats(match, db)
-        log.info(
+        logger.info(
             f"Activity logged: {activity_type} → {match['type']} '{match['name']}' by user {user_id}"
         )
     else:
-        log.info(
+        logger.info(
             f"Activity logged (unmatched): {activity_type} for {phone} by user {user_id}"
         )
 
@@ -383,7 +382,7 @@ def log_company_call(
     db.query(Company).filter(Company.id == company_id).update(
         {"last_activity_at": now}, synchronize_session=False
     )
-    log.info(f"Activity logged: {activity_type} -> company {company_id} by user {user_id}")
+    logger.info(f"Activity logged: {activity_type} -> company {company_id} by user {user_id}")
     return record
 
 
@@ -410,7 +409,7 @@ def log_company_note(
     db.query(Company).filter(Company.id == company_id).update(
         {"last_activity_at": now}, synchronize_session=False
     )
-    log.info(f"Activity logged: note -> company {company_id} by user {user_id}")
+    logger.info(f"Activity logged: note -> company {company_id} by user {user_id}")
     return record
 
 
@@ -449,7 +448,7 @@ def log_site_contact_note(
     db.query(CustomerSite).filter(CustomerSite.id == customer_site_id).update(
         {"last_activity_at": now}, synchronize_session=False
     )
-    log.info(f"Activity logged: note -> site_contact {site_contact_id} by user {user_id}")
+    logger.info(f"Activity logged: note -> site_contact {site_contact_id} by user {user_id}")
     return record
 
 
@@ -510,7 +509,7 @@ def log_vendor_call(
     if vendor_contact_id:
         _increment_vendor_contact(vendor_contact_id, db)
 
-    log.info(f"Activity logged: {activity_type} -> vendor {vendor_card_id} by user {user_id}")
+    logger.info(f"Activity logged: {activity_type} -> vendor {vendor_card_id} by user {user_id}")
     return record
 
 
@@ -544,7 +543,7 @@ def log_vendor_note(
     if vendor_contact_id:
         _increment_vendor_contact(vendor_contact_id, db)
 
-    log.info(f"Activity logged: note -> vendor {vendor_card_id} by user {user_id}")
+    logger.info(f"Activity logged: note -> vendor {vendor_card_id} by user {user_id}")
     return record
 
 
@@ -668,7 +667,7 @@ def attribute_activity(
     match = {"type": entity_type, "id": entity_id}
     _update_last_activity(match, db, user_id)
 
-    log.info(
+    logger.info(
         f"Activity {activity_id} attributed to {entity_type} {entity_id}"
     )
     return activity
@@ -683,5 +682,5 @@ def dismiss_activity(activity_id: int, db: Session) -> ActivityLog | None:
     activity.dismissed_at = datetime.now(timezone.utc)
     db.flush()
 
-    log.info(f"Activity {activity_id} dismissed")
+    logger.info(f"Activity {activity_id} dismissed")
     return activity

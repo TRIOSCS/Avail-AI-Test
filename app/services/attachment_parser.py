@@ -10,11 +10,10 @@ Target fields extracted per row:
 """
 
 import io
-import logging
+from loguru import logger
 import re
 from datetime import datetime, timezone
 
-log = logging.getLogger(__name__)
 
 # Standard column header patterns (deterministic, no AI needed)
 HEADER_PATTERNS = {
@@ -145,7 +144,7 @@ Rules:
         return mapping
 
     except Exception as e:
-        log.warning(f"AI column detection failed: {e}")
+        logger.warning(f"AI column detection failed: {e}")
         return {}
 
 
@@ -174,7 +173,7 @@ async def _get_or_detect_mapping(
             .first()
         )
         if cached and cached.mapping:
-            log.info(
+            logger.info(
                 f"Cache hit for column mapping: {vendor_domain}/{file_fingerprint[:8]}"
             )
             # Convert string keys back to int
@@ -188,7 +187,7 @@ async def _get_or_detect_mapping(
 
     # Step 3: AI fallback if deterministic didn't find MPN
     if not has_mpn and headers:
-        log.info(f"Deterministic matching insufficient for {vendor_domain}, trying AI")
+        logger.info(f"Deterministic matching insufficient for {vendor_domain}, trying AI")
         ai_mapping = await _ai_detect_columns(headers, sample_rows, vendor_domain)
         if ai_mapping:
             # Merge: AI fills gaps, deterministic takes priority
@@ -230,7 +229,7 @@ async def _get_or_detect_mapping(
             db.execute(stmt)
             db.flush()
         except Exception as e:
-            log.debug(f"Column mapping cache write failed: {e}")
+            logger.debug(f"Column mapping cache write failed: {e}")
 
     return mapping
 
@@ -364,7 +363,7 @@ async def parse_attachment(
     # H3: Validate file type
     is_valid, detected_type = validate_file(file_bytes, filename)
     if not is_valid:
-        log.warning(f"File validation failed for {filename}: {detected_type}")
+        logger.warning(f"File validation failed for {filename}: {detected_type}")
         return []
 
     fp = file_fingerprint(file_bytes)
@@ -376,7 +375,7 @@ async def parse_attachment(
     elif lower.endswith((".csv", ".tsv")):
         headers, data_rows = _parse_csv(file_bytes, filename)
     else:
-        log.warning(f"Unsupported file type: {filename}")
+        logger.warning(f"Unsupported file type: {filename}")
         return []
 
     if not headers or not data_rows:
@@ -387,7 +386,7 @@ async def parse_attachment(
     mapping = await _get_or_detect_mapping(headers, sample, vendor_domain, fp, db)
 
     if not mapping or "mpn" not in mapping.values():
-        log.warning(f"No MPN column detected in {filename}")
+        logger.warning(f"No MPN column detected in {filename}")
         return []
 
     # Extract rows
@@ -397,7 +396,7 @@ async def parse_attachment(
         if extracted:
             results.append(extracted)
 
-    log.info(
+    logger.info(
         f"Parsed {len(results)} rows from {filename} ({len(data_rows)} total, {len(mapping)} mapped columns)"
     )
     return results

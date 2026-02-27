@@ -10,10 +10,9 @@ through a three-tier confidence system:
 
 import asyncio
 import json
-import logging
+from loguru import logger
 from datetime import datetime, timedelta, timezone
 
-log = logging.getLogger("avail.deep_enrichment")
 
 
 # ── Contact linking ──────────────────────────────────────────────────
@@ -121,7 +120,7 @@ def link_contact_to_entities(db, sender_email: str, signature_data: dict) -> Non
     try:
         db.flush()
     except Exception as e:
-        log.debug("Contact linking flush error: %s", e)
+        logger.debug("Contact linking flush error: %s", e)
         db.rollback()
 
 
@@ -403,8 +402,8 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
                     if not contact.is_verified:
                         contact.is_verified = True
                         return f"verified:{contact.email}"
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Email verification failed for %s: %s", contact.email, e)
             return None
 
         verify_results = await asyncio.gather(*[_verify_one(c) for c in contacts])
@@ -503,7 +502,7 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
     try:
         db.commit()
     except Exception as e:
-        log.error("Deep enrich vendor commit failed: %s", e)
+        logger.error("Deep enrich vendor commit failed: %s", e)
         db.rollback()
 
     return {
@@ -640,7 +639,7 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
     try:
         db.commit()
     except Exception as e:
-        log.error("Deep enrich company commit failed: %s", e)
+        logger.error("Deep enrich company commit failed: %s", e)
         db.rollback()
 
     return {
@@ -878,7 +877,7 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                         user.last_deep_email_scan = datetime.now(timezone.utc)
                         db.commit()
                     except Exception as e:
-                        log.warning("Deep email scan failed for user %s: %s", user.email, e)
+                        logger.warning("Deep email scan failed for user %s: %s", user.email, e)
                         error_log.append(f"email_scan_{user.email}: {str(e)[:100]}")
                         db.rollback()
             except Exception as e:
@@ -893,13 +892,13 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
         job.completed_at = datetime.now(timezone.utc)
         db.commit()
 
-        log.info(
+        logger.info(
             "Backfill job %d completed: %d processed, %d enriched, %d errors",
             job_id, processed, enriched, error_count,
         )
 
     except Exception as e:
-        log.error("Backfill job %d failed: %s", job_id, e)
+        logger.error("Backfill job %d failed: %s", job_id, e)
         try:
             job = db.get(EnrichmentJob, job_id)
             if job:
@@ -907,7 +906,7 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                 job.error_log = [str(e)[:500]]
                 job.completed_at = datetime.now(timezone.utc)
                 db.commit()
-        except Exception:
-            pass
+        except Exception as inner_e:
+            logger.warning("Deep enrichment: failed to record job failure for job %s: %s", job_id, inner_e)
     finally:
         db.close()

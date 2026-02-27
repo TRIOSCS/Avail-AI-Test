@@ -17,7 +17,7 @@ Usage:
 
 import asyncio
 import html
-import logging
+from loguru import logger
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, func
@@ -26,7 +26,6 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import ActivityLog, Company, CustomerSite, User
 
-log = logging.getLogger("avail.ownership")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -81,7 +80,7 @@ async def run_ownership_sweep(db: Session) -> dict:
         if days_inactive >= inactivity_limit:
             _clear_ownership(company, db)
             cleared += 1
-            log.info(
+            logger.info(
                 f"Ownership cleared: '{company.name}' (ID {company.id}) — "
                 f"{days_inactive} days inactive (limit: {inactivity_limit})"
             )
@@ -105,7 +104,7 @@ async def run_ownership_sweep(db: Session) -> dict:
         "cleared": cleared,
         "timestamp": now.isoformat(),
     }
-    log.info(f"Ownership sweep complete: {result}")
+    logger.info(f"Ownership sweep complete: {result}")
     return result
 
 
@@ -143,7 +142,7 @@ def check_and_claim_open_account(company_id: int, user_id: int, db: Session) -> 
     company.ownership_cleared_at = None  # Clear the "was cleared" timestamp
     db.flush()
 
-    log.info(
+    logger.info(
         f"Account claimed: '{company.name}' (ID {company.id}) by user {user.name} (ID {user_id})"
     )
     return True
@@ -382,7 +381,7 @@ def run_site_ownership_sweep(db: Session) -> dict:
             site.ownership_cleared_at = now
             db.flush()
             cleared += 1
-            log.info(
+            logger.info(
                 f"Site ownership cleared: '{site.site_name}' (ID {site.id}) — "
                 f"{days_inactive} days inactive"
             )
@@ -421,7 +420,7 @@ def run_site_ownership_sweep(db: Session) -> dict:
         "warned": warned,
         "cleared": cleared,
     }
-    log.info(f"Site ownership sweep complete: {result}")
+    logger.info(f"Site ownership sweep complete: {result}")
     return result
 
 
@@ -477,7 +476,7 @@ def claim_site(site_id: int, user_id: int, db: Session) -> bool:
     site.ownership_cleared_at = None
     db.flush()
 
-    log.info(
+    logger.info(
         f"Site claimed: '{site.site_name}' (ID {site.id}) by user {user.name} (ID {user_id})"
     )
     return True
@@ -665,7 +664,7 @@ async def _send_warning_alert(
 
         token = await get_valid_token(owner, db)
         if not token:
-            log.warning(
+            logger.warning(
                 f"No token for {owner.email}, skipping warning email for {company.name}"
             )
             return
@@ -697,12 +696,12 @@ async def _send_warning_alert(
             "saveToSentItems": "false",  # Don't clutter sent items with system alerts
         }
         await gc.post_json("/me/sendMail", payload)
-        log.info(
+        logger.info(
             f"Warning email sent to {owner.email} for {company.name} ({days_remaining} days remaining)"
         )
 
     except Exception as e:
-        log.error(
+        logger.error(
             f"Failed to send warning email to {owner.email} for {company.name}: {e}"
         )
 
@@ -716,7 +715,7 @@ async def _send_warning_alert(
             days_remaining=days_remaining,
         )
     except Exception as e:
-        log.debug(f"Teams ownership warning skipped for {company.name}: {e}")
+        logger.debug(f"Teams ownership warning skipped for {company.name}: {e}")
 
 
 async def send_manager_digest_email(db: Session):
@@ -724,7 +723,7 @@ async def send_manager_digest_email(db: Session):
     digest = get_manager_digest(db)
 
     if not digest["at_risk_accounts"] and not digest["recently_cleared"]:
-        log.info("Manager digest: nothing to report")
+        logger.info("Manager digest: nothing to report")
         return
 
     # Build email body
@@ -797,8 +796,8 @@ async def send_manager_digest_email(db: Session):
                 "saveToSentItems": "false",
             }
             await gc.post_json("/me/sendMail", payload)
-            log.info(f"Manager digest sent to {admin_email}")
+            logger.info(f"Manager digest sent to {admin_email}")
         except Exception as e:
-            log.error(f"Failed to send manager digest to {admin_email}: {e}")
+            logger.error(f"Failed to send manager digest to {admin_email}: {e}")
 
     await asyncio.gather(*[_send_digest_to_admin(e) for e in settings.admin_emails])

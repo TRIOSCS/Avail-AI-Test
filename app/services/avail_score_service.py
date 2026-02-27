@@ -15,7 +15,7 @@ Called by: scheduler.py (daily), routers/performance.py (on-demand)
 Depends on: models (Requisition, Contact, Offer, Quote, BuyPlan, ActivityLog, etc.)
 """
 
-import logging
+from loguru import logger
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import and_, func as sqlfunc
@@ -37,7 +37,6 @@ from ..models import (
 )
 from ..models.performance import AvailScoreSnapshot
 
-log = logging.getLogger("avail.avail_score")
 
 # ── Bonus thresholds ─────────────────────────────────────────────────
 BONUS_1ST = 500.0
@@ -697,7 +696,7 @@ def compute_all_avail_scores(db: Session, month: date | None = None) -> dict:
             result["user_name"] = user.name
             buyer_results.append(result)
         except Exception as e:
-            log.error("Avail score error for buyer %s: %s", user.id, e)
+            logger.error("Avail score error for buyer %s: %s", user.id, e)
 
     sales_results = []
     for user in sales + multi_role:
@@ -707,7 +706,7 @@ def compute_all_avail_scores(db: Session, month: date | None = None) -> dict:
             result["user_name"] = user.name
             sales_results.append(result)
         except Exception as e:
-            log.error("Avail score error for sales %s: %s", user.id, e)
+            logger.error("Avail score error for sales %s: %s", user.id, e)
 
     # Rank and assign bonuses
     _rank_and_bonus(buyer_results)
@@ -720,7 +719,7 @@ def compute_all_avail_scores(db: Session, month: date | None = None) -> dict:
             saved += _upsert_snapshot(db, r, month)
 
     db.commit()
-    log.info("Avail scores computed: %d buyers, %d sales, %d saved", len(buyer_results), len(sales_results), saved)
+    logger.info("Avail scores computed: %d buyers, %d sales, %d saved", len(buyer_results), len(sales_results), saved)
     return {"buyers": len(buyer_results), "sales": len(sales_results), "saved": saved}
 
 

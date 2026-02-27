@@ -15,7 +15,7 @@ Depends on: models, email_service, vendor_utils, engagement_scoring
 """
 
 import asyncio
-import logging
+from loguru import logger
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -43,7 +43,6 @@ from ..models import (
 from ..schemas.rfq import BatchRfqSend, FollowUpEmail, PhoneCallLog, RfqPrepare
 from ..vendor_utils import normalize_vendor_name
 
-log = logging.getLogger("avail.rfq")
 
 router = APIRouter(tags=["rfq"])
 
@@ -525,7 +524,7 @@ async def rfq_prepare(
                             if phones:
                                 merge_phones_into_card(card, phones)
                 except Exception as e:
-                    log.debug("Contact auto-lookup failed for %s: %s", r["vendor_name"], e)
+                    logger.debug("Contact auto-lookup failed for %s: %s", r["vendor_name"], e)
 
         await asyncio.gather(
             *[_contact_lookup(i) for i in needs_lookup_indices],

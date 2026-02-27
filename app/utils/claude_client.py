@@ -17,14 +17,13 @@ Usage:
 """
 
 import json
-import logging
+from loguru import logger
 from typing import Any
 
 import sentry_sdk
 from app.http_client import http
 from app.services.credential_service import get_credential_cached
 
-log = logging.getLogger("avail.claude")
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
@@ -136,7 +135,7 @@ async def claude_structured(
 
             if resp.status_code != 200:
                 span.set_data("ai.response.status_code", resp.status_code)
-                log.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
+                logger.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
                 return None
 
             data = resp.json()
@@ -158,11 +157,11 @@ async def claude_structured(
                 ):
                     return block.get("input")
 
-            log.warning("Claude structured output: no tool_use block in response")
+            logger.warning("Claude structured output: no tool_use block in response")
             return None
 
     except Exception as e:
-        log.warning(f"Claude structured call failed: {e}")
+        logger.warning(f"Claude structured call failed: {e}")
         return None
 
 
@@ -233,7 +232,7 @@ async def claude_text(
 
             if resp.status_code != 200:
                 span.set_data("ai.response.status_code", resp.status_code)
-                log.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
+                logger.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
                 return None
 
             data = resp.json()
@@ -254,7 +253,7 @@ async def claude_text(
             return "\n".join(texts) if texts else None
 
     except Exception as e:
-        log.warning(f"Claude text call failed: {e}")
+        logger.warning(f"Claude text call failed: {e}")
         return None
 
 
@@ -315,7 +314,7 @@ def safe_json_parse(text: str) -> dict | list | None:
             except json.JSONDecodeError:
                 continue
 
-    log.debug(f"JSON parse failed: {text[:100]}...")
+    logger.debug(f"JSON parse failed: {text[:100]}...")
     return None
 
 
@@ -396,17 +395,17 @@ async def claude_batch_submit(
         )
 
         if resp.status_code != 200:
-            log.warning(f"Batch API submit {resp.status_code}: {resp.text[:300]}")
+            logger.warning(f"Batch API submit {resp.status_code}: {resp.text[:300]}")
             return None
 
         data = resp.json()
         batch_id = data.get("id")
         count = data.get("request_counts", {}).get("processing", len(requests))
-        log.info(f"Batch submitted: {batch_id} ({count} requests)")
+        logger.info(f"Batch submitted: {batch_id} ({count} requests)")
         return batch_id
 
     except Exception as e:
-        log.warning(f"Batch API submit failed: {e}")
+        logger.warning(f"Batch API submit failed: {e}")
         return None
 
 
@@ -432,20 +431,20 @@ async def claude_batch_results(
         )
 
         if resp.status_code != 200:
-            log.warning(f"Batch status check {resp.status_code}: {resp.text[:200]}")
+            logger.warning(f"Batch status check {resp.status_code}: {resp.text[:200]}")
             return None
 
         data = resp.json()
         status = data.get("processing_status")
 
         if status != "ended":
-            log.debug(f"Batch {batch_id} status: {status}")
+            logger.debug(f"Batch {batch_id} status: {status}")
             return None  # Still processing
 
         # Fetch results JSONL
         results_url = data.get("results_url")
         if not results_url:
-            log.warning(f"Batch {batch_id} ended but no results_url")
+            logger.warning(f"Batch {batch_id} ended but no results_url")
             return None
 
         results_resp = await http.get(
@@ -455,7 +454,7 @@ async def claude_batch_results(
         )
 
         if results_resp.status_code != 200:
-            log.warning(f"Batch results fetch {results_resp.status_code}")
+            logger.warning(f"Batch results fetch {results_resp.status_code}")
             return None
 
         # Parse JSONL results
@@ -482,17 +481,17 @@ async def claude_batch_results(
                         parsed[cid] = None
                 else:
                     error = result.get("error", {})
-                    log.warning(
+                    logger.warning(
                         f"Batch item {cid} failed: {error.get('type', 'unknown')}"
                     )
                     parsed[cid] = None
 
             except json.JSONDecodeError:
-                log.debug(f"Batch JSONL parse error: {line[:100]}")
+                logger.debug(f"Batch JSONL parse error: {line[:100]}")
                 continue
 
         counts = data.get("request_counts", {})
-        log.info(
+        logger.info(
             f"Batch {batch_id} complete: "
             f"{counts.get('succeeded', 0)} succeeded, "
             f"{counts.get('errored', 0)} errored"
@@ -500,5 +499,5 @@ async def claude_batch_results(
         return parsed
 
     except Exception as e:
-        log.warning(f"Batch results check failed: {e}")
+        logger.warning(f"Batch results check failed: {e}")
         return None

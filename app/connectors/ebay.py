@@ -1,13 +1,12 @@
 """eBay Browse API connector — searches electronic components on eBay."""
 
 import base64
-import logging
+from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
 from .sources import BaseConnector
 
-log = logging.getLogger(__name__)
 
 class EbayConnector(BaseConnector):
     """eBay Browse API — OAuth client credentials flow."""
@@ -143,5 +142,5 @@ class EbayConnector(BaseConnector):
                 }
             )
 
-        log.info(f"eBay: {pn} -> {len(results)} results")
+        logger.info(f"eBay: {pn} -> {len(results)} results")
         return results

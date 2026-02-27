@@ -13,7 +13,7 @@ Depends on: utils/graph_client, models, config
 
 import asyncio
 import html
-import logging
+from loguru import logger
 
 from sqlalchemy.orm import Session
 
@@ -22,7 +22,6 @@ from ..http_client import http
 from ..models import ActivityLog, BuyPlan, Offer, User
 from ..services.credential_service import get_credential_cached
 
-log = logging.getLogger("avail.buyplan")
 
 
 # ── Background Task Helper ─────────────────────────────────────────────
@@ -43,7 +42,7 @@ def run_buyplan_bg(coro_factory, plan_id: int, **kwargs):
             if bg_plan:
                 await coro_factory(bg_plan, bg_db, **kwargs)
         except Exception:
-            log.exception(
+            logger.exception(
                 "Background %s failed for plan %s",
                 coro_factory.__name__,
                 plan_id,
@@ -178,9 +177,9 @@ async def notify_buyplan_submitted(plan: BuyPlan, db: Session):
                     "saveToSentItems": "false",
                 },
             )
-            log.info(f"Buy plan email sent to admin {admin.email}")
+            logger.info(f"Buy plan email sent to admin {admin.email}")
         except Exception as e:
-            log.error(f"Failed to send buy plan email to {admin.email}: {e}")
+            logger.error(f"Failed to send buy plan email to {admin.email}: {e}")
 
     await asyncio.gather(*[_send_admin_email(a) for a in admin_users])
 
@@ -317,9 +316,9 @@ async def notify_buyplan_approved(plan: BuyPlan, db: Session):
                     "saveToSentItems": "false",
                 },
             )
-            log.info(f"Buy plan approved email sent to buyer {buyer.email}")
+            logger.info(f"Buy plan approved email sent to buyer {buyer.email}")
         except Exception as e:
-            log.error(f"Failed to send approved email to {buyer.email}: {e}")
+            logger.error(f"Failed to send approved email to {buyer.email}: {e}")
 
         # In-app notification
         db.add(
@@ -396,7 +395,7 @@ async def notify_buyplan_rejected(plan: BuyPlan, db: Session):
                 },
             )
     except Exception as e:
-        log.error(f"Failed to send rejection email to {submitter.email}: {e}")
+        logger.error(f"Failed to send rejection email to {submitter.email}: {e}")
 
     db.add(
         ActivityLog(
@@ -496,9 +495,9 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
                             "saveToSentItems": "false",
                         },
                     )
-                    log.info(f"Stock sale email sent to {email_addr}")
+                    logger.info(f"Stock sale email sent to {email_addr}")
                 except Exception as e:
-                    log.error(f"Failed to send stock sale email to {email_addr}: {e}")
+                    logger.error(f"Failed to send stock sale email to {email_addr}: {e}")
 
             await asyncio.gather(*[_send_stock_email(e) for e in settings.stock_sale_notify_emails])
 
@@ -567,7 +566,7 @@ async def notify_buyplan_completed(plan: BuyPlan, db: Session, completer_name: s
                 },
             )
     except Exception as e:
-        log.error(f"Failed to send completion email to {submitter.email}: {e}")
+        logger.error(f"Failed to send completion email to {submitter.email}: {e}")
 
     db.add(
         ActivityLog(
@@ -625,7 +624,7 @@ async def notify_buyplan_cancelled(plan: BuyPlan, db: Session):
 async def _post_teams_channel(message: str):
     """Post a message to the configured Teams channel via webhook."""
     if not get_credential_cached("teams_notifications", "TEAMS_WEBHOOK_URL"):
-        log.debug("Teams webhook not configured — skipping channel post")
+        logger.debug("Teams webhook not configured — skipping channel post")
         return
     try:
         resp = await http.post(
@@ -649,17 +648,17 @@ async def _post_teams_channel(message: str):
             timeout=15,
         )
         if resp.status_code not in (200, 202):
-            log.warning(
+            logger.warning(
                 f"Teams webhook returned {resp.status_code}: {resp.text[:200]}"
             )
     except Exception as e:
-        log.error(f"Teams channel post failed: {e}")
+        logger.error(f"Teams channel post failed: {e}")
 
 
 async def _send_teams_dm(user: User, message: str, db: Session = None):
     """Send a direct Teams message to a user via Graph API."""
     if not user.access_token and not db:
-        log.debug(f"No token for {user.email}, skipping Teams DM")
+        logger.debug(f"No token for {user.email}, skipping Teams DM")
         return
     try:
         from ..utils.graph_client import GraphClient
@@ -671,7 +670,7 @@ async def _send_teams_dm(user: User, message: str, db: Session = None):
         else:
             token = user.access_token
         if not token:
-            log.debug(f"No valid token for {user.email}, skipping Teams DM")
+            logger.debug(f"No valid token for {user.email}, skipping Teams DM")
             return
         gc = GraphClient(token)
         # Create or get 1:1 chat with the user (self-chat acts as notification)
@@ -693,9 +692,9 @@ async def _send_teams_dm(user: User, message: str, db: Session = None):
             await gc.post_json(
                 f"/chats/{chat_id}/messages", {"body": {"content": message}}
             )
-            log.info(f"Teams DM sent to {user.email}")
+            logger.info(f"Teams DM sent to {user.email}")
     except Exception as e:
-        log.debug(
+        logger.debug(
             f"Teams DM to {user.email} failed (may not have Chat permissions): {e}"
         )
 
@@ -770,7 +769,7 @@ async def verify_po_sent(plan: BuyPlan, db: Session) -> dict:
                 results[po_number] = {"verified": False, "reason": "not_found"}
 
         except Exception as e:
-            log.error(f"PO verification failed for {po_number}: {e}")
+            logger.error(f"PO verification failed for {po_number}: {e}")
             results[po_number] = {"verified": False, "reason": str(e)}
 
     if updated:
@@ -816,7 +815,7 @@ def auto_complete_stock_sales(db: Session) -> int:
         plan.status = "complete"
         plan.completed_at = datetime.now(timezone.utc)
         # completed_by_id stays None (auto-completed by system)
-        log.info(f"Auto-completed stuck stock sale plan #{plan.id}")
+        logger.info(f"Auto-completed stuck stock sale plan #{plan.id}")
         completed += 1
 
     if completed:

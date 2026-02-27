@@ -4,12 +4,11 @@ All naive datetimes from PostgreSQL are auto-tagged as UTC via event
 listener to prevent naive-vs-aware comparison errors.
 """
 
-import logging
+from loguru import logger
 from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, TypeDecorator, create_engine, event
 
-log = logging.getLogger(__name__)
 from sqlalchemy.orm import sessionmaker
 
 from .config import settings
@@ -57,7 +56,7 @@ def _make_datetimes_aware(session, instance):
             try:
                 setattr(instance, key, val.replace(tzinfo=timezone.utc))
             except Exception:
-                log.debug("Failed to set timezone on %s.%s", type(instance).__name__, key, exc_info=True)
+                logger.debug("Failed to set timezone on %s.%s", type(instance).__name__, key, exc_info=True)
 
 
 def get_db():

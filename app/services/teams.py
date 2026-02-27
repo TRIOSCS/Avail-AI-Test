@@ -15,10 +15,9 @@ Called by: scheduler.py, ownership_service.py, requisitions.py, crm.py
 Depends on: utils/graph_client.py, config.py
 """
 
-import logging
+from loguru import logger
 from datetime import datetime, timezone
 
-log = logging.getLogger("avail.teams")
 
 # Rate limit: { "event_type:entity_id" → last_posted_at }
 _rate_limits: dict[str, datetime] = {}
@@ -68,8 +67,8 @@ def _get_teams_config() -> tuple[str, str, bool]:
                 enabled = cfg["teams_enabled"].lower() == "true"
         finally:
             db.close()
-    except Exception:
-        pass  # DB not available — use env vars
+    except Exception as e:
+        logger.debug("Teams config: DB lookup failed, using env vars: %s", e)
 
     return channel_id, team_id, enabled
 
@@ -102,11 +101,11 @@ async def post_to_channel(team_id: str, channel_id: str, card: dict, token: str)
             f"/teams/{team_id}/channels/{channel_id}/messages", payload
         )
         if "error" in result:
-            log.warning(f"Teams post failed: {result.get('detail', result.get('error'))}")
+            logger.warning(f"Teams post failed: {result.get('detail', result.get('error'))}")
             return False
         return True
     except Exception as e:
-        log.warning(f"Teams post error: {e}")
+        logger.warning(f"Teams post error: {e}")
         return False
 
 
@@ -374,7 +373,7 @@ async def _get_system_token() -> str | None:
         finally:
             db.close()
     except Exception as e:
-        log.warning(f"Failed to get system token for Teams: {e}")
+        logger.warning(f"Failed to get system token for Teams: {e}")
         return None
 
 

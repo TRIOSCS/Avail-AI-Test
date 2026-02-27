@@ -1,12 +1,11 @@
 """DigiKey Product Search API connector."""
 
-import logging
+from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
 from .sources import BaseConnector
 
-log = logging.getLogger(__name__)
 
 
 class DigiKeyConnector(BaseConnector):
@@ -148,5 +147,5 @@ class DigiKeyConnector(BaseConnector):
                 }
             )
 
-        log.info(f"DigiKey: {pn} -> {len(results)} results")
+        logger.info(f"DigiKey: {pn} -> {len(results)} results")
         return results

@@ -7,14 +7,13 @@ Called by: search_service.py
 Depends on: BaseConnector, httpx
 """
 
-import logging
+from loguru import logger
 from urllib.parse import quote_plus
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
 from .sources import BaseConnector
 
-log = logging.getLogger(__name__)
 
 
 class Element14Connector(BaseConnector):
@@ -85,5 +84,5 @@ class Element14Connector(BaseConnector):
                 "description": desc[:500] if desc else "",
             })
 
-        log.info(f"element14: {pn} -> {len(results)} results")
+        logger.info(f"element14: {pn} -> {len(results)} results")
         return results

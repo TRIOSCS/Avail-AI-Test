@@ -291,8 +291,8 @@ async def main():
                     try:
                         if item:
                             mark_status(db, item, "failed", error=str(e)[:500])
-                    except Exception:
-                        pass
+                    except Exception as mark_err:
+                        logger.debug("NC worker: failed to mark item as failed: %s", mark_err)
                 finally:
                     db.close()
 

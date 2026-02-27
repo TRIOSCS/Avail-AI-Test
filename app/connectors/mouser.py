@@ -1,12 +1,11 @@
 """Mouser Search API connector."""
 
-import logging
+from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float
 from .sources import BaseConnector
 
-log = logging.getLogger(__name__)
 
 
 class MouserConnector(BaseConnector):
@@ -46,7 +45,7 @@ class MouserConnector(BaseConnector):
         errors = data.get("Errors") or []
         if errors:
             msg = errors[0].get("Message", "Unknown Mouser API error")
-            log.warning(f"Mouser API errors for {part_number}: {errors}")
+            logger.warning(f"Mouser API errors for {part_number}: {errors}")
             raise RuntimeError(f"Mouser API: {msg}")
 
         return self._parse(data, part_number)
@@ -101,5 +100,5 @@ class MouserConnector(BaseConnector):
                 }
             )
 
-        log.info(f"Mouser: {pn} -> {len(results)} results")
+        logger.info(f"Mouser: {pn} -> {len(results)} results")
         return results

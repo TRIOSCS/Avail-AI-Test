@@ -1,7 +1,7 @@
 """Website scraper — extract vendor contact emails from their websites."""
 
 import asyncio
-import logging
+from loguru import logger
 import re
 
 import httpx
@@ -12,7 +12,6 @@ from ..http_client import http_redirect
 from ..models import VendorCard, VendorContact
 from ..vendor_utils import merge_emails_into_card
 
-log = logging.getLogger(__name__)
 
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 
@@ -58,8 +57,8 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> str | None:
         r = await client.get(url, follow_redirects=True)
         if r.status_code == 200 and "text" in r.headers.get("content-type", ""):
             return r.text[:500_000]  # Cap at 500KB
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("Website fetch failed for %s: %s", url, e)
     return None
 
 
@@ -132,7 +131,7 @@ async def scrape_vendor_websites(
     if not vendors:
         return {"vendors_scraped": 0, "emails_found": 0}
 
-    log.info("Website scraper: processing %d vendors", len(vendors))
+    logger.info("Website scraper: processing %d vendors", len(vendors))
 
     vendors_scraped = 0
     emails_found = 0
@@ -149,7 +148,7 @@ async def scrape_vendor_websites(
                 await asyncio.sleep(RATE_LIMIT_DELAY)  # Rate limit between vendors
                 return (card, scrape_results)
             except Exception as e:
-                log.debug("Scrape failed for %s: %s", card.website, e)
+                logger.debug("Scrape failed for %s: %s", card.website, e)
                 return None
 
     scrape_results_list = await asyncio.gather(
@@ -193,16 +192,16 @@ async def scrape_vendor_websites(
             try:
                 db.commit()
             except Exception as e:
-                log.warning("Website scraper periodic commit failed: %s", e)
+                logger.warning("Website scraper periodic commit failed: %s", e)
                 db.rollback()
 
     try:
         db.commit()
     except Exception as e:
         db.rollback()
-        log.error("Website scraper final commit failed: %s", e)
+        logger.error("Website scraper final commit failed: %s", e)
 
-    log.info("Website scraper complete: %d vendors scraped, %d emails found", vendors_scraped, emails_found)
+    logger.info("Website scraper complete: %d vendors scraped, %d emails found", vendors_scraped, emails_found)
     return {
         "vendors_scraped": vendors_scraped,
         "emails_found": emails_found,

@@ -13,11 +13,10 @@ Usage:
 import functools
 import hashlib
 import json
-import logging
+from loguru import logger
 
 from .intel_cache import get_cached, set_cached
 
-log = logging.getLogger("avail.cache")
 
 
 def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | None = None):
@@ -56,13 +55,13 @@ def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | N
             try:
                 cached = get_cached(cache_key)
                 if cached is not None:
-                    log.debug("Cache HIT: %s", cache_key)
+                    logger.debug("Cache HIT: %s", cache_key)
                     return cached
             except Exception as e:
-                log.warning("Cache read failed for %s: %s", cache_key, e)
+                logger.warning("Cache read failed for %s: %s", cache_key, e)
 
             # Cache miss — call the real function
-            log.debug("Cache MISS: %s", cache_key)
+            logger.debug("Cache MISS: %s", cache_key)
             result = func(*args, **kwargs)
 
             # Only cache dict/list results (not Response objects)
@@ -70,7 +69,7 @@ def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | N
                 try:
                     set_cached(cache_key, result, ttl_days=ttl_days)
                 except Exception as e:
-                    log.warning("Cache write failed for %s: %s", cache_key, e)
+                    logger.warning("Cache write failed for %s: %s", cache_key, e)
 
             return result
 
@@ -101,7 +100,7 @@ def invalidate_prefix(prefix: str) -> None:
                 if cursor == 0:
                     break
         except Exception as e:
-            log.debug("Redis prefix invalidation error for %s: %s", prefix, e)
+            logger.debug("Redis prefix invalidation error for %s: %s", prefix, e)
 
     # PostgreSQL: delete by LIKE pattern
     try:
@@ -116,4 +115,4 @@ def invalidate_prefix(prefix: str) -> None:
             )
             db.commit()
     except Exception as e:
-        log.debug("PG prefix invalidation error for %s: %s", prefix, e)
+        logger.debug("PG prefix invalidation error for %s: %s", prefix, e)
