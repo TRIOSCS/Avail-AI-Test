@@ -1377,32 +1377,52 @@ const debouncedCheckDupCompany = debounce(async (val) => {
     } catch (e) { warn.style.display = 'none'; }
 }, 400);
 
-async function createCompany() {
+async function createCompany(forceCreate) {
     const name = document.getElementById('ncName').value.trim();
     if (!name) return;
     const btn = document.querySelector('#newCompanyModal .btn-primary');
+    const body = {
+        name, website: document.getElementById('ncWebsite').value.trim(),
+        linkedin_url: document.getElementById('ncLinkedin').value.trim() || null,
+        industry: document.getElementById('ncIndustry').value.trim(),
+    };
+    const qs = forceCreate ? '?force=true' : '';
     await guardBtn(btn, 'Creating…', async () => {
         try {
-            const data = await apiFetch('/api/companies', {
-                method: 'POST', body: {
-                    name, website: document.getElementById('ncWebsite').value.trim(),
-                    linkedin_url: document.getElementById('ncLinkedin').value.trim() || null,
-                    industry: document.getElementById('ncIndustry').value.trim(),
-                }
+            const data = await apiFetch('/api/companies' + qs, {
+                method: 'POST', body
             });
             closeModal('newCompanyModal');
             ['ncName','ncWebsite','ncLinkedin','ncIndustry'].forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
             showToast('Company "' + data.name + '" created', 'success');
             await loadSiteOptions();
             loadCustomers();
-            // If created from req modal, auto-select the new company and go back
             if (window._quickCreateFromReq && data.default_site_id) {
                 window._quickCreateFromReq = false;
                 selectSite(data.default_site_id, data.name);
                 return;
             }
             openAddSiteModal(data.id, data.name);
-        } catch (e) { showToast('Failed to create company', 'error'); }
+        } catch (e) {
+            // 409 = duplicate found — offer to use existing company
+            if (e.status === 409) {
+                try {
+                    const errData = JSON.parse(e.message);
+                    if (errData.duplicates && errData.duplicates.length) {
+                        const dup = errData.duplicates[0];
+                        const msg = `Similar company found: "${dup.name}" (${dup.match} match).\n\nAdd a site to the existing company instead?\n\n(Click Cancel to create a separate account — this is fine if different salespeople own different sites.)`;
+                        if (confirm(msg)) {
+                            closeModal('newCompanyModal');
+                            openAddSiteModal(dup.id, dup.name);
+                        } else {
+                            await createCompany(true);
+                        }
+                        return;
+                    }
+                } catch (_) { /* parse failed, fall through */ }
+            }
+            showToast('Failed to create company', 'error');
+        }
     });
 }
 
@@ -2325,7 +2345,7 @@ async function loadSpecificQuote(quoteId) {
 
 async function markQuoteResult(result) {
     if (!crmQuote) return;
-    if (result === 'won') { openBuyPlanModal(); return; }
+    if (result === 'won') { markQuoteWonV3(); return; }
     if (markQuoteResult._busy) return; markQuoteResult._busy = true;
     // Optimistic UI
     const prevStatus = crmQuote.status;
@@ -2774,6 +2794,289 @@ async function verifyBuyPlanPOs() {
         _currentBuyPlan = { ..._currentBuyPlan, line_items: result.line_items, status: result.status };
         renderBuyPlanStatus();
     } catch (e) { showToast('Verification failed', 'error'); }
+}
+
+// ── Buy Plan V3 (AI-powered) ─────────────────────────────────────────
+
+let _currentBuyPlanV3 = null;
+var _bpV3RenderTarget = 'buyPlanSection';
+
+async function markQuoteWonV3() {
+    if (!crmQuote) return;
+    if (markQuoteWonV3._busy) return; markQuoteWonV3._busy = true;
+    const el = document.getElementById('buyPlanSection');
+    if (el) el.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Building AI-optimized buy plan\u2026</div>';
+    try {
+        const resultData = await apiFetch('/api/quotes/' + crmQuote.id + '/result', {
+            method: 'POST', body: { result: 'won' }
+        });
+        notifyStatusChange(resultData);
+        crmQuote.status = 'won';
+        renderQuote();
+        _currentBuyPlanV3 = await apiFetch('/api/quotes/' + crmQuote.id + '/buy-plan-v3/build', { method: 'POST' });
+        renderBuyPlanV3Status();
+        showToast('AI buy plan built \u2014 review and submit', 'success');
+    } catch (e) {
+        logCatchError('markQuoteWonV3', e);
+        showToast('Failed: ' + (e.message || e), 'error');
+        if (el) el.innerHTML = '';
+    } finally { markQuoteWonV3._busy = false; }
+}
+
+async function loadBuyPlanV3() {
+    if (!crmQuote) return;
+    try {
+        const resp = await apiFetch('/api/buy-plans-v3?quote_id=' + crmQuote.id);
+        const plans = (resp.items || []);
+        if (plans.length > 0) {
+            _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + plans[0].id);
+        } else {
+            _currentBuyPlanV3 = null;
+        }
+    } catch (e) { logCatchError('loadBuyPlanV3', e); _currentBuyPlanV3 = null; }
+    renderBuyPlanV3Status();
+}
+
+function _bpV3StatusColor(status) {
+    return { draft:'var(--muted)', pending:'var(--amber)', active:'var(--green)',
+        halted:'var(--red)', completed:'var(--green)', cancelled:'var(--muted)' }[status] || 'var(--muted)';
+}
+function _bpV3StatusLabel(status) {
+    return { draft:'Draft', pending:'Pending Approval', active:'Active',
+        halted:'Halted', completed:'Completed', cancelled:'Cancelled' }[status] || status;
+}
+function _bpV3SOBadge(soStatus) {
+    if (!soStatus || soStatus === 'pending') return '<span class="badge b-pend">SO Pending</span>';
+    if (soStatus === 'approved') return '<span class="badge b-appr">SO Verified</span>';
+    return '<span class="badge b-rej">SO Rejected</span>';
+}
+function _bpV3ScoreBadge(score) {
+    if (score == null) return '';
+    const s = Math.round(score);
+    const cls = s >= 75 ? 'b-proven' : s >= 50 ? 'b-developing' : 'b-caution';
+    return '<span class="badge ' + cls + '">' + s + '</span>';
+}
+function _bpV3LineBadge(lineStatus) {
+    const map = { awaiting_po:'Awaiting PO', pending_verify:'Verify PO', verified:'Verified', issue:'Issue' };
+    const cls = { awaiting_po:'b-pend', pending_verify:'b-draft', verified:'b-appr', issue:'b-rej' };
+    return '<span class="badge ' + (cls[lineStatus]||'b-draft') + '">' + (map[lineStatus]||lineStatus) + '</span>';
+}
+function _fmtMoney(v) {
+    if (v == null) return '\u2014';
+    return '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+function renderBuyPlanV3Status(targetId) {
+    if (targetId) _bpV3RenderTarget = targetId;
+    const el = document.getElementById(_bpV3RenderTarget);
+    if (!el) return;
+    if (!_currentBuyPlanV3) { el.innerHTML = ''; return; }
+    const bp = _currentBuyPlanV3;
+    const statusColor = _bpV3StatusColor(bp.status);
+    const isDraft = bp.status === 'draft';
+
+    // AI Summary
+    let summaryHtml = '';
+    if (bp.ai_summary) {
+        summaryHtml = '<div style="background:#f0f9ff;padding:10px 12px;border-left:3px solid #2563eb;border-radius:4px;margin-bottom:10px;font-size:12px;line-height:1.5">'
+            + '<strong style="font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:#2563eb">AI Analysis</strong><br>'
+            + esc(bp.ai_summary) + '</div>';
+    }
+
+    // AI Flags
+    let flagsHtml = '';
+    if (bp.ai_flags && bp.ai_flags.length) {
+        flagsHtml = '<div style="margin-bottom:10px">';
+        for (const f of bp.ai_flags) {
+            const fcolor = f.severity === 'critical' ? 'var(--red)' : f.severity === 'warning' ? 'var(--amber)' : '#2563eb';
+            const ficon = f.severity === 'critical' ? '\u26d4' : f.severity === 'warning' ? '\u26a0\ufe0f' : '\u2139\ufe0f';
+            flagsHtml += '<div style="padding:6px 10px;border-left:3px solid ' + fcolor + ';background:var(--bg-alt,#f9fafb);border-radius:4px;margin-bottom:4px;font-size:12px">'
+                + ficon + ' ' + esc(f.message) + '</div>';
+        }
+        flagsHtml += '</div>';
+    }
+
+    // Context
+    let contextHtml = '';
+    if (bp.customer_name || bp.quote_number || bp.sales_order_number) {
+        contextHtml = '<div class="info-card">'
+            + (bp.customer_name ? '<div><strong>Customer:</strong> ' + esc(bp.customer_name) + '</div>' : '')
+            + (bp.quote_number ? '<div><strong>Quote:</strong> ' + esc(bp.quote_number) + '</div>' : '')
+            + (bp.sales_order_number ? '<div><strong>SO#:</strong> ' + esc(bp.sales_order_number) + '</div>' : '')
+            + (bp.customer_po_number ? '<div><strong>Customer PO:</strong> ' + esc(bp.customer_po_number) + '</div>' : '')
+            + '</div>';
+    }
+
+    // Financial summary
+    let marginHtml = '';
+    if (bp.total_cost != null) {
+        const profit = (bp.total_revenue || 0) - (bp.total_cost || 0);
+        const profitColor = profit >= 0 ? 'var(--green)' : 'var(--red)';
+        marginHtml = '<div class="stat-row">'
+            + '<div><strong>Cost:</strong> ' + _fmtMoney(bp.total_cost) + '</div>'
+            + (bp.total_revenue ? '<div><strong>Revenue:</strong> ' + _fmtMoney(bp.total_revenue) + '</div>' : '')
+            + (bp.total_revenue ? '<div style="color:' + profitColor + '"><strong>Profit:</strong> ' + _fmtMoney(profit) + '</div>' : '')
+            + (bp.total_margin_pct != null ? '<div><strong>Margin:</strong> ' + Number(bp.total_margin_pct).toFixed(1) + '%</div>' : '')
+            + '</div>';
+    }
+
+    // Notes
+    let notesHtml = '';
+    if (bp.salesperson_notes) notesHtml += '<div style="background:#f0f9ff;padding:8px 10px;border-left:3px solid #2563eb;border-radius:4px;margin-bottom:8px;font-size:12px"><strong>Sales:</strong> ' + esc(bp.salesperson_notes) + '</div>';
+    if (bp.approval_notes) notesHtml += '<div style="background:#f0fdf4;padding:8px 10px;border-left:3px solid #16a34a;border-radius:4px;margin-bottom:8px;font-size:12px"><strong>Manager:</strong> ' + esc(bp.approval_notes) + '</div>';
+    if (bp.so_rejection_note) notesHtml += '<div style="background:#fef2f2;padding:8px 10px;border-left:3px solid var(--red);border-radius:4px;margin-bottom:8px;font-size:12px"><strong>SO Rejected:</strong> ' + esc(bp.so_rejection_note) + '</div>';
+
+    // Lines table
+    const lines = bp.lines || [];
+    let linesHtml = lines.map(l => {
+        const compareBtn = isDraft ? ' <a href="javascript:void(0)" onclick="openOfferComparisonV3(' + bp.id + ',' + l.requirement_id + ',' + l.id + ')" style="font-size:10px;color:#2563eb;text-decoration:underline">compare</a>' : '';
+        return '<tr data-line-id="' + l.id + '">'
+            + '<td>' + esc(l.mpn) + compareBtn + '</td>'
+            + '<td>' + esc(l.vendor_name || '\u2014') + '</td>'
+            + '<td>' + _bpV3ScoreBadge(l.ai_score) + '</td>'
+            + '<td style="font-size:11px">' + esc(l.buyer_name || '\u2014') + '</td>'
+            + '<td class="mono">' + (isDraft
+                ? '<input type="number" class="bpv3-qty" data-line-id="' + l.id + '" value="' + (l.quantity||0) + '" min="1" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:4px;font-size:11px;text-align:right">'
+                : (l.quantity||0).toLocaleString()) + '</td>'
+            + '<td class="mono">$' + Number(l.unit_cost||0).toFixed(4) + '</td>'
+            + '<td class="mono">' + (l.margin_pct != null ? Number(l.margin_pct).toFixed(1) + '%' : '\u2014') + '</td>'
+            + '<td>' + esc(l.lead_time || '\u2014') + '</td>'
+            + (isDraft ? '' : '<td>' + _bpV3LineBadge(l.status) + '</td>')
+            + '</tr>';
+    }).join('');
+
+    // Actions
+    let actionsHtml = '';
+    if (isDraft) {
+        actionsHtml = '<div style="margin-top:14px;border-top:1px solid var(--border);padding-top:14px">'
+            + '<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px">'
+            + '<div class="field" style="flex:1;min-width:180px"><label style="font-weight:600;font-size:12px">Acctivate SO# <span style="color:var(--red)">*</span></label>'
+            + '<input type="text" id="bpV3SO" placeholder="Enter Acctivate SO#" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)"></div>'
+            + '<div class="field" style="flex:1;min-width:180px"><label style="font-weight:600;font-size:12px">Customer PO# <span style="font-size:11px;color:var(--muted)">(optional)</span></label>'
+            + '<input type="text" id="bpV3CustPO" placeholder="Customer PO number" style="width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)"></div>'
+            + '</div>'
+            + '<div class="field" style="margin-bottom:10px"><label style="font-weight:600;font-size:12px">Notes for Buyers</label>'
+            + '<textarea id="bpV3Notes" rows="2" placeholder="Special instructions, context\u2026" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)"></textarea></div>'
+            + '<div style="display:flex;gap:8px"><button class="btn btn-primary" onclick="submitBuyPlanV3()">Submit Buy Plan</button></div>'
+            + '</div>';
+    }
+
+    el.innerHTML = '<div class="card" style="margin-top:16px;border-left:4px solid ' + statusColor + '">'
+        + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
+        + '<div><strong>Buy Plan V3</strong>'
+        + ' <span class="status-badge" style="background:' + statusColor + ';color:#fff;margin-left:8px">' + _bpV3StatusLabel(bp.status) + '</span>'
+        + (bp.status !== 'draft' && bp.so_status ? ' ' + _bpV3SOBadge(bp.so_status) : '')
+        + (bp.is_stock_sale ? ' <span class="status-badge" style="background:#7c3aed;color:#fff;margin-left:4px">Stock Sale</span>' : '')
+        + (bp.auto_approved ? ' <span class="badge b-appr" style="margin-left:4px">Auto-Approved</span>' : '')
+        + '</div>'
+        + '<span style="font-size:11px;color:var(--muted)">' + (bp.submitted_by_name ? 'by ' + esc(bp.submitted_by_name) : '') + (bp.created_at ? ' \xB7 ' + fmtDateTime(bp.created_at) : '') + '</span>'
+        + '</div>'
+        + summaryHtml + flagsHtml + contextHtml + marginHtml + notesHtml
+        + '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="tbl" style="margin-bottom:0"><thead><tr>'
+        + '<th>MPN</th><th>Vendor</th><th>Score</th><th>Buyer</th><th>Qty</th><th>Unit Cost</th><th>Margin</th><th>Lead</th>'
+        + (isDraft ? '' : '<th>Status</th>')
+        + '</tr></thead><tbody>' + linesHtml + '</tbody></table></div>'
+        + actionsHtml + '</div>';
+}
+
+async function submitBuyPlanV3() {
+    if (!_currentBuyPlanV3 || _currentBuyPlanV3.status !== 'draft') return;
+    const soNum = (document.getElementById('bpV3SO')?.value || '').trim();
+    if (!soNum) { showToast('Acctivate SO# is required', 'error'); document.getElementById('bpV3SO')?.focus(); return; }
+
+    // Collect line edits (quantities the salesperson may have changed)
+    const lineEdits = [];
+    document.querySelectorAll('.bpv3-qty').forEach(input => {
+        const lineId = parseInt(input.dataset.lineId);
+        const line = (_currentBuyPlanV3.lines || []).find(l => l.id === lineId);
+        if (line) {
+            const newQty = parseInt(input.value) || line.quantity;
+            if (newQty !== line.quantity) {
+                lineEdits.push({ requirement_id: line.requirement_id, offer_id: line.offer_id, quantity: newQty });
+            }
+        }
+    });
+
+    const custPO = (document.getElementById('bpV3CustPO')?.value || '').trim() || null;
+    const notes = (document.getElementById('bpV3Notes')?.value || '').trim() || null;
+
+    const btn = document.querySelector('#buyPlanSection .btn-primary');
+    await guardBtn(btn, 'Submitting\u2026', async () => {
+        try {
+            const body = { sales_order_number: soNum, customer_po_number: custPO, salesperson_notes: notes };
+            if (lineEdits.length) body.line_edits = lineEdits;
+            const res = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/submit', { method: 'POST', body });
+            const msg = res.auto_approved ? 'Buy plan auto-approved \u2014 buyers notified!' : 'Buy plan submitted for approval';
+            showToast(msg, 'success');
+            _currentBuyPlanV3 = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id);
+            renderBuyPlanV3Status();
+        } catch (e) {
+            logCatchError('submitBuyPlanV3', e);
+            showToast('Failed to submit: ' + (e.message || e), 'error');
+        }
+    });
+}
+
+async function openOfferComparisonV3(planId, reqId, currentLineId) {
+    const modal = document.getElementById('offerComparisonV3Modal');
+    if (!modal) return;
+    openModal('offerComparisonV3Modal');
+    const body = modal.querySelector('.modal');
+    body.innerHTML = '<h2>Offer Comparison</h2><div class="spinner-row"><div class="spinner"></div>Loading offers\u2026</div>';
+    try {
+        const data = await apiFetch('/api/buy-plans-v3/' + planId + '/offers/' + reqId);
+        const offers = data.offers || [];
+        const selectedIds = new Set(data.selected_offer_ids || []);
+        let html = '<h2>Offers for ' + esc(data.mpn || 'MPN') + '</h2>';
+        html += '<p style="font-size:12px;color:var(--muted);margin-bottom:12px">Target qty: ' + (data.target_qty || 0).toLocaleString() + ' \u2014 click a row to swap vendor</p>';
+        if (!offers.length) {
+            html += '<p class="empty">No alternative offers available</p>';
+        } else {
+            html += '<table class="tbl"><thead><tr><th></th><th>Vendor</th><th>Unit Price</th><th>Qty Avail</th><th>Lead</th><th>Condition</th></tr></thead><tbody>';
+            for (const o of offers) {
+                const sel = selectedIds.has(o.offer_id);
+                const stale = o.is_stale ? ' style="opacity:.6"' : '';
+                html += '<tr' + stale + ' onclick="swapLineOfferV3(' + currentLineId + ',' + o.offer_id + ',' + reqId + ')" style="cursor:pointer' + (sel ? ';background:var(--teal-light)' : '') + '">'
+                    + '<td>' + (sel ? '<strong>\u2713</strong>' : '') + '</td>'
+                    + '<td>' + esc(o.vendor_name) + (o.is_stale ? ' <span style="font-size:10px;color:var(--red)">(stale)</span>' : '') + '</td>'
+                    + '<td class="mono">' + (o.unit_price != null ? '$' + Number(o.unit_price).toFixed(4) : '\u2014') + '</td>'
+                    + '<td class="mono">' + (o.qty_available != null ? o.qty_available.toLocaleString() : '\u2014') + '</td>'
+                    + '<td>' + esc(o.lead_time || '\u2014') + '</td>'
+                    + '<td>' + esc(o.condition || '\u2014') + '</td>'
+                    + '</tr>';
+            }
+            html += '</tbody></table>';
+        }
+        html += '<div class="mactions"><button class="btn btn-ghost" onclick="closeModal(\'offerComparisonV3Modal\')">Close</button></div>';
+        body.innerHTML = html;
+    } catch (e) {
+        logCatchError('openOfferComparisonV3', e);
+        body.innerHTML = '<h2>Offer Comparison</h2><p style="color:var(--red)">Failed to load offers</p><div class="mactions"><button class="btn btn-ghost" onclick="closeModal(\'offerComparisonV3Modal\')">Close</button></div>';
+    }
+}
+
+async function swapLineOfferV3(lineId, offerId, reqId) {
+    if (!_currentBuyPlanV3 || _currentBuyPlanV3.status !== 'draft') return;
+    const line = (_currentBuyPlanV3.lines || []).find(l => l.id === lineId);
+    if (!line) return;
+    if (line.offer_id === offerId) { closeModal('offerComparisonV3Modal'); return; }
+    // Update the line edit locally — actual swap happens on submit via line_edits
+    line.offer_id = offerId;
+    line._swapped = true;
+    // Fetch offer details to update display
+    try {
+        const data = await apiFetch('/api/buy-plans-v3/' + _currentBuyPlanV3.id + '/offers/' + reqId);
+        const offer = (data.offers || []).find(o => o.offer_id === offerId);
+        if (offer) {
+            line.vendor_name = offer.vendor_name;
+            line.unit_cost = offer.unit_price;
+            line.lead_time = offer.lead_time;
+            line.condition = offer.condition;
+        }
+    } catch (e) { logCatchError('swapLineOfferV3', e); }
+    closeModal('offerComparisonV3Modal');
+    renderBuyPlanV3Status();
+    showToast('Vendor swapped \u2014 will apply on submit', 'info');
 }
 
 // ── Buy Plans Admin List ──────────────────────────────────────────────
@@ -4966,16 +5269,11 @@ function switchSettingsTab(name, btn) {
     // Lazy-load data
     if (name === 'users') loadAdminUsers();
     else if (name === 'health') loadSettingsHealth();
-    else if (name === 'scoring') loadSettingsScoring();
     else if (name === 'config') loadSettingsConfig();
     else if (name === 'sources') loadSettingsSources();
-    else if (name === 'manage-users') loadAdminUsers();
-    else if (name === 'unmatched') loadUnmatchedQueue();
     else if (name === 'teams') loadTeamsConfig();
     else if (name === 'enrichment') { loadEnrichmentQueue(); loadEnrichmentStats(); }
     else if (name === 'tickets') loadTroubleTickets();
-    else if (name === 'vendor-dedup') loadVendorDedupSuggestions();
-    else if (name === 'company-dedup') loadCompanyDedupSuggestions();
     else if (name === 'transfer') loadTransferPanel();
 }
 
@@ -5389,44 +5687,6 @@ async function loadSettingsHealth() {
 
 // ── Scoring Weights ──
 
-async function loadSettingsScoring() {
-    const el = document.getElementById('settingsScoringContent');
-    el.innerHTML = '<p class="empty">Loading...</p>';
-    try {
-        const configs = await apiFetch('/api/admin/config');
-        const weights = configs.filter(c => c.key.startsWith('weight_'));
-        let html = '<div class="card s-card">';
-        html += '<h3>Search Scoring Weights</h3>';
-        html += '<p class="s-desc">Weights determine how search results are ranked. Total should equal 100.</p>';
-        html += '<div class="s-form">';
-        for (const w of weights) {
-            const label = w.key.replace('weight_', '').replace(/_/g, ' ');
-            html += `<div class="s-row">
-                <label style="flex:1;font-size:13px;text-transform:capitalize">${label}</label>
-                <input type="number" min="0" max="100" value="${w.value}" id="sw_${w.key}"
-                    onchange="updateWeightTotal()" class="s-input-num" style="width:60px">
-                <button class="btn btn-ghost btn-sm" onclick="saveConfig('${w.key}', document.getElementById('sw_${w.key}').value)">Save</button>
-            </div>`;
-        }
-        html += '</div>';
-        html += '<div style="margin-top:16px;font-size:13px"><strong>Total: <span id="weightTotal">0</span></strong> <span id="weightWarn" style="color:var(--red);display:none">(should be 100)</span></div>';
-        html += '</div>';
-        el.innerHTML = html;
-        updateWeightTotal();
-    } catch (e) {
-        el.innerHTML = '<p class="empty">Error loading scoring config</p>';
-    }
-}
-
-function updateWeightTotal() {
-    const inputs = document.querySelectorAll('[id^="sw_weight_"]');
-    let total = 0;
-    inputs.forEach(inp => total += parseInt(inp.value) || 0);
-    const totalEl = document.getElementById('weightTotal');
-    const warnEl = document.getElementById('weightWarn');
-    if (totalEl) totalEl.textContent = total;
-    if (warnEl) warnEl.style.display = total !== 100 ? '' : 'none';
-}
 
 
 // ── Configuration ──
@@ -5477,9 +5737,7 @@ async function saveConfig(key, value) {
             method: 'PUT',
             body: {value: String(value)}
         });
-        // Reload the panel that owns this key
-        if (key.startsWith('weight_')) loadSettingsScoring();
-        else loadSettingsConfig();
+        loadSettingsConfig();
     } catch (e) {
         showToast('Error saving: ' + (e.message || e), 'error');
     }
@@ -5567,148 +5825,8 @@ async function createUser() {
     }
 }
 
-async function importCustomers() {
-    const fileInput = document.getElementById('customerImportFile');
-    if (!fileInput.files.length) { showToast('Select a CSV file first', 'error'); return; }
-    const form = new FormData();
-    form.append('file', fileInput.files[0]);
-    const statusEl = document.getElementById('customerImportStatus');
-    statusEl.textContent = 'Importing...';
-    try {
-        const data = await apiFetch('/api/admin/import/customers', {method:'POST', body:form});
-        statusEl.textContent = `Done: ${data.companies_created} companies, ${data.sites_created} sites, ${data.contacts_created} contacts created from ${data.rows_processed} rows`;
-        fileInput.value = '';
-    } catch (e) {
-        statusEl.textContent = 'Error: ' + (e.message || e);
-    }
-}
-
-async function importVendors() {
-    const fileInput = document.getElementById('vendorImportFile');
-    if (!fileInput.files.length) { showToast('Select a CSV file first', 'error'); return; }
-    const form = new FormData();
-    form.append('file', fileInput.files[0]);
-    const statusEl = document.getElementById('vendorImportStatus');
-    statusEl.textContent = 'Importing...';
-    try {
-        const data = await apiFetch('/api/admin/import/vendors', {method:'POST', body:form});
-        statusEl.textContent = `Done: ${data.vendors_created} vendors, ${data.contacts_created} contacts created from ${data.rows_processed} rows`;
-        fileInput.value = '';
-    } catch (e) {
-        statusEl.textContent = 'Error: ' + (e.message || e);
-    }
-}
 
 
-// ═══════════════════════════════════════════════════════════════════════
-//  UNMATCHED ACTIVITY QUEUE (Phase 2A)
-// ═══════════════════════════════════════════════════════════════════════
-
-async function loadUnmatchedQueue() {
-    const el = document.getElementById('unmatchedQueueContent');
-    el.innerHTML = '<p class="empty">Loading unmatched activities...</p>';
-    try {
-        const data = await apiFetch('/api/activities/unmatched?limit=50');
-        const items = data.items || [];
-        if (!items.length) {
-            el.innerHTML = '<p class="empty">No unmatched activities — all clear!</p>';
-            return;
-        }
-        let html = `<p class="s-hint" style="margin:0 0 12px">${data.total} unmatched activit${data.total === 1 ? 'y' : 'ies'} awaiting review</p>`;
-        html += '<div class="s-form" style="gap:8px">';
-        for (const a of items) {
-            const contact = a.contact_email || a.contact_phone || 'Unknown';
-            const typeIcon = a.channel === 'email' ? '✉' : '📞';
-            const dateStr = a.created_at ? new Date(a.created_at).toLocaleDateString() : '';
-            const subject = a.subject ? ` — ${esc(a.subject.substring(0, 60))}` : '';
-            html += `<div class="card s-row" style="padding:12px;gap:12px;max-width:none" id="unmatched-${a.id}">
-                <span style="font-size:18px">${typeIcon}</span>
-                <div style="flex:1;min-width:0">
-                    <div style="font-weight:600;font-size:13px">${esc(contact)}${subject}</div>
-                    <div class="s-hint">${esc(a.activity_type)} · ${esc(a.user_name || '')} · ${dateStr}</div>
-                    ${a.contact_name ? `<div class="s-hint">Contact: ${esc(a.contact_name)}</div>` : ''}
-                </div>
-                <div style="display:flex;gap:6px;flex-shrink:0">
-                    <button class="btn btn-sm" onclick="promptAttributeActivity(${a.id})">Attribute</button>
-                    <button class="btn btn-ghost btn-sm" onclick="dismissActivity(${a.id})">Dismiss</button>
-                </div>
-            </div>`;
-        }
-        html += '</div>';
-        el.innerHTML = html;
-    } catch (e) {
-        el.innerHTML = `<p class="empty" style="color:var(--red)">Error: ${e.message || e}</p>`;
-    }
-}
-
-function promptAttributeActivity(activityId) {
-    // Show inline attribution panel instead of raw prompt()
-    const row = document.getElementById('unmatched-' + activityId);
-    if (!row) return;
-    // Remove any existing attribution panels
-    document.querySelectorAll('.attr-panel').forEach(p => p.remove());
-    const panel = document.createElement('div');
-    panel.className = 'attr-panel';
-    panel.style.cssText = 'padding:10px;background:var(--bg);border:1px solid var(--border);border-radius:8px;margin-top:8px';
-    panel.innerHTML = `
-        <div style="display:flex;gap:8px;margin-bottom:8px">
-            <button class="btn btn-sm attr-type-btn on" data-type="company" onclick="this.parentNode.querySelectorAll('.attr-type-btn').forEach(b=>b.classList.remove('on'));this.classList.add('on');document.getElementById('attrSearch-${activityId}').placeholder='Search companies...';document.getElementById('attrSearch-${activityId}').value='';document.getElementById('attrResults-${activityId}').innerHTML=''">Company</button>
-            <button class="btn btn-sm attr-type-btn" data-type="vendor" onclick="this.parentNode.querySelectorAll('.attr-type-btn').forEach(b=>b.classList.remove('on'));this.classList.add('on');document.getElementById('attrSearch-${activityId}').placeholder='Search vendors...';document.getElementById('attrSearch-${activityId}').value='';document.getElementById('attrResults-${activityId}').innerHTML=''">Vendor</button>
-            <button class="btn btn-ghost btn-sm" onclick="this.closest('.attr-panel').remove()" style="margin-left:auto">Cancel</button>
-        </div>
-        <input id="attrSearch-${activityId}" placeholder="Search companies..." oninput="_attrSearch(${activityId},this.value)" style="width:100%;padding:6px 10px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--input)">
-        <div id="attrResults-${activityId}" style="max-height:150px;overflow-y:auto;margin-top:4px"></div>
-    `;
-    row.appendChild(panel);
-    panel.querySelector('input').focus();
-}
-
-var _attrSearchDebounce = null;
-function _attrSearch(activityId, query) {
-    clearTimeout(_attrSearchDebounce);
-    if (query.length < 2) { document.getElementById('attrResults-' + activityId).innerHTML = ''; return; }
-    _attrSearchDebounce = setTimeout(async () => {
-        const typeBtn = document.querySelector('#unmatched-' + activityId + ' .attr-type-btn.on');
-        const entityType = typeBtn ? typeBtn.dataset.type : 'company';
-        const resultsEl = document.getElementById('attrResults-' + activityId);
-        try {
-            let items = [];
-            if (entityType === 'company') {
-                items = await apiFetch('/api/companies/typeahead?q=' + encodeURIComponent(query));
-                items = (items || []).slice(0, 8);
-            } else {
-                const resp = await apiFetch('/api/vendors?q=' + encodeURIComponent(query));
-                items = ((resp.vendors || resp) || []).slice(0, 8).map(v => ({id: v.id, name: v.display_name || v.name}));
-            }
-            if (!items.length) { resultsEl.innerHTML = '<div style="padding:6px;font-size:11px;color:var(--muted)">No results</div>'; return; }
-            resultsEl.innerHTML = items.map(i => `<div onclick="_attrSelect(${activityId},'${entityType}',${i.id})" style="padding:6px 8px;font-size:12px;cursor:pointer;border-radius:4px;hover:background:var(--card2)" onmouseover="this.style.background='var(--card2)'" onmouseout="this.style.background=''">${esc(i.name)}</div>`).join('');
-        } catch (e) { resultsEl.innerHTML = '<div style="padding:6px;font-size:11px;color:var(--red)">Search error</div>'; }
-    }, 250);
-}
-
-async function _attrSelect(activityId, entityType, entityId) {
-    try {
-        await apiFetch('/api/activities/' + activityId + '/attribute', {
-            method: 'POST',
-            body: {entity_type: entityType, entity_id: entityId}
-        });
-        showToast('Activity attributed', 'success');
-        const row = document.getElementById('unmatched-' + activityId);
-        if (row) row.remove();
-    } catch (e) {
-        showToast('Error: ' + (e.message || e), 'error');
-    }
-}
-
-async function dismissActivity(activityId) {
-    try {
-        await apiFetch(`/api/activities/${activityId}/dismiss`, {method: 'POST'});
-        const row = document.getElementById('unmatched-' + activityId);
-        if (row) row.remove();
-    } catch (e) {
-        showToast('Error: ' + (e.message || e), 'error');
-    }
-}
 
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -6368,137 +6486,6 @@ async function regeneratePrompt(id, btn) {
 }
 
 // ── Vendor Dedup ────────────────────────────────────────────────────────
-
-async function loadVendorDedupSuggestions() {
-    const el = document.getElementById('dedupResults');
-    const status = document.getElementById('dedupStatus');
-    if (!el) return;
-    const threshold = (document.getElementById('dedupThreshold') || {}).value || 85;
-    el.innerHTML = '<p class="empty">Scanning vendors...</p>';
-    if (status) status.textContent = 'Scanning...';
-    try {
-        const data = await apiFetch(`/api/admin/vendor-dedup-suggestions?threshold=${threshold}&limit=100`);
-        if (status) status.textContent = data.count + ' potential duplicate' + (data.count !== 1 ? 's' : '') + ' found';
-        if (!data.count) {
-            el.innerHTML = '<p class="empty">No duplicate vendors found at this threshold</p>';
-            return;
-        }
-        let html = '<table class="tbl"><thead><tr><th>Score</th><th>Vendor A</th><th>Sightings</th><th>Vendor B</th><th>Sightings</th><th></th></tr></thead><tbody>';
-        for (const c of data.candidates) {
-            const keepA = (c.vendor_a.sightings || 0) >= (c.vendor_b.sightings || 0);
-            const keepId = keepA ? c.vendor_a.id : c.vendor_b.id;
-            const removeId = keepA ? c.vendor_b.id : c.vendor_a.id;
-            const scoreColor = c.score >= 95 ? 'var(--red)' : c.score >= 90 ? 'var(--amber)' : 'var(--muted)';
-            html += `<tr id="dedup-row-${c.vendor_a.id}-${c.vendor_b.id}">
-                <td style="font-weight:700;color:${scoreColor}">${c.score}%</td>
-                <td>${esc(c.vendor_a.name)}${keepA ? ' <span style="font-size:9px;color:var(--green);font-weight:600">KEEP</span>' : ''}</td>
-                <td class="mono">${c.vendor_a.sightings}</td>
-                <td>${esc(c.vendor_b.name)}${!keepA ? ' <span style="font-size:9px;color:var(--green);font-weight:600">KEEP</span>' : ''}</td>
-                <td class="mono">${c.vendor_b.sightings}</td>
-                <td>
-                    <button class="btn btn-sm btn-primary" onclick="mergeVendors(${keepId},${removeId},this)" title="Merge into vendor with more sightings">Merge</button>
-                    <button class="btn btn-sm btn-ghost" onclick="this.closest('tr').remove()" title="Dismiss">Skip</button>
-                </td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
-        el.innerHTML = html;
-    } catch (e) {
-        el.innerHTML = '<p class="empty" style="color:var(--red)">Failed to load: ' + esc(e.message) + '</p>';
-        if (status) status.textContent = '';
-    }
-}
-
-async function mergeVendors(keepId, removeId, btn) {
-    if (!confirm(`Merge vendor #${removeId} into #${keepId}? This cannot be undone.`)) return;
-    await guardBtn(btn, 'Merging...', async () => {
-        const result = await apiFetch('/api/admin/vendor-merge', {
-            method: 'POST',
-            body: { keep_id: keepId, remove_id: removeId },
-        });
-        showToast(`Merged! ${result.reassigned} records reassigned`, 'success');
-        const row = btn.closest('tr');
-        if (row) row.remove();
-        // Update status count
-        const remaining = document.querySelectorAll('#dedupResults tbody tr').length;
-        const status = document.getElementById('dedupStatus');
-        if (status) status.textContent = remaining + ' remaining';
-    });
-}
-
-
-// ── Company Dedup ─────────────────────────────────────────────────────
-
-async function loadCompanyDedupSuggestions() {
-    const el = document.getElementById('companyDedupResults');
-    const status = document.getElementById('companyDedupStatus');
-    if (!el) return;
-    const threshold = (document.getElementById('companyDedupThreshold') || {}).value || 85;
-    el.innerHTML = '<p class="empty">Scanning companies...</p>';
-    if (status) status.textContent = 'Scanning...';
-    try {
-        const data = await apiFetch(`/api/admin/company-dedup-suggestions?threshold=${threshold}&limit=100`);
-        if (status) status.textContent = data.count + ' potential duplicate' + (data.count !== 1 ? 's' : '') + ' found';
-        if (!data.count) {
-            el.innerHTML = '<p class="empty">No duplicate companies found at this threshold</p>';
-            return;
-        }
-        let html = '<table class="tbl"><thead><tr><th>Score</th><th>Company A</th><th>Sites</th><th>Company B</th><th>Sites</th><th></th></tr></thead><tbody>';
-        for (const c of data.candidates) {
-            const keepId = c.auto_keep_id;
-            const removeId = keepId === c.company_a.id ? c.company_b.id : c.company_a.id;
-            const scoreColor = c.score >= 95 ? 'var(--red)' : c.score >= 90 ? 'var(--amber)' : 'var(--muted)';
-            const aIsKeep = c.company_a.id === keepId;
-            html += `<tr id="cdedup-row-${c.company_a.id}-${c.company_b.id}">
-                <td style="font-weight:700;color:${scoreColor}">${c.score}%</td>
-                <td>${esc(c.company_a.name)}${aIsKeep ? ' <span style="font-size:9px;color:var(--green);font-weight:600">KEEP</span>' : ''}</td>
-                <td class="mono">${c.company_a.site_count}</td>
-                <td>${esc(c.company_b.name)}${!aIsKeep ? ' <span style="font-size:9px;color:var(--green);font-weight:600">KEEP</span>' : ''}</td>
-                <td class="mono">${c.company_b.site_count}</td>
-                <td>
-                    <button class="btn btn-sm btn-primary" onclick="previewCompanyMerge(${keepId},${removeId},this)" title="Preview merge impact">Merge</button>
-                    <button class="btn btn-sm btn-ghost" onclick="this.closest('tr').remove()" title="Dismiss">Skip</button>
-                </td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
-        el.innerHTML = html;
-    } catch (e) {
-        el.innerHTML = '<p class="empty" style="color:var(--red)">Failed to load: ' + esc(e.message) + '</p>';
-        if (status) status.textContent = '';
-    }
-}
-
-async function previewCompanyMerge(keepId, removeId, btn) {
-    await guardBtn(btn, 'Loading...', async () => {
-        const preview = await apiFetch(`/api/admin/company-merge-preview?keep_id=${keepId}&remove_id=${removeId}`);
-        const parts = [];
-        if (preview.sites_to_move) parts.push(`${preview.sites_to_move} site(s) moved`);
-        if (preview.sites_to_delete) parts.push(`${preview.sites_to_delete} empty HQ site(s) deleted`);
-        if (preview.activities_to_reassign) parts.push(`${preview.activities_to_reassign} activities reassigned`);
-        if (preview.fields_to_fill.length) parts.push(`${preview.fields_to_fill.length} fields filled`);
-        if (preview.tags_to_merge) parts.push(`${preview.tags_to_merge} new tags`);
-        const summary = parts.length ? parts.join(', ') : 'No data to move';
-        if (!confirm(`Merge "${preview.remove.name}" into "${preview.keep.name}"?\n\n${summary}\n\nThis cannot be undone.`)) return;
-        await mergeCompanies(keepId, removeId, btn);
-    });
-}
-
-async function mergeCompanies(keepId, removeId, btn) {
-    await guardBtn(btn, 'Merging...', async () => {
-        const result = await apiFetch('/api/admin/company-merge', {
-            method: 'POST',
-            body: { keep_id: keepId, remove_id: removeId },
-        });
-        showToast(`Merged! ${result.sites_moved} sites moved, ${result.reassigned} records reassigned`, 'success');
-        const row = btn.closest('tr');
-        if (row) row.remove();
-        const remaining = document.querySelectorAll('#companyDedupResults tbody tr').length;
-        const cStatus = document.getElementById('companyDedupStatus');
-        if (cStatus) cStatus.textContent = remaining + ' remaining';
-    });
-}
-
 
 /// ── Mass Account Transfer ───────────────────────────────────────────────
 
@@ -7635,7 +7622,7 @@ function _refreshCustPipeline() {
 // ── ESM: expose all inline-handler functions to window ────────────────
 Object.assign(window, {
     _refreshCustPipeline,
-    _attrSearch, _attrSelect, _debouncedFilterSiteContacts,
+    _debouncedFilterSiteContacts,
     _debouncedFilterDrawerContacts, _debouncedLoadVendorScorecards,
     _debouncedUpdateBpTotals, _debouncedUpdateProactivePreview,
     _toggleActivityDetail,
@@ -7645,7 +7632,7 @@ Object.assign(window, {
     completeBuyPlan, convertProactiveOffer, copyPromptToClipboard,
     copyQuoteTable, deleteAIContact, deleteAdminUser, deleteCredential,
     deleteOffer, deleteOfferAttachment, deleteSiteContact,
-    dismissActivity, dismissProactiveGroup, editCredential,
+    dismissProactiveGroup, editCredential,
     eqToggleAll, eqToggleItem, loadBuyPlans, loadBuyerLeaderboard, toggleBpMyOnly,
     loadQuote, loadSpecificQuote, loadSalespersonScorecard,
     loadTroubleTickets, markQuoteResult, onSourcesSearch,
@@ -7653,7 +7640,7 @@ Object.assign(window, {
     openEditCompany, openEditOffer, openEditSiteContact,
     openEditSiteModal, openLogNoteModal, openLostModal,
     openOfferGallery, openPricingHistory, openProactiveSendModal,
-    openRejectBuyPlanModal, promptAttributeActivity, quickCreateCompany,
+    openRejectBuyPlanModal, quickCreateCompany,
     refreshBuyerLeaderboard, refreshTeamsChannels,
     refreshVendorScorecards, regeneratePrompt, rejectBuyPlan,
     rejectEnrichItem, reopenQuote, resubmitBuyPlan, reviseQuote,
@@ -7666,12 +7653,12 @@ Object.assign(window, {
     toggleSourceStatus, tokenApprovePlan, tokenRejectPlan,
     triggerDeepScan, unifiedEnrichCompany, updateQuoteLine,
     updateQuoteLineField, updateTicketStatus, updateUserField,
-    updateWeightTotal, verifyBuyPlanPOs, viewTicketDetail,
+    verifyBuyPlanPOs, viewTicketDetail,
     openSuggestedContacts,
     // HTML template inline handlers
     addSelectedSuggestedContacts, addSite, bulkApproveSelected,
     confirmSendQuote, createCompany, createUser, exportTicketsXlsx,
-    filterSiteTypeahead, importCustomers, importVendors,
+    filterSiteTypeahead,
     loadCustomers, loadEnrichmentQueue, onSqContactChange,
     openNewCompanyModal, renderBuyPlansList, saveEditCompany,
     saveLogCall, saveLogNote, saveSiteContact, searchSuggestedContacts,
@@ -7696,10 +7683,6 @@ Object.assign(window, {
     toggleAccountExpand, releaseSite, releaseStaleSites,
     openProspectDrawer, closeProspectDrawer, switchProspectDrawerTab,
     _renderProspectMiniListFromSearch, _prospectMiniListKeyNav,
-    // Vendor dedup
-    loadVendorDedupSuggestions, mergeVendors,
-    // Company dedup
-    loadCompanyDedupSuggestions, previewCompanyMerge, mergeCompanies,
     // Account transfer
     loadTransferPanel, loadTransferPreview, toggleTransferSite,
     toggleTransferSelectAll, updateTransferSelectedCount, executeTransfer,

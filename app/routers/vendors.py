@@ -94,15 +94,54 @@ _GENERIC_EMAIL_DOMAINS = frozenset(
 
 
 def get_or_create_card(vendor_name: str, db: Session) -> VendorCard:
-    """Find existing VendorCard by normalized name, or create a new one."""
+    """Find existing VendorCard by normalized name or fuzzy match, or create new.
+
+    1. Exact normalized match (fastest path)
+    2. Fuzzy match with threshold >= 90 — auto-merge to avoid duplicates
+    3. No match — create new card
+    """
     norm = normalize_vendor_name(vendor_name)
     card = db.query(VendorCard).filter_by(normalized_name=norm).first()
-    if not card:
-        card = VendorCard(
-            normalized_name=norm, display_name=vendor_name, emails=[], phones=[]
+    if card:
+        return card
+
+    # Fuzzy match: query existing cards and compare
+    try:
+        from thefuzz import fuzz
+
+        existing = (
+            db.query(VendorCard.id, VendorCard.normalized_name, VendorCard.display_name)
+            .limit(500)
+            .all()
         )
-        db.add(card)
-        db.commit()
+        best_score, best_card_id = 0, None
+        for row in existing:
+            score = fuzz.token_sort_ratio(norm, row.normalized_name)
+            if score > best_score:
+                best_score = score
+                best_card_id = row.id
+        if best_score >= 90 and best_card_id:
+            card = db.get(VendorCard, best_card_id)
+            if card:
+                # Add original name as alternate
+                alts = list(card.alternate_names or [])
+                if vendor_name not in alts and vendor_name != card.display_name:
+                    alts.append(vendor_name)
+                    card.alternate_names = alts
+                    db.commit()
+                logger.info(
+                    "Fuzzy-matched vendor '%s' to '%s' (score=%d)",
+                    vendor_name, card.display_name, best_score,
+                )
+                return card
+    except ImportError:
+        pass  # thefuzz not installed — skip fuzzy matching
+
+    card = VendorCard(
+        normalized_name=norm, display_name=vendor_name, emails=[], phones=[]
+    )
+    db.add(card)
+    db.commit()
     return card
 
 
@@ -269,6 +308,56 @@ def card_to_dict(card: VendorCard, db: Session) -> dict:
         "created_at": card.created_at.isoformat() if card.created_at else None,
         "updated_at": card.updated_at.isoformat() if card.updated_at else None,
     }
+
+
+@router.get("/api/vendors/check-duplicate")
+async def check_vendor_duplicate(
+    name: str = Query(..., min_length=1),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Check for duplicate vendors by name (exact + fuzzy).
+
+    Returns exact and fuzzy matches (threshold 80 for suggestions).
+    Used by frontend before vendor creation to warn about duplicates.
+    """
+    norm = normalize_vendor_name(name)
+    matches = []
+
+    # Exact match
+    exact = db.query(VendorCard).filter_by(normalized_name=norm).first()
+    if exact:
+        matches.append({
+            "id": exact.id,
+            "name": exact.display_name,
+            "match": "exact",
+            "score": 100,
+        })
+        return {"matches": matches}
+
+    # Fuzzy matches
+    try:
+        from thefuzz import fuzz
+
+        existing = (
+            db.query(VendorCard.id, VendorCard.normalized_name, VendorCard.display_name)
+            .limit(500)
+            .all()
+        )
+        for row in existing:
+            score = fuzz.token_sort_ratio(norm, row.normalized_name)
+            if score >= 80:
+                matches.append({
+                    "id": row.id,
+                    "name": row.display_name,
+                    "match": "fuzzy",
+                    "score": score,
+                })
+        matches.sort(key=lambda m: m["score"], reverse=True)
+    except ImportError:
+        pass
+
+    return {"matches": matches[:5]}
 
 
 # ── Vendor Cards CRUD ────────────────────────────────────────────────────

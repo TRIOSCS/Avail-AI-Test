@@ -366,72 +366,14 @@ async def merge_vendor_cards(
     db: Session = Depends(get_db),
 ):
     """Merge two vendor cards: reassign all FKs from remove_id to keep_id, then delete remove_id."""
-    from ..models import (
-        ActivityLog,
-        BuyerVendorStats,
-        EnrichmentQueue,
-        Offer,
-        ProspectContact,
-        StockListHash,
-        VendorMetricsSnapshot,
-        VendorReview,
-    )
+    from ..services.vendor_merge_service import merge_vendor_cards as _merge
 
-    keep = db.get(VendorCard, payload.keep_id)
-    remove = db.get(VendorCard, payload.remove_id)
-    if not keep or not remove:
-        raise HTTPException(404, "One or both vendor cards not found")
-    if keep.id == remove.id:
-        raise HTTPException(400, "Cannot merge a vendor with itself")
-
-    # Merge array fields
-    for field in ("emails", "phones", "contacts", "alternate_names", "domain_aliases"):
-        existing = set(str(v) for v in (getattr(keep, field) or []))
-        merged = list(getattr(keep, field) or [])
-        for v in (getattr(remove, field) or []):
-            if str(v) not in existing:
-                merged.append(v)
-                existing.add(str(v))
-        setattr(keep, field, merged)
-
-    # Add removed vendor's display_name as alternate name
-    if remove.display_name and remove.display_name != keep.display_name:
-        alts = list(keep.alternate_names or [])
-        if remove.display_name not in alts:
-            alts.append(remove.display_name)
-            keep.alternate_names = alts
-
-    # Sum sighting counts
-    keep.sighting_count = (keep.sighting_count or 0) + (remove.sighting_count or 0)
-
-    # Reassign FK references from remove → keep
-    fk_tables = [
-        (VendorContact, "vendor_card_id"),
-        (VendorReview, "vendor_card_id"),
-        (Offer, "vendor_card_id"),
-        (VendorMetricsSnapshot, "vendor_card_id"),
-        (StockListHash, "vendor_card_id"),
-        (BuyerVendorStats, "vendor_card_id"),
-        (ActivityLog, "vendor_card_id"),
-        (EnrichmentQueue, "vendor_card_id"),
-        (ProspectContact, "vendor_card_id"),
-    ]
-    reassigned = 0
-    for model, col in fk_tables:
-        try:
-            count = db.query(model).filter(getattr(model, col) == remove.id).update(
-                {col: keep.id}, synchronize_session="fetch"
-            )
-            reassigned += count
-        except Exception:
-            pass  # Table may not exist in test DB
-
-    # Delete the removed card
-    db.delete(remove)
+    try:
+        result = _merge(payload.keep_id, payload.remove_id, db)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     db.commit()
-
-    logger.info(f"Vendor merge: kept {keep.id} ({keep.display_name}), removed {remove.id} ({remove.display_name}), reassigned {reassigned} records")
-    return {"ok": True, "kept": keep.id, "removed": payload.remove_id, "reassigned": reassigned}
+    return result
 
 
 # ── Company Dedup (admin only) ────────────────────────────────────────
@@ -534,124 +476,14 @@ def api_company_merge(
     db: Session = Depends(get_db),
 ):
     """Merge two companies: move sites, reassign FKs, delete the removed company."""
-    from ..cache.decorators import invalidate_prefix
-    from ..models import ActivityLog, EnrichmentQueue, Requisition, Sighting
+    from ..services.company_merge_service import merge_companies as _merge
 
-    keep = db.get(Company, payload.keep_id)
-    remove = db.get(Company, payload.remove_id)
-    if not keep or not remove:
-        raise HTTPException(404, "One or both companies not found")
-    if keep.id == remove.id:
-        raise HTTPException(400, "Cannot merge a company with itself")
-
-    # 1. Merge JSON array tags (deduplicate)
-    for field in ("brand_tags", "commodity_tags"):
-        existing = list(getattr(keep, field) or [])
-        existing_set = set(str(v) for v in existing)
-        for v in (getattr(remove, field) or []):
-            if str(v) not in existing_set:
-                existing.append(v)
-                existing_set.add(str(v))
-        setattr(keep, field, existing)
-
-    # 2. Merge notes
-    if remove.notes:
-        sep = f"\n\n--- Merged from {remove.name} ---\n"
-        keep.notes = (keep.notes or "") + sep + remove.notes
-
-    # 3. Fill enrichment gaps
-    for field in (
-        "domain", "linkedin_url", "legal_name", "employee_size",
-        "hq_city", "hq_state", "hq_country", "website", "industry",
-        "phone", "credit_terms", "tax_id", "currency", "preferred_carrier", "account_type",
-    ):
-        if getattr(keep, field) is None and getattr(remove, field) is not None:
-            setattr(keep, field, getattr(remove, field))
-
-    # 4. Merge booleans
-    keep.is_strategic = bool(keep.is_strategic) or bool(remove.is_strategic)
-
-    # 5. Merge owner
-    if not keep.account_owner_id and remove.account_owner_id:
-        keep.account_owner_id = remove.account_owner_id
-
-    # 6. Merge timestamps
-    if remove.last_activity_at:
-        if not keep.last_activity_at or remove.last_activity_at > keep.last_activity_at:
-            keep.last_activity_at = remove.last_activity_at
-
-    # 7. Handle sites
-    remove_sites = db.query(CustomerSite).filter(CustomerSite.company_id == remove.id).all()
-    keep_site_names = {
-        s.site_name.strip().upper()
-        for s in db.query(CustomerSite).filter(CustomerSite.company_id == keep.id).all()
-    }
-
-    sites_deleted = 0
-    sites_moved = 0
-    for s in remove_sites:
-        # Check if empty HQ
-        is_empty_hq = (
-            (s.site_name or "").strip().upper() == "HQ"
-            and not s.contact_name
-            and not s.contact_email
-            and not s.address_line1
-            and db.query(SiteContact).filter(SiteContact.customer_site_id == s.id).count() == 0
-            and db.query(Requisition).filter(Requisition.customer_site_id == s.id).count() == 0
-        )
-        if is_empty_hq:
-            db.delete(s)
-            sites_deleted += 1
-        else:
-            # Name collision handling
-            if s.site_name.strip().upper() in keep_site_names:
-                s.site_name = f"{remove.name} - {s.site_name}"
-            s.company_id = keep.id
-            keep_site_names.add(s.site_name.strip().upper())
-            sites_moved += 1
-
-    # Flush site changes and expire the relationship so ORM cascade doesn't
-    # try to delete sites we already moved.
-    db.flush()
-    db.expire(remove, ["sites"])
-
-    # 8. Reassign company-level FKs
-    reassigned = 0
-    for model, col in [
-        (ActivityLog, "company_id"),
-        (EnrichmentQueue, "company_id"),
-        (Sighting, "source_company_id"),
-    ]:
-        try:
-            count = db.query(model).filter(getattr(model, col) == remove.id).update(
-                {col: keep.id}, synchronize_session="fetch"
-            )
-            reassigned += count
-        except Exception:
-            pass
-
-    # 9. Delete removed company
-    db.delete(remove)
-    db.commit()
-
-    # 10. Invalidate cache
     try:
-        invalidate_prefix("company_list")
-    except Exception:
-        pass
-
-    logger.info(
-        f"Company merge: kept {keep.id} ({keep.name}), removed {payload.remove_id} ({remove.name}), "
-        f"sites_moved={sites_moved}, sites_deleted={sites_deleted}, reassigned={reassigned}"
-    )
-    return {
-        "ok": True,
-        "kept": keep.id,
-        "removed": payload.remove_id,
-        "sites_moved": sites_moved,
-        "sites_deleted": sites_deleted,
-        "reassigned": reassigned,
-    }
+        result = _merge(payload.keep_id, payload.remove_id, db)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    db.commit()
+    return result
 
 
 # ── Data Import (admin only) ─────────────────────────────────────────

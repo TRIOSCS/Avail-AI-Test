@@ -1,7 +1,8 @@
 import asyncio
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import JSONResponse
 from loguru import logger
 from sqlalchemy import String, func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -346,14 +347,61 @@ async def get_company(
 @router.post("/api/companies")
 async def create_company(
     payload: CompanyCreate,
+    force: bool = Query(False),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
+    """Create a new company with auto-enrichment and default HQ site.
+
+    When force=False (default), checks for duplicate companies first.
+    Returns 409 with duplicate list if near-matches are found.
+    Pass force=True to skip the duplicate check and create anyway.
+    """
     from ...enrichment_service import normalize_company_input
 
     clean_name, clean_domain = await normalize_company_input(
         payload.name, payload.domain or ""
     )
+
+    # Duplicate check (unless force=True)
+    if not force:
+        _suffixes = re.compile(
+            r"\b(inc\.?|llc\.?|ltd\.?|corp\.?|co\.?|plc\.?|gmbh|ag|sa|s\.?a\.?|"
+            r"s\.?r\.?l\.?|pty\.?|b\.?v\.?|n\.?v\.?|a\.?s\.?|oy|ab|limited|"
+            r"corporation|incorporated|company)\s*$",
+            re.IGNORECASE,
+        )
+
+        def _norm(n: str) -> str:
+            n = n.strip().lower()
+            n = re.sub(r"[^\w\s]", " ", n)
+            n = _suffixes.sub("", n).strip()
+            return re.sub(r"\s+", " ", n)
+
+        query_clean = _norm(clean_name)
+        if query_clean:
+            companies = (
+                db.query(Company.id, Company.name)
+                .filter(Company.is_active == True)  # noqa: E712
+                .limit(2000)
+                .all()
+            )
+            duplicates = []
+            for c in companies:
+                cn = _norm(c.name)
+                if not cn:
+                    continue
+                if cn == query_clean:
+                    duplicates.append({"id": c.id, "name": c.name, "match": "exact"})
+                elif cn in query_clean or query_clean in cn:
+                    duplicates.append({"id": c.id, "name": c.name, "match": "similar"})
+                elif len(query_clean) >= 6 and len(cn) >= 6 and cn[:6] == query_clean[:6]:
+                    duplicates.append({"id": c.id, "name": c.name, "match": "similar"})
+            if duplicates:
+                return JSONResponse(
+                    status_code=409,
+                    content={"duplicates": duplicates[:5]},
+                )
     # Extract domain from website if no explicit domain
     if not clean_domain and payload.website:
         clean_domain = (

@@ -268,6 +268,14 @@ def configure_scheduler():
         scheduler.add_job(_job_material_enrichment, IntervalTrigger(hours=6),
                           id="material_enrichment", name="Material card AI enrichment")
 
+    # Auto-attribute unmatched activities (every 2 hours)
+    scheduler.add_job(_job_auto_attribute_activities, IntervalTrigger(hours=2),
+                      id="auto_attribute_activities", name="Auto-attribute unmatched activities")
+
+    # Auto-dedup companies and vendors (daily)
+    scheduler.add_job(_job_auto_dedup, IntervalTrigger(hours=24),
+                      id="auto_dedup", name="Auto-dedup companies and vendors")
+
     job_count = len(scheduler.get_jobs())
     logger.info(f"APScheduler configured with {job_count} jobs")
 
@@ -1784,5 +1792,49 @@ async def _job_material_enrichment():
         )
     except Exception:
         logger.exception("Material enrichment job failed")
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_auto_attribute_activities():
+    """Auto-attribute unmatched activities using rule-based + AI matching."""
+    from .database import SessionLocal
+    from .services.auto_attribution_service import run_auto_attribution
+
+    db = SessionLocal()
+    try:
+        stats = run_auto_attribution(db)
+        total = stats["rule_matched"] + stats["ai_matched"]
+        if total:
+            logger.info(
+                "Auto-attribution: %d rule-matched, %d AI-matched, %d dismissed",
+                stats["rule_matched"], stats["ai_matched"], stats["auto_dismissed"],
+            )
+    except Exception:
+        logger.exception("Auto-attribution job failed")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_auto_dedup():
+    """Auto-deduplicate companies and vendors using fuzzy matching + AI confirmation."""
+    from .database import SessionLocal
+    from .services.auto_dedup_service import run_auto_dedup
+
+    db = SessionLocal()
+    try:
+        stats = run_auto_dedup(db)
+        total = stats["vendors_merged"] + stats["companies_merged"]
+        if total:
+            logger.info(
+                "Auto-dedup: %d vendors merged, %d companies merged",
+                stats["vendors_merged"], stats["companies_merged"],
+            )
+    except Exception:
+        logger.exception("Auto-dedup job failed")
+        db.rollback()
     finally:
         db.close()

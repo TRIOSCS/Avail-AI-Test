@@ -1138,30 +1138,35 @@
         <div class="tabs" id="settingsTabs">
             <button type="button" class="tab on settings-tab-users" onclick="switchSettingsTab('users',this)">Users</button>
             <button type="button" class="tab" onclick="switchSettingsTab('health',this)">System Health</button>
-            <button type="button" class="tab settings-tab-scoring" onclick="switchSettingsTab('scoring',this)">Scoring Weights</button>
             <button type="button" class="tab" onclick="switchSettingsTab('config',this)">Configuration</button>
             <button type="button" class="tab" onclick="switchSettingsTab('sources',this)">Data Sources</button>
-            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('create-user',this)">Create User</button>
             <button type="button" class="tab" onclick="switchSettingsTab('enrichment',this)">Enrichment</button>
-            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('unmatched',this)">Unmatched Queue</button>
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('teams',this)">Teams Integration</button>
-            <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('import',this)">Import</button>
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('tickets',this)">Trouble Tickets</button>
-            <button type="button" class="tab" onclick="switchSettingsTab('vendor-dedup',this)">Vendor Dedup</button>
-            <button type="button" class="tab" onclick="switchSettingsTab('company-dedup',this)">Company Dedup</button>
             <button type="button" class="tab settings-tab-users" onclick="switchSettingsTab('transfer',this)">Account Transfer</button>
         </div>
 
         <div id="settings-users" class="settings-panel">
             <div id="adminUsersList"><p class="empty">Loading...</p></div>
+            <div class="card s-card" style="margin-top:16px">
+                <h3>Create New User</h3>
+                <div class="s-form">
+                    <input id="newUserName" class="s-input" placeholder="Full name">
+                    <input id="newUserEmail" class="s-input" placeholder="Email address" type="email">
+                    <select id="newUserRole" class="s-select">
+                        <option value="buyer">Buyer</option>
+                        <option value="trader">Trader</option>
+                        <option value="sales">Sales</option>
+                        <option value="manager">Manager</option>
+                        <option value="admin">Admin</option>
+                    </select>
+                    <div><button type="button" class="btn btn-primary" onclick="createUser()">Create User</button></div>
+                </div>
+            </div>
         </div>
 
         <div id="settings-health" class="settings-panel" style="display:none">
             <div id="settingsHealthContent"><p class="empty">Loading...</p></div>
-        </div>
-
-        <div id="settings-scoring" class="settings-panel" style="display:none">
-            <div id="settingsScoringContent"><p class="empty">Loading...</p></div>
         </div>
 
         <div id="settings-config" class="settings-panel" style="display:none">
@@ -1172,33 +1177,8 @@
             <div id="settingsSourcesList"><p class="empty">Loading...</p></div>
         </div>
 
-        <div id="settings-unmatched" class="settings-panel" style="display:none">
-            <div id="unmatchedQueueContent"><p class="empty">Loading...</p></div>
-        </div>
-
         <div id="settings-teams" class="settings-panel" style="display:none">
             <div id="teamsConfigContent"><p class="empty">Loading...</p></div>
-        </div>
-
-        <div id="settings-import" class="settings-panel" style="display:none">
-            <div class="card s-card">
-                <h3>Import Customers</h3>
-                <p class="s-desc">CSV: company_name, site_name, contact_name, contact_email, contact_phone</p>
-                <div class="s-form">
-                    <input type="file" id="customerImportFile" accept=".csv">
-                    <div><button type="button" class="btn btn-primary btn-sm" onclick="importCustomers()">Import</button></div>
-                    <div id="customerImportStatus" class="s-status"></div>
-                </div>
-            </div>
-            <div class="card s-card">
-                <h3>Import Vendors</h3>
-                <p class="s-desc">CSV: vendor_name, domain, website, contact_name, contact_email</p>
-                <div class="s-form">
-                    <input type="file" id="vendorImportFile" accept=".csv">
-                    <div><button type="button" class="btn btn-primary btn-sm" onclick="importVendors()">Import</button></div>
-                    <div id="vendorImportStatus" class="s-status"></div>
-                </div>
-            </div>
         </div>
 
         <div id="settings-enrichment" class="settings-panel" style="display:none">
@@ -1305,44 +1285,6 @@
             </div>
             <div id="ticketList"><p class="empty">Loading...</p></div>
             <div id="ticketDetail" style="display:none"></div>
-        </div>
-
-        <div id="settings-create-user" class="settings-panel" style="display:none">
-            <div class="card s-card">
-                <h3>Create New User</h3>
-                <div class="s-form">
-                    <input id="newUserName" class="s-input" placeholder="Full name">
-                    <input id="newUserEmail" class="s-input" placeholder="Email address" type="email">
-                    <select id="newUserRole" class="s-select">
-                        <option value="buyer">Buyer</option>
-                        <option value="trader">Trader</option>
-                        <option value="sales">Sales</option>
-                        <option value="manager">Manager</option>
-                        <option value="admin">Admin</option>
-                    </select>
-                    <div><button type="button" class="btn btn-primary" onclick="createUser()">Create User</button></div>
-                </div>
-            </div>
-        </div>
-
-        <div id="settings-vendor-dedup" class="settings-panel" style="display:none">
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-                <label style="font-size:11px;color:var(--muted)">Threshold:</label>
-                <input type="number" id="dedupThreshold" value="85" min="70" max="100" style="width:60px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px">
-                <button type="button" class="btn btn-primary btn-sm" onclick="loadVendorDedupSuggestions()">Scan for Duplicates</button>
-                <span id="dedupStatus" style="font-size:11px;color:var(--muted)"></span>
-            </div>
-            <div id="dedupResults"><p class="empty">Click "Scan for Duplicates" to find potential duplicate vendor cards</p></div>
-        </div>
-
-        <div id="settings-company-dedup" class="settings-panel" style="display:none">
-            <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
-                <label style="font-size:11px;color:var(--muted)">Threshold:</label>
-                <input type="number" id="companyDedupThreshold" value="85" min="70" max="100" style="width:60px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:11px">
-                <button type="button" class="btn btn-primary btn-sm" onclick="loadCompanyDedupSuggestions()">Scan for Duplicates</button>
-                <span id="companyDedupStatus" style="font-size:11px;color:var(--muted)"></span>
-            </div>
-            <div id="companyDedupResults"><p class="empty">Click "Scan for Duplicates" to find potential duplicate companies</p></div>
         </div>
 
         <div id="settings-transfer" class="settings-panel" style="display:none">
