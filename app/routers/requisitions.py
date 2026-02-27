@@ -17,7 +17,7 @@ Depends on: models, search_service, file_utils, scoring, vendor_utils
 import asyncio
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, Request, UploadFile
 from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy import select
@@ -655,6 +655,7 @@ async def list_requirements(
 async def add_requirements(
     req_id: int,
     request: Request,
+    background_tasks: BackgroundTasks,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -694,6 +695,23 @@ async def add_requirements(
         db.add(r)
         created.append(r)
     db.commit()
+
+    # NetComponents: queue parts for automated search (background, separate DB session)
+    def _nc_enqueue_batch(requirement_ids: list[int]):
+        from ..database import SessionLocal
+        from ..services.nc_worker.queue_manager import enqueue_for_nc_search
+        bg_db = SessionLocal()
+        try:
+            for rid in requirement_ids:
+                try:
+                    enqueue_for_nc_search(rid, bg_db)
+                except Exception:
+                    logger.debug("NC enqueue failed for requirement %s", rid, exc_info=True)
+        finally:
+            bg_db.close()
+
+    if created:
+        background_tasks.add_task(_nc_enqueue_batch, [r.id for r in created])
 
     # Teams: hot requirement alert for high-value items
     try:
@@ -750,6 +768,7 @@ async def add_requirements(
 @router.post("/api/requisitions/{req_id}/upload")
 async def upload_requirements(
     req_id: int,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -847,6 +866,26 @@ async def upload_requirements(
         db.add(r)
         created += 1
     db.commit()
+
+    # NetComponents: queue uploaded requirements for automated search (background)
+    def _nc_enqueue_uploaded(requisition_id: int, count: int):
+        from ..database import SessionLocal
+        from ..services.nc_worker.queue_manager import enqueue_for_nc_search
+        bg_db = SessionLocal()
+        try:
+            for r_item in bg_db.query(Requirement).filter(
+                Requirement.requisition_id == requisition_id,
+            ).order_by(Requirement.id.desc()).limit(count).all():
+                try:
+                    enqueue_for_nc_search(r_item.id, bg_db)
+                except Exception:
+                    logger.debug("NC enqueue failed for requirement %s", r_item.id, exc_info=True)
+        finally:
+            bg_db.close()
+
+    if created:
+        background_tasks.add_task(_nc_enqueue_uploaded, req_id, created)
+
     return {"created": created, "total_rows": len(rows)}
 
 
