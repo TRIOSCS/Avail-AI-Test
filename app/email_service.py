@@ -783,32 +783,12 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
     vr.needs_action = classification["needs_action"]
     vr.action_hint = classification["action_hint"]
 
-    # Create notification for vendor replies needing review (confidence 0.5–0.8)
-    if db and vr.needs_action and 0.5 <= vr.confidence <= 0.8:
-        try:
-            owner_id = vr.scanned_by_user_id
-            if vr.requisition_id:
-                req = db.get(Requisition, vr.requisition_id)
-                if req and req.created_by:
-                    owner_id = req.created_by
-            if owner_id:
-                db.add(ActivityLog(
-                    user_id=owner_id,
-                    activity_type="vendor_reply_review",
-                    channel="system",
-                    requisition_id=vr.requisition_id,
-                    contact_name=vr.vendor_name,
-                    subject=f"Review needed: {vr.vendor_name or 'Unknown'} reply — {vr.action_hint or 'check response'}",
-                ))
-        except Exception as e:
-            log.warning(f"Failed to create vendor_reply_review activity: {e}")
-
     # Auto-create draft Offer records from parsed emails (confidence >= 0.5)
     if db and vr.confidence and vr.confidence >= 0.5 and vr.requisition_id:
         try:
             from .services.response_parser import extract_draft_offers
             draft_offers = extract_draft_offers(parsed, vr.vendor_name or "Unknown")
-            req = db.get(Requisition, vr.requisition_id) if not (vr.needs_action and 0.5 <= vr.confidence <= 0.8) else req
+            req = db.get(Requisition, vr.requisition_id)
             owner_id = vr.scanned_by_user_id
             if req and req.created_by:
                 owner_id = req.created_by

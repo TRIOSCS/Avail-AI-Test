@@ -276,6 +276,8 @@ class ActivityLog(Base):
         Integer, ForeignKey("site_contacts.id", ondelete="SET NULL")
     )
 
+    buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id"), nullable=True)
+
     # Contact snapshot
     contact_email = Column(String(255))
     contact_phone = Column(String(100))

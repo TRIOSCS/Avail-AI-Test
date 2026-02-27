@@ -565,10 +565,11 @@ _NOTIFICATION_TYPES = (
     "buyplan_rejected",
     "buyplan_completed",
     "buyplan_cancelled",
-    "vendor_reply_review",
     "competitive_quote",
     "proactive_match",
     "offer_pending_review",
+    "quote_won",
+    "quote_lost",
 )
 
 

@@ -232,19 +232,19 @@ Desktop `#mainSearch` (line 42) and mobile `#mobileMainSearch` (line 81) both fi
 
 ### CRITICAL — Breaks Functionality
 
-| # | Category | Description | Location | Fix |
-|---|----------|-------------|----------|-----|
-| C1 | JS Global | `currentReqId` used without declaration in `crm.js` — implicit global decoupled from `app.js` module-scoped variable | crm.js:62 vs app.js:91 | Export from app.js, import in crm.js |
-| C2 | DOM ID Mismatch | `navPerformance` and `navEnrichment` IDs missing from HTML — sidebar nav items for admin/manager roles never shown | app.js:470,478 vs index.html:113 | Add missing IDs or update JS references |
+| # | Category | Description | Location | Status |
+|---|----------|-------------|----------|--------|
+| C1 | JS Global | `currentReqId` used without declaration in `crm.js` — implicit global decoupled from `app.js` module-scoped variable | crm.js:62 vs app.js:91 | **FIXED** — `currentReqId` exported from app.js, imported in crm.js with setter |
+| C2 | DOM ID Mismatch | `navPerformance` and `navEnrichment` IDs missing from HTML — sidebar nav items for admin/manager roles never shown | app.js:470,478 vs index.html:113 | **FIXED** — JS updated to use `navScorecards` matching HTML |
 
 ### HIGH — Visual/UX Break or Data Risk
 
-| # | Category | Description | Location | Fix |
-|---|----------|-------------|----------|-----|
-| H1 | Null Safety | 15–20% of 614+ `getElementById` calls lack null checks — crashes on missing elements | app.js:1379,1692; crm.js:362,393 | Add optional chaining (`?.`) |
-| H2 | CSRF Bypass | 3 buy-plan endpoints use raw `fetch()` instead of `apiFetch()` — missing auth/CSRF headers | crm.js:1818,1869,1882 | Replace with `apiFetch()` |
-| H3 | Modal Reset | Log Offer and New Company modals don't clear fields on reopen — stale data risk | app.js:3544; crm.js:338 | Add field clear in open functions |
-| H4 | Modal Loading | RFQ modal `dataset.loading` flag not cleared on API error — traps user | index.html:336; app.js:345 | Clear flag in error handler |
+| # | Category | Description | Location | Status |
+|---|----------|-------------|----------|--------|
+| H1 | Null Safety | ~250 of 614+ `getElementById` calls lack null checks — crashes on missing elements | app.js ~120 calls, crm.js ~130 calls | **FIXING** |
+| H2 | CSRF Bypass | 3 buy-plan endpoints use raw `fetch()` instead of `apiFetch()` — missing auth/CSRF headers | crm.js:1818,1869,1882 | **FIXED** — all buy-plan token endpoints now use `apiFetch()` |
+| H3 | Modal Reset | Log Offer and New Company modals don't clear fields on reopen — stale data risk | app.js:3544; crm.js:338 | **FIXED** — both modals clear all fields in open functions |
+| H4 | Modal Loading | RFQ modal `dataset.loading` flag not cleared on API error — traps user | index.html:336; app.js:345 | **FIXED** — loading flag cleared in `finally` block |
 | H5 | CSS Coupling | 15 `!important` overrides from specificity wars — any CSS change cascades unpredictably | styles.css:179,412,445,539,753,1241 | Restructure base rules to eliminate need |
 | H6 | Fragmented CSS | 4 separate `@media(max-width:768px)` blocks — conflicting mobile rules | styles.css:407,852,963,1483 | Consolidate into single block |
 | H7 | z-index | `.site-typeahead-list` at z-index 10 — hidden behind filter panels (300) and modals (500) | styles.css:843 | Raise to 501+ |

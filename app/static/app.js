@@ -10440,9 +10440,8 @@ function toggleNotifications() {
 
 function _notifBadgeColor(type) {
     switch (type) {
-        case 'vendor_reply_review': return '#3b82f6';
-        case 'competitive_quote': case 'buyplan_approved': case 'buyplan_completed': return '#22c55e';
-        case 'buyplan_rejected': return '#ef4444';
+        case 'competitive_quote': case 'buyplan_approved': case 'buyplan_completed': case 'quote_won': return '#22c55e';
+        case 'buyplan_rejected': case 'quote_lost': return '#ef4444';
         case 'ownership_warning': case 'buyplan_pending': case 'buyplan_cancelled': return '#f59e0b';
         case 'proactive_match': return '#a855f7';
         case 'offer_pending_review': return '#f59e0b';
@@ -10452,7 +10451,6 @@ function _notifBadgeColor(type) {
 function _notifLabel(type) {
     switch (type) {
         case 'ownership_warning': return 'Ownership';
-        case 'vendor_reply_review': return 'Review';
         case 'competitive_quote': return 'Competitive';
         case 'proactive_match': return 'Proactive';
         case 'buyplan_pending': return 'Buy Plan';
@@ -10461,6 +10459,8 @@ function _notifLabel(type) {
         case 'buyplan_completed': return 'Completed';
         case 'buyplan_cancelled': return 'Cancelled';
         case 'offer_pending_review': return 'Offer Review';
+        case 'quote_won': return 'Won';
+        case 'quote_lost': return 'Lost';
         default: return type;
     }
 }
