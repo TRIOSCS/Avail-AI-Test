@@ -44,9 +44,21 @@ from ...schemas.buy_plan import (
     SOVerificationRequest,
     VerificationGroupUpdate,
 )
+from ...services.buyplan_v3_notifications import (
+    notify_v3_approved,
+    notify_v3_completed,
+    notify_v3_issue_flagged,
+    notify_v3_po_confirmed,
+    notify_v3_rejected,
+    notify_v3_so_rejected,
+    notify_v3_so_verified,
+    notify_v3_submitted,
+    run_v3_notify_bg,
+)
 from ...services.buy_plan_v3_service import (
     approve_buy_plan,
     build_buy_plan,
+    check_completion,
     confirm_po,
     flag_line_issue,
     resubmit_buy_plan,
@@ -371,6 +383,10 @@ async def submit_plan_v3(
 
     db.commit()
     logger.info("Buy plan V3 #{} submitted by {}", plan_id, user.email)
+    if plan.auto_approved:
+        run_v3_notify_bg(notify_v3_approved, plan.id)
+    else:
+        run_v3_notify_bg(notify_v3_submitted, plan.id)
     return {"ok": True, "plan_id": plan.id, "status": plan.status,
             "auto_approved": plan.auto_approved}
 
@@ -402,6 +418,10 @@ async def approve_plan_v3(
         raise HTTPException(400, str(e))
 
     db.commit()
+    if body.action == "approve":
+        run_v3_notify_bg(notify_v3_approved, plan.id)
+    else:
+        run_v3_notify_bg(notify_v3_rejected, plan.id)
     return {"ok": True, "plan_id": plan.id, "status": plan.status}
 
 
@@ -426,6 +446,10 @@ async def resubmit_plan_v3(
         raise HTTPException(400, str(e))
 
     db.commit()
+    if plan.auto_approved:
+        run_v3_notify_bg(notify_v3_approved, plan.id)
+    else:
+        run_v3_notify_bg(notify_v3_submitted, plan.id)
     return {"ok": True, "plan_id": plan.id, "status": plan.status,
             "auto_approved": plan.auto_approved}
 
@@ -452,6 +476,10 @@ async def verify_so_v3(
         raise HTTPException(403, str(e))
 
     db.commit()
+    if body.action == "approve":
+        run_v3_notify_bg(notify_v3_so_verified, plan.id)
+    else:
+        run_v3_notify_bg(notify_v3_so_rejected, plan.id, action=body.action)
     return {"ok": True, "plan_id": plan.id, "so_status": plan.so_status,
             "status": plan.status}
 
@@ -477,6 +505,7 @@ async def confirm_po_v3(
         raise HTTPException(400, str(e))
 
     db.commit()
+    run_v3_notify_bg(notify_v3_po_confirmed, plan_id, line_id=line.id)
     return {"ok": True, "line_id": line.id, "status": line.status,
             "po_number": line.po_number}
 
@@ -504,6 +533,11 @@ async def verify_po_v3(
         raise HTTPException(403, str(e))
 
     db.commit()
+    # Check if all lines verified → auto-complete
+    updated_plan = check_completion(plan_id, db)
+    if updated_plan and updated_plan.status == "completed":
+        db.commit()
+        run_v3_notify_bg(notify_v3_completed, plan_id)
     return {"ok": True, "line_id": line.id, "status": line.status}
 
 
@@ -528,6 +562,7 @@ async def flag_issue_v3(
         raise HTTPException(400, str(e))
 
     db.commit()
+    run_v3_notify_bg(notify_v3_issue_flagged, plan_id, line_id=line.id, issue_type=body.issue_type)
     return {"ok": True, "line_id": line.id, "status": line.status,
             "issue_type": line.issue_type}
 
