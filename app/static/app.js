@@ -40,6 +40,14 @@
 
 // AI features enabled for all authenticated users
 
+// ── Safe localStorage wrappers (private browsing / quota / disabled) ──
+function safeGet(key, fallback) { try { return localStorage.getItem(key); } catch(e) { return fallback || null; } }
+function safeSet(key, val) { try { localStorage.setItem(key, val); } catch(e) {} }
+function safeRemove(key) { try { localStorage.removeItem(key); } catch(e) {} }
+window.safeGet = safeGet;
+window.safeSet = safeSet;
+window.safeRemove = safeRemove;
+
 // ── Mobile detection (cheap matchMedia flag for JS branches) ──────────
 (function() {
     var mql = window.matchMedia('(max-width:768px) and (hover:none), (max-width:768px) and (pointer:coarse)');
@@ -220,6 +228,7 @@ function _rebuildSightingIndex() {
 
 // ── Shared Helpers ──────────────────────────────────────────────────────
 const _apiFetchInflight = {}; // URL+method → Promise (dedup guard)
+const _apiFetchCooldown = {}; // URL+method → timestamp (POST/PUT/DELETE double-click guard)
 export async function apiFetch(url, opts = {}) {
     // CSRF: include double-submit cookie value as header
     const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
@@ -232,6 +241,13 @@ export async function apiFetch(url, opts = {}) {
     // Request deduplication for GET requests — return in-flight promise if identical
     const dedupeKey = method === 'GET' ? method + ':' + url : null;
     if (dedupeKey && _apiFetchInflight[dedupeKey]) return _apiFetchInflight[dedupeKey];
+    // Double-click protection for mutating requests (500ms cooldown per URL+method)
+    if (method !== 'GET') {
+        const cooldownKey = method + ':' + url;
+        const last = _apiFetchCooldown[cooldownKey];
+        if (last && Date.now() - last < 500) return Promise.reject(new Error('Duplicate request blocked'));
+        _apiFetchCooldown[cooldownKey] = Date.now();
+    }
     const doFetch = async () => {
         if (!navigator.onLine) {
             throw Object.assign(new Error('You appear to be offline'), {status: 0});
@@ -641,10 +657,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     const initView = _hashToView[initBaseHash];
     // Auto-load Command Center on first visit or after 3+ hours of inactivity
-    const _lastActivity = parseInt(localStorage.getItem('_lastActivityTs') || '0');
+    const _lastActivity = parseInt(safeGet('_lastActivityTs', '0'));
     const _inactiveHours = (Date.now() - _lastActivity) / 3600000;
     const shouldDefaultDashboard = !initHash && (_lastActivity === 0 || _inactiveHours >= 3);
-    localStorage.setItem('_lastActivityTs', String(Date.now()));
+    safeSet('_lastActivityTs', String(Date.now()));
     const effectiveView = shouldDefaultDashboard ? 'view-dashboard' : initView;
     if (effectiveView && effectiveView !== 'view-list') {
         _navFromPopstate = true;
@@ -678,10 +694,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (!initView || initView === 'view-list') {
         var restoreId = initDrillId;
         if (!restoreId) {
-            try {
-                const lastId = parseInt(localStorage.getItem('lastReqId'));
-                if (lastId) restoreId = lastId;
-            } catch(e) {}
+            const lastId = parseInt(safeGet('lastReqId', '0'));
+            if (lastId) restoreId = lastId;
         }
         if (restoreId) {
             const found = _reqListData.find(r => r.id === restoreId);
@@ -982,7 +996,7 @@ export function showView(viewId) {
 function showList() {
     showView('view-list');
     currentReqId = null;
-    try { localStorage.removeItem('lastReqId'); localStorage.removeItem('lastReqName'); } catch(e) {}
+    safeRemove('lastReqId'); safeRemove('lastReqName');
     const mainSearch = document.getElementById('mainSearch');
     if (mainSearch) mainSearch.value = '';
     _serverSearchActive = false;
@@ -996,7 +1010,7 @@ function showDetail(id, name, tab) {
     showView('view-list');
     currentReqId = id;
     currentReqName = name;
-    try { localStorage.setItem('lastReqId', id); localStorage.setItem('lastReqName', name || ''); } catch(e) {}
+    safeSet('lastReqId', id); safeSet('lastReqName', name || '');
     setTimeout(() => toggleDrillDown(id), 200);
 }
 
@@ -1048,8 +1062,8 @@ async function loadContacts() {
 
         // Fetch vendor contacts and customer contacts in parallel
         const [vendorResp, customerContacts] = await Promise.all([
-            apiFetch('/api/vendors?limit=500').catch(() => []),
-            apiFetch('/api/customer-contacts').catch(() => []),
+            apiFetch('/api/vendors?limit=500').catch(e => { showToast('Failed to load vendors','warn'); return []; }),
+            apiFetch('/api/customer-contacts').catch(e => { showToast('Failed to load customer contacts','warn'); return []; }),
         ]);
 
         // Step 1: Vendor contacts (existing logic)
@@ -1861,10 +1875,10 @@ async function loadDashboard() {
 
         // 3-zone: status bar + attention feed + work queue (no morning brief API call)
         const [attnFeed, freshReqs, quotes, hotOffers] = await Promise.all([
-            apiFetch(`/api/dashboard/attention-feed?days=${daysParam}&scope=my`).catch(() => []),
-            haveReqs ? Promise.resolve(null) : apiFetch('/api/requisitions').catch(() => []),
-            apiFetch('/api/quotes').catch(() => []),
-            apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(() => []),
+            apiFetch(`/api/dashboard/attention-feed?days=${daysParam}&scope=my`).catch(e => { showToast('Failed to load attention feed','warn'); return []; }),
+            haveReqs ? Promise.resolve(null) : apiFetch('/api/requisitions').catch(e => { showToast('Failed to load requisitions','warn'); return []; }),
+            apiFetch('/api/quotes').catch(e => { showToast('Failed to load quotes','warn'); return []; }),
+            apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(e => { showToast('Failed to load hot offers','warn'); return []; }),
         ]);
 
         const reqs = haveReqs ? _reqListData : freshReqs;
@@ -1967,9 +1981,9 @@ async function loadBuyerDashboard(el) {
     try {
         const daysParam = _dashPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _dashPeriod === '90d' ? 90 : 30;
         const [brief, attnFeed, hotOffers] = await Promise.all([
-            apiFetch(`/api/dashboard/buyer-brief?days=${daysParam}&scope=${_buyerScope}`).catch(() => null),
-            apiFetch(`/api/dashboard/attention-feed?days=${daysParam}&scope=${_buyerScope}`).catch(() => []),
-            apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(() => []),
+            apiFetch(`/api/dashboard/buyer-brief?days=${daysParam}&scope=${_buyerScope}`).catch(e => { showToast('Failed to load buyer brief','warn'); return null; }),
+            apiFetch(`/api/dashboard/attention-feed?days=${daysParam}&scope=${_buyerScope}`).catch(e => { showToast('Failed to load attention feed','warn'); return []; }),
+            apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(e => { showToast('Failed to load hot offers','warn'); return []; }),
         ]);
 
         if (!brief) {
@@ -5488,7 +5502,7 @@ async function ddResearchAll(reqId) {
 async function openLogOfferFromList(reqId) {
     const loReqId = document.getElementById('loReqId'); if (loReqId) loReqId.value = reqId;
     // Load requirements to populate part picker
-    const reqs = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`).catch(() => []);
+    const reqs = _ddReqCache[reqId] || await apiFetch(`/api/requisitions/${reqId}/requirements`).catch(e => { showToast('Failed to load requirements','warn'); return []; });
     _ddReqCache[reqId] = reqs;
     const sel = document.getElementById('loReqPart');
     if (sel) {
@@ -6615,7 +6629,7 @@ function toggleSidebarGroup(headerEl) {
 
 export function sidebarNav(page, el) {
     // Track activity for auto-dashboard on return
-    localStorage.setItem('_lastActivityTs', String(Date.now()));
+    safeSet('_lastActivityTs', String(Date.now()));
     document.querySelectorAll('.sb-nav-btn, .sb-cc-header').forEach(i => i.classList.remove('active'));
     if (el) el.classList.add('active');
     // Highlight Command Center group for dashboard/scorecard views
@@ -7928,7 +7942,7 @@ Trio Supply Chain Solutions`
 function rfqLoadTemplates() {
     const sel = document.getElementById('rfqTemplateSelect');
     if (!sel) return;
-    const customs = JSON.parse(localStorage.getItem('rfq_templates') || '[]');
+    const customs = JSON.parse(safeGet('rfq_templates', '[]'));
     const all = [..._rfqBuiltinTemplates, ...customs];
     sel.innerHTML = `<option value="">— Select template —</option>` +
         all.map(t => `<option value="${escAttr(t.id)}">${esc(t.name)}${t.id.startsWith('__') ? '' : ' (custom)'}</option>`).join('');
@@ -7938,7 +7952,7 @@ function rfqLoadTemplates() {
 
 function rfqApplyTemplate(templateId) {
     if (!templateId) return;
-    const customs = JSON.parse(localStorage.getItem('rfq_templates') || '[]');
+    const customs = JSON.parse(safeGet('rfq_templates', '[]'));
     const all = [..._rfqBuiltinTemplates, ...customs];
     const tpl = all.find(t => t.id === templateId);
     if (!tpl) return;
@@ -7979,9 +7993,9 @@ function rfqSaveTemplate() {
     const subject = document.getElementById('rfqSubject')?.value || '';
     const body = document.getElementById('rfqBody')?.value || '';
     const id = 'custom_' + Date.now();
-    const customs = JSON.parse(localStorage.getItem('rfq_templates') || '[]');
+    const customs = JSON.parse(safeGet('rfq_templates', '[]'));
     customs.push({ id, name: name.trim(), subject, body });
-    localStorage.setItem('rfq_templates', JSON.stringify(customs));
+    safeSet('rfq_templates', JSON.stringify(customs));
     rfqLoadTemplates();
     document.getElementById('rfqTemplateSelect').value = id;
     showToast('Template saved', 'success');
@@ -7991,8 +8005,8 @@ function rfqDeleteTemplate() {
     const sel = document.getElementById('rfqTemplateSelect');
     const id = sel?.value;
     if (!id || id.startsWith('__')) return;
-    const customs = JSON.parse(localStorage.getItem('rfq_templates') || '[]');
-    localStorage.setItem('rfq_templates', JSON.stringify(customs.filter(t => t.id !== id)));
+    const customs = JSON.parse(safeGet('rfq_templates', '[]'));
+    safeSet('rfq_templates', JSON.stringify(customs.filter(t => t.id !== id)));
     rfqLoadTemplates();
     showToast('Template deleted', 'success');
 }
@@ -8050,7 +8064,7 @@ function renderRfqMessage() {
     rfqLoadTemplates();
     // Restore saved draft if available
     const draftKey = `rfq_draft_${currentReqId}`;
-    const saved = localStorage.getItem(draftKey);
+    const saved = safeGet(draftKey);
     const rfqSubj = document.getElementById('rfqSubject');
     const rfqBod = document.getElementById('rfqBody');
 
@@ -8088,7 +8102,7 @@ function _saveRfqDraft() {
     if (!currentReqId) return;
     const subject = document.getElementById('rfqSubject')?.value || '';
     const body = document.getElementById('rfqBody')?.value || '';
-    localStorage.setItem(`rfq_draft_${currentReqId}`, JSON.stringify({ subject, body }));
+    safeSet(`rfq_draft_${currentReqId}`, JSON.stringify({ subject, body }));
 }
 
 
@@ -8237,7 +8251,7 @@ async function rfqConfirmSend() {
                 showToast(`Sent ${sent} of ${results.length} RFQs`, 'success');
                 closeModal('rfqModal');
             }
-            localStorage.removeItem(`rfq_draft_${currentReqId}`);
+            safeRemove(`rfq_draft_${currentReqId}`);
             selectedSightings.clear();
             if (_ddSelectedSightings[currentReqId]) delete _ddSelectedSightings[currentReqId];
             if (_ddSightingsCache[currentReqId]) delete _ddSightingsCache[currentReqId];
@@ -11183,7 +11197,7 @@ Object.assign(window, {
     debouncedLoadCustomers, debouncedLoadMaterials, debouncedMainSearch,
     doStockImport, filterVendorList, openNewReqModal, openTroubleChat,
     rfqDeselectAllVendors, rfqSelectAllVendors, saveVendorContact, sendBulkFollowUp,
-    saveVendorLogCall, saveVendorLogNote, sendBatchRfq, setMainView,
+    saveVendorLogCall, saveVendorLogNote, setMainView,
     setRfqCondition, setStatusFilter, setVendorTier, showFileReady,
     submitLogOffer, submitPastedRows, submitTrouble, toggleMobileSidebar,
     toggleMyAccounts, toggleNotifications, toggleSidebar, toggleSidebarGroup, toggleStockImport,
