@@ -527,7 +527,7 @@ def _save_sightings(
             qty_available=clean_qty,
             unit_price=clean_price,
             currency=clean_currency,
-            moq=r.get("moq"),
+            moq=r.get("moq") if r.get("moq") and r.get("moq") > 0 else None,
             source_type=r.get("source_type"),
             is_authorized=r.get("is_authorized", False),
             confidence=norm_conf,
@@ -543,7 +543,34 @@ def _save_sightings(
         s.score = score_sighting(vendor_score_map.get(norm_name), s.is_authorized)
         db.add(s)
         sightings.append(s)
-    db.commit()
+    try:
+        db.commit()
+    except Exception as e:
+        # One bad row shouldn't kill the entire batch — rollback and retry
+        # one-by-one, skipping any rows that violate constraints.
+        logger.warning(f"Bulk sighting commit failed ({e}), retrying row-by-row")
+        db.rollback()
+        # Re-delete old sightings (rollback undid the delete above)
+        if succeeded_sources and expanded:
+            db.query(Sighting).filter(
+                Sighting.requirement_id == req.id,
+                Sighting.source_type.in_(expanded),
+            ).delete(synchronize_session="fetch")
+            db.flush()
+        else:
+            db.query(Sighting).filter_by(requirement_id=req.id).delete()
+            db.flush()
+        saved = []
+        for s in sightings:
+            try:
+                db.merge(s)
+                db.flush()
+                saved.append(s)
+            except Exception:
+                db.rollback()
+                logger.warning(f"Skipping bad sighting: {s.source_type}/{s.vendor_name}/{s.mpn_matched}")
+        db.commit()
+        sightings = saved
 
     # Dedup: if a vendor+MPN exists in both old (preserved) and fresh, keep fresh
     if succeeded_sources and expanded:

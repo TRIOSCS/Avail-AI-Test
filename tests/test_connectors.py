@@ -1624,6 +1624,29 @@ class TestOEMSecretsConnector:
             result = await c._do_search("LM317T")
             assert result == []
 
+    def test_parse_moq_zero_becomes_none(self):
+        """MOQ=0 from API must become None to satisfy chk_sight_moq."""
+        c = self._make_connector()
+        data = {"stock": [{
+            "distributor": "Broker X",
+            "mpn": "ABC",
+            "stock": 100,
+            "moq": 0,
+        }]}
+        results = c._parse(data, "ABC")
+        assert results[0]["moq"] is None
+
+    def test_parse_moq_positive_kept(self):
+        c = self._make_connector()
+        data = {"stock": [{
+            "distributor": "Arrow",
+            "mpn": "ABC",
+            "stock": 100,
+            "moq": 5,
+        }]}
+        results = c._parse(data, "ABC")
+        assert results[0]["moq"] == 5
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Sourcengine Connector tests
@@ -1724,6 +1747,29 @@ class TestSourcengineConnector:
         c = SourcengineConnector(api_key="")
         results = await c._do_search("LM317T")
         assert results == []
+
+    def test_parse_moq_zero_becomes_none(self):
+        """MOQ=0 from API must become None to satisfy chk_sight_moq."""
+        c = self._make_connector()
+        data = {"results": [{
+            "supplier": "Future Electronics",
+            "mpn": "ABC",
+            "quantity": 100,
+            "moq": 0,
+        }]}
+        results = c._parse(data, "ABC")
+        assert results[0]["moq"] is None
+
+    def test_parse_moq_positive_kept(self):
+        c = self._make_connector()
+        data = {"results": [{
+            "supplier": "Future Electronics",
+            "mpn": "ABC",
+            "quantity": 100,
+            "moq": 10,
+        }]}
+        results = c._parse(data, "ABC")
+        assert results[0]["moq"] == 10
 
 
 # ═══════════════════════════════════════════════════════════════════════

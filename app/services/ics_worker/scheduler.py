@@ -32,11 +32,25 @@ class SearchScheduler:
         self.break_threshold = random.randint(8, 15)
 
     def is_business_hours(self) -> bool:
-        """Check if current time (Eastern) is within business hours on a weekday."""
+        """Check if current time (Eastern) is within work window.
+
+        Window: Sunday 6 PM ET through Friday 5 PM ET.
+        Off: Friday 5 PM → Sunday 6 PM (Saturday all day).
+        """
         now = datetime.now(EASTERN)
-        if now.weekday() >= 5:  # Saturday=5, Sunday=6
+        wd = now.weekday()  # Mon=0 … Sun=6
+        hour = now.hour
+        # Saturday (5) — always off
+        if wd == 5:
             return False
-        return self.config.ICS_BUSINESS_HOURS_START <= now.hour < self.config.ICS_BUSINESS_HOURS_END
+        # Sunday (6) — only on at 6 PM+
+        if wd == 6:
+            return hour >= 18
+        # Friday (4) — only on until 5 PM
+        if wd == 4:
+            return hour < 17
+        # Mon-Thu (0-3) — always on
+        return True
 
     def next_delay(self) -> float:
         """Generate a realistic delay between searches using log-normal distribution.

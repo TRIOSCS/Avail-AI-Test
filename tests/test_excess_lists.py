@@ -70,6 +70,48 @@ class TestSightingSourceCompanyId:
 
         assert sighting.source_company_id is None
 
+    def test_sighting_moq_zero_coerced_to_none(self, db_session, test_requisition):
+        """MOQ=0 must be coerced to None by model validator (chk_sight_moq)."""
+        requirement = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        sighting = Sighting(
+            requirement_id=requirement.id,
+            vendor_name="Test Vendor",
+            mpn_matched="LM317T",
+            source_type="api",
+            moq=0,
+        )
+        assert sighting.moq is None
+
+    def test_sighting_moq_negative_coerced_to_none(self, db_session, test_requisition):
+        """Negative MOQ must be coerced to None."""
+        requirement = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        sighting = Sighting(
+            requirement_id=requirement.id,
+            vendor_name="Test Vendor",
+            mpn_matched="LM317T",
+            source_type="api",
+            moq=-1,
+        )
+        assert sighting.moq is None
+
+    def test_sighting_moq_positive_kept(self, db_session, test_requisition):
+        """Positive MOQ should be preserved."""
+        requirement = db_session.query(Requirement).filter_by(
+            requisition_id=test_requisition.id
+        ).first()
+        sighting = Sighting(
+            requirement_id=requirement.id,
+            vendor_name="Test Vendor",
+            mpn_matched="LM317T",
+            source_type="api",
+            moq=5,
+        )
+        assert sighting.moq == 5
+
     def test_sighting_source_company_relationship(self, db_session, test_requisition, test_company):
         """source_company relationship should resolve to Company."""
         requirement = db_session.query(Requirement).filter_by(

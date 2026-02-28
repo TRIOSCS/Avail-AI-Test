@@ -997,11 +997,32 @@ async def update_requirement(
 # ── Search ───────────────────────────────────────────────────────────────
 
 
+def _enqueue_ics_nc_batch(requirement_ids: list[int]):
+    """Queue requirements for ICS and NC browser-based searches (background task)."""
+    from ..database import SessionLocal
+    from ..services.nc_worker.queue_manager import enqueue_for_nc_search
+    from ..services.ics_worker.queue_manager import enqueue_for_ics_search
+    bg_db = SessionLocal()
+    try:
+        for rid in requirement_ids:
+            try:
+                enqueue_for_nc_search(rid, bg_db)
+            except Exception:
+                logger.debug("NC enqueue failed for requirement %s", rid, exc_info=True)
+            try:
+                enqueue_for_ics_search(rid, bg_db)
+            except Exception:
+                logger.debug("ICS enqueue failed for requirement %s", rid, exc_info=True)
+    finally:
+        bg_db.close()
+
+
 @router.post("/api/requisitions/{req_id}/search")
 @limiter.limit("20/minute")
 async def search_all(
     req_id: int,
     request: Request,
+    background_tasks: BackgroundTasks,
     body: SearchOptions | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -1055,6 +1076,10 @@ async def search_all(
         req.status = "active"
     db.commit()
 
+    # Queue ICS/NC browser searches for any manually searched requirements
+    req_ids = [r.id for r in reqs_to_search]
+    background_tasks.add_task(_enqueue_ics_nc_batch, req_ids)
+
     # Enrich with vendor card ratings (no contact lookup — that happens at RFQ time)
     _enrich_with_vendor_cards(results, db)
 
@@ -1065,7 +1090,8 @@ async def search_all(
 @router.post("/api/requirements/{item_id}/search")
 @limiter.limit("20/minute")
 async def search_one(
-    item_id: int, request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
+    item_id: int, request: Request, background_tasks: BackgroundTasks,
+    user: User = Depends(require_user), db: Session = Depends(get_db),
 ):
     r = db.get(Requirement, item_id)
     if not r:
@@ -1082,6 +1108,9 @@ async def search_one(
         str(r.id): {"label": r.primary_mpn or f"Req #{r.id}", "sightings": sightings}
     }
     _enrich_with_vendor_cards(results, db)
+
+    # Queue ICS/NC browser searches for this requirement
+    background_tasks.add_task(_enqueue_ics_nc_batch, [r.id])
 
     return {"sightings": results[str(r.id)]["sightings"], "source_stats": source_stats}
 

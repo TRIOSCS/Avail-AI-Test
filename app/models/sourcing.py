@@ -16,7 +16,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from .base import Base
 
@@ -150,6 +150,12 @@ class Sighting(Base):
     requirement = relationship("Requirement", back_populates="sightings")
     material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
     source_company = relationship("Company", foreign_keys=[source_company_id])
+
+    @validates("moq")
+    def _coerce_moq(self, _key, value):
+        if value is not None and value <= 0:
+            return None
+        return value
 
     __table_args__ = (
         Index("ix_sightings_vendor_name", "vendor_name"),

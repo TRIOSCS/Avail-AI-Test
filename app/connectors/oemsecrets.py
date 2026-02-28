@@ -137,7 +137,7 @@ class OEMSecretsConnector(BaseConnector):
                     "confidence": 5 if qty else 3,
                     "click_url": url,
                     "vendor_sku": sku,
-                    "moq": safe_int(moq),
+                    "moq": safe_int(moq) or None,
                     "datasheet_url": datasheet,
                 }
             )
