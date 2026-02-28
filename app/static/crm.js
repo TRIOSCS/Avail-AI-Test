@@ -400,7 +400,7 @@ function _renderCustCardMobile(c) {
 
     return `<div class="m-card m-health-${healthColor}" onclick="openCustDrawer(${c.id})">
         <div class="m-card-header">
-            <span class="m-card-title">${esc(displayName)}${c.is_strategic ? ' <span style="color:var(--amber)">★</span>' : ''}</span>
+            <span class="m-card-title">${esc(displayName)}${c.is_strategic ? ' <span style="color:var(--amber)">★</span>' : ''} ${_custEnrichBadge(c)}</span>
             <span class="m-card-chevron">›</span>
         </div>
         ${c.domain ? `<div class="m-card-subtitle">${esc(c.domain)}</div>` : ''}
@@ -889,20 +889,26 @@ async function toggleSiteAccordion(siteId) {
                 const CSTATUS = window.CONTACT_STATUS || {};
                 const csCfg = CSTATUS[cStatus] || { label: cStatus, color: '#64748b', bg: '#e2e8f0' };
                 const lastContact = c.last_contacted_at ? getRelativeTime(c.last_contacted_at) : '';
+                const emailBadge = c.email_verified ? '<span style="color:#22c55e;font-size:9px;margin-left:2px" title="Verified">&#10003;</span>' : '';
+                const phoneBadge = c.phone_verified ? '<span style="color:#22c55e;font-size:9px;margin-left:2px" title="Direct dial">&#9742;</span>' : '';
                 html += `<div class="site-contact-row">
                     <div class="site-contact-avatar">${initials}</div>
                     <div class="site-contact-info">
                         <div class="site-contact-name">
                             ${esc(c.full_name)}${c.is_primary ? ' <span style="font-size:9px;color:var(--blue);font-weight:700">PRIMARY</span>' : ''}
                             <span style="background:${csCfg.bg};color:${csCfg.color};padding:1px 5px;border-radius:3px;font-size:9px;font-weight:600;margin-left:4px">${csCfg.label}</span>
+                            ${_contactRoleBadge(c.contact_role)}
+                            ${_enrichSourceBadge(c.enrichment_source)}
                         </div>
                         ${c.title ? '<div class="site-contact-title">' + esc(c.title) + '</div>' : ''}
-                        ${c.email ? '<div style="font-size:10px;color:var(--muted)">' + esc(c.email) + '</div>' : ''}
+                        ${c.email ? '<div style="font-size:10px;color:var(--muted)">' + esc(c.email) + emailBadge + '</div>' : ''}
+                        ${c.phone ? '<div style="font-size:10px;color:var(--muted)">' + esc(c.phone) + phoneBadge + '</div>' : ''}
                         ${lastContact ? '<div style="font-size:10px;color:var(--muted)">Last contact: ' + lastContact + '</div>' : ''}
                     </div>
                     <div class="site-contact-actions">
                         ${c.email ? '<a href="mailto:'+escAttr(c.email)+'" title="Email" onclick="event.stopPropagation();autoLogEmail(\''+escAttr(c.email)+'\',\''+escAttr(c.full_name || '')+'\')">✉</a>' : ''}
                         ${c.phone ? '<a href="tel:'+escAttr(c.phone)+'" title="Call" onclick="event.stopPropagation();autoLogCrmCall(\''+escAttr(c.phone)+'\')">📞</a>' : ''}
+                        ${c.email && !c.email_verified ? '<a href="#" onclick="event.preventDefault();event.stopPropagation();verifyContactEmail('+c.id+',\''+escAttr(c.email)+'\')" title="Verify email" style="font-size:10px">Verify</a>' : ''}
                         <a href="#" onclick="event.preventDefault();event.stopPropagation();openEditSiteContact(${s.id},${c.id})">Edit</a>
                     </div>
                 </div>`;
@@ -4028,33 +4034,95 @@ async function addSelectedSuggestedContacts() {
 async function unifiedEnrichCompany(companyId) {
     showToast('Enriching company — this may take a moment…', 'info');
     try {
-        const res = await apiFetch(`/api/enrichment/company/${companyId}`, {
-            method: 'POST',
-            body: { force: true },
-        });
-        if (res.status === 'completed') {
-            const fields = res.enriched_fields || [];
-            const contactQueued = fields.filter(f => f.startsWith('contact_queued:')).length;
-            const dataFields = fields.filter(f => !f.startsWith('contact_queued:')).length;
-            let msg = `Enrichment complete — ${dataFields} field${dataFields !== 1 ? 's' : ''} updated`;
-            if (contactQueued) msg += `, ${contactQueued} contact${contactQueued !== 1 ? 's' : ''} pending review`;
-            showToast(msg, 'success');
-            // If contacts were queued, prompt user to review via suggested contacts modal
-            if (contactQueued) {
-                const c = crmCustomers.find(x => x.id === companyId);
-                if (c && c.domain) {
-                    setTimeout(() => openSuggestedContacts('site',
-                        (c.sites && c.sites[0]) ? c.sites[0].id : 0,
-                        c.domain, c.name), 500);
-                }
-            }
-        } else {
-            showToast('Enrichment: ' + (res.status || 'done'));
+        // Trigger customer enrichment waterfall (contacts) in parallel with deep enrichment (firmographics)
+        const [custRes, deepRes] = await Promise.allSettled([
+            apiFetch(`/api/enrichment/customer/${companyId}`, { method: 'POST', body: { force: true } }),
+            apiFetch(`/api/enrichment/company/${companyId}`, { method: 'POST', body: { force: true } }),
+        ]);
+
+        const cResult = custRes.status === 'fulfilled' ? custRes.value : {};
+        const dResult = deepRes.status === 'fulfilled' ? deepRes.value : {};
+
+        const contactsAdded = cResult.contacts_added || 0;
+        const sourcesUsed = (cResult.sources_used || []).join(', ');
+        const fields = dResult.enriched_fields || [];
+        const dataFields = fields.filter(f => !f.startsWith('contact_queued:')).length;
+
+        let msg = '';
+        if (dataFields > 0) msg += `${dataFields} field${dataFields !== 1 ? 's' : ''} updated`;
+        if (contactsAdded > 0) {
+            if (msg) msg += ', ';
+            msg += `${contactsAdded} contact${contactsAdded !== 1 ? 's' : ''} added`;
+            if (sourcesUsed) msg += ` (via ${sourcesUsed})`;
         }
+        if (!msg) msg = cResult.error || dResult.status || 'done';
+
+        showToast('Enrichment: ' + msg, (contactsAdded > 0 || dataFields > 0) ? 'success' : 'info');
         loadCustomers();
     } catch (e) {
         console.error('unifiedEnrichCompany:', e);
         showToast('Enrichment failed: ' + (e.message || e), 'error');
+    }
+}
+
+// ── Customer Enrichment Helpers ──────────────────────────────────────
+
+function _custEnrichBadge(company) {
+    const status = company.customer_enrichment_status;
+    if (status === 'complete') return '<span style="color:#22c55e;font-size:10px" title="Contacts complete">&#9679;</span>';
+    if (status === 'partial') return '<span style="color:#eab308;font-size:10px" title="Contacts partial">&#9679;</span>';
+    return '<span style="color:#ef4444;font-size:10px" title="Contacts missing/stale">&#9679;</span>';
+}
+
+function _contactRoleBadge(role) {
+    const colors = { buyer: '#3b82f6', technical: '#8b5cf6', decision_maker: '#f59e0b', operations: '#64748b' };
+    const labels = { buyer: 'Buyer', technical: 'Technical', decision_maker: 'Decision Maker', operations: 'Ops' };
+    const color = colors[role] || '#94a3b8';
+    const label = labels[role] || role || '';
+    if (!label) return '';
+    return `<span style="background:${color}20;color:${color};padding:1px 5px;border-radius:3px;font-size:9px;font-weight:600;margin-left:3px">${label}</span>`;
+}
+
+function _enrichSourceBadge(source) {
+    if (!source) return '';
+    const colors = { lusha: '#7c3aed', clay: '#2563eb', apollo: '#f97316', hunter: '#10b981', manual: '#64748b' };
+    const color = colors[source] || '#94a3b8';
+    return `<span style="color:${color};font-size:9px;margin-left:3px">via ${source}</span>`;
+}
+
+async function verifyContactEmail(contactId, email) {
+    try {
+        showToast('Verifying email...', 'info');
+        const res = await apiFetch('/api/enrichment/verify-email', { method: 'POST', body: { email: email } });
+        const status = res.status || 'unknown';
+        const score = res.score || 0;
+        showToast(`Email ${email}: ${status} (score: ${score})`, status === 'valid' ? 'success' : 'warn');
+    } catch (e) {
+        showToast('Email verification failed: ' + (e.message || e), 'error');
+    }
+}
+
+async function loadCreditUsage() {
+    try {
+        const data = await apiFetch('/api/enrichment/credits');
+        const el = document.getElementById('creditUsagePanel');
+        if (!el || !data.credits) return;
+        let html = '<div style="display:flex;flex-wrap:wrap;gap:12px">';
+        for (const c of data.credits) {
+            const pct = c.limit > 0 ? Math.round((c.used / c.limit) * 100) : 0;
+            const color = pct >= 90 ? 'var(--red)' : pct >= 70 ? 'var(--amber)' : 'var(--green)';
+            html += `<div style="flex:1;min-width:140px;padding:8px;border:1px solid var(--border);border-radius:6px">
+                <div style="font-size:11px;font-weight:600;text-transform:capitalize">${c.provider.replace('_',' ')}</div>
+                <div style="font-size:18px;font-weight:700;color:${color}">${c.used}<span style="font-size:11px;color:var(--muted)">/${c.limit}</span></div>
+                <div style="height:4px;background:var(--border);border-radius:2px;margin-top:4px">
+                    <div style="height:100%;width:${pct}%;background:${color};border-radius:2px"></div>
+                </div>
+            </div>`;
+        }
+        html += '</div>';
+        el.innerHTML = html;
+    } catch (e) {
+        console.error('loadCreditUsage:', e);
     }
 }
 
@@ -5608,7 +5676,7 @@ function switchSettingsTab(name, btn) {
     else if (name === 'config') loadSettingsConfig();
     else if (name === 'sources') loadSettingsSources();
     else if (name === 'teams') loadTeamsConfig();
-    else if (name === 'enrichment') { loadEnrichmentQueue(); loadEnrichmentStats(); }
+    else if (name === 'enrichment') { loadEnrichmentQueue(); loadEnrichmentStats(); loadCreditUsage(); }
     else if (name === 'tickets') loadTroubleTickets();
     else if (name === 'transfer') loadTransferPanel();
 }
@@ -6320,11 +6388,15 @@ function switchEnrichTab(tab, btn) {
     _p('enrichJobsPanel', tab === 'jobs' ? '' : 'none');
     const m365Panel = document.getElementById('enrichM365Panel');
     if (m365Panel) m365Panel.style.display = tab === 'm365' ? '' : 'none';
+    _p('enrichCreditsPanel', tab === 'credits' ? '' : 'none');
+    _p('enrichGapsPanel', tab === 'gaps' ? '' : 'none');
 
     if (tab === 'queue') loadEnrichmentQueue();
     if (tab === 'backfill') loadEnrichmentJobs();
     if (tab === 'jobs') loadEnrichmentJobs();
     if (tab === 'm365') loadM365Status();
+    if (tab === 'credits') loadCreditUsage();
+    if (tab === 'gaps') loadCustomerGaps();
 }
 
 async function loadEnrichmentQueue() {
@@ -8004,7 +8076,7 @@ Object.assign(window, {
     confirmSendQuote, createCompany, createUser, exportTicketsXlsx,
     filterSiteTypeahead,
     loadCustomers, loadEnrichmentQueue, onSqContactChange,
-    openNewCompanyModal, renderBuyPlansList, saveEditCompany,
+    debouncedCheckDupCompany, openNewCompanyModal, renderBuyPlansList, saveEditCompany,
     saveLogCall, saveLogNote, saveSiteContact, searchSuggestedContacts,
     sendProactiveOffer, setBpFilter, startBackfill, startEmailBackfill,
     startWebsiteScrape, submitBuyPlan, submitBuyPlanV3, submitFlagIssueV3, submitLost, swapLineOfferV3, switchEnrichTab,

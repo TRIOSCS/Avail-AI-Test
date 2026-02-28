@@ -43,7 +43,7 @@
             <button type="button" class="search-btn" id="mainSearchBtn" onclick="triggerMainSearch()" title="Search"><svg class="search-icon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="spinner-icon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2" stroke-dasharray="32" stroke-dashoffset="10" stroke-linecap="round"/></svg></button>
             <kbd class="search-hint">/</kbd>
         </div>
-        <div class="fpills fpills-sm" id="statusToggle" class="hidden">
+        <div class="fpills fpills-sm hidden" id="statusToggle">
             <button type="button" class="fp fp-sm" data-sf="draft" onclick="setStatusFilter('draft',this)">Draft</button>
             <button type="button" class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
         </div>
@@ -1184,6 +1184,8 @@
                 <button type="button" class="tab" onclick="switchEnrichTab('backfill',this)">Backfill</button>
                 <button type="button" class="tab" onclick="switchEnrichTab('jobs',this)">Job History</button>
                 <button type="button" class="tab" onclick="switchEnrichTab('m365',this)">Inbox Mining</button>
+                <button type="button" class="tab" onclick="switchEnrichTab('credits',this)">Credits</button>
+                <button type="button" class="tab" onclick="switchEnrichTab('gaps',this)">Customer Gaps</button>
             </div>
 
             <!-- Review Queue Tab -->
@@ -1201,7 +1203,7 @@
                         <option value="vendor">Vendors</option>
                         <option value="company">Companies</option>
                     </select>
-                    <button type="button" class="btn btn-sm" onclick="bulkApproveSelected()" id="eqBulkApproveBtn" class="hidden">Approve Selected</button>
+                    <button type="button" class="btn btn-sm hidden" onclick="bulkApproveSelected()" id="eqBulkApproveBtn">Approve Selected</button>
                     <span id="eqCount" class="s-hint u-ml-auto"></span>
                 </div>
                 <div id="enrichQueueList"><p class="empty">Loading...</p></div>
@@ -1254,6 +1256,29 @@
                     <h3>M365 Inbox Mining</h3>
                     <p class="s-desc">Users must authenticate via Azure AD to enable inbox mining for vendor email extraction.</p>
                     <div id="m365UserList"><p class="empty">Loading...</p></div>
+                </div>
+            </div>
+
+            <!-- Credits Tab -->
+            <div id="enrichCreditsPanel" class="hidden">
+                <div class="card s-card">
+                    <h3>Monthly Credit Usage</h3>
+                    <p class="s-desc">API credit consumption across enrichment providers. Resets monthly.</p>
+                    <div id="creditUsagePanel"><p class="empty">Loading...</p></div>
+                </div>
+            </div>
+
+            <!-- Customer Gaps Tab -->
+            <div id="enrichGapsPanel" class="hidden">
+                <div class="card s-card">
+                    <h3>Customer Enrichment Gaps</h3>
+                    <p class="s-desc">Accounts needing contact enrichment. Assigned accounts are prioritized.</p>
+                    <div class="s-row" style="margin-bottom:12px">
+                        <button type="button" class="btn" onclick="loadCustomerGaps()">Refresh</button>
+                        <button type="button" class="btn btn-outline" onclick="startCustomerBackfill()">Run Backfill</button>
+                        <span id="gapStatus" class="s-hint"></span>
+                    </div>
+                    <div id="customerGapsList"><p class="empty">Loading...</p></div>
                 </div>
             </div>
 
