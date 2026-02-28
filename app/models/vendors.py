@@ -82,6 +82,12 @@ class VendorCard(Base):
     commodity_tags = Column(JSON, default=list)
     material_tags_updated_at = Column(DateTime)
 
+    # Email health scoring (Phase 5)
+    email_health_score = Column(Float)             # 0-100 composite score
+    email_health_computed_at = Column(DateTime)
+    response_rate = Column(Float)                  # 0.0-1.0 ratio
+    quote_quality_rate = Column(Float)             # 0.0-1.0 ratio
+
     # Deep enrichment tracking
     deep_enrichment_at = Column(DateTime)
     specialty_confidence = Column(Float)
@@ -139,6 +145,10 @@ class VendorContact(Base):
     relationship_score = Column(Float)        # 0-100
     activity_trend = Column(String(20))       # warming/stable/cooling/dormant
     score_computed_at = Column(DateTime)
+
+    # OOO detection (from AI email classification)
+    is_ooo = Column(Boolean, default=False)
+    ooo_return_date = Column(DateTime)
 
     vendor_card = relationship("VendorCard", back_populates="vendor_contacts")
 

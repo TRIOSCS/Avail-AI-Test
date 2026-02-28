@@ -24,7 +24,7 @@ from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from ..config import APP_VERSION, settings
+from ..config import APP_VERSION, GRAPH_SCOPES, settings
 from ..database import get_db
 from ..dependencies import get_user
 from ..http_client import http
@@ -35,7 +35,7 @@ router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
 AZURE_AUTH = f"https://login.microsoftonline.com/{settings.azure_tenant_id}/oauth2/v2.0"
-SCOPES = "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read Files.ReadWrite Chat.ReadWrite Calendars.Read ChannelMessage.Send Team.ReadBasic.All Channel.ReadBasic.All"
+SCOPES = GRAPH_SCOPES
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -149,6 +149,13 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
         user.refresh_token = tokens["refresh_token"]
 
     db.commit()
+
+    # Fetch mailbox settings (timezone, working hours) on login
+    try:
+        from ..services.mailbox_intelligence import fetch_and_store_mailbox_settings
+        await fetch_and_store_mailbox_settings(access_token, user, db)
+    except Exception as e:
+        logger.debug(f"Mailbox settings fetch skipped for {user.email}: {e}")
 
     # Trigger first-time backfill if user has never been scanned
     if not user.last_inbox_scan:

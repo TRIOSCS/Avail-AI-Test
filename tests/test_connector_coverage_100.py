@@ -348,18 +348,18 @@ class TestEmailMiningGaps:
         miner.gc.get_all_pages = AsyncMock(return_value=[
             {
                 "id": "old-deep-msg",
-                "sender": {"emailAddress": {"address": "vendor@chips.com", "name": "Chip Co"}},
+                "from": {"emailAddress": {"address": "vendor@chips.com", "name": "Chip Co"}},
                 "subject": "Follow up",
                 "body": {"content": "Hello from Chip Co."},
             },
             {
                 "id": "new-deep-msg",
-                "sender": {"emailAddress": {"address": "sales@newvendor.com", "name": "New Vendor"}},
+                "from": {"emailAddress": {"address": "sales@newvendor.com", "name": "New Vendor"}},
                 "subject": "Stock available for LM317T",
                 "body": {"content": "We have LM317T in stock."},
             },
             {
-                "sender": {"emailAddress": {"address": "x@y.com", "name": "X"}},
+                "from": {"emailAddress": {"address": "x@y.com", "name": "X"}},
                 "subject": "test",
                 "body": {"content": "test"},
             },
@@ -394,13 +394,13 @@ class TestEmailMiningGaps:
         miner.gc.get_all_pages = AsyncMock(return_value=[
             {
                 "id": "dm1",
-                "sender": {"emailAddress": {"address": "a@vendor.com", "name": "A"}},
+                "from": {"emailAddress": {"address": "a@vendor.com", "name": "A"}},
                 "subject": "test",
                 "body": {"content": "test"},
             },
             {
                 "id": "dm2",
-                "sender": {"emailAddress": {"address": "b@vendor.com", "name": "B"}},
+                "from": {"emailAddress": {"address": "b@vendor.com", "name": "B"}},
                 "subject": "test",
                 "body": {"content": "test"},
             },

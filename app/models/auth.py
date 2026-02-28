@@ -33,6 +33,12 @@ class User(Base):
     m365_last_healthy = Column(DateTime)
     last_deep_email_scan = Column(DateTime)
     commodity_tags = Column(JSON, default=list)
+
+    # Mailbox settings (from Graph /me/mailboxSettings)
+    timezone = Column(String(100))
+    working_hours_start = Column(String(10))  # e.g. "08:00"
+    working_hours_end = Column(String(10))  # e.g. "17:00"
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisitions = relationship("Requisition", back_populates="creator", foreign_keys="[Requisition.created_by]")

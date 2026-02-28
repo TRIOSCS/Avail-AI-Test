@@ -877,7 +877,7 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                         for domain, domain_data in scan_result.get("per_domain", {}).items():
                             for email_addr in domain_data.get("emails", []):
                                 sig_data = await extract_signature(
-                                    "",  # No body available in summary
+                                    domain_data.get("last_body", ""),
                                     sender_name=domain_data.get("sender_names", [""])[0] if domain_data.get("sender_names") else "",
                                     sender_email=email_addr,
                                 )

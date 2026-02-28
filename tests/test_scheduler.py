@@ -2949,7 +2949,7 @@ def test_sync_user_contacts_empty(scheduler_db, test_user):
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_all_pages = AsyncMock(return_value=[])
+    mock_gc.delta_query = AsyncMock(return_value=([], "delta-token"))
 
     with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
         from app.scheduler import _sync_user_contacts
@@ -2966,7 +2966,7 @@ def test_sync_user_contacts_creates_vendor_card(scheduler_db, test_user):
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_all_pages = AsyncMock(return_value=[
+    mock_gc.delta_query = AsyncMock(return_value=([
         {
             "companyName": "New Outlook Co",
             "displayName": "Jane Doe",
@@ -2974,7 +2974,7 @@ def test_sync_user_contacts_creates_vendor_card(scheduler_db, test_user):
             "businessPhones": ["+1-555-0001"],
             "mobilePhone": "+1-555-0002",
         }
-    ])
+    ], "delta-token"))
 
     with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
          patch("app.vendor_utils.normalize_vendor_name", return_value="new outlook co"), \
@@ -2998,7 +2998,7 @@ def test_sync_user_contacts_uses_display_name_fallback(scheduler_db, test_user):
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_all_pages = AsyncMock(return_value=[
+    mock_gc.delta_query = AsyncMock(return_value=([
         {
             "companyName": None,
             "displayName": "Solo Contact",
@@ -3006,7 +3006,7 @@ def test_sync_user_contacts_uses_display_name_fallback(scheduler_db, test_user):
             "businessPhones": [],
             "mobilePhone": None,
         }
-    ])
+    ], "delta-token"))
 
     with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
          patch("app.vendor_utils.normalize_vendor_name", return_value="solo contact"), \
@@ -3024,7 +3024,7 @@ def test_sync_user_contacts_skips_short_company(scheduler_db, test_user):
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_all_pages = AsyncMock(return_value=[
+    mock_gc.delta_query = AsyncMock(return_value=([
         {
             "companyName": "X",
             "displayName": "X",
@@ -3032,7 +3032,7 @@ def test_sync_user_contacts_skips_short_company(scheduler_db, test_user):
             "businessPhones": [],
             "mobilePhone": None,
         }
-    ])
+    ], "delta-token"))
 
     with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
          patch("app.vendor_utils.merge_emails_into_card") as mock_merge:
@@ -3050,7 +3050,7 @@ def test_sync_user_contacts_graph_error(scheduler_db, test_user):
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_all_pages = AsyncMock(side_effect=Exception("Graph API error"))
+    mock_gc.delta_query = AsyncMock(side_effect=Exception("Graph API error"))
 
     with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
         from app.scheduler import _sync_user_contacts
@@ -3068,7 +3068,7 @@ def test_sync_user_contacts_commit_error(scheduler_db, test_user):
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_all_pages = AsyncMock(return_value=[
+    mock_gc.delta_query = AsyncMock(return_value=([
         {
             "companyName": "Commit Fail Co",
             "displayName": "Test",
@@ -3076,7 +3076,7 @@ def test_sync_user_contacts_commit_error(scheduler_db, test_user):
             "businessPhones": [],
             "mobilePhone": None,
         }
-    ])
+    ], "delta-token"))
 
     original_commit = scheduler_db.commit
     call_count = [0]
@@ -3105,7 +3105,7 @@ def test_sync_user_contacts_flush_conflict(scheduler_db, test_user):
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_all_pages = AsyncMock(return_value=[
+    mock_gc.delta_query = AsyncMock(return_value=([
         {
             "companyName": "Conflict Co",
             "displayName": "Test",
@@ -3113,7 +3113,7 @@ def test_sync_user_contacts_flush_conflict(scheduler_db, test_user):
             "businessPhones": [],
             "mobilePhone": None,
         }
-    ])
+    ], "delta-token"))
 
     original_flush = scheduler_db.flush
 
@@ -3136,7 +3136,7 @@ def test_sync_user_contacts_existing_card(scheduler_db, test_user, test_vendor_c
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.get_all_pages = AsyncMock(return_value=[
+    mock_gc.delta_query = AsyncMock(return_value=([
         {
             "companyName": "Arrow Electronics",
             "displayName": "Arrow Rep",
@@ -3144,7 +3144,7 @@ def test_sync_user_contacts_existing_card(scheduler_db, test_user, test_vendor_c
             "businessPhones": ["+1-555-0300"],
             "mobilePhone": None,
         }
-    ])
+    ], "delta-token"))
 
     with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
          patch("app.vendor_utils.normalize_vendor_name", return_value="arrow electronics"), \

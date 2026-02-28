@@ -468,6 +468,21 @@ def compute_all_contact_scores(db: Session) -> dict:
     skipped = 0
     batch = []
 
+    # Build vendor_card_id → avg_response_hours map
+    vc_ids = {c.vendor_card_id for c in contacts if c.vendor_card_id}
+    response_hours_map: dict[int, float | None] = {}
+    if vc_ids:
+        from app.models import VendorCard
+        vc_rows = (
+            db.query(VendorCard.id, VendorCard.avg_response_hours)
+            .filter(
+                VendorCard.id.in_(vc_ids),
+                VendorCard.avg_response_hours.isnot(None),
+            )
+            .all()
+        )
+        response_hours_map = {r[0]: r[1] for r in vc_rows}
+
     for contact in contacts:
         cid = contact.id
         i30 = counts_30d.get(cid, 0)
@@ -479,7 +494,7 @@ def compute_all_contact_scores(db: Session) -> dict:
             interactions_30d=i30,
             interactions_60d=i60,
             interactions_90d=i90,
-            avg_response_hours=None,  # Would need response pairing — skip for now
+            avg_response_hours=response_hours_map.get(contact.vendor_card_id),
             wins=win_map.get(cid, 0),
             total_interactions=total_map.get(cid, 0),
             distinct_channels=channel_map.get(cid, 0),

@@ -73,6 +73,9 @@ from .performance import (  # noqa: F401
     VendorMetricsSnapshot,
 )
 
+# Email Intelligence (AI-powered inbox mining)
+from .email_intelligence import EmailIntelligence  # noqa: F401
+
 # Email Pipeline
 from .pipeline import ColumnMappingCache, PendingBatch, ProcessedMessage, SyncState  # noqa: F401
 

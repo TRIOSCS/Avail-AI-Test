@@ -611,7 +611,6 @@ async def scan_inbox_for_vendors(
         "vendors_found": results.get("vendors_found", 0),
         "offers_parsed": len(results.get("offers_parsed", [])),
         "contacts_enriched": enriched_count,
-        "stock_lists_found": results.get("stock_lists_found", 0),
     }
 
 

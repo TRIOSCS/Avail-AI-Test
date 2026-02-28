@@ -83,6 +83,8 @@ async def _refresh_access_token(
 
     Returns (access_token, new_refresh_token_or_None) or None on failure.
     """
+    from ..config import GRAPH_SCOPES
+
     token_url = f"https://login.microsoftonline.com/{tenant_id}/oauth2/v2.0/token"
 
     try:
@@ -93,7 +95,7 @@ async def _refresh_access_token(
                 "client_secret": client_secret,
                 "refresh_token": refresh_token,
                 "grant_type": "refresh_token",
-                "scope": "openid profile email offline_access Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read Calendars.Read ChannelMessage.Send Team.ReadBasic.All",
+                "scope": GRAPH_SCOPES,
             },
             timeout=15,
         )

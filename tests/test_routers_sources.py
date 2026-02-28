@@ -363,7 +363,6 @@ def test_scan_inbox(sources_client: TestClient, _email_mining_source: ApiSource)
         "vendors_found": 3,
         "offers_parsed": [],
         "contacts_enriched": [],
-        "stock_lists_found": 1,
     })
 
     with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
@@ -374,7 +373,6 @@ def test_scan_inbox(sources_client: TestClient, _email_mining_source: ApiSource)
     data = resp.json()
     assert data["messages_scanned"] == 50
     assert data["vendors_found"] == 3
-    assert data["stock_lists_found"] == 1
 
 
 # ── 10. test_scan_inbox_no_m365 ──────────────────────────────────────
@@ -1605,7 +1603,6 @@ def test_scan_inbox_with_contacts_enriched(
                 "websites": ["newvendor.com"],
             },
         ],
-        "stock_lists_found": 0,
     })
 
     with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
@@ -1647,7 +1644,6 @@ def test_scan_inbox_enriches_existing_vendor_card(
                 "websites": [],
             },
         ],
-        "stock_lists_found": 0,
     })
 
     with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
@@ -1668,7 +1664,6 @@ def test_scan_inbox_with_json_body_options(
         "vendors_found": 0,
         "offers_parsed": [],
         "contacts_enriched": [],
-        "stock_lists_found": 0,
     })
 
     with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
@@ -1699,7 +1694,6 @@ def test_scan_inbox_empty_contacts(
         "contacts_enriched": [
             {"vendor_name": "", "emails": ["nobody@example.com"]},
         ],
-        "stock_lists_found": 0,
     })
 
     with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \
@@ -1719,7 +1713,6 @@ def test_scan_inbox_no_email_mining_source(sources_client: TestClient, db_sessio
         "vendors_found": 0,
         "offers_parsed": [],
         "contacts_enriched": [],
-        "stock_lists_found": 0,
     })
 
     with patch("app.routers.sources.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"), \

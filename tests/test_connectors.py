@@ -2492,9 +2492,12 @@ class TestEmailMiner:
     def test_mark_processed_duplicate(self):
         mock_db = MagicMock()
         mock_db.flush.side_effect = Exception("duplicate key")
+        mock_savepoint = MagicMock()
+        mock_db.begin_nested.return_value = mock_savepoint
         miner = self._make_miner(db=mock_db)
         miner._mark_processed("msg1", "mining")  # should not raise
-        mock_db.rollback.assert_called_once()
+        mock_db.begin_nested.assert_called_once()
+        mock_savepoint.rollback.assert_called_once()
 
     # ── Delta token helpers ──────────────────────────────────────────
 
@@ -2758,7 +2761,7 @@ class TestEmailMiner:
         miner.gc.get_all_pages = AsyncMock(return_value=[
             {
                 "id": "d1",
-                "sender": {"emailAddress": {"address": "sales@chipco.com", "name": "Chip Co"}},
+                "from": {"emailAddress": {"address": "sales@chipco.com", "name": "Chip Co"}},
                 "subject": "Availability - LM317T from TI",
                 "body": {"content": "Phone: +1 555 123 4567\nwww.chipco.com"},
                 "receivedDateTime": "2026-01-15T10:00:00Z",
@@ -2777,7 +2780,7 @@ class TestEmailMiner:
         miner.gc.get_all_pages = AsyncMock(return_value=[
             {
                 "id": "d2",
-                "sender": {"emailAddress": {"address": "noreply@microsoft.com", "name": "MS"}},
+                "from": {"emailAddress": {"address": "noreply@microsoft.com", "name": "MS"}},
                 "subject": "Notification",
                 "body": {"content": "System notification"},
             }
@@ -2791,7 +2794,7 @@ class TestEmailMiner:
         miner.gc.get_all_pages = AsyncMock(return_value=[
             {
                 "id": "d3",
-                "sender": {"emailAddress": {"address": "", "name": ""}},
+                "from": {"emailAddress": {"address": "", "name": ""}},
                 "subject": "Test",
                 "body": {"content": "body"},
             }
@@ -2805,7 +2808,7 @@ class TestEmailMiner:
         miner.gc.get_all_pages = AsyncMock(return_value=[
             {
                 "id": "d4",
-                "sender": {"emailAddress": {"address": "invalid", "name": "X"}},
+                "from": {"emailAddress": {"address": "invalid", "name": "X"}},
                 "subject": "Test",
                 "body": {"content": "body"},
             }
@@ -2827,7 +2830,7 @@ class TestEmailMiner:
         miner.gc.get_all_pages = AsyncMock(return_value=[
             {
                 "id": "d5",
-                "sender": {"emailAddress": {"address": "s@vendor.com", "name": "V"}},
+                "from": {"emailAddress": {"address": "s@vendor.com", "name": "V"}},
                 "subject": "Hi",
                 "body": {"content": "body"},
             }
@@ -2899,13 +2902,12 @@ class TestLushaClient:
                 {"type": "mobile", "number": "+15559876543"},
             ],
             "emailAddresses": [
-                {"type": "work", "email": "john@acme.com"},
-                {"type": "personal", "email": "john@gmail.com"},
+                {"type": "work", "email": "john@acme.com", "emailConfidence": "A+"},
+                {"type": "personal", "email": "john@gmail.com", "emailConfidence": "B"},
             ],
             "linkedinUrl": "https://linkedin.com/in/johndoe",
             "location": "New York, NY",
             "doNotCall": False,
-            "confidence": 0.95,
         })
         with patch("app.connectors.lusha_client.settings") as mock_s, \
              patch("app.connectors.lusha_client.http") as mock_http:
@@ -2920,7 +2922,7 @@ class TestLushaClient:
             assert result["do_not_call"] is False
             assert result["linkedin_url"] == "https://linkedin.com/in/johndoe"
             assert result["source"] == "lusha"
-            assert result["confidence"] == 0.95
+            assert result["confidence"] == 95  # A+ grade maps to 95
 
     @pytest.mark.asyncio
     async def test_find_person_by_linkedin(self):
@@ -3119,11 +3121,13 @@ class TestLushaClient:
 
     def test_best_email_empty_list(self):
         from app.connectors.lusha_client import _best_email
-        assert _best_email([]) is None
+        assert _best_email([]) == (None, 0)
 
     def test_best_email_unknown_type(self):
         from app.connectors.lusha_client import _best_email
-        assert _best_email([{"type": "other", "email": "x@y.com"}]) == "x@y.com"
+        email, confidence = _best_email([{"type": "other", "email": "x@y.com"}])
+        assert email == "x@y.com"
+        assert confidence == 50  # default when no emailConfidence grade
 
     @pytest.mark.asyncio
     async def test_find_person_null_phone_and_email_lists(self):

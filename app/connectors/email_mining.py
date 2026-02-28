@@ -99,11 +99,15 @@ class EmailMiner:
         return {r[0] for r in rows}
 
     def _mark_processed(self, message_id: str, processing_type: str):
-        """Record a message as processed to prevent reprocessing (H2)."""
+        """Record a message as processed to prevent reprocessing (H2).
+
+        Uses savepoint so duplicate key errors don't rollback earlier flushes.
+        """
         if not self.db:
             return
         from app.models import ProcessedMessage
 
+        savepoint = self.db.begin_nested()
         try:
             self.db.add(
                 ProcessedMessage(
@@ -113,9 +117,10 @@ class EmailMiner:
                 )
             )
             self.db.flush()
+            savepoint.commit()
         except Exception:
             # Duplicate key — already processed (race condition safety)
-            self.db.rollback()
+            savepoint.rollback()
 
     # ── H8: Delta Query helpers ──────────────────────────────────────
 
@@ -199,7 +204,6 @@ class EmailMiner:
                 "vendors_found": int,
                 "contacts_enriched": [...],
                 "offers_parsed": [...],
-                "stock_lists_found": int,
                 "messages_scanned": int,
                 "used_delta": bool,
             }
@@ -307,8 +311,9 @@ class EmailMiner:
                 except Exception:
                     pass
 
-            # Check if this is an offer email
-            if self._is_offer_email(subject, body):
+            # Check if this is an offer email (regex pre-filter)
+            regex_matches = self._count_offer_matches(subject, body)
+            if regex_matches >= 2:
                 parts = self._extract_part_numbers(subject + " " + body)
                 c["parts_mentioned"].update(parts)
                 if parts:
@@ -321,6 +326,41 @@ class EmailMiner:
                             "received": received,
                         }
                     )
+
+            # AI classification for ambiguous emails (0-1 regex matches)
+            if self.db and self.user_id and regex_matches < 2:
+                try:
+                    from app.services.email_intelligence_service import (
+                        process_email_intelligence,
+                    )
+
+                    received_dt = None
+                    if received:
+                        try:
+                            received_dt = datetime.fromisoformat(
+                                received.replace("Z", "+00:00")
+                            )
+                        except Exception:
+                            pass
+
+                    import asyncio
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        # Already in async context
+                        await process_email_intelligence(
+                            self.db,
+                            message_id=msg["id"],
+                            user_id=self.user_id,
+                            sender_email=sender_email,
+                            sender_name=sender_name,
+                            subject=subject,
+                            body=body[:5000],
+                            received_at=received_dt,
+                            conversation_id=msg.get("conversationId"),
+                            regex_offer_matches=regex_matches,
+                        )
+                except Exception as e:
+                    logger.debug("AI classification skipped for %s: %s", msg["id"], e)
 
             # H2: Mark as processed
             self._mark_processed(msg["id"], "mining")
@@ -347,7 +387,6 @@ class EmailMiner:
             "vendors_found": len(contacts),
             "contacts_enriched": enriched,
             "offers_parsed": offers[:200],
-            "stock_lists_found": 0,
             "messages_scanned": len(messages),
             "used_delta": used_delta,
         }
@@ -543,6 +582,7 @@ class EmailMiner:
         every email to extract signatures, brand mentions, and contact data.
 
         Uses separate processing_type='deep_mining' for dedup (H2).
+        Uses delta query for incremental sync (H8).
 
         Returns: {
             messages_scanned: int,
@@ -554,30 +594,56 @@ class EmailMiner:
         """
         from datetime import timedelta
 
-        cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
-        cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
-
-        # Fetch all messages (no keyword filter)
-        params = {
-            "$filter": f"receivedDateTime ge {cutoff_str}",
-            "$orderby": "receivedDateTime desc",
-            "$top": "50",
-            "$select": MSG_SELECT,
+        messages = []
+        empty_result = {
+            "messages_scanned": 0,
+            "signatures_extracted": 0,
+            "brands_detected": 0,
+            "contacts_found": 0,
+            "per_domain": {},
         }
 
-        try:
-            messages = await self.gc.get_all_pages(
-                "/me/messages", params=params, max_items=max_messages
-            )
-        except Exception as e:
-            logger.warning("Deep scan inbox error: %s", e)
-            return {
-                "messages_scanned": 0,
-                "signatures_extracted": 0,
-                "brands_detected": 0,
-                "contacts_found": 0,
-                "per_domain": {},
+        # Try delta query first for incremental scan
+        if self.user_id and self.db:
+            delta_token = self._get_delta_token("deep_mining")
+            try:
+                items, new_token = await self.gc.delta_query(
+                    "/me/mailFolders/inbox/messages/delta",
+                    delta_token=delta_token,
+                    params={"$select": MSG_SELECT, "$top": "50"},
+                    max_items=max_messages,
+                )
+                messages = items
+                if new_token:
+                    self._save_delta_token("deep_mining", new_token)
+                logger.info("Delta scan (deep): %d changes", len(messages))
+            except GraphSyncStateExpired:
+                logger.warning("Delta token expired for deep mining — clearing")
+                self._clear_delta_token("deep_mining")
+                messages = []
+            except Exception as e:
+                logger.warning("Delta query failed for deep mining: %s", e)
+                messages = []
+
+        # Fallback: full scan with date filter
+        if not messages:
+            cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
+            cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+            params = {
+                "$filter": f"receivedDateTime ge {cutoff_str}",
+                "$orderby": "receivedDateTime desc",
+                "$top": "50",
+                "$select": MSG_SELECT,
             }
+
+            try:
+                messages = await self.gc.get_all_pages(
+                    "/me/messages", params=params, max_items=max_messages
+                )
+            except Exception as e:
+                logger.warning("Deep scan inbox error: %s", e)
+                return empty_result
 
         # Filter already-processed
         msg_ids = [m.get("id") for m in messages if m.get("id")]
@@ -603,7 +669,7 @@ class EmailMiner:
             if not msg_id or msg_id in processed:
                 continue
 
-            sender = msg.get("sender", {}).get("emailAddress", {})
+            sender = msg.get("from", {}).get("emailAddress", {})
             sender_email = (sender.get("address") or "").strip().lower()
             sender_name = (sender.get("name") or "").strip()
 
@@ -631,6 +697,7 @@ class EmailMiner:
                     "commodities": set(),
                     "sender_names": set(),
                     "subjects": [],
+                    "last_body": "",
                 }
 
             entry = per_domain[domain]
@@ -641,6 +708,9 @@ class EmailMiner:
                 entry["sender_names"].add(sender_name)
             if subject:
                 entry["subjects"].append(subject[:200])
+            # Keep last body for signature extraction (truncated)
+            if body:
+                entry["last_body"] = body[:2000]
 
             # Detect brands and commodities from subject + body snippet
             try:
@@ -752,11 +822,14 @@ class EmailMiner:
             "websites": list(websites),
         }
 
+    def _count_offer_matches(self, subject: str, body: str) -> int:
+        """Count how many offer regex patterns match in the email."""
+        text = f"{subject} {body[:2000]}"
+        return sum(1 for p in OFFER_PATTERNS if re.search(p, text))
+
     def _is_offer_email(self, subject: str, body: str) -> bool:
         """Check if email looks like a component offer/quote."""
-        text = f"{subject} {body[:2000]}"
-        matches = sum(1 for p in OFFER_PATTERNS if re.search(p, text))
-        return matches >= 2
+        return self._count_offer_matches(subject, body) >= 2
 
     def _extract_part_numbers(self, text: str) -> set:
         """Extract likely electronic component part numbers from text."""

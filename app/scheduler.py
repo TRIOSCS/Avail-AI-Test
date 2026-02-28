@@ -1436,11 +1436,10 @@ async def _compute_vendor_scores_job(db):
 
 
 async def _sync_user_contacts(user, db):
-    """Pull contacts from Outlook into VendorCards."""
-    # Use GraphClient for pagination with retry (H1, H6)
-    from app.utils.graph_client import GraphClient
+    """Pull contacts from Outlook into VendorCards using delta query for efficiency."""
+    from app.utils.graph_client import GraphClient, GraphSyncStateExpired
 
-    from .models import VendorCard
+    from .models import SyncState, VendorCard
     from .vendor_utils import (
         merge_emails_into_card,
         merge_phones_into_card,
@@ -1448,15 +1447,57 @@ async def _sync_user_contacts(user, db):
     )
 
     gc = GraphClient(user.access_token)
+
+    # Load delta token for incremental sync
+    folder_key = "contacts_sync"
+    sync_state = (
+        db.query(SyncState)
+        .filter(SyncState.user_id == user.id, SyncState.folder == folder_key)
+        .first()
+    )
+    delta_token = sync_state.delta_token if sync_state else None
+
     try:
-        contacts = await gc.get_all_pages(
-            "/me/contacts",
+        contacts, new_token = await gc.delta_query(
+            "/me/contacts/delta",
+            delta_token=delta_token,
             params={
-                "$top": "500",
                 "$select": "displayName,emailAddresses,businessPhones,mobilePhone,companyName",
+                "$top": "100",
             },
             max_items=2500,
         )
+        # Persist new delta token
+        if new_token:
+            if sync_state:
+                sync_state.delta_token = new_token
+                sync_state.last_sync_at = datetime.now(timezone.utc)
+            else:
+                db.add(SyncState(
+                    user_id=user.id,
+                    folder=folder_key,
+                    delta_token=new_token,
+                    last_sync_at=datetime.now(timezone.utc),
+                ))
+            db.flush()
+    except GraphSyncStateExpired:
+        logger.warning(f"Contacts delta token expired for {user.email} — full resync")
+        if sync_state:
+            sync_state.delta_token = None
+            db.flush()
+        # Fall back to full pull
+        try:
+            contacts = await gc.get_all_pages(
+                "/me/contacts",
+                params={
+                    "$top": "500",
+                    "$select": "displayName,emailAddresses,businessPhones,mobilePhone,companyName",
+                },
+                max_items=2500,
+            )
+        except Exception as e:
+            logger.warning(f"Contacts sync failed for {user.email}: {e}")
+            return
     except Exception as e:
         logger.warning(f"Contacts sync failed for {user.email}: {e}")
         return

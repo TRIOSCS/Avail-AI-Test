@@ -191,7 +191,7 @@ async function loadCustomers() {
         if (_custFilterMode === 'unassigned') url += '&unassigned=1';
         const [result, reqs] = await Promise.all([
             apiFetch(url, {signal: _custAbort.signal}).catch(e => { if (e.name !== 'AbortError') showToast('Failed to load accounts', 'error'); return []; }),
-            apiFetch('/api/requisitions', {signal: _custAbort.signal}).catch(() => []),
+            apiFetch('/api/requisitions', {signal: _custAbort.signal}).catch(e => { if (e.name !== 'AbortError') showToast('Failed to load requisitions','warn'); return []; }),
         ]);
         crmCustomers = (Array.isArray(result) ? result : []).filter(c =>
             !c.account_type || c.account_type.toLowerCase() !== 'vendor'
@@ -5696,11 +5696,11 @@ function openSettingsTab(panel) {
     document.querySelectorAll('.sidebar-nav button').forEach(b => b.classList.remove('active'));
     const navBtn = document.getElementById('navSettings');
     if (navBtn) navBtn.classList.add('active');
-    switchSettingsTab(panel || localStorage.getItem('settings_active_tab') || 'users');
+    switchSettingsTab(panel || safeGet('settings_active_tab', 'users'));
 }
 
 function switchSettingsTab(name, btn) {
-    try { localStorage.setItem('settings_active_tab', name); } catch(e) {}
+    safeSet('settings_active_tab', name);
     document.querySelectorAll('.settings-panel').forEach(p => { p.classList.add('hidden'); p.style.display = 'none'; });
     document.querySelectorAll('#settingsTabs .tab').forEach(t => t.classList.remove('on'));
     const target = document.getElementById('settings-' + name);

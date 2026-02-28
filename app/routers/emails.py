@@ -164,3 +164,55 @@ async def send_reply(
     clear_cache()
 
     return {"ok": True, "message": f"Reply sent to {payload.to}"}
+
+
+# ── Email Intelligence ────────────────────────────────────────────────
+
+
+@router.get("/api/email-intelligence/thread-summary/{conversation_id}")
+async def get_thread_summary(
+    conversation_id: str,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get AI-generated summary of an email thread."""
+    try:
+        token = await require_fresh_token(request, db)
+    except HTTPException:
+        raise HTTPException(401, "M365 connection needs refresh")
+
+    from ..services.email_intelligence_service import summarize_thread
+
+    summary = await summarize_thread(token, conversation_id, db, user.id)
+    if not summary:
+        return {"summary": None, "error": "Could not generate summary"}
+    return {"summary": summary}
+
+
+@router.get("/api/email-intelligence")
+async def list_email_intelligence(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+    limit: int = 50,
+    classification: str | None = None,
+):
+    """Recent AI-classified email intelligence for dashboard display."""
+    from ..services.email_intelligence_service import get_recent_intelligence
+
+    data = get_recent_intelligence(
+        db, user.id, limit=min(limit, 200), classification=classification
+    )
+    return {"items": data, "count": len(data)}
+
+
+@router.get("/api/email-intelligence/dashboard")
+async def email_intelligence_dashboard(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+    days: int = 7,
+):
+    """Aggregated email intelligence dashboard — scans, offers, health metrics."""
+    from ..services.response_analytics import get_email_intelligence_dashboard
+
+    return get_email_intelligence_dashboard(db, user.id, days=min(days, 90))

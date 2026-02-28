@@ -4,6 +4,15 @@ import os
 
 APP_VERSION = "3.0.0"
 
+# Microsoft Graph API scopes — single source of truth for auth + token refresh.
+# These must match exactly to prevent scope loss after token refresh.
+GRAPH_SCOPES = (
+    "openid profile email offline_access "
+    "Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read "
+    "Files.ReadWrite Chat.ReadWrite Calendars.Read "
+    "ChannelMessage.Send Team.ReadBasic.All Channel.ReadBasic.All"
+)
+
 
 class Settings:
     app_url: str = os.getenv("APP_URL", "http://localhost:8000")
