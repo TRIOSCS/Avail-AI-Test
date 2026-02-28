@@ -1459,35 +1459,10 @@ let _scPeriod = '30d';
 
 function showScorecard() {
     showView('view-scorecard');
-
-    // Build perspective toggle for multi-role users
-    const header = document.querySelector('.sc-header');
-    if (_isMultiRole() && header) {
-        let toggle = document.getElementById('scPerspectivePills');
-        if (!toggle) {
-            toggle = document.createElement('div');
-            toggle.className = 'cc-persp-toggle';
-            toggle.id = 'scPerspectivePills';
-            const eff = _effectivePerspective();
-            toggle.innerHTML = `<button class="cc-persp-btn cc-persp-purchasing ${eff==='purchasing'?'on':''}" onclick="setScPerspective('purchasing',this)"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg> Purchasing</button><button class="cc-persp-btn cc-persp-sales ${eff==='sales'?'on':''}" onclick="setScPerspective('sales',this)"><svg viewBox="0 0 24 24" width="13" height="13"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg> Sales</button>`;
-            const h2 = header.querySelector('h2');
-            if (h2) h2.after(toggle);
-        }
-    }
-
     _loadScPersonalSummary();
     _loadDashTeamLeaderboard(document.getElementById('scContent'));
 }
 window.showScorecard = showScorecard;
-
-function setScPerspective(persp, btn) {
-    window.__dashPerspective = persp;
-    document.querySelectorAll('.sc-header .cc-persp-btn').forEach(b => b.classList.remove('on'));
-    if (btn) btn.classList.add('on');
-    _loadScPersonalSummary();
-    _loadDashTeamLeaderboard(document.getElementById('scContent'));
-}
-window.setScPerspective = setScPerspective;
 
 function setScPeriod(period, chip) {
     _scPeriod = period;
@@ -1557,8 +1532,8 @@ async function _loadScPersonalSummary() {
         if (isTrader && otherData) {
             const otherEntries = otherData.entries || [];
             const meOther = otherEntries.find(e => e.user_id === window.userId);
-            const primaryLabel = role === 'buyer' ? 'Purchasing' : 'Sales';
-            const otherLabel = role === 'buyer' ? 'Sales' : 'Purchasing';
+            const primaryLabel = role === 'buyer' ? 'Buyer' : 'Sales';
+            const otherLabel = role === 'buyer' ? 'Sales' : 'Buyer';
 
             el.innerHTML = `<div class="sc-personal card-v2 sc-personal-dual">
                 <div class="sc-personal-left">
@@ -1616,11 +1591,9 @@ async function _loadDashTeamLeaderboard(el) {
 function _renderTeamLeaderboard(entries, role, month) {
     const monthLabel = month ? new Date(month + 'T00:00:00').toLocaleDateString('en-US', { month: 'long', year: 'numeric' }) : '';
     const myId = window.userId;
-    const roleLabel = role === 'buyer' ? 'Purchasing' : 'Sales';
 
     let html = `<div class="lb-header">
         <span class="lb-month">${esc(monthLabel)}</span>
-        <span class="as-role-badge as-role-${role}">${roleLabel}</span>
         <span class="lb-info-pill" onmouseenter="_showScoringTooltip(this)" onmouseleave="_hideScoringTooltip(this)">How scoring works</span>
     </div>`;
 
@@ -5306,7 +5279,7 @@ function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice) {
             <td class="mono">${subBadge}${esc(s.mpn_matched || '\u2014')}</td>
             <td class="mono">${qty}</td>
             <td class="mono" style="color:${priceColor}"${priceTitle}>${price}</td>
-            <td style="font-size:10px">${esc(s.source_type || '\u2014')}</td>
+            <td style="font-size:10px">${esc(s.source_type || '\u2014')}${s.merged_count > 1 ? ' <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:var(--blue-light,#e0f2fe);color:var(--blue,#0284c7);font-weight:600" title="Merged from ' + s.merged_count + ' duplicate listings' + (s.merged_sources ? ' (' + s.merged_sources.join(', ') + ')' : '') + '">' + s.merged_count + 'x</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.condition || '\u2014')}${s.date_code ? ' <span style="color:var(--muted)">\u00b7 DC:' + esc(s.date_code) + '</span>' : ''}</td>
             <td style="font-size:10px">${esc(s.lead_time || '\u2014')}</td>
             <td style="font-size:10px;color:var(--muted)">${sAge} ${unavailBtn}${!s._historical && !unavail && hasEmail ? ` <button class="btn btn-ghost btn-sm" style="font-size:10px;padding:1px 5px;color:var(--teal)" onclick="event.stopPropagation();ddQuickRfq(${reqId},'${safeVName}','${escAttr(s.mpn_matched || '')}')" title="Send RFQ to this vendor">&#x2709;</button>` : ''}</td>
