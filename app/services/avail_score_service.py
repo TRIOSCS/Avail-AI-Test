@@ -9,7 +9,7 @@ Buyer outcomes:   Sourcing Ratio, Offer→Quote, Win Rate, BP Completion, Vendor
 Sales behaviors:  Account Coverage, Outreach Consistency, Quote Follow-Up, Proactive Selling, New Biz
 Sales outcomes:   Win Rate, Revenue, Quote Volume, Proactive Conversion, Strategic Wins
 
-Bonus: 1st place $500, 2nd $250 — must meet minimum score thresholds.
+Bonus: 1st place $500, 2nd $250, 3rd $100 — must meet minimum score thresholds.
 
 Called by: scheduler.py (daily), routers/performance.py (on-demand)
 Depends on: models (Requisition, Contact, Offer, Quote, BuyPlan, ActivityLog, etc.)
@@ -41,8 +41,10 @@ from ..models.performance import AvailScoreSnapshot
 # ── Bonus thresholds ─────────────────────────────────────────────────
 BONUS_1ST = 500.0
 BONUS_2ND = 250.0
+BONUS_3RD = 100.0
 QUALIFY_1ST = 60  # minimum score to win 1st
 QUALIFY_2ND = 50  # minimum score to win 2nd
+QUALIFY_3RD = 40  # minimum score to win 3rd
 MIN_REQS_BUYER = 10  # minimum reqs to qualify as buyer
 MIN_ACTIVITIES_SALES = 20  # minimum outbound activities to qualify as sales
 
@@ -742,6 +744,8 @@ def _rank_and_bonus(results):
         qualified[0]["bonus_amount"] = BONUS_1ST
     if len(qualified) >= 2 and qualified[1]["total_score"] >= QUALIFY_2ND:
         qualified[1]["bonus_amount"] = BONUS_2ND
+    if len(qualified) >= 3 and qualified[2]["total_score"] >= QUALIFY_3RD:
+        qualified[2]["bonus_amount"] = BONUS_3RD
 
 
 def _upsert_snapshot(db: Session, result: dict, month: date) -> int:

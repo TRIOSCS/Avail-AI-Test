@@ -33,10 +33,12 @@ from app.models.performance import AvailScoreSnapshot, StockListHash
 from app.services.avail_score_service import (
     BONUS_1ST,
     BONUS_2ND,
+    BONUS_3RD,
     MIN_ACTIVITIES_SALES,
     MIN_REQS_BUYER,
     QUALIFY_1ST,
     QUALIFY_2ND,
+    QUALIFY_3RD,
     _rank_and_bonus,
     _tier,
     compute_all_avail_scores,
@@ -165,7 +167,7 @@ class TestRankAndBonus:
         _rank_and_bonus(results)
         assert results[0]["bonus_amount"] == BONUS_1ST
         assert results[1]["bonus_amount"] == BONUS_2ND
-        assert results[2]["bonus_amount"] == 0
+        assert results[2]["bonus_amount"] == BONUS_3RD
 
     def test_no_bonus_below_threshold(self):
         results = [

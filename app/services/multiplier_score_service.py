@@ -56,8 +56,10 @@ PTS_NEW_ACCOUNT = 3
 # Bonus thresholds
 BONUS_1ST = 500.0
 BONUS_2ND = 250.0
+BONUS_3RD = 100.0
 QUALIFY_SCORE_1ST = 60
 QUALIFY_SCORE_2ND = 50
+QUALIFY_SCORE_3RD = 40
 MIN_OFFERS_BUYER = 10
 MIN_ACTIVITIES_SALES = 20
 
@@ -431,6 +433,8 @@ def _attach_avail_scores_and_rank(db: Session, results: list[dict], month: date,
         qualified[0]["bonus_amount"] = BONUS_1ST
     if len(qualified) >= 2 and qualified[1]["avail_score"] >= QUALIFY_SCORE_2ND:
         qualified[1]["bonus_amount"] = BONUS_2ND
+    if len(qualified) >= 3 and qualified[2]["avail_score"] >= QUALIFY_SCORE_3RD:
+        qualified[2]["bonus_amount"] = BONUS_3RD
 
 
 def _upsert_multiplier(db: Session, result: dict, month: date) -> int:
@@ -530,6 +534,15 @@ def determine_bonus_winners(db: Session, role_type: str, month: date) -> list[di
                 "total_points": snap.total_points,
                 "avail_score": snap.avail_score,
                 "bonus_amount": BONUS_2ND,
+            })
+        elif len(winners) == 2 and snap.avail_score >= QUALIFY_SCORE_3RD:
+            winners.append({
+                "user_id": snap.user_id,
+                "user_name": user_name,
+                "rank": 3,
+                "total_points": snap.total_points,
+                "avail_score": snap.avail_score,
+                "bonus_amount": BONUS_3RD,
             })
 
     return winners

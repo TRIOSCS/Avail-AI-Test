@@ -52,6 +52,9 @@ class Element14Connector(BaseConnector):
         }
 
         r = await http.get(self.SEARCH_URL, params=params, timeout=self.timeout)
+        if r.status_code == 400:
+            logger.debug(f"element14: 400 Bad Request for term '{term}' — skipping")
+            return []
         r.raise_for_status()
         data = r.json()
 

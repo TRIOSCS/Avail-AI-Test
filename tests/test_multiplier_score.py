@@ -30,6 +30,7 @@ from app.models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot, 
 from app.services.multiplier_score_service import (
     BONUS_1ST,
     BONUS_2ND,
+    BONUS_3RD,
     MIN_OFFERS_BUYER,
     PTS_NEW_ACCOUNT,
     PTS_OFFER_BASE,

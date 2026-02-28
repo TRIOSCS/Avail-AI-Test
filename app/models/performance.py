@@ -130,7 +130,7 @@ class AvailScoreSnapshot(Base):
 
     Stores 10 individual metric scores (0–10 each) split into behaviors (50 max)
     and outcomes (50 max) for a total of 0–100. Used for buyer and sales leaderboards
-    with financial bonus for 1st/2nd place.
+    with financial bonus for 1st/2nd/3rd place.
 
     Called by: services/avail_score_service.py (daily compute), routers/performance.py
     """

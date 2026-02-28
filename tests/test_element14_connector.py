@@ -101,3 +101,47 @@ async def test_no_api_key_returns_empty():
     conn = Element14Connector(api_key="")
     results = await conn._do_search("LM358N")
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_api_search_400_returns_empty(connector, monkeypatch):
+    """400 Bad Request from element14 should return [] instead of raising."""
+    import httpx
+
+    fake_request = httpx.Request("GET", "https://api.element14.com/catalog/products")
+
+    async def mock_get(*args, **kwargs):
+        return httpx.Response(
+            400, request=fake_request, json={"error": {"code": 400, "message": "Bad Request"}}
+        )
+
+    monkeypatch.setattr("app.connectors.element14.http", type("FakeHTTP", (), {"get": mock_get})())
+    results = await connector._api_search("TPS65217CRSLR", "TPS65217CRSLR")
+    assert results == []
+
+
+@pytest.mark.asyncio
+async def test_keyword_fallback_survives_400(connector, monkeypatch):
+    """If exact MPN returns 0 and keyword fallback gets 400, return [] gracefully."""
+    import httpx
+
+    call_count = 0
+    fake_request = httpx.Request("GET", "https://api.element14.com/catalog/products")
+
+    async def mock_get(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            return httpx.Response(
+                200,
+                request=fake_request,
+                json={"manufacturerPartNumberSearchReturn": {"products": []}},
+            )
+        return httpx.Response(
+            400, request=fake_request, json={"error": {"code": 400, "message": "Bad Request"}}
+        )
+
+    monkeypatch.setattr("app.connectors.element14.http", type("FakeHTTP", (), {"get": mock_get})())
+    results = await connector._do_search("TPS65217CRSLR")
+    assert results == []
+    assert call_count == 2
