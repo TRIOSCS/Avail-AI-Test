@@ -2220,7 +2220,8 @@ export async function loadRequisitions(query = '', append = false) {
         if (isInitial && items.length >= 50) {
             _reqFullyLoaded = true;
             const bgView = _currentMainView;
-            apiFetch(`/api/requisitions?limit=200&offset=0${status}`).then(full => {
+            apiFetch(`/api/requisitions?limit=200&offset=0${status}`, { signal }).then(full => {
+                if (thisSeq !== _reqSearchSeq) return; // stale — newer request fired
                 if (_currentMainView !== bgView) return; // stale — user switched tabs
                 const fullItems = full.requisitions || full;
                 if (Array.isArray(fullItems) && fullItems.length > _reqListData.length) {
@@ -2228,7 +2229,7 @@ export async function loadRequisitions(query = '', append = false) {
                     _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
                     renderReqList();
                 }
-            }).catch(e => console.warn('req list fetch error:', e));
+            }).catch(e => { if (e.name !== 'AbortError') console.warn('req list fetch error:', e); });
         } else if (!isInitial && !query) {
             _reqFullyLoaded = true;
         }
@@ -4373,7 +4374,7 @@ function _openMobileDrillDown(reqId) {
     if (existing) existing.remove();
 
     const r = _reqListData.find(x => x.id === reqId);
-    const cust = r ? (r.customer_display || r.name || 'RFQ') : 'RFQ';
+    const cust = r ? (r.customer_display || r.name || 'Req') : 'Req';
     const total = r ? (r.requirement_count || 0) : 0;
     const offers = r ? (r.offer_count || 0) : 0;
     const badgeMap = {draft:'m-chip',active:'m-chip-blue',sourcing:'m-chip-blue',quoted:'m-chip-purple',won:'m-chip-green',lost:'m-chip-red'};
@@ -4462,7 +4463,7 @@ function _renderDdDetails(reqId, targetPanel) {
     html += `<div class="det-ctx">
         <div class="det-ctx-main">
             <div class="det-ctx-cust">${esc(meta.customer_display || '—')}</div>
-            <div class="det-ctx-name">${esc(meta.name || 'Untitled RFQ')}</div>
+            <div class="det-ctx-name">${esc(meta.name || 'Untitled Requirement')}</div>
         </div>
         <div class="det-ctx-meta">
             <div class="det-kv"><span class="det-k">Bid Due</span><span class="det-v ${dlClass}">${dlText}</span></div>
@@ -4474,7 +4475,7 @@ function _renderDdDetails(reqId, targetPanel) {
 
     // ── Parts ──
     if (!reqs.length) {
-        html += '<p style="font-size:11px;color:var(--muted);margin-top:8px">No parts on this RFQ</p>';
+        html += '<p style="font-size:11px;color:var(--muted);margin-top:8px">No parts on this requirement</p>';
     } else {
         for (const r of reqs) {
             const subs = (r.substitutes || []).filter(s => s);
@@ -5734,7 +5735,7 @@ function renderReqList() {
     if (v === 'sourcing') {
         thead = `<thead><tr>
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
-            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">RFQ ${sa('name')}</th>
+            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Requirement ${sa('name')}</th>
             <th onclick="sortReqList('score')"${thClass('score')} title="Sourcing effort score">Sourcing ${sa('score')}</th>
             <th onclick="sortReqList('deadline')"${thClass('deadline')}>Bid Due ${sa('deadline')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
@@ -5749,7 +5750,7 @@ function renderReqList() {
     } else if (v === 'archive') {
         thead = `<thead><tr>
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
-            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">RFQ ${sa('name')}</th>
+            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Requirement ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th onclick="sortReqList('offers')"${thClass('offers')}>Offers ${sa('offers')}</th>
             <th onclick="sortReqList('status')"${thClass('status')}>Outcome ${sa('status')}</th>
@@ -5761,7 +5762,7 @@ function renderReqList() {
     } else {
         thead = `<thead><tr>
             <th style="width:36px;cursor:pointer;font-size:10px" onclick="toggleAllDrillRows()" id="ddToggleAll">\u25b6</th>
-            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">RFQ ${sa('name')}</th>
+            <th onclick="sortReqList('name')"${thClass('name')} style="min-width:200px">Requirement ${sa('name')}</th>
             <th onclick="sortReqList('reqs')"${thClass('reqs')}>Parts ${sa('reqs')}</th>
             <th>Quote</th>
             <th>Sourcing</th>
@@ -6203,7 +6204,7 @@ function editReqName(reqId, span) {
     const inp = document.createElement('input');
     inp.type = 'text';
     inp.value = cur;
-    inp.placeholder = 'RFQ name';
+    inp.placeholder = 'Requirement name';
     inp.style.cssText = 'font-size:10px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;width:120px';
     inp.onclick = e => e.stopPropagation();
     let _done = false;
@@ -6485,11 +6486,11 @@ function setMainView(view, btn) {
     if (view === 'rfq') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
-        if (_reqListData.length) renderReqList(); else loadRequisitions();
+        loadRequisitions();
     } else if (view === 'sourcing') {
         _reqStatusFilter = 'all';
         _serverSearchActive = false;
-        if (_reqListData.length) renderReqList(); else loadRequisitions();
+        loadRequisitions();
         loadFollowUpsPanel();
     } else if (view === 'archive') {
         _reqStatusFilter = 'archive';
@@ -6721,7 +6722,7 @@ async function loadFollowUpsPanel() {
         const groups = {};
         for (const fu of followUps) {
             const key = fu.requisition_id || 0;
-            if (!groups[key]) groups[key] = { name: fu.requisition_name || 'Unknown RFQ', items: [] };
+            if (!groups[key]) groups[key] = { name: fu.requisition_name || 'Unknown Requirement', items: [] };
             groups[key].items.push(fu);
         }
         let html = `<div class="card" style="margin:0 16px 12px;padding:12px;border-left:3px solid var(--amber)">
