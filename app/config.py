@@ -85,13 +85,6 @@ class Settings:
         "EXPLORIUM_API_BASE_URL", "https://api.explorium.ai"
     )
 
-    # Clay OAuth2 (replaces deprecated REST API key)
-    clay_client_id: str = os.getenv("CLAY_CLIENT_ID", "")
-    clay_client_secret: str = os.getenv("CLAY_CLIENT_SECRET", "")
-    clay_redirect_uri: str = os.getenv(
-        "CLAY_REDIRECT_URI", "https://avail.trioscs.com/api/clay/callback"
-    )
-
     # Enrichment APIs
     apollo_api_key: str = os.getenv("APOLLO_API_KEY", "")
     apollo_rate_limit_per_min: int = int(os.getenv("APOLLO_RATE_LIMIT_PER_MIN", "5"))

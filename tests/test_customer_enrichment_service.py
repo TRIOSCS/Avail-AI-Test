@@ -386,37 +386,8 @@ async def test_step_clay_credit_check(db_session, _mock_settings):
 
 
 @pytest.mark.asyncio
-async def test_step_clay_passes_title_keywords(db_session, _mock_settings):
-    """_step_clay should pass role-based title keywords, not company name."""
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
-         patch("app.services.customer_enrichment_service.record_credit_usage"), \
-         patch("app.connectors.clay_client.find_contacts", new_callable=AsyncMock) as mock_clay:
-        mock_clay.return_value = []
-
-        from app.services.customer_enrichment_service import _step_clay
-        await _step_clay(db_session, "acme.com", "Acme Electronics", 5)
-
-        mock_clay.assert_awaited_once()
-        call_args = mock_clay.call_args
-        # First positional arg is domain, second is title filter
-        title_filter = call_args[0][1]
-        assert "purchasing" in title_filter
-        assert "Acme Electronics" not in title_filter
-
-
-@pytest.mark.asyncio
-async def test_step_clay_confidence_is_70(db_session, _mock_settings):
-    """Clay contacts should have confidence 70 (co-primary, not gap-filler 50)."""
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
-         patch("app.services.customer_enrichment_service.record_credit_usage"), \
-         patch("app.connectors.clay_client.find_contacts", new_callable=AsyncMock) as mock_clay:
-        mock_clay.return_value = [
-            {"full_name": "Test Person", "email": "test@acme.com", "title": "Buyer"},
-        ]
-
-        from app.services.customer_enrichment_service import _step_clay
-        result = await _step_clay(db_session, "acme.com", "Acme", 5)
-
-        assert len(result) == 1
-        assert result[0]["confidence"] == 70
-        assert result[0]["source"] == "clay"
+async def test_step_clay_returns_empty(db_session, _mock_settings):
+    """_step_clay should return empty list (Clay API deprecated)."""
+    from app.services.customer_enrichment_service import _step_clay
+    result = await _step_clay(db_session, "acme.com", "Acme Electronics", 5)
+    assert result == []

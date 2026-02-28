@@ -220,22 +220,10 @@ class _ApolloTestConnector:
 
 
 class _ClayTestConnector:
-    """Test Clay OAuth2 connection with a company enrichment call."""
+    """Clay REST API is deprecated — test always reports unavailable."""
 
     async def search(self, mpn: str) -> list[dict]:
-        from ..connectors.clay_client import enrich_company
-        from ..database import SessionLocal
-
-        db = SessionLocal()
-        try:
-            result = await enrich_company("anthropic.com", db=db)
-            db.commit()
-            if not result:
-                raise ValueError("Clay returned no data — check OAuth connection")
-            name = result.get("legal_name", "Unknown")
-            return [{"vendor_name": "Clay", "mpn_matched": f"Enriched: {name}", "status": "ok"}]
-        finally:
-            db.close()
+        raise ValueError("Clay REST API deprecated — this source is no longer available")
 
 
 class _ExploriumTestConnector:

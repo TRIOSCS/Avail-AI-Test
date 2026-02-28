@@ -184,23 +184,6 @@ class EnrichmentCreditUsage(Base):
     )
 
 
-class ClayOAuthToken(Base):
-    """Stores Clay OAuth2 access/refresh tokens (singleton row)."""
-
-    __tablename__ = "clay_oauth_tokens"
-    id = Column(Integer, primary_key=True)
-    access_token = Column(Text, nullable=False)
-    refresh_token = Column(Text, nullable=False)
-    expires_at = Column(DateTime, nullable=False)
-    scope = Column(String(255), default="mcp mcp:run-enrichment")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(
-        DateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
-
-
 class IntelCache(Base):
     """Cached intelligence data with TTL."""
 

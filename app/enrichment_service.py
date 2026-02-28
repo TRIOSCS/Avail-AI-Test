@@ -259,43 +259,17 @@ def normalize_company_output(data: dict) -> dict:
     return out
 
 
-# ── Provider: Clay (OAuth2) ─────────────────────────────────────────────
-
-
-def _get_clay_db():
-    """Get a short-lived DB session for Clay token lookups."""
-    from .database import SessionLocal
-    return SessionLocal()
+# ── Provider: Clay (deprecated — REST API returns 404) ─────────────────
 
 
 async def _clay_find_company(domain: str) -> Optional[dict]:
-    """Look up a company on Clay by domain. Uses OAuth2 clay_client."""
-    db = _get_clay_db()
-    try:
-        from .connectors.clay_client import enrich_company
-        result = await enrich_company(domain, db=db)
-        db.commit()
-        return result
-    except Exception as e:
-        logger.error("Clay company lookup error: %s", e)
-        return None
-    finally:
-        db.close()
+    """Clay REST API is deprecated. Returns None."""
+    return None
 
 
 async def _clay_find_contacts(domain: str, title_filter: str = "") -> list[dict]:
-    """Find contacts at a company via Clay. Uses OAuth2 clay_client."""
-    db = _get_clay_db()
-    try:
-        from .connectors.clay_client import find_contacts
-        result = await find_contacts(domain, title_filter, db=db)
-        db.commit()
-        return result
-    except Exception as e:
-        logger.error("Clay contacts lookup error: %s", e)
-        return []
-    finally:
-        db.close()
+    """Clay REST API is deprecated. Returns []."""
+    return []
 
 
 # ── Provider: Explorium (Vibe Prospecting) ──────────────────────────────

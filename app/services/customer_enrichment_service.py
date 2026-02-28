@@ -170,38 +170,11 @@ async def _step_lusha(
 async def _step_clay(
     db: Session, domain: str, company_name: str, needed: int
 ) -> list[dict]:
-    """Step 1b: Search Clay for contacts (co-primary with Lusha).
+    """Step 1b: Clay (deprecated — REST API no longer available).
 
-    Clay is a primary data source — always runs alongside Lusha, not just
-    as a gap-filler. Uses OAuth2 clay_client connector.
-    Results are merged and deduped before Hunter verification.
+    Clay deprecated their REST API. This step is a no-op until a
+    replacement data source is configured.
     """
-    if not can_use_credits(db, "clay", 1):
-        logger.info("Clay credits exhausted, skipping")
-        return []
-
-    try:
-        from ..connectors.clay_client import find_contacts
-
-        contacts = await find_contacts(
-            domain, "purchasing,procurement,buyer,engineer,director,vp", db=db
-        )
-        if contacts:
-            record_credit_usage(db, "clay", 1)
-            return [
-                {
-                    "full_name": c.get("full_name"),
-                    "title": c.get("title") or c.get("position"),
-                    "email": c.get("email"),
-                    "phone": c.get("phone") or c.get("phone_number"),
-                    "linkedin_url": c.get("linkedin_url"),
-                    "source": "clay",
-                    "confidence": c.get("confidence", 70),
-                }
-                for c in contacts
-            ]
-    except (ImportError, AttributeError):
-        logger.debug("Clay contact search not available")
     return []
 
 

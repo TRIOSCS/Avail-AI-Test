@@ -5915,7 +5915,6 @@ function _renderSourceCard(s, canToggle, isPlanned) {
         ${isPlanned && s.setup_notes ? '<div class="s-hint" style="margin-bottom:4px">' + s.setup_notes + '</div>' : ''}
         ${s.signup_url ? '<a href="' + s.signup_url + '" target="_blank" style="font-size:11px;color:var(--teal);text-decoration:none">' + (isPlanned ? 'More info' : 'Get API credentials') + ' ↗</a>' : ''}
         ${credsHtml ? '<div style="margin-top:10px">' + credsHtml + '</div>' : ''}
-        ${s.name === 'clay_enrichment' ? `<div id="clay-oauth-section-${s.id}" style="margin-top:10px"><button class="btn btn-primary btn-sm" onclick="connectClayOAuth()">Connect Clay (OAuth)</button> <span id="clay-oauth-status" style="font-size:11px;color:var(--text2)"></span></div>` : ''}
         <div id="test-result-${s.id}"></div>
         ${statsHtml}${errorHtml}
     </div>`;
@@ -6057,37 +6056,6 @@ async function testSourceCred(sourceId) {
     }
     btn.disabled = false;
     btn.textContent = 'Test';
-}
-
-async function connectClayOAuth() {
-    const statusEl = document.getElementById('clay-oauth-status');
-    if (statusEl) statusEl.textContent = 'Requesting authorization URL...';
-    try {
-        const data = await apiFetch('/api/enrichment/clay/authorize');
-        if (data.authorize_url) {
-            window.open(data.authorize_url, '_blank', 'width=600,height=700');
-            if (statusEl) statusEl.innerHTML = 'Authorization window opened. Complete the flow in the popup, then <a href="#" onclick="checkClayOAuthStatus();return false" style="color:var(--teal)">check status</a>.';
-        } else {
-            if (statusEl) statusEl.textContent = 'Failed to get authorization URL';
-        }
-    } catch (e) {
-        if (statusEl) statusEl.textContent = `Error: ${e.message || e}`;
-    }
-}
-
-async function checkClayOAuthStatus() {
-    const statusEl = document.getElementById('clay-oauth-status');
-    try {
-        const data = await apiFetch('/api/enrichment/clay/status');
-        if (data.connected) {
-            if (statusEl) statusEl.innerHTML = `<span style="color:var(--green)">Connected</span> — expires ${new Date(data.expires_at).toLocaleString()}`;
-            showToast('Clay OAuth connected successfully', 'success');
-        } else {
-            if (statusEl) statusEl.textContent = 'Not connected yet — complete the authorization flow first';
-        }
-    } catch (e) {
-        if (statusEl) statusEl.textContent = `Status check failed: ${e.message || e}`;
-    }
 }
 
 async function toggleSourceStatus(sourceId, currentStatus) {

@@ -34,3 +34,5 @@ scripts/deep_test.py
 # server-local backups (do not commit)
 availai_backup.sql
 app/static/public/*_backup.png
+.env.ics-worker
+.env.nc-worker
