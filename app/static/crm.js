@@ -181,7 +181,7 @@ async function loadCustomers() {
     if (_custAbort) { try { _custAbort.abort(); } catch(e){} }
     _custAbort = new AbortController();
     var cl = document.getElementById('custList');
-    if (cl && (!crmCustomers || !crmCustomers.length)) cl.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading companies…</div>';
+    if (cl && (!crmCustomers || !crmCustomers.length)) cl.innerHTML = window.skeletonRows ? window.skeletonRows(5) : '<div class="spinner-row"><div class="spinner"></div>Loading companies…</div>';
     try {
         const filter = document.getElementById('custFilter')?.value || '';
         const isSalesOnly = window.userRole === 'sales';

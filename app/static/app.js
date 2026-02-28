@@ -291,6 +291,11 @@ export function escAttr(s) {
     if (!s) return '';
     return s.replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
+window.skeletonRows = function(n) {
+    let h = '';
+    for (let i = 0; i < n; i++) h += '<div class="skeleton-row"><div class="skeleton-cell skeleton-cell-lg"></div><div class="skeleton-cell skeleton-cell-md"></div><div class="skeleton-cell skeleton-cell-sm"></div><div class="skeleton-cell skeleton-cell-md"></div></div>';
+    return h;
+};
 export function logCatchError(ctx, err) { if (err) console.warn('[' + ctx + ']', err); }
 
 /** Unified loading spinner HTML */
@@ -1036,7 +1041,7 @@ async function loadContacts() {
         return renderContacts(q);
     }
 
-    list.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading contacts\u2026</div>';
+    list.innerHTML = window.skeletonRows(5);
 
     try {
         const people = [];
@@ -9115,7 +9120,7 @@ async function loadVendorList() {
     _vendorAbort = new AbortController();
     const q = (document.getElementById('vendorSearch') || {}).value || '';
     var vl = document.getElementById('vendorList');
-    if (vl && !_vendorListData.length) vl.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading vendors…</div>';
+    if (vl && !_vendorListData.length) vl.innerHTML = window.skeletonRows(5);
     let resp;
     try { resp = await apiFetch(`/api/vendors?q=${encodeURIComponent(q)}`, {signal: _vendorAbort.signal}); }
     catch (e) { if (e.name === 'AbortError') return; logCatchError('loadVendorList', e); showToast('Failed to load vendors', 'error'); return; }
