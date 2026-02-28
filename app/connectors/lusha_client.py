@@ -139,11 +139,11 @@ async def search_contacts(
     if not api_key or not company_domain:
         return []
 
+    title_set = {t.lower() for t in (titles or [])}
+
     async with _semaphore:
         try:
-            params = {"domain": company_domain, "limit": min(limit, 20)}
-            if titles:
-                params["titles"] = ",".join(titles)
+            params = {"domain": company_domain, "limit": min(limit * 3, 50)}
             resp = await http.get(
                 f"{LUSHA_BASE}/company/contacts",
                 params=params,
@@ -157,17 +157,21 @@ async def search_contacts(
             data = resp.json()
             contacts_raw = data.get("contacts") or data.get("data") or []
             contacts = []
-            for c in contacts_raw[:limit]:
+            for c in contacts_raw:
                 first = (c.get("firstName") or "").strip()
                 last = (c.get("lastName") or "").strip()
                 full_name = f"{first} {last}".strip() if first or last else None
+                title = c.get("title") or ""
+                # Filter by title keywords locally if provided
+                if title_set and not any(kw in title.lower() for kw in title_set):
+                    continue
                 phones = c.get("phoneNumbers") or []
                 phone, phone_type = _best_phone(phones)
                 emails = c.get("emailAddresses") or []
                 best_email = _best_email(emails)
                 contacts.append({
                     "full_name": full_name,
-                    "title": c.get("title"),
+                    "title": title or None,
                     "email": best_email,
                     "phone": phone,
                     "phone_type": phone_type,
@@ -175,6 +179,8 @@ async def search_contacts(
                     "source": "lusha",
                     "confidence": c.get("confidence", 0),
                 })
+                if len(contacts) >= limit:
+                    break
             return contacts
         except Exception as e:
             logger.warning("Lusha contacts search error: %s", e)

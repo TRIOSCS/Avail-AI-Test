@@ -247,24 +247,29 @@ async def _step_apollo(
         return []
 
     try:
-        from ..enrichment_service import _safe_apollo_contacts
-        contacts = await _safe_apollo_contacts(domain, limit=needed)
-        if contacts:
+        from ..connectors.apollo_client import search_contacts as apollo_search
+
+        raw = await apollo_search(
+            company_name=company_name,
+            domain=domain,
+            limit=needed,
+        )
+        if raw:
             record_credit_usage(db, "apollo", 1)
             return [
                 {
                     "full_name": c.get("full_name"),
-                    "title": c.get("title") or c.get("position"),
+                    "title": c.get("title"),
                     "email": c.get("email"),
-                    "phone": c.get("phone") or c.get("phone_number"),
+                    "phone": c.get("phone"),
                     "linkedin_url": c.get("linkedin_url"),
                     "source": "apollo",
-                    "confidence": c.get("confidence", 30),
+                    "confidence": c.get("confidence", "low"),
                 }
-                for c in contacts
+                for c in raw
             ]
-    except (ImportError, AttributeError):
-        logger.debug("Apollo contact search not available")
+    except Exception as e:
+        logger.debug("Apollo contact search failed: %s", e)
     return []
 
 

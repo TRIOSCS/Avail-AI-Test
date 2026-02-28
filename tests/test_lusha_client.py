@@ -129,7 +129,7 @@ async def test_search_contacts_success(_mock_http):
         },
     ))
     from app.connectors.lusha_client import search_contacts
-    result = await search_contacts("acme.com", titles=["buyer", "engineer"], limit=5)
+    result = await search_contacts("acme.com", titles=["procurement", "engineer"], limit=5)
     assert len(result) == 2
     assert result[0]["full_name"] == "Alice Buyer"
     assert result[0]["email"] == "alice@acme.com"
