@@ -43,11 +43,11 @@
             <button type="button" class="search-btn" id="mainSearchBtn" onclick="triggerMainSearch()" title="Search"><svg class="search-icon" viewBox="0 0 20 20" fill="none"><circle cx="8.5" cy="8.5" r="5.5" stroke="currentColor" stroke-width="2"/><line x1="12.5" y1="12.5" x2="17" y2="17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><svg class="spinner-icon" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="2" stroke-dasharray="32" stroke-dashoffset="10" stroke-linecap="round"/></svg></button>
             <kbd class="search-hint">/</kbd>
         </div>
-        <div class="fpills fpills-sm" id="statusToggle" style="display:none">
+        <div class="fpills fpills-sm" id="statusToggle" class="hidden">
             <button type="button" class="fp fp-sm" data-sf="draft" onclick="setStatusFilter('draft',this)">Draft</button>
             <button type="button" class="fp fp-sm on" data-sf="active" onclick="setStatusFilter('active',this)">Sourcing</button>
         </div>
-        <div id="topBreadcrumb" class="top-breadcrumb" style="display:none">
+        <div id="topBreadcrumb" class="top-breadcrumb hidden">
             <button class="breadcrumb-back" onclick="closeCustDrawer();closeProspectDrawer()" title="Back to list">&larr; <span id="breadcrumbBackLabel">Accounts</span></button>
             <span class="breadcrumb-sep">›</span>
             <span class="breadcrumb-text" id="topBreadcrumbText"></span>
@@ -70,7 +70,7 @@
 </div>
 
 <!-- Sidebar rail — blue strip with chevron, click to toggle -->
-<div class="sb-rail" onclick="toggleSidebar()" title="Toggle menu" aria-label="Toggle sidebar">
+<div class="sb-rail" onclick="toggleSidebar()" title="Toggle menu" aria-label="Toggle sidebar" role="button" tabindex="0">
     <svg viewBox="0 0 10 14"><polyline points="2,2 8,7 2,12"/></svg>
 </div>
 
@@ -109,7 +109,7 @@
         <div class="sb-top-gradient sb-top-gradient-cc" data-section="cc"></div>
         <div class="sb-nav-group sb-cc-group" data-section="cc" style="--section-color:var(--blue);--section-dot:linear-gradient(135deg,#3b6ea8,#1e3a5f);--section-border:rgba(59,110,168,.18)">
             <div class="sb-section-dot"></div>
-            <div class="sb-group-header sb-cc-header" id="navCmdCenter" onclick="toggleSidebarGroup(this)" data-tip="Command Center">
+            <div class="sb-group-header sb-cc-header" id="navCmdCenter" onclick="toggleSidebarGroup(this)" data-tip="Command Center" role="button" tabindex="0">
                 <span class="sb-group-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linejoin="round"><polygon points="7.5,1 12.5,3.8 12.5,9.4 7.5,12.2 2.5,9.4 2.5,3.8"/><polygon points="16.5,1 21.5,3.8 21.5,9.4 16.5,12.2 11.5,9.4 11.5,3.8"/><polygon points="12,10.8 17,13.6 17,19.2 12,22 7,19.2 7,13.6"/></svg></span>
                 <span class="sb-group-label">Command Center</span>
                 <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
@@ -122,14 +122,14 @@
         <div class="sb-top-gradient" data-section="sourcing"></div>
         <div class="sb-nav-group" data-section="sourcing" style="--section-color:var(--sourcing-color);--section-dot:var(--sourcing-dot);--section-border:var(--sourcing-border)">
             <div class="sb-section-dot"></div>
-            <div class="sb-group-header" onclick="toggleSidebarGroup(this)">
+            <div class="sb-group-header" onclick="toggleSidebarGroup(this)" role="button" tabindex="0">
                 <span class="sb-group-icon"><svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></span>
                 <span class="sb-group-label">Opportunity</span>
                 <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
             </div>
             <div class="sb-group-items">
                 <button type="button" class="sb-nav-btn active" id="navReqs" data-tip="RFQs" onclick="sidebarNav('reqs',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg></span> RFQs</button>
-                <button type="button" class="sb-nav-btn" id="navProactive" data-tip="Proactive" onclick="sidebarNav('proactive',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></span> Proactive<span id="proactiveBadge" class="sb-badge" style="display:none"></span></button>
+                <button type="button" class="sb-nav-btn" id="navProactive" data-tip="Proactive" onclick="sidebarNav('proactive',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg></span> Proactive<span id="proactiveBadge" class="sb-badge hidden"></span></button>
                 <button type="button" class="sb-nav-btn" id="navMaterials" data-tip="Materials" onclick="sidebarNav('materials',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span> Materials</button>
                 <button type="button" class="sb-nav-btn" id="navBuyPlans" data-tip="Buy Plans" onclick="sidebarNav('buyplans',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 14l2 2 4-4"/></svg></span> Buy Plans</button>
             </div>
@@ -137,7 +137,7 @@
         <div class="sb-top-gradient sb-top-gradient-rel" data-section="relationships"></div>
         <div class="sb-nav-group" data-section="relationships" style="--section-color:var(--relationships-color);--section-dot:var(--relationships-dot);--section-border:var(--relationships-border)">
             <div class="sb-section-dot"></div>
-            <div class="sb-group-header" onclick="toggleSidebarGroup(this)">
+            <div class="sb-group-header" onclick="toggleSidebarGroup(this)" role="button" tabindex="0">
                 <span class="sb-group-icon"><svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
                 <span class="sb-group-label">Relationships</span>
                 <svg class="sb-group-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></svg>
@@ -155,11 +155,11 @@
         <div class="sb-user-menu">
             <span class="ui">{{ user_name[:2]|upper if user_name else 'U' }}</span>
             <span class="un">{{ user_name }}</span>
-            <span id="roleBadge" style="display:none"></span>
+            <span id="roleBadge" class="hidden"></span>
             {% if is_admin %}<span class="rb">Admin</span>{% endif %}
             <div class="sb-user-popover">
                 <div class="sb-user-popover-name">{{ user_name }}{% if is_admin %} <span class="rb">Admin</span>{% endif %}</div>
-                <button type="button" id="navSettings" onclick="sidebarNav('settings',this)" style="display:none"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Settings</button>
+                <button type="button" id="navSettings" onclick="sidebarNav('settings',this)" class="hidden"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Settings</button>
                 <button type="button" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Logout</button>
             </div>
         </div>
@@ -177,7 +177,7 @@
     </div>
 
     <!-- VIEW: Requisition Detail (removed — drill-down sub-tabs replaced this) -->
-    <div id="view-detail" style="display:none"></div>
+    <div id="view-detail" class="hidden"></div>
 
     <!-- Log Offer Modal -->
     <div id="logOfferModal" class="modal-bg" onclick="if(event.target===this)closeLogOfferModal()">
@@ -383,7 +383,7 @@
             </select>
             <span id="suggestedPager" style="font-size:11px;color:var(--muted);white-space:nowrap;display:flex;align-items:center;gap:4px;margin-left:auto"></span>
         </div>
-        <div id="suggestedLegend" class="scoring-legend" style="display:none">
+        <div id="suggestedLegend" class="scoring-legend hidden">
             <div class="scoring-legend-body" style="max-height:none;opacity:1">
                 <div class="scoring-legend-section">
                     <div class="scoring-legend-title">Fit Score <span class="scoring-legend-range">(0–100)</span></div>
@@ -478,7 +478,7 @@
     </div>
 
     <!-- VIEW: Materials -->
-    <div id="view-materials" style="display:none">
+    <div id="view-materials" class="hidden">
         <div class="view-toolbar">
             <h2>Materials</h2>
             <input class="sbox sbox-wide" id="materialSearch" placeholder="Search by MPN or manufacturer…" oninput="debouncedLoadMaterials()" aria-label="Search material cards">
@@ -506,7 +506,7 @@
     </div>
 
     <!-- VIEW: Buy Plans (admin only) -->
-    <div id="view-buyplans" style="display:none">
+    <div id="view-buyplans" class="hidden">
         <div class="view-toolbar">
             <h2>Buy Plans</h2>
             <div class="fpills" id="bpStatusPills">
@@ -523,7 +523,7 @@
     </div>
 
     <!-- VIEW: Proactive Offers -->
-    <div id="view-proactive" style="display:none">
+    <div id="view-proactive" class="hidden">
         <div class="vendor-header">
             <h2>Proactive Offers</h2>
             <div style="display:flex;gap:8px;align-items:center">
@@ -537,8 +537,8 @@
             <button type="button" class="tab" onclick="switchProactiveTab('scorecard',this)">Scorecard</button>
         </div>
         <div id="proactiveMatchesPanel"><p class="empty">Loading…</p></div>
-        <div id="proactiveSentPanel" style="display:none"><p class="empty">Loading…</p></div>
-        <div id="proactiveScorecardPanel" style="display:none"><p class="empty">Loading…</p></div>
+        <div id="proactiveSentPanel" class="hidden"><p class="empty">Loading…</p></div>
+        <div id="proactiveScorecardPanel" class="hidden"><p class="empty">Loading…</p></div>
     </div>
 
 <!-- New Requisition Modal -->
@@ -588,9 +588,10 @@
                 <p id="rfqPrepareStatus" style="font-size:12px;color:var(--text2);margin:0">Checking vendor contacts…</p>
             </div>
             <div id="rfqPrepareVendors" style="max-height:240px;overflow-y:auto;margin-bottom:12px"></div>
+            <div id="rfqPrepareCancel" style="display:none;margin-bottom:8px"></div>
             <button type="button" class="btn btn-ghost btn-sm" onclick="delete document.getElementById('rfqModal').dataset.loading;closeModal('rfqModal')">Cancel</button>
         </div>
-        <div id="rfqReady" style="display:none">
+        <div id="rfqReady" class="hidden">
             <p style="font-size:12px;color:var(--text2);margin-bottom:10px" id="rfqSummary"></p>
             <div style="display:flex;gap:8px;margin-bottom:8px">
                 <button type="button" class="btn btn-ghost btn-sm" onclick="rfqSelectAllVendors()">Select All</button>
@@ -603,9 +604,9 @@
                 <button type="button" class="rfq-cond-btn" onclick="setRfqCondition('new',this)">New</button>
                 <button type="button" class="rfq-cond-btn" onclick="setRfqCondition('used',this)">Used</button>
             </div>
-            <div class="field"><label>Subject</label><input id="rfqSubject" aria-label="RFQ email subject"></div>
+            <div class="field"><label>Subject <button type="button" class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;margin-left:6px" onclick="navigator.clipboard.writeText(document.getElementById('rfqSubject').value);showToast('Subject copied','success')" title="Copy subject to clipboard">Copy</button></label><input id="rfqSubject" aria-label="RFQ email subject"></div>
             <div class="field">
-                <label>Message</label>
+                <label>Message <button type="button" class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;margin-left:6px" onclick="navigator.clipboard.writeText(document.getElementById('rfqBody').value);showToast('Body copied','success')" title="Copy body to clipboard">Copy</button></label>
                 <textarea id="rfqBody" style="min-height:160px"></textarea>
             </div>
             <div id="aiDraftWrap" style="display:none;margin-bottom:8px;text-align:right">
@@ -803,7 +804,7 @@
         </div>
         <div class="mactions">
             <button type="button" class="btn btn-ghost" onclick="closeModal('suggestedContactsModal')">Cancel</button>
-            <button type="button" class="btn btn-primary" id="scAddBtn" onclick="addSelectedSuggestedContacts()" style="display:none">Add Selected (0)</button>
+            <button type="button" class="btn btn-primary hidden" id="scAddBtn" onclick="addSelectedSuggestedContacts()">Add Selected (0)</button>
         </div>
     </div>
 </div>
@@ -1088,7 +1089,7 @@
     </div>
 
     <!-- VIEW: Dashboard -->
-    <div id="view-dashboard" style="display:none">
+    <div id="view-dashboard" class="hidden">
         <div style="padding:16px 0 8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
             <div style="display:flex;align-items:center;gap:12px">
                 <h2 style="margin:0;font-size:18px">Command Center</h2>
@@ -1110,7 +1111,7 @@
     </div>
 
     <!-- VIEW: Scorecard -->
-    <div id="view-scorecard" style="display:none">
+    <div id="view-scorecard" class="hidden">
         <div class="sc-header">
             <h2>Scorecard</h2>
             <div class="sc-controls">
@@ -1122,21 +1123,12 @@
             </div>
         </div>
         <div id="scPersonalSummary"></div>
-        <div class="fpills" id="scTabs" style="margin:0 16px 12px">
-            <button type="button" class="fp on" onclick="switchScTab('leaderboard',this)">Leaderboard</button>
-            <button type="button" class="fp" onclick="switchScTab('vendors',this)">Vendor</button>
-            <button type="button" class="fp" onclick="switchScTab('buyers',this)">Buyer</button>
-            <button type="button" class="fp" onclick="switchScTab('sales',this)">Sales</button>
-            <button type="button" class="fp" onclick="switchScTab('avail-score',this)">Avail Score</button>
-            <button type="button" class="fp" onclick="switchScTab('outcomes',this)">Outcomes</button>
-            <button type="button" class="fp" id="scDigestTab" onclick="switchScTab('digest',this)" style="display:none">Digest</button>
-        </div>
         <div id="scContent"><p class="empty">Loading...</p></div>
     </div>
 
 
     <!-- VIEW: Settings (admin only) -->
-    <div id="view-settings" style="display:none">
+    <div id="view-settings" class="hidden">
         <div class="vendor-header">
             <h2>Admin Settings</h2>
         </div>
@@ -1170,23 +1162,23 @@
             </div>
         </div>
 
-        <div id="settings-health" class="settings-panel" style="display:none">
+        <div id="settings-health" class="settings-panel hidden">
             <div id="settingsHealthContent"><p class="empty">Loading...</p></div>
         </div>
 
-        <div id="settings-config" class="settings-panel" style="display:none">
+        <div id="settings-config" class="settings-panel hidden">
             <div id="settingsConfigContent"><p class="empty">Loading...</p></div>
         </div>
 
-        <div id="settings-sources" class="settings-panel" style="display:none">
+        <div id="settings-sources" class="settings-panel hidden">
             <div id="settingsSourcesList"><p class="empty">Loading...</p></div>
         </div>
 
-        <div id="settings-teams" class="settings-panel" style="display:none">
+        <div id="settings-teams" class="settings-panel hidden">
             <div id="teamsConfigContent"><p class="empty">Loading...</p></div>
         </div>
 
-        <div id="settings-enrichment" class="settings-panel" style="display:none">
+        <div id="settings-enrichment" class="settings-panel hidden">
             <div class="tabs" id="enrichTabs">
                 <button type="button" class="tab on" onclick="switchEnrichTab('queue',this)">Review Queue</button>
                 <button type="button" class="tab" onclick="switchEnrichTab('backfill',this)">Backfill</button>
@@ -1209,14 +1201,14 @@
                         <option value="vendor">Vendors</option>
                         <option value="company">Companies</option>
                     </select>
-                    <button type="button" class="btn btn-sm" onclick="bulkApproveSelected()" id="eqBulkApproveBtn" style="display:none">Approve Selected</button>
+                    <button type="button" class="btn btn-sm" onclick="bulkApproveSelected()" id="eqBulkApproveBtn" class="hidden">Approve Selected</button>
                     <span id="eqCount" class="s-hint u-ml-auto"></span>
                 </div>
                 <div id="enrichQueueList"><p class="empty">Loading...</p></div>
             </div>
 
             <!-- Backfill Tab -->
-            <div id="enrichBackfillPanel" style="display:none">
+            <div id="enrichBackfillPanel" class="hidden">
                 <div class="card s-card">
                     <h3>Start Deep Enrichment</h3>
                     <div class="s-form">
@@ -1227,7 +1219,7 @@
                         <div class="s-row"><button type="button" class="btn" onclick="startBackfill()">Start Enrichment</button> <span id="bfStatus" class="s-hint"></span></div>
                     </div>
                 </div>
-                <div id="bfProgressBox" class="s-card" style="display:none">
+                <div id="bfProgressBox" class="s-card hidden">
                     <h4 style="margin:0 0 12px">Running Job</h4>
                     <div style="background:var(--bg);border-radius:4px;height:20px;overflow:hidden;margin-bottom:8px">
                         <div id="bfProgressBar" style="height:100%;background:var(--teal);transition:width 0.3s;width:0%"></div>
@@ -1252,12 +1244,12 @@
             </div>
 
             <!-- Job History Tab -->
-            <div id="enrichJobsPanel" style="display:none">
+            <div id="enrichJobsPanel" class="hidden">
                 <div id="enrichJobsList"><p class="empty">Loading...</p></div>
             </div>
 
             <!-- M365 Connection Status -->
-            <div id="enrichM365Panel" style="display:none">
+            <div id="enrichM365Panel" class="hidden">
                 <div class="card s-card">
                     <h3>M365 Inbox Mining</h3>
                     <p class="s-desc">Users must authenticate via Azure AD to enable inbox mining for vendor email extraction.</p>
@@ -1276,7 +1268,7 @@
             </div>
         </div>
 
-        <div id="settings-tickets" class="settings-panel" style="display:none">
+        <div id="settings-tickets" class="settings-panel hidden">
             <div class="s-row" style="gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
                 <select id="ticketStatusFilter" onchange="loadTroubleTickets()" class="s-select" style="padding:6px 10px">
                     <option value="">All</option>
@@ -1289,10 +1281,10 @@
                 <span id="ticketCount" class="s-hint u-ml-auto"></span>
             </div>
             <div id="ticketList"><p class="empty">Loading...</p></div>
-            <div id="ticketDetail" style="display:none"></div>
+            <div id="ticketDetail" class="hidden"></div>
         </div>
 
-        <div id="settings-transfer" class="settings-panel" style="display:none">
+        <div id="settings-transfer" class="settings-panel hidden">
             <div style="display:flex;gap:16px;align-items:flex-end;margin-bottom:16px;flex-wrap:wrap">
                 <div>
                     <label style="font-size:11px;color:var(--muted);display:block;margin-bottom:4px">Transfer FROM (source)</label>
@@ -1307,7 +1299,7 @@
                     </select>
                 </div>
             </div>
-            <div id="transferSitesContainer" style="display:none">
+            <div id="transferSitesContainer" class="hidden">
                 <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px">
                     <label style="font-size:12px"><input type="checkbox" onchange="toggleTransferSelectAll(this.checked)"> Select All</label>
                     <span id="transferSelectedCount" style="font-size:11px;color:var(--muted)">0 selected</span>

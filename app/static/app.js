@@ -1430,7 +1430,6 @@ function _loadDashScorecard(tab) {
 }
 
 // ── Scorecard Page ──────────────────────────────────────────────────────
-let _scTab = 'leaderboard';
 let _scPeriod = '30d';
 
 function showScorecard() {
@@ -1451,12 +1450,8 @@ function showScorecard() {
         }
     }
 
-    // Show digest tab for admins
-    const digestTab = document.getElementById('scDigestTab');
-    if (digestTab) digestTab.style.display = window.__isAdmin ? '' : 'none';
-
     _loadScPersonalSummary();
-    _loadScTab(_scTab);
+    _loadDashTeamLeaderboard(document.getElementById('scContent'));
 }
 window.showScorecard = showScorecard;
 
@@ -1465,7 +1460,7 @@ function setScPerspective(persp, btn) {
     document.querySelectorAll('.sc-header .cc-persp-btn').forEach(b => b.classList.remove('on'));
     if (btn) btn.classList.add('on');
     _loadScPersonalSummary();
-    _loadScTab(_scTab);
+    _loadDashTeamLeaderboard(document.getElementById('scContent'));
 }
 window.setScPerspective = setScPerspective;
 
@@ -1473,45 +1468,33 @@ function setScPeriod(period, chip) {
     _scPeriod = period;
     document.querySelectorAll('#scPeriodPills .chip').forEach(c => c.classList.remove('on'));
     if (chip) chip.classList.add('on');
-    if (_scTab === 'outcomes') _loadScTab('outcomes');
-}
-window.setScPeriod = setScPeriod;
-
-function switchScTab(tab, btn) {
-    _scTab = tab;
-    document.querySelectorAll('#scTabs .fp').forEach(t => t.classList.remove('on'));
-    if (btn) btn.classList.add('on');
-    _loadScTab(tab);
-}
-window.switchScTab = switchScTab;
-
-function _loadScTab(tab) {
-    const el = document.getElementById('scContent');
-    if (!el) return;
-    if (tab === 'leaderboard') _loadDashTeamLeaderboard(el);
-    else if (tab === 'vendors') _loadDashVendorScorecard(el);
-    else if (tab === 'buyers') _loadDashBuyerLeaderboard(el);
-    else if (tab === 'sales') _loadDashSalesScorecard(el);
-    else if (tab === 'avail-score') _loadDashAvailScore(el);
-    else if (tab === 'outcomes') _loadScOutcomes(el);
-    else if (tab === 'digest') _loadDashDigest(el);
 }
 
 async function _loadScPersonalSummary() {
     const el = document.getElementById('scPersonalSummary');
     if (!el) return;
-    const role = _effectivePerspective() === 'sales' ? 'sales' : 'buyer';
+    const isTrader = window.userRole === 'trader';
+    const perspective = _effectivePerspective();
+    const role = perspective === 'sales' ? 'sales' : 'buyer';
+
     try {
-        const data = await apiFetch(`/api/performance/avail-scores?role=${role}`);
+        // Traders get both perspectives side by side
+        const fetches = [apiFetch(`/api/performance/avail-scores?role=${role}`)];
+        if (isTrader) {
+            const otherRole = role === 'buyer' ? 'sales' : 'buyer';
+            fetches.push(apiFetch(`/api/performance/avail-scores?role=${otherRole}`));
+        }
+        // Also fetch outcome numbers
+        const daysParam = _scPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _scPeriod === '90d' ? 90 : 30;
+        fetches.push(apiFetch(`/api/dashboard/buyer-brief?days=${daysParam}&scope=my`).catch(() => null));
+
+        const results = await Promise.all(fetches);
+        const data = results[0];
+        const otherData = isTrader ? results[1] : null;
+        const brief = isTrader ? results[2] : results[1];
+
         const entries = data.entries || [];
         const me = entries.find(e => e.user_id === window.userId);
-        if (!me) { el.innerHTML = ''; return; }
-
-        const score = (me.avail_score || 0).toFixed(0);
-        const scoreColor = me.avail_score >= 60 ? 'var(--green)' : me.avail_score >= 40 ? 'var(--amber)' : 'var(--muted)';
-
-        const behaviorMetrics = me.behaviors || [];
-        const outcomeMetrics = me.outcomes || [];
 
         const renderBars = (metrics) => metrics.map(m => {
             const pct = Math.min(100, Math.max(0, (m.score || 0)));
@@ -1523,223 +1506,67 @@ async function _loadScPersonalSummary() {
             </div>`;
         }).join('');
 
-        el.innerHTML = `<div class="sc-personal card-v2">
-            <div class="sc-personal-left">
-                <div class="sc-score-ring" style="--ring-color:${scoreColor}">
-                    <span class="sc-score-num">${score}</span>
-                    <span class="sc-score-label">Avail Score</span>
-                </div>
-            </div>
-            <div class="sc-personal-right">
-                ${behaviorMetrics.length ? '<div class="sc-metric-col"><div class="sc-metric-title">Behaviors</div>' + renderBars(behaviorMetrics) + '</div>' : ''}
-                ${outcomeMetrics.length ? '<div class="sc-metric-col"><div class="sc-metric-title">Outcomes</div>' + renderBars(outcomeMetrics) + '</div>' : ''}
-            </div>
+        const renderScoreRing = (entry, label) => {
+            if (!entry) return '';
+            const score = (entry.avail_score || 0).toFixed(0);
+            const scoreColor = entry.avail_score >= 60 ? 'var(--green)' : entry.avail_score >= 40 ? 'var(--amber)' : 'var(--muted)';
+            return `<div class="sc-score-ring" style="--ring-color:${scoreColor}">
+                <span class="sc-score-num">${score}</span>
+                <span class="sc-score-label">${esc(label)}</span>
+            </div>`;
+        };
+
+        // Outcome numbers from buyer brief
+        const fmtMoney = v => v ? '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '$0';
+        const revProfit = brief ? (brief.revenue_profit || {}) : {};
+        const completed = brief ? (brief.completed_deals || {}) : {};
+
+        let outcomesHtml = `<div class="sc-outcomes-row">
+            <div class="sc-outcome-item"><span class="sc-outcome-num" style="color:var(--green)">${fmtMoney(revProfit.est_revenue)}</span><span class="sc-outcome-lbl">Revenue</span></div>
+            <div class="sc-outcome-item"><span class="sc-outcome-num" style="color:${(revProfit.est_gross_profit || 0) > 0 ? 'var(--green)' : 'var(--text-muted)'}">${fmtMoney(revProfit.est_gross_profit)}</span><span class="sc-outcome-lbl">Profit</span></div>
+            <div class="sc-outcome-item"><span class="sc-outcome-num" style="color:var(--green)">${completed.won_count || 0}</span><span class="sc-outcome-lbl">Won</span></div>
         </div>`;
+
+        if (!me && !isTrader) { el.innerHTML = ''; return; }
+
+        if (isTrader && otherData) {
+            const otherEntries = otherData.entries || [];
+            const meOther = otherEntries.find(e => e.user_id === window.userId);
+            const primaryLabel = role === 'buyer' ? 'Purchasing' : 'Sales';
+            const otherLabel = role === 'buyer' ? 'Sales' : 'Purchasing';
+
+            el.innerHTML = `<div class="sc-personal card-v2 sc-personal-dual">
+                <div class="sc-personal-left">
+                    ${renderScoreRing(me, primaryLabel)}
+                    ${renderScoreRing(meOther, otherLabel)}
+                </div>
+                <div class="sc-personal-right">
+                    ${me && me.behaviors ? '<div class="sc-metric-col"><div class="sc-metric-title">Behaviors</div>' + renderBars(me.behaviors) + '</div>' : ''}
+                    ${me && me.outcomes ? '<div class="sc-metric-col"><div class="sc-metric-title">Outcomes</div>' + renderBars(me.outcomes) + '</div>' : ''}
+                </div>
+            </div>${outcomesHtml}`;
+        } else if (me) {
+            const score = (me.avail_score || 0).toFixed(0);
+            const scoreColor = me.avail_score >= 60 ? 'var(--green)' : me.avail_score >= 40 ? 'var(--amber)' : 'var(--muted)';
+            const behaviorMetrics = me.behaviors || [];
+            const outcomeMetrics = me.outcomes || [];
+
+            el.innerHTML = `<div class="sc-personal card-v2">
+                <div class="sc-personal-left">
+                    <div class="sc-score-ring" style="--ring-color:${scoreColor}">
+                        <span class="sc-score-num">${score}</span>
+                        <span class="sc-score-label">Avail Score</span>
+                    </div>
+                </div>
+                <div class="sc-personal-right">
+                    ${behaviorMetrics.length ? '<div class="sc-metric-col"><div class="sc-metric-title">Behaviors</div>' + renderBars(behaviorMetrics) + '</div>' : ''}
+                    ${outcomeMetrics.length ? '<div class="sc-metric-col"><div class="sc-metric-title">Outcomes</div>' + renderBars(outcomeMetrics) + '</div>' : ''}
+                </div>
+            </div>${outcomesHtml}`;
+        }
     } catch(e) {
         el.innerHTML = '';
     }
-}
-
-async function _loadScOutcomes(el) {
-    el.innerHTML = '<div class="spinner-row"><div class="spinner"></div>Loading outcomes…</div>';
-    try {
-        const daysParam = _scPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _scPeriod === '90d' ? 90 : 30;
-        const brief = await apiFetch(`/api/dashboard/buyer-brief?days=${daysParam}&scope=my`).catch(() => null);
-        if (!brief) { el.innerHTML = '<p class="empty">Failed to load outcomes data.</p>'; return; }
-
-        const revProfit = brief.revenue_profit || {};
-        const completed = brief.completed_deals || {};
-        const recentWins = completed.recent_wins || [];
-        const recentLosses = completed.recent_losses || [];
-        const fmtMoney = v => v ? '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '$0';
-        const fmtVal = v => v ? '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '\u2014';
-
-        let html = '<div class="sc-outcomes-grid">';
-
-        // Revenue & Profit card
-        const rpColor = (revProfit.est_gross_profit || 0) > 0 ? 'var(--green)' : 'var(--text-muted)';
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:${rpColor}">&#9679;</span> Revenue &amp; Profit</h3>`;
-        html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;padding:8px 12px;font-size:0.85rem">
-            <div><span style="color:var(--text-muted)">Est. Revenue</span><div style="font-size:1.25rem;font-weight:700;color:var(--green)">${fmtMoney(revProfit.est_revenue)}</div></div>
-            <div><span style="color:var(--text-muted)">Gross Profit</span><div style="font-size:1.25rem;font-weight:700;color:${rpColor}">${fmtMoney(revProfit.est_gross_profit)}</div></div>
-            <div><span style="color:var(--text-muted)">Avg Margin</span><div style="font-weight:600">${revProfit.margin_pct || 0}%</div></div>
-            <div><span style="color:var(--text-muted)">Buy Plans</span><div style="font-weight:600">${revProfit.plan_count || 0}</div></div>
-            <div style="grid-column:span 2;border-top:1px solid var(--border);padding-top:6px;margin-top:2px">
-                <span style="color:var(--text-muted)">Pipeline</span>
-                <span style="font-weight:600;margin-left:8px">${fmtMoney(revProfit.pipeline_revenue)} rev</span>
-                <span style="color:var(--text-muted);margin:0 4px">/</span>
-                <span style="font-weight:600">${fmtMoney(revProfit.pipeline_profit)} profit</span>
-                <span style="color:var(--text-muted);margin-left:4px">(${revProfit.pipeline_count || 0} plans)</span>
-            </div>
-        </div>`;
-        if (revProfit.recent_plans && revProfit.recent_plans.length) {
-            html += '<div class="cc-card-scroll">';
-            html += revProfit.recent_plans.map(bp => {
-                const profit = bp.revenue - bp.cost;
-                const profitColor = profit > 0 ? 'var(--green)' : 'var(--red)';
-                const statusLabel = bp.status === 'completed' ? 'done' : bp.status;
-                return `<div class="cc-row" onclick="goToReq(${bp.requisition_id})">
-                    <span class="cc-dot" style="background:${profitColor}"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(bp.customer_name || 'BP #' + bp.id)}</span>
-                        <span class="cc-row-detail">${fmtMoney(bp.revenue)} rev &middot; ${bp.margin_pct}% margin &middot; ${statusLabel}</span>
-                    </div>
-                </div>`;
-            }).join('');
-            html += '</div>';
-        }
-        html += '</div>';
-
-        // Won Deals card
-        const wonTotal = fmtVal(completed.won_value);
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--green)">&#9679;</span> Won Deals <span class="cc-card-count">${completed.won_count || 0}</span></h3>`;
-        html += `<div class="cc-completed-stats" style="padding:0 12px 8px;font-size:0.85rem;color:var(--text-muted)">Total value: <strong style="color:var(--green)">${wonTotal}</strong> &middot; Win rate: <strong>${completed.win_rate || 0}%</strong></div>`;
-        if (recentWins.length) {
-            html += '<div class="cc-card-scroll">';
-            html += recentWins.map(r => {
-                const val = r.value ? fmtVal(r.value) : '';
-                return `<div class="cc-row" onclick="goToReq(${r.id})">
-                    <span class="cc-dot" style="background:var(--green)"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
-                        <span class="cc-row-detail">${r.customer_name ? esc(r.customer_name) + ' &middot; ' : ''}${r.age_label || ''}</span>
-                    </div>
-                    ${val ? '<span class="cc-row-badge cc-badge-green">' + val + '</span>' : ''}
-                </div>`;
-            }).join('');
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">No won deals yet.</p>';
-        }
-        html += '</div>';
-
-        // Lost Deals card
-        const lostTotal = fmtVal(completed.lost_value);
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Lost Deals <span class="cc-card-count">${completed.lost_count || 0}</span></h3>`;
-        html += `<div class="cc-completed-stats" style="padding:0 12px 8px;font-size:0.85rem;color:var(--text-muted)">Total value: <strong style="color:var(--red)">${lostTotal}</strong></div>`;
-        if (recentLosses.length) {
-            html += '<div class="cc-card-scroll">';
-            html += recentLosses.map(r => {
-                const val = r.value ? fmtVal(r.value) : '';
-                return `<div class="cc-row" onclick="goToReq(${r.id})">
-                    <span class="cc-dot" style="background:var(--red)"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
-                        <span class="cc-row-detail">${r.customer_name ? esc(r.customer_name) + ' &middot; ' : ''}${r.age_label || ''}</span>
-                    </div>
-                    ${val ? '<span class="cc-row-badge">' + val + '</span>' : ''}
-                </div>`;
-            }).join('');
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">No lost deals.</p>';
-        }
-        html += '</div>';
-
-        html += '</div>'; // close sc-outcomes-grid
-        el.innerHTML = html;
-    } catch(e) {
-        console.error('Outcomes load error:', e);
-        el.innerHTML = '<p class="empty">Failed to load outcomes data.</p>';
-    }
-}
-
-async function _loadDashVendorScorecard(el) {
-    el.innerHTML = '<p class="empty">Loading vendor scorecard...</p>';
-    try {
-        const data = await apiFetch('/api/performance/vendors');
-        const vendors = data.vendors || data || [];
-        if (!vendors.length) { el.innerHTML = '<p class="empty">No vendor scorecard data yet</p>'; return; }
-        let html = '<table class="crm-table" style="font-size:12px"><thead><tr><th>Vendor</th><th>Score</th><th>Win Rate</th><th>Response</th><th>POs</th><th>Revenue</th></tr></thead><tbody>';
-        for (const v of vendors.slice(0, 20)) {
-            html += `<tr onclick="openVendorDrawer(${v.vendor_card_id || v.id})" style="cursor:pointer">
-                <td style="font-weight:600">${esc(v.vendor_name || v.display_name || '')}</td>
-                <td><span style="font-weight:700;font-family:'JetBrains Mono',monospace">${v.vendor_score != null ? Math.round(v.vendor_score) : '—'}</span></td>
-                <td>${v.win_rate != null ? Math.round(v.win_rate * 100) + '%' : '—'}</td>
-                <td>${v.avg_response_hours != null ? Math.round(v.avg_response_hours) + 'h' : '—'}</td>
-                <td>${v.total_pos || 0}</td>
-                <td>${v.total_revenue ? '$' + Number(v.total_revenue).toLocaleString() : '—'}</td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
-        el.innerHTML = html;
-    } catch(e) { el.innerHTML = '<p class="empty">Failed to load vendor scorecard</p>'; }
-}
-
-async function _loadDashBuyerLeaderboard(el) {
-    el.innerHTML = '<p class="empty">Loading buyer leaderboard...</p>';
-    try {
-        const data = await apiFetch('/api/performance/buyers');
-        const buyers = data.buyers || data || [];
-        if (!buyers.length) { el.innerHTML = '<p class="empty">No buyer data yet</p>'; return; }
-        let html = '<table class="crm-table" style="font-size:12px"><thead><tr><th>Buyer</th><th>Active RFQs</th><th>Offers Logged</th><th>Quotes Built</th><th>Win Rate</th></tr></thead><tbody>';
-        for (const b of buyers) {
-            html += `<tr>
-                <td style="font-weight:600">${esc(b.buyer_name || b.name || '')}</td>
-                <td>${b.active_rfqs || b.active_reqs || 0}</td>
-                <td>${b.offers_logged || b.total_offers || 0}</td>
-                <td>${b.quotes_built || b.total_quotes || 0}</td>
-                <td>${b.win_rate != null ? Math.round(b.win_rate * 100) + '%' : '—'}</td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
-        el.innerHTML = html;
-    } catch(e) { el.innerHTML = '<p class="empty">Failed to load buyer leaderboard</p>'; }
-}
-
-async function _loadDashSalesScorecard(el) {
-    el.innerHTML = '<p class="empty">Loading sales scorecard...</p>';
-    try {
-        const data = await apiFetch('/api/performance/sales');
-        const reps = data.salespeople || data || [];
-        if (!reps.length) { el.innerHTML = '<p class="empty">No sales data yet</p>'; return; }
-        let html = '<table class="crm-table" style="font-size:12px"><thead><tr><th>Salesperson</th><th>Quotes Sent</th><th>Won</th><th>Revenue</th><th>Win Rate</th></tr></thead><tbody>';
-        for (const s of reps) {
-            html += `<tr>
-                <td style="font-weight:600">${esc(s.name || '')}</td>
-                <td>${s.quotes_sent || 0}</td>
-                <td>${s.quotes_won || 0}</td>
-                <td>${s.revenue ? '$' + Number(s.revenue).toLocaleString() : '—'}</td>
-                <td>${s.win_rate != null ? Math.round(s.win_rate * 100) + '%' : '—'}</td>
-            </tr>`;
-        }
-        html += '</tbody></table>';
-        el.innerHTML = html;
-    } catch(e) { el.innerHTML = '<p class="empty">Failed to load sales scorecard</p>'; }
-}
-
-async function _loadDashDigest(el) {
-    el.innerHTML = '<p class="empty">Loading team digest...</p>';
-    try {
-        const data = await apiFetch('/api/sales/manager-digest');
-        const s = data.summary || data;
-        let html = '<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:16px">';
-        const cards = [
-            { label: 'Active RFQs', val: s.active_rfqs ?? s.total_active ?? '—', color: 'var(--blue)' },
-            { label: 'Offers Today', val: s.offers_today ?? s.new_offers ?? '—', color: 'var(--green)' },
-            { label: 'Quotes Sent', val: s.quotes_sent ?? s.total_quotes ?? '—', color: 'var(--purple)' },
-            { label: 'Pending Follow-ups', val: s.pending_followups ?? s.follow_ups ?? '—', color: 'var(--amber)' },
-        ];
-        for (const c of cards) {
-            html += `<div class="card-v2" style="padding:16px;min-width:120px;text-align:center">
-                <div style="font-size:24px;font-weight:800;color:${c.color}">${c.val}</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:4px">${c.label}</div>
-            </div>`;
-        }
-        html += '</div>';
-        el.innerHTML = html;
-    } catch(e) { el.innerHTML = '<p class="empty">Failed to load team digest</p>'; }
-}
-
-async function _loadDashAvailScore(el) {
-    const role = _effectivePerspective() === 'sales' ? 'sales' : 'buyer';
-    el.innerHTML = '<p class="empty">Loading Avail Scores...</p>';
-    try {
-        const data = await apiFetch(`/api/performance/avail-scores?role=${role}`);
-        const entries = data.entries || [];
-        if (!entries.length) { el.innerHTML = '<p class="empty">No Avail Score data yet — scores are computed daily</p>'; return; }
-        el.innerHTML = _renderAvailScoreTable(entries, role, data.month);
-    } catch(e) { el.innerHTML = '<p class="empty">Failed to load Avail Scores</p>'; }
 }
 
 async function _loadDashTeamLeaderboard(el) {
@@ -1779,11 +1606,13 @@ function _renderTeamLeaderboard(entries, role, month) {
         const qualTag = (!e.avail_qualified && !e.mult_qualified) ? '<span class="lb-unqualified">Not Qualified</span>' : '';
         const meClass = isMe ? ' lb-me' : '';
 
+        const traderTag = e.user_role === 'trader' ? '<span class="trader-badge">[T]</span>' : '';
+
         html += `<div class="lb-entry${meClass}" onclick="this.classList.toggle('lb-open');this.querySelector('.lb-detail').classList.toggle('open')">
             <div class="lb-row">
                 <span class="lb-rank ${rankClass}">${e.rank || '—'}</span>
                 <div class="lb-name-col">
-                    <span class="lb-name">${esc(e.user_name)}${isMe ? ' <span class="lb-you">(You)</span>' : ''}</span>
+                    <span class="lb-name">${esc(e.user_name)}${traderTag}${isMe ? ' <span class="lb-you">(You)</span>' : ''}</span>
                     <div class="lb-tags">${qualTag}${bonusTag}</div>
                 </div>
                 <div class="lb-scores">
@@ -1994,6 +1823,17 @@ function _ccTrend(curr, prev) {
     return '<span style="color:var(--muted);font-size:10px;margin-left:4px">&mdash;</span>';
 }
 
+function _attnTypeBadge(type) {
+    const map = {
+        stale_account: 'account',
+        req_at_risk: 'req',
+        needs_quote: 'quote',
+        expiring_quote: 'expiring',
+        buyplan_pending: 'buy plan',
+    };
+    return map[type] || type;
+}
+
 async function loadDashboard() {
     const el = document.getElementById('dashboardContent');
     if (!el) return;
@@ -2006,129 +1846,73 @@ async function loadDashboard() {
 
     try {
         const daysParam = _dashPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _dashPeriod === '90d' ? 90 : 30;
-
-        // Reuse already-loaded req data when available (avoids duplicate fetch)
         const haveReqs = _reqListData && _reqListData.length > 0;
 
-        // Fetch all sales-focused data in parallel
-        const [brief, needsAttn, freshReqs, quotes, scorecard, hotOffers] = await Promise.all([
-            apiFetch('/api/dashboard/morning-brief').catch(() => null),
-            apiFetch(`/api/dashboard/needs-attention?days=${daysParam}`).catch(() => []),
+        // 3-zone: status bar + attention feed + work queue (no morning brief API call)
+        const [attnFeed, freshReqs, quotes, hotOffers] = await Promise.all([
+            apiFetch(`/api/dashboard/attention-feed?days=${daysParam}&scope=my`).catch(() => []),
             haveReqs ? Promise.resolve(null) : apiFetch('/api/requisitions').catch(() => []),
             apiFetch('/api/quotes').catch(() => []),
-            apiFetch('/api/proactive/scorecard').catch(() => null),
             apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(() => []),
         ]);
 
         const reqs = haveReqs ? _reqListData : freshReqs;
         const reqList = Array.isArray(reqs) ? reqs : (reqs && reqs.requisitions ? reqs.requisitions : []);
         const quoteList = Array.isArray(quotes) ? quotes : [];
-        const attnList = Array.isArray(needsAttn) ? needsAttn : [];
+        const feedItems = Array.isArray(attnFeed) ? attnFeed : [];
         const targetId = _dashUserId || window.userId;
-
-        // Filter to selected user's data
         const myReqs = targetId ? reqList.filter(r => r.created_by === targetId || r.sales_user_id === targetId) : reqList;
 
-        // Stat calculations
         const now = new Date();
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-
         const myOpenReqs = myReqs.filter(r => ['open','active','sourcing'].includes(r.status)).length;
         const quotesOut = quoteList.filter(q => q.status === 'sent' && !q.result).length;
         const wonThisMonth = myReqs.filter(r => r.status === 'won' && r.updated_at && new Date(r.updated_at) >= monthStart).length;
-        const wonLastMonth = myReqs.filter(r => r.status === 'won' && r.updated_at && new Date(r.updated_at) >= lastMonthStart && new Date(r.updated_at) <= lastMonthEnd).length;
         const lostThisMonth = myReqs.filter(r => r.status === 'lost' && r.updated_at && new Date(r.updated_at) >= monthStart).length;
         const winRate = (wonThisMonth + lostThisMonth) > 0 ? Math.round(wonThisMonth / (wonThisMonth + lostThisMonth) * 100) : 0;
-        const lostLastMonth = myReqs.filter(r => r.status === 'lost' && r.updated_at && new Date(r.updated_at) >= lastMonthStart && new Date(r.updated_at) <= lastMonthEnd).length;
-        const lastWinRate = (wonLastMonth + lostLastMonth) > 0 ? Math.round(wonLastMonth / (wonLastMonth + lostLastMonth) * 100) : 0;
 
         let html = '';
 
-        // ── Morning Brief ──
-        if (brief) {
-            const briefText = brief.text || null;
-            const stats = brief.stats || {};
-            if (briefText) {
-                html += `<div class="cc-brief"><p>${esc(briefText)}</p></div>`;
-            } else {
-                html += `<div class="cc-brief cc-brief-fallback"><p>You have ${stats.stale_accounts || 0} stale accounts, ${stats.quotes_awaiting || 0} quotes awaiting response, and ${stats.new_proactive_matches || 0} new proactive matches.</p></div>`;
-            }
-        }
-
-        // ── Stat Row ──
-        html += `<div class="cc-stat-row">
-            <div class="cc-stat"><div class="cc-stat-num">${myOpenReqs}</div><div class="cc-stat-label">My Open Reqs</div></div>
-            <div class="cc-stat"><div class="cc-stat-num">${quotesOut}</div><div class="cc-stat-label">Quotes Out</div></div>
-            <div class="cc-stat"><div class="cc-stat-num" style="color:var(--green)">${wonThisMonth}${_ccTrend(wonThisMonth, wonLastMonth)}</div><div class="cc-stat-label">Won This Month</div></div>
-            <div class="cc-stat"><div class="cc-stat-num">${winRate}%${_ccTrend(winRate, lastWinRate)}</div><div class="cc-stat-label">Win Rate</div></div>
+        // ── Zone 1: Status Bar ──
+        html += `<div class="status-bar">
+            <span class="status-bar-item">Open Reqs: <b>${myOpenReqs}</b></span>
+            <span class="status-bar-sep">|</span>
+            <span class="status-bar-item">Quotes Out: <b>${quotesOut}</b></span>
+            <span class="status-bar-sep">|</span>
+            <span class="status-bar-item">Won: <b style="color:var(--green)">${wonThisMonth}</b></span>
+            <span class="status-bar-sep">|</span>
+            <span class="status-bar-item">Win Rate: <b>${winRate}%</b></span>
         </div>`;
 
-        // ── Detail Cards Grid ──
-        html += '<div class="cc-cards-grid">';
-
-        // Card 1: Needs Attention (revenue-enhanced, top 15, scrollable)
-        // Sort by priority: highest open_quote_value first, then most overdue
-        const attnSorted = [...attnList].sort((a, b) => {
-            const aVal = (a.open_quote_value || 0) + (a.days_since_contact || 0) * 100;
-            const bVal = (b.open_quote_value || 0) + (b.days_since_contact || 0) * 100;
-            return bVal - aVal;
-        });
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Needs Attention <span class="cc-card-count">${attnList.length}</span></h3>`;
-        if (attnSorted.length) {
-            html += '<div class="cc-card-scroll">';
-            html += attnSorted.slice(0, 15).map(a => {
-                const hasQuote = a.open_quote_value > 0;
-                const neverContacted = !a.last_outreach_at;
-                const dotColor = (neverContacted || (hasQuote && a.days_since_contact >= 5)) ? 'var(--red)' : 'var(--amber)';
-                let detail = '';
-                if (neverContacted) detail = 'Never contacted';
-                else if (hasQuote) detail = `$${(a.open_quote_value/1000).toFixed(1)}K quote going cold &middot; ${a.days_since_contact}d`;
-                else detail = `${a.days_since_contact}d ago &middot; ${a.last_channel || 'unknown'}`;
-                return `<div class="cc-row" onclick="goToCompany(${a.company_id})">
+        // ── Zone 2: Needs Attention (unified prioritized list) ──
+        html += `<div class="card-v2 attention-feed">
+            <h3 class="cc-card-title">Needs Attention <span class="cc-card-count">${feedItems.length}</span></h3>`;
+        if (feedItems.length) {
+            html += feedItems.map(item => {
+                const dotColor = item.urgency === 'critical' ? 'var(--red)' : item.urgency === 'warning' ? 'var(--amber)' : 'var(--green)';
+                const typeBadge = _attnTypeBadge(item.type);
+                const onclick = item.link_type === 'company' ? `goToCompany(${item.link_id})` : `goToReq(${item.link_id})`;
+                return `<div class="cc-row" onclick="${onclick}">
                     <span class="cc-dot" style="background:${dotColor}"></span>
                     <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(a.company_name)}${a.is_strategic ? ' <span class="cc-star">&#9733;</span>' : ''}</span>
-                        <span class="cc-row-detail">${detail}</span>
+                        <span class="cc-row-name">${esc(item.title)}</span>
+                        <span class="cc-row-detail">${esc(item.detail)}</span>
                     </div>
-                    ${a.open_req_count ? '<span class="cc-row-badge">' + a.open_req_count + ' open</span>' : ''}
-                </div>`;
-            }).join('');
-            html += '</div>';
-            if (attnList.length > 15) {
-                html += `<div class="cc-view-all"><a class="cc-link" onclick="sidebarNav('customers',document.getElementById('navCustomers'))">View All ${attnList.length} &rarr;</a></div>`;
-            }
-        } else {
-            html += '<p class="cc-empty">All accounts contacted recently.</p>';
-        }
-        html += '</div>';
-
-        // Card 2: Quotes Awaiting Response
-        const awaitingQuotes = quoteList.filter(q => q.status === 'sent' && !q.result).sort((a, b) => new Date(a.sent_at || 0) - new Date(b.sent_at || 0));
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--amber)">&#9679;</span> Quotes Awaiting Response <span class="cc-card-count">${awaitingQuotes.length}</span></h3>`;
-        if (awaitingQuotes.length) {
-            html += awaitingQuotes.slice(0, 5).map(q => {
-                const daysSent = q.sent_at ? Math.floor((now - new Date(q.sent_at)) / 86400000) : 0;
-                const dotColor = daysSent >= 7 ? 'var(--red)' : daysSent >= 3 ? 'var(--amber)' : 'var(--green)';
-                return `<div class="cc-row" onclick="goToReq(${q.requisition_id || q.id})">
-                    <span class="cc-dot" style="background:${dotColor}"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(q.quote_number || 'Quote #' + q.id)}${q.customer_name ? ' &mdash; ' + esc(q.customer_name) : ''}</span>
-                        <span class="cc-row-detail">${daysSent}d since sent${q.subtotal ? ' &middot; $' + Number(q.subtotal).toLocaleString() : ''}</span>
-                    </div>
+                    <span class="cc-row-badge">${typeBadge}</span>
                 </div>`;
             }).join('');
         } else {
-            html += '<p class="cc-empty">No quotes waiting for response.</p>';
+            html += '<p class="cc-empty">Nothing urgent right now.</p>';
         }
         html += '</div>';
 
-        // Card 3: Ready to Quote
+        // ── Zone 3: Work Queue ──
+        html += '<div class="work-queue">';
+
         const readyToQuote = myReqs.filter(r => ['open','active','sourcing'].includes(r.status) && (r.offer_count || 0) > 0 && (r.quote_count || 0) === 0);
         html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--blue)">&#9679;</span> Ready to Quote <span class="cc-card-count">${readyToQuote.length}</span></h3>`;
         if (readyToQuote.length) {
-            html += readyToQuote.slice(0, 5).map(r => `<div class="cc-row" onclick="goToReq(${r.id})">
+            html += readyToQuote.slice(0, 8).map(r => `<div class="cc-row" onclick="goToReq(${r.id})">
                 <span class="cc-dot" style="background:var(--blue)"></span>
                 <div class="cc-row-body">
                     <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
@@ -2140,62 +1924,11 @@ async function loadDashboard() {
         }
         html += '</div>';
 
-        // Card 4: Upcoming Deadlines
-        const withDeadline = myReqs.filter(r => r.deadline && ['open','active','sourcing'].includes(r.status));
-        withDeadline.sort((a, b) => {
-            if (a.deadline === 'ASAP') return -1;
-            if (b.deadline === 'ASAP') return 1;
-            return new Date(a.deadline) - new Date(b.deadline);
-        });
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Upcoming Deadlines <span class="cc-card-count">${withDeadline.length}</span></h3>`;
-        if (withDeadline.length) {
-            html += withDeadline.slice(0, 5).map(r => {
-                let dotColor = 'var(--green)';
-                let deadlineLabel = r.deadline;
-                if (r.deadline === 'ASAP') {
-                    dotColor = 'var(--red)';
-                } else {
-                    const dl = new Date(r.deadline);
-                    const daysLeft = Math.floor((dl - now) / 86400000);
-                    if (daysLeft <= 0) { dotColor = 'var(--red)'; deadlineLabel = daysLeft === 0 ? 'Today' : Math.abs(daysLeft) + 'd overdue'; }
-                    else if (daysLeft <= 3) { dotColor = 'var(--amber)'; deadlineLabel = daysLeft + 'd left'; }
-                    else { deadlineLabel = r.deadline; }
-                }
-                return `<div class="cc-row" onclick="goToReq(${r.id})">
-                    <span class="cc-dot" style="background:${dotColor}"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
-                        <span class="cc-row-detail">${deadlineLabel}</span>
-                    </div>
-                </div>`;
-            }).join('');
-        } else {
-            html += '<p class="cc-empty">No upcoming deadlines.</p>';
-        }
-        html += '</div>';
-
-        // Card 5: Proactive Intelligence (inside grid)
-        if (scorecard) {
-            const sc = scorecard;
-            const rate = sc.conversion_rate != null ? Math.round(sc.conversion_rate) : 0;
-            html += `<div class="card-v2 cc-card">
-                <h3 class="cc-card-title"><span style="color:var(--sourcing-color)">&#9679;</span> Proactive Intelligence</h3>
-                <div class="cc-proactive-stats">
-                    <span class="cc-pill">Sent: <b>${sc.total_sent || 0}</b></span>
-                    <span class="cc-pill">Quoted: <b>${sc.total_quoted || 0}</b></span>
-                    <span class="cc-pill">POs: <b>${sc.total_po || 0}</b></span>
-                    <span class="cc-pill">Rate: <b>${rate}%</b></span>
-                </div>
-                <div style="margin-top:6px"><a class="cc-link" onclick="sidebarNav('proactive',document.getElementById('navProactive'))">View all matches &rarr;</a></div>
-            </div>`;
-        }
-
-        // Card 6: Hot Offers — recent vendor offers/responses
         const hotList = Array.isArray(hotOffers) ? hotOffers : [];
         html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--green)">&#9679;</span> Hot Offers <span class="cc-card-count">${hotList.length}</span></h3>`;
         if (hotList.length) {
             html += '<div class="cc-card-scroll">';
-            html += hotList.map(o => {
+            html += hotList.slice(0, 8).map(o => {
                 const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
                 return `<div class="cc-row" onclick="goToReq(${o.requisition_id})">
                     <span class="cc-dot" style="background:var(--green)"></span>
@@ -2211,8 +1944,7 @@ async function loadDashboard() {
         }
         html += '</div>';
 
-        html += '</div>'; // close cc-cards-grid
-
+        html += '</div>'; // close work-queue
         el.innerHTML = html;
     } catch (err) {
         console.error('loadDashboard error:', err);
@@ -2223,8 +1955,9 @@ async function loadDashboard() {
 async function loadBuyerDashboard(el) {
     try {
         const daysParam = _dashPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _dashPeriod === '90d' ? 90 : 30;
-        const [brief, hotOffers] = await Promise.all([
+        const [brief, attnFeed, hotOffers] = await Promise.all([
             apiFetch(`/api/dashboard/buyer-brief?days=${daysParam}&scope=${_buyerScope}`).catch(() => null),
+            apiFetch(`/api/dashboard/attention-feed?days=${daysParam}&scope=${_buyerScope}`).catch(() => []),
             apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(() => []),
         ]);
 
@@ -2235,191 +1968,80 @@ async function loadBuyerDashboard(el) {
 
         const kpis = brief.kpis || {};
         const pipeline = brief.pipeline || {};
-        const newReqs = brief.new_requirements || [];
         const reviewOffers = brief.offers_to_review || [];
-        const reqsAtRisk = brief.reqs_at_risk || [];
-        const quotesDue = brief.quotes_due_soon || [];
-        const needsResp = brief.needs_response || [];
-        const expiringQ = brief.expiring_quotes || [];
         const bpPending = brief.buyplans_pending || [];
         const hotList = Array.isArray(hotOffers) ? hotOffers : [];
+        const feedItems = Array.isArray(attnFeed) ? attnFeed : [];
 
         let html = '';
 
-        // ── KPI Stat Row ──
-        html += `<div class="cc-stat-row cc-stat-row-buyer">
-            <div class="cc-stat">
-                <div class="cc-stat-num" style="color:var(--sourcing-color)">${kpis.sourcing_ratio || 0}%</div>
-                <div class="cc-stat-label">Sourcing Ratio</div>
-                <div class="cc-stat-sub">${kpis.sourced_reqs || 0}/${kpis.total_reqs || 0} reqs</div>
-            </div>
-            <div class="cc-stat">
-                <div class="cc-stat-num" style="color:var(--blue)">${kpis.offer_quote_rate || 0}%</div>
-                <div class="cc-stat-label">Offer&rarr;Quote</div>
-                <div class="cc-stat-sub">${kpis.quoted_offers || 0}/${kpis.total_offers || 0} offers</div>
-            </div>
-            <div class="cc-stat">
-                <div class="cc-stat-num" style="color:var(--green)">${kpis.quote_win_rate || 0}%</div>
-                <div class="cc-stat-label">Win Rate</div>
-                <div class="cc-stat-sub">${kpis.won || 0}W / ${kpis.lost || 0}L</div>
-            </div>
-            <div class="cc-stat">
-                <div class="cc-stat-num" style="color:var(--purple)">${kpis.buyplan_po_rate || 0}%</div>
-                <div class="cc-stat-label">BP&rarr;PO</div>
-                <div class="cc-stat-sub">${kpis.confirmed_pos || 0}/${kpis.total_buyplans || 0} plans</div>
-            </div>
+        // ── Zone 1: Status Bar ──
+        html += `<div class="status-bar">
+            <span class="status-bar-item">Sourcing: <b style="color:var(--sourcing-color)">${kpis.sourcing_ratio || 0}%</b></span>
+            <span class="status-bar-sep">|</span>
+            <span class="status-bar-item">Offer&rarr;Quote: <b style="color:var(--blue)">${kpis.offer_quote_rate || 0}%</b></span>
+            <span class="status-bar-sep">|</span>
+            <span class="status-bar-item">Win Rate: <b style="color:var(--green)">${kpis.quote_win_rate || 0}%</b></span>
+            <span class="status-bar-sep">|</span>
+            <span class="status-bar-item">Pipeline: <b>${pipeline.active_reqs || 0}</b> active</span>
+            <span class="status-bar-sep">|</span>
+            <span class="status-bar-item">Active: <b>${(pipeline.active_reqs || 0) + (pipeline.quotes_out || 0)}</b></span>
         </div>`;
 
-        // ── Pipeline Summary Bar ──
-        html += `<div class="cc-pipeline-bar">
-            <span class="cc-pipe-item"><span class="cc-pipe-num">${pipeline.active_reqs || 0}</span> Active</span>
-            <span class="cc-pipe-sep">&rarr;</span>
-            <span class="cc-pipe-item"><span class="cc-pipe-num">${pipeline.quotes_out || 0}</span> Quoted</span>
-            <span class="cc-pipe-sep">&rarr;</span>
-            <span class="cc-pipe-item" style="color:var(--green)"><span class="cc-pipe-num">${pipeline.won_this_month || 0}</span> Won</span>
-            <span class="cc-pipe-sep">/</span>
-            <span class="cc-pipe-item" style="color:var(--red)"><span class="cc-pipe-num">${pipeline.lost_this_month || 0}</span> Lost</span>
-            <span class="cc-pipe-sep">&rarr;</span>
-            <span class="cc-pipe-item" style="color:var(--purple)"><span class="cc-pipe-num">${pipeline.buyplans_approved || 0}</span> Buy Plans</span>
-        </div>`;
-
-        // ── Cards Grid ──
-        html += '<div class="cc-cards-grid">';
-
-        // Card 1: New Requirements
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--blue)">&#9679;</span> New Requirements <span class="cc-card-count">${newReqs.length}</span></h3>`;
-        if (newReqs.length) {
-            html += '<div class="cc-card-scroll">';
-            html += newReqs.map(r => {
-                const dotColor = r.deadline === 'ASAP' ? 'var(--red)' : r.has_offers ? 'var(--green)' : 'var(--amber)';
-                const badge = r.has_offers ? '<span class="cc-row-badge cc-badge-green">has offers</span>' : '';
-                return `<div class="cc-row" onclick="goToReq(${r.id})">
+        // ── Zone 2: Needs Attention (unified prioritized list) ──
+        html += `<div class="card-v2 attention-feed">
+            <h3 class="cc-card-title">Needs Attention <span class="cc-card-count">${feedItems.length}</span></h3>`;
+        if (feedItems.length) {
+            html += feedItems.map(item => {
+                const dotColor = item.urgency === 'critical' ? 'var(--red)' : item.urgency === 'warning' ? 'var(--amber)' : 'var(--green)';
+                const typeBadge = _attnTypeBadge(item.type);
+                const onclick = item.link_type === 'company' ? `goToCompany(${item.link_id})` : `goToReq(${item.link_id})`;
+                return `<div class="cc-row" onclick="${onclick}">
                     <span class="cc-dot" style="background:${dotColor}"></span>
                     <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
-                        <span class="cc-row-detail">${r.customer_name ? esc(r.customer_name) + ' &middot; ' : ''}${r.age_label}${r.deadline ? ' &middot; ' + esc(r.deadline) : ''}</span>
+                        <span class="cc-row-name">${esc(item.title)}</span>
+                        <span class="cc-row-detail">${esc(item.detail)}</span>
                     </div>
-                    ${badge}
+                    <span class="cc-row-badge">${typeBadge}</span>
                 </div>`;
             }).join('');
-            html += '</div>';
         } else {
-            html += '<p class="cc-empty">No new requirements.</p>';
+            html += '<p class="cc-empty">Nothing urgent right now.</p>';
         }
         html += '</div>';
 
-        // Card 2: Offers to Review
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--amber)">&#9679;</span> Offers to Review <span class="cc-card-count">${reviewOffers.length}</span></h3>`;
-        if (reviewOffers.length) {
-            html += '<div class="cc-card-scroll">';
-            html += reviewOffers.map(o => {
-                const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
-                return `<div class="cc-row" onclick="goToReq(${o.requisition_id})">
-                    <span class="cc-dot" style="background:var(--amber)"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(o.vendor_name)}</span>
-                        <span class="cc-row-detail"><span class="mono">${esc(o.mpn)}</span> &middot; ${price} &middot; ${o.age_label}</span>
-                    </div>
-                    <span class="cc-row-badge">${o.source || 'manual'}</span>
-                </div>`;
-            }).join('');
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">No offers pending review.</p>';
-        }
-        html += '</div>';
-
+        // ── Zone 3: Work Queue ──
+        html += '<div class="work-queue">';
         const fmtMoney = v => v ? '$' + Number(v).toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0}) : '$0';
 
-        // Card 3b: Requisitions at Risk
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Reqs at Risk <span class="cc-card-count">${reqsAtRisk.length}</span></h3>`;
-        if (reqsAtRisk.length) {
+        // New Offers (merge Offers to Review + Hot Offers)
+        const allOffers = [...reviewOffers.map(o => ({...o, _src: 'review'})), ...hotList.map(o => ({...o, _src: 'hot'}))];
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--amber)">&#9679;</span> New Offers <span class="cc-card-count">${allOffers.length}</span></h3>`;
+        if (allOffers.length) {
             html += '<div class="cc-card-scroll">';
-            html += reqsAtRisk.map(r => {
-                const dotColor = r.urgency === 'critical' ? 'var(--red)' : r.urgency === 'warning' ? 'var(--amber)' : 'var(--text-muted)';
-                return `<div class="cc-row" onclick="goToReq(${r.id})">
+            html += allOffers.slice(0, 10).map(o => {
+                const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
+                const dotColor = o._src === 'review' ? 'var(--amber)' : 'var(--green)';
+                return `<div class="cc-row" onclick="goToReq(${o.requisition_id})">
                     <span class="cc-dot" style="background:${dotColor}"></span>
                     <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
-                        <span class="cc-row-detail">${r.customer_name ? esc(r.customer_name) + ' &middot; ' : ''}${esc(r.risk)}</span>
+                        <span class="cc-row-name">${esc(o.vendor_name)}</span>
+                        <span class="cc-row-detail"><span class="mono">${esc(o.mpn)}</span> &middot; ${price} &middot; ${o.age_label || o.source || ''}</span>
                     </div>
-                    <span class="cc-row-badge">${r.num_offers} offer${r.num_offers !== 1 ? 's' : ''}</span>
+                    <span class="cc-row-badge">${o._src === 'review' ? 'review' : 'hot'}</span>
                 </div>`;
             }).join('');
             html += '</div>';
         } else {
-            html += '<p class="cc-empty">No requisitions at risk.</p>';
+            html += '<p class="cc-empty">No new offers.</p>';
         }
         html += '</div>';
 
-        // Card 4: Quotes Due Soon
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Quotes Due Soon <span class="cc-card-count">${quotesDue.length}</span></h3>`;
-        if (quotesDue.length) {
-            html += '<div class="cc-card-scroll">';
-            html += quotesDue.map(r => {
-                const dotColor = r.urgency === 'critical' ? 'var(--red)' : r.urgency === 'warning' ? 'var(--amber)' : 'var(--green)';
-                const dlLabel = r.deadline === 'ASAP' ? 'ASAP' : r.days_left <= 0 ? Math.abs(r.days_left) + 'd overdue' : r.days_left + 'd left';
-                return `<div class="cc-row" onclick="goToReq(${r.id})">
-                    <span class="cc-dot" style="background:${dotColor}"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
-                        <span class="cc-row-detail">${dlLabel}</span>
-                    </div>
-                </div>`;
-            }).join('');
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">No upcoming deadlines.</p>';
-        }
-        html += '</div>';
-
-        // Card 5a: Needs Response (offers received, no quote sent)
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--amber)">&#9679;</span> Needs Quote <span class="cc-card-count">${needsResp.length}</span></h3>`;
-        if (needsResp.length) {
-            html += '<div class="cc-card-scroll">';
-            html += needsResp.map(r => {
-                return `<div class="cc-row" onclick="goToReq(${r.id})">
-                    <span class="cc-dot" style="background:var(--amber)"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(r.customer_name || r.name || 'REQ #' + r.id)}</span>
-                        <span class="cc-row-detail">${r.offer_count} offer${r.offer_count !== 1 ? 's' : ''} ready &middot; ${r.age_label || ''}</span>
-                    </div>
-                </div>`;
-            }).join('');
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">All offers have been quoted.</p>';
-        }
-        html += '</div>';
-
-        // Card 5b: Expiring Quotes (sent, no customer response, expiring soon)
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Expiring Quotes <span class="cc-card-count">${expiringQ.length}</span></h3>`;
-        if (expiringQ.length) {
-            html += '<div class="cc-card-scroll">';
-            html += expiringQ.map(q => {
-                const dotColor = q.days_left <= 0 ? 'var(--red)' : q.days_left <= 2 ? 'var(--amber)' : 'var(--text-muted)';
-                const dlLabel = q.days_left <= 0 ? Math.abs(q.days_left) + 'd expired' : q.days_left + 'd left';
-                const val = q.value ? fmtMoney(q.value) : '';
-                return `<div class="cc-row" onclick="goToReq(${q.requisition_id})">
-                    <span class="cc-dot" style="background:${dotColor}"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(q.customer_name || q.quote_number)}</span>
-                        <span class="cc-row-detail">${q.quote_number} &middot; ${dlLabel}</span>
-                    </div>
-                    ${val ? '<span class="cc-row-badge">' + val + '</span>' : ''}
-                </div>`;
-            }).join('');
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">No quotes expiring soon.</p>';
-        }
-        html += '</div>';
-
-        // Card 5c: Buy Plans Pending (awaiting approval or PO)
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Buy Plans Pending <span class="cc-card-count">${bpPending.length}</span></h3>`;
+        // Buy Plans Pending
         if (bpPending.length) {
+            html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Buy Plans Pending <span class="cc-card-count">${bpPending.length}</span></h3>`;
             html += '<div class="cc-card-scroll">';
-            html += bpPending.map(bp => {
+            html += bpPending.slice(0, 8).map(bp => {
                 const statusLabel = bp.status === 'pending' ? 'awaiting approval' : bp.so_status === 'pending' ? 'SO pending' : bp.status;
                 const dotColor = bp.status === 'pending' ? 'var(--amber)' : 'var(--purple)';
                 return `<div class="cc-row" onclick="goToReq(${bp.requisition_id})">
@@ -2430,34 +2052,10 @@ async function loadBuyerDashboard(el) {
                     </div>
                 </div>`;
             }).join('');
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">No buy plans pending.</p>';
+            html += '</div></div>';
         }
-        html += '</div>';
 
-        // Card 6: Hot Offers
-        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--green)">&#9679;</span> Hot Offers <span class="cc-card-count">${hotList.length}</span></h3>`;
-        if (hotList.length) {
-            html += '<div class="cc-card-scroll">';
-            html += hotList.map(o => {
-                const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
-                return `<div class="cc-row" onclick="goToReq(${o.requisition_id})">
-                    <span class="cc-dot" style="background:var(--green)"></span>
-                    <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(o.vendor_name)}</span>
-                        <span class="cc-row-detail"><span class="mono">${esc(o.mpn)}</span> &middot; ${price} &middot; ${o.age_label}</span>
-                    </div>
-                </div>`;
-            }).join('');
-            html += '</div>';
-        } else {
-            html += '<p class="cc-empty">No new offers.</p>';
-        }
-        html += '</div>';
-
-        html += '</div>'; // close cc-cards-grid
-
+        html += '</div>'; // close work-queue
         el.innerHTML = html;
     } catch (err) {
         console.error('loadBuyerDashboard error:', err);
@@ -2605,7 +2203,7 @@ export async function loadRequisitions(query = '', append = false) {
                     _reqListData.forEach(r => { if (r.customer_display) _reqCustomerMap[r.id] = r.customer_display; });
                     renderReqList();
                 }
-            }).catch(() => {});
+            }).catch(e => console.warn('req list fetch error:', e));
         } else if (!isInitial && !query) {
             _reqFullyLoaded = true;
         }
@@ -2713,7 +2311,7 @@ async function _switchDdTab(reqId, tabName) {
             const dot = row?.querySelector('.new-offers-dot');
             if (dot) dot.remove();
             // Persist dismissal server-side
-            apiFetch(`/api/requisitions/${reqId}/dismiss-new-offers`, { method: 'POST' }).catch(() => {});
+            apiFetch(`/api/requisitions/${reqId}/dismiss-new-offers`, { method: 'POST' }).catch(e => console.warn('dismiss offers error:', e));
         }
     }
     // Update pill state
@@ -2799,7 +2397,7 @@ function _renderDdActivity(reqId, data, panel) {
         }
     }
     const af = _ddActFilter[reqId] || 'all';
-    let html = `<div style="display:flex;gap:16px;margin-bottom:8px;font-size:11px;align-items:center;flex-wrap:wrap">
+    let html = `<div style="display:flex;gap:16px;margin-bottom:8px;font-size:11px;align-items:center;flex-wrap:wrap;position:sticky;top:0;z-index:2;background:var(--bg2,var(--bg1));padding:6px 0">
         <span><b>${totalContacts}</b> RFQs sent</span>
         <span><b>${totalReplies}</b> replies</span>
         <span><b>${totalCalls}</b> calls</span>
@@ -2826,7 +2424,23 @@ function _renderDdActivity(reqId, data, panel) {
         const hasReply = responses.length > 0;
         const dotColor = hasReply ? 'var(--green)' : 'var(--amber)';
         html += `<div class="act-vendor-card">`;
-        html += `<div style="font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;margin-bottom:6px"><span style="width:7px;height:7px;border-radius:50%;background:${dotColor};display:inline-block"></span>${esc(v.vendor_name)} <span style="font-weight:400;color:var(--muted);font-size:11px">${contacts.length} sent, ${responses.length} replied</span></div>`;
+        // Per-part status summary from parsed responses
+        let partStatusHtml = '';
+        const parsedResponses = responses.filter(r => r.parsed_data && r.parsed_data.parts && r.parsed_data.parts.length);
+        if (parsedResponses.length) {
+            const statusCounts = {};
+            for (const r of parsedResponses) for (const p of r.parsed_data.parts) {
+                const s = (p.status || 'unknown').replace('_', ' ');
+                statusCounts[s] = (statusCounts[s] || 0) + 1;
+            }
+            const statusColors = {quoted:'var(--green)', 'no stock':'var(--red)', 'counter offer':'var(--amber)', 'follow up':'var(--amber)'};
+            const pills = Object.entries(statusCounts).map(([s,c]) => {
+                const clr = statusColors[s] || 'var(--muted)';
+                return `<span style="font-size:9px;padding:1px 5px;border-radius:3px;background:${clr}15;color:${clr};text-transform:capitalize">${c} ${s}</span>`;
+            }).join(' ');
+            partStatusHtml = `<div style="display:flex;gap:4px;margin-top:2px;flex-wrap:wrap">${pills}</div>`;
+        }
+        html += `<div style="font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px;margin-bottom:6px;flex-wrap:wrap"><span style="width:7px;height:7px;border-radius:50%;background:${dotColor};display:inline-block"></span>${esc(v.vendor_name)} <span style="font-weight:400;color:var(--muted);font-size:11px">${contacts.length} sent, ${responses.length} replied</span>${partStatusHtml}</div>`;
         // Build timeline with email bodies
         const timeline = [];
         for (const c of contacts) timeline.push({type:'sent', date: c.created_at, subject: c.subject || '', body: c.body || '', text: `${c.contact_type} to ${c.vendor_contact || 'vendor'}`, user: c.user_name, parts: c.parts_included || []});
@@ -2849,7 +2463,8 @@ function _renderDdActivity(reqId, data, panel) {
                 if (isReply && t.confidence != null) {
                     const pct = Math.round(t.confidence * 100);
                     const cc = pct >= 80 ? 'var(--green)' : pct >= 50 ? 'var(--amber)' : 'var(--red)';
-                    confBadge = ` <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:${cc}20;color:${cc}">${pct}%</span>`;
+                    const label = pct >= 80 ? '\u2713 High' : pct >= 50 ? '\u26a0 Review' : '\u26a0 Low';
+                    confBadge = ` <span style="font-size:9px;padding:1px 4px;border-radius:3px;background:${cc}20;color:${cc}" title="Parse confidence: ${pct}%">${label}</span>`;
                 }
                 // Classification badge
                 let classBadge = '';
@@ -5460,7 +5075,7 @@ function _ddVendorInlineBadges(s) {
 }
 
 function _ddCopyContact(text, type) {
-    navigator.clipboard.writeText(text).then(() => showToast(type + ' copied', 'success')).catch(() => {});
+    navigator.clipboard.writeText(text).then(() => showToast(type + ' copied', 'success')).catch(e => console.warn('clipboard copy failed:', e));
 }
 
 function _ddRenderTierRows(sightings, reqId, sel, groupLabel, targetPrice) {
@@ -5565,8 +5180,8 @@ function _renderSourcingDrillDown(reqId, targetPanel) {
                 _ddScoreCache[reqId][rs.requirement_id] = rs;
             }
             _renderSourcingDrillDown(reqId); // re-render with scores
-        }).catch(() => {});
-        _ddScoreCache[reqId] = {}; // mark as loading
+        }).catch(e => console.warn('score fetch error:', e));
+        _ddScoreCache[reqId] = { _loading: true }; // sentinel to prevent duplicate fetches
     }
     const scoreMap = _ddScoreCache[reqId] || {};
 
@@ -7086,12 +6701,14 @@ async function loadFollowUpsPanel() {
         let html = `<div class="card" style="margin:0 16px 12px;padding:12px;border-left:3px solid var(--amber)">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
                 <span style="font-weight:700;font-size:13px;color:var(--amber)">Awaiting Vendor Replies (${followUps.length})</span>
+                <button class="btn btn-warning btn-sm" id="bulkFollowUpBtn" onclick="sendBulkFollowUp()" style="font-size:10px;display:none">Send Selected</button>
             </div>`;
         for (const [rfqId, g] of Object.entries(groups)) {
             html += `<div style="margin-bottom:6px"><span style="font-weight:600;font-size:12px">${esc(g.name)}</span></div>`;
             for (const fu of g.items) {
                 const dayColor = fu.days_waiting > 5 ? 'var(--red)' : fu.days_waiting > 2 ? 'var(--amber)' : 'var(--green)';
                 html += `<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:11px">
+                    ${fu.contact_id ? `<input type="checkbox" class="fu-cb" data-contact-id="${fu.contact_id}" onchange="_updateBulkFollowUpBtn()">` : ''}
                     <span style="color:var(--text2)">${esc(fu.vendor_name)}</span>
                     <span style="color:var(--muted)">${esc(fu.vendor_email || '')}</span>
                     <span style="color:${dayColor};font-weight:600">${fu.days_waiting}d</span>
@@ -7104,6 +6721,29 @@ async function loadFollowUpsPanel() {
         panel.innerHTML = html;
         panel.style.display = '';
     } catch(e) { if (e.name !== 'AbortError') panel.style.display = 'none'; }
+}
+
+function _updateBulkFollowUpBtn() {
+    const checked = document.querySelectorAll('.fu-cb:checked').length;
+    const btn = document.getElementById('bulkFollowUpBtn');
+    if (btn) {
+        btn.style.display = checked > 0 ? '' : 'none';
+        btn.textContent = `Send ${checked} Follow-up${checked > 1 ? 's' : ''}`;
+    }
+}
+
+async function sendBulkFollowUp() {
+    const checked = [...document.querySelectorAll('.fu-cb:checked')];
+    const contactIds = checked.map(cb => parseInt(cb.dataset.contactId)).filter(Boolean);
+    if (!contactIds.length) return;
+    const btn = document.getElementById('bulkFollowUpBtn');
+    await guardBtn(btn, 'Sending…', async () => {
+        const data = await apiFetch('/api/follow-ups/send-batch', {
+            method: 'POST', body: { contact_ids: contactIds }
+        });
+        showToast(`Sent ${data.sent} of ${data.total} follow-ups`, data.sent > 0 ? 'success' : 'error');
+        loadFollowUps();
+    });
 }
 
 async function createRequisition() {
@@ -7994,17 +7634,25 @@ async function openBatchRfqModal(prebuiltGroups) {
     if (needsLookup.length) {
         // Prevent backdrop click from closing modal during lookup
         modal.dataset.loading = '1';
+        const abortCtrl = new AbortController();
+        // Show cancel button
+        const rfqCancelWrap = document.getElementById('rfqPrepareCancel');
+        if (rfqCancelWrap) {
+            rfqCancelWrap.innerHTML = '<button class="btn btn-danger btn-sm" id="rfqCancelLookup">Cancel Lookup</button>';
+            rfqCancelWrap.style.display = '';
+            document.getElementById('rfqCancelLookup').onclick = () => abortCtrl.abort();
+        }
         try {
             const rfqStatus = document.getElementById('rfqPrepareStatus');
             if (rfqStatus) rfqStatus.textContent = `Finding contacts for ${needsLookup.length} vendor(s)…`;
             needsLookup.forEach(v => { v.lookup_status = 'loading'; });
             _renderRfqPrepareProgress();
-            // Look up all vendors in parallel instead of one-at-a-time
             let done = 0;
             await Promise.all(needsLookup.map(async (v) => {
+                if (abortCtrl.signal.aborted) { v.lookup_status = 'no_email'; v.lookup_fail_reason = 'Cancelled'; return; }
                 try {
                     const data = await apiFetch('/api/vendor-contact', {
-                        method: 'POST', body: { vendor_name: v.vendor_name }
+                        method: 'POST', body: { vendor_name: v.vendor_name }, signal: abortCtrl.signal
                     });
                     v.emails = data.emails || [];
                     v.phones = data.phones || [];
@@ -8013,9 +7661,14 @@ async function openBatchRfqModal(prebuiltGroups) {
                     v.lookup_status = v.emails.length ? 'ready' : 'no_email';
                     v.contact_source = data.source || null;
                     v.contact_tier = data.tier || 0;
+                    if (!v.emails.length) {
+                        v.lookup_fail_reason = data.fail_reason || (data.card_id ? 'Scrape returned no emails' : 'No vendor card found');
+                    }
                 } catch (e) {
+                    if (e.name === 'AbortError') { v.lookup_status = 'no_email'; v.lookup_fail_reason = 'Cancelled'; return; }
                     console.warn(`Vendor lookup failed for ${v.vendor_name}:`, e);
                     v.lookup_status = 'no_email';
+                    v.lookup_fail_reason = 'Lookup error: ' + (e.message || 'unknown');
                 }
                 done++;
                 const st = document.getElementById('rfqPrepareStatus'); if (st) st.textContent = `Finding contacts… ${done}/${needsLookup.length} done`;
@@ -8023,6 +7676,7 @@ async function openBatchRfqModal(prebuiltGroups) {
             }));
         } finally {
             delete modal.dataset.loading;
+            if (rfqCancelWrap) rfqCancelWrap.style.display = 'none';
         }
     }
 
@@ -8036,8 +7690,12 @@ function _renderRfqPrepareProgress() {
     const el = document.getElementById('rfqPrepareVendors');
     if (!el) return;
     el.innerHTML = rfqVendorData.filter(v => v.lookup_status !== 'ready' || v.needs_lookup).map(v => {
-        const icon = v.lookup_status === 'loading' ? '⏳' : v.lookup_status === 'ready' ? '✅' : v.lookup_status === 'no_email' ? '❌' : '⏳';
-        return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px">${icon} <strong>${esc(v.display_name || v.vendor_name)}</strong></div>`;
+        const icon = v.lookup_status === 'loading' ? '<span class="rfq-spin">⏳</span>'
+            : v.lookup_status === 'ready' ? '✅'
+            : v.lookup_status === 'no_email' ? '❌'
+            : '⏳';
+        const reason = v.lookup_status === 'no_email' ? `<span style="color:#9ca3af;margin-left:4px">${esc(v.lookup_fail_reason || 'No contact found')}</span>` : '';
+        return `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:12px">${icon} <strong>${esc(v.display_name || v.vendor_name)}</strong>${reason}</div>`;
     }).join('');
 }
 
@@ -8048,30 +7706,41 @@ function renderRfqVendors() {
         if (v.lookup_status === 'loading') {
             emailHtml = '<span class="email-loading">⏳ Looking up…</span>';
         } else if (v.lookup_status === 'no_email' || (!v.emails.length && v.lookup_status !== 'pending')) {
+            const failReason = v.lookup_fail_reason || 'No email found';
             emailHtml = `<div class="rfq-email-row">
-                <span class="email-none">No email found</span>
-                <input class="rfq-email-input" placeholder="Enter email…" onchange="rfqManualEmail(${i},this.value)">
+                <span class="email-none" title="${escAttr(failReason)}">${esc(failReason)}</span>
+                <input type="email" class="rfq-email-input" placeholder="Enter email…" onchange="rfqManualEmail(${i},this.value)">
                 <button class="btn btn-danger btn-sm" onclick="rfqRemoveVendor(${i})" title="Remove">✕</button>
             </div>`;
         } else if (v.emails.length) {
-            const opts = v.emails.map(e =>
-                `<option value="${escAttr(e)}" ${e === v.selected_email ? 'selected' : ''}>${esc(e)}</option>`
-            ).join('');
-            emailHtml = `<div class="rfq-email-row">
-                <select class="email-select" onchange="rfqSelectEmail(${i},this.value)">
-                    ${opts}
-                    <option value="__custom__">✏️ Enter custom…</option>
-                </select>
-                <button class="btn btn-danger btn-sm" onclick="rfqRemoveVendor(${i})" title="Remove">✕</button>
-            </div>`;
+            if (v._editing_email) {
+                emailHtml = `<div class="rfq-email-row">
+                    <input type="email" class="rfq-email-input" placeholder="Enter email…" autofocus
+                        onkeydown="if(event.key==='Enter')rfqConfirmCustomEmail(${i},this);if(event.key==='Escape'){delete rfqVendorData[${i}]._editing_email;renderRfqVendors()}"
+                        onblur="rfqConfirmCustomEmail(${i},this)">
+                    <button class="btn btn-danger btn-sm" onclick="rfqRemoveVendor(${i})" title="Remove">✕</button>
+                </div>`;
+            } else {
+                const opts = v.emails.map(e =>
+                    `<option value="${escAttr(e)}" ${e === v.selected_email ? 'selected' : ''}>${esc(e)}</option>`
+                ).join('');
+                emailHtml = `<div class="rfq-email-row">
+                    <select class="email-select" onchange="rfqSelectEmail(${i},this.value)">
+                        ${opts}
+                        <option value="__custom__">✏️ Enter custom…</option>
+                    </select>
+                    <button class="btn btn-danger btn-sm" onclick="rfqRemoveVendor(${i})" title="Remove">✕</button>
+                </div>`;
+            }
         } else {
             emailHtml = '<span class="email-loading">⏳ Pending…</span>';
         }
 
-        // Source indicator
+        // Source indicator with tooltips
         const srcLabels = { cached: '💾 Cached', website_scrape: '🌐 Website', ai_lookup: '🤖 AI', apollo: '📇 Apollo', hunter: '📧 Hunter', rocketreach: '🚀 RocketReach', clay: '🧱 Clay', explorium: '🔬 Explorium', ai: '🤖 AI', enrichment: '🔍 Auto' };
+        const srcTitles = { cached: 'Contact from local database cache', website_scrape: 'Email scraped from vendor website', ai_lookup: 'Contact found via AI search', apollo: 'Enriched via Apollo.io', hunter: 'Found via Hunter.io email finder', rocketreach: 'Found via RocketReach', clay: 'Enriched via Clay.com', explorium: 'Enriched via Explorium', ai: 'Contact found via AI search', enrichment: 'Auto-enriched from multiple sources' };
         const srcKey = (v.contact_source || '').split('+')[0];
-        const srcBadge = v.contact_source ? `<span class="rfq-src-badge">${srcLabels[srcKey] || v.contact_source}</span>` : '';
+        const srcBadge = v.contact_source ? `<span class="rfq-src-badge" title="${escAttr(srcTitles[srcKey] || 'Contact source: ' + v.contact_source)}">${srcLabels[srcKey] || v.contact_source}</span>` : '';
 
         // Parts breakdown
         let partsHtml = '';
@@ -8205,43 +7874,73 @@ Trio Supply Chain Solutions`;
 }
 
 function renderRfqMessage() {
-    // Subject uses all unique parts across all vendors being sent
-    const allParts = [...new Set(rfqAllParts)];
-    const condTag = rfqCondition !== 'any' ? ` [${rfqCondition.toUpperCase()}]` : '';
+    // Restore saved draft if available
+    const draftKey = `rfq_draft_${currentReqId}`;
+    const saved = localStorage.getItem(draftKey);
     const rfqSubj = document.getElementById('rfqSubject');
-    if (rfqSubj) rfqSubj.value = `RFQ: ${allParts.slice(0, 5).join(', ')}${allParts.length > 5 ? '…' : ''}${condTag} — ${currentReqName}`;
-
-    // Preview body shows a sample for the first vendor with parts to send
     const rfqBod = document.getElementById('rfqBody');
-    const sample = rfqVendorData.find(v => _vendorHasPartsToSend(v));
-    if (sample) {
-        if (rfqBod) rfqBod.value = buildVendorBody(sample) || '';
+
+    if (saved) {
+        try {
+            const draft = JSON.parse(saved);
+            if (rfqSubj) rfqSubj.value = draft.subject || '';
+            if (rfqBod) rfqBod.value = draft.body || '';
+        } catch { /* ignore corrupt draft */ }
     } else {
-        if (rfqBod) rfqBod.value = '(No vendors with new parts to send)';
+        // Subject uses all unique parts across all vendors being sent
+        const allParts = [...new Set(rfqAllParts)];
+        const condTag = rfqCondition !== 'any' ? ` [${rfqCondition.toUpperCase()}]` : '';
+        if (rfqSubj) rfqSubj.value = `RFQ: ${allParts.slice(0, 5).join(', ')}${allParts.length > 5 ? '…' : ''}${condTag} — ${currentReqName}`;
+
+        // Preview body shows a sample for the first vendor with parts to send
+        const sample = rfqVendorData.find(v => _vendorHasPartsToSend(v));
+        if (sample) {
+            if (rfqBod) rfqBod.value = buildVendorBody(sample) || '';
+        } else {
+            if (rfqBod) rfqBod.value = '(No vendors with new parts to send)';
+        }
     }
+
+    // Auto-save on edit
+    if (rfqSubj) rfqSubj.oninput = () => _saveRfqDraft();
+    if (rfqBod) rfqBod.oninput = () => _saveRfqDraft();
+
     // Show AI Draft button for admins
     const aiWrap = document.getElementById('aiDraftWrap');
     if (aiWrap) aiWrap.style.display = '';
 }
 
+function _saveRfqDraft() {
+    if (!currentReqId) return;
+    const subject = document.getElementById('rfqSubject')?.value || '';
+    const body = document.getElementById('rfqBody')?.value || '';
+    localStorage.setItem(`rfq_draft_${currentReqId}`, JSON.stringify({ subject, body }));
+}
+
 
 function rfqSelectEmail(idx, value) {
     if (value === '__custom__') {
-        const custom = prompt('Enter email address:');
-        if (custom && custom.includes('@')) {
-            const email = custom.trim().toLowerCase();
-            rfqVendorData[idx].selected_email = email;
-            if (!rfqVendorData[idx].emails.includes(email)) {
-                rfqVendorData[idx].emails.unshift(email);
-            }
-            apiFetch('/api/vendor-card/add-email', {
-                method: 'POST', body: { vendor_name: rfqVendorData[idx].vendor_name, email }
-            }).catch(() => showToast('Failed to save email', 'error'));
-        }
+        // Switch to inline input mode instead of prompt()
+        rfqVendorData[idx]._editing_email = true;
         renderRfqVendors();
     } else {
         rfqVendorData[idx].selected_email = value;
     }
+}
+
+function rfqConfirmCustomEmail(idx, inputEl) {
+    const email = (inputEl.value || '').trim().toLowerCase();
+    if (email && email.includes('@')) {
+        rfqVendorData[idx].selected_email = email;
+        if (!rfqVendorData[idx].emails.includes(email)) {
+            rfqVendorData[idx].emails.unshift(email);
+        }
+        apiFetch('/api/vendor-card/add-email', {
+            method: 'POST', body: { vendor_name: rfqVendorData[idx].vendor_name, email }
+        }).catch(() => showToast('Failed to save email', 'error'));
+    }
+    delete rfqVendorData[idx]._editing_email;
+    renderRfqVendors();
 }
 
 function rfqManualEmail(idx, value) {
@@ -8296,6 +7995,7 @@ async function sendBatchRfq() {
                 showToast(`Sent ${sent} of ${results.length} RFQs`, 'success');
             }
             closeModal('rfqModal');
+            localStorage.removeItem(`rfq_draft_${currentReqId}`);
             selectedSightings.clear();
             // Clear sourcing drill-down state so next expand re-fetches fresh data
             if (_ddSelectedSightings[currentReqId]) delete _ddSelectedSightings[currentReqId];
@@ -10554,10 +10254,16 @@ async function toggleVpThreadMessages(conversationId, itemEl) {
 }
 
 // ── Sales Notifications ──────────────────────────────────────────────────
+let _notifCloseHandler = null;
 function toggleNotifications() {
     const panel = document.getElementById('notifPanel');
     if (!panel) return;
     const opening = !panel.classList.contains('open');
+    // Remove any stale outside-click listener before toggling
+    if (_notifCloseHandler) {
+        document.removeEventListener('click', _notifCloseHandler, true);
+        _notifCloseHandler = null;
+    }
     panel.classList.toggle('open');
     if (opening) {
         // Position below the bell button (desktop or mobile)
@@ -10572,15 +10278,16 @@ function toggleNotifications() {
         loadNotifications();
         // Close on click outside
         setTimeout(() => {
-            function _closeNotif(e) {
+            _notifCloseHandler = function(e) {
                 if (!panel.contains(e.target)
                     && !e.target.closest('.filter-wrap')
                     && !e.target.closest('.mobile-notif-btn')) {
                     panel.classList.remove('open');
-                    document.removeEventListener('click', _closeNotif, true);
+                    document.removeEventListener('click', _notifCloseHandler, true);
+                    _notifCloseHandler = null;
                 }
-            }
-            document.addEventListener('click', _closeNotif, true);
+            };
+            document.addEventListener('click', _notifCloseHandler, true);
         }, 0);
     }
 }
@@ -11149,7 +10856,7 @@ Object.assign(window, {
     openEditVendorContact, openLogOfferFromList, openMaterialPopup,
     openMaterialPopupByMpn, openVendorLogNoteModal,
     openVendorPopup, placeVendorCall, renderReqList, requoteFromList,
-    rfqIncludeRepeats, rfqManualEmail, rfqRemoveVendor, rfqSelectEmail,
+    rfqConfirmCustomEmail, rfqIncludeRepeats, rfqManualEmail, rfqRemoveVendor, rfqSelectEmail,
     rfqToggleVendor, saveDeadline, sendEmailReply, sendFollowUp,
     setToolbarQuickFilter, showView, sidebarNav, sortMatList, sortReqList,
     selectVendor,
@@ -11177,13 +10884,13 @@ Object.assign(window, {
     _renderRfqPrepareProgress, _renderSourcingDrillDown, _reqBadge,
     _saveAddRow, _selfGuard, _sortArrow, _switchDdTab,
     _timeAgo, _updateDdBulkButton, _updateDrillToggleLabel,
-    _updateToolbarStats, _vendorHasPartsToSend,
+    _updateBulkFollowUpBtn, _updateToolbarStats, _vendorHasPartsToSend,
     // HTML template inline handlers
     clearFileInput, clearNrSite, closeLogOfferModal, closeTroubleChat,
     createRequisition, debouncedFilterSites, debouncedFilterVendors,
     debouncedLoadCustomers, debouncedLoadMaterials, debouncedMainSearch,
     doStockImport, filterVendorList, openNewReqModal, openTroubleChat,
-    rfqDeselectAllVendors, rfqSelectAllVendors, saveVendorContact,
+    rfqDeselectAllVendors, rfqSelectAllVendors, saveVendorContact, sendBulkFollowUp,
     saveVendorLogCall, saveVendorLogNote, sendBatchRfq, setMainView,
     setRfqCondition, setStatusFilter, setVendorTier, showFileReady,
     submitLogOffer, submitPastedRows, submitTrouble, toggleMobileSidebar,
