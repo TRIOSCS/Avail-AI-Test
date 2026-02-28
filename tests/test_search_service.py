@@ -1649,6 +1649,34 @@ class TestFetchFresh:
         assert len(arrow_results) == 1
 
     @pytest.mark.asyncio
+    async def test_dedup_integer_vendor_sku(self, db_session):
+        """Dedup handles integer vendor_sku without crashing (OEMSecrets returns int SKUs)."""
+        with patch("app.services.credential_service.get_credential", return_value="fake-key"), \
+             patch("app.search_service.NexarConnector") as MockNexar, \
+             patch("app.search_service.BrokerBinConnector") as MockBB, \
+             patch("app.search_service.EbayConnector") as MockEbay, \
+             patch("app.search_service.DigiKeyConnector") as MockDK, \
+             patch("app.search_service.MouserConnector") as MockMouser, \
+             patch("app.search_service.OEMSecretsConnector") as MockOEM, \
+             patch("app.search_service.SourcengineConnector") as MockSrc, \
+             patch("app.search_service.Element14Connector") as MockE14, \
+             patch("app.search_service.TMEConnector") as MockTME:
+
+            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14, MockTME]
+            _setup_mock_connectors(mocks)
+
+            # OEMSecrets returns vendor_sku as integer
+            MockOEM.return_value.search = AsyncMock(return_value=[
+                {"vendor_name": "Farnell", "mpn_matched": "LM317T",
+                 "vendor_sku": 4200830, "source_type": "oemsecrets"},
+            ])
+
+            results, stats = await _fetch_fresh(["LM317T"], db_session)
+
+        assert len(results) == 1
+        assert results[0]["vendor_sku"] == 4200830
+
+    @pytest.mark.asyncio
     async def test_junk_vendors_filtered(self, db_session):
         """Junk vendor names (empty, 'unknown', etc.) are filtered out."""
         with patch("app.services.credential_service.get_credential", return_value="fake-key"), \

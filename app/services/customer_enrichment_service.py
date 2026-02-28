@@ -1,8 +1,9 @@
-"""Customer Enrichment Service — sequential waterfall: Lusha → Clay → Hunter → Apollo.
+"""Customer Enrichment Service — waterfall: [Lusha + Clay] → Hunter → Apollo.
 
-Enriches customer accounts with verified contacts. Each provider fills gaps
-left by the previous one. Credit-budget-aware, respects cooldown periods,
-and enforces data quality (phone-verified dials, Hunter-verified emails).
+Enriches customer accounts with verified contacts. Lusha and Clay are
+co-primary sources that run concurrently. Hunter verifies all emails.
+Apollo is last-resort fallback. Credit-budget-aware, respects cooldown
+periods, and enforces data quality (phone-verified dials, verified emails).
 
 Priority: Assigned accounts first, then unassigned accounts.
 
@@ -169,14 +170,19 @@ async def _step_lusha(
 async def _step_clay(
     db: Session, domain: str, company_name: str, needed: int
 ) -> list[dict]:
-    """Step 2: Search Clay for contacts to fill gaps."""
-    if needed <= 0 or not can_use_credits(db, "clay", 1):
-        logger.info("Clay credits exhausted or no contacts needed, skipping")
+    """Step 1b: Search Clay for contacts (co-primary with Lusha).
+
+    Clay is a primary data source — always runs alongside Lusha, not just
+    as a gap-filler. Results are merged and deduped before Hunter verification.
+    """
+    if not can_use_credits(db, "clay", 1):
+        logger.info("Clay credits exhausted, skipping")
         return []
 
     try:
         from ..enrichment_service import _clay_find_contacts
-        contacts = await _clay_find_contacts(domain, company_name, limit=needed)
+        # Pass title keywords for role-based search, not company_name
+        contacts = await _clay_find_contacts(domain, "purchasing,procurement,buyer,engineer,director,vp")
         if contacts:
             record_credit_usage(db, "clay", 1)
             return [
@@ -187,7 +193,7 @@ async def _step_clay(
                     "phone": c.get("phone") or c.get("phone_number"),
                     "linkedin_url": c.get("linkedin_url"),
                     "source": "clay",
-                    "confidence": c.get("confidence", 50),
+                    "confidence": c.get("confidence", 70),
                 }
                 for c in contacts
             ]
@@ -271,11 +277,10 @@ async def enrich_customer_account(
 
     Steps:
     1. Check 90-day cooldown (skip if force=True)
-    2. Lusha — search contacts by buyer/technical/decision-maker titles
-    3. Clay — fill gaps for unfilled roles
-    4. Hunter — verify ALL emails, reject non-deliverable
-    5. Apollo — last resort for remaining gaps
-    6. Dedup by email, validate quality, update company status
+    2. Lusha + Clay — co-primary sources, run concurrently
+    3. Hunter — verify ALL emails, reject non-deliverable
+    4. Apollo — last resort for remaining gaps
+    5. Dedup by email, validate quality, update company status
 
     Returns summary dict with contacts_added, contacts_verified, sources_used.
     """
@@ -313,21 +318,30 @@ async def enrich_customer_account(
     all_contacts = []
     sources_used = []
 
-    # Step 1: Lusha (primary)
-    lusha_contacts = await _step_lusha(db, domain, company.name, needed)
+    # Step 1: Lusha + Clay (co-primary, run concurrently)
+    lusha_contacts, clay_contacts = await asyncio.gather(
+        _step_lusha(db, domain, company.name, needed),
+        _step_clay(db, domain, company.name, needed),
+        return_exceptions=True,
+    )
+
+    # Handle exceptions from either source gracefully
+    if isinstance(lusha_contacts, Exception):
+        logger.warning("Lusha step failed: %s", lusha_contacts)
+        lusha_contacts = []
+    if isinstance(clay_contacts, Exception):
+        logger.warning("Clay step failed: %s", clay_contacts)
+        clay_contacts = []
+
     if lusha_contacts:
         all_contacts.extend(lusha_contacts)
         sources_used.append("lusha")
         logger.info("Lusha returned %d contacts for %s", len(lusha_contacts), company.name)
 
-    # Step 2: Clay (gap fill)
-    still_needed = max(0, needed - len(all_contacts))
-    if still_needed > 0:
-        clay_contacts = await _step_clay(db, domain, company.name, still_needed)
-        if clay_contacts:
-            all_contacts.extend(clay_contacts)
-            sources_used.append("clay")
-            logger.info("Clay returned %d contacts for %s", len(clay_contacts), company.name)
+    if clay_contacts:
+        all_contacts.extend(clay_contacts)
+        sources_used.append("clay")
+        logger.info("Clay returned %d contacts for %s", len(clay_contacts), company.name)
 
     # Dedup before verification
     all_contacts = _dedup_contacts(all_contacts)
@@ -351,6 +365,17 @@ async def enrich_customer_account(
 
     # Final dedup
     all_contacts = _dedup_contacts(all_contacts)
+
+    # Validate contacts before saving
+    from .contact_quality import validate_contact
+    validated = []
+    for contact in all_contacts:
+        is_valid, issues = validate_contact(contact)
+        if is_valid:
+            validated.append(contact)
+        else:
+            logger.debug("Skipping invalid contact: %s (%s)", contact.get("email"), issues)
+    all_contacts = validated
 
     # Save contacts
     saved_count = 0

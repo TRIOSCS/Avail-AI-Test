@@ -25,6 +25,7 @@ from ..models import (
 from ..rate_limit import limiter
 from ..schemas.enrichment import (
     BackfillRequest,
+    BatchEnrichRequest,
     BulkApproveRequest,
     CustomerBackfillRequest,
     CustomerEnrichRequest,
@@ -778,6 +779,127 @@ def api_customer_gaps(
 
     gaps = get_enrichment_gaps(db, limit=limit)
     return {"gaps": gaps, "total": len(gaps)}
+
+
+# ── Batch Enrichment ─────────────────────────────────────────────────
+
+
+@router.post("/api/enrichment/batch")
+async def api_batch_enrich(
+    body: BatchEnrichRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Batch waterfall enrichment for up to 50 companies. Returns job ID."""
+    from ..services.customer_enrichment_service import enrich_customer_account
+
+    job = EnrichmentJob(
+        job_type="customer_batch",
+        status="running",
+        total_items=len(body.company_ids),
+        started_by_id=user.id,
+        started_at=datetime.now(timezone.utc),
+    )
+    db.add(job)
+    db.flush()
+
+    processed = 0
+    enriched = 0
+    errors = []
+    for cid in body.company_ids:
+        company = db.get(Company, cid)
+        if not company:
+            errors.append(f"Company {cid}: not found")
+            continue
+        try:
+            result = await enrich_customer_account(cid, db, force=body.force)
+            processed += 1
+            if result.get("ok") and result.get("contacts_added", 0) > 0:
+                enriched += 1
+            db.flush()
+        except Exception as e:
+            errors.append(f"Company {cid}: {str(e)[:100]}")
+            logger.warning("Batch enrich error for company %d: %s", cid, e)
+
+    job.processed_items = processed
+    job.enriched_items = enriched
+    job.error_count = len(errors)
+    job.error_log = errors[:20]
+    job.status = "completed"
+    job.completed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "ok": True,
+        "job_id": job.id,
+        "processed": processed,
+        "enriched": enriched,
+        "errors": len(errors),
+    }
+
+
+@router.get("/api/enrichment/status/{company_id}")
+def api_enrichment_status(
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get enrichment status for a company — contacts, gaps, last enrichment date."""
+    from ..models.crm import CustomerSite, SiteContact
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    sites = db.query(CustomerSite.id).filter_by(company_id=company_id).all()
+    site_ids = [s.id for s in sites]
+
+    contacts = []
+    if site_ids:
+        contacts = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id.in_(site_ids),
+                SiteContact.is_active == True,  # noqa: E712
+            )
+            .all()
+        )
+
+    # Identify gaps
+    gaps = []
+    roles_found = {c.contact_role for c in contacts if c.contact_role}
+    for needed_role in ("buyer", "technical", "decision_maker"):
+        if needed_role not in roles_found:
+            gaps.append(f"missing_{needed_role}")
+
+    verified_emails = sum(1 for c in contacts if c.email_verified)
+    if contacts and verified_emails == 0:
+        gaps.append("no_verified_emails")
+
+    verified_phones = sum(1 for c in contacts if c.phone_verified)
+    if contacts and verified_phones == 0:
+        gaps.append("no_verified_phones")
+
+    return {
+        "company_id": company_id,
+        "company_name": company.name,
+        "enrichment_status": company.customer_enrichment_status or "none",
+        "enrichment_date": company.customer_enrichment_at.isoformat() if company.customer_enrichment_at else None,
+        "contact_count": len(contacts),
+        "contacts": [
+            {
+                "full_name": c.full_name,
+                "title": c.title,
+                "email": c.email,
+                "email_verified": bool(c.email_verified),
+                "phone": c.phone,
+                "phone_verified": bool(c.phone_verified),
+                "contact_role": c.contact_role,
+            }
+            for c in contacts
+        ],
+        "gaps": gaps,
+    }
 
 
 # ── Website Scraping ─────────────────────────────────────────────────

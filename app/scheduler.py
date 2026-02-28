@@ -187,6 +187,22 @@ def configure_scheduler():
     scheduler.add_job(_job_reset_connector_errors, CronTrigger(hour=0, minute=0),
                       id="reset_connector_errors", name="Reset connector 24h error counts")
 
+    # Customer enrichment quarterly sweep (1st of Jan/Apr/Jul/Oct at 5 AM UTC)
+    if settings.customer_enrichment_enabled:
+        scheduler.add_job(
+            _job_customer_enrichment_sweep,
+            CronTrigger(month="1,4,7,10", day=1, hour=5, minute=0),
+            id="customer_enrichment_sweep",
+            name="Quarterly customer enrichment sweep",
+        )
+        # Email re-verification (15th of Feb/May/Aug/Nov at 5 AM UTC)
+        scheduler.add_job(
+            _job_email_reverification,
+            CronTrigger(month="2,5,8,11", day=15, hour=5, minute=0),
+            id="email_reverification",
+            name="Quarterly email re-verification",
+        )
+
     job_count = len(scheduler.get_jobs())
     logger.info(f"APScheduler configured with {job_count} jobs")
 
@@ -879,6 +895,48 @@ async def _job_monthly_enrichment_refresh():
         logger.info(f"Monthly enrichment refresh started: job #{job_id}")
     except Exception as e:
         logger.error(f"Monthly enrichment refresh error: {e}")
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_customer_enrichment_sweep():
+    """Quarterly: enrich customer accounts missing contacts. Assigned first."""
+    from .database import SessionLocal
+    from .services.customer_enrichment_batch import run_customer_enrichment_batch
+
+    db = SessionLocal()
+    try:
+        result = await run_customer_enrichment_batch(db, user_id=None, max_accounts=100)
+        db.commit()
+        logger.info(
+            "Customer enrichment sweep: %d processed, %d enriched",
+            result.get("processed", 0), result.get("enriched", 0),
+        )
+    except Exception as e:
+        logger.error(f"Customer enrichment sweep error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_email_reverification():
+    """Quarterly: re-verify emails older than 90 days."""
+    from .database import SessionLocal
+    from .services.customer_enrichment_batch import run_email_reverification
+
+    db = SessionLocal()
+    try:
+        result = await run_email_reverification(db, max_contacts=200)
+        db.commit()
+        logger.info(
+            "Email re-verification: %d processed, %d invalidated",
+            result.get("processed", 0), result.get("invalidated", 0),
+        )
+    except Exception as e:
+        logger.error(f"Email re-verification error: {e}")
+        db.rollback()
     finally:
         db.close()
 

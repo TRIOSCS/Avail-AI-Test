@@ -1,6 +1,6 @@
 """TME (Transfer Multisort Elektronik) API connector.
 
-Searches TME product catalog using HMAC-SHA256 signed requests.
+Searches TME product catalog using HMAC-SHA1 signed requests.
 Two-step: search for products, then fetch prices.
 
 Called by: search_service.py
@@ -20,7 +20,7 @@ from .sources import BaseConnector
 
 
 class TMEConnector(BaseConnector):
-    """TME Product Search — HMAC-SHA256 signed POST requests."""
+    """TME Product Search — HMAC-SHA1 signed POST requests."""
 
     SEARCH_URL = "https://api.tme.eu/Products/Search.json"
     PRICES_URL = "https://api.tme.eu/Products/GetPrices.json"
@@ -31,11 +31,18 @@ class TMEConnector(BaseConnector):
         self.secret = secret
 
     def _sign(self, url: str, params: dict) -> dict:
-        """Sign a TME API request with HMAC-SHA1 (per TME docs)."""
+        """Sign a TME API request with HMAC-SHA1 (per TME docs).
+
+        Uses urllib.parse.quote (not quote_plus) for parameter encoding,
+        matching the official TME Python 3 client behaviour.
+        """
         params = dict(params)
         params["Token"] = self.token
         sorted_params = sorted(params.items())
-        encoded = urllib.parse.urlencode(sorted_params)
+        # TME requires quote (space -> %20), NOT quote_plus (space -> +)
+        encoded = urllib.parse.urlencode(
+            sorted_params, quote_via=urllib.parse.quote
+        )
         base_string = (
             "POST&" + urllib.parse.quote(url, safe="")
             + "&" + urllib.parse.quote(encoded, safe="")
@@ -45,7 +52,7 @@ class TMEConnector(BaseConnector):
             base_string.encode(),
             hashlib.sha1,
         ).digest()
-        params["ApiSignature"] = base64.b64encode(signature).decode().rstrip("\n")
+        params["ApiSignature"] = base64.encodebytes(signature).rstrip().decode()
         return params
 
     async def _do_search(self, part_number: str) -> list[dict]:
@@ -66,7 +73,10 @@ class TMEConnector(BaseConnector):
             headers={"Content-Type": "application/x-www-form-urlencoded"},
             timeout=self.timeout,
         )
-        r.raise_for_status()
+        if r.status_code != 200:
+            body = r.text[:500]
+            logger.warning(f"TME search HTTP {r.status_code}: {body}")
+            r.raise_for_status()
         data = r.json()
 
         products = (data.get("Data") or {}).get("ProductList", [])

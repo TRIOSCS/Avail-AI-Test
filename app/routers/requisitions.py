@@ -711,8 +711,23 @@ async def add_requirements(
         finally:
             bg_db.close()
 
+    # ICsource: queue parts for automated search (background, separate DB session)
+    def _ics_enqueue_batch(requirement_ids: list[int]):
+        from ..database import SessionLocal
+        from ..services.ics_worker.queue_manager import enqueue_for_ics_search
+        bg_db = SessionLocal()
+        try:
+            for rid in requirement_ids:
+                try:
+                    enqueue_for_ics_search(rid, bg_db)
+                except Exception:
+                    logger.debug("ICS enqueue failed for requirement %s", rid, exc_info=True)
+        finally:
+            bg_db.close()
+
     if created:
         background_tasks.add_task(_nc_enqueue_batch, [r.id for r in created])
+        background_tasks.add_task(_ics_enqueue_batch, [r.id for r in created])
 
     # Teams: hot requirement alert for high-value items
     try:

@@ -396,7 +396,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         key = (
             r.get("vendor_name", "").lower(),
             normalize_mpn_key(r.get("mpn_matched", "")),
-            (r.get("vendor_sku") or "").lower(),
+            str(r.get("vendor_sku") or "").lower(),
         )
         if key not in seen:
             seen.add(key)

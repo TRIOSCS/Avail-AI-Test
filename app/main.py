@@ -635,10 +635,10 @@ def _seed_api_sources():
                 "display_name": "IC Source",
                 "category": "scraper",
                 "source_type": "broker",
-                "description": "Broker marketplace with inventory listings and vendor contacts. Membership-based.",
+                "description": "Broker marketplace with 65M+ inventory listings and vendor contacts. Browser-automated search.",
                 "signup_url": "https://www.icsource.com",
-                "env_vars": [],
-                "setup_notes": "PENDING: Need browser automation to search with membership login. Similar value to NetComponents.",
+                "env_vars": ["ICS_USERNAME", "ICS_PASSWORD"],
+                "setup_notes": "Browser automation with membership login. Run ICS worker as systemd service alongside NC worker.",
             },
             {
                 "name": "thebrokersite",
@@ -722,13 +722,13 @@ def _seed_api_sources():
             },
             # ── PENDING (additional authorized distributors) ──
             {
-                "name": "newark",
+                "name": "element14",
                 "display_name": "Newark / element14 / Farnell",
                 "category": "api",
                 "source_type": "authorized",
                 "description": "Major authorized distributor (part of Avnet). element14 API covers Newark (Americas), Farnell (Europe), element14 (APAC).",
                 "signup_url": "https://partner.element14.com/docs",
-                "env_vars": [],
+                "env_vars": ["ELEMENT14_API_KEY"],
                 "setup_notes": "PENDING: Register at element14 Partner API portal. REST API with JSON responses. Single key covers all 3 regional brands.",
             },
             {
@@ -929,3 +929,7 @@ app.include_router(prospect_suggested_router)
 from .routers.nc_admin import router as nc_admin_router
 
 app.include_router(nc_admin_router)
+
+from .routers.ics_admin import router as ics_admin_router
+
+app.include_router(ics_admin_router)

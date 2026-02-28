@@ -903,7 +903,7 @@ def test_get_connector_newark():
 
     with patch("app.services.credential_service.get_credential", side_effect=fake_cred):
         with patch("app.connectors.element14.Element14Connector"):
-            result = _get_connector_for_source("newark", db=MagicMock())
+            result = _get_connector_for_source("element14", db=MagicMock())
             assert result is not None
 
 

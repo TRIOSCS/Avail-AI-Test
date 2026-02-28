@@ -42,7 +42,7 @@ from app.services.nc_worker.queue_manager import (
 )
 from app.services.nc_worker.result_parser import NcSighting, parse_quantity, parse_results_html
 from app.services.nc_worker.scheduler import SearchScheduler
-from app.services.nc_worker.search_engine import build_search_url, search_part, search_part_via_api
+from app.services.nc_worker.search_engine import build_search_url, search_part
 from app.services.nc_worker.sighting_writer import save_nc_sightings
 
 
@@ -280,16 +280,6 @@ class TestSearchEngine:
         assert result["html"] == "<html>body</html>"
         assert result["total_count"] == 0
 
-    @pytest.mark.asyncio
-    async def test_search_part_via_api(self):
-        """Exercise the API fallback search function."""
-        page = AsyncMock()
-        page.evaluate = AsyncMock(return_value={"html": "<div>api results</div>", "total_count": 5})
-
-        result = await search_part_via_api(page, "LM317T")
-        assert result["html"] == "<div>api results</div>"
-        assert result["total_count"] == 5
-        assert result["duration_ms"] >= 0
 
 
 # ═══════════════════════════════════════════════════════════════════════

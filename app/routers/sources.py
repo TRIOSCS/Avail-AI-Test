@@ -99,7 +99,7 @@ def _get_connector_for_source(name: str, db: Session = None):
         return SourcengineConnector(src_key)
 
     e14_key = _cred("ELEMENT14_API_KEY")
-    if name == "newark" and e14_key:
+    if name == "element14" and e14_key:
         return Element14Connector(e14_key)
 
     tme_token = _cred("TME_API_TOKEN")

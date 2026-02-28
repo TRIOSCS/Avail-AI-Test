@@ -2,6 +2,7 @@
 
 Converts parsed NcSighting objects into AVAIL Sighting records,
 matching the same patterns used by DigiKey/Mouser/OEMSecrets integrations.
+Now includes price break data and supplier product URLs.
 
 Called by: worker loop
 Depends on: result_parser.NcSighting, sighting model, vendor_utils
@@ -65,6 +66,28 @@ def save_nc_sightings(
             continue
         existing_keys.add(dedup_key)
 
+        # Extract best unit price from price breaks (lowest qty tier = unit price)
+        unit_price = None
+        currency = nc.currency
+        if nc.price_breaks:
+            unit_price = nc.price_breaks[0].price
+
+        # Build raw_data with all NC-specific fields
+        raw_data = {
+            "region": nc.region,
+            "country": nc.country,
+            "inventory_type": nc.inventory_type,
+            "uploaded_date": nc.uploaded_date,
+            "is_sponsor": nc.is_sponsor,
+            "description": nc.description,
+            "supplier_product_url": nc.supplier_product_url,
+        }
+        if nc.price_breaks:
+            raw_data["price_breaks"] = [
+                {"price": pb.price, "min_qty": pb.min_qty}
+                for pb in nc.price_breaks
+            ]
+
         sighting = Sighting(
             requirement_id=req.id,
             material_card_id=material_card_id,
@@ -74,19 +97,14 @@ def save_nc_sightings(
             normalized_mpn=mpn_norm,
             manufacturer=nc.manufacturer,
             qty_available=nc.quantity,
+            unit_price=unit_price,
+            currency=currency,
             source_type="netcomponents",
             source_searched_at=now,
             is_authorized=nc.is_authorized,
             confidence=0.6 if nc.inventory_type == "in_stock" else 0.3,
             date_code=nc.date_code or None,
-            raw_data={
-                "region": nc.region,
-                "country": nc.country,
-                "inventory_type": nc.inventory_type,
-                "uploaded_date": nc.uploaded_date,
-                "is_sponsor": nc.is_sponsor,
-                "description": nc.description,
-            },
+            raw_data=raw_data,
             created_at=now,
         )
         db.add(sighting)

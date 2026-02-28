@@ -1,0 +1,20 @@
+[Unit]
+Description=AVAIL ICsource Search Worker
+After=network.target postgresql.service avail-xvfb.service
+Wants=avail-xvfb.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/availai
+Environment=DISPLAY=:99
+Environment=PYTHONPATH=/root/availai
+ExecStart=/usr/bin/python -m app.services.ics_worker.worker
+Restart=on-failure
+RestartSec=30s
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=avail-ics-worker
+
+[Install]
+WantedBy=multi-user.target

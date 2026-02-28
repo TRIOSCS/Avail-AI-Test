@@ -1,21 +1,20 @@
-"""NetComponents search worker — main entry point.
+"""ICsource search worker — main entry point.
 
 Runs as a long-lived background process that:
 1. Classifies pending parts via AI gate
-2. Searches queued parts on NetComponents (HTTP or browser fallback)
+2. Searches queued parts on ICsource via browser automation
 3. Parses results and writes sightings to AVAIL database
 4. Respects rate limits, business hours, and circuit breaker
 
-Run: python -m app.services.nc_worker.worker
+Run: python -m app.services.ics_worker.worker
 
-Called by: systemd service (avail-nc-worker.service)
-Depends on: all nc_worker modules, database
+Called by: systemd service (avail-ics-worker.service)
+Depends on: all ics_worker modules, database
 """
 
 import asyncio
 import hashlib
 import signal
-import time
 from datetime import datetime, timezone
 
 from loguru import logger
@@ -42,10 +41,13 @@ signal.signal(signal.SIGINT, _handle_shutdown)
 
 
 def update_worker_status(db: Session, **kwargs):
-    """Update the nc_worker_status singleton row."""
-    from app.models import NcWorkerStatus
+    """Update the ics_worker_status singleton row.
 
-    status = db.query(NcWorkerStatus).filter(NcWorkerStatus.id == 1).first()
+    Pass any column as a kwarg: is_running=True, searches_today=5, etc.
+    """
+    from app.models import IcsWorkerStatus
+
+    status = db.query(IcsWorkerStatus).filter(IcsWorkerStatus.id == 1).first()
     if not status:
         return
     for key, value in kwargs.items():
@@ -55,21 +57,17 @@ def update_worker_status(db: Session, **kwargs):
     db.commit()
 
 
-async def run_ai_gate(db: Session):
-    """Run the AI gate (async wrapper since claude_structured is async)."""
-    from .ai_gate import process_ai_gate
-    await process_ai_gate(db)
-
-
-def main():
+async def main():
     """Main worker loop."""
     from app.database import SessionLocal
-    from app.models import NcSearchLog
+    from app.models import IcsSearchLog
 
+    from .ai_gate import process_ai_gate
     from .circuit_breaker import CircuitBreaker
-    from .config import NcConfig
+    from .config import IcsConfig
     from .queue_manager import (
         get_next_queued_item,
+        get_queue_stats,
         mark_completed,
         mark_status,
         recover_stale_searches,
@@ -77,17 +75,17 @@ def main():
     from .result_parser import parse_results_html
     from .scheduler import SearchScheduler
     from .search_engine import search_part
-    from .session_manager import NcSessionManager
-    from .sighting_writer import save_nc_sightings
+    from .session_manager import IcsSessionManager
+    from .sighting_writer import save_ics_sightings
 
-    config = NcConfig()
+    config = IcsConfig()
     scheduler = SearchScheduler(config)
     breaker = CircuitBreaker()
     searches_today = 0
     sightings_today = 0
     last_stats_date = None
 
-    logger.info("NC worker starting...")
+    logger.info("ICS worker starting...")
 
     # Recover stale items from previous crash
     db = SessionLocal()
@@ -97,12 +95,12 @@ def main():
     finally:
         db.close()
 
-    # Start HTTP session and login
-    session = NcSessionManager(config)
+    # Start browser session
+    session = IcsSessionManager(config)
     try:
-        session.start()
+        await session.start()
     except Exception as e:
-        logger.error("NC worker: failed to start session: {}", e)
+        logger.error("ICS worker: failed to start browser session: {}", e)
         db = SessionLocal()
         try:
             update_worker_status(db, is_running=False)
@@ -111,9 +109,9 @@ def main():
         return
 
     if not session.is_logged_in:
-        if not session.login():
-            logger.error("NC worker: initial login failed, exiting")
-            session.stop()
+        if not await session.login():
+            logger.error("ICS worker: initial login failed, exiting")
+            await session.stop()
             db = SessionLocal()
             try:
                 update_worker_status(db, is_running=False)
@@ -121,7 +119,7 @@ def main():
                 db.close()
             return
 
-    logger.info("NC worker: session ready")
+    logger.info("ICS worker: browser session ready")
 
     try:
         while True:
@@ -131,15 +129,18 @@ def main():
 
             try:
                 now_eastern = datetime.now(EASTERN)
+                now_utc = datetime.now(timezone.utc)
 
                 # Reset daily stats at midnight
                 today_date = now_eastern.date()
                 if last_stats_date != today_date:
                     if last_stats_date is not None:
                         logger.info(
-                            "NC daily summary: {} searches, {} sightings",
-                            searches_today, sightings_today,
+                            "ICS daily summary: {} searches, {} sightings",
+                            searches_today,
+                            sightings_today,
                         )
+                        # Update daily stats in worker status
                         db = SessionLocal()
                         try:
                             update_worker_status(
@@ -160,20 +161,20 @@ def main():
 
                 # Check business hours
                 if not scheduler.is_business_hours():
-                    logger.debug("NC worker: outside business hours, sleeping 30 min")
-                    time.sleep(30 * 60)
+                    logger.debug("ICS worker: outside business hours, sleeping 30 min")
+                    await asyncio.sleep(30 * 60)
                     continue
 
                 # Check daily limit
-                if searches_today >= config.NC_MAX_DAILY_SEARCHES:
-                    logger.info("NC worker: daily limit reached ({})", searches_today)
-                    time.sleep(60 * 60)
+                if searches_today >= config.ICS_MAX_DAILY_SEARCHES:
+                    logger.info("ICS worker: daily limit reached ({}), sleeping until tomorrow", searches_today)
+                    await asyncio.sleep(60 * 60)
                     continue
 
                 # Check circuit breaker
                 if breaker.should_stop():
                     info = breaker.get_trip_info()
-                    logger.error("NC worker: circuit breaker open ({})", info["trip_reason"])
+                    logger.error("ICS worker: circuit breaker open ({}), sleeping 1hr", info["trip_reason"])
                     db = SessionLocal()
                     try:
                         update_worker_status(
@@ -183,59 +184,54 @@ def main():
                         )
                     finally:
                         db.close()
-                    time.sleep(60 * 60)
+                    await asyncio.sleep(60 * 60)
                     continue
 
                 # Check if time for a break
                 if scheduler.time_for_break():
                     duration = scheduler.get_break_duration()
-                    logger.info("NC worker: taking a break ({:.0f} min)", duration / 60)
+                    logger.info("ICS worker: taking a break ({:.0f} min)", duration / 60)
                     scheduler.reset_break_counter()
-                    time.sleep(duration)
+                    await asyncio.sleep(duration)
                     continue
 
                 # Run AI gate for any pending items
                 db = SessionLocal()
                 try:
-                    asyncio.run(run_ai_gate(db))
+                    await process_ai_gate(db)
                 except Exception as e:
-                    logger.error("NC worker: AI gate error: {}", e)
+                    logger.error("ICS worker: AI gate error: {}", e)
                 finally:
                     db.close()
 
                 # Get next queued item
                 db = SessionLocal()
-                item = None
                 try:
                     item = get_next_queued_item(db)
                     if not item:
-                        logger.debug("NC worker: queue empty, sleeping 60s")
+                        logger.debug("ICS worker: queue empty, sleeping 60s")
                         db.close()
-                        time.sleep(60)
+                        await asyncio.sleep(60)
                         continue
 
                     # Ensure session is valid
-                    if not session.ensure_session():
-                        logger.error("NC worker: session re-auth failed")
+                    if not await session.ensure_session():
+                        logger.error("ICS worker: session re-auth failed, sleeping 5 min")
                         mark_status(db, item, "failed", error="Session authentication failed")
                         db.close()
-                        time.sleep(5 * 60)
+                        await asyncio.sleep(5 * 60)
                         continue
 
-                    # Execute search (tries HTTP first, then browser)
+                    # Execute search
                     mark_status(db, item, "searching")
-                    logger.info("NC worker: searching '{}' (queue id={})", item.mpn, item.id)
+                    logger.info("ICS worker: searching '{}' (queue id={})", item.mpn, item.id)
 
-                    search_result = search_part(session, item.mpn)
+                    search_result = await search_part(session.page, item.mpn)
 
-                    # Check response health
-                    health = breaker.check_response_health(
-                        search_result.get("status_code", 0),
-                        search_result["html"],
-                        search_result.get("url", ""),
-                    )
+                    # Check page health
+                    health = await breaker.check_page_health(session.page)
                     if health == "SESSION_EXPIRED":
-                        mark_status(db, item, "queued")
+                        mark_status(db, item, "queued")  # re-queue for next attempt
                         db.close()
                         continue
                     if breaker.should_stop():
@@ -245,33 +241,34 @@ def main():
 
                     # Parse results
                     html = search_result["html"]
-                    nc_sightings = parse_results_html(html)
+                    ics_sightings = parse_results_html(html)
 
-                    if not nc_sightings:
+                    if not ics_sightings:
                         breaker.record_empty_results()
                     else:
                         breaker.record_results()
 
                     # Write sightings
-                    created_count = save_nc_sightings(db, item, nc_sightings)
+                    created_count = save_ics_sightings(db, item, ics_sightings)
 
                     # Log search
                     html_hash = hashlib.sha256(html.encode()).hexdigest() if html else None
-                    log_entry = NcSearchLog(
+                    log_entry = IcsSearchLog(
                         queue_id=item.id,
                         duration_ms=search_result["duration_ms"],
-                        results_found=len(nc_sightings),
+                        results_found=len(ics_sightings),
                         sightings_created=created_count,
                         page_html_hash=html_hash,
                     )
                     db.add(log_entry)
 
                     # Mark completed
-                    mark_completed(db, item, results_found=len(nc_sightings), sightings_created=created_count)
+                    mark_completed(db, item, results_found=len(ics_sightings), sightings_created=created_count)
 
                     searches_today += 1
                     sightings_today += created_count
 
+                    # Update worker status after each search
                     update_worker_status(
                         db,
                         last_search_at=datetime.now(timezone.utc),
@@ -281,39 +278,41 @@ def main():
                     )
 
                     logger.info(
-                        "NC worker: '{}' done — {} results, {} sightings [{}] (today: {}/{})",
-                        item.mpn, len(nc_sightings), created_count,
-                        search_result.get("mode", "unknown"),
-                        searches_today, config.NC_MAX_DAILY_SEARCHES,
+                        "ICS worker: '{}' done — {} results, {} sightings (today: {}/{})",
+                        item.mpn,
+                        len(ics_sightings),
+                        created_count,
+                        searches_today,
+                        config.ICS_MAX_DAILY_SEARCHES,
                     )
 
                 except Exception as e:
-                    logger.error("NC worker: search iteration error: {}", e)
+                    logger.error("ICS worker: search iteration error: {}", e)
                     try:
                         if item:
                             mark_status(db, item, "failed", error=str(e)[:500])
-                    except Exception:
-                        pass
+                    except Exception as mark_err:
+                        logger.debug("ICS worker: failed to mark item as failed: %s", mark_err)
                 finally:
                     db.close()
 
                 # Delay before next search
                 delay = scheduler.next_delay()
-                logger.debug("NC worker: sleeping {:.0f}s before next search", delay)
-                time.sleep(delay)
+                logger.debug("ICS worker: sleeping {:.0f}s before next search", delay)
+                await asyncio.sleep(delay)
 
             except Exception as e:
-                logger.error("NC worker: unexpected error: {}", e)
-                time.sleep(5 * 60)
+                logger.error("ICS worker: unexpected error in main loop: {}", e)
+                await asyncio.sleep(5 * 60)
 
     finally:
+        # Shutdown cleanup
         logger.info(
-            "NC worker shutting down: {} searches, {} sightings today",
-            searches_today, sightings_today,
+            "ICS worker shutting down: {} searches, {} sightings today",
+            searches_today,
+            sightings_today,
         )
-        session.stop()
-        if session.has_browser:
-            asyncio.run(session.stop_browser())
+        await session.stop()
         db = SessionLocal()
         try:
             update_worker_status(db, is_running=False)
@@ -322,4 +321,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

@@ -14,6 +14,7 @@ class NcConfig:
     """Configuration for the NetComponents search worker."""
 
     def __init__(self):
+        self.NC_ACCOUNT_NUMBER = os.environ.get("NC_ACCOUNT_NUMBER", "")
         self.NC_USERNAME = os.environ.get("NC_USERNAME", "")
         self.NC_PASSWORD = os.environ.get("NC_PASSWORD", "")
         self.NC_MAX_DAILY_SEARCHES = int(os.environ.get("NC_MAX_DAILY_SEARCHES", "75"))
@@ -25,5 +26,5 @@ class NcConfig:
         self.NC_BUSINESS_HOURS_START = int(os.environ.get("NC_BUSINESS_HOURS_START", "8"))
         self.NC_BUSINESS_HOURS_END = int(os.environ.get("NC_BUSINESS_HOURS_END", "18"))
         self.NC_BROWSER_PROFILE_DIR = os.environ.get(
-            "NC_BROWSER_PROFILE_DIR", "/home/avail/nc_browser_profile"
+            "NC_BROWSER_PROFILE_DIR", "/root/nc_browser_profile"
         )

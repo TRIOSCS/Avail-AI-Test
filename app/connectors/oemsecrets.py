@@ -112,7 +112,7 @@ class OEMSecretsConnector(BaseConnector):
             currency = item.get("currency", "USD")
             url = item.get("buy_now_url", item.get("url", item.get("buy_url", "")))
             moq = item.get("moq", item.get("minimum_order"))
-            sku = item.get("sku", item.get("distributor_pn", ""))
+            sku = str(item.get("sku", item.get("distributor_pn", "")) or "")
             datasheet = item.get("datasheet_url", "")
 
             key = f"{dist_name}_{mpn}_{sku}".lower()

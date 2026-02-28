@@ -1,11 +1,11 @@
 """Circuit breaker — stops searches on signs of blocking or errors.
 
-Monitors HTTP responses for captchas, redirects, rate limiting, and
-other signs that NC has detected automated access. Trips immediately
+Monitors page content for captchas, redirects, rate limiting, and
+other signs that ICsource has detected automated access. Trips immediately
 on high-severity signals, accumulates for lower-severity ones.
 
 Called by: worker loop (after each search)
-Depends on: nothing (HTTP response analysis)
+Depends on: nothing (page content analysis)
 """
 
 from loguru import logger
@@ -27,33 +27,31 @@ class CircuitBreaker:
         self.trip_reason = reason
         logger.critical("CIRCUIT BREAKER TRIPPED: {}", reason)
 
-    def check_response_health(self, status_code: int, html: str, url: str) -> str:
-        """Check HTTP response for red flags indicating detection.
+    async def check_page_health(self, page) -> str:
+        """Check page content for red flags indicating detection.
 
         Returns a status string:
         - "HEALTHY" — all good
         - "SESSION_EXPIRED" — login page detected (normal, not an error)
         - Other values trip or accumulate toward tripping the breaker.
         """
-        # Login redirect = session expired (normal, handled by session_manager)
-        if "/account/login" in url.lower():
-            return "SESSION_EXPIRED"
-
-        # HTTP error codes
-        if status_code == 429:
-            self._trip("HTTP 429 — rate limited by NetComponents")
-            return "RATE_LIMITED"
-        if status_code == 403:
-            self._trip("HTTP 403 — access denied")
-            return "ACCESS_DENIED"
-        if status_code >= 500:
+        try:
+            url = page.url
+            content = await page.evaluate("() => document.body.innerText.toLowerCase().substring(0, 3000)")
+        except Exception as e:
             self.consecutive_failures += 1
             if self.consecutive_failures >= 3:
-                self._trip(f"3 consecutive server errors (last: {status_code})")
-            return "SERVER_ERROR"
+                self._trip(f"3 consecutive page health check failures: {e}")
+            return "CHECK_FAILED"
 
-        # Content-based detection (check lowercase first 3000 chars)
-        content = html[:3000].lower() if html else ""
+        # Immediate trip: unexpected redirect off ICsource domain
+        if "icsource.com" not in url:
+            self._trip(f"Unexpected redirect to: {url}")
+            return "UNEXPECTED_REDIRECT"
+
+        # Login page = session expired (normal, handled by session_manager)
+        if "login.aspx" in url.lower() or "login" in url.lower().split("/")[-1]:
+            return "SESSION_EXPIRED"
 
         # Captcha detection
         captcha_signals = ["captcha", "verify you are human", "are you a robot", "recaptcha"]
@@ -64,13 +62,13 @@ class CircuitBreaker:
                 self._trip(f"Captcha detected {self.captcha_count} times")
             return "CAPTCHA_WARNING"
 
-        # Rate limiting in content
+        # Rate limiting
         if "too many requests" in content or "rate limit" in content:
-            self._trip("Rate limited by NetComponents (content)")
+            self._trip("Rate limited by ICsource")
             return "RATE_LIMITED"
 
-        # Access denied in content
-        if "access denied" in content or "unusual activity" in content:
+        # Access denied
+        if "access denied" in content or "blocked" in content or "unusual activity" in content:
             self._trip("Access denied or unusual activity detected")
             return "ACCESS_DENIED"
 

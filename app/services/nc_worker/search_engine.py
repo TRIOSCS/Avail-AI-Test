@@ -1,10 +1,11 @@
-"""NetComponents search engine — executes part searches via browser.
+"""NetComponents search engine — hybrid HTTP + browser.
 
-Uses the NC search URL pattern with all required ASP.NET MVC parameters.
-Handles both navigation-based and API-based search approaches.
+Tries HTTP GET first (fast, ~150ms). If the response lacks results
+(e.g. during maintenance mode when API is blocked), falls back to
+browser-based search via Patchright (~5-10s but always works).
 
 Called by: worker loop
-Depends on: session_manager (page), human_behavior
+Depends on: session_manager, result_parser (for validation)
 """
 
 import asyncio
@@ -14,7 +15,7 @@ from urllib.parse import quote
 from loguru import logger
 
 
-def build_search_url(mpn: str) -> str:
+def build_search_url(mpn: str, search_logic: str = "Begins") -> str:
     """Build the full NC search URL with all required parameters.
 
     Includes duplicate Filters/PSA params (ASP.NET MVC checkbox binding).
@@ -22,7 +23,7 @@ def build_search_url(mpn: str) -> str:
     encoded_mpn = quote(mpn, safe="")
     return (
         f"https://www.netcomponents.com/search/result"
-        f"?SearchId=0&SortBy=0&Demo=false&SearchType=0&SearchLogic=Begins"
+        f"?SearchId=0&SortBy=0&Demo=false&SearchType=0&SearchLogic={search_logic}"
         f"&Filters=true&Filters=false&PSA=true&PSA=false"
         f"&PartsSearched%5B0%5D.PartNumber={encoded_mpn}"
         f"&PartsSearched%5B1%5D.PartNumber="
@@ -31,102 +32,131 @@ def build_search_url(mpn: str) -> str:
     )
 
 
-async def search_part(page, part_number: str) -> dict:
-    """Search for a part on NC using the navigation approach.
+def search_part(session_manager, part_number: str) -> dict:
+    """Search for a part — tries HTTP first, falls back to browser.
 
-    Navigates to the search URL and waits for results to render.
-    Returns {"html": str, "total_count": int, "url": str, "duration_ms": int}.
+    Returns {"html": str, "url": str, "duration_ms": int, "status_code": int, "mode": str}.
     """
+    # Try HTTP first (fast path)
+    result = _search_http(session_manager, part_number)
+
+    # Check if we got actual results (look for result markers in HTML)
+    if _has_results(result["html"]):
+        result["mode"] = "http"
+        return result
+
+    # HTTP didn't return results — try browser fallback
+    logger.info("NC search: HTTP returned no results, trying browser fallback for '{}'", part_number)
+    browser_result = asyncio.run(_search_browser(session_manager, part_number))
+    if browser_result:
+        browser_result["mode"] = "browser"
+        return browser_result
+
+    # Both failed — return the HTTP result (may be empty)
+    result["mode"] = "http_empty"
+    return result
+
+
+def _search_http(session_manager, part_number: str) -> dict:
+    """Search via HTTP GET — fast but may not work during maintenance."""
     url = build_search_url(part_number)
     start = time.monotonic()
 
-    logger.info("NC search: navigating to search for '{}'", part_number)
-    await page.goto(url, wait_until="load", timeout=30000)
-
-    # Wait for NC's async polling to complete and results to render.
-    # NC uses: checkmasterid → startsearchapi → counttotalapiparts → getresult
     try:
-        await page.wait_for_selector(
-            "table.results-table, .no-results, #searchResults table, #divResult table, .search-results",
-            timeout=20_000,
+        resp = session_manager.session.get(url, timeout=60)
+        duration_ms = int((time.monotonic() - start) * 1000)
+
+        logger.info(
+            "NC search (HTTP): '{}' in {}ms (status={}, size={}KB)",
+            part_number, duration_ms, resp.status_code, len(resp.text) // 1024,
         )
-    except Exception:
-        logger.warning("NC search: results selector not found within 20s — page may have changed structure")
 
-    # Get results HTML
-    html = await page.evaluate("""
-        () => {
-            const container = document.querySelector('.search-results, #searchResults, .api-results, .result-table');
-            return container ? container.innerHTML : document.body.innerHTML;
+        return {
+            "html": resp.text,
+            "url": url,
+            "duration_ms": duration_ms,
+            "status_code": resp.status_code,
         }
-    """)
+    except Exception as e:
+        logger.warning("NC search (HTTP): failed for '{}': {}", part_number, e)
+        return {"html": "", "url": url, "duration_ms": 0, "status_code": 0}
 
-    # Try to get total count from page
-    total_count = await page.evaluate("""
-        () => {
-            const el = document.querySelector('.total-count, .result-count, #totalParts');
-            if (el) return parseInt(el.textContent.replace(/,/g, ''), 10) || 0;
-            return 0;
+
+async def _search_browser(session_manager, part_number: str) -> dict | None:
+    """Search via browser automation — slower but works during maintenance."""
+    try:
+        if not session_manager.has_browser:
+            await session_manager.start_browser()
+
+        if not session_manager.has_browser:
+            logger.error("NC search (browser): could not start browser")
+            return None
+
+        # Navigate to NC and login via browser if needed
+        page = session_manager.page
+        await page.goto("https://www.netcomponents.com/", wait_until="load", timeout=30000)
+        await asyncio.sleep(2)
+
+        auth_check = await page.evaluate("""
+            async () => {
+                const r = await fetch('/client/isauthorized', {credentials: 'same-origin'});
+                return r.status === 200 && (await r.text()).toLowerCase().includes('true');
+            }
+        """)
+        if not auth_check:
+            if not await session_manager.login_browser():
+                logger.error("NC search (browser): login failed")
+                return None
+
+        url = build_search_url(part_number)
+        start = time.monotonic()
+
+        await page.goto(url, wait_until="load", timeout=30000)
+
+        # Wait for results to render (NC uses async JS polling)
+        try:
+            await page.wait_for_selector(
+                "table.searchresultstable, .no-results, .search-total-lines",
+                timeout=25_000,
+            )
+        except Exception:
+            logger.warning("NC search (browser): results selector not found within 25s")
+
+        # Extra wait for async result loading
+        await asyncio.sleep(3)
+
+        # Get the full page HTML (results are rendered by JS into the DOM)
+        html = await page.evaluate("() => document.documentElement.outerHTML")
+
+        duration_ms = int((time.monotonic() - start) * 1000)
+
+        logger.info(
+            "NC search (browser): '{}' in {}ms (size={}KB)",
+            part_number, duration_ms, len(html) // 1024,
+        )
+
+        return {
+            "html": html,
+            "url": url,
+            "duration_ms": duration_ms,
+            "status_code": 200,
         }
-    """)
 
-    duration_ms = int((time.monotonic() - start) * 1000)
-    logger.info("NC search: '{}' completed in {}ms, count={}", part_number, duration_ms, total_count)
-
-    return {
-        "html": html or "",
-        "total_count": total_count,
-        "url": url,
-        "duration_ms": duration_ms,
-    }
+    except Exception as e:
+        logger.error("NC search (browser): failed for '{}': {}", part_number, e)
+        return None
 
 
-async def search_part_via_api(page, part_number: str) -> dict:
-    """Fallback: execute NC search via direct API calls using page.evaluate().
-
-    Uses the 5-step API flow: checkmasterid → startsearchapi → poll → getresult.
-    Returns {"html": str, "total_count": int, "duration_ms": int}.
-    """
-    start = time.monotonic()
-    encoded_mpn = quote(part_number, safe="")
-
-    logger.info("NC search (API fallback): searching for '{}'", part_number)
-
-    result = await page.evaluate(f"""
-        async () => {{
-            // Step 1: checkmasterid
-            await fetch('/search/checkmasterid?masterID=0&p={encoded_mpn}&l=Begins',
-                {{credentials: 'same-origin'}});
-
-            // Step 2: wait
-            await new Promise(r => setTimeout(r, 1500));
-
-            // Step 3: start search
-            await fetch('/search/startsearchapi', {{credentials: 'same-origin'}});
-
-            // Step 4: poll for results
-            let count = 0;
-            for (let i = 0; i < 10; i++) {{
-                await new Promise(r => setTimeout(r, 750));
-                const cr = await fetch('/search/counttotalapiparts', {{credentials: 'same-origin'}});
-                const ct = await cr.text();
-                count = parseInt(ct, 10) || 0;
-                if (count > 0) break;
-            }}
-
-            // Step 5: get results
-            const rr = await fetch('/search/getresult', {{credentials: 'same-origin'}});
-            const html = await rr.text();
-
-            return {{html: html, total_count: count}};
-        }}
-    """)
-
-    duration_ms = int((time.monotonic() - start) * 1000)
-    logger.info("NC search (API): '{}' completed in {}ms, count={}", part_number, duration_ms, result.get("total_count", 0))
-
-    return {
-        "html": result.get("html", ""),
-        "total_count": result.get("total_count", 0),
-        "duration_ms": duration_ms,
-    }
+def _has_results(html: str) -> bool:
+    """Quick check if the HTML contains search result indicators."""
+    if not html:
+        return False
+    # Look for result table markers in the HTML
+    markers = [
+        "searchresultstable",
+        "div-table-float-reg",
+        "floating-block",
+        "region-header",
+    ]
+    html_lower = html.lower()
+    return any(m in html_lower for m in markers)

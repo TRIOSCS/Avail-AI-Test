@@ -31,6 +31,12 @@ from .enrichment import (  # noqa: F401
 # Error Reports / Trouble Tickets
 from .error_report import ErrorReport  # noqa: F401
 
+# ICsource Search
+from .ics_classification_cache import IcsClassificationCache  # noqa: F401
+from .ics_search_log import IcsSearchLog  # noqa: F401
+from .ics_search_queue import IcsSearchQueue  # noqa: F401
+from .ics_worker_status import IcsWorkerStatus  # noqa: F401
+
 # NetComponents Search
 from .nc_classification_cache import NcClassificationCache  # noqa: F401
 from .nc_search_log import NcSearchLog  # noqa: F401

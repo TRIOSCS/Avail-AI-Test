@@ -92,3 +92,28 @@ class CustomerEnrichmentResult(BaseModel):
     sources_used: list[str] = []
     status: str | None = None
     error: str | None = None
+
+
+class BatchEnrichRequest(BaseModel):
+    company_ids: list[int] = Field(..., min_length=1, max_length=50)
+    force: bool = False
+
+
+class ContactSummary(BaseModel, extra="allow"):
+    full_name: str | None = None
+    title: str | None = None
+    email: str | None = None
+    email_verified: bool = False
+    phone: str | None = None
+    phone_verified: bool = False
+    contact_role: str | None = None
+
+
+class EnrichmentStatusResponse(BaseModel, extra="allow"):
+    company_id: int
+    company_name: str | None = None
+    enrichment_status: str | None = None
+    enrichment_date: str | None = None
+    contacts: list[ContactSummary] = []
+    contact_count: int = 0
+    gaps: list[str] = []
