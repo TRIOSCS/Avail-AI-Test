@@ -310,20 +310,15 @@ class NexarConnector(BaseConnector):
         if not self.client_id:
             return []
 
-        # Path 2: Try GraphQL full query with sellers
-        data = await self._run_query(self.FULL_QUERY, part_number)
+        # Use aggregate query (totalAvail + medianPrice). The full sellers
+        # query requires a Nexar Enterprise plan; DISTRIBUTOR role only gets
+        # aggregate data. This avoids a wasted API call that would fail.
+        data = await self._run_query(self.AGGREGATE_QUERY, part_number)
         errors = data.get("errors", [])
         if errors:
             msg = errors[0].get("message", "")
             logger.warning(f"Nexar query error for {part_number}: {msg[:120]}")
-            # Fall back to aggregate query if sellers field is not authorized
-            if "not authorized" in msg.lower() and "sellers" in msg.lower():
-                logger.info(f"Nexar: falling back to aggregate query for {part_number}")
-                data = await self._run_query(self.AGGREGATE_QUERY, part_number)
-                results_data = (
-                    (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
-                )
-                return self._parse_aggregate(results_data, part_number) if results_data else []
+            return []
 
         results_data = (
             (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
@@ -331,7 +326,7 @@ class NexarConnector(BaseConnector):
         if not results_data:
             return []
 
-        return self._parse_full(results_data, part_number)
+        return self._parse_aggregate(results_data, part_number)
 
     def _parse_full(self, results_data: list, pn: str) -> list[dict]:
         results = []

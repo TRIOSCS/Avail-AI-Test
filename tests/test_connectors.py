@@ -2162,12 +2162,9 @@ class TestNexarConnector:
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_do_search_full_query_errors_fallback_aggregate(self):
+    async def test_do_search_aggregate_query_success(self):
+        """_do_search goes directly to aggregate query (DISTRIBUTOR role)."""
         c = self._make_connector()
-        full_resp = {
-            "errors": [{"message": "You are not authorized to access sellers field"}],
-            "data": {"supSearchMpn": {"results": []}},
-        }
         agg_resp = {
             "data": {
                 "supSearchMpn": {
@@ -2187,10 +2184,23 @@ class TestNexarConnector:
             }
         }
         with patch.object(c, "_rest_search", new_callable=AsyncMock, return_value=None), \
-             patch.object(c, "_run_query", new_callable=AsyncMock, side_effect=[full_resp, agg_resp]):
+             patch.object(c, "_run_query", new_callable=AsyncMock, return_value=agg_resp):
             results = await c._do_search("LM317T")
             assert len(results) == 1
             assert results[0]["vendor_name"] == "Octopart (aggregate)"
+
+    @pytest.mark.asyncio
+    async def test_do_search_aggregate_query_errors(self):
+        """_do_search returns empty when aggregate query has errors."""
+        c = self._make_connector()
+        error_resp = {
+            "errors": [{"message": "Some API error"}],
+            "data": {"supSearchMpn": {"results": []}},
+        }
+        with patch.object(c, "_rest_search", new_callable=AsyncMock, return_value=None), \
+             patch.object(c, "_run_query", new_callable=AsyncMock, return_value=error_resp):
+            results = await c._do_search("LM317T")
+            assert results == []
 
     @pytest.mark.asyncio
     async def test_do_search_no_results(self):

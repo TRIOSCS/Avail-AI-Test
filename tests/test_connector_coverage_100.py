@@ -155,37 +155,32 @@ class TestSourcesGaps:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_nexar_do_search_full_query_success(self):
+    async def test_nexar_do_search_aggregate_query_success(self):
+        """_do_search skips full sellers query (DISTRIBUTOR role) and goes to aggregate."""
         from app.connectors.sources import NexarConnector
         c = NexarConnector(client_id="id", client_secret="secret")
-        full_resp = {
+        agg_resp = {
             "data": {
                 "supSearchMpn": {
                     "results": [{
                         "part": {
                             "mpn": "LM317T",
                             "manufacturer": {"name": "TI"},
-                            "sellers": [{
-                                "company": {"name": "Arrow", "homepageUrl": "https://arrow.com"},
-                                "isAuthorized": True,
-                                "offers": [{
-                                    "inventoryLevel": 1000,
-                                    "prices": [{"price": 0.50, "currency": "USD", "quantity": 1}],
-                                    "clickUrl": "https://arrow.com/buy",
-                                    "sku": "ARW-317",
-                                }],
-                            }],
+                            "totalAvail": 500000,
+                            "medianPrice1000": {"price": 0.36, "currency": "USD"},
+                            "octopartUrl": "https://octopart.com/lm317t",
+                            "shortDescription": "Adj voltage regulator",
                         }
                     }]
                 }
             }
         }
         with patch.object(c, "_rest_search", new_callable=AsyncMock, return_value=None):
-            with patch.object(c, "_run_query", new_callable=AsyncMock, return_value=full_resp):
+            with patch.object(c, "_run_query", new_callable=AsyncMock, return_value=agg_resp):
                 results = await c._do_search("LM317T")
                 assert len(results) == 1
-                assert results[0]["vendor_name"] == "Arrow"
-                assert results[0]["qty_available"] == 1000
+                assert results[0]["vendor_name"] == "Octopart (aggregate)"
+                assert results[0]["qty_available"] == 500000
 
 
 # ========================================================================
