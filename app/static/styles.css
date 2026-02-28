@@ -2591,3 +2591,10 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 /* Card source/priority tag */
 .suggested-source{font-size:9px;color:var(--muted);margin-top:4px}
 
+/* Loading skeleton */
+@keyframes skeleton-pulse{0%{background-position:200% 0}to{background-position:-200% 0}}
+.skeleton-table{width:100%;border-collapse:collapse}
+.skeleton-row{display:flex;gap:12px;padding:10px 16px;border-bottom:1px solid var(--border)}
+.skeleton-cell{height:12px;border-radius:4px;background:linear-gradient(90deg,var(--surface) 25%,rgba(0,0,0,.04) 50%,var(--surface) 75%);background-size:200% 100%;animation:skeleton-pulse 1.8s ease-in-out infinite}
+.skeleton-cell-sm{width:60px}.skeleton-cell-md{width:120px}.skeleton-cell-lg{flex:1;min-width:140px}
+

@@ -5701,10 +5701,10 @@ function openSettingsTab(panel) {
 
 function switchSettingsTab(name, btn) {
     try { localStorage.setItem('settings_active_tab', name); } catch(e) {}
-    document.querySelectorAll('.settings-panel').forEach(p => p.style.display = 'none');
+    document.querySelectorAll('.settings-panel').forEach(p => { p.classList.add('hidden'); p.style.display = 'none'; });
     document.querySelectorAll('#settingsTabs .tab').forEach(t => t.classList.remove('on'));
     const target = document.getElementById('settings-' + name);
-    if (target) target.style.display = '';
+    if (target) { target.classList.remove('hidden'); target.style.display = ''; }
     if (btn) btn.classList.add('on');
     else {
         const tabBtn = document.querySelector(`#settingsTabs .tab[onclick*="${name}"]`);

@@ -12,35 +12,40 @@ from app.config import settings
 from app.http_client import http
 
 
-LUSHA_BASE = "https://api.lusha.com/v2"
+LUSHA_BASE = "https://api.lusha.com"
 _semaphore = asyncio.Semaphore(10)
+
+# Confidence map: Lusha email confidence grades → numeric score
+_CONFIDENCE_MAP = {"A+": 95, "A": 90, "B": 75, "C": 50}
 
 
 def _best_phone(phones: list[dict]) -> tuple[str | None, str | None]:
     """Pick the best phone from Lusha's phone list.
 
-    Priority: direct_dial > mobile > work > other.
+    Priority: direct_dial/direct > mobile > phone/work > other.
     Returns (number, type) or (None, None).
     """
     if not phones:
         return None, None
-    priority = {"direct_dial": 0, "mobile": 1, "work": 2}
-    ranked = sorted(phones, key=lambda p: priority.get(p.get("type", ""), 99))
+    priority = {"direct_dial": 0, "direct": 0, "mobile": 1, "phone": 2, "work": 2}
+    ranked = sorted(phones, key=lambda p: priority.get(p.get("type") or p.get("phoneType", ""), 99))
     best = ranked[0]
-    return best.get("number"), best.get("type")
+    return best.get("number"), best.get("type") or best.get("phoneType")
 
 
-def _best_email(emails: list[dict]) -> str | None:
+def _best_email(emails: list[dict]) -> tuple[str | None, int]:
     """Pick the best email from Lusha's email list.
 
     Priority: work > personal > other.
-    Returns email string or None.
+    Returns (email, confidence_score) or (None, 0).
     """
     if not emails:
-        return None
+        return None, 0
     priority = {"work": 0, "personal": 1}
-    ranked = sorted(emails, key=lambda e: priority.get(e.get("type", ""), 99))
-    return ranked[0].get("email")
+    ranked = sorted(emails, key=lambda e: priority.get(e.get("type") or e.get("emailType", ""), 99))
+    best = ranked[0]
+    conf = _CONFIDENCE_MAP.get(best.get("emailConfidence", ""), 50)
+    return best.get("email"), conf
 
 
 async def find_person(
@@ -84,7 +89,7 @@ async def find_person(
     async with _semaphore:
         try:
             resp = await http.get(
-                f"{LUSHA_BASE}/person",
+                f"{LUSHA_BASE}/v2/person",
                 params=params,
                 headers={"api_key": api_key},
                 timeout=20,
@@ -106,7 +111,7 @@ async def find_person(
             phone, phone_type = _best_phone(phones)
 
             emails = data.get("emailAddresses") or []
-            best_email = _best_email(emails)
+            best_email, confidence = _best_email(emails)
 
             return {
                 "full_name": full_name,
@@ -118,7 +123,7 @@ async def find_person(
                 "linkedin_url": data.get("linkedinUrl"),
                 "location": data.get("location"),
                 "source": "lusha",
-                "confidence": data.get("confidence", 0),
+                "confidence": confidence,
             }
         except Exception as e:
             logger.warning("Lusha person lookup error: %s", e)
@@ -130,10 +135,13 @@ async def search_contacts(
     titles: list[str] | None = None,
     limit: int = 5,
 ) -> list[dict]:
-    """Search for contacts at a company domain via Lusha.
+    """Search for contacts at a company via Lusha Prospecting API (2-step).
 
-    Filters by title keywords if provided (buyer, procurement, etc.).
-    Returns list of contact dicts matching find_person output format.
+    Step 1: POST /prospecting/contact/search — find contacts by domain + filters.
+    Step 2: POST /prospecting/contact/enrich — enrich top results for emails/phones.
+
+    Filters by title keywords locally after enrichment.
+    Returns list of contact dicts with full_name, title, email, phone, etc.
     """
     api_key = settings.lusha_api_key
     if not api_key or not company_domain:
@@ -143,44 +151,73 @@ async def search_contacts(
 
     async with _semaphore:
         try:
-            params = {"domain": company_domain, "limit": min(limit * 3, 50)}
-            resp = await http.get(
-                f"{LUSHA_BASE}/company/contacts",
-                params=params,
-                headers={"api_key": api_key},
+            # Step 1: Search
+            search_resp = await http.post(
+                f"{LUSHA_BASE}/prospecting/contact/search",
+                headers={"api_key": api_key, "Content-Type": "application/json"},
+                json={
+                    "filters": {
+                        "companies": {
+                            "include": {"domains": [company_domain]},
+                        },
+                    },
+                },
                 timeout=25,
             )
-            if resp.status_code != 200:
-                logger.warning("Lusha contacts search failed: %s %s", resp.status_code, resp.text[:200])
+            if search_resp.status_code not in (200, 201):
+                logger.warning("Lusha prospecting search failed: %s %s", search_resp.status_code, search_resp.text[:200])
                 return []
 
-            data = resp.json()
-            contacts_raw = data.get("contacts") or data.get("data") or []
+            search_data = search_resp.json()
+            request_id = search_data.get("requestId")
+            candidates = search_data.get("data") or []
+            if not candidates or not request_id:
+                return []
+
+            # Pre-filter by title before enriching to save credits
+            if title_set:
+                filtered = [
+                    c for c in candidates
+                    if any(kw in (c.get("jobTitle") or "").lower() for kw in title_set)
+                ]
+                candidates = filtered or candidates[:limit]
+
+            # Take top N for enrichment
+            to_enrich = candidates[:limit]
+            contact_ids = [c["contactId"] for c in to_enrich]
+
+            # Step 2: Enrich
+            enrich_resp = await http.post(
+                f"{LUSHA_BASE}/prospecting/contact/enrich",
+                headers={"api_key": api_key, "Content-Type": "application/json"},
+                json={"requestId": request_id, "contactIds": contact_ids},
+                timeout=25,
+            )
+            if enrich_resp.status_code not in (200, 201):
+                logger.warning("Lusha prospecting enrich failed: %s %s", enrich_resp.status_code, enrich_resp.text[:200])
+                return []
+
+            enriched = enrich_resp.json().get("contacts") or []
             contacts = []
-            for c in contacts_raw:
-                first = (c.get("firstName") or "").strip()
-                last = (c.get("lastName") or "").strip()
-                full_name = f"{first} {last}".strip() if first or last else None
-                title = c.get("title") or ""
-                # Filter by title keywords locally if provided
-                if title_set and not any(kw in title.lower() for kw in title_set):
+            for item in enriched:
+                if not item.get("isSuccess"):
                     continue
+                c = item.get("data") or {}
                 phones = c.get("phoneNumbers") or []
                 phone, phone_type = _best_phone(phones)
                 emails = c.get("emailAddresses") or []
-                best_email = _best_email(emails)
+                best_email, confidence = _best_email(emails)
+                linkedin = (c.get("socialLinks") or {}).get("linkedin")
                 contacts.append({
-                    "full_name": full_name,
-                    "title": title or None,
+                    "full_name": c.get("fullName"),
+                    "title": c.get("jobTitle"),
                     "email": best_email,
                     "phone": phone,
                     "phone_type": phone_type,
-                    "linkedin_url": c.get("linkedinUrl"),
+                    "linkedin_url": linkedin,
                     "source": "lusha",
-                    "confidence": c.get("confidence", 0),
+                    "confidence": confidence,
                 })
-                if len(contacts) >= limit:
-                    break
             return contacts
         except Exception as e:
             logger.warning("Lusha contacts search error: %s", e)

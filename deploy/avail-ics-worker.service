@@ -1,20 +1,26 @@
 [Unit]
 Description=AVAIL ICsource Search Worker
-After=network.target postgresql.service avail-xvfb.service
-Wants=avail-xvfb.service
+Documentation=https://github.com/TRIOSCS/Avail-AI-Test
+After=network.target avail-xvfb.service
+Requires=avail-xvfb.service
 
 [Service]
 Type=simple
 User=root
+Group=root
 WorkingDirectory=/root/availai
-Environment=DISPLAY=:99
-Environment=PYTHONPATH=/root/availai
-ExecStart=/usr/bin/python -m app.services.ics_worker.worker
+EnvironmentFile=/root/availai/.env.ics-worker
+Environment="DISPLAY=:99"
+Environment="PYTHONPATH=/root/availai"
+ExecStart=/usr/bin/python3 -m app.services.ics_worker.worker
 Restart=on-failure
-RestartSec=30s
+RestartSec=300
 StandardOutput=journal
 StandardError=journal
-SyslogIdentifier=avail-ics-worker
+
+# Safety limits
+MemoryMax=2G
+CPUQuota=50%
 
 [Install]
 WantedBy=multi-user.target

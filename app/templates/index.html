@@ -146,9 +146,18 @@
                 <button type="button" class="sb-nav-btn" id="navCustomers" data-tip="Accounts" onclick="sidebarNav('customers',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg></span> Accounts</button>
                 <button type="button" class="sb-nav-btn" id="navVendors" data-tip="Vendors" onclick="sidebarNav('vendors',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><path d="M6 2L3 7v13a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7l-3-5z"/><line x1="3" y1="7" x2="21" y2="7"/><path d="M16 11a4 4 0 0 1-8 0"/></svg></span> Vendors</button>
                 <button type="button" class="sb-nav-btn" id="navSuggested" data-tip="Prospecting" onclick="sidebarNav('suggested',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span> Prospecting</button>
+                <button type="button" class="sb-nav-btn" id="navContacts" data-tip="Contacts" onclick="sidebarNav('contacts',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span> Contacts</button>
             </div>
         </div>
         <!-- Insight section removed — Dashboard + Scorecards consolidated into Command Center -->
+        {% if is_admin %}
+        <div class="sb-nav-group sb-settings-group" data-section="settings" style="--section-color:var(--muted);--section-dot:linear-gradient(135deg,#6b7280,#374151);--section-border:rgba(107,114,128,.18)">
+            <div class="sb-section-dot"></div>
+            <div class="sb-group-items" style="padding-top:4px">
+                <button type="button" class="sb-nav-btn" id="navSettingsSidebar" data-tip="Settings" onclick="sidebarNav('settings',this)"><span class="sb-nav-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span> Settings</button>
+            </div>
+        </div>
+        {% endif %}
     </nav>
     <button type="button" class="sb-scroll-arrow sb-scroll-down" id="sbScrollDown" onclick="document.querySelector('.sidebar-nav').scrollBy({top:80,behavior:'smooth'})" aria-label="Scroll down"><svg viewBox="0 0 24 24" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg></button>
     <div class="sidebar-footer">
@@ -159,8 +168,9 @@
             {% if is_admin %}<span class="rb">Admin</span>{% endif %}
             <div class="sb-user-popover">
                 <div class="sb-user-popover-name">{{ user_name }}{% if is_admin %} <span class="rb">Admin</span>{% endif %}</div>
-                <button type="button" id="navSettings" onclick="sidebarNav('settings',this)" class="hidden"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Settings</button>
+                <button type="button" id="navSettings" onclick="sidebarNav('settings',this)" style="display:none"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> Settings</button>
                 <button type="button" onclick="fetch('/auth/logout',{method:'POST'}).then(()=>location.reload())"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg> Logout</button>
+                <div style="font-size:10px;color:var(--muted);padding:4px 0;border-top:1px solid var(--border);margin-top:4px">v{{ app_version }}</div>
             </div>
         </div>
         <span id="m365Status" style="display:none;font-size:10px;padding:4px 8px"><span id="m365Dot"></span><span id="m365Label"></span></span>
@@ -598,6 +608,12 @@
                 <button type="button" class="btn btn-ghost btn-sm" onclick="rfqDeselectAllVendors()">Deselect All</button>
             </div>
             <div id="rfqVendorList" style="max-height:240px;overflow-y:auto;margin-bottom:12px"></div>
+            <div id="rfqTemplateSelector" style="display:flex;align-items:center;gap:6px;margin-bottom:8px">
+                <label style="font-size:11px;color:var(--text2);white-space:nowrap">Template</label>
+                <select id="rfqTemplateSelect" onchange="rfqApplyTemplate(this.value)" style="flex:1;font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg2);color:var(--text1)"></select>
+                <button type="button" class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px" onclick="rfqSaveTemplate()">Save as Template</button>
+                <button type="button" class="btn btn-ghost btn-sm" style="font-size:10px;padding:2px 6px;color:var(--red)" onclick="rfqDeleteTemplate()" id="rfqDeleteTplBtn" title="Delete selected custom template">Delete</button>
+            </div>
             <div class="rfq-condition">
                 <label>Condition Required</label>
                 <button type="button" class="rfq-cond-btn active" onclick="setRfqCondition('any',this)">Any</button>
@@ -614,7 +630,25 @@
             </div>
             <div class="mactions">
                 <button type="button" class="btn btn-ghost" onclick="closeModal('rfqModal')">Cancel</button>
-                <button type="button" class="btn btn-success" id="rfqSendBtn" onclick="sendBatchRfq()">Send</button>
+                <button type="button" class="btn btn-success" id="rfqPreviewBtn" onclick="rfqShowPreview()">Preview &amp; Send</button>
+            </div>
+        </div>
+        <div id="rfqPreview" class="hidden">
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+                <p style="font-size:12px;color:var(--text2);margin:0" id="rfqPreviewSummary"></p>
+            </div>
+            <div id="rfqPreviewCards" style="max-height:400px;overflow-y:auto;margin-bottom:12px"></div>
+            <div class="mactions">
+                <button type="button" class="btn btn-ghost" onclick="rfqBackToCompose()">Back to Edit</button>
+                <button type="button" class="btn btn-success" id="rfqSendBtn" onclick="rfqConfirmSend()">Confirm &amp; Send</button>
+            </div>
+        </div>
+        <div id="rfqResults" class="hidden">
+            <h3 style="margin-bottom:12px">Send Results</h3>
+            <div id="rfqResultsList" style="max-height:340px;overflow-y:auto;margin-bottom:12px"></div>
+            <div class="mactions">
+                <button type="button" class="btn btn-danger" id="rfqRetryBtn" onclick="rfqRetryFailed()" style="display:none">Retry Failed</button>
+                <button type="button" class="btn btn-ghost" onclick="closeModal('rfqModal')">Close</button>
             </div>
         </div>
     </div>

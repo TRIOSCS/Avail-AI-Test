@@ -14,9 +14,13 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import IcsSearchQueue, Requirement, Sighting
+from app.models.sourcing import Requisition
 
 from .config import IcsConfig
 from .mpn_normalizer import normalize_mpn
+
+# Requisition statuses that indicate active sourcing work
+_ACTIVE_STATUSES = {"active", "sourcing", "offers", "quoting", "reopened"}
 
 _config = IcsConfig()
 
@@ -100,6 +104,10 @@ def enqueue_for_ics_search(requirement_id: int, db: Session) -> IcsSearchQueue |
             logger.info("ICS dedup: requirement {} matched recent search but no material card to link", requirement_id)
         return None
 
+    # Priority: 1 for actively-sourced requisitions, 3 for everything else
+    reqn = db.get(Requisition, req.requisition_id) if req.requisition_id else None
+    priority = 1 if reqn and reqn.status in _ACTIVE_STATUSES else 3
+
     # Create new queue entry
     item = IcsSearchQueue(
         requirement_id=requirement_id,
@@ -108,6 +116,7 @@ def enqueue_for_ics_search(requirement_id: int, db: Session) -> IcsSearchQueue |
         normalized_mpn=norm_mpn,
         manufacturer=req.brand,
         status="pending",
+        priority=priority,
     )
     db.add(item)
     db.commit()
@@ -139,11 +148,11 @@ def recover_stale_searches(db: Session) -> int:
 
 
 def get_next_queued_item(db: Session) -> IcsSearchQueue | None:
-    """Get the oldest queued item, ordered by priority ASC then created_at ASC."""
+    """Get the next queued item — active-sourcing first (priority 1), newest first."""
     return (
         db.query(IcsSearchQueue)
         .filter(IcsSearchQueue.status == "queued")
-        .order_by(IcsSearchQueue.priority.asc(), IcsSearchQueue.created_at.asc())
+        .order_by(IcsSearchQueue.priority.asc(), IcsSearchQueue.created_at.desc())
         .first()
     )
 

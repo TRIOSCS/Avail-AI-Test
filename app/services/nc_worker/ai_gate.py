@@ -132,7 +132,7 @@ async def process_ai_gate(db: Session):
     pending = (
         db.query(NcSearchQueue)
         .filter(NcSearchQueue.status == "pending")
-        .order_by(NcSearchQueue.created_at.asc())
+        .order_by(NcSearchQueue.priority.asc(), NcSearchQueue.created_at.desc())
         .limit(30)
         .all()
     )

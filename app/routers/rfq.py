@@ -451,19 +451,56 @@ async def rfq_prepare(
         for c in db.query(VendorCard).filter(VendorCard.normalized_name.in_(vendor_norms.keys())).all()
     }
 
+    # ── Past RFQ email reuse: query all past Contact records by normalized vendor name ──
+    all_norms = list(vendor_norms.keys())
+    past_contacts_by_norm: dict[str, list] = {}
+    if all_norms:
+        past_contact_rows = (
+            db.query(Contact)
+            .filter(
+                Contact.vendor_name_normalized.in_(all_norms),
+                Contact.contact_type == "email",
+                Contact.vendor_contact.isnot(None),
+                Contact.requisition_id != req_id,  # Exclude current req
+            )
+            .order_by(Contact.created_at.desc())
+            .limit(500)
+            .all()
+        )
+        # Group by normalized name, deduplicate emails, keep up to 5 recent per vendor
+        for pc in past_contact_rows:
+            pc_norm = normalize_vendor_name(pc.vendor_name or "")
+            if pc_norm not in past_contacts_by_norm:
+                past_contacts_by_norm[pc_norm] = []
+            if len(past_contacts_by_norm[pc_norm]) < 5:
+                past_contacts_by_norm[pc_norm].append({
+                    "req_id": pc.requisition_id,
+                    "parts": pc.parts_included or [],
+                    "date": pc.created_at.isoformat() if pc.created_at else None,
+                    "email": pc.vendor_contact,
+                })
+
     results = []
     for v in vendors[:50]:
         vendor_name = v.vendor_name
         norm = normalize_vendor_name(vendor_name)
         card = cards_by_norm.get(norm)
         already_asked = sorted(exhaustion.get(norm, set()))
+        past_contacts = past_contacts_by_norm.get(norm, [])
 
         base = {
             "vendor_name": vendor_name,
             "display_name": card.display_name if card else vendor_name,
             "card_id": card.id if card else None,
             "already_asked": already_asked,
+            "past_contacts": past_contacts,
         }
+
+        # Use past RFQ emails when vendor card has no emails (before enrichment)
+        past_emails = list(dict.fromkeys(
+            pc["email"] for pc in past_contacts if pc.get("email")
+        ))
+
         if card and card.emails:
             base.update(
                 {
@@ -471,6 +508,15 @@ async def rfq_prepare(
                     "phones": card.phones or [],
                     "needs_lookup": False,
                     "contact_source": "cached",
+                }
+            )
+        elif past_emails:
+            base.update(
+                {
+                    "emails": past_emails,
+                    "phones": card.phones or [] if card else [],
+                    "needs_lookup": False,
+                    "contact_source": "past_rfq",
                 }
             )
         else:
@@ -523,8 +569,12 @@ async def rfq_prepare(
                             merge_emails_into_card(card, emails)
                             if phones:
                                 merge_phones_into_card(card, phones)
+                except asyncio.TimeoutError:
+                    logger.debug("Contact auto-lookup timed out for %s", r["vendor_name"])
+                    r["lookup_fail_reason"] = "Lookup timed out (15s)"
                 except Exception as e:
                     logger.debug("Contact auto-lookup failed for %s: %s", r["vendor_name"], e)
+                    r["lookup_fail_reason"] = "Lookup failed"
 
         await asyncio.gather(
             *[_contact_lookup(i) for i in needs_lookup_indices],

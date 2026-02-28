@@ -27,6 +27,7 @@ from app.models import (
     VendorReview,
 )
 from app.rate_limit import limiter
+from app.vendor_utils import normalize_vendor_name
 
 # ---------------------------------------------------------------------------
 # Garbage vendor filtering (pure logic, no DB needed)
@@ -159,6 +160,7 @@ def _make_contact(
         user_id=user.id,
         contact_type=contact_type,
         vendor_name=vendor_name,
+        vendor_name_normalized=normalize_vendor_name(vendor_name),
         vendor_contact=vendor_contact,
         parts_included=parts or ["LM317T"],
         subject=f"RFQ for {vendor_name}",
@@ -1048,6 +1050,170 @@ def test_rfq_prepare_vendor_without_emails(client, db_session, test_user, test_r
     v = data["vendors"][0]
     assert v["card_id"] == card.id
     assert v["needs_lookup"] is True
+
+
+# ══════════════════════════════════════════════════════════════════════
+# NEW TESTS — Past RFQ email reuse + timeout handling (Phase 1)
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_rfq_prepare_past_contact_emails(client, db_session, test_user, test_requisition):
+    """rfq-prepare uses emails from past RFQ contacts when VendorCard has no emails."""
+    # Create a second requisition with a contact for the same vendor
+    other_req = Requisition(
+        name="Other Req", created_by=test_user.id, status="active",
+    )
+    db_session.add(other_req)
+    db_session.commit()
+    db_session.refresh(other_req)
+
+    from app.vendor_utils import normalize_vendor_name
+
+    _make_contact(
+        db_session, other_req, test_user,
+        vendor_name="Past Vendor Co",
+        vendor_contact="past@vendor.com",
+        status="sent",
+        days_ago=10,
+    )
+    # Ensure no VendorCard exists for this vendor
+    with patch(
+        "app.enrichment_service.find_suggested_contacts",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/rfq-prepare",
+            json={"vendors": [{"vendor_name": "Past Vendor Co"}]},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    v = data["vendors"][0]
+    assert v["needs_lookup"] is False
+    assert "past@vendor.com" in v["emails"]
+    assert v["contact_source"] == "past_rfq"
+
+
+def test_rfq_prepare_past_contacts_exclude_current_req(client, db_session, test_user, test_requisition):
+    """rfq-prepare past_contacts does NOT include contacts from the current requisition."""
+    # Contact on the CURRENT requisition — should be excluded from past_contacts
+    _make_contact(
+        db_session, test_requisition, test_user,
+        vendor_name="Current Only Vendor",
+        vendor_contact="current@vendor.com",
+        status="sent",
+        days_ago=1,
+    )
+
+    with patch(
+        "app.enrichment_service.find_suggested_contacts",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/rfq-prepare",
+            json={"vendors": [{"vendor_name": "Current Only Vendor"}]},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    v = data["vendors"][0]
+    # past_contacts should be empty because the only contact is on the current req
+    assert v["past_contacts"] == []
+    # Should still need lookup since no VendorCard and no past emails
+    assert v["needs_lookup"] is True
+
+
+def test_rfq_prepare_timeout_sets_fail_reason(client, db_session, test_user, test_requisition):
+    """rfq-prepare sets lookup_fail_reason on asyncio.TimeoutError."""
+    import asyncio
+
+    with patch(
+        "app.enrichment_service.find_suggested_contacts",
+        new_callable=AsyncMock,
+        side_effect=asyncio.TimeoutError(),
+    ):
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/rfq-prepare",
+            json={"vendors": [{"vendor_name": "Timeout Vendor"}]},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    v = data["vendors"][0]
+    assert v["needs_lookup"] is True
+    assert v.get("lookup_fail_reason") == "Lookup timed out (15s)"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# NEW TESTS — Cross-req "Already Contacted" context (Phase 5)
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_cross_req_history_returned(client, db_session, test_user, test_requisition):
+    """rfq-prepare returns past_contacts from OTHER requisitions for context."""
+    other_req = Requisition(
+        name="Cross Req Test", created_by=test_user.id, status="active",
+    )
+    db_session.add(other_req)
+    db_session.commit()
+    db_session.refresh(other_req)
+
+    _make_contact(
+        db_session, other_req, test_user,
+        vendor_name="Cross Vendor Inc",
+        vendor_contact="cross@vendor.com",
+        status="sent",
+        parts=["LM317T", "LM7805"],
+        days_ago=3,
+    )
+
+    with patch(
+        "app.enrichment_service.find_suggested_contacts",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/rfq-prepare",
+            json={"vendors": [{"vendor_name": "Cross Vendor Inc"}]},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    v = data["vendors"][0]
+    assert len(v["past_contacts"]) == 1
+    pc = v["past_contacts"][0]
+    assert pc["email"] == "cross@vendor.com"
+    assert pc["req_id"] == other_req.id
+    assert "LM317T" in pc["parts"]
+
+
+def test_cross_req_history_excludes_current_req(client, db_session, test_user, test_requisition):
+    """rfq-prepare past_contacts excludes contacts from the CURRENT requisition."""
+    # Only a contact on the current req — no cross-req history
+    _make_contact(
+        db_session, test_requisition, test_user,
+        vendor_name="Same Req Vendor",
+        vendor_contact="same@vendor.com",
+        status="sent",
+        days_ago=1,
+    )
+
+    with patch(
+        "app.enrichment_service.find_suggested_contacts",
+        new_callable=AsyncMock,
+        return_value=[],
+    ):
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/rfq-prepare",
+            json={"vendors": [{"vendor_name": "Same Req Vendor"}]},
+        )
+
+    assert resp.status_code == 200
+    data = resp.json()
+    v = data["vendors"][0]
+    assert v["past_contacts"] == []
 
 
 # ══════════════════════════════════════════════════════════════════════

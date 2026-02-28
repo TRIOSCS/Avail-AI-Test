@@ -765,6 +765,15 @@ class TestQueueManager:
         assert item is not None
         assert item.mpn == "LM317T"
         assert item.status == "pending"
+        assert item.priority == 3  # "open" is not an active sourcing status
+
+    def test_enqueue_active_requisition_gets_priority(self, db_session, test_requisition):
+        test_requisition.status = "sourcing"
+        db_session.commit()
+        req = test_requisition.requirements[0]
+        item = enqueue_for_ics_search(req.id, db_session)
+        assert item is not None
+        assert item.priority == 1
 
     def test_enqueue_already_queued(self, db_session, test_requisition):
         req = test_requisition.requirements[0]
@@ -908,6 +917,49 @@ class TestQueueManager:
 
         result = get_next_queued_item(db_session)
         assert result.id == item.id
+
+    def test_get_next_queued_prefers_high_priority_then_newest(self, db_session, test_user):
+        """Active-sourcing items (priority=1) come first, then newest-first within same priority."""
+        from app.models import Requisition
+
+        # Create two requisitions
+        r1 = Requisition(name="OLD", customer_name="A", status="open",
+                         created_by=test_user.id, created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        r2 = Requisition(name="NEW", customer_name="B", status="open",
+                         created_by=test_user.id, created_at=datetime(2026, 2, 1, tzinfo=timezone.utc))
+        db_session.add_all([r1, r2])
+        db_session.flush()
+
+        req1 = Requirement(requisition_id=r1.id, primary_mpn="OLD-PART", target_qty=1,
+                           created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        req2 = Requirement(requisition_id=r2.id, primary_mpn="NEW-PART", target_qty=1,
+                           created_at=datetime(2026, 2, 1, tzinfo=timezone.utc))
+        db_session.add_all([req1, req2])
+        db_session.flush()
+
+        # Both same priority — newer should come first
+        old_item = IcsSearchQueue(
+            requirement_id=req1.id, requisition_id=r1.id,
+            mpn="OLD-PART", normalized_mpn="old-part", status="queued",
+            priority=3, created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+        new_item = IcsSearchQueue(
+            requirement_id=req2.id, requisition_id=r2.id,
+            mpn="NEW-PART", normalized_mpn="new-part", status="queued",
+            priority=3, created_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+        )
+        db_session.add_all([old_item, new_item])
+        db_session.commit()
+
+        result = get_next_queued_item(db_session)
+        assert result.mpn == "NEW-PART", "Newest part should come first"
+
+        # Now set old_item to high priority — it should come first despite being older
+        old_item.priority = 1
+        db_session.commit()
+
+        result = get_next_queued_item(db_session)
+        assert result.mpn == "OLD-PART", "High priority should beat recency"
 
     def test_get_next_queued_none(self, db_session):
         assert get_next_queued_item(db_session) is None

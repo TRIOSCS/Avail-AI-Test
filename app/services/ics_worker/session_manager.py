@@ -66,41 +66,39 @@ class IcsSessionManager:
     async def check_session_health(self) -> bool:
         """Check if the ICS session is still valid.
 
-        Navigates to the member search page and checks we're not redirected to login.
+        Navigates to the member search page and checks we're not redirected
+        to login or the public home page.
         """
         try:
             await self._page.goto(
                 "https://www.icsource.com/members/Search/NewSearch.aspx",
                 wait_until="load",
-                timeout=15000,
+                timeout=20000,
             )
-            await asyncio.sleep(1)
+            await asyncio.sleep(3)
             url = self._page.url.lower()
+            logger.debug("ICS health check URL: {}", url)
             # If redirected to login page, session is expired
-            if "login" in url or "login.aspx" in url:
+            if "login" in url:
                 return False
-            # Check for a member-only element (search form)
-            try:
-                await self._page.wait_for_selector(
-                    "#ctl00_ctl00_rtxtPartNumber2025, #ctl00_ctl00_txtPNZX",
-                    timeout=5000,
-                )
-                return True
-            except Exception:
+            # Must be on a members page (not redirected to public home)
+            if "/members/" not in url:
+                logger.debug("ICS health check: redirected to {}", url)
                 return False
+            return True
         except Exception as e:
             logger.warning("ICS session health check failed: {}", e)
             return False
 
     async def login(self) -> bool:
-        """Log in to ICsource using human-like typing.
+        """Log in to ICsource.
 
         ICsource login flow:
         1. Navigate to /home/LogIn.aspx
-        2. Fill username field
+        2. Set username via JS (Telerik RadTextBox doesn't respond to keyboard.type)
         3. Click password placeholder to reveal real password input
-        4. Type password
-        5. Click login button (Telerik AJAX — Enter key won't work)
+        4. Set password via JS
+        5. Click the styled green Log In div button
         """
         if not self.config.ICS_USERNAME or not self.config.ICS_PASSWORD:
             logger.error("ICS login: ICS_USERNAME or ICS_PASSWORD not configured")
@@ -112,12 +110,20 @@ class IcsSessionManager:
 
             # Wait for login form
             username_sel = "#ctl00_ctl00_body_bodycontent_logincontrol_txtUserName"
-            username_input = self._page.locator(username_sel)
-            await username_input.wait_for(timeout=10000)
+            await self._page.locator(username_sel).wait_for(timeout=10000)
 
-            # Clear and type username
-            await username_input.fill("")
-            await HumanBehavior.human_type(self._page, username_input, self.config.ICS_USERNAME)
+            # Set username via JS evaluate (Telerik inputs ignore keyboard events)
+            await self._page.evaluate(
+                """(u) => {
+                    const el = document.getElementById(
+                        'ctl00_ctl00_body_bodycontent_logincontrol_txtUserName'
+                    );
+                    el.value = u;
+                    el.dispatchEvent(new Event('input', {bubbles: true}));
+                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                }""",
+                self.config.ICS_USERNAME,
+            )
 
             await HumanBehavior.random_delay(0.3, 0.8)
 
@@ -130,23 +136,32 @@ class IcsSessionManager:
             except Exception:
                 pass  # Placeholder may not exist on all login page versions
 
-            # Type password
-            pwd_input = self._page.locator(
-                ".password, "
-                "#ctl00_ctl00_body_bodycontent_logincontrol_txtPassword, "
-                "input[type='password']"
+            # Set password via JS evaluate
+            await self._page.evaluate(
+                """(p) => {
+                    const el = document.getElementById(
+                        'ctl00_ctl00_body_bodycontent_logincontrol_txtPassword'
+                    );
+                    el.style.display = 'inline-block';
+                    el.value = p;
+                    el.dispatchEvent(new Event('input', {bubbles: true}));
+                    el.dispatchEvent(new Event('change', {bubbles: true}));
+                }""",
+                self.config.ICS_PASSWORD,
             )
-            await pwd_input.fill("")
-            await HumanBehavior.human_type(self._page, pwd_input, self.config.ICS_PASSWORD)
 
             await HumanBehavior.random_delay(0.5, 1.0)
 
-            # Click login button (Telerik AJAX — must click, not Enter)
-            login_btn = self._page.locator(
-                "#ctl00_ctl00_body_bodycontent_logincontrol_btnLogIn"
-            )
+            # Click the styled green Log In button (not the hidden ASP.NET input)
+            login_btn = self._page.locator("div.button.green:has-text('Log In')")
+            try:
+                await login_btn.wait_for(state="visible", timeout=5000)
+            except Exception:
+                login_btn = self._page.locator(
+                    "#ctl00_ctl00_body_bodycontent_logincontrol_btnLogIn"
+                )
             await HumanBehavior.human_click(self._page, login_btn)
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
 
             # Verify login succeeded
             self.is_logged_in = await self.check_session_health()

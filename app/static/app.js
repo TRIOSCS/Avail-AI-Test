@@ -928,7 +928,13 @@ export function showView(viewId) {
     try { _pushNav(viewId); } catch(e) { console.warn('pushNav:', e); }
     for (const id of ALL_VIEWS) {
         const el = document.getElementById(id);
-        if (el) el.style.display = id === viewId ? '' : 'none';
+        if (!el) continue;
+        if (id === viewId) {
+            el.classList.remove('hidden');
+            el.style.display = '';
+        } else {
+            el.style.display = 'none';
+        }
     }
     // Restore scroll position for the view we're entering
     if (scroller) {
@@ -6651,7 +6657,8 @@ export function navHighlight(btn) {
         var gradient = document.querySelector('.sb-top-gradient');
         if (gradient) gradient.dataset.section = section.dataset.section;
     }
-    document.body.classList.remove('sb-open');
+    // Only auto-close sidebar on mobile; keep pinned state on desktop
+    if (window.innerWidth < 768) document.body.classList.remove('sb-open');
 }
 
 function setMainPill(view) {
@@ -7584,6 +7591,10 @@ async function openBatchRfqModal(prebuiltGroups) {
     const modal = document.getElementById('rfqModal');
     const rfqPrep = document.getElementById('rfqPrepare'); if (rfqPrep) rfqPrep.style.display = '';
     const rfqRdy = document.getElementById('rfqReady'); if (rfqRdy) rfqRdy.style.display = 'none';
+    const rfqPrv = document.getElementById('rfqPreview'); if (rfqPrv) { rfqPrv.classList.add('hidden'); rfqPrv.style.display = 'none'; }
+    const rfqRes = document.getElementById('rfqResults'); if (rfqRes) { rfqRes.classList.add('hidden'); rfqRes.style.display = 'none'; }
+    _rfqPreviewPayload = [];
+    _rfqLastFailedGroups = [];
     rfqCondition = 'any';
     document.querySelectorAll('.rfq-cond-btn').forEach((b,i) => {
         b.classList.toggle('active', i === 0);
@@ -7707,8 +7718,10 @@ function renderRfqVendors() {
             emailHtml = '<span class="email-loading">⏳ Looking up…</span>';
         } else if (v.lookup_status === 'no_email' || (!v.emails.length && v.lookup_status !== 'pending')) {
             const failReason = v.lookup_fail_reason || 'No email found';
+            const retryBtn = v.lookup_fail_reason ? `<button class="btn btn-ghost btn-sm" onclick="rfqRetryLookup(${i})" title="Retry lookup" style="font-size:10px;padding:2px 6px">🔄 Retry</button>` : '';
             emailHtml = `<div class="rfq-email-row">
                 <span class="email-none" title="${escAttr(failReason)}">${esc(failReason)}</span>
+                ${retryBtn}
                 <input type="email" class="rfq-email-input" placeholder="Enter email…" onchange="rfqManualEmail(${i},this.value)">
                 <button class="btn btn-danger btn-sm" onclick="rfqRemoveVendor(${i})" title="Remove">✕</button>
             </div>`;
@@ -7737,8 +7750,8 @@ function renderRfqVendors() {
         }
 
         // Source indicator with tooltips
-        const srcLabels = { cached: '💾 Cached', website_scrape: '🌐 Website', ai_lookup: '🤖 AI', apollo: '📇 Apollo', hunter: '📧 Hunter', rocketreach: '🚀 RocketReach', clay: '🧱 Clay', explorium: '🔬 Explorium', ai: '🤖 AI', enrichment: '🔍 Auto' };
-        const srcTitles = { cached: 'Contact from local database cache', website_scrape: 'Email scraped from vendor website', ai_lookup: 'Contact found via AI search', apollo: 'Enriched via Apollo.io', hunter: 'Found via Hunter.io email finder', rocketreach: 'Found via RocketReach', clay: 'Enriched via Clay.com', explorium: 'Enriched via Explorium', ai: 'Contact found via AI search', enrichment: 'Auto-enriched from multiple sources' };
+        const srcLabels = { cached: '💾 Cached', past_rfq: '📬 Past RFQ', website_scrape: '🌐 Website', ai_lookup: '🤖 AI', apollo: '📇 Apollo', hunter: '📧 Hunter', rocketreach: '🚀 RocketReach', clay: '🧱 Clay', explorium: '🔬 Explorium', ai: '🤖 AI', enrichment: '🔍 Auto' };
+        const srcTitles = { cached: 'Contact from local database cache', past_rfq: 'Email reused from a previous RFQ', website_scrape: 'Email scraped from vendor website', ai_lookup: 'Contact found via AI search', apollo: 'Enriched via Apollo.io', hunter: 'Found via Hunter.io email finder', rocketreach: 'Found via RocketReach', clay: 'Enriched via Clay.com', explorium: 'Enriched via Explorium', ai: 'Contact found via AI search', enrichment: 'Auto-enriched from multiple sources' };
         const srcKey = (v.contact_source || '').split('+')[0];
         const srcBadge = v.contact_source ? `<span class="rfq-src-badge" title="${escAttr(srcTitles[srcKey] || 'Contact source: ' + v.contact_source)}">${srcLabels[srcKey] || v.contact_source}</span>` : '';
 
@@ -7766,10 +7779,25 @@ function renderRfqVendors() {
             exhaustHtml = `<span class="rfq-exhaust-partial" title="Previously asked: ${repeatNames}">🔄 ${totalRepeats} part${totalRepeats > 1 ? 's' : ''} already asked — ${v.new_listing.length + v.new_other.length} new</span>`;
         }
 
+        // Past contact / cross-req history subtitle
+        let pastHtml = '';
+        if (v.past_contacts && v.past_contacts.length) {
+            const lastDate = v.past_contacts[0].date;
+            if (lastDate) {
+                const daysAgo = Math.floor((Date.now() - new Date(lastDate).getTime()) / 86400000);
+                const allPastParts = [...new Set(v.past_contacts.flatMap(pc => pc.parts || []))].slice(0, 5);
+                const partsStr = allPastParts.join(', ');
+                const reqCount = new Set(v.past_contacts.map(pc => pc.req_id)).size;
+                const reqNote = reqCount > 1 ? ` across ${reqCount} reqs` : ' on another req';
+                pastHtml = `<span class="rfq-past-contact" style="font-size:10px;color:var(--text2);display:block;margin-top:2px">Also contacted ${daysAgo}d ago${reqNote}${partsStr ? ' for ' + esc(partsStr) : ''}</span>`;
+            }
+        }
+
         return `<div class="rfq-vendor-row ${totalRepeats > 0 && (v.new_listing.length + v.new_other.length) === 0 && !v.include_repeats ? 'rfq-vendor-exhausted' : ''} ${!v.included ? 'rfq-vendor-excluded' : ''}">
             <input type="checkbox" ${v.included ? 'checked' : ''} onchange="rfqToggleVendor(${i})" class="rfq-vendor-cb" title="Include in RFQ">
             <div class="rfq-vendor-info">
                 <strong>${esc(v.display_name || v.vendor_name)}</strong>
+                ${pastHtml}
                 <div class="rfq-parts-breakdown">${partsHtml}</div>
                 ${exhaustHtml}
                 ${srcBadge}
@@ -7824,6 +7852,146 @@ function setRfqCondition(cond, btn) {
     renderRfqMessage();
 }
 
+// ── RFQ Email Templates ──────────────────────────────────────────────
+const _rfqBuiltinTemplates = [
+    {
+        id: '__standard__',
+        name: 'Standard RFQ',
+        subject: 'RFQ: {PARTS}',
+        body: `Hi,
+
+We are sourcing the following parts — please send your best offer if available:
+
+{PARTS_LIST}
+{CONDITION}
+Please include with your quote:
+  - Qty available / Lead time
+  - Unit price (USD)
+  - Condition (New / Used / Refurb)
+  - Photos if available
+  - Warranty & payment terms
+
+Thanks,
+{SENDER}
+Trio Supply Chain Solutions`
+    },
+    {
+        id: '__urgent__',
+        name: 'Urgent RFQ',
+        subject: 'URGENT RFQ: {PARTS}',
+        body: `Hi,
+
+We have an URGENT requirement for the following parts — same-day quotes appreciated:
+
+{PARTS_LIST}
+{CONDITION}
+Please reply ASAP with:
+  - Qty available / Lead time
+  - Unit price (USD)
+  - Condition & date codes
+  - Fastest shipping option
+
+This is time-sensitive — thank you for your quick response.
+
+{SENDER}
+Trio Supply Chain Solutions`
+    },
+    {
+        id: '__broker__',
+        name: 'Broker Outreach',
+        subject: 'Sourcing Inquiry: {PARTS}',
+        body: `Hello,
+
+We are a supply chain solutions company sourcing the following components for a client:
+
+{PARTS_LIST}
+{CONDITION}
+If you have stock or access to any of these, please share:
+  - Qty on hand / Lead time
+  - Best unit price (USD)
+  - Condition, date codes, packaging
+  - MOQ if applicable
+
+We're open to alternatives or cross-references if exact matches aren't available.
+
+Best regards,
+{SENDER}
+Trio Supply Chain Solutions`
+    }
+];
+
+function rfqLoadTemplates() {
+    const sel = document.getElementById('rfqTemplateSelect');
+    if (!sel) return;
+    const customs = JSON.parse(localStorage.getItem('rfq_templates') || '[]');
+    const all = [..._rfqBuiltinTemplates, ...customs];
+    sel.innerHTML = `<option value="">— Select template —</option>` +
+        all.map(t => `<option value="${escAttr(t.id)}">${esc(t.name)}${t.id.startsWith('__') ? '' : ' (custom)'}</option>`).join('');
+    const delBtn = document.getElementById('rfqDeleteTplBtn');
+    if (delBtn) delBtn.style.display = 'none';
+}
+
+function rfqApplyTemplate(templateId) {
+    if (!templateId) return;
+    const customs = JSON.parse(localStorage.getItem('rfq_templates') || '[]');
+    const all = [..._rfqBuiltinTemplates, ...customs];
+    const tpl = all.find(t => t.id === templateId);
+    if (!tpl) return;
+
+    const allParts = [...new Set(rfqAllParts)];
+    const partsStr = allParts.slice(0, 5).join(', ') + (allParts.length > 5 ? '…' : '');
+    const fullName = (window.userName || 'Trio Supply Chain Solutions').trim();
+    const firstName = fullName.split(' ')[0];
+    let condLine = '';
+    if (rfqCondition === 'new') condLine = 'Condition: NEW ONLY\n\n';
+    else if (rfqCondition === 'used') condLine = 'Condition: USED / REFURBISHED ACCEPTABLE\n\n';
+    const partsListStr = allParts.map(p => {
+        const subs = (rfqSubsMap[p] || []).filter(s => s.toUpperCase() !== p.toUpperCase());
+        return subs.length ? `  ${p}  (also acceptable: ${subs.join(', ')})` : `  ${p}`;
+    }).join('\n');
+
+    const subject = tpl.subject.replace('{PARTS}', partsStr);
+    const body = tpl.body
+        .replace('{PARTS_LIST}', partsListStr + '\n')
+        .replace('{CONDITION}', condLine)
+        .replace('{SENDER}', firstName)
+        .replace('{PARTS}', partsStr);
+
+    const rfqSubj = document.getElementById('rfqSubject');
+    const rfqBod = document.getElementById('rfqBody');
+    if (rfqSubj) rfqSubj.value = subject;
+    if (rfqBod) rfqBod.value = body;
+    _saveRfqDraft();
+
+    // Show/hide delete button for custom templates
+    const delBtn = document.getElementById('rfqDeleteTplBtn');
+    if (delBtn) delBtn.style.display = templateId.startsWith('__') ? 'none' : '';
+}
+
+function rfqSaveTemplate() {
+    const name = prompt('Template name:');
+    if (!name || !name.trim()) return;
+    const subject = document.getElementById('rfqSubject')?.value || '';
+    const body = document.getElementById('rfqBody')?.value || '';
+    const id = 'custom_' + Date.now();
+    const customs = JSON.parse(localStorage.getItem('rfq_templates') || '[]');
+    customs.push({ id, name: name.trim(), subject, body });
+    localStorage.setItem('rfq_templates', JSON.stringify(customs));
+    rfqLoadTemplates();
+    document.getElementById('rfqTemplateSelect').value = id;
+    showToast('Template saved', 'success');
+}
+
+function rfqDeleteTemplate() {
+    const sel = document.getElementById('rfqTemplateSelect');
+    const id = sel?.value;
+    if (!id || id.startsWith('__')) return;
+    const customs = JSON.parse(localStorage.getItem('rfq_templates') || '[]');
+    localStorage.setItem('rfq_templates', JSON.stringify(customs.filter(t => t.id !== id)));
+    rfqLoadTemplates();
+    showToast('Template deleted', 'success');
+}
+
 function buildVendorBody(v) {
     // Determine which parts to include
     let listingParts = [...v.new_listing];
@@ -7874,6 +8042,7 @@ Trio Supply Chain Solutions`;
 }
 
 function renderRfqMessage() {
+    rfqLoadTemplates();
     // Restore saved draft if available
     const draftKey = `rfq_draft_${currentReqId}`;
     const saved = localStorage.getItem(draftKey);
@@ -7963,47 +8132,161 @@ function rfqRemoveVendor(idx) {
     renderRfqMessage();
 }
 
-async function sendBatchRfq() {
+async function rfqRetryLookup(idx) {
+    const v = rfqVendorData[idx];
+    if (!v) return;
+    v.lookup_status = 'loading';
+    v.lookup_fail_reason = null;
+    renderRfqVendors();
+    try {
+        const data = await apiFetch('/api/vendor-contact', {
+            method: 'POST', body: { vendor_name: v.vendor_name }
+        });
+        v.emails = data.emails || [];
+        v.phones = data.phones || [];
+        v.card_id = data.card_id;
+        v.selected_email = v.emails.length ? v.emails[0] : '';
+        v.lookup_status = v.emails.length ? 'ready' : 'no_email';
+        v.contact_source = data.source || null;
+        if (!v.emails.length) {
+            v.lookup_fail_reason = data.fail_reason || 'No contact found after retry';
+        }
+    } catch (e) {
+        v.lookup_status = 'no_email';
+        v.lookup_fail_reason = 'Retry failed: ' + (e.message || 'unknown');
+    }
+    renderRfqVendors();
+}
+
+let _rfqPreviewPayload = [];
+let _rfqLastFailedGroups = [];
+
+function _buildRfqPayload() {
+    const subject = document.getElementById('rfqSubject')?.value || '';
+    const sendable = rfqVendorData.filter(g => g.included && g.selected_email && _vendorHasPartsToSend(g));
+    if (!sendable.length) return [];
+    return sendable.map(g => {
+        // Per-vendor body using buildVendorBody for each vendor's specific parts
+        const body = buildVendorBody(g) || document.getElementById('rfqBody')?.value || '';
+        let sentParts = [...g.new_listing, ...g.new_other];
+        if (g.include_repeats) sentParts = [...sentParts, ...g.repeat_listing, ...g.repeat_other];
+        return {
+            vendor_name: g.vendor_name, vendor_email: g.selected_email,
+            parts: sentParts, subject, body
+        };
+    });
+}
+
+function rfqShowPreview() {
+    _rfqPreviewPayload = _buildRfqPayload();
+    if (!_rfqPreviewPayload.length) { showToast('No vendors with email and new parts to send', 'error'); return; }
+
+    const previewEl = document.getElementById('rfqPreviewCards');
+    previewEl.innerHTML = _rfqPreviewPayload.map((p, i) => `
+        <div class="rfq-preview-card" style="border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px;background:var(--bg2)">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+                <strong style="font-size:13px">${esc(p.vendor_name)}</strong>
+                <span style="font-size:11px;color:var(--text2)">${esc(p.vendor_email)}</span>
+            </div>
+            <div style="font-size:11px;color:var(--text2);margin-bottom:4px"><strong>Subject:</strong> ${esc(p.subject)}</div>
+            <div style="font-size:11px;color:var(--text2);margin-bottom:4px"><strong>Parts:</strong> ${esc(p.parts.join(', '))}</div>
+            <details>
+                <summary style="font-size:11px;color:var(--teal);cursor:pointer">Show email body</summary>
+                <pre style="font-size:11px;white-space:pre-wrap;margin-top:4px;padding:8px;background:var(--bg1);border-radius:4px;max-height:200px;overflow-y:auto">${esc(p.body)}</pre>
+            </details>
+        </div>
+    `).join('');
+
+    const sumEl = document.getElementById('rfqPreviewSummary');
+    if (sumEl) sumEl.textContent = `${_rfqPreviewPayload.length} email(s) ready to send`;
+
+    document.getElementById('rfqReady').style.display = 'none';
+    const preview = document.getElementById('rfqPreview');
+    preview.classList.remove('hidden');
+    preview.style.display = '';
+}
+
+function rfqBackToCompose() {
+    const preview = document.getElementById('rfqPreview');
+    preview.classList.add('hidden');
+    preview.style.display = 'none';
+    document.getElementById('rfqReady').style.display = '';
+}
+
+async function rfqConfirmSend() {
     const btn = document.getElementById('rfqSendBtn');
     await guardBtn(btn, 'Sending…', async () => {
-        const subject = document.getElementById('rfqSubject')?.value || '';
-        // Build per-vendor payloads with personalized body
-        const sendable = rfqVendorData.filter(g => g.included && g.selected_email && _vendorHasPartsToSend(g));
-        if (!sendable.length) { showToast('No vendors with email and new parts to send', 'error'); return; }
-        const payload = sendable.map(g => {
-            const body = document.getElementById('rfqBody')?.value || '';
-            // All parts being sent (for contact tracking)
-            let sentParts = [...g.new_listing, ...g.new_other];
-            if (g.include_repeats) sentParts = [...sentParts, ...g.repeat_listing, ...g.repeat_other];
-            return {
-                vendor_name: g.vendor_name, vendor_email: g.selected_email,
-                parts: sentParts, subject, body
-            };
-        });
+        if (!_rfqPreviewPayload.length) { showToast('No emails to send', 'error'); return; }
         try {
             const data = await apiFetch(`/api/requisitions/${currentReqId}/rfq`, {
-                method: 'POST', body: { groups: payload }
+                method: 'POST', body: { groups: _rfqPreviewPayload }
             });
             const results = data.results || [];
             const sent = results.filter(r => r.status === 'sent').length;
             const failed = results.filter(r => r.status !== 'sent');
-            if (failed.length > 0 && sent > 0) {
-                showToast(`Sent ${sent} of ${results.length} RFQs (${failed.length} failed)`, 'warn');
-            } else if (failed.length > 0 && sent === 0) {
-                showToast(`All ${failed.length} emails failed to send`, 'error');
+
+            if (failed.length > 0) {
+                // Show results panel instead of closing
+                _rfqShowResults(results);
             } else {
                 showToast(`Sent ${sent} of ${results.length} RFQs`, 'success');
+                closeModal('rfqModal');
             }
-            closeModal('rfqModal');
             localStorage.removeItem(`rfq_draft_${currentReqId}`);
             selectedSightings.clear();
-            // Clear sourcing drill-down state so next expand re-fetches fresh data
             if (_ddSelectedSightings[currentReqId]) delete _ddSelectedSightings[currentReqId];
             if (_ddSightingsCache[currentReqId]) delete _ddSightingsCache[currentReqId];
             renderSources();
             loadActivity();
         } catch (e) {
             showToast('Send error: ' + e.message, 'error');
+        }
+    });
+}
+
+function _rfqShowResults(results) {
+    const listEl = document.getElementById('rfqResultsList');
+    _rfqLastFailedGroups = [];
+    listEl.innerHTML = results.map(r => {
+        const ok = r.status === 'sent';
+        if (!ok) {
+            const matchGroup = _rfqPreviewPayload.find(p => p.vendor_name === r.vendor_name && p.vendor_email === (r.vendor_email || r.email));
+            if (matchGroup) _rfqLastFailedGroups.push(matchGroup);
+        }
+        return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;font-size:12px;border-bottom:1px solid var(--border)">
+            <span>${ok ? '✅' : '❌'}</span>
+            <strong>${esc(r.vendor_name)}</strong>
+            <span style="color:var(--text2)">${esc(r.vendor_email || r.email || '')}</span>
+            ${!ok ? `<span style="color:var(--red);margin-left:auto">${esc(r.error || 'Send failed')}</span>` : '<span style="color:var(--green);margin-left:auto">Sent</span>'}
+        </div>`;
+    }).join('');
+
+    const retryBtn = document.getElementById('rfqRetryBtn');
+    if (retryBtn) retryBtn.style.display = _rfqLastFailedGroups.length ? '' : 'none';
+
+    const sent = results.filter(r => r.status === 'sent').length;
+    const failedCount = results.length - sent;
+    showToast(`Sent ${sent} of ${results.length} RFQs (${failedCount} failed)`, failedCount > 0 ? 'warn' : 'success');
+
+    document.getElementById('rfqPreview').style.display = 'none';
+    document.getElementById('rfqReady').style.display = 'none';
+    const resultsDiv = document.getElementById('rfqResults');
+    resultsDiv.classList.remove('hidden');
+    resultsDiv.style.display = '';
+}
+
+async function rfqRetryFailed() {
+    if (!_rfqLastFailedGroups.length) return;
+    const btn = document.getElementById('rfqRetryBtn');
+    await guardBtn(btn, 'Retrying…', async () => {
+        try {
+            const data = await apiFetch(`/api/requisitions/${currentReqId}/rfq`, {
+                method: 'POST', body: { groups: _rfqLastFailedGroups }
+            });
+            _rfqShowResults(data.results || []);
+            loadActivity();
+        } catch (e) {
+            showToast('Retry error: ' + e.message, 'error');
         }
     });
 }
@@ -9188,25 +9471,29 @@ async function _renderVendorDrawerParts(vendorId) {
     if (!body) return;
     body.innerHTML = '<div class="drawer-section"><p class="empty">Loading part history...</p></div>';
     try {
-        const sightings = await apiFetch('/api/vendors/' + vendorId + '/sightings?limit=20');
-        if (!sightings.length) {
+        const data = await apiFetch('/api/vendors/' + vendorId + '/parts-summary?limit=20');
+        const parts = data.items || [];
+        if (!parts.length) {
             body.innerHTML = '<div class="drawer-section"><p class="crm-empty">No part history</p></div>';
             return;
         }
         let html = `<div style="padding:12px 20px"><table class="crm-table"><thead><tr>
-            <th>Part #</th><th>Last Seen</th><th style="text-align:right">Price</th><th style="text-align:right">Qty</th>
+            <th>Part #</th><th>Last Seen</th><th style="text-align:right">Price</th><th style="text-align:right">Sightings</th>
         </tr></thead><tbody>`;
-        for (const s of sightings) {
+        for (const s of parts) {
             html += `<tr>
-                <td class="mono">${esc(s.mpn || s.part_number || '—')}</td>
-                <td style="color:var(--muted)">${s.seen_at ? fmtDate(s.seen_at) : '—'}</td>
-                <td style="text-align:right">${s.price != null ? '$' + Number(s.price).toFixed(2) : '—'}</td>
-                <td style="text-align:right;color:var(--muted)">${s.quantity != null ? Number(s.quantity).toLocaleString() : '—'}</td>
+                <td class="mono">${esc(s.mpn || '—')}</td>
+                <td style="color:var(--muted)">${s.last_seen ? fmtDate(s.last_seen) : '—'}</td>
+                <td style="text-align:right">${s.last_price != null ? '$' + Number(s.last_price).toFixed(2) : '—'}</td>
+                <td style="text-align:right;color:var(--muted)">${s.sighting_count != null ? Number(s.sighting_count).toLocaleString() : '—'}</td>
             </tr>`;
         }
         html += '</tbody></table></div>';
         body.innerHTML = html;
-    } catch (err) { body.innerHTML = '<div class="drawer-section"><p class="crm-empty">Error loading parts</p></div>'; }
+    } catch (err) {
+        body.innerHTML = `<div class="drawer-section"><p class="crm-empty">Error loading parts</p>
+            <button class="btn-sm" onclick="_renderVendorDrawerParts(${vendorId})" style="margin-top:8px">Retry</button></div>`;
+    }
 }
 
 
