@@ -1873,71 +1873,120 @@ async function loadDashboard() {
         const daysParam = _dashPeriod === 'ytd' ? Math.ceil((Date.now() - new Date(new Date().getFullYear(), 0, 1)) / 86400000) : _dashPeriod === '90d' ? 90 : 30;
         const haveReqs = _reqListData && _reqListData.length > 0;
 
-        // 3-zone: status bar + attention feed + work queue (no morning brief API call)
-        const [attnFeed, freshReqs, quotes, hotOffers] = await Promise.all([
-            apiFetch(`/api/dashboard/attention-feed?days=${daysParam}&scope=my`).catch(e => { showToast('Failed to load attention feed','warn'); return []; }),
-            haveReqs ? Promise.resolve(null) : apiFetch('/api/requisitions').catch(e => { showToast('Failed to load requisitions','warn'); return []; }),
-            apiFetch('/api/quotes').catch(e => { showToast('Failed to load quotes','warn'); return []; }),
-            apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(e => { showToast('Failed to load hot offers','warn'); return []; }),
+        const [brief, needsAttn, freshReqs, quotes, scorecard, hotOffers] = await Promise.all([
+            apiFetch('/api/dashboard/morning-brief').catch(() => null),
+            apiFetch(`/api/dashboard/needs-attention?days=${daysParam}`).catch(() => []),
+            haveReqs ? Promise.resolve(null) : apiFetch('/api/requisitions').catch(() => []),
+            apiFetch('/api/quotes').catch(() => []),
+            apiFetch('/api/proactive/scorecard').catch(() => null),
+            apiFetch(`/api/dashboard/hot-offers?days=${daysParam}`).catch(() => []),
         ]);
 
         const reqs = haveReqs ? _reqListData : freshReqs;
         const reqList = Array.isArray(reqs) ? reqs : (reqs && reqs.requisitions ? reqs.requisitions : []);
         const quoteList = Array.isArray(quotes) ? quotes : [];
-        const feedItems = Array.isArray(attnFeed) ? attnFeed : [];
+        const attnList = Array.isArray(needsAttn) ? needsAttn : [];
         const targetId = _dashUserId || window.userId;
         const myReqs = targetId ? reqList.filter(r => r.created_by === targetId || r.sales_user_id === targetId) : reqList;
 
         const now = new Date();
         const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+
         const myOpenReqs = myReqs.filter(r => ['open','active','sourcing'].includes(r.status)).length;
         const quotesOut = quoteList.filter(q => q.status === 'sent' && !q.result).length;
         const wonThisMonth = myReqs.filter(r => r.status === 'won' && r.updated_at && new Date(r.updated_at) >= monthStart).length;
+        const wonLastMonth = myReqs.filter(r => r.status === 'won' && r.updated_at && new Date(r.updated_at) >= lastMonthStart && new Date(r.updated_at) <= lastMonthEnd).length;
         const lostThisMonth = myReqs.filter(r => r.status === 'lost' && r.updated_at && new Date(r.updated_at) >= monthStart).length;
         const winRate = (wonThisMonth + lostThisMonth) > 0 ? Math.round(wonThisMonth / (wonThisMonth + lostThisMonth) * 100) : 0;
+        const lostLastMonth = myReqs.filter(r => r.status === 'lost' && r.updated_at && new Date(r.updated_at) >= lastMonthStart && new Date(r.updated_at) <= lastMonthEnd).length;
+        const lastWinRate = (wonLastMonth + lostLastMonth) > 0 ? Math.round(wonLastMonth / (wonLastMonth + lostLastMonth) * 100) : 0;
 
         let html = '';
 
-        // ── Zone 1: Status Bar ──
-        html += `<div class="status-bar">
-            <span class="status-bar-item">Open Reqs: <b>${myOpenReqs}</b></span>
-            <span class="status-bar-sep">|</span>
-            <span class="status-bar-item">Quotes Out: <b>${quotesOut}</b></span>
-            <span class="status-bar-sep">|</span>
-            <span class="status-bar-item">Won: <b style="color:var(--green)">${wonThisMonth}</b></span>
-            <span class="status-bar-sep">|</span>
-            <span class="status-bar-item">Win Rate: <b>${winRate}%</b></span>
+        // ── Morning Brief ──
+        if (brief) {
+            const briefText = brief.text || null;
+            const stats = brief.stats || {};
+            if (briefText) {
+                html += `<div class="cc-brief"><p>${esc(briefText)}</p></div>`;
+            } else {
+                html += `<div class="cc-brief cc-brief-fallback"><p>You have ${stats.stale_accounts || 0} stale accounts, ${stats.quotes_awaiting || 0} quotes awaiting response, and ${stats.new_proactive_matches || 0} new proactive matches.</p></div>`;
+            }
+        }
+
+        // ── Stat Row ──
+        html += `<div class="cc-stat-row">
+            <div class="cc-stat"><div class="cc-stat-num">${myOpenReqs}</div><div class="cc-stat-label">My Open Reqs</div></div>
+            <div class="cc-stat"><div class="cc-stat-num">${quotesOut}</div><div class="cc-stat-label">Quotes Out</div></div>
+            <div class="cc-stat"><div class="cc-stat-num" style="color:var(--green)">${wonThisMonth}${_ccTrend(wonThisMonth, wonLastMonth)}</div><div class="cc-stat-label">Won This Month</div></div>
+            <div class="cc-stat"><div class="cc-stat-num">${winRate}%${_ccTrend(winRate, lastWinRate)}</div><div class="cc-stat-label">Win Rate</div></div>
         </div>`;
 
-        // ── Zone 2: Needs Attention (unified prioritized list) ──
-        html += `<div class="card-v2 attention-feed">
-            <h3 class="cc-card-title">Needs Attention <span class="cc-card-count">${feedItems.length}</span></h3>`;
-        if (feedItems.length) {
-            html += feedItems.map(item => {
-                const dotColor = item.urgency === 'critical' ? 'var(--red)' : item.urgency === 'warning' ? 'var(--amber)' : 'var(--green)';
-                const typeBadge = _attnTypeBadge(item.type);
-                const onclick = item.link_type === 'company' ? `goToCompany(${item.link_id})` : `goToReq(${item.link_id})`;
-                return `<div class="cc-row" onclick="${onclick}">
+        // ── Detail Cards Grid ──
+        html += '<div class="cc-cards-grid">';
+
+        // Card 1: Needs Attention
+        const attnSorted = [...attnList].sort((a, b) => {
+            const aVal = (a.open_quote_value || 0) + (a.days_since_contact || 0) * 100;
+            const bVal = (b.open_quote_value || 0) + (b.days_since_contact || 0) * 100;
+            return bVal - aVal;
+        });
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--red)">&#9679;</span> Needs Attention <span class="cc-card-count">${attnList.length}</span></h3>`;
+        if (attnSorted.length) {
+            html += '<div class="cc-card-scroll">';
+            html += attnSorted.slice(0, 15).map(a => {
+                const hasQuote = a.open_quote_value > 0;
+                const neverContacted = !a.last_outreach_at;
+                const dotColor = (neverContacted || (hasQuote && a.days_since_contact >= 5)) ? 'var(--red)' : 'var(--amber)';
+                let detail = '';
+                if (neverContacted) detail = 'Never contacted';
+                else if (hasQuote) detail = `$${(a.open_quote_value/1000).toFixed(1)}K quote going cold &middot; ${a.days_since_contact}d`;
+                else detail = `${a.days_since_contact}d ago &middot; ${a.last_channel || 'unknown'}`;
+                return `<div class="cc-row" onclick="goToCompany(${a.company_id})">
                     <span class="cc-dot" style="background:${dotColor}"></span>
                     <div class="cc-row-body">
-                        <span class="cc-row-name">${esc(item.title)}</span>
-                        <span class="cc-row-detail">${esc(item.detail)}</span>
+                        <span class="cc-row-name">${esc(a.company_name)}${a.is_strategic ? ' <span class="cc-star">&#9733;</span>' : ''}</span>
+                        <span class="cc-row-detail">${detail}</span>
                     </div>
-                    <span class="cc-row-badge">${typeBadge}</span>
+                    ${a.open_req_count ? '<span class="cc-row-badge">' + a.open_req_count + ' open</span>' : ''}
                 </div>`;
             }).join('');
+            html += '</div>';
+            if (attnList.length > 15) {
+                html += `<div class="cc-view-all"><a class="cc-link" onclick="sidebarNav('customers',document.getElementById('navCustomers'))">View All ${attnList.length} &rarr;</a></div>`;
+            }
         } else {
-            html += '<p class="cc-empty">Nothing urgent right now.</p>';
+            html += '<p class="cc-empty">All accounts contacted recently.</p>';
         }
         html += '</div>';
 
-        // ── Zone 3: Work Queue ──
-        html += '<div class="work-queue">';
+        // Card 2: Quotes Awaiting Response
+        const awaitingQuotes = quoteList.filter(q => q.status === 'sent' && !q.result).sort((a, b) => new Date(a.sent_at || 0) - new Date(b.sent_at || 0));
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--amber)">&#9679;</span> Quotes Awaiting Response <span class="cc-card-count">${awaitingQuotes.length}</span></h3>`;
+        if (awaitingQuotes.length) {
+            html += awaitingQuotes.slice(0, 5).map(q => {
+                const daysSent = q.sent_at ? Math.floor((now - new Date(q.sent_at)) / 86400000) : 0;
+                const dotColor = daysSent >= 7 ? 'var(--red)' : daysSent >= 3 ? 'var(--amber)' : 'var(--green)';
+                return `<div class="cc-row" onclick="goToReq(${q.requisition_id || q.id})">
+                    <span class="cc-dot" style="background:${dotColor}"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(q.quote_number || 'Quote #' + q.id)}${q.customer_name ? ' &mdash; ' + esc(q.customer_name) : ''}</span>
+                        <span class="cc-row-detail">${daysSent}d since sent${q.subtotal ? ' &middot; $' + Number(q.subtotal).toLocaleString() : ''}</span>
+                    </div>
+                </div>`;
+            }).join('');
+        } else {
+            html += '<p class="cc-empty">No quotes waiting for response.</p>';
+        }
+        html += '</div>';
 
+        // Card 3: Ready to Quote
         const readyToQuote = myReqs.filter(r => ['open','active','sourcing'].includes(r.status) && (r.offer_count || 0) > 0 && (r.quote_count || 0) === 0);
         html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--blue)">&#9679;</span> Ready to Quote <span class="cc-card-count">${readyToQuote.length}</span></h3>`;
         if (readyToQuote.length) {
-            html += readyToQuote.slice(0, 8).map(r => `<div class="cc-row" onclick="goToReq(${r.id})">
+            html += readyToQuote.slice(0, 5).map(r => `<div class="cc-row" onclick="goToReq(${r.id})">
                 <span class="cc-dot" style="background:var(--blue)"></span>
                 <div class="cc-row-body">
                     <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
@@ -1949,11 +1998,62 @@ async function loadDashboard() {
         }
         html += '</div>';
 
+        // Card 4: Upcoming Deadlines
+        const withDeadline = myReqs.filter(r => r.deadline && ['open','active','sourcing'].includes(r.status));
+        withDeadline.sort((a, b) => {
+            if (a.deadline === 'ASAP') return -1;
+            if (b.deadline === 'ASAP') return 1;
+            return new Date(a.deadline) - new Date(b.deadline);
+        });
+        html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--purple)">&#9679;</span> Upcoming Deadlines <span class="cc-card-count">${withDeadline.length}</span></h3>`;
+        if (withDeadline.length) {
+            html += withDeadline.slice(0, 5).map(r => {
+                let dotColor = 'var(--green)';
+                let deadlineLabel = r.deadline;
+                if (r.deadline === 'ASAP') {
+                    dotColor = 'var(--red)';
+                } else {
+                    const dl = new Date(r.deadline);
+                    const daysLeft = Math.floor((dl - now) / 86400000);
+                    if (daysLeft <= 0) { dotColor = 'var(--red)'; deadlineLabel = daysLeft === 0 ? 'Today' : Math.abs(daysLeft) + 'd overdue'; }
+                    else if (daysLeft <= 3) { dotColor = 'var(--amber)'; deadlineLabel = daysLeft + 'd left'; }
+                    else { deadlineLabel = r.deadline; }
+                }
+                return `<div class="cc-row" onclick="goToReq(${r.id})">
+                    <span class="cc-dot" style="background:${dotColor}"></span>
+                    <div class="cc-row-body">
+                        <span class="cc-row-name">${esc(r.name || 'REQ #' + r.id)}</span>
+                        <span class="cc-row-detail">${deadlineLabel}</span>
+                    </div>
+                </div>`;
+            }).join('');
+        } else {
+            html += '<p class="cc-empty">No upcoming deadlines.</p>';
+        }
+        html += '</div>';
+
+        // Card 5: Proactive Intelligence
+        if (scorecard) {
+            const sc = scorecard;
+            const rate = sc.conversion_rate != null ? Math.round(sc.conversion_rate) : 0;
+            html += `<div class="card-v2 cc-card">
+                <h3 class="cc-card-title"><span style="color:var(--sourcing-color)">&#9679;</span> Proactive Intelligence</h3>
+                <div class="cc-proactive-stats">
+                    <span class="cc-pill">Sent: <b>${sc.total_sent || 0}</b></span>
+                    <span class="cc-pill">Quoted: <b>${sc.total_quoted || 0}</b></span>
+                    <span class="cc-pill">POs: <b>${sc.total_po || 0}</b></span>
+                    <span class="cc-pill">Rate: <b>${rate}%</b></span>
+                </div>
+                <div style="margin-top:6px"><a class="cc-link" onclick="sidebarNav('proactive',document.getElementById('navProactive'))">View all matches &rarr;</a></div>
+            </div>`;
+        }
+
+        // Card 6: Hot Offers
         const hotList = Array.isArray(hotOffers) ? hotOffers : [];
         html += `<div class="card-v2 cc-card"><h3 class="cc-card-title"><span style="color:var(--green)">&#9679;</span> Hot Offers <span class="cc-card-count">${hotList.length}</span></h3>`;
         if (hotList.length) {
             html += '<div class="cc-card-scroll">';
-            html += hotList.slice(0, 8).map(o => {
+            html += hotList.map(o => {
                 const price = o.unit_price ? '$' + Number(o.unit_price).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 4}) : '\u2014';
                 return `<div class="cc-row" onclick="goToReq(${o.requisition_id})">
                     <span class="cc-dot" style="background:var(--green)"></span>
@@ -1969,7 +2069,7 @@ async function loadDashboard() {
         }
         html += '</div>';
 
-        html += '</div>'; // close work-queue
+        html += '</div>'; // close cc-cards-grid
         el.innerHTML = html;
     } catch (err) {
         console.error('loadDashboard error:', err);

@@ -1385,3 +1385,36 @@ def reactivation_signals(
         }
         for s in signals
     ]
+
+
+# ── Unified Leaderboard ────────────────────────────────────────────
+
+
+@router.get("/unified-leaderboard")
+@cached_endpoint(prefix="unified_lb", ttl_hours=0.25, key_params=["month"])
+def unified_leaderboard(
+    month: str = Query(None, description="YYYY-MM format"),
+    db: Session = Depends(get_db),
+    user=Depends(require_user),
+):
+    """Return unified cross-role leaderboard with category breakdowns and AI blurbs."""
+    from ..services.unified_score_service import get_unified_leaderboard
+
+    if month:
+        try:
+            m = datetime.strptime(month, "%Y-%m").date()
+        except ValueError:
+            from fastapi import HTTPException
+            raise HTTPException(400, "Invalid month format — use YYYY-MM")
+    else:
+        m = datetime.now(timezone.utc).date().replace(day=1)
+
+    return get_unified_leaderboard(db, m)
+
+
+@router.get("/scoring-info")
+def scoring_info(user=Depends(require_user)):
+    """Return static scoring system explanation for the info pill tooltip."""
+    from ..services.unified_score_service import get_scoring_info
+
+    return get_scoring_info()

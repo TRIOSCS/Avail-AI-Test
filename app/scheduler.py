@@ -666,6 +666,16 @@ async def _job_performance_tracking():
             f"Multiplier Scores: {ms_result['buyers']} buyers, "
             f"{ms_result['sales']} sales, {ms_result['saved']} saved for {current_month}"
         )
+        # Unified Scores (cross-role leaderboard)
+        from .services.unified_score_service import compute_all_unified_scores
+        us_result = await asyncio.wait_for(
+            loop.run_in_executor(None, compute_all_unified_scores, db, current_month),
+            timeout=300,
+        )
+        logger.info(
+            f"Unified Scores: {us_result['computed']} computed, "
+            f"{us_result['saved']} saved for {current_month}"
+        )
         # Recompute previous month during grace period (first 7 days)
         if now.day <= 7:
             prev_month = (current_month - timedelta(days=1)).replace(day=1)
@@ -679,6 +689,10 @@ async def _job_performance_tracking():
             )
             await asyncio.wait_for(
                 loop.run_in_executor(None, compute_all_multiplier_scores, db, prev_month),
+                timeout=300,
+            )
+            await asyncio.wait_for(
+                loop.run_in_executor(None, compute_all_unified_scores, db, prev_month),
                 timeout=300,
             )
     except asyncio.TimeoutError:

@@ -73,6 +73,9 @@ from .performance import (  # noqa: F401
     VendorMetricsSnapshot,
 )
 
+# Unified Score (cross-role leaderboard)
+from .unified_score import UnifiedScoreSnapshot  # noqa: F401
+
 # Email Intelligence (AI-powered inbox mining)
 from .email_intelligence import EmailIntelligence  # noqa: F401
 

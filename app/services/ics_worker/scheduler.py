@@ -37,6 +37,9 @@ class SearchScheduler:
         Window: Sunday 6 PM ET through Friday 5 PM ET.
         Off: Friday 5 PM → Sunday 6 PM (Saturday all day).
         """
+        import os
+        if os.environ.get("FORCE_BUSINESS_HOURS"):
+            return True
         now = datetime.now(EASTERN)
         wd = now.weekday()  # Mon=0 … Sun=6
         hour = now.hour

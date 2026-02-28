@@ -245,3 +245,30 @@ def refresh_multiplier_scores(
     result = compute_all_multiplier_scores(db, m)
     invalidate_prefix("perf_multiplier")
     return {"status": "ok", **result}
+
+
+# ── Unified Scores ──────────────────────────────────────────────────
+
+
+@router.post("/api/performance/unified-scores/refresh")
+def refresh_unified_scores(
+    month: str = Query(None, description="YYYY-MM format"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Recompute Unified Scores for all users. Admin only."""
+    if not _is_admin(user):
+        raise HTTPException(403, "Admin required")
+    from ..services.unified_score_service import compute_all_unified_scores
+
+    if month:
+        try:
+            m = datetime.strptime(month, "%Y-%m").date()
+        except ValueError:
+            raise HTTPException(400, "Invalid month format — use YYYY-MM")
+    else:
+        m = date.today().replace(day=1)
+
+    result = compute_all_unified_scores(db, m)
+    invalidate_prefix("unified_lb")
+    return {"status": "ok", **result}
