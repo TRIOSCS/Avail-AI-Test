@@ -237,7 +237,7 @@ async def enrich_company(domain: str) -> dict | None:
     async with _semaphore:
         try:
             resp = await http.get(
-                f"{LUSHA_BASE}/company",
+                f"{LUSHA_BASE}/v2/company",
                 params={"domain": domain},
                 headers={"api_key": api_key},
                 timeout=20,
