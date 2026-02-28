@@ -390,7 +390,7 @@ async def test_step_clay_passes_title_keywords(db_session, _mock_settings):
     """_step_clay should pass role-based title keywords, not company name."""
     with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
          patch("app.services.customer_enrichment_service.record_credit_usage"), \
-         patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock) as mock_clay:
+         patch("app.connectors.clay_client.find_contacts", new_callable=AsyncMock) as mock_clay:
         mock_clay.return_value = []
 
         from app.services.customer_enrichment_service import _step_clay
@@ -398,7 +398,7 @@ async def test_step_clay_passes_title_keywords(db_session, _mock_settings):
 
         mock_clay.assert_awaited_once()
         call_args = mock_clay.call_args
-        # First arg is domain, second is title filter
+        # First positional arg is domain, second is title filter
         title_filter = call_args[0][1]
         assert "purchasing" in title_filter
         assert "Acme Electronics" not in title_filter
@@ -409,7 +409,7 @@ async def test_step_clay_confidence_is_70(db_session, _mock_settings):
     """Clay contacts should have confidence 70 (co-primary, not gap-filler 50)."""
     with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
          patch("app.services.customer_enrichment_service.record_credit_usage"), \
-         patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock) as mock_clay:
+         patch("app.connectors.clay_client.find_contacts", new_callable=AsyncMock) as mock_clay:
         mock_clay.return_value = [
             {"full_name": "Test Person", "email": "test@acme.com", "title": "Buyer"},
         ]

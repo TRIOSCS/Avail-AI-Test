@@ -173,16 +173,19 @@ async def _step_clay(
     """Step 1b: Search Clay for contacts (co-primary with Lusha).
 
     Clay is a primary data source — always runs alongside Lusha, not just
-    as a gap-filler. Results are merged and deduped before Hunter verification.
+    as a gap-filler. Uses OAuth2 clay_client connector.
+    Results are merged and deduped before Hunter verification.
     """
     if not can_use_credits(db, "clay", 1):
         logger.info("Clay credits exhausted, skipping")
         return []
 
     try:
-        from ..enrichment_service import _clay_find_contacts
-        # Pass title keywords for role-based search, not company_name
-        contacts = await _clay_find_contacts(domain, "purchasing,procurement,buyer,engineer,director,vp")
+        from ..connectors.clay_client import find_contacts
+
+        contacts = await find_contacts(
+            domain, "purchasing,procurement,buyer,engineer,director,vp", db=db
+        )
         if contacts:
             record_credit_usage(db, "clay", 1)
             return [

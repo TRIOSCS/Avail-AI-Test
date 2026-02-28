@@ -259,93 +259,43 @@ def normalize_company_output(data: dict) -> dict:
     return out
 
 
-# ── Provider: Clay ──────────────────────────────────────────────────────
+# ── Provider: Clay (OAuth2) ─────────────────────────────────────────────
 
-CLAY_BASE = "https://api.clay.com/v3/sources"
+
+def _get_clay_db():
+    """Get a short-lived DB session for Clay token lookups."""
+    from .database import SessionLocal
+    return SessionLocal()
 
 
 async def _clay_find_company(domain: str) -> Optional[dict]:
-    """Look up a company on Clay by domain. Returns normalized company data."""
-    if not get_credential_cached("clay_enrichment", "CLAY_API_KEY"):
-        logger.debug("Clay API key not configured — skipping")
-        return None
+    """Look up a company on Clay by domain. Uses OAuth2 clay_client."""
+    db = _get_clay_db()
     try:
-        resp = await http.post(
-            f"{CLAY_BASE}/enrich-company",
-            headers={
-                "Authorization": f"Bearer {get_credential_cached('clay_enrichment', 'CLAY_API_KEY')}",
-                "Content-Type": "application/json",
-            },
-            json={"domain": domain},
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            logger.warning(
-                "Clay company lookup failed: %s %s",
-                resp.status_code,
-                resp.text[:200],
-            )
-            return None
-        data = resp.json()
-        return {
-                "source": "clay",
-                "legal_name": data.get("name"),
-                "domain": domain,
-                "linkedin_url": data.get("linkedin_url") or data.get("url"),
-                "industry": data.get("industry"),
-                "employee_size": data.get("size"),
-                "hq_city": data.get("locality", "").split(",")[0].strip()
-                if data.get("locality")
-                else None,
-                "hq_state": data.get("locality", "").split(",")[-1].strip()
-                if data.get("locality") and "," in data.get("locality", "")
-                else None,
-                "hq_country": data.get("country"),
-                "website": data.get("website"),
-            }
+        from .connectors.clay_client import enrich_company
+        result = await enrich_company(domain, db=db)
+        db.commit()
+        return result
     except Exception as e:
         logger.error("Clay company lookup error: %s", e)
         return None
+    finally:
+        db.close()
 
 
 async def _clay_find_contacts(domain: str, title_filter: str = "") -> list[dict]:
-    """Find contacts at a company via Clay. Returns list of contact dicts."""
-    if not get_credential_cached("clay_enrichment", "CLAY_API_KEY"):
-        return []
+    """Find contacts at a company via Clay. Uses OAuth2 clay_client."""
+    db = _get_clay_db()
     try:
-        payload = {"domain": domain}
-        if title_filter:
-            payload["title"] = title_filter
-        resp = await http.post(
-            f"{CLAY_BASE}/find-people",
-            headers={
-                "Authorization": f"Bearer {get_credential_cached('clay_enrichment', 'CLAY_API_KEY')}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=20,
-        )
-        if resp.status_code != 200:
-            logger.warning("Clay contacts lookup failed: %s", resp.status_code)
-            return []
-        people = resp.json().get("people") or resp.json().get("contacts") or []
-        return [
-            {
-                "source": "clay",
-                "full_name": p.get("name") or p.get("full_name"),
-                "title": p.get("title") or p.get("latest_experience_title"),
-                "email": p.get("email"),
-                "phone": p.get("phone"),
-                "linkedin_url": p.get("linkedin_url") or p.get("url"),
-                "location": p.get("location_name") or p.get("location"),
-                "company": p.get("company") or p.get("latest_experience_company"),
-            }
-            for p in people
-            if p.get("name") or p.get("full_name")
-        ]
+        from .connectors.clay_client import find_contacts
+        result = await find_contacts(domain, title_filter, db=db)
+        db.commit()
+        return result
     except Exception as e:
         logger.error("Clay contacts lookup error: %s", e)
         return []
+    finally:
+        db.close()
 
 
 # ── Provider: Explorium (Vibe Prospecting) ──────────────────────────────

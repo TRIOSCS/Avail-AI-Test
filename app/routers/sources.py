@@ -220,24 +220,22 @@ class _ApolloTestConnector:
 
 
 class _ClayTestConnector:
-    """Test Clay API key with a company enrichment call."""
+    """Test Clay OAuth2 connection with a company enrichment call."""
 
     async def search(self, mpn: str) -> list[dict]:
-        from ..http_client import http
+        from ..connectors.clay_client import enrich_company
+        from ..database import SessionLocal
 
-        api_key = get_credential_cached("clay_enrichment", "CLAY_API_KEY")
-        if not api_key:
-            raise ValueError("CLAY_API_KEY not configured")
-        resp = await http.post(
-            "https://api.clay.com/v3/sources/enrich-company",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"domain": "anthropic.com"},
-            timeout=15,
-        )
-        if resp.status_code != 200:
-            raise ValueError(f"Clay API returned {resp.status_code}: {resp.text[:200]}")
-        name = resp.json().get("name", "Unknown")
-        return [{"vendor_name": "Clay", "mpn_matched": f"Enriched: {name}", "status": "ok"}]
+        db = SessionLocal()
+        try:
+            result = await enrich_company("anthropic.com", db=db)
+            db.commit()
+            if not result:
+                raise ValueError("Clay returned no data — check OAuth connection")
+            name = result.get("legal_name", "Unknown")
+            return [{"vendor_name": "Clay", "mpn_matched": f"Enriched: {name}", "status": "ok"}]
+        finally:
+            db.close()
 
 
 class _ExploriumTestConnector:
