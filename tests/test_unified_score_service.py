@@ -1,7 +1,7 @@
-"""Tests for unified score service — category math, trader merge, ranking, blurb mock.
+"""Tests for unified score service — 4-category math, trader merge, ranking, blurb mock.
 
-Validates cross-role normalization, weighted scoring, and AI blurb generation
-with mocked claude_structured calls.
+Validates cross-role normalization (Execution, Follow-Through, Closing, Depth),
+weighted scoring (30/25/30/15), and AI blurb generation with mocked claude_structured.
 
 Called by: pytest
 Depends on: app/services/unified_score_service.py, app/models/unified_score.py
@@ -26,12 +26,13 @@ class TestBuyerCategories:
         from app.services.unified_score_service import _buyer_categories
 
         snap = MagicMock()
-        for attr in ("b1_score", "b2_score", "b3_score", "b4_score", "b5_score",
+        for attr in ("b1_score", "b3_score", "b4_score",
                       "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
             setattr(snap, attr, 10.0)
 
         cats = _buyer_categories(snap)
-        assert cats["prospecting"] == 100.0  # (10+10)/20 * 100
+        assert len(cats) == 4
+        assert "prospecting" not in cats
         assert cats["execution"] == 100.0    # (10+10+10)/30 * 100
         assert cats["followthrough"] == 100.0  # (10+10)/20 * 100
         assert cats["closing"] == 100.0      # (10+10)/20 * 100
@@ -41,11 +42,12 @@ class TestBuyerCategories:
         from app.services.unified_score_service import _buyer_categories
 
         snap = MagicMock()
-        for attr in ("b1_score", "b2_score", "b3_score", "b4_score", "b5_score",
+        for attr in ("b1_score", "b3_score", "b4_score",
                       "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
             setattr(snap, attr, 0)
 
         cats = _buyer_categories(snap)
+        assert len(cats) == 4
         assert all(v == 0.0 for v in cats.values())
 
     def test_partial_scores(self):
@@ -53,10 +55,8 @@ class TestBuyerCategories:
 
         snap = MagicMock()
         snap.b1_score = 5.0
-        snap.b2_score = 8.0
         snap.b3_score = 6.0
         snap.b4_score = 7.0
-        snap.b5_score = 4.0
         snap.o1_score = 3.0
         snap.o2_score = 9.0
         snap.o3_score = 2.0
@@ -64,7 +64,7 @@ class TestBuyerCategories:
         snap.o5_score = 6.0
 
         cats = _buyer_categories(snap)
-        assert cats["prospecting"] == pytest.approx((8 + 4) / 20 * 100, abs=0.1)
+        assert len(cats) == 4
         assert cats["execution"] == pytest.approx((5 + 7 + 3) / 30 * 100, abs=0.1)
         assert cats["followthrough"] == pytest.approx((6 + 9) / 20 * 100, abs=0.1)
         assert cats["closing"] == pytest.approx((2 + 8) / 20 * 100, abs=0.1)
@@ -74,11 +74,12 @@ class TestBuyerCategories:
         from app.services.unified_score_service import _buyer_categories
 
         snap = MagicMock()
-        for attr in ("b1_score", "b2_score", "b3_score", "b4_score", "b5_score",
+        for attr in ("b1_score", "b3_score", "b4_score",
                       "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
             setattr(snap, attr, None)
 
         cats = _buyer_categories(snap)
+        assert len(cats) == 4
         assert all(v == 0.0 for v in cats.values())
 
 
@@ -87,27 +88,28 @@ class TestSalesCategories:
         from app.services.unified_score_service import _sales_categories
 
         snap = MagicMock()
-        for attr in ("b1_score", "b2_score", "b3_score", "b4_score", "b5_score",
+        for attr in ("b2_score", "b3_score", "b4_score",
                       "o1_score", "o2_score", "o3_score", "o4_score", "o5_score"):
             setattr(snap, attr, 10.0)
 
         cats = _sales_categories(snap)
-        assert cats["prospecting"] == 100.0
-        assert cats["execution"] == 100.0
-        assert cats["followthrough"] == 100.0
-        assert cats["closing"] == 100.0
-        assert cats["depth"] == 100.0
+        assert len(cats) == 4
+        assert "prospecting" not in cats
+        assert cats["execution"] == 100.0   # (10+10+10)/30
+        assert cats["followthrough"] == 100.0  # (10+10)/20
+        assert cats["closing"] == 100.0     # (10+10)/20 — no O5 double-count
+        assert cats["depth"] == 100.0       # 10/10
 
 
 class TestTraderMerge:
     def test_averages_both_roles(self):
         from app.services.unified_score_service import _merge_trader_categories
 
-        buyer = {"prospecting": 80, "execution": 60, "followthrough": 40, "closing": 100, "depth": 20}
-        sales = {"prospecting": 60, "execution": 80, "followthrough": 60, "closing": 40, "depth": 80}
+        buyer = {"execution": 60, "followthrough": 40, "closing": 100, "depth": 20}
+        sales = {"execution": 80, "followthrough": 60, "closing": 40, "depth": 80}
 
         merged = _merge_trader_categories(buyer, sales)
-        assert merged["prospecting"] == 70.0
+        assert len(merged) == 4
         assert merged["execution"] == 70.0
         assert merged["followthrough"] == 50.0
         assert merged["closing"] == 70.0
@@ -116,14 +118,14 @@ class TestTraderMerge:
     def test_buyer_only(self):
         from app.services.unified_score_service import _merge_trader_categories
 
-        buyer = {"prospecting": 80, "execution": 60, "followthrough": 40, "closing": 100, "depth": 20}
+        buyer = {"execution": 60, "followthrough": 40, "closing": 100, "depth": 20}
         merged = _merge_trader_categories(buyer, None)
         assert merged == buyer
 
     def test_sales_only(self):
         from app.services.unified_score_service import _merge_trader_categories
 
-        sales = {"prospecting": 60, "execution": 80, "followthrough": 60, "closing": 40, "depth": 80}
+        sales = {"execution": 80, "followthrough": 60, "closing": 40, "depth": 80}
         merged = _merge_trader_categories(None, sales)
         assert merged == sales
 
@@ -131,6 +133,7 @@ class TestTraderMerge:
         from app.services.unified_score_service import _merge_trader_categories
 
         merged = _merge_trader_categories(None, None)
+        assert len(merged) == 4
         assert all(v == 0.0 for v in merged.values())
 
 
@@ -138,20 +141,20 @@ class TestWeightedScore:
     def test_all_100(self):
         from app.services.unified_score_service import _weighted_score
 
-        cats = {"prospecting": 100, "execution": 100, "followthrough": 100, "closing": 100, "depth": 100}
+        cats = {"execution": 100, "followthrough": 100, "closing": 100, "depth": 100}
         assert _weighted_score(cats) == pytest.approx(100.0)
 
     def test_all_zero(self):
         from app.services.unified_score_service import _weighted_score
 
-        cats = {"prospecting": 0, "execution": 0, "followthrough": 0, "closing": 0, "depth": 0}
+        cats = {"execution": 0, "followthrough": 0, "closing": 0, "depth": 0}
         assert _weighted_score(cats) == 0.0
 
     def test_weighted_correctly(self):
         from app.services.unified_score_service import _weighted_score
 
-        cats = {"prospecting": 50, "execution": 80, "followthrough": 60, "closing": 70, "depth": 40}
-        expected = 50 * 0.20 + 80 * 0.25 + 60 * 0.20 + 70 * 0.25 + 40 * 0.10
+        cats = {"execution": 80, "followthrough": 60, "closing": 70, "depth": 40}
+        expected = 80 * 0.30 + 60 * 0.25 + 70 * 0.30 + 40 * 0.15
         assert _weighted_score(cats) == pytest.approx(expected)
 
 
@@ -221,7 +224,8 @@ class TestComputeAllUnifiedScores:
         assert snap is not None
         assert snap.primary_role == "trader"
         # All buyer cats are 100%, all sales cats are 0%, so average = 50%
-        assert snap.prospecting_pct == pytest.approx(50.0)
+        assert snap.prospecting_pct == 0.0  # prospecting removed, always zeroed
+        assert snap.execution_pct == pytest.approx(50.0)
         assert snap.unified_score == pytest.approx(50.0)
 
     def test_no_data_skips_user(self, db_session, test_user):
@@ -269,29 +273,29 @@ class TestComputeAllUnifiedScores:
 
 
 class TestGenerateBlurb:
-    @patch("app.services.unified_score_service.claude_structured")
+    @patch("app.utils.claude_client.claude_structured")
     def test_returns_strength_and_improvement(self, mock_claude):
         from app.services.unified_score_service import _generate_blurb
 
         mock_claude.return_value = {
-            "strength": "You excel at prospecting.",
+            "strength": "You excel at execution.",
             "improvement": "Focus on closing more deals.",
         }
 
-        cats = {"prospecting": 80, "execution": 60, "followthrough": 40, "closing": 30, "depth": 50}
+        cats = {"execution": 60, "followthrough": 40, "closing": 30, "depth": 50}
         result = _generate_blurb("Test User", "buyer", cats, 55.0, 2, 5)
 
         assert result is not None
-        assert result["strength"] == "You excel at prospecting."
+        assert result["strength"] == "You excel at execution."
         assert result["improvement"] == "Focus on closing more deals."
 
-    @patch("app.services.unified_score_service.claude_structured")
+    @patch("app.utils.claude_client.claude_structured")
     def test_returns_none_on_failure(self, mock_claude):
         from app.services.unified_score_service import _generate_blurb
 
         mock_claude.side_effect = Exception("API error")
 
-        cats = {"prospecting": 50, "execution": 50, "followthrough": 50, "closing": 50, "depth": 50}
+        cats = {"execution": 50, "followthrough": 50, "closing": 50, "depth": 50}
         result = _generate_blurb("Test User", "buyer", cats, 50.0, 1, 1)
         assert result is None
 
@@ -340,7 +344,9 @@ class TestGetScoringInfo:
         from app.services.unified_score_service import get_scoring_info
 
         info = get_scoring_info()
-        assert len(info["categories"]) == 5
+        assert len(info["categories"]) == 4
+        names = [c["name"] for c in info["categories"]]
+        assert "Prospecting" not in names
         total_weight = sum(c["weight"] for c in info["categories"])
         assert total_weight == 100
         assert info["total_range"] == "0-100"

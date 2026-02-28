@@ -1,11 +1,11 @@
 """Unified Score Service — cross-role normalized scoring for combined leaderboard.
 
-Maps AvailScore metrics (b1-b5, o1-o5) into 5 universal categories, normalizes
+Maps AvailScore metrics (b1-b5, o1-o5) into 4 universal categories, normalizes
 to 0-100%, and applies weights to produce a single unified score. Traders average
 buyer + sales category percentages. AI blurbs cached with 2-hour TTL.
 
 Category weights:
-  Prospecting 20% | Execution 25% | Follow-Through 20% | Closing 25% | Depth 10%
+  Execution 30% | Follow-Through 25% | Closing 30% | Depth 15%
 
 Called by: scheduler.py (daily, after multiplier scores), routers/performance.py (refresh)
 Depends on: models/performance.py (AvailScoreSnapshot, MultiplierScoreSnapshot),
@@ -26,33 +26,29 @@ from ..models.unified_score import UnifiedScoreSnapshot
 
 # ── Category Weights ────────────────────────────────────────────────
 CATEGORY_WEIGHTS = {
-    "prospecting": 0.20,
-    "execution": 0.25,
-    "followthrough": 0.20,
-    "closing": 0.25,
-    "depth": 0.10,
+    "execution": 0.30,
+    "followthrough": 0.25,
+    "closing": 0.30,
+    "depth": 0.15,
 }
 
 # Max possible raw points per category per role (sum of max metric scores)
-# Buyer:  b2(10)+b5(10)=20, b1(10)+b4(10)+o1(10)=30, b3(10)+o2(10)=20, o3(10)+o4(10)=20, o5(10)=10
-# Sales:  b1(10)+b5(10)=20, b2(10)+b4(10)+o3(10)=30, b3(10)+o4(10)=20, o1(10)+o2(10)+o5(10)=30, o5(10)=10
+# Buyer:  b1(10)+b4(10)+o1(10)=30, b3(10)+o2(10)=20, o3(10)+o4(10)=20, o5(10)=10
+# Sales:  b2(10)+b4(10)+o3(10)=30, b3(10)+o4(10)=20, o1(10)+o2(10)=20, o5(10)=10
 
 
 def _buyer_categories(snap: AvailScoreSnapshot) -> dict[str, float]:
-    """Extract 5 category percentages from a buyer AvailScoreSnapshot.
+    """Extract 4 category percentages from a buyer AvailScoreSnapshot.
 
     Buyer metric mapping:
-      Prospecting:    B2 Multi-Source + B5 Stock Lists → /20
       Execution:      B1 Speed to Source + B4 Pipeline Hygiene + O1 Sourcing Ratio → /30
       Follow-Through: B3 Vendor Follow-Up + O2 Offer→Quote → /20
       Closing:        O3 Win Rate + O4 BP Completion → /20
       Depth:          O5 Vendor Diversity → /10
     """
     b1 = snap.b1_score or 0
-    b2 = snap.b2_score or 0
     b3 = snap.b3_score or 0
     b4 = snap.b4_score or 0
-    b5 = snap.b5_score or 0
     o1 = snap.o1_score or 0
     o2 = snap.o2_score or 0
     o3 = snap.o3_score or 0
@@ -60,7 +56,6 @@ def _buyer_categories(snap: AvailScoreSnapshot) -> dict[str, float]:
     o5 = snap.o5_score or 0
 
     return {
-        "prospecting": _safe_pct(b2 + b5, 20),
         "execution": _safe_pct(b1 + b4 + o1, 30),
         "followthrough": _safe_pct(b3 + o2, 20),
         "closing": _safe_pct(o3 + o4, 20),
@@ -69,20 +64,17 @@ def _buyer_categories(snap: AvailScoreSnapshot) -> dict[str, float]:
 
 
 def _sales_categories(snap: AvailScoreSnapshot) -> dict[str, float]:
-    """Extract 5 category percentages from a sales AvailScoreSnapshot.
+    """Extract 4 category percentages from a sales AvailScoreSnapshot.
 
     Sales metric mapping:
-      Prospecting:    B1 Account Coverage + B5 New Biz → /20
       Execution:      B2 Outreach Consistency + B4 Proactive Selling + O3 Quote Volume → /30
       Follow-Through: B3 Quote Follow-Up + O4 Proactive Conversion → /20
-      Closing:        O1 Win Rate + O2 Revenue + O5 Strategic Wins → /30
+      Closing:        O1 Win Rate + O2 Revenue → /20
       Depth:          O5 Strategic Wins → /10
     """
-    b1 = snap.b1_score or 0
     b2 = snap.b2_score or 0
     b3 = snap.b3_score or 0
     b4 = snap.b4_score or 0
-    b5 = snap.b5_score or 0
     o1 = snap.o1_score or 0
     o2 = snap.o2_score or 0
     o3 = snap.o3_score or 0
@@ -90,10 +82,9 @@ def _sales_categories(snap: AvailScoreSnapshot) -> dict[str, float]:
     o5 = snap.o5_score or 0
 
     return {
-        "prospecting": _safe_pct(b1 + b5, 20),
         "execution": _safe_pct(b2 + b4 + o3, 30),
         "followthrough": _safe_pct(b3 + o4, 20),
-        "closing": _safe_pct(o1 + o2 + o5, 30),
+        "closing": _safe_pct(o1 + o2, 20),
         "depth": _safe_pct(o5, 10),
     }
 
@@ -220,7 +211,7 @@ def compute_all_unified_scores(db: Session, month: date | None = None) -> dict:
             snap = UnifiedScoreSnapshot(user_id=r["user_id"], month=month)
             db.add(snap)
 
-        snap.prospecting_pct = round(r["cats"]["prospecting"], 2)
+        snap.prospecting_pct = 0.0  # category removed, column kept for backward compat
         snap.execution_pct = round(r["cats"]["execution"], 2)
         snap.followthrough_pct = round(r["cats"]["followthrough"], 2)
         snap.closing_pct = round(r["cats"]["closing"], 2)
@@ -303,9 +294,8 @@ def _generate_blurb(
     )
     user_msg = (
         f"{user_name} ({role}) scores this month:\n"
-        f"Prospecting: {cats['prospecting']:.0f}%, Execution: {cats['execution']:.0f}%, "
-        f"Follow-Through: {cats['followthrough']:.0f}%, Closing: {cats['closing']:.0f}%, "
-        f"Depth: {cats['depth']:.0f}%\n"
+        f"Execution: {cats['execution']:.0f}%, Follow-Through: {cats['followthrough']:.0f}%, "
+        f"Closing: {cats['closing']:.0f}%, Depth: {cats['depth']:.0f}%\n"
         f"Unified Score: {score:.0f}/100 (#{rank} of {total})\n"
         f"Best category: {best_cat} at {best_pct:.0f}%. Weakest: {worst_cat} at {worst_pct:.0f}%.\n\n"
         'Return JSON: {"strength": "...", "improvement": "..."}'
@@ -425,11 +415,10 @@ def get_scoring_info() -> dict:
     """Return static scoring system explanation for the info pill tooltip."""
     return {
         "categories": [
-            {"name": "Prospecting", "weight": 20, "description": "Building pipeline & vendor network"},
-            {"name": "Execution", "weight": 25, "description": "Speed and volume of core work"},
-            {"name": "Follow-Through", "weight": 20, "description": "Persistence and deal progression"},
-            {"name": "Closing", "weight": 25, "description": "Win rate and revenue generation"},
-            {"name": "Depth", "weight": 10, "description": "Strategic breadth and vendor diversity"},
+            {"name": "Execution", "weight": 30, "description": "Speed and volume of core work"},
+            {"name": "Follow-Through", "weight": 25, "description": "Persistence and deal progression"},
+            {"name": "Closing", "weight": 30, "description": "Win rate and revenue generation"},
+            {"name": "Depth", "weight": 15, "description": "Strategic breadth and vendor diversity"},
         ],
         "total_range": "0-100",
         "normalization": "Scores are normalized by role so buyers, sales, and traders compete fairly.",

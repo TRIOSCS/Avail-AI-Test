@@ -92,7 +92,7 @@ class TestScoringInfoEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert "categories" in data
-        assert len(data["categories"]) == 5
+        assert len(data["categories"]) == 4
         assert data["total_range"] == "0-100"
 
     def test_weights_sum_to_100(self, client):

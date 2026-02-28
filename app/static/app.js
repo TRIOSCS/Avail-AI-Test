@@ -1594,20 +1594,22 @@ async function _loadScPersonalSummary() {
     }
 }
 
+let _scoringInfoCache = null;
 async function _loadDashTeamLeaderboard(el) {
+    // Note: innerHTML usage is safe here — all user-sourced values pass through esc() helper
     const role = _effectivePerspective() === 'sales' ? 'sales' : 'buyer';
-    el.innerHTML = '<p class="empty">Loading leaderboard...</p>';
+    el.textContent = 'Loading leaderboard...';
     try {
-        const data = await apiFetch(`/api/dashboard/team-leaderboard?role=${role}`);
+        const data = await apiFetch('/api/dashboard/unified-leaderboard');
         const entries = data.entries || [];
         if (!entries.length) {
-            el.innerHTML = '<p class="empty">No leaderboard data yet — scores are computed daily</p>';
+            el.textContent = 'No leaderboard data yet — scores are computed daily';
             return;
         }
         el.innerHTML = _renderTeamLeaderboard(entries, role, data.month);
     } catch(e) {
         console.error('Leaderboard load error:', e);
-        el.innerHTML = '<p class="empty">Failed to load leaderboard</p>';
+        el.textContent = 'Failed to load leaderboard';
     }
 }
 
@@ -1619,12 +1621,14 @@ function _renderTeamLeaderboard(entries, role, month) {
     let html = `<div class="lb-header">
         <span class="lb-month">${esc(monthLabel)}</span>
         <span class="as-role-badge as-role-${role}">${roleLabel}</span>
+        <span class="lb-info-pill" onmouseenter="_showScoringTooltip(this)" onmouseleave="_hideScoringTooltip(this)">How scoring works</span>
     </div>`;
 
     html += '<div class="lb-list">';
     for (const e of entries) {
         const isMe = e.user_id === myId;
-        const scoreColor = e.avail_score >= 60 ? 'var(--green)' : e.avail_score >= 40 ? 'var(--amber)' : 'var(--muted)';
+        const uScore = e.unified_score || e.avail_score || 0;
+        const scoreColor = uScore >= 60 ? 'var(--green)' : uScore >= 40 ? 'var(--amber)' : 'var(--muted)';
         const rankClass = e.rank === 1 ? 'lb-gold' : e.rank === 2 ? 'lb-silver' : e.rank === 3 ? 'lb-bronze' : '';
         const bonusTotal = (e.avail_bonus || 0) + (e.mult_bonus || 0);
         const bonusTag = bonusTotal > 0 ? `<span class="lb-bonus-badge">+$${bonusTotal}</span>` : '';
@@ -1638,12 +1642,13 @@ function _renderTeamLeaderboard(entries, role, month) {
                 <span class="lb-rank ${rankClass}">${e.rank || '—'}</span>
                 <div class="lb-name-col">
                     <span class="lb-name">${esc(e.user_name)}${traderTag}${isMe ? ' <span class="lb-you">(You)</span>' : ''}</span>
+                    ${e.ai_blurb_improvement ? `<span class="lb-blurb" title="${esc(e.ai_blurb_improvement)}">${esc(e.ai_blurb_improvement)}</span>` : ''}
                     <div class="lb-tags">${qualTag}${bonusTag}</div>
                 </div>
                 <div class="lb-scores">
                     <div class="lb-score-block">
-                        <span class="lb-score-val" style="color:${scoreColor}">${(e.avail_score || 0).toFixed(0)}</span>
-                        <span class="lb-score-lbl">Avail</span>
+                        <span class="lb-score-val" style="color:${scoreColor}">${uScore.toFixed(0)}</span>
+                        <span class="lb-score-lbl">Unified</span>
                     </div>
                     <div class="lb-score-sep"></div>
                     <div class="lb-score-block">
@@ -1660,6 +1665,29 @@ function _renderTeamLeaderboard(entries, role, month) {
     }
     html += '</div>';
     return html;
+}
+
+async function _showScoringTooltip(pill) {
+    if (!_scoringInfoCache) {
+        try { _scoringInfoCache = await apiFetch('/api/dashboard/scoring-info'); } catch(e) { return; }
+    }
+    const info = _scoringInfoCache;
+    let tip = pill.querySelector('.scoring-tooltip');
+    if (!tip) {
+        tip = document.createElement('div');
+        tip.className = 'scoring-tooltip';
+        pill.appendChild(tip);
+    }
+    const rows = (info.categories || []).map(c =>
+        `<div class="st-row"><span class="st-name">${esc(c.name)}</span><span class="st-weight">${c.weight}%</span><span class="st-desc">${esc(c.description)}</span></div>`
+    ).join('');
+    tip.innerHTML = `<div class="st-title">Scoring Categories</div>${rows}<div class="st-note">${esc(info.normalization || '')}</div>`;
+    tip.style.display = 'block';
+}
+
+function _hideScoringTooltip(pill) {
+    const tip = pill.querySelector('.scoring-tooltip');
+    if (tip) tip.style.display = 'none';
 }
 
 function _renderLeaderboardDetail(entry, role) {
