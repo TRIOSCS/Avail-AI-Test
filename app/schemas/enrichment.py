@@ -58,3 +58,37 @@ class EnrichmentStats(BaseModel):
     companies_enriched: int = 0
     companies_total: int = 0
     active_jobs: int = 0
+
+
+# ── Customer Enrichment Schemas ─────────────────────────────────────
+
+
+class CustomerEnrichRequest(BaseModel):
+    force: bool = False
+
+
+class VerifyEmailRequest(BaseModel):
+    email: str = Field(..., min_length=5)
+
+
+class CustomerBackfillRequest(BaseModel):
+    max_accounts: int = Field(default=50, ge=1, le=500)
+    assigned_only: bool = False
+
+
+class CreditUsageItem(BaseModel):
+    provider: str
+    month: str
+    used: int
+    limit: int
+    remaining: int
+
+
+class CustomerEnrichmentResult(BaseModel):
+    ok: bool = False
+    company_id: int | None = None
+    contacts_added: int = 0
+    contacts_verified: int = 0
+    sources_used: list[str] = []
+    status: str | None = None
+    error: str | None = None

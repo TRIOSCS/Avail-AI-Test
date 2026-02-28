@@ -45,7 +45,7 @@ class TMEConnector(BaseConnector):
             base_string.encode(),
             hashlib.sha1,
         ).digest()
-        params["ApiSignature"] = base64.b64encode(signature).decode().rstrip()
+        params["ApiSignature"] = base64.b64encode(signature).decode().rstrip("\n")
         return params
 
     async def _do_search(self, part_number: str) -> list[dict]:

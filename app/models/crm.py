@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, JSON, String, Text
 from sqlalchemy.orm import relationship
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -33,7 +34,7 @@ class Company(Base):
     # v1.3.0: Customer ownership fields
     is_strategic = Column(Boolean, default=False)
     ownership_cleared_at = Column(DateTime)
-    last_activity_at = Column(DateTime)
+    last_activity_at = Column(UTCDateTime)
     account_owner_id = Column(Integer, ForeignKey("users.id"))
 
     # v1.4.0: Account management fields
@@ -59,6 +60,10 @@ class Company(Base):
 
     # Deep enrichment tracking
     deep_enrichment_at = Column(DateTime)
+
+    # Customer enrichment waterfall tracking
+    customer_enrichment_at = Column(DateTime)
+    customer_enrichment_status = Column(String(20))  # complete, partial, missing, stale
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
@@ -120,7 +125,7 @@ class CustomerSite(Base):
     is_active = Column(Boolean, default=True)
 
     # v2.10: Prospecting pool fields
-    last_activity_at = Column(DateTime)
+    last_activity_at = Column(UTCDateTime)
     ownership_cleared_at = Column(DateTime)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -158,6 +163,19 @@ class SiteContact(Base):
     is_primary = Column(Boolean, default=False)
     is_active = Column(Boolean, default=True)
     contact_status = Column(String(20), default="new")
+
+    # Customer enrichment fields
+    phone_verified = Column(Boolean, default=False)
+    email_verified = Column(Boolean, default=False)
+    email_verified_at = Column(DateTime)
+    email_verification_status = Column(String(20))  # valid, invalid, accept_all, unknown
+    enrichment_source = Column(String(50))  # lusha, clay, apollo, hunter, manual
+    contact_role = Column(String(50))  # buyer, technical, decision_maker, operations
+    needs_refresh = Column(Boolean, default=False)
+    last_enriched_at = Column(DateTime)
+    linkedin_url = Column(String(500))
+    enrichment_field_sources = Column(JSON)  # Per-field source tracking
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,

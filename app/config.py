@@ -91,10 +91,23 @@ class Settings:
 
     # Deep Enrichment APIs
     hunter_api_key: str = os.getenv("HUNTER_API_KEY", "")
-    hunter_monthly_search_limit: int = int(os.getenv("HUNTER_MONTHLY_SEARCH_LIMIT", "25"))
-    hunter_monthly_verify_limit: int = int(os.getenv("HUNTER_MONTHLY_VERIFY_LIMIT", "50"))
+    hunter_monthly_search_limit: int = int(os.getenv("HUNTER_MONTHLY_SEARCH_LIMIT", "500"))
+    hunter_monthly_verify_limit: int = int(os.getenv("HUNTER_MONTHLY_VERIFY_LIMIT", "500"))
     rocketreach_api_key: str = os.getenv("ROCKETREACH_API_KEY", "")
     clearbit_api_key: str = os.getenv("CLEARBIT_API_KEY", "")
+    lusha_api_key: str = os.getenv("LUSHA_API_KEY", "")
+    lusha_monthly_credit_limit: int = int(os.getenv("LUSHA_MONTHLY_CREDIT_LIMIT", "300"))
+
+    # Customer enrichment waterfall (Lusha → Clay → Hunter → Apollo)
+    customer_enrichment_enabled: bool = (
+        os.getenv("CUSTOMER_ENRICHMENT_ENABLED", "true").lower() == "true"
+    )
+    customer_enrichment_cooldown_days: int = int(
+        os.getenv("CUSTOMER_ENRICHMENT_COOLDOWN_DAYS", "90")
+    )
+    customer_enrichment_contacts_per_account: int = int(
+        os.getenv("CUSTOMER_ENRICHMENT_CONTACTS_PER_ACCOUNT", "5")
+    )
 
     # Deep Enrichment feature flags
     deep_enrichment_enabled: bool = (
@@ -153,6 +166,9 @@ class Settings:
     teams_team_id: str = os.getenv("TEAMS_TEAM_ID", "")
     teams_channel_id: str = os.getenv("TEAMS_CHANNEL_ID", "")
     teams_hot_threshold: float = float(os.getenv("TEAMS_HOT_THRESHOLD", "10000"))
+
+    # RFQ follow-up threshold (days before a sent/opened email is stale)
+    follow_up_days: int = int(os.getenv("FOLLOW_UP_DAYS", "3"))
 
     # Activity tracking & customer ownership (v1.3.0)
     activity_tracking_enabled: bool = (

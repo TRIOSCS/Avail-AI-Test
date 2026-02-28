@@ -541,15 +541,16 @@ async def rfq_prepare(
 async def get_follow_ups(
     user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
-    """Return contacts that need follow-up: sent/opened > 3 days ago with no response."""
+    """Return contacts that need follow-up: sent/opened > N days ago with no response."""
+    from ..config import settings as cfg
 
-    three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
+    threshold = datetime.now(timezone.utc) - timedelta(days=cfg.follow_up_days)
 
     # Find contacts with stale status and no matching vendor response
     stale_contacts = db.query(Contact).filter(
         Contact.contact_type == "email",
         Contact.status.in_(["sent", "opened"]),
-        Contact.created_at < three_days_ago,
+        Contact.created_at < threshold,
     )
     # Sales/trader sees only their own reqs' follow-ups
     if user.role in ("sales", "trader"):
@@ -598,7 +599,9 @@ async def follow_up_summary(
     user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     """Cross-req follow-up counts for badge display."""
-    three_days_ago = datetime.now(timezone.utc) - timedelta(days=3)
+    from ..config import settings as cfg
+
+    threshold = datetime.now(timezone.utc) - timedelta(days=cfg.follow_up_days)
 
     query = (
         db.query(
@@ -610,7 +613,7 @@ async def follow_up_summary(
         .filter(
             Contact.contact_type == "email",
             Contact.status.in_(["sent", "opened"]),
-            Contact.created_at < three_days_ago,
+            Contact.created_at < threshold,
         )
         .group_by(Requisition.id, Requisition.name)
     )
@@ -677,6 +680,56 @@ async def send_follow_up(
     db.commit()
 
     return {"ok": True, "message": f"Follow-up sent to {contact.vendor_contact}"}
+
+
+@router.post("/api/follow-ups/send-batch")
+async def send_follow_up_batch(
+    request: Request,
+    user: User = Depends(require_buyer),
+    db: Session = Depends(get_db),
+):
+    """Send follow-up emails to multiple contacts at once."""
+    token = await require_fresh_token(request, db)
+    raw = await request.json()
+    contact_ids = raw.get("contact_ids", [])
+    if not contact_ids:
+        raise HTTPException(400, "contact_ids required")
+
+    from ..email_service import _build_html_body
+    from ..utils.graph_client import GraphClient
+
+    gc = GraphClient(token)
+    results = []
+    for cid in contact_ids[:50]:  # Cap at 50 to prevent abuse
+        contact = db.query(Contact).filter_by(id=cid).first()
+        if not contact or not contact.vendor_contact:
+            results.append({"contact_id": cid, "status": "skipped", "reason": "not found"})
+            continue
+
+        parts_str = ", ".join(contact.parts_included or ["your parts"])
+        body = f"Hi, following up on our RFQ below regarding {parts_str}. Please advise on availability and pricing at your earliest convenience. Thank you."
+        html_body = _build_html_body(body)
+        subject = f"Re: {contact.subject}" if contact.subject else "Follow-Up — RFQ from TRIO Supply Chain"
+
+        try:
+            await gc.post_json("/me/sendMail", {
+                "message": {
+                    "subject": subject,
+                    "body": {"contentType": "HTML", "content": html_body},
+                    "toRecipients": [{"emailAddress": {"address": contact.vendor_contact}}],
+                },
+                "saveToSentItems": "true",
+            })
+            contact.status = "sent"
+            contact.status_updated_at = datetime.now(timezone.utc)
+            results.append({"contact_id": cid, "status": "sent"})
+        except Exception as e:
+            logger.warning("Bulk follow-up failed for contact %s: %s", cid, e)
+            results.append({"contact_id": cid, "status": "failed", "reason": str(e)})
+
+    db.commit()
+    sent_count = sum(1 for r in results if r["status"] == "sent")
+    return {"ok": True, "results": results, "sent": sent_count, "total": len(results)}
 
 
 # ── Search enrichment with vendor cards ────────────────────────────────

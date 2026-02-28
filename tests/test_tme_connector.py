@@ -99,6 +99,20 @@ def test_sign_is_deterministic(connector):
     assert sig1 == sig2
 
 
+def test_sign_preserves_base64_padding(connector):
+    """Regression: .rstrip() was stripping '=' padding from base64 signatures."""
+    # Use inputs that produce a signature ending in '=' padding
+    params = {"SearchPlain": "test", "Country": "US"}
+    signed = connector._sign("https://api.tme.eu/Products/Search.json", params)
+    sig = signed["ApiSignature"]
+    # Verify it's valid base64 (will raise if padding is wrong)
+    import base64
+    decoded = base64.b64decode(sig)
+    assert len(decoded) == 20  # SHA-1 produces 20 bytes
+    # Re-encode should match — proves padding wasn't stripped
+    assert base64.b64encode(decoded).decode() == sig
+
+
 @pytest.mark.asyncio
 async def test_no_credentials_returns_empty():
     conn = TMEConnector(token="", secret="")

@@ -58,8 +58,21 @@ async def enrich_company(
         )
     enrichment = await enrich_entity(domain, company.name)
     updated = apply_enrichment_to_company(company, enrichment)
+
+    # Also trigger customer enrichment waterfall for contact discovery
+    waterfall_result = None
+    if settings.customer_enrichment_enabled:
+        try:
+            from ...services.customer_enrichment_service import enrich_customer_account
+            waterfall_result = await enrich_customer_account(company_id, db)
+        except Exception as e:
+            logger.warning("Customer waterfall enrichment error: %s", e)
+
     db.commit()
-    return {"ok": True, "updated_fields": updated, "enrichment": enrichment}
+    result = {"ok": True, "updated_fields": updated, "enrichment": enrichment}
+    if waterfall_result:
+        result["customer_enrichment"] = waterfall_result
+    return result
 
 
 @router.post("/api/enrich/vendor/{card_id}")

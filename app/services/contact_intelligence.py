@@ -311,7 +311,8 @@ def compute_contact_relationship_score(
 
     # Recency: 0-7d = 100, decays linearly to 0 at 365d
     if last_interaction_at:
-        days_since = max((now - last_interaction_at).total_seconds() / 86400, 0)
+        lia = last_interaction_at.replace(tzinfo=last_interaction_at.tzinfo or timezone.utc) if last_interaction_at else last_interaction_at
+        days_since = max((now - lia).total_seconds() / 86400, 0)
         if days_since <= RECENCY_IDEAL_DAYS:
             recency = 100.0
         elif days_since >= RECENCY_MAX_DAYS:
@@ -549,9 +550,11 @@ def generate_contact_nudges(db: Session, vendor_card_id: int) -> list[dict]:
 
         days_since = None
         if c.last_interaction_at:
-            days_since = (now - c.last_interaction_at).days
+            ts = c.last_interaction_at if c.last_interaction_at.tzinfo else c.last_interaction_at.replace(tzinfo=timezone.utc)
+            days_since = (now - ts).days
         elif c.last_seen_at:
-            days_since = (now - c.last_seen_at).days
+            ts = c.last_seen_at if c.last_seen_at.tzinfo else c.last_seen_at.replace(tzinfo=timezone.utc)
+            days_since = (now - ts).days
 
         if days_since is None:
             continue

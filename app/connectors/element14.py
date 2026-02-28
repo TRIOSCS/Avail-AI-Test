@@ -1,7 +1,8 @@
 """element14 / Newark Search API connector.
 
 Searches the element14 product catalog (Newark US store) by manufacturer
-part number. REST API with simple API key auth.
+part number. REST API with simple API key auth. Falls back to keyword
+search if exact MPN match returns no results.
 
 Called by: search_service.py
 Depends on: BaseConnector, httpx
@@ -29,8 +30,19 @@ class Element14Connector(BaseConnector):
         if not self.api_key:
             return []
 
+        # Try exact MPN search first
+        results = await self._api_search(f"manuPartNum:{part_number}", part_number)
+        if results:
+            return results
+
+        # Fallback: keyword search (catches partial matches and alternate formats)
+        logger.debug(f"element14: exact MPN match returned 0 for {part_number}, trying keyword search")
+        return await self._api_search(part_number, part_number)
+
+    async def _api_search(self, term: str, part_number: str) -> list[dict]:
+        """Run a single search against the element14 API."""
         params = {
-            "term": f"manuPartNum:{part_number}",
+            "term": term,
             "storeInfo.id": "www.newark.com",
             "resultsSettings.offset": "0",
             "resultsSettings.numberOfResults": "25",

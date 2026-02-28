@@ -527,6 +527,17 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
     if not company:
         return {"status": "not_found"}
 
+    # Delegate to customer enrichment waterfall for customer-type companies
+    if settings.customer_enrichment_enabled and company.account_type in ("Customer", "Prospect", None):
+        try:
+            from .customer_enrichment_service import enrich_customer_account
+            result = await enrich_customer_account(company_id, db, force=force)
+            if result.get("ok"):
+                # Continue with standard deep enrichment for firmographics
+                pass
+        except Exception as e:
+            logger.warning("Customer enrichment waterfall error for %s: %s", company.name, e)
+
     # Skip if recently enriched (bypass when force=True)
     if not force:
         stale_days = settings.deep_enrichment_stale_days

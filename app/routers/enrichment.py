@@ -26,6 +26,9 @@ from ..rate_limit import limiter
 from ..schemas.enrichment import (
     BackfillRequest,
     BulkApproveRequest,
+    CustomerBackfillRequest,
+    CustomerEnrichRequest,
+    VerifyEmailRequest,
 )
 from ..schemas.responses import EnrichmentQueueResponse
 
@@ -650,6 +653,131 @@ async def api_deep_email_scan(
         "messages_scanned": results.get("messages_scanned", 0),
         "contacts_created": contacts_created,
     }
+
+
+# ── Customer Enrichment Waterfall ─────────────────────────────────────
+
+
+@router.post("/api/enrichment/customer/{company_id}")
+async def api_customer_enrich(
+    company_id: int,
+    body: CustomerEnrichRequest = CustomerEnrichRequest(),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Trigger waterfall enrichment (Lusha → Clay → Hunter → Apollo) for a customer account."""
+    from ..services.customer_enrichment_service import enrich_customer_account
+
+    company = db.get(Company, company_id)
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    result = await enrich_customer_account(company_id, db, force=body.force)
+    if result.get("error"):
+        return result
+    db.commit()
+    return result
+
+
+@router.post("/api/enrichment/verify-email")
+async def api_verify_email(
+    body: VerifyEmailRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Verify a single email address via Hunter.io."""
+    from ..connectors.hunter_client import verify_email
+    from ..services.credit_manager import can_use_credits, record_credit_usage
+
+    if not can_use_credits(db, "hunter_verify", 1):
+        raise HTTPException(429, "Hunter verification credits exhausted for this month")
+
+    result = await verify_email(body.email)
+    if result:
+        record_credit_usage(db, "hunter_verify", 1)
+        db.commit()
+    return result or {"email": body.email, "status": "unknown", "score": 0, "sources": 0}
+
+
+@router.get("/api/enrichment/credits")
+def api_credit_usage(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get monthly credit usage across all enrichment providers."""
+    from ..services.credit_manager import get_all_budgets
+
+    return {"credits": get_all_budgets(db)}
+
+
+@router.post("/api/enrichment/customer-backfill")
+async def api_customer_backfill(
+    body: CustomerBackfillRequest = CustomerBackfillRequest(),
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Batch enrichment for customer accounts (admin only). Assigned accounts first."""
+    from ..services.customer_enrichment_service import enrich_customer_account, get_enrichment_gaps
+
+    gaps = get_enrichment_gaps(db, limit=body.max_accounts)
+    if body.assigned_only:
+        gaps = [g for g in gaps if g.get("account_owner_id")]
+
+    if not gaps:
+        return {"status": "no_gaps", "processed": 0}
+
+    job = EnrichmentJob(
+        job_type="customer_backfill",
+        status="running",
+        total_items=len(gaps),
+        started_by_id=user.id,
+        started_at=datetime.now(timezone.utc),
+    )
+    db.add(job)
+    db.flush()
+
+    processed = 0
+    enriched = 0
+    errors = []
+    for gap in gaps:
+        try:
+            result = await enrich_customer_account(gap["company_id"], db, force=False)
+            processed += 1
+            if result.get("ok") and result.get("contacts_added", 0) > 0:
+                enriched += 1
+            db.flush()
+        except Exception as e:
+            errors.append(f"Company {gap['company_id']}: {str(e)[:100]}")
+            logger.warning("Backfill error for company %d: %s", gap["company_id"], e)
+
+    job.processed_items = processed
+    job.enriched_items = enriched
+    job.error_count = len(errors)
+    job.error_log = errors[:20]
+    job.status = "completed"
+    job.completed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "status": "completed",
+        "job_id": job.id,
+        "processed": processed,
+        "enriched": enriched,
+        "errors": len(errors),
+    }
+
+
+@router.get("/api/enrichment/customer-gaps")
+def api_customer_gaps(
+    limit: int = Query(50, ge=1, le=200),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Gap analysis — which customer accounts need enrichment? Assigned first."""
+    from ..services.customer_enrichment_service import get_enrichment_gaps
+
+    gaps = get_enrichment_gaps(db, limit=limit)
+    return {"gaps": gaps, "total": len(gaps)}
 
 
 # ── Website Scraping ─────────────────────────────────────────────────

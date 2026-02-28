@@ -1400,9 +1400,9 @@ class TestEnrichEntitySafeApolloAndClearbitDirectly:
                                     assert result["domain"] == "test.com"
 
 
-class TestFindSuggestedContactsHunterRocketreachApolloExceptions:
-    """Test _safe_hunter, _safe_rocketreach, _safe_apollo_contacts exception paths
-    by forcing import failures (lines 726-728, 751-753, 778-780)."""
+class TestFindSuggestedContactsHunterRocketreachApolloLushaExceptions:
+    """Test _safe_hunter, _safe_rocketreach, _safe_apollo_contacts, _safe_lusha exception paths
+    by forcing import failures."""
 
     @pytest.fixture(autouse=True)
     def _no_creds(self):
@@ -1410,7 +1410,7 @@ class TestFindSuggestedContactsHunterRocketreachApolloExceptions:
             yield
 
     def test_all_safe_wrappers_handle_import_errors(self):
-        """Force hunter, rocketreach, and apollo imports to fail inside find_suggested_contacts."""
+        """Force hunter, rocketreach, apollo, and lusha imports to fail inside find_suggested_contacts."""
         from app.enrichment_service import find_suggested_contacts
         import builtins
 
@@ -1423,6 +1423,8 @@ class TestFindSuggestedContactsHunterRocketreachApolloExceptions:
                 raise ImportError("rocketreach not available")
             if "apollo_client" in name:
                 raise ImportError("apollo not available")
+            if "lusha_client" in name:
+                raise ImportError("lusha not available")
             return original_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=mock_import):
@@ -1430,3 +1432,36 @@ class TestFindSuggestedContactsHunterRocketreachApolloExceptions:
                 find_suggested_contacts("example.com")
             )
             assert result == []
+
+    def test_lusha_returns_contact_in_gather(self):
+        """Lusha returns a valid contact that appears in find_suggested_contacts results."""
+        from app.enrichment_service import find_suggested_contacts
+
+        lusha_result = {
+            "full_name": "Lusha Contact",
+            "title": "Director",
+            "email": "lusha@acme.com",
+            "phone": "+15551234567",
+            "linkedin_url": None,
+            "location": "Boston",
+        }
+        with patch(
+            "app.enrichment_service._clay_find_contacts",
+            new_callable=AsyncMock, return_value=[],
+        ), patch(
+            "app.enrichment_service._explorium_find_contacts",
+            new_callable=AsyncMock, return_value=[],
+        ), patch(
+            "app.enrichment_service._ai_find_contacts",
+            new_callable=AsyncMock, return_value=[],
+        ):
+            # Mock the lazy import inside _safe_lusha
+            mock_find_person = AsyncMock(return_value=lusha_result)
+            with patch.dict("sys.modules", {"app.connectors.lusha_client": MagicMock(find_person=mock_find_person)}):
+                result = asyncio.run(
+                    find_suggested_contacts("acme.com", name="Acme Corp")
+                )
+                lusha_contacts = [c for c in result if c.get("source") == "lusha"]
+                assert len(lusha_contacts) == 1
+                assert lusha_contacts[0]["full_name"] == "Lusha Contact"
+                assert lusha_contacts[0]["company"] == "Acme Corp"

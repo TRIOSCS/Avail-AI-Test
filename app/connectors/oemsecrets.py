@@ -2,6 +2,9 @@
 
 Returns pricing/stock from DigiKey, Mouser, Arrow, Avnet, Farnell, RS,
 Future, TME, and many more in a single API call.
+
+Called by: app/connectors/sources.py via search pipeline
+Depends on: http_client, utils.safe_float/safe_int, sources.BaseConnector
 """
 
 from loguru import logger
@@ -17,8 +20,8 @@ from .sources import BaseConnector
 class OEMSecretsConnector(BaseConnector):
     """OEMSecrets Part Search API — JSON endpoint."""
 
-    # Docs: https://www.oemsecrets.com/api
-    SEARCH_URL = "https://www.oemsecrets.com/api/v1/search"
+    # Docs: https://oemsecretsapi.com/documentation/
+    SEARCH_URL = "https://oemsecretsapi.com/partsearch"
 
     def __init__(self, api_key: str):
         super().__init__(timeout=20.0)
@@ -48,7 +51,14 @@ class OEMSecretsConnector(BaseConnector):
         return self._parse(data, part_number)
 
     def _parse(self, data: dict, pn: str) -> list[dict]:
-        # OEMSecrets response varies — handle both formats
+        """Parse OEMSecrets API response into normalized results.
+
+        API response has top-level 'stock' array. Each item contains:
+        - distributor: {distributor_name, ...}
+        - quantity_in_stock, source_part_number, part_number
+        - prices: {USD: [{unit_break, unit_price}, ...], ...}
+        - buy_now_url, datasheet_url, manufacturer, moq
+        """
         stock_data = (
             data
             if isinstance(data, list)
@@ -64,23 +74,43 @@ class OEMSecretsConnector(BaseConnector):
             if not isinstance(item, dict):
                 continue
 
+            # Distributor name — nested dict or flat string
             distributor = item.get("distributor", {})
-            dist_name = (
-                distributor.get("name", "")
-                if isinstance(distributor, dict)
-                else str(distributor)
-            )
+            if isinstance(distributor, dict):
+                dist_name = distributor.get("distributor_name", distributor.get("name", ""))
+            else:
+                dist_name = str(distributor)
             if not dist_name:
                 dist_name = item.get("distributor_name", item.get("seller", ""))
             if not dist_name:
                 continue
 
-            mpn = item.get("mpn", item.get("part_number", pn))
+            # MPN — prefer source_part_number (has original formatting)
+            mpn = item.get("source_part_number", item.get("part_number", item.get("mpn", pn)))
             mfr = item.get("manufacturer", "")
-            qty = item.get("stock", item.get("quantity", item.get("qty")))
-            price = item.get("price", item.get("unit_price"))
+
+            # Quantity — v3 uses quantity_in_stock
+            qty = item.get("quantity_in_stock", item.get("stock", item.get("quantity", item.get("qty"))))
+
+            # Price — extract from nested prices dict or flat field
+            price = None
+            prices_obj = item.get("prices")
+            if isinstance(prices_obj, dict):
+                # Pick USD prices, fall back to first available currency
+                price_list = prices_obj.get("USD", [])
+                if not price_list:
+                    for _cur, plist in prices_obj.items():
+                        if plist:
+                            price_list = plist
+                            break
+                if price_list and isinstance(price_list, list) and len(price_list) > 0:
+                    # Use the lowest unit break price (first entry)
+                    price = price_list[0].get("unit_price")
+            if price is None:
+                price = item.get("price", item.get("unit_price"))
+
             currency = item.get("currency", "USD")
-            url = item.get("url", item.get("buy_url", ""))
+            url = item.get("buy_now_url", item.get("url", item.get("buy_url", "")))
             moq = item.get("moq", item.get("minimum_order"))
             sku = item.get("sku", item.get("distributor_pn", ""))
             datasheet = item.get("datasheet_url", "")
@@ -90,8 +120,9 @@ class OEMSecretsConnector(BaseConnector):
                 continue
             seen.add(key)
 
-            # Authorized distributors from OEMSecrets are generally legit
-            is_auth = item.get("authorized", item.get("is_authorized", True))
+            # Authorization status
+            auth_status = item.get("distributor_authorisation_status", "")
+            is_auth = auth_status == "authorised" if auth_status else item.get("authorized", item.get("is_authorized", True))
 
             results.append(
                 {

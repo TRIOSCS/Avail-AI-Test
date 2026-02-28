@@ -133,6 +133,8 @@ async def list_companies(
                     "commodity_tags": c.commodity_tags or [],
                     "account_owner_id": c.account_owner_id,
                     "account_owner_name": (c.account_owner.name if c.account_owner else None) if c.account_owner_id else None,
+                    "customer_enrichment_status": c.customer_enrichment_status,
+                    "customer_enrichment_at": c.customer_enrichment_at.isoformat() if c.customer_enrichment_at else None,
                     "site_count": len(sites),
                     "sites": sites,
                 }
@@ -428,8 +430,15 @@ async def create_company(
     db.add(default_site)
     db.commit()
 
+    # Capture response values eagerly so background tasks can't detach them
+    result = {
+        "id": company.id,
+        "name": company.name,
+        "default_site_id": default_site.id,
+        "enrich_triggered": False,
+    }
+
     # Auto-enrich if domain is available
-    enrich_triggered = False
     domain = company.domain or ""
     if domain and (
         get_credential_cached("clay_enrichment", "CLAY_API_KEY")
@@ -454,30 +463,31 @@ async def create_company(
                             apply_enrichment_to_company(c, enrichment)
                             s.commit()
 
-                    # Discover contacts but do NOT auto-add — let user review
-                    from ...enrichment_service import find_suggested_contacts
-                    contacts = await find_suggested_contacts(d, n)
-                    if contacts:
-                        logger.info(
-                            "Discovered %d suggested contacts for company %d — pending user review",
-                            len(contacts), cid,
-                        )
+                    # Run customer enrichment waterfall for immediate contact discovery
+                    if settings.customer_enrichment_enabled:
+                        try:
+                            from ...services.customer_enrichment_service import enrich_customer_account
+                            waterfall = await enrich_customer_account(cid, s, force=True)
+                            if waterfall.get("contacts_added", 0) > 0:
+                                s.commit()
+                                logger.info(
+                                    "Auto-enriched company %d: %d contacts via waterfall",
+                                    cid, waterfall["contacts_added"],
+                                )
+                        except Exception as we:
+                            logger.warning("Waterfall auto-enrich error for company %d: %s", cid, we)
+                            s.rollback()
                 finally:
                     s.close()
             except Exception:
                 logger.exception("Background enrichment failed for company %d", cid)
 
-        asyncio.create_task(_enrich_company_bg(company.id, default_site.id, domain, company.name))
-        enrich_triggered = True
+        asyncio.create_task(_enrich_company_bg(result["id"], result["default_site_id"], domain, result["name"]))
+        result["enrich_triggered"] = True
 
     invalidate_prefix("company_list")
     invalidate_prefix("companies_typeahead")
-    return {
-        "id": company.id,
-        "name": company.name,
-        "default_site_id": default_site.id,
-        "enrich_triggered": enrich_triggered,
-    }
+    return result
 
 
 @router.put("/api/companies/{company_id}")

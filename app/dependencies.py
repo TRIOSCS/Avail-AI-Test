@@ -137,7 +137,8 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
     # Check if token needs refresh (15-min buffer)
     needs_refresh = False
     if user.token_expires_at:
-        if datetime.now(timezone.utc) > user.token_expires_at - timedelta(minutes=15):
+        expiry = user.token_expires_at if user.token_expires_at.tzinfo else user.token_expires_at.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) > expiry - timedelta(minutes=15):
             needs_refresh = True
 
     if needs_refresh:

@@ -66,7 +66,7 @@ def run_auto_attribution(db: Session) -> dict:
         if match:
             attribute_activity(act.id, match["type"], match["id"], db, user_id=act.user_id)
             stats["rule_matched"] += 1
-        elif act.created_at and act.created_at < cutoff_30d:
+        elif act.created_at and act.created_at.replace(tzinfo=act.created_at.tzinfo or timezone.utc) < cutoff_30d:
             # Auto-dismiss activities older than 30 days
             dismiss_activity(act.id, db)
             stats["auto_dismissed"] += 1

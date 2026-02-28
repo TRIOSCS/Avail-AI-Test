@@ -165,8 +165,9 @@ def migrate(dry_run: bool = False) -> dict:
         logger.info(f"Summary: {summary}")
         return summary
 
-    finally:
-        db.close()
+    except Exception:
+        db.rollback()
+        raise
 
 
 if __name__ == "__main__":

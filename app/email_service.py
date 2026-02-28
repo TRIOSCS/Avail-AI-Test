@@ -912,18 +912,22 @@ async def process_batch_results(db: Session) -> int:
         except Exception as e:
             logger.warning(f"Batch results check failed for {pb.batch_id}: {e}")
             # Mark as failed if submitted >24h ago
-            if pb.submitted_at and datetime.now(timezone.utc) - pb.submitted_at > timedelta(hours=24):
-                pb.status = "failed"
-                pb.error_message = f"Timed out after 24h: {e}"
-                db.commit()
+            if pb.submitted_at:
+                sa = pb.submitted_at if pb.submitted_at.tzinfo else pb.submitted_at.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) - sa > timedelta(hours=24):
+                    pb.status = "failed"
+                    pb.error_message = f"Timed out after 24h: {e}"
+                    db.commit()
             continue
 
         if results is None:
             # Still processing — check for timeout
-            if pb.submitted_at and datetime.now(timezone.utc) - pb.submitted_at > timedelta(hours=24):
-                pb.status = "failed"
-                pb.error_message = "Batch did not complete within 24h"
-                db.commit()
+            if pb.submitted_at:
+                sa = pb.submitted_at if pb.submitted_at.tzinfo else pb.submitted_at.replace(tzinfo=timezone.utc)
+                if datetime.now(timezone.utc) - sa > timedelta(hours=24):
+                    pb.status = "failed"
+                    pb.error_message = "Batch did not complete within 24h"
+                    db.commit()
             continue
 
         # Batch complete — apply results

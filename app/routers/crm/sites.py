@@ -1,9 +1,11 @@
 import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
+from loguru import logger
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ...cache.decorators import invalidate_prefix
+from ...config import settings
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin, require_buyer, require_user
 from ...models import Company, CustomerSite, Requisition, SiteContact, User
@@ -30,6 +32,23 @@ async def add_site(
     db.commit()
     invalidate_prefix("companies_typeahead")
     invalidate_prefix("company_detail")
+
+    # Trigger customer enrichment waterfall in the background for the parent company
+    if settings.customer_enrichment_enabled and (company.domain or company.website):
+        async def _bg_enrich(cid):
+            from ...database import SessionLocal
+            s = SessionLocal()
+            try:
+                from ...services.customer_enrichment_service import enrich_customer_account
+                await enrich_customer_account(cid, s, force=False)
+                s.commit()
+            except Exception as e:
+                logger.warning("Site-create auto-enrich error for company %d: %s", cid, e)
+                s.rollback()
+            finally:
+                s.close()
+        asyncio.create_task(_bg_enrich(company_id))
+
     return {"id": site.id, "site_name": site.site_name}
 
 
@@ -130,6 +149,13 @@ async def get_site(
                 "notes": c.notes,
                 "is_primary": c.is_primary,
                 "is_active": c.is_active,
+                "contact_status": c.contact_status,
+                "phone_verified": c.phone_verified or False,
+                "email_verified": c.email_verified or False,
+                "email_verification_status": c.email_verification_status,
+                "enrichment_source": c.enrichment_source,
+                "contact_role": c.contact_role,
+                "linkedin_url": c.linkedin_url,
             }
             for c in contacts
         ],

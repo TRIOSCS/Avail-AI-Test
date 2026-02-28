@@ -163,6 +163,27 @@ class ProspectContact(Base):
     )
 
 
+class EnrichmentCreditUsage(Base):
+    """Monthly credit usage tracking per enrichment provider."""
+
+    __tablename__ = "enrichment_credit_usage"
+    id = Column(Integer, primary_key=True)
+    provider = Column(String(50), nullable=False)  # lusha, clay, hunter, apollo
+    month = Column(String(7), nullable=False)  # "2026-02" format
+    credits_used = Column(Integer, default=0, nullable=False)
+    credits_limit = Column(Integer, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    __table_args__ = (
+        Index("ix_ecu_provider_month", "provider", "month", unique=True),
+    )
+
+
 class IntelCache(Base):
     """Cached intelligence data with TTL."""
 

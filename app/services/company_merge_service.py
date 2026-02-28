@@ -8,6 +8,8 @@ Called by: admin.py (company-merge endpoint), auto_dedup_service.py
 Depends on: models
 """
 
+from datetime import timezone
+
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -67,10 +69,13 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
     if not keep.account_owner_id and remove.account_owner_id:
         keep.account_owner_id = remove.account_owner_id
 
-    # 6. Merge timestamps
+    # 6. Merge timestamps (make tz-safe for SQLite which strips tzinfo)
+    def _tz_safe(dt):
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
     if remove.last_activity_at:
-        if not keep.last_activity_at or remove.last_activity_at > keep.last_activity_at:
-            keep.last_activity_at = remove.last_activity_at
+        if not keep.last_activity_at or _tz_safe(remove.last_activity_at) > _tz_safe(keep.last_activity_at):
+            keep.last_activity_at = _tz_safe(remove.last_activity_at)
 
     # 7. Handle sites — move or delete empty HQs
     remove_sites = db.query(CustomerSite).filter(CustomerSite.company_id == remove.id).all()

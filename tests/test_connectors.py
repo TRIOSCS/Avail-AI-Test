@@ -1,8 +1,9 @@
 """Comprehensive tests for app/connectors/ modules.
 
-Covers: apollo_client, clearbit_client, hunter_client, rocketreach_client,
-tme, sources (BaseConnector, CircuitBreaker, NexarConnector, BrokerBinConnector),
-email_mining, digikey, ebay, mouser, oemsecrets, sourcengine, element14.
+Covers: apollo_client, clearbit_client, hunter_client, lusha_client,
+rocketreach_client, tme, sources (BaseConnector, CircuitBreaker,
+NexarConnector, BrokerBinConnector), email_mining, digikey, ebay, mouser,
+oemsecrets, sourcengine, element14.
 
 All external HTTP calls are mocked — no real API requests.
 """
@@ -1536,6 +1537,70 @@ class TestOEMSecretsConnector:
         results = await c._do_search("LM317T")
         assert results == []
 
+    def test_parse_v3_api_format(self):
+        """V3 API uses nested distributor dict with distributor_name, quantity_in_stock, prices dict."""
+        c = self._make_connector()
+        data = {
+            "version": "3.0",
+            "status": "http 200 OK",
+            "parts_returned": 1,
+            "stock": [{
+                "manufacturer": "Texas Instruments",
+                "moq": 5,
+                "sku": "5338209P",
+                "source_part_number": "LM317T/NOPB",
+                "part_number": "LM317TNOPB",
+                "quantity_in_stock": 7182,
+                "buy_now_url": "https://analytics.oemsecrets.com/buy",
+                "datasheet_url": "https://example.com/ds.pdf",
+                "distributor_authorisation_status": "authorised",
+                "prices": {
+                    "USD": [
+                        {"unit_break": 5, "unit_price": "2.98"},
+                        {"unit_break": 10, "unit_price": "2.67"},
+                    ]
+                },
+                "distributor": {
+                    "distributor_name": "RS UK",
+                    "distributor_region": "Europe",
+                },
+            }]
+        }
+        results = c._parse(data, "LM317T")
+        assert len(results) == 1
+        r = results[0]
+        assert r["vendor_name"] == "RS UK"
+        assert r["mpn_matched"] == "LM317T/NOPB"
+        assert r["qty_available"] == 7182
+        assert r["unit_price"] == 2.98
+        assert r["is_authorized"] is True
+        assert r["click_url"] == "https://analytics.oemsecrets.com/buy"
+        assert r["vendor_sku"] == "5338209P"
+
+    def test_parse_v3_unauthorized(self):
+        c = self._make_connector()
+        data = {"stock": [{
+            "distributor": {"distributor_name": "Broker X"},
+            "source_part_number": "ABC",
+            "quantity_in_stock": 100,
+            "distributor_authorisation_status": "independent",
+            "prices": {"USD": [{"unit_break": 1, "unit_price": "1.50"}]},
+        }]}
+        results = c._parse(data, "ABC")
+        assert results[0]["is_authorized"] is False
+
+    def test_parse_v3_no_usd_prices(self):
+        """Falls back to first available currency if USD not in prices."""
+        c = self._make_connector()
+        data = {"stock": [{
+            "distributor": {"distributor_name": "RS UK"},
+            "source_part_number": "X",
+            "quantity_in_stock": 50,
+            "prices": {"GBP": [{"unit_break": 1, "unit_price": "1.20"}]},
+        }]}
+        results = c._parse(data, "X")
+        assert results[0]["unit_price"] == 1.20
+
     @pytest.mark.asyncio
     async def test_do_search_non_200(self):
         c = self._make_connector()
@@ -1742,6 +1807,56 @@ class TestElement14Connector:
         c = Element14Connector(api_key="")
         results = await c._do_search("LM317T")
         assert results == []
+
+    @pytest.mark.asyncio
+    async def test_fallback_keyword_search(self):
+        """When exact MPN match returns 0, falls back to keyword search."""
+        c = self._make_connector()
+        exact_resp = _mock_response(200, json_data={"manufacturerPartNumberSearchReturn": {"products": []}})
+        keyword_resp = _mock_response(200, json_data={
+            "manufacturerPartNumberSearchReturn": {
+                "products": [{
+                    "translatedManufacturerPartNumber": "LM317T/NOPB",
+                    "brandName": "TI", "displayName": "VReg", "sku": "123",
+                    "stock": {"level": "100"}, "prices": [{"cost": "0.50"}],
+                }]
+            }
+        })
+        call_count = 0
+
+        async def _mock_get(*args, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            return exact_resp if call_count == 1 else keyword_resp
+
+        with patch("app.connectors.element14.http") as mock_http:
+            mock_http.get = _mock_get
+            results = await c._do_search("LM317T")
+
+        assert len(results) == 1
+        assert results[0]["mpn_matched"] == "LM317T/NOPB"
+        assert call_count == 2  # exact + fallback
+
+    @pytest.mark.asyncio
+    async def test_no_fallback_when_exact_matches(self):
+        """When exact MPN returns results, no fallback search is made."""
+        c = self._make_connector()
+        resp = _mock_response(200, json_data={
+            "manufacturerPartNumberSearchReturn": {
+                "products": [{
+                    "translatedManufacturerPartNumber": "LM317T",
+                    "brandName": "TI", "displayName": "VReg", "sku": "456",
+                    "stock": {"level": "500"}, "prices": [{"cost": "0.65"}],
+                }]
+            }
+        })
+
+        with patch("app.connectors.element14.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=resp)
+            results = await c._do_search("LM317T")
+
+        assert len(results) == 1
+        mock_http.get.assert_awaited_once()  # Only one call — no fallback
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -2728,6 +2843,295 @@ class TestEmailMiner:
         miner.gc.get_all_pages = AsyncMock(side_effect=Exception("search error"))
         result = await miner._search_messages("test query")
         assert result == []
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Lusha Client tests
+# ═══════════════════════════════════════════════════════════════════════
+
+class TestLushaClient:
+    @pytest.mark.asyncio
+    async def test_find_person_no_key(self):
+        from app.connectors.lusha_client import find_person
+        with patch("app.connectors.lusha_client.settings") as mock_s:
+            mock_s.lusha_api_key = ""
+            result = await find_person(email="test@acme.com")
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_find_person_insufficient_params(self):
+        from app.connectors.lusha_client import find_person
+        with patch("app.connectors.lusha_client.settings") as mock_s:
+            mock_s.lusha_api_key = "key"
+            # No email, no linkedin, no first+last+company
+            result = await find_person()
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_find_person_insufficient_name_only(self):
+        from app.connectors.lusha_client import find_person
+        with patch("app.connectors.lusha_client.settings") as mock_s:
+            mock_s.lusha_api_key = "key"
+            # first_name alone is not enough
+            result = await find_person(first_name="John")
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_find_person_by_email_success(self):
+        from app.connectors.lusha_client import find_person
+
+        resp = _mock_response(200, {
+            "firstName": "John",
+            "lastName": "Doe",
+            "title": "VP Sales",
+            "phoneNumbers": [
+                {"type": "direct_dial", "number": "+15551234567"},
+                {"type": "mobile", "number": "+15559876543"},
+            ],
+            "emailAddresses": [
+                {"type": "work", "email": "john@acme.com"},
+                {"type": "personal", "email": "john@gmail.com"},
+            ],
+            "linkedinUrl": "https://linkedin.com/in/johndoe",
+            "location": "New York, NY",
+            "doNotCall": False,
+            "confidence": 0.95,
+        })
+        with patch("app.connectors.lusha_client.settings") as mock_s, \
+             patch("app.connectors.lusha_client.http") as mock_http:
+            mock_s.lusha_api_key = "key"
+            mock_http.get = AsyncMock(return_value=resp)
+            result = await find_person(email="john@acme.com")
+            assert result["full_name"] == "John Doe"
+            assert result["title"] == "VP Sales"
+            assert result["email"] == "john@acme.com"
+            assert result["phone"] == "+15551234567"
+            assert result["phone_type"] == "direct_dial"
+            assert result["do_not_call"] is False
+            assert result["linkedin_url"] == "https://linkedin.com/in/johndoe"
+            assert result["source"] == "lusha"
+            assert result["confidence"] == 0.95
+
+    @pytest.mark.asyncio
+    async def test_find_person_by_linkedin(self):
+        from app.connectors.lusha_client import find_person
+
+        resp = _mock_response(200, {
+            "firstName": "Jane",
+            "lastName": "Smith",
+            "title": "Buyer",
+            "phoneNumbers": [{"type": "work", "number": "+15550001111"}],
+            "emailAddresses": [{"type": "personal", "email": "jane@gmail.com"}],
+            "confidence": 0.8,
+        })
+        with patch("app.connectors.lusha_client.settings") as mock_s, \
+             patch("app.connectors.lusha_client.http") as mock_http:
+            mock_s.lusha_api_key = "key"
+            mock_http.get = AsyncMock(return_value=resp)
+            result = await find_person(linkedin_url="https://linkedin.com/in/janesmith")
+            assert result["full_name"] == "Jane Smith"
+            assert result["phone"] == "+15550001111"
+            assert result["phone_type"] == "work"
+            assert result["email"] == "jane@gmail.com"
+
+    @pytest.mark.asyncio
+    async def test_find_person_by_name_and_company(self):
+        from app.connectors.lusha_client import find_person
+
+        resp = _mock_response(200, {
+            "firstName": "Bob",
+            "lastName": "Jones",
+            "title": "Engineer",
+            "phoneNumbers": [],
+            "emailAddresses": [{"type": "work", "email": "bob@acme.com"}],
+            "confidence": 0.7,
+        })
+        with patch("app.connectors.lusha_client.settings") as mock_s, \
+             patch("app.connectors.lusha_client.http") as mock_http:
+            mock_s.lusha_api_key = "key"
+            mock_http.get = AsyncMock(return_value=resp)
+            result = await find_person(
+                first_name="Bob", last_name="Jones", company_name="Acme Corp"
+            )
+            assert result["full_name"] == "Bob Jones"
+            assert result["phone"] is None
+            assert result["phone_type"] is None
+            assert result["email"] == "bob@acme.com"
+
+    @pytest.mark.asyncio
+    async def test_find_person_by_name_and_domain(self):
+        from app.connectors.lusha_client import find_person
+
+        resp = _mock_response(200, {
+            "firstName": "Alice",
+            "lastName": "Wong",
+            "title": None,
+            "phoneNumbers": [{"type": "mobile", "number": "+15552223333"}],
+            "emailAddresses": [],
+            "confidence": 0.6,
+        })
+        with patch("app.connectors.lusha_client.settings") as mock_s, \
+             patch("app.connectors.lusha_client.http") as mock_http:
+            mock_s.lusha_api_key = "key"
+            mock_http.get = AsyncMock(return_value=resp)
+            result = await find_person(
+                first_name="Alice", last_name="Wong", company_domain="acme.com"
+            )
+            assert result["full_name"] == "Alice Wong"
+            assert result["phone"] == "+15552223333"
+            assert result["email"] is None
+
+    @pytest.mark.asyncio
+    async def test_find_person_phone_priority_direct_dial_first(self):
+        from app.connectors.lusha_client import find_person
+
+        resp = _mock_response(200, {
+            "firstName": "Test",
+            "lastName": "User",
+            "phoneNumbers": [
+                {"type": "work", "number": "+1111"},
+                {"type": "direct_dial", "number": "+2222"},
+                {"type": "mobile", "number": "+3333"},
+            ],
+            "emailAddresses": [],
+        })
+        with patch("app.connectors.lusha_client.settings") as mock_s, \
+             patch("app.connectors.lusha_client.http") as mock_http:
+            mock_s.lusha_api_key = "key"
+            mock_http.get = AsyncMock(return_value=resp)
+            result = await find_person(email="test@acme.com")
+            assert result["phone"] == "+2222"
+            assert result["phone_type"] == "direct_dial"
+
+    @pytest.mark.asyncio
+    async def test_find_person_email_priority_work_first(self):
+        from app.connectors.lusha_client import find_person
+
+        resp = _mock_response(200, {
+            "firstName": "Test",
+            "lastName": "User",
+            "phoneNumbers": [],
+            "emailAddresses": [
+                {"type": "personal", "email": "test@gmail.com"},
+                {"type": "work", "email": "test@acme.com"},
+            ],
+        })
+        with patch("app.connectors.lusha_client.settings") as mock_s, \
+             patch("app.connectors.lusha_client.http") as mock_http:
+            mock_s.lusha_api_key = "key"
+            mock_http.get = AsyncMock(return_value=resp)
+            result = await find_person(email="test@acme.com")
+            assert result["email"] == "test@acme.com"
+
+    @pytest.mark.asyncio
+    async def test_find_person_do_not_call_flag(self):
+        from app.connectors.lusha_client import find_person
+
+        resp = _mock_response(200, {
+            "firstName": "DNC",
+            "lastName": "Person",
+            "phoneNumbers": [{"type": "direct_dial", "number": "+15559999"}],
+            "emailAddresses": [],
+            "doNotCall": True,
+        })
+        with patch("app.connectors.lusha_client.settings") as mock_s, \
+             patch("app.connectors.lusha_client.http") as mock_http:
+            mock_s.lusha_api_key = "key"
+            mock_http.get = AsyncMock(return_value=resp)
+            result = await find_person(email="dnc@acme.com")
+            assert result["do_not_call"] is True
+
+    @pytest.mark.asyncio
+    async def test_find_person_api_error(self):
+        from app.connectors.lusha_client import find_person
+
+        with patch("app.connectors.lusha_client.settings") as mock_s, \
+             patch("app.connectors.lusha_client.http") as mock_http:
+            mock_s.lusha_api_key = "key"
+            mock_http.get = AsyncMock(return_value=_mock_response(429, text="Rate limited"))
+            result = await find_person(email="test@acme.com")
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_find_person_exception(self):
+        from app.connectors.lusha_client import find_person
+
+        with patch("app.connectors.lusha_client.settings") as mock_s, \
+             patch("app.connectors.lusha_client.http") as mock_http:
+            mock_s.lusha_api_key = "key"
+            mock_http.get = AsyncMock(side_effect=Exception("network error"))
+            result = await find_person(email="test@acme.com")
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_find_person_empty_name_fields(self):
+        from app.connectors.lusha_client import find_person
+
+        resp = _mock_response(200, {
+            "firstName": "",
+            "lastName": "",
+            "phoneNumbers": [],
+            "emailAddresses": [{"type": "work", "email": "anon@acme.com"}],
+        })
+        with patch("app.connectors.lusha_client.settings") as mock_s, \
+             patch("app.connectors.lusha_client.http") as mock_http:
+            mock_s.lusha_api_key = "key"
+            mock_http.get = AsyncMock(return_value=resp)
+            result = await find_person(email="anon@acme.com")
+            assert result["full_name"] is None
+
+    @pytest.mark.asyncio
+    async def test_find_person_by_domain_only(self):
+        from app.connectors.lusha_client import find_person
+
+        resp = _mock_response(200, {
+            "firstName": "Domain",
+            "lastName": "User",
+            "phoneNumbers": [],
+            "emailAddresses": [],
+        })
+        with patch("app.connectors.lusha_client.settings") as mock_s, \
+             patch("app.connectors.lusha_client.http") as mock_http:
+            mock_s.lusha_api_key = "key"
+            mock_http.get = AsyncMock(return_value=resp)
+            result = await find_person(company_domain="acme.com")
+            assert result["full_name"] == "Domain User"
+
+    def test_best_phone_empty_list(self):
+        from app.connectors.lusha_client import _best_phone
+        assert _best_phone([]) == (None, None)
+
+    def test_best_phone_unknown_type(self):
+        from app.connectors.lusha_client import _best_phone
+        phone, ptype = _best_phone([{"type": "fax", "number": "+1555"}])
+        assert phone == "+1555"
+        assert ptype == "fax"
+
+    def test_best_email_empty_list(self):
+        from app.connectors.lusha_client import _best_email
+        assert _best_email([]) is None
+
+    def test_best_email_unknown_type(self):
+        from app.connectors.lusha_client import _best_email
+        assert _best_email([{"type": "other", "email": "x@y.com"}]) == "x@y.com"
+
+    @pytest.mark.asyncio
+    async def test_find_person_null_phone_and_email_lists(self):
+        from app.connectors.lusha_client import find_person
+
+        resp = _mock_response(200, {
+            "firstName": "Null",
+            "lastName": "Lists",
+            "phoneNumbers": None,
+            "emailAddresses": None,
+        })
+        with patch("app.connectors.lusha_client.settings") as mock_s, \
+             patch("app.connectors.lusha_client.http") as mock_http:
+            mock_s.lusha_api_key = "key"
+            mock_http.get = AsyncMock(return_value=resp)
+            result = await find_person(email="null@acme.com")
+            assert result["phone"] is None
+            assert result["email"] is None
 
 
 # ═══════════════════════════════════════════════════════════════════════

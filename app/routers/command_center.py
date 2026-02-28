@@ -91,7 +91,7 @@ def get_command_center_actions(
                 "requisition_id": q.requisition_id,
                 "quote_number": q.quote_number,
                 "sent_at": q.sent_at.isoformat() if q.sent_at else None,
-                "days_pending": (now - q.sent_at).days if q.sent_at else None,
+                "days_pending": (now - (q.sent_at if q.sent_at.tzinfo else q.sent_at.replace(tzinfo=timezone.utc))).days if q.sent_at else None,
             }
             for q in pending_quotes
         ],

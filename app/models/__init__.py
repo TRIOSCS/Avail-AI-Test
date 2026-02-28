@@ -21,6 +21,7 @@ from .prospect_account import ProspectAccount  # noqa: F401
 # Enrichment
 from .enrichment import (  # noqa: F401
     EmailSignatureExtract,
+    EnrichmentCreditUsage,
     EnrichmentJob,
     EnrichmentQueue,
     IntelCache,

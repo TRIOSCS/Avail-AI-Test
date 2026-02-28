@@ -83,7 +83,7 @@ engine = create_engine(
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
-TestSessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
+TestSessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=True)
 
 
 @event.listens_for(engine, "connect")
@@ -97,6 +97,19 @@ def _enable_fk(dbapi_conn, _):
 # Tables using PostgreSQL-only types (ARRAY) that SQLite can't handle.
 # These are excluded from the test DB; tests needing them require PostgreSQL.
 _PG_ONLY_TABLES = {"buyer_profiles"}
+
+
+@pytest.fixture(autouse=True)
+def _reset_ai_gate_state():
+    """Clear AI gate module state between tests to prevent order-dependent failures."""
+    yield
+    try:
+        from app.services.nc_worker.ai_gate import clear_classification_cache
+        from app.services.nc_worker import ai_gate
+        clear_classification_cache()
+        ai_gate._last_api_failure = 0.0
+    except ImportError:
+        pass
 
 
 @pytest.fixture(autouse=True)

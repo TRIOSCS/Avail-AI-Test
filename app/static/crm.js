@@ -4126,6 +4126,46 @@ async function loadCreditUsage() {
     }
 }
 
+async function loadCustomerGaps() {
+    const el = document.getElementById('customerGapsList');
+    if (!el) return;
+    try {
+        const data = await apiFetch('/api/enrichment/customer-gaps?limit=100');
+        const gaps = data.gaps || [];
+        if (!gaps.length) { el.innerHTML = '<p class="empty">All customer accounts have contacts!</p>'; return; }
+        let html = '<table class="tbl"><thead><tr><th>Company</th><th>Domain</th><th>Owner</th><th>Contacts Needed</th><th>Status</th><th>Action</th></tr></thead><tbody>';
+        for (const g of gaps) {
+            const ownerBadge = g.account_owner_id
+                ? '<span style="color:var(--green);font-size:10px">Assigned</span>'
+                : '<span style="color:var(--muted);font-size:10px">Unassigned</span>';
+            html += `<tr>
+                <td>${esc(g.company_name)}</td>
+                <td style="font-size:11px;color:var(--muted)">${esc(g.domain || '-')}</td>
+                <td>${ownerBadge}</td>
+                <td>${g.contacts_needed}</td>
+                <td>${g.current_status || 'missing'}</td>
+                <td><button class="btn btn-sm" onclick="unifiedEnrichCompany(${g.company_id})">Enrich</button></td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    } catch (e) {
+        el.innerHTML = '<p class="empty" style="color:var(--red)">Failed to load gaps</p>';
+    }
+}
+
+async function startCustomerBackfill() {
+    const status = document.getElementById('gapStatus');
+    if (status) status.textContent = 'Starting backfill...';
+    try {
+        const res = await apiFetch('/api/enrichment/customer-backfill', { method: 'POST', body: { max_accounts: 50 } });
+        if (status) status.textContent = `Done: ${res.enriched || 0} enriched, ${res.errors || 0} errors`;
+        loadCustomerGaps();
+    } catch (e) {
+        if (status) status.textContent = 'Error: ' + (e.message || e);
+    }
+}
+
 async function unifiedEnrichVendor(vendorId) {
     showToast('Enriching vendor — this may take a moment…', 'info');
     try {
@@ -8067,7 +8107,8 @@ Object.assign(window, {
     sortSalesScorecard, testSourceCred, testTeamsPost,
     toggleOfferSelect, togglePlannedSources, toggleSiteDetail,
     toggleSourceStatus, tokenApprovePlan, tokenRejectPlan,
-    triggerDeepScan, unifiedEnrichCompany, updateQuoteLine,
+    triggerDeepScan, unifiedEnrichCompany, updateQuoteLine, verifyContactEmail,
+    loadCreditUsage, loadCustomerGaps, startCustomerBackfill,
     updateQuoteLineField, updateTicketStatus, updateUserField,
     verifyBuyPlanPOs, verifyPOV3, verifySOV3, viewTicketDetail,
     openSuggestedContacts,

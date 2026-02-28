@@ -699,7 +699,7 @@ async def find_suggested_contacts(
 ) -> list[dict]:
     """Find suggested contacts at a company from all configured providers.
 
-    All 5 sources run concurrently via asyncio.gather.
+    All 7 sources run concurrently via asyncio.gather.
     Returns deduplicated list sorted by relevance. Each contact has:
     full_name, title, email, phone, linkedin_url, location, source
     """
@@ -778,13 +778,34 @@ async def find_suggested_contacts(
             logger.debug("Apollo contacts skipped: %s", e)
             return []
 
-    # Run all 6 sources concurrently
+    async def _safe_lusha(domain: str) -> list[dict]:
+        try:
+            from .connectors.lusha_client import find_person
+            result = await find_person(company_domain=domain)
+            if not result or not result.get("full_name"):
+                return []
+            return [{
+                "source": "lusha",
+                "full_name": result["full_name"],
+                "title": result.get("title"),
+                "email": result.get("email"),
+                "phone": result.get("phone"),
+                "linkedin_url": result.get("linkedin_url"),
+                "location": result.get("location"),
+                "company": name or domain,
+            }]
+        except Exception as e:
+            logger.debug("Lusha contacts skipped: %s", e)
+            return []
+
+    # Run all 7 sources concurrently
     results = await asyncio.gather(
         _clay_find_contacts(domain, title_filter),
         _explorium_find_contacts(domain, title_filter),
         _safe_hunter(domain),
         _safe_rocketreach(domain),
         _safe_apollo_contacts(domain),
+        _safe_lusha(domain),
         _ai_find_contacts(domain, name, title_filter),
         return_exceptions=True,
     )

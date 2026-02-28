@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from xml.etree import ElementTree
 
 from loguru import logger
+from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.prospect_account import ProspectAccount
 
@@ -245,6 +246,9 @@ async def run_free_enrichment(prospect_id: int) -> dict:
                 prospect.readiness_signals = signals
 
         prospect.enrichment_data = ed
+        flag_modified(prospect, "enrichment_data")
+        if prospect.readiness_signals is not None:
+            flag_modified(prospect, "readiness_signals")
         prospect.last_enriched_at = datetime.now(timezone.utc)
         db.commit()
 

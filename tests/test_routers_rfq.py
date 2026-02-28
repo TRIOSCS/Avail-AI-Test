@@ -1790,3 +1790,116 @@ def test_follow_ups_includes_req_name(client, db_session, test_user, test_requis
     assert resp.status_code == 200
     data = resp.json()
     assert data["follow_ups"][0]["requisition_name"] == "REQ-TEST-001"
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Batch follow-up endpoint tests
+# ══════════════════════════════════════════════════════════════════════
+
+
+def test_send_follow_up_batch_success(rfq_client, db_session, test_user, test_requisition):
+    """Batch follow-up sends to multiple contacts."""
+    c1 = _make_contact(db_session, test_requisition, test_user,
+                       vendor_name="Vendor A", vendor_contact="a@v.com",
+                       status="sent", days_ago=5)
+    c2 = _make_contact(db_session, test_requisition, test_user,
+                       vendor_name="Vendor B", vendor_contact="b@v.com",
+                       status="sent", days_ago=5, parts=["LM358N"])
+
+    mock_gc = MagicMock()
+    mock_gc.post_json = AsyncMock(return_value=None)
+
+    with patch("app.routers.rfq.require_fresh_token",
+               new_callable=AsyncMock, return_value="fake-token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        resp = rfq_client.post("/api/follow-ups/send-batch",
+                               json={"contact_ids": [c1.id, c2.id]})
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["sent"] == 2
+    assert data["total"] == 2
+    assert len(data["results"]) == 2
+    assert all(r["status"] == "sent" for r in data["results"])
+
+
+def test_send_follow_up_batch_empty_ids(rfq_client):
+    """Empty contact_ids returns 400."""
+    with patch("app.routers.rfq.require_fresh_token",
+               new_callable=AsyncMock, return_value="fake-token"):
+        resp = rfq_client.post("/api/follow-ups/send-batch",
+                               json={"contact_ids": []})
+    assert resp.status_code == 400
+
+
+def test_send_follow_up_batch_missing_contact(rfq_client, db_session, test_user, test_requisition):
+    """Non-existent contact ID is skipped."""
+    c1 = _make_contact(db_session, test_requisition, test_user,
+                       vendor_name="Real Vendor", vendor_contact="real@v.com",
+                       status="sent", days_ago=5)
+
+    mock_gc = MagicMock()
+    mock_gc.post_json = AsyncMock(return_value=None)
+
+    with patch("app.routers.rfq.require_fresh_token",
+               new_callable=AsyncMock, return_value="fake-token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        resp = rfq_client.post("/api/follow-ups/send-batch",
+                               json={"contact_ids": [c1.id, 99999]})
+
+    data = resp.json()
+    assert data["sent"] == 1
+    assert data["total"] == 2
+    skipped = [r for r in data["results"] if r["status"] == "skipped"]
+    assert len(skipped) == 1
+    assert skipped[0]["contact_id"] == 99999
+
+
+def test_send_follow_up_batch_send_failure(rfq_client, db_session, test_user, test_requisition):
+    """Graph API failure marks contact as failed, doesn't crash batch."""
+    c1 = _make_contact(db_session, test_requisition, test_user,
+                       vendor_name="Fail Vendor", vendor_contact="fail@v.com",
+                       status="sent", days_ago=5)
+
+    mock_gc = MagicMock()
+    mock_gc.post_json = AsyncMock(side_effect=Exception("Graph API error"))
+
+    with patch("app.routers.rfq.require_fresh_token",
+               new_callable=AsyncMock, return_value="fake-token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        resp = rfq_client.post("/api/follow-ups/send-batch",
+                               json={"contact_ids": [c1.id]})
+
+    data = resp.json()
+    assert data["ok"] is True
+    assert data["sent"] == 0
+    assert data["results"][0]["status"] == "failed"
+    assert "Graph API error" in data["results"][0]["reason"]
+
+
+def test_send_follow_up_batch_no_subject_fallback(rfq_client, db_session, test_user, test_requisition):
+    """Contact without subject gets fallback subject line."""
+    c = Contact(
+        requisition_id=test_requisition.id, user_id=test_user.id,
+        contact_type="email", vendor_name="NoSub",
+        vendor_contact="nosub@v.com", parts_included=["LM317T"],
+        subject=None, status="sent",
+        created_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=5),
+    )
+    db_session.add(c)
+    db_session.commit()
+    db_session.refresh(c)
+
+    mock_gc = MagicMock()
+    mock_gc.post_json = AsyncMock(return_value=None)
+
+    with patch("app.routers.rfq.require_fresh_token",
+               new_callable=AsyncMock, return_value="fake-token"), \
+         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+        resp = rfq_client.post("/api/follow-ups/send-batch",
+                               json={"contact_ids": [c.id]})
+
+    assert resp.status_code == 200
+    call_args = mock_gc.post_json.call_args[0][1]
+    assert "TRIO Supply Chain" in call_args["message"]["subject"]
