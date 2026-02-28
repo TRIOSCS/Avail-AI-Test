@@ -38,6 +38,7 @@ from app.models import (
     VendorContact,
 )
 from app.search_service import (
+    _deduplicate_sightings,
     _fetch_fresh,
     _get_material_history,
     _history_to_result,
@@ -2102,6 +2103,8 @@ class TestSearchRequirement:
                 "source_type": "nexar",
                 "is_authorized": False,
                 "confidence": 0,
+                "qty_available": 100,
+                "unit_price": 0.50,
             },
         ]
         mock_stats = [
@@ -2131,6 +2134,8 @@ class TestSearchRequirement:
                 "source_type": "nexar",
                 "is_authorized": False,
                 "confidence": 0,
+                "qty_available": 50,
+                "unit_price": 0.30,
             },
             {
                 "vendor_name": "HighScore",
@@ -2139,6 +2144,8 @@ class TestSearchRequirement:
                 "source_type": "nexar",
                 "is_authorized": True,
                 "confidence": 5,
+                "qty_available": 100,
+                "unit_price": 0.40,
             },
         ]
         mock_stats = [
@@ -2187,6 +2194,8 @@ class TestSearchRequirement:
                 "source_type": "nexar",
                 "is_authorized": False,
                 "confidence": 0,
+                "qty_available": 250,
+                "unit_price": 0.45,
             },
         ]
         mock_stats = [
@@ -2238,6 +2247,8 @@ class TestSearchRequirement:
                 "source_type": "nexar",
                 "is_authorized": False,
                 "confidence": 0,
+                "qty_available": 100,
+                "unit_price": 0.35,
             },
             {
                 "vendor_name": "Mouser",
@@ -2246,6 +2257,8 @@ class TestSearchRequirement:
                 "source_type": "mouser",
                 "is_authorized": False,
                 "confidence": 0,
+                "qty_available": 200,
+                "unit_price": 0.50,
             },
         ]
         mock_stats = [
@@ -2275,6 +2288,8 @@ class TestSearchRequirement:
                 "mpn_matched": "LM317T",
                 "source_type": "nexar",
                 "confidence": 0,
+                "qty_available": 75,
+                "unit_price": 0.25,
             },
         ]
         mock_stats = [
@@ -2341,3 +2356,147 @@ class TestSearchThrottling:
             )
 
         assert max_concurrent <= 2
+
+
+# ── _deduplicate_sightings tests ─────────────────────────────────────────
+
+
+def _make_sighting_dict(**overrides):
+    """Helper to build a sighting dict with sensible defaults."""
+    base = {
+        "id": 1,
+        "requirement_id": 10,
+        "vendor_name": "Digi-Key",
+        "vendor_email": None,
+        "vendor_phone": None,
+        "mpn_matched": "LM358",
+        "manufacturer": "Texas Instruments",
+        "qty_available": 500,
+        "unit_price": 0.42,
+        "currency": "USD",
+        "source_type": "digikey",
+        "is_authorized": True,
+        "confidence": 0.95,
+        "score": 85.0,
+        "is_unavailable": False,
+        "moq": 1,
+        "condition": "new",
+        "date_code": None,
+        "packaging": None,
+        "lead_time_days": None,
+        "lead_time": None,
+        "created_at": "2026-02-28T10:00:00",
+        "is_stale": False,
+        "is_historical": False,
+        "is_material_history": False,
+    }
+    base.update(overrides)
+    return base
+
+
+def test_dedup_filters_out_no_qty():
+    """Sightings with qty_available=None or 0 are excluded."""
+    rows = [
+        _make_sighting_dict(id=1, qty_available=None),
+        _make_sighting_dict(id=2, qty_available=0),
+        _make_sighting_dict(id=3, qty_available=100),
+    ]
+    result = _deduplicate_sightings(rows)
+    assert len(result) == 1
+    assert result[0]["id"] == 3
+
+
+def test_dedup_merges_same_vendor_mpn_price():
+    """Same vendor+MPN+price from different sources → merge quantities."""
+    rows = [
+        _make_sighting_dict(id=1, vendor_name="Digi-Key", mpn_matched="LM358",
+                            unit_price=0.42, qty_available=500, score=80,
+                            source_type="digikey", confidence=0.9, moq=10),
+        _make_sighting_dict(id=2, vendor_name="Digi-Key", mpn_matched="LM358",
+                            unit_price=0.42, qty_available=300, score=90,
+                            source_type="nexar", confidence=0.95, moq=1),
+    ]
+    result = _deduplicate_sightings(rows)
+    assert len(result) == 1
+    merged = result[0]
+    assert merged["qty_available"] == 800       # summed
+    assert merged["score"] == 90                # best score kept
+    assert merged["confidence"] == 0.95         # best confidence
+    assert merged["moq"] == 1                   # lowest MOQ
+    assert merged["merged_count"] == 2
+    assert set(merged["merged_sources"]) == {"digikey", "nexar"}
+
+
+def test_dedup_keeps_different_prices_separate():
+    """Same vendor+MPN but different price → keep both lines."""
+    rows = [
+        _make_sighting_dict(id=1, vendor_name="Mouser", mpn_matched="LM358",
+                            unit_price=0.40, qty_available=100),
+        _make_sighting_dict(id=2, vendor_name="Mouser", mpn_matched="LM358",
+                            unit_price=0.55, qty_available=200),
+    ]
+    result = _deduplicate_sightings(rows)
+    assert len(result) == 2
+    prices = {r["unit_price"] for r in result}
+    assert prices == {0.40, 0.55}
+
+
+def test_dedup_case_insensitive_vendor():
+    """Vendor name matching is case-insensitive."""
+    rows = [
+        _make_sighting_dict(id=1, vendor_name="Digi-Key", unit_price=0.42,
+                            qty_available=100, source_type="digikey"),
+        _make_sighting_dict(id=2, vendor_name="digi-key", unit_price=0.42,
+                            qty_available=200, source_type="nexar"),
+    ]
+    result = _deduplicate_sightings(rows)
+    assert len(result) == 1
+    assert result[0]["qty_available"] == 300
+
+
+def test_dedup_preserves_historical_rows():
+    """Historical and material-history rows pass through untouched."""
+    rows = [
+        _make_sighting_dict(id=1, is_historical=True, qty_available=None),
+        _make_sighting_dict(id=2, is_material_history=True, qty_available=0),
+        _make_sighting_dict(id=3, qty_available=100),
+    ]
+    result = _deduplicate_sightings(rows)
+    assert len(result) == 3
+    hist_ids = {r["id"] for r in result if r.get("is_historical") or r.get("is_material_history")}
+    assert hist_ids == {1, 2}
+
+
+def test_dedup_single_row_no_merge():
+    """Single sighting for a vendor+mpn+price — no merge metadata added."""
+    rows = [_make_sighting_dict(id=1, qty_available=50)]
+    result = _deduplicate_sightings(rows)
+    assert len(result) == 1
+    assert "merged_count" not in result[0]
+
+
+def test_dedup_none_price_grouped_separately():
+    """Sightings with price=None are grouped separately from priced ones."""
+    rows = [
+        _make_sighting_dict(id=1, unit_price=None, qty_available=100),
+        _make_sighting_dict(id=2, unit_price=0.42, qty_available=200),
+    ]
+    result = _deduplicate_sightings(rows)
+    assert len(result) == 2
+
+
+def test_dedup_different_mpn_not_merged():
+    """Same vendor+price but different MPN → not merged (different parts)."""
+    rows = [
+        _make_sighting_dict(id=1, mpn_matched="LM358", unit_price=0.42,
+                            qty_available=100),
+        _make_sighting_dict(id=2, mpn_matched="LM358N", unit_price=0.42,
+                            qty_available=200),
+    ]
+    result = _deduplicate_sightings(rows)
+    assert len(result) == 2
+
+
+def test_dedup_empty_list():
+    """Empty input returns empty output."""
+    assert _deduplicate_sightings([]) == []

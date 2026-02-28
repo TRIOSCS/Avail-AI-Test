@@ -56,6 +56,7 @@ from ..schemas.requisitions import (
 )
 from ..schemas.responses import RequisitionListResponse
 from ..search_service import (
+    _deduplicate_sightings,
     _get_material_history,
     _history_to_result,
     search_requirement,
@@ -1240,6 +1241,7 @@ async def get_saved_sightings(
             sighting_dicts.append(_history_to_result(h, now))
 
         hist_offers = hist_by_req.get(r.id, [])
+        sighting_dicts = _deduplicate_sightings(sighting_dicts)
         if not sighting_dicts and not hist_offers:
             continue
         sighting_dicts.sort(key=lambda x: x.get("score", 0), reverse=True)

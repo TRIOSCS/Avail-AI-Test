@@ -214,8 +214,75 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         else:
             r["cross_references"] = []
 
+    results = _deduplicate_sightings(results)
     results.sort(key=lambda x: x.get("score", 0), reverse=True)
     return {"sightings": results, "source_stats": source_stats}
+
+
+# ── Sighting deduplication ───────────────────────────────────────────────
+
+
+def _deduplicate_sightings(sighting_dicts: list[dict]) -> list[dict]:
+    """Deduplicate and merge sighting results for cleaner display.
+
+    Rules:
+    - Exclude sightings with no qty_available (null or 0)
+    - Same vendor + MPN + price → merge (sum quantities, keep best row)
+    - Same vendor + MPN + different price → keep separate lines
+    - Historical / material-history rows pass through untouched
+    """
+    kept: list[dict] = []
+    groups: dict[tuple, list[dict]] = {}
+
+    for d in sighting_dicts:
+        # Pass through historical rows untouched
+        if d.get("is_historical") or d.get("is_material_history"):
+            kept.append(d)
+            continue
+
+        # Filter out rows with no quantity
+        qty = d.get("qty_available")
+        if not qty:
+            continue
+
+        # Group key: vendor + mpn + price
+        vendor = (d.get("vendor_name") or "").strip().lower()
+        mpn = (d.get("mpn_matched") or "").strip().lower()
+        price = d.get("unit_price")
+        price_key = round(float(price), 4) if price is not None else None
+        key = (vendor, mpn, price_key)
+        groups.setdefault(key, []).append(d)
+
+    # Merge each group
+    for group in groups.values():
+        if len(group) == 1:
+            kept.append(group[0])
+            continue
+
+        # Pick the row with highest score as the "best"
+        group.sort(key=lambda x: x.get("score", 0), reverse=True)
+        best = dict(group[0])
+
+        # Sum quantities across all rows in group
+        best["qty_available"] = sum(g.get("qty_available") or 0 for g in group)
+
+        # Keep best confidence
+        best["confidence"] = max((g.get("confidence") or 0) for g in group)
+
+        # Keep lowest MOQ (most favorable to buyer)
+        moqs = [g["moq"] for g in group if g.get("moq")]
+        if moqs:
+            best["moq"] = min(moqs)
+
+        # Collect merged source types (e.g. "nexar + digikey")
+        sources = sorted({g.get("source_type", "") for g in group})
+        if len(sources) > 1:
+            best["merged_sources"] = sources
+
+        best["merged_count"] = len(group)
+        kept.append(best)
+
+    return kept
 
 
 # ── Private helpers ──────────────────────────────────────────────────────
