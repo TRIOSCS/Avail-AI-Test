@@ -17,6 +17,7 @@ from loguru import logger
 
 from app.cache.intel_cache import get_cached, set_cached
 from app.utils.claude_client import claude_json, claude_text
+from app.utils.llm_router import routed_text
 
 
 # Model for intelligence features (needs quality)
@@ -262,7 +263,7 @@ async def draft_rfq(
         f"No signature (it'll be added separately)."
     )
 
-    body = await claude_text(
+    body = await routed_text(
         prompt,
         system="You write concise, professional RFQ emails for an electronic component broker. "
         "Keep it short — 3-5 sentences plus a parts table. Reference past business "
@@ -291,7 +292,7 @@ async def rephrase_rfq(body: str) -> str | None:
         f"Original:\n{body}"
     )
 
-    return await claude_text(
+    return await routed_text(
         prompt,
         system="You rephrase procurement emails for an electronic component broker. "
         "Vary the greeting, intro, closing, and transitions while keeping all part numbers, "

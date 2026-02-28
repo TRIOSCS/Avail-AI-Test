@@ -937,7 +937,7 @@ class TestAiGate:
             ]
         }
 
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_result):
             result = await classify_parts_batch([{"mpn": "STM32F103", "manufacturer": "ST", "description": "MCU"}])
             assert len(result) == 1
             assert result[0]["search_nc"] is True
@@ -947,7 +947,7 @@ class TestAiGate:
         """classify_parts_batch returns None on API failure."""
         from app.services.nc_worker.ai_gate import classify_parts_batch
 
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, side_effect=Exception("API error")):
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, side_effect=Exception("API error")):
             result = await classify_parts_batch([{"mpn": "X", "manufacturer": "", "description": ""}])
             assert result is None
 
@@ -956,7 +956,7 @@ class TestAiGate:
         """classify_parts_batch returns None on bad response format."""
         from app.services.nc_worker.ai_gate import classify_parts_batch
 
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={"bad": "format"}):
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value={"bad": "format"}):
             result = await classify_parts_batch([{"mpn": "X", "manufacturer": "", "description": ""}])
             assert result is None
 
@@ -991,7 +991,7 @@ class TestAiGate:
             ]
         }
 
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_result):
             await process_ai_gate(db_session)
 
         db_session.refresh(item)
@@ -1022,7 +1022,7 @@ class TestAiGate:
             ]
         }
 
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_result):
             await process_ai_gate(db_session)
 
         db_session.refresh(item)
@@ -1076,7 +1076,7 @@ class TestAiGate:
         db_session.add(item)
         db_session.commit()
 
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=None):
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=None):
             await process_ai_gate(db_session)
 
         # Item should remain pending after API failure
@@ -1132,7 +1132,7 @@ class TestAiGate:
 
         mock_result = {"classifications": []}  # Empty classifications
 
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_result):
             await process_ai_gate(db_session)
 
         db_session.refresh(item)

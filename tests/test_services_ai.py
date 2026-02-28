@@ -736,7 +736,7 @@ class TestDraftRfq:
         )
 
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value=expected_body,
         ):
@@ -750,7 +750,7 @@ class TestDraftRfq:
     async def test_returns_none_on_api_failure(self):
         """Returns None when claude_text returns None."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value=None,
         ):
@@ -772,7 +772,7 @@ class TestDraftRfq:
         }
 
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="email body",
         ) as mock_claude:
@@ -792,7 +792,7 @@ class TestDraftRfq:
     async def test_no_history_context_when_none(self):
         """No history section in prompt when vendor_history is None."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="email body",
         ) as mock_claude:
@@ -808,7 +808,7 @@ class TestDraftRfq:
     async def test_target_price_in_parts_string(self):
         """Target price is shown when provided."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="email body",
         ) as mock_claude:
@@ -823,7 +823,7 @@ class TestDraftRfq:
     async def test_no_target_price_when_absent(self):
         """When target_price is missing, no target mentioned."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="email body",
         ) as mock_claude:
@@ -844,7 +844,7 @@ class TestDraftRfq:
         ]
 
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="email body",
         ) as mock_claude:
@@ -860,7 +860,7 @@ class TestDraftRfq:
         parts = [{"mpn": f"PART-{i:03d}", "qty": 100} for i in range(30)]
 
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="email body",
         ) as mock_claude:
@@ -873,7 +873,7 @@ class TestDraftRfq:
     async def test_uses_fast_model_tier(self):
         """RFQ drafts use the FAST model tier."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="email body",
         ) as mock_claude:
@@ -888,7 +888,7 @@ class TestDraftRfq:
     async def test_user_name_in_prompt(self):
         """User name is passed into the prompt."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="email body",
         ) as mock_claude:
@@ -904,7 +904,7 @@ class TestDraftRfq:
     async def test_default_sender_when_no_user_name(self):
         """Default sender label when user_name is empty."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="email body",
         ) as mock_claude:
@@ -920,7 +920,7 @@ class TestDraftRfq:
     async def test_vendor_name_in_prompt(self):
         """Vendor name appears in the prompt."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="email body",
         ) as mock_claude:
@@ -935,7 +935,7 @@ class TestDraftRfq:
     async def test_empty_parts_list(self):
         """Empty parts list still calls claude_text."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="email body",
         ) as mock_claude:
@@ -947,7 +947,7 @@ class TestDraftRfq:
     async def test_parts_with_missing_fields(self):
         """Parts with missing mpn/qty use '?' placeholder."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="email body",
         ) as mock_claude:
@@ -964,7 +964,7 @@ class TestDraftRfq:
         history = {"total_rfqs": 5}  # other fields missing
 
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="email body",
         ) as mock_claude:
@@ -991,7 +991,7 @@ class TestRephraseRfq:
         rephrased = "Could you provide pricing for LM317T, quantity 1000?"
 
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value=rephrased,
         ):
@@ -1002,7 +1002,7 @@ class TestRephraseRfq:
     async def test_returns_none_on_api_failure(self):
         """Returns None when claude_text returns None."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value=None,
         ):
@@ -1015,7 +1015,7 @@ class TestRephraseRfq:
         original = "Please quote LM317T x1000 pcs at $0.50 target."
 
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="rephrased text",
         ) as mock_claude:
@@ -1027,7 +1027,7 @@ class TestRephraseRfq:
     async def test_uses_fast_model_tier(self):
         """Rephrase uses the FAST model tier."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="rephrased text",
         ) as mock_claude:
@@ -1039,7 +1039,7 @@ class TestRephraseRfq:
     async def test_max_tokens_is_800(self):
         """Rephrase requests 800 max tokens."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="rephrased text",
         ) as mock_claude:
@@ -1051,7 +1051,7 @@ class TestRephraseRfq:
     async def test_empty_body_still_calls_claude(self):
         """Even with empty body, the function calls claude_text."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="rephrased empty",
         ) as mock_claude:
@@ -1065,7 +1065,7 @@ class TestRephraseRfq:
         long_body = "Line of text. " * 500  # ~7500 chars
 
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             return_value="rephrased",
         ) as mock_claude:
@@ -1107,7 +1107,7 @@ class TestErrorHandling:
     async def test_draft_rfq_claude_exception_propagates(self):
         """If claude_text raises an unexpected exception, it propagates."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             side_effect=TimeoutError("Timed out"),
         ):
@@ -1120,7 +1120,7 @@ class TestErrorHandling:
     async def test_rephrase_rfq_claude_exception_propagates(self):
         """If claude_text raises an unexpected exception, it propagates."""
         with patch(
-            "app.services.ai_service.claude_text",
+            "app.services.ai_service.routed_text",
             new_callable=AsyncMock,
             side_effect=ConnectionError("Network failure"),
         ):

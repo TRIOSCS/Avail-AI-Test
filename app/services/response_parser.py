@@ -16,6 +16,7 @@ import json
 from loguru import logger
 
 from app.utils.claude_client import claude_structured
+from app.utils.llm_router import routed_structured
 from app.utils.normalization import (
     detect_currency,
     fuzzy_mpn_match,
@@ -147,7 +148,7 @@ async def parse_vendor_response(
         f"Vendor reply:\n{body_truncated}"
     )
 
-    result = await claude_structured(
+    result = await routed_structured(
         prompt=prompt,
         schema=RESPONSE_PARSE_SCHEMA,
         system=SYSTEM_PROMPT,

@@ -1140,7 +1140,7 @@ class TestAiGate:
                 {"mpn": "STM32F103", "search_ics": True, "commodity": "semiconductor", "reason": "MCU"}
             ]
         }
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_response):
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_response):
             result = await classify_parts_batch([{"mpn": "STM32F103", "manufacturer": "ST", "description": "MCU"}])
 
         assert len(result) == 1
@@ -1150,7 +1150,7 @@ class TestAiGate:
     async def test_classify_parts_batch_api_failure(self):
         from app.services.ics_worker.ai_gate import classify_parts_batch
 
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, side_effect=Exception("API error")):
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, side_effect=Exception("API error")):
             result = await classify_parts_batch([{"mpn": "STM32F103", "manufacturer": "ST", "description": ""}])
 
         assert result is None
@@ -1159,7 +1159,7 @@ class TestAiGate:
     async def test_classify_parts_batch_bad_format(self):
         from app.services.ics_worker.ai_gate import classify_parts_batch
 
-        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={"bad": "format"}):
+        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value={"bad": "format"}):
             result = await classify_parts_batch([{"mpn": "X", "manufacturer": "", "description": ""}])
 
         assert result is None

@@ -69,7 +69,7 @@ def test_classify_parts_batch_returns_valid_json(db_session):
         ]
     }
 
-    with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
+    with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = mock_response
         parts = [
             {"mpn": "STM32F103C8T6", "manufacturer": "STMicroelectronics", "description": "MCU"},
@@ -91,7 +91,7 @@ def test_classify_empty_batch():
 
 def test_classify_api_failure():
     """API failure returns None."""
-    with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
+    with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock) as mock_claude:
         mock_claude.side_effect = Exception("API timeout")
         parts = [{"mpn": "TEST", "manufacturer": "", "description": ""}]
         result = asyncio.get_event_loop().run_until_complete(classify_parts_batch(parts))
@@ -110,7 +110,7 @@ def test_process_ai_gate_classifies_pending(db_session, test_user):
         ]
     }
 
-    with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
+    with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = mock_response
         asyncio.get_event_loop().run_until_complete(process_ai_gate(db_session))
 
@@ -136,7 +136,7 @@ def test_process_ai_gate_cache_hit(db_session, test_user):
         ]
     }
 
-    with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
+    with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = mock_response
         asyncio.get_event_loop().run_until_complete(process_ai_gate(db_session))
 
@@ -146,7 +146,7 @@ def test_process_ai_gate_cache_hit(db_session, test_user):
     # Create second item with same MPN
     q2 = _make_queue_item(db_session, test_user, "STM32F103C8T6", "STM", index=1)
 
-    with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
+    with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = {"classifications": []}  # Should not be called
         asyncio.get_event_loop().run_until_complete(process_ai_gate(db_session))
 
@@ -159,7 +159,7 @@ def test_process_ai_gate_cache_hit(db_session, test_user):
 
 def test_process_ai_gate_no_pending(db_session):
     """No pending items = no-op, no API call."""
-    with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
+    with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock) as mock_claude:
         asyncio.get_event_loop().run_until_complete(process_ai_gate(db_session))
     mock_claude.assert_not_called()
 
@@ -168,7 +168,7 @@ def test_process_ai_gate_api_failure_leaves_pending(db_session, test_user):
     """If API fails, items stay as pending for retry."""
     q1 = _make_queue_item(db_session, test_user, "AD8232ACPZ", index=0)
 
-    with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_claude:
+    with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock) as mock_claude:
         mock_claude.return_value = None
         asyncio.get_event_loop().run_until_complete(process_ai_gate(db_session))
 

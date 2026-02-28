@@ -85,7 +85,7 @@ async def classify_parts_batch(parts: list[dict]) -> list[dict] | None:
         List of {"mpn": str, "search_ics": bool, "commodity": str, "reason": str}
         or None on API failure.
     """
-    from app.utils.claude_client import claude_structured
+    from app.utils.llm_router import routed_structured
 
     if not parts:
         return []
@@ -99,7 +99,7 @@ async def classify_parts_batch(parts: list[dict]) -> list[dict] | None:
     prompt = "\n".join(prompt_lines)
 
     try:
-        result = await claude_structured(
+        result = await routed_structured(
             prompt=prompt,
             schema=_GATE_SCHEMA,
             system=_GATE_SYSTEM_PROMPT,

@@ -217,7 +217,7 @@ class TestParseVendorResponse:
         }
 
         with patch(
-            "app.services.response_parser.claude_structured",
+            "app.services.response_parser.routed_structured",
             new_callable=AsyncMock,
             return_value=mock_claude_result,
         ):
@@ -237,7 +237,7 @@ class TestParseVendorResponse:
         from app.services.response_parser import parse_vendor_response
 
         with patch(
-            "app.services.response_parser.claude_structured",
+            "app.services.response_parser.routed_structured",
             new_callable=AsyncMock,
             return_value=None,
         ):
@@ -260,7 +260,7 @@ class TestParseVendorResponse:
         }
 
         with patch(
-            "app.services.response_parser.claude_structured",
+            "app.services.response_parser.routed_structured",
             new_callable=AsyncMock,
             return_value=mock_result,
         ):
@@ -286,7 +286,7 @@ class TestParseVendorResponse:
         }
 
         with patch(
-            "app.services.response_parser.claude_structured",
+            "app.services.response_parser.routed_structured",
             new_callable=AsyncMock,
             return_value=mock_result,
         ) as mock_claude:
@@ -324,26 +324,22 @@ class TestParseVendorResponse:
             "parts": [{"mpn": "LM317T", "status": "quoted", "unit_price": 0.75}],
         }
 
-        call_count = 0
-
-        async def mock_claude_structured(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return first_result
-            return retry_result
-
         with patch(
+            "app.services.response_parser.routed_structured",
+            new_callable=AsyncMock,
+            return_value=first_result,
+        ), patch(
             "app.services.response_parser.claude_structured",
-            side_effect=mock_claude_structured,
-        ):
+            new_callable=AsyncMock,
+            return_value=retry_result,
+        ) as mock_retry:
             result = await parse_vendor_response(
                 email_body="We can offer LM317T",
                 email_subject="RE: RFQ",
                 vendor_name="Arrow",
             )
 
-        assert call_count == 2  # First call + retry
+        mock_retry.assert_called_once()  # Extended thinking retry called
         assert result["confidence"] == 0.88  # Retry result used
         assert result["overall_classification"] == "quote_provided"
 
@@ -365,26 +361,22 @@ class TestParseVendorResponse:
             "parts": [{"mpn": "X", "status": "follow_up"}],
         }
 
-        call_count = 0
-
-        async def mock_claude_structured(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return first_result
-            return retry_result
-
         with patch(
+            "app.services.response_parser.routed_structured",
+            new_callable=AsyncMock,
+            return_value=first_result,
+        ), patch(
             "app.services.response_parser.claude_structured",
-            side_effect=mock_claude_structured,
-        ):
+            new_callable=AsyncMock,
+            return_value=retry_result,
+        ) as mock_retry:
             result = await parse_vendor_response(
                 email_body="Unclear response",
                 email_subject="RE: RFQ",
                 vendor_name="Vendor",
             )
 
-        assert call_count == 2
+        mock_retry.assert_called_once()
         assert result["confidence"] == 0.65  # Original kept
 
     @pytest.mark.asyncio
@@ -399,25 +391,22 @@ class TestParseVendorResponse:
             "parts": [],
         }
 
-        call_count = 0
-
-        async def mock_claude_structured(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                return first_result
-            return None  # Retry fails
-
         with patch(
+            "app.services.response_parser.routed_structured",
+            new_callable=AsyncMock,
+            return_value=first_result,
+        ), patch(
             "app.services.response_parser.claude_structured",
-            side_effect=mock_claude_structured,
-        ):
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as mock_retry:
             result = await parse_vendor_response(
                 email_body="Hmm",
                 email_subject="RE: RFQ",
                 vendor_name="V",
             )
 
+        mock_retry.assert_called_once()
         assert result["confidence"] == 0.6
 
 
