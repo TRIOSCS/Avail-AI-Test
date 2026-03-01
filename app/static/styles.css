@@ -2011,16 +2011,37 @@ input:focus-visible,textarea:focus-visible,select:focus-visible,.btn:focus-visib
 .lb-tier-rate{font-size:9px;color:var(--muted);font-weight:400}
 .lb-tier-val{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:600;color:var(--text-muted)}
 .lb-bonus-section{margin-top:8px;padding-top:6px;border-top:1px solid var(--border)}
-.lb-blurb{font-size:11px;font-style:italic;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;cursor:default}
-.lb-info-pill{font-size:10px;padding:2px 8px;border-radius:10px;background:var(--surface);color:var(--blue);border:1px solid var(--border);cursor:pointer;position:relative;white-space:nowrap;margin-left:auto;user-select:none}
+.lb-blurbs{display:flex;flex-direction:column;gap:2px;margin-top:1px}
+.lb-blurb{font-size:11px;font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px;cursor:default;line-height:1.3}
+.lb-blurb-strength{color:var(--green)}
+.lb-blurb-strength::before{content:'+ '}
+.lb-blurb-improve{color:var(--amber,#d97706)}
+.lb-blurb-improve::before{content:'~ '}
+.lb-info-pill{font-size:10px;padding:2px 8px;border-radius:10px;background:var(--surface);color:var(--blue);border:1px solid var(--border);cursor:pointer;position:relative;white-space:nowrap;margin-left:auto;user-select:none;display:inline-flex;align-items:center}
 .lb-info-pill:hover{background:var(--blue);color:#fff}
-.scoring-tooltip{display:none;position:absolute;top:calc(100% + 6px);right:0;width:280px;background:var(--card-bg,#fff);border:1px solid var(--border);border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);padding:12px;z-index:100;font-size:11px;color:var(--text);cursor:default}
-.st-title{font-weight:700;font-size:12px;margin-bottom:8px;color:var(--text)}
-.st-row{display:flex;gap:6px;align-items:baseline;margin-bottom:4px}
-.st-name{font-weight:600;min-width:90px}
-.st-weight{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--blue);min-width:28px}
-.st-desc{color:var(--text-muted);flex:1}
-.st-note{margin-top:8px;padding-top:6px;border-top:1px solid var(--border);font-size:10px;color:var(--muted);font-style:italic}
+/* Scoring Info Modal */
+.si-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:600;align-items:center;justify-content:center;padding:20px}
+.si-modal{background:var(--card-bg,#fff);border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.18);width:100%;max-width:640px;max-height:85vh;display:flex;flex-direction:column;overflow:hidden}
+.si-modal-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)}
+.si-modal-title{font-size:16px;font-weight:700;color:var(--text)}
+.si-modal-close{background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;padding:0 4px;line-height:1}
+.si-modal-close:hover{color:var(--text)}
+.si-modal-body{padding:20px;overflow-y:auto;font-size:12px;color:var(--text)}
+.si-section{margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--border)}
+.si-section:last-child{border-bottom:none;margin-bottom:0}
+.si-section-title{font-size:13px;font-weight:700;color:var(--text);margin-bottom:8px}
+.si-cat-list{display:flex;flex-direction:column;gap:6px}
+.si-cat-row{display:flex;align-items:center;gap:8px;position:relative;padding:4px 0}
+.si-cat-bar{position:absolute;left:0;top:0;bottom:0;background:var(--blue);opacity:.08;border-radius:4px}
+.si-cat-name{font-weight:600;min-width:100px;z-index:1}
+.si-cat-weight{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--blue);min-width:32px;font-weight:700;z-index:1}
+.si-cat-desc{color:var(--text-muted);flex:1;z-index:1}
+.si-note{font-size:11px;color:var(--muted);line-height:1.5;margin-top:6px}
+.si-two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px}
+.si-col-title{font-size:11px;font-weight:700;color:var(--text);margin-bottom:4px;text-transform:uppercase;letter-spacing:.3px}
+.si-metric-item{font-size:11px;color:var(--text-muted);padding:2px 0;display:flex;align-items:center;gap:6px}
+.si-metric-num{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--blue);font-weight:600;min-width:20px}
+@media(max-width:600px){.si-two-col{grid-template-columns:1fr}}
 /* lb responsive rules moved to consolidated @media(max-width:768px) block below */
 
 /* ── Scorecard Page ──────────────────────────────────────── */

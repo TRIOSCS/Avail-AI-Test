@@ -404,6 +404,51 @@ def get_unified_leaderboard(db: Session, month: date | None = None) -> dict:
                 entry[f"{role_type}_total_points"] = mult.total_points or 0
                 entry[f"{role_type}_offer_points"] = mult.offer_points or 0
                 entry[f"{role_type}_bonus_points"] = mult.bonus_points or 0
+                entry[f"{role_type}_qualified"] = mult.qualified or False
+                entry[f"{role_type}_mult_bonus"] = mult.bonus_amount or 0
+                # Full tier breakdown for detail view
+                if role_type == "buyer":
+                    entry[f"{role_type}_breakdown"] = {
+                        "offers_base": mult.offers_base_count or 0,
+                        "pts_base": mult.offers_base_pts or 0,
+                        "offers_quoted": mult.offers_quoted_count or 0,
+                        "pts_quoted": mult.offers_quoted_pts or 0,
+                        "offers_bp": mult.offers_bp_count or 0,
+                        "pts_bp": mult.offers_bp_pts or 0,
+                        "offers_po": mult.offers_po_count or 0,
+                        "pts_po": mult.offers_po_pts or 0,
+                        "rfqs_sent": mult.rfqs_sent_count or 0,
+                        "pts_rfqs": mult.rfqs_sent_pts or 0,
+                        "stock_lists": mult.stock_lists_count or 0,
+                        "pts_stock": mult.stock_lists_pts or 0,
+                    }
+                else:
+                    entry[f"{role_type}_breakdown"] = {
+                        "quotes_sent": mult.quotes_sent_count or 0,
+                        "pts_quote_sent": mult.quotes_sent_pts or 0,
+                        "quotes_won": mult.quotes_won_count or 0,
+                        "pts_quote_won": mult.quotes_won_pts or 0,
+                        "proactive_sent": mult.proactive_sent_count or 0,
+                        "pts_proactive_sent": mult.proactive_sent_pts or 0,
+                        "proactive_converted": mult.proactive_converted_count or 0,
+                        "pts_proactive_converted": mult.proactive_converted_pts or 0,
+                        "new_accounts": mult.new_accounts_count or 0,
+                        "pts_accounts": mult.new_accounts_pts or 0,
+                    }
+
+        # Convenience: top-level avail_score and total_points (use primary role)
+        pr = snap.primary_role or "buyer"
+        entry["avail_score"] = entry.get(f"{pr}_behavior_total", 0) + entry.get(f"{pr}_outcome_total", 0)
+        entry["total_points"] = entry.get(f"{pr}_total_points", 0)
+        # For traders, sum both roles' points
+        if pr == "trader":
+            entry["total_points"] = (entry.get("buyer_total_points", 0) or 0) + (entry.get("sales_total_points", 0) or 0)
+            entry["avail_score"] = snap.avail_score_buyer or snap.avail_score_sales or 0
+        # Qualification & bonus aggregation
+        entry["avail_qualified"] = entry.get("buyer_qualified", False) or entry.get("sales_qualified", False)
+        entry["mult_qualified"] = entry.get("buyer_qualified", False) or entry.get("sales_qualified", False)
+        entry["avail_bonus"] = (entry.get("buyer_mult_bonus", 0) or 0) + (entry.get("sales_mult_bonus", 0) or 0)
+        entry["mult_bonus"] = entry.get("avail_bonus", 0)
 
         entries.append(entry)
 
@@ -414,12 +459,28 @@ def get_scoring_info() -> dict:
     """Return static scoring system explanation for the info pill tooltip."""
     return {
         "categories": [
-            {"name": "Execution", "weight": 30, "description": "Speed and volume of core work"},
-            {"name": "Follow-Through", "weight": 25, "description": "Persistence and deal progression"},
-            {"name": "Closing", "weight": 30, "description": "Win rate and revenue generation"},
-            {"name": "Depth", "weight": 15, "description": "Strategic breadth and vendor diversity"},
+            {"name": "Execution", "weight": 30, "description": "Speed and volume of core work — sourcing speed, outreach consistency, pipeline throughput"},
+            {"name": "Follow-Through", "weight": 25, "description": "Persistence and deal progression — vendor follow-ups, quote conversions, offer advancement"},
+            {"name": "Closing", "weight": 30, "description": "Win rate and revenue generation — deals won, buy plans completed, revenue produced"},
+            {"name": "Depth", "weight": 15, "description": "Strategic breadth — vendor diversity for buyers, strategic wins for sales"},
         ],
         "total_range": "0-100",
-        "normalization": "Scores are normalized by role so buyers, sales, and traders compete fairly.",
+        "normalization": "Scores are normalized by role so buyers, sales, and traders compete fairly. Traders average their buyer and sales scores.",
         "ai_refresh": "AI insights refresh every 2 hours.",
+        "avail_score": {
+            "description": "10 metrics (5 behaviors + 5 outcomes) scored 0-10 each, totaling 0-100.",
+            "buyer_behaviors": ["Speed to Source", "Multi-Source Breadth", "Vendor Follow-Up", "Pipeline Hygiene", "Stock List Uploads"],
+            "buyer_outcomes": ["Sourcing Ratio", "Offer-to-Quote", "Win Rate", "Buy Plan Completion", "Vendor Diversity"],
+            "sales_behaviors": ["Account Coverage", "Outreach Consistency", "Quote Follow-Up", "Proactive Selling", "New Business"],
+            "sales_outcomes": ["Win Rate", "Revenue", "Quote Volume", "Proactive Conversion", "Strategic Wins"],
+        },
+        "multiplier_points": {
+            "description": "Activity-based points. Offers earn their highest tier only (non-stacking).",
+            "buyer_tiers": "1pt base, 3pt quoted, 5pt buy plan, 8pt PO confirmed. Bonus: 0.25pt per RFQ, 2pt per stock list.",
+            "sales_tiers": "2pt per quote sent, 8pt per quote won, 1pt per proactive sent, 4pt per proactive converted, 3pt per new account.",
+        },
+        "bonus_tiers": {
+            "description": "Top 3 qualify if minimum activity and Avail Score thresholds are met.",
+            "prizes": "1st: $500, 2nd: $250, 3rd: $100",
+        },
     }

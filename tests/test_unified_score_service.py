@@ -335,6 +335,62 @@ class TestGetUnifiedLeaderboard:
         result = get_unified_leaderboard(db_session, date(2026, 1, 1))
         assert result["entries"] == []
 
+    def test_includes_multiplier_breakdown(self, db_session, test_user):
+        from app.services.unified_score_service import get_unified_leaderboard
+
+        month = date(2026, 2, 1)
+
+        snap = UnifiedScoreSnapshot(
+            user_id=test_user.id, month=month, unified_score=75, rank=1,
+            primary_role="buyer", execution_pct=70,
+            followthrough_pct=80, closing_pct=90, depth_pct=60,
+        )
+        # Add avail score data
+        avail = AvailScoreSnapshot(
+            user_id=test_user.id, month=month, role_type="buyer",
+            b1_score=8, b2_score=7, b3_score=6, b4_score=9, b5_score=5,
+            b1_label="Speed", b2_label="Multi", b3_label="Follow", b4_label="Hygiene", b5_label="Stock",
+            o1_score=7, o2_score=8, o3_score=6, o4_score=9, o5_score=4,
+            o1_label="Ratio", o2_label="OfferQuote", o3_label="WinRate", o4_label="BPComp", o5_label="Diversity",
+            behavior_total=35, outcome_total=34, total_score=69,
+        )
+        # Add multiplier score data
+        mult = MultiplierScoreSnapshot(
+            user_id=test_user.id, month=month, role_type="buyer",
+            offer_points=18, bonus_points=5, total_points=23,
+            offers_base_count=10, offers_base_pts=2,
+            offers_quoted_count=4, offers_quoted_pts=12,
+            offers_bp_count=1, offers_bp_pts=5,
+            offers_po_count=0, offers_po_pts=0,
+            rfqs_sent_count=20, rfqs_sent_pts=5,
+            stock_lists_count=0, stock_lists_pts=0,
+            qualified=True, bonus_amount=500,
+        )
+        db_session.add_all([snap, avail, mult])
+        db_session.commit()
+
+        result = get_unified_leaderboard(db_session, month)
+        entry = result["entries"][0]
+
+        # Verify role-prefixed avail fields
+        assert entry["buyer_b1_score"] == 8
+        assert entry["buyer_b1_label"] == "Speed"
+        assert entry["buyer_behavior_total"] == 35
+
+        # Verify multiplier breakdown
+        assert "buyer_breakdown" in entry
+        bd = entry["buyer_breakdown"]
+        assert bd["offers_base"] == 10
+        assert bd["pts_base"] == 2
+        assert bd["offers_quoted"] == 4
+        assert bd["pts_quoted"] == 12
+        assert bd["rfqs_sent"] == 20
+
+        # Verify convenience top-level fields
+        assert entry["total_points"] == 23
+        assert entry["avail_score"] == 69  # behavior_total + outcome_total
+        assert entry["avail_qualified"] is True
+
 
 # ── Scoring Info Tests ───────────────────────────────────────────────
 
@@ -350,6 +406,29 @@ class TestGetScoringInfo:
         total_weight = sum(c["weight"] for c in info["categories"])
         assert total_weight == 100
         assert info["total_range"] == "0-100"
+
+    def test_returns_avail_score_detail(self):
+        from app.services.unified_score_service import get_scoring_info
+
+        info = get_scoring_info()
+        assert "avail_score" in info
+        assert len(info["avail_score"]["buyer_behaviors"]) == 5
+        assert len(info["avail_score"]["sales_outcomes"]) == 5
+
+    def test_returns_multiplier_points_detail(self):
+        from app.services.unified_score_service import get_scoring_info
+
+        info = get_scoring_info()
+        assert "multiplier_points" in info
+        assert "buyer_tiers" in info["multiplier_points"]
+        assert "sales_tiers" in info["multiplier_points"]
+
+    def test_returns_bonus_tiers(self):
+        from app.services.unified_score_service import get_scoring_info
+
+        info = get_scoring_info()
+        assert "bonus_tiers" in info
+        assert "$500" in info["bonus_tiers"]["prizes"]
 
 
 # ── Model Tests ──────────────────────────────────────────────────────

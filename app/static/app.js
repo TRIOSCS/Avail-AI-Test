@@ -1551,6 +1551,7 @@ async function _loadScPersonalSummary() {
             </div>${outcomesHtml}`;
         }
     } catch(e) {
+        console.error('Scorecard personal summary load error:', e);
         el.innerHTML = '';
     }
 }
@@ -1580,13 +1581,13 @@ function _renderTeamLeaderboard(entries, role, month) {
 
     let html = `<div class="lb-header">
         <span class="lb-month">${esc(monthLabel)}</span>
-        <span class="lb-info-pill" onmouseenter="_showScoringTooltip(this)" onmouseleave="_hideScoringTooltip(this)">How scoring works</span>
+        <span class="lb-info-pill" onclick="_openScoringModal()"><svg viewBox="0 0 24 24" width="12" height="12" style="vertical-align:-1px;margin-right:3px"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 16v-4M12 8h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>How scoring works</span>
     </div>`;
 
     html += '<div class="lb-list">';
     for (const e of entries) {
         const isMe = e.user_id === myId;
-        const uScore = e.unified_score || e.avail_score || 0;
+        const uScore = e.unified_score || 0;
         const scoreColor = uScore >= 60 ? 'var(--green)' : uScore >= 40 ? 'var(--amber)' : 'var(--muted)';
         const rankClass = e.rank === 1 ? 'lb-gold' : e.rank === 2 ? 'lb-silver' : e.rank === 3 ? 'lb-bronze' : '';
         const bonusTotal = (e.avail_bonus || 0) + (e.mult_bonus || 0);
@@ -1596,12 +1597,24 @@ function _renderTeamLeaderboard(entries, role, month) {
 
         const traderTag = e.user_role === 'trader' ? '<span class="trader-badge">[T]</span>' : '';
 
+        // AI blurbs: show strength (green) and improvement (amber) next to the name
+        let blurbHtml = '';
+        if (e.ai_blurb_strength || e.ai_blurb_improvement) {
+            blurbHtml = '<div class="lb-blurbs">';
+            if (e.ai_blurb_strength) blurbHtml += `<span class="lb-blurb lb-blurb-strength">${esc(e.ai_blurb_strength)}</span>`;
+            if (e.ai_blurb_improvement) blurbHtml += `<span class="lb-blurb lb-blurb-improve">${esc(e.ai_blurb_improvement)}</span>`;
+            blurbHtml += '</div>';
+        }
+
+        // Determine the entry's effective role for detail rendering
+        const entryRole = e.primary_role === 'trader' ? 'trader' : (e.primary_role || role);
+
         html += `<div class="lb-entry${meClass}" onclick="this.classList.toggle('lb-open');this.querySelector('.lb-detail').classList.toggle('open')">
             <div class="lb-row">
                 <span class="lb-rank ${rankClass}">${e.rank || '—'}</span>
                 <div class="lb-name-col">
                     <span class="lb-name">${esc(e.user_name)}${traderTag}${isMe ? ' <span class="lb-you">(You)</span>' : ''}</span>
-                    ${e.ai_blurb_improvement ? `<span class="lb-blurb" title="${esc(e.ai_blurb_improvement)}">${esc(e.ai_blurb_improvement)}</span>` : ''}
+                    ${blurbHtml}
                     <div class="lb-tags">${qualTag}${bonusTag}</div>
                 </div>
                 <div class="lb-scores">
@@ -1618,7 +1631,7 @@ function _renderTeamLeaderboard(entries, role, month) {
                 <svg class="as-chevron" viewBox="0 0 24 24" width="14" height="14"><path d="M6 9l6 6 6-6"/></svg>
             </div>
             <div class="lb-detail">
-                ${_renderLeaderboardDetail(e, role)}
+                ${_renderLeaderboardDetail(e, entryRole)}
             </div>
         </div>`;
     }
@@ -1626,103 +1639,197 @@ function _renderTeamLeaderboard(entries, role, month) {
     return html;
 }
 
-async function _showScoringTooltip(pill) {
-    if (!_scoringInfoCache) {
-        try { _scoringInfoCache = await apiFetch('/api/dashboard/scoring-info'); } catch(e) { return; }
+let _scoringInfoFetching = false;
+async function _openScoringModal() {
+    // Note: All user-sourced values pass through esc() helper below — safe innerHTML usage
+    if (!_scoringInfoCache && !_scoringInfoFetching) {
+        _scoringInfoFetching = true;
+        try { _scoringInfoCache = await apiFetch('/api/dashboard/scoring-info'); }
+        catch(e) { console.error('Failed to load scoring info:', e); _scoringInfoFetching = false; return; }
+        _scoringInfoFetching = false;
     }
+    if (!_scoringInfoCache) return;
     const info = _scoringInfoCache;
-    let tip = pill.querySelector('.scoring-tooltip');
-    if (!tip) {
-        tip = document.createElement('div');
-        tip.className = 'scoring-tooltip';
-        pill.appendChild(tip);
-    }
-    const rows = (info.categories || []).map(c =>
-        `<div class="st-row"><span class="st-name">${esc(c.name)}</span><span class="st-weight">${c.weight}%</span><span class="st-desc">${esc(c.description)}</span></div>`
+
+    const catRows = (info.categories || []).map(c =>
+        `<div class="si-cat-row">
+            <div class="si-cat-bar" style="width:${parseInt(c.weight, 10)}%"></div>
+            <span class="si-cat-name">${esc(c.name)}</span>
+            <span class="si-cat-weight">${parseInt(c.weight, 10)}%</span>
+            <span class="si-cat-desc">${esc(c.description)}</span>
+        </div>`
     ).join('');
-    tip.innerHTML = `<div class="st-title">Scoring Categories</div>${rows}<div class="st-note">${esc(info.normalization || '')}</div>`;
-    tip.style.display = 'block';
-}
 
-function _hideScoringTooltip(pill) {
-    const tip = pill.querySelector('.scoring-tooltip');
-    if (tip) tip.style.display = 'none';
-}
+    const as = info.avail_score || {};
+    const mp = info.multiplier_points || {};
+    const bonus = info.bonus_tiers || {};
 
-function _renderLeaderboardDetail(entry, role) {
+    let body = `<div class="si-section">
+        <div class="si-section-title">Unified Score Categories</div>
+        <div class="si-cat-list">${catRows}</div>
+        <div class="si-note">${esc(info.normalization || '')}</div>
+    </div>`;
+
+    if (as.description) {
+        body += `<div class="si-section">
+            <div class="si-section-title">Avail Score (0-100)</div>
+            <div class="si-note">${esc(as.description)}</div>
+            <div class="si-two-col">
+                <div>
+                    <div class="si-col-title">Buyer Behaviors</div>
+                    ${(as.buyer_behaviors || []).map((b, i) => `<div class="si-metric-item"><span class="si-metric-num">B${i+1}</span> ${esc(b)}</div>`).join('')}
+                    <div class="si-col-title" style="margin-top:8px">Buyer Outcomes</div>
+                    ${(as.buyer_outcomes || []).map((o, i) => `<div class="si-metric-item"><span class="si-metric-num">O${i+1}</span> ${esc(o)}</div>`).join('')}
+                </div>
+                <div>
+                    <div class="si-col-title">Sales Behaviors</div>
+                    ${(as.sales_behaviors || []).map((b, i) => `<div class="si-metric-item"><span class="si-metric-num">B${i+1}</span> ${esc(b)}</div>`).join('')}
+                    <div class="si-col-title" style="margin-top:8px">Sales Outcomes</div>
+                    ${(as.sales_outcomes || []).map((o, i) => `<div class="si-metric-item"><span class="si-metric-num">O${i+1}</span> ${esc(o)}</div>`).join('')}
+                </div>
+            </div>
+        </div>`;
+    }
+
+    if (mp.description) {
+        body += `<div class="si-section">
+            <div class="si-section-title">Multiplier Points</div>
+            <div class="si-note">${esc(mp.description)}</div>
+            <div class="si-two-col">
+                <div><div class="si-col-title">Buyer</div><div class="si-note">${esc(mp.buyer_tiers || '')}</div></div>
+                <div><div class="si-col-title">Sales</div><div class="si-note">${esc(mp.sales_tiers || '')}</div></div>
+            </div>
+        </div>`;
+    }
+
+    if (bonus.description) {
+        body += `<div class="si-section">
+            <div class="si-section-title">Bonus Qualification</div>
+            <div class="si-note">${esc(bonus.description)} ${esc(bonus.prizes || '')}</div>
+        </div>`;
+    }
+
+    body += `<div class="si-section"><div class="si-note" style="font-style:italic">${esc(info.ai_refresh || '')}</div></div>`;
+
+    let overlay = document.getElementById('scoringInfoOverlay');
+    if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.id = 'scoringInfoOverlay';
+        overlay.className = 'si-overlay';
+        overlay.onclick = function(ev) { if (ev.target === overlay) overlay.style.display = 'none'; };
+        document.body.appendChild(overlay);
+    }
+    // Note: innerHTML is safe — all dynamic values are escaped via esc(), data is from our own API
+    overlay.innerHTML = `<div class="si-modal">
+        <div class="si-modal-header">
+            <span class="si-modal-title">How Scoring Works</span>
+            <button type="button" class="si-modal-close" onclick="document.getElementById('scoringInfoOverlay').style.display='none'">&times;</button>
+        </div>
+        <div class="si-modal-body">${body}</div>
+    </div>`;
+    overlay.style.display = 'flex';
+}
+window._openScoringModal = _openScoringModal;
+
+function _renderLeaderboardDetail(entry, entryRole) {
+    // Note: All user-sourced values pass through esc() — safe innerHTML usage
+    // Determine which role(s) to render for avail score breakdown
+    const roles = entryRole === 'trader' ? ['buyer', 'sales'] : [entryRole === 'sales' ? 'sales' : 'buyer'];
+
     let html = '<div class="lb-detail-grid">';
 
-    // Left column: Avail Score breakdown
-    html += '<div class="lb-detail-col"><div class="lb-detail-title">Avail Score <span class="lb-detail-sub">' + (entry.avail_score || 0).toFixed(0) + '/100</span></div>';
-    html += '<div class="lb-detail-split">';
-    html += '<div><div class="lb-metric-hdr">Behaviors <span class="lb-metric-sub">' + (entry.behavior_total || 0).toFixed(1) + '/50</span></div>';
-    for (let i = 1; i <= 5; i++) {
-        const score = entry['b' + i + '_score'] ?? 0;
-        const label = entry['b' + i + '_label'] || 'B' + i;
-        const pct = score * 10;
-        html += `<div class="lb-metric">
-            <span class="lb-metric-label">${esc(label)}</span>
-            <div class="lb-bar"><div class="lb-bar-fill lb-bar-behavior" style="width:${pct}%"></div></div>
-            <span class="lb-metric-num">${score.toFixed(1)}</span>
-        </div>`;
-    }
-    html += '</div><div><div class="lb-metric-hdr">Outcomes <span class="lb-metric-sub">' + (entry.outcome_total || 0).toFixed(1) + '/50</span></div>';
-    for (let i = 1; i <= 5; i++) {
-        const score = entry['o' + i + '_score'] ?? 0;
-        const label = entry['o' + i + '_label'] || 'O' + i;
-        const pct = score * 10;
-        html += `<div class="lb-metric">
-            <span class="lb-metric-label">${esc(label)}</span>
-            <div class="lb-bar"><div class="lb-bar-fill lb-bar-outcome" style="width:${pct}%"></div></div>
-            <span class="lb-metric-num">${score.toFixed(1)}</span>
-        </div>`;
-    }
-    html += '</div></div></div>';
+    // Left column: Avail Score breakdown (one or two roles for traders)
+    html += '<div class="lb-detail-col">';
+    for (const r of roles) {
+        const roleLabel = r === 'buyer' ? 'Buyer' : 'Sales';
+        const availScore = entry[`avail_score_${r}`] || 0;
+        const behaviorTotal = entry[`${r}_behavior_total`] || 0;
+        const outcomeTotal = entry[`${r}_outcome_total`] || 0;
 
-    // Right column: Multiplier Points breakdown
-    html += '<div class="lb-detail-col"><div class="lb-detail-title">Multiplier Points <span class="lb-detail-sub">' + (entry.total_points || 0).toFixed(1) + ' pts</span></div>';
-    const bd = entry.breakdown || {};
-    if (role === 'buyer') {
-        const tiers = [
-            { label: 'Offers (base)', count: bd.offers_base || 0, pts: bd.pts_base || 0, rate: '1pt' },
-            { label: 'Quoted', count: bd.offers_quoted || 0, pts: bd.pts_quoted || 0, rate: '3pt' },
-            { label: 'Buy Plan', count: bd.offers_bp || 0, pts: bd.pts_bp || 0, rate: '5pt' },
-            { label: 'PO Confirmed', count: bd.offers_po || 0, pts: bd.pts_po || 0, rate: '8pt' },
-        ];
-        html += '<div class="lb-tier-list">';
-        const maxPts = Math.max(...tiers.map(t => t.pts), 1);
-        for (const t of tiers) {
-            const pct = Math.round(t.pts / maxPts * 100);
-            html += `<div class="lb-tier">
-                <div class="lb-tier-head"><span>${t.label} <span class="lb-tier-rate">${t.rate}</span></span><span class="lb-tier-val">${t.count} &times; = ${t.pts.toFixed(1)}</span></div>
-                <div class="lb-bar"><div class="lb-bar-fill lb-bar-tier" style="width:${pct}%"></div></div>
+        html += `<div class="lb-detail-title">${roles.length > 1 ? esc(roleLabel) + ' ' : ''}Avail Score <span class="lb-detail-sub">${availScore.toFixed(0)}/100</span></div>`;
+        html += '<div class="lb-detail-split">';
+
+        html += `<div><div class="lb-metric-hdr">Behaviors <span class="lb-metric-sub">${behaviorTotal.toFixed(1)}/50</span></div>`;
+        for (let i = 1; i <= 5; i++) {
+            const score = entry[`${r}_b${i}_score`] ?? 0;
+            const label = entry[`${r}_b${i}_label`] || `B${i}`;
+            const pct = Math.min(100, score * 10);
+            html += `<div class="lb-metric">
+                <span class="lb-metric-label">${esc(label)}</span>
+                <div class="lb-bar"><div class="lb-bar-fill lb-bar-behavior" style="width:${pct}%"></div></div>
+                <span class="lb-metric-num">${score.toFixed(1)}</span>
             </div>`;
         }
         html += '</div>';
-        html += '<div class="lb-bonus-section"><div class="lb-metric-hdr">Bonus Points</div>';
-        html += `<div class="lb-metric"><span class="lb-metric-label">RFQs Sent</span><span class="lb-metric-num">${bd.rfqs_sent || 0} &times; 0.25 = ${(bd.pts_rfqs || 0).toFixed(1)}</span></div>`;
-        html += `<div class="lb-metric"><span class="lb-metric-label">Stock Lists</span><span class="lb-metric-num">${bd.stock_lists || 0} &times; 2 = ${(bd.pts_stock || 0).toFixed(1)}</span></div>`;
-        html += '</div>';
-    } else {
-        const tiers = [
-            { label: 'Quotes Sent', count: bd.quotes_sent || 0, pts: bd.pts_quote_sent || 0, rate: '2pt' },
-            { label: 'Quotes Won', count: bd.quotes_won || 0, pts: bd.pts_quote_won || 0, rate: '8pt' },
-            { label: 'Proactive Sent', count: bd.proactive_sent || 0, pts: bd.pts_proactive_sent || 0, rate: '1pt' },
-            { label: 'Proactive Converted', count: bd.proactive_converted || 0, pts: bd.pts_proactive_converted || 0, rate: '4pt' },
-        ];
-        html += '<div class="lb-tier-list">';
-        const maxPts = Math.max(...tiers.map(t => t.pts), 1);
-        for (const t of tiers) {
-            const pct = Math.round(t.pts / maxPts * 100);
-            html += `<div class="lb-tier">
-                <div class="lb-tier-head"><span>${t.label} <span class="lb-tier-rate">${t.rate}</span></span><span class="lb-tier-val">${t.count} &times; = ${t.pts.toFixed(1)}</span></div>
-                <div class="lb-bar"><div class="lb-bar-fill lb-bar-tier" style="width:${pct}%"></div></div>
+
+        html += `<div><div class="lb-metric-hdr">Outcomes <span class="lb-metric-sub">${outcomeTotal.toFixed(1)}/50</span></div>`;
+        for (let i = 1; i <= 5; i++) {
+            const score = entry[`${r}_o${i}_score`] ?? 0;
+            const label = entry[`${r}_o${i}_label`] || `O${i}`;
+            const pct = Math.min(100, score * 10);
+            html += `<div class="lb-metric">
+                <span class="lb-metric-label">${esc(label)}</span>
+                <div class="lb-bar"><div class="lb-bar-fill lb-bar-outcome" style="width:${pct}%"></div></div>
+                <span class="lb-metric-num">${score.toFixed(1)}</span>
             </div>`;
         }
-        html += '</div>';
-        html += '<div class="lb-bonus-section"><div class="lb-metric-hdr">Bonus Points</div>';
-        html += `<div class="lb-metric"><span class="lb-metric-label">New Accounts</span><span class="lb-metric-num">${bd.new_accounts || 0} &times; 3 = ${(bd.pts_accounts || 0).toFixed(1)}</span></div>`;
-        html += '</div>';
+        html += '</div></div>';
+        if (roles.length > 1 && r === 'buyer') html += '<div style="border-top:1px solid var(--border);margin:8px 0"></div>';
+    }
+    html += '</div>';
+
+    // Right column: Multiplier Points breakdown (one or two roles for traders)
+    html += '<div class="lb-detail-col">';
+    for (const r of roles) {
+        const roleLabel = r === 'buyer' ? 'Buyer' : 'Sales';
+        const totalPts = entry[`${r}_total_points`] || 0;
+        const bd = entry[`${r}_breakdown`] || {};
+
+        html += `<div class="lb-detail-title">${roles.length > 1 ? esc(roleLabel) + ' ' : ''}Multiplier Points <span class="lb-detail-sub">${totalPts.toFixed(1)} pts</span></div>`;
+
+        if (r === 'buyer') {
+            const tiers = [
+                { label: 'Offers (base)', count: bd.offers_base || 0, pts: bd.pts_base || 0, rate: '1pt' },
+                { label: 'Quoted', count: bd.offers_quoted || 0, pts: bd.pts_quoted || 0, rate: '3pt' },
+                { label: 'Buy Plan', count: bd.offers_bp || 0, pts: bd.pts_bp || 0, rate: '5pt' },
+                { label: 'PO Confirmed', count: bd.offers_po || 0, pts: bd.pts_po || 0, rate: '8pt' },
+            ];
+            html += '<div class="lb-tier-list">';
+            const maxPts = Math.max(...tiers.map(t => t.pts), 1);
+            for (const t of tiers) {
+                const pct = Math.round(t.pts / maxPts * 100);
+                html += `<div class="lb-tier">
+                    <div class="lb-tier-head"><span>${t.label} <span class="lb-tier-rate">${t.rate}</span></span><span class="lb-tier-val">${t.count} &times; = ${t.pts.toFixed(1)}</span></div>
+                    <div class="lb-bar"><div class="lb-bar-fill lb-bar-tier" style="width:${pct}%"></div></div>
+                </div>`;
+            }
+            html += '</div>';
+            html += '<div class="lb-bonus-section"><div class="lb-metric-hdr">Bonus Points</div>';
+            html += `<div class="lb-metric"><span class="lb-metric-label">RFQs Sent</span><span class="lb-metric-num">${bd.rfqs_sent || 0} &times; 0.25 = ${(bd.pts_rfqs || 0).toFixed(1)}</span></div>`;
+            html += `<div class="lb-metric"><span class="lb-metric-label">Stock Lists</span><span class="lb-metric-num">${bd.stock_lists || 0} &times; 2 = ${(bd.pts_stock || 0).toFixed(1)}</span></div>`;
+            html += '</div>';
+        } else {
+            const tiers = [
+                { label: 'Quotes Sent', count: bd.quotes_sent || 0, pts: bd.pts_quote_sent || 0, rate: '2pt' },
+                { label: 'Quotes Won', count: bd.quotes_won || 0, pts: bd.pts_quote_won || 0, rate: '8pt' },
+                { label: 'Proactive Sent', count: bd.proactive_sent || 0, pts: bd.pts_proactive_sent || 0, rate: '1pt' },
+                { label: 'Proactive Converted', count: bd.proactive_converted || 0, pts: bd.pts_proactive_converted || 0, rate: '4pt' },
+            ];
+            html += '<div class="lb-tier-list">';
+            const maxPts = Math.max(...tiers.map(t => t.pts), 1);
+            for (const t of tiers) {
+                const pct = Math.round(t.pts / maxPts * 100);
+                html += `<div class="lb-tier">
+                    <div class="lb-tier-head"><span>${t.label} <span class="lb-tier-rate">${t.rate}</span></span><span class="lb-tier-val">${t.count} &times; = ${t.pts.toFixed(1)}</span></div>
+                    <div class="lb-bar"><div class="lb-bar-fill lb-bar-tier" style="width:${pct}%"></div></div>
+                </div>`;
+            }
+            html += '</div>';
+            html += '<div class="lb-bonus-section"><div class="lb-metric-hdr">Bonus Points</div>';
+            html += `<div class="lb-metric"><span class="lb-metric-label">New Accounts</span><span class="lb-metric-num">${bd.new_accounts || 0} &times; 3 = ${(bd.pts_accounts || 0).toFixed(1)}</span></div>`;
+            html += '</div>';
+        }
+        if (roles.length > 1 && r === 'buyer') html += '<div style="border-top:1px solid var(--border);margin:8px 0"></div>';
     }
     html += '</div>';
 
