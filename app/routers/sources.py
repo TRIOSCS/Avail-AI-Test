@@ -367,11 +367,10 @@ async def list_api_sources(
     for src in sources:
         env_vars = src.env_vars or []
         if env_vars:
-            all_set = all(credential_is_set(db, src.name, v) for v in env_vars)
             any_set = any(credential_is_set(db, src.name, v) for v in env_vars)
-            if all_set and src.status == "pending":
-                src.status = "live"
-            elif not any_set and src.status == "live":
+            # Only downgrade to pending if ALL credentials are missing
+            # Never auto-upgrade to "live" — that's the health checker's job
+            if not any_set and src.status not in ("disabled", "error"):
                 src.status = "pending"
     db.commit()
 
