@@ -1300,7 +1300,7 @@ async def test_background_enrich_vendor_success():
     mock_card = MagicMock()
     mock_session.get.return_value = mock_card
 
-    mock_enrich = AsyncMock(return_value={"source": "clay", "industry": "Electronics"})
+    mock_enrich = AsyncMock(return_value={"source": "explorium", "industry": "Electronics"})
     mock_apply = MagicMock()
 
     with patch("app.enrichment_service.enrich_entity", mock_enrich):
@@ -1310,7 +1310,7 @@ async def test_background_enrich_vendor_success():
                     await _background_enrich_vendor(1, "example.com", "Example Vendor")
 
     mock_enrich.assert_called_once_with("example.com", "Example Vendor")
-    mock_apply.assert_called_once_with(mock_card, {"source": "clay", "industry": "Electronics"})
+    mock_apply.assert_called_once_with(mock_card, {"source": "explorium", "industry": "Electronics"})
     mock_session.commit.assert_called_once()
     mock_session.close.assert_called_once()
 
@@ -1344,7 +1344,7 @@ async def test_background_enrich_vendor_card_not_found():
     mock_session = MagicMock()
     mock_session.get.return_value = None  # Card not found
 
-    mock_enrich = AsyncMock(return_value={"source": "clay"})
+    mock_enrich = AsyncMock(return_value={"source": "explorium"})
 
     with patch("app.enrichment_service.enrich_entity", mock_enrich):
         with patch("app.enrichment_service.apply_enrichment_to_vendor") as mock_apply:
@@ -1363,7 +1363,7 @@ async def test_background_enrich_vendor_with_ai_analysis():
     mock_card = MagicMock()
     mock_session.get.return_value = mock_card
 
-    mock_enrich = AsyncMock(return_value={"source": "clay"})
+    mock_enrich = AsyncMock(return_value={"source": "explorium"})
     mock_apply = MagicMock()
     mock_analyze = AsyncMock()
 
@@ -1384,7 +1384,7 @@ async def test_background_enrich_vendor_analysis_fails():
     mock_card = MagicMock()
     mock_session.get.return_value = mock_card
 
-    mock_enrich = AsyncMock(return_value={"source": "clay"})
+    mock_enrich = AsyncMock(return_value={"source": "explorium"})
     mock_apply = MagicMock()
     mock_analyze = AsyncMock(side_effect=Exception("AI error"))
 

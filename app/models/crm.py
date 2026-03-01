@@ -29,7 +29,7 @@ class Company(Base):
     hq_state = Column(String(100))
     hq_country = Column(String(100))
     last_enriched_at = Column(DateTime)
-    enrichment_source = Column(String(50))  # "clay", "explorium", "manual"
+    enrichment_source = Column(String(50))  # "explorium", "apollo", "manual"
 
     # v1.3.0: Customer ownership fields
     is_strategic = Column(Boolean, default=False)
@@ -173,7 +173,7 @@ class SiteContact(Base):
     email_verified = Column(Boolean, default=False)
     email_verified_at = Column(DateTime)
     email_verification_status = Column(String(20))  # valid, invalid, accept_all, unknown
-    enrichment_source = Column(String(50))  # lusha, clay, apollo, hunter, manual
+    enrichment_source = Column(String(50))  # lusha, apollo, hunter, manual
     contact_role = Column(String(50))  # buyer, technical, decision_maker, operations
     needs_refresh = Column(Boolean, default=False)
     last_enriched_at = Column(DateTime)

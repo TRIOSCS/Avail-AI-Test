@@ -1,6 +1,6 @@
 """Deep Enrichment Service — orchestrates multi-source enrichment with confidence routing.
 
-Combines Hunter.io, RocketReach, Clearbit, Apollo, Clay, Explorium, and AI
+Combines Hunter.io, RocketReach, Clearbit, Apollo, Explorium, and AI
 enrichment with signature parsing and specialty detection. Routes results
 through a three-tier confidence system:
   - >= auto_apply_threshold (0.8): auto-apply + log

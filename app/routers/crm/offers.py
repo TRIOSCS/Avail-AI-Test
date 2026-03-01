@@ -313,8 +313,7 @@ async def create_offer(
         db.add(card)
         db.flush()
         if domain and (
-            get_credential_cached("clay_enrichment", "CLAY_API_KEY")
-            or get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+            get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
             or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
         ):
             _enrich_new_card = (card.id, domain, card.display_name)

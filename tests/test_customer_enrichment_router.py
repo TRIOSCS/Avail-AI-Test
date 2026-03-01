@@ -109,7 +109,7 @@ def test_batch_enrich_success(client, db_session, test_co):
     with patch(
         "app.services.customer_enrichment_service.enrich_customer_account",
         new_callable=AsyncMock,
-        return_value={"ok": True, "contacts_added": 2, "sources_used": ["lusha", "clay"], "status": "complete"},
+        return_value={"ok": True, "contacts_added": 2, "sources_used": ["lusha"], "status": "complete"},
     ):
         resp = client.post("/api/enrichment/batch", json={"company_ids": [test_co.id]})
         assert resp.status_code == 200

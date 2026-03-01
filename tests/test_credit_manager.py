@@ -56,7 +56,6 @@ def test_get_all_budgets(db_session, _mock_settings):
     assert len(budgets) == 5
     providers = [b["provider"] for b in budgets]
     assert "lusha" in providers
-    assert "clay" in providers
     assert "hunter_search" in providers
     assert "hunter_verify" in providers
     assert "apollo" in providers
@@ -64,8 +63,8 @@ def test_get_all_budgets(db_session, _mock_settings):
 
 def test_credit_usage_incremental(db_session, _mock_settings):
     from app.services.credit_manager import record_credit_usage, get_monthly_usage
-    record_credit_usage(db_session, "clay", 3)
-    record_credit_usage(db_session, "clay", 7)
+    record_credit_usage(db_session, "lusha", 3)
+    record_credit_usage(db_session, "lusha", 7)
     db_session.flush()
-    usage = get_monthly_usage(db_session, "clay")
+    usage = get_monthly_usage(db_session, "lusha")
     assert usage["used"] == 10

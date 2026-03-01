@@ -1,17 +1,17 @@
-"""Customer Enrichment Service — waterfall: [Lusha + Clay] → Hunter → Apollo.
+"""Customer Enrichment Service — waterfall: Apollo → Hunter → Lusha phones → Other.
 
-Enriches customer accounts with verified contacts. Lusha and Clay are
-co-primary sources that run concurrently. Hunter verifies all emails.
-Apollo is last-resort fallback. Credit-budget-aware, respects cooldown
+Enriches customer accounts with verified contacts. Apollo is the primary
+contact discovery source (names, emails, titles). Hunter verifies emails.
+Lusha is reserved for phone enrichment only (direct dials, mobiles) to
+conserve expensive credits. Credit-budget-aware, respects cooldown
 periods, and enforces data quality (phone-verified dials, verified emails).
 
 Priority: Assigned accounts first, then unassigned accounts.
 
 Called by: enrichment router endpoints, batch scheduler.
-Depends on: lusha_client, hunter_client, credit_manager, enrichment_service.
+Depends on: lusha_client, hunter_client, apollo_client, credit_manager.
 """
 
-import asyncio
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
@@ -108,6 +108,12 @@ def _save_contact(
     if not email:
         return None
 
+    field_sources = contact.get("enrichment_field_sources") or {
+        "email": source,
+        "phone": source if contact.get("phone") else None,
+        "name": source,
+    }
+
     existing = (
         db.query(SiteContact)
         .filter_by(customer_site_id=site.id, email=email)
@@ -118,6 +124,10 @@ def _save_contact(
         if contact.get("phone") and not existing.phone:
             existing.phone = contact["phone"]
             existing.phone_verified = _is_direct_dial(contact.get("phone_type"))
+            # Update phone source attribution
+            efs = existing.enrichment_field_sources or {}
+            efs["phone"] = field_sources.get("phone", source)
+            existing.enrichment_field_sources = efs
         if contact.get("linkedin_url") and not existing.linkedin_url:
             existing.linkedin_url = contact["linkedin_url"]
         if contact.get("title") and not existing.title:
@@ -137,45 +147,65 @@ def _save_contact(
         contact_role=_classify_contact_role(contact.get("title")),
         linkedin_url=contact.get("linkedin_url"),
         last_enriched_at=datetime.now(timezone.utc),
-        enrichment_field_sources={
-            "email": source,
-            "phone": source if contact.get("phone") else None,
-            "name": source,
-        },
+        enrichment_field_sources=field_sources,
     )
     db.add(sc)
     return sc
 
 
-async def _step_lusha(
-    db: Session, domain: str, company_name: str, needed: int
+async def _step_lusha_phones(
+    db: Session, contacts: list[dict], domain: str
 ) -> list[dict]:
-    """Step 1: Search Lusha for contacts at the company domain."""
-    if not can_use_credits(db, "lusha", 1):
-        logger.info("Lusha credits exhausted, skipping")
-        return []
+    """Step 3: Enrich contacts with Lusha phone data (direct dials only).
 
-    from ..connectors.lusha_client import search_contacts
-
-    contacts = await search_contacts(
-        company_domain=domain,
-        titles=["buyer", "procurement", "purchasing", "sourcing", "director", "vp", "engineer"],
-        limit=needed,
-    )
-    if contacts:
-        record_credit_usage(db, "lusha", 1)
-    return contacts
-
-
-async def _step_clay(
-    db: Session, domain: str, company_name: str, needed: int
-) -> list[dict]:
-    """Step 1b: Clay (deprecated — REST API no longer available).
-
-    Clay deprecated their REST API. This step is a no-op until a
-    replacement data source is configured.
+    Skips contacts that already have a direct_dial or mobile phone.
+    Calls find_person per contact, merges phone into contact dict.
+    Records 1 credit per find_person call (even if no result).
+    Stops early if credits are exhausted.
     """
-    return []
+    from ..connectors.lusha_client import find_person
+
+    enriched = []
+    for contact in contacts:
+        # Skip if already has a direct dial or mobile
+        if contact.get("phone") and contact.get("phone_type") in ("direct_dial", "mobile"):
+            enriched.append(contact)
+            continue
+
+        if not can_use_credits(db, "lusha", 1):
+            logger.info("Lusha credits exhausted during phone enrichment, stopping")
+            enriched.append(contact)
+            continue
+
+        try:
+            email = contact.get("email")
+            full_name = contact.get("full_name") or ""
+            parts = full_name.split(None, 1)
+            first_name = parts[0] if parts else None
+            last_name = parts[1] if len(parts) > 1 else None
+
+            result = await find_person(
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                company_domain=domain,
+            )
+            record_credit_usage(db, "lusha", 1)
+
+            if result and result.get("phone"):
+                contact["phone"] = result["phone"]
+                contact["phone_type"] = result.get("phone_type", "direct_dial")
+                fs = contact.get("enrichment_field_sources") or {}
+                fs["phone"] = "lusha"
+                contact["enrichment_field_sources"] = fs
+                logger.debug("Lusha phone enriched %s → %s", email, result["phone"])
+        except Exception as e:
+            logger.debug("Lusha phone lookup failed for %s: %s", contact.get("email"), e)
+
+        enriched.append(contact)
+
+    return enriched
+
 
 
 async def _step_hunter_verify(db: Session, contacts: list[dict]) -> list[dict]:
@@ -217,9 +247,9 @@ async def _step_hunter_verify(db: Session, contacts: list[dict]) -> list[dict]:
 async def _step_apollo(
     db: Session, domain: str, company_name: str, needed: int
 ) -> list[dict]:
-    """Step 4: Last resort — search Apollo for remaining contacts."""
-    if needed <= 0 or not can_use_credits(db, "apollo", 1):
-        logger.info("Apollo credits exhausted or no contacts needed, skipping")
+    """Step 1: Primary contact discovery via Apollo."""
+    if not can_use_credits(db, "apollo", 1):
+        logger.info("Apollo credits exhausted, skipping")
         return []
 
     try:
@@ -238,9 +268,15 @@ async def _step_apollo(
                     "title": c.get("title"),
                     "email": c.get("email"),
                     "phone": c.get("phone"),
+                    "phone_type": c.get("phone_type"),
                     "linkedin_url": c.get("linkedin_url"),
                     "source": "apollo",
-                    "confidence": c.get("confidence", "low"),
+                    "confidence": c.get("confidence", "medium"),
+                    "enrichment_field_sources": {
+                        "email": "apollo",
+                        "name": "apollo",
+                        "phone": "apollo" if c.get("phone") else None,
+                    },
                 }
                 for c in raw
             ]
@@ -257,10 +293,10 @@ async def enrich_customer_account(
     """Run the full waterfall enrichment for a customer account.
 
     Steps:
-    1. Check 90-day cooldown (skip if force=True)
-    2. Lusha + Clay — co-primary sources, run concurrently
-    3. Hunter — verify ALL emails, reject non-deliverable
-    4. Apollo — last resort for remaining gaps
+    1. Apollo — primary contact discovery (names, emails, titles)
+    2. Hunter — verify all emails, reject non-deliverable
+    3. Lusha — phone enrichment only (contacts missing direct dials)
+    4. Apollo — last resort for remaining gaps — fill remaining gaps if still_needed > 0
     5. Dedup by email, validate quality, update company status
 
     Returns summary dict with contacts_added, contacts_verified, sources_used.
@@ -299,50 +335,31 @@ async def enrich_customer_account(
     all_contacts = []
     sources_used = []
 
-    # Step 1: Lusha + Clay (co-primary, run concurrently)
-    lusha_contacts, clay_contacts = await asyncio.gather(
-        _step_lusha(db, domain, company.name, needed),
-        _step_clay(db, domain, company.name, needed),
-        return_exceptions=True,
-    )
+    # Step 1: Apollo (primary contact discovery)
+    try:
+        apollo_contacts = await _step_apollo(db, domain, company.name, needed)
+    except Exception as e:
+        logger.warning("Apollo step failed: %s", e)
+        apollo_contacts = []
 
-    # Handle exceptions from either source gracefully
-    if isinstance(lusha_contacts, Exception):
-        logger.warning("Lusha step failed: %s", lusha_contacts)
-        lusha_contacts = []
-    if isinstance(clay_contacts, Exception):
-        logger.warning("Clay step failed: %s", clay_contacts)
-        clay_contacts = []
+    if apollo_contacts:
+        all_contacts.extend(apollo_contacts)
+        sources_used.append("apollo")
+        logger.info("Apollo returned %d contacts for %s", len(apollo_contacts), company.name)
 
-    if lusha_contacts:
-        all_contacts.extend(lusha_contacts)
-        sources_used.append("lusha")
-        logger.info("Lusha returned %d contacts for %s", len(lusha_contacts), company.name)
-
-    if clay_contacts:
-        all_contacts.extend(clay_contacts)
-        sources_used.append("clay")
-        logger.info("Clay returned %d contacts for %s", len(clay_contacts), company.name)
-
-    # Dedup before verification
-    all_contacts = _dedup_contacts(all_contacts)
-
-    # Step 3: Hunter email verification
+    # Step 2: Hunter email verification
     if all_contacts:
         all_contacts = await _step_hunter_verify(db, all_contacts)
-        if "hunter" not in sources_used:
-            sources_used.append("hunter_verify")
+        sources_used.append("hunter_verify")
 
-    # Step 4: Apollo (last resort)
-    still_needed = max(0, needed - len(all_contacts))
-    if still_needed > 0:
-        apollo_contacts = await _step_apollo(db, domain, company.name, still_needed)
-        if apollo_contacts:
-            # Verify Apollo contacts too
-            apollo_contacts = await _step_hunter_verify(db, apollo_contacts)
-            all_contacts.extend(apollo_contacts)
-            sources_used.append("apollo")
-            logger.info("Apollo returned %d contacts for %s", len(apollo_contacts), company.name)
+    # Step 3: Lusha phone enrichment (only contacts missing direct dials)
+    if all_contacts:
+        all_contacts = await _step_lusha_phones(db, all_contacts, domain)
+        if any(
+            (c.get("enrichment_field_sources") or {}).get("phone") == "lusha"
+            for c in all_contacts
+        ):
+            sources_used.append("lusha_phones")
 
     # Final dedup
     all_contacts = _dedup_contacts(all_contacts)

@@ -971,12 +971,6 @@ def test_get_connector_apollo_enrichment():
     assert isinstance(result, _ApolloTestConnector)
 
 
-def test_get_connector_clay_enrichment():
-    """Clay returns _ClayTestConnector."""
-    from app.routers.sources import _ClayTestConnector
-    result = _get_connector_for_source("clay_enrichment")
-    assert isinstance(result, _ClayTestConnector)
-
 
 def test_get_connector_explorium_enrichment():
     """Explorium returns _ExploriumTestConnector."""
@@ -1155,48 +1149,7 @@ async def test_apollo_test_connector_api_error():
             await connector.search("LM358N")
 
 
-@pytest.mark.asyncio
-async def test_clay_test_connector_success():
-    """_ClayTestConnector succeeds when API returns 200."""
-    from app.routers.sources import _ClayTestConnector
 
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"name": "Anthropic"}
-
-    connector = _ClayTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="clay_key"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
-        results = await connector.search("LM358N")
-    assert len(results) == 1
-    assert "Anthropic" in results[0]["mpn_matched"]
-
-
-@pytest.mark.asyncio
-async def test_clay_test_connector_no_key():
-    """_ClayTestConnector raises if no API key."""
-    from app.routers.sources import _ClayTestConnector
-
-    connector = _ClayTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value=None):
-        with pytest.raises(ValueError, match="CLAY_API_KEY not configured"):
-            await connector.search("LM358N")
-
-
-@pytest.mark.asyncio
-async def test_clay_test_connector_api_error():
-    """_ClayTestConnector raises on non-200 response."""
-    from app.routers.sources import _ClayTestConnector
-
-    mock_resp = MagicMock()
-    mock_resp.status_code = 401
-    mock_resp.text = "Unauthorized"
-
-    connector = _ClayTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value="clay_key"), \
-         patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
-        with pytest.raises(ValueError, match="Clay API returned 401"):
-            await connector.search("LM358N")
 
 
 @pytest.mark.asyncio

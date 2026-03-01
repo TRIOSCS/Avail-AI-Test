@@ -1,7 +1,7 @@
 """Credit Manager — tracks monthly API credit usage per enrichment provider.
 
 Prevents overspend by checking budgets before each external API call.
-Providers: lusha, clay, hunter_search, hunter_verify, apollo.
+Providers: lusha, hunter_search, hunter_verify, apollo.
 
 Called by: customer_enrichment_service.py waterfall steps.
 Depends on: app.models.enrichment.EnrichmentCreditUsage, app.config.settings.
@@ -25,10 +25,9 @@ def _default_limit(provider: str) -> int:
     """Get the configured monthly credit limit for a provider."""
     limits = {
         "lusha": settings.lusha_monthly_credit_limit,
-        "clay": 3000,
         "hunter_search": settings.hunter_monthly_search_limit,
         "hunter_verify": settings.hunter_monthly_verify_limit,
-        "apollo": 1000,
+        "apollo": settings.apollo_monthly_credit_limit,
     }
     return limits.get(provider, 100)
 
@@ -83,5 +82,5 @@ def record_credit_usage(db: Session, provider: str, count: int = 1) -> None:
 
 def get_all_budgets(db: Session) -> list[dict]:
     """Get credit usage for all providers this month."""
-    providers = ["lusha", "clay", "hunter_search", "hunter_verify", "apollo"]
+    providers = ["lusha", "hunter_search", "hunter_verify", "apollo"]
     return [get_monthly_usage(db, p) for p in providers]

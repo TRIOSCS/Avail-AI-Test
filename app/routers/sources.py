@@ -116,8 +116,6 @@ def _get_connector_for_source(name: str, db: Session = None):
         return _TeamsTestConnector()
     if name == "apollo_enrichment":
         return _ApolloTestConnector()
-    if name == "clay_enrichment":
-        return _ClayTestConnector()
     if name == "explorium_enrichment":
         return _ExploriumTestConnector()
     if name == "azure_oauth":
@@ -217,13 +215,6 @@ class _ApolloTestConnector:
             raise ValueError(f"Apollo API returned {resp.status_code}: {resp.text[:200]}")
         count = len(resp.json().get("people", []))
         return [{"vendor_name": "Apollo", "mpn_matched": f"Search OK — {count} result(s)", "status": "ok"}]
-
-
-class _ClayTestConnector:
-    """Clay REST API is deprecated — test always reports unavailable."""
-
-    async def search(self, mpn: str) -> list[dict]:
-        raise ValueError("Clay REST API deprecated — this source is no longer available")
 
 
 class _ExploriumTestConnector:

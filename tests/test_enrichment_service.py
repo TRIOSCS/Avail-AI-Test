@@ -4,7 +4,6 @@ test_enrichment_service.py — Tests for the unified enrichment service.
 Covers:
 - _clean_domain, _name_looks_suspicious, _title_case_preserve_acronyms
 - normalize_company_output, normalize_company_input
-- _clay_find_company, _clay_find_contacts
 - _explorium_find_company, _explorium_find_contacts
 - _gradient_find_company
 - _ai_find_company, _ai_find_contacts
@@ -238,111 +237,6 @@ class TestNormalizeCompanyInput:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# Provider: Clay
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestClayFindCompany:
-    def test_no_api_key_returns_none(self):
-        from app.enrichment_service import _clay_find_company
-        with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.run(_clay_find_company("example.com"))
-            assert result is None
-
-    def test_success(self):
-        from app.enrichment_service import _clay_find_company
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "name": "Example Corp",
-            "industry": "Electronics",
-            "size": "100-500",
-            "locality": "Austin, TX",
-            "country": "US",
-            "website": "https://example.com",
-        }
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _clay_find_company("example.com")
-                )
-                assert result["source"] == "clay"
-                assert result["legal_name"] == "Example Corp"
-                assert result["industry"] == "Electronics"
-                assert result["hq_city"] == "Austin"
-                assert result["hq_state"] == "TX"
-
-    def test_api_error_returns_none(self):
-        from app.enrichment_service import _clay_find_company
-        mock_resp = MagicMock()
-        mock_resp.status_code = 500
-        mock_resp.text = "Internal Server Error"
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _clay_find_company("example.com")
-                )
-                assert result is None
-
-    def test_exception_returns_none(self):
-        from app.enrichment_service import _clay_find_company
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(side_effect=Exception("timeout"))
-                result = asyncio.run(
-                    _clay_find_company("example.com")
-                )
-                assert result is None
-
-
-class TestClayFindContacts:
-    def test_no_api_key_returns_empty(self):
-        from app.enrichment_service import _clay_find_contacts
-        with patch("app.enrichment_service.get_credential_cached", return_value=None):
-            result = asyncio.run(
-                _clay_find_contacts("example.com")
-            )
-            assert result == []
-
-    def test_success(self):
-        from app.enrichment_service import _clay_find_contacts
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "people": [
-                {"name": "Jane Doe", "title": "VP Sales", "email": "jane@example.com"},
-                {"name": "John Smith", "title": "Buyer", "email": "john@example.com"},
-            ]
-        }
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _clay_find_contacts("example.com")
-                )
-                assert len(result) == 2
-                assert result[0]["full_name"] == "Jane Doe"
-                assert result[0]["source"] == "clay"
-
-    def test_filters_nameless_contacts(self):
-        from app.enrichment_service import _clay_find_contacts
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "people": [
-                {"name": "Jane Doe", "email": "jane@example.com"},
-                {"email": "nope@example.com"},  # no name
-            ]
-        }
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _clay_find_contacts("example.com")
-                )
-                assert len(result) == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -571,34 +465,7 @@ class TestEnrichEntity:
                 assert result["domain"] == "test.com"
                 assert result["legal_name"] is None
 
-    def test_clay_data_merged(self):
-        from app.enrichment_service import enrich_entity
-        clay_data = {
-            "source": "clay",
-            "legal_name": "Clay Corp",
-            "domain": "clay.com",
-            "industry": "Electronics",
-            "hq_city": "Austin",
-            "hq_state": "TX",
-            "hq_country": "US",
-        }
-        with patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock, return_value=("Clay", "clay.com")):
-            with patch("app.enrichment_service._clay_find_company", new_callable=AsyncMock, return_value=clay_data):
-                with patch("app.enrichment_service._ai_find_company", new_callable=AsyncMock, return_value=None):
-                    result = asyncio.run(
-                        enrich_entity("clay.com")
-                    )
-                    assert "clay" in result.get("source", "")
-                    assert result["legal_name"] == "Clay CORP"
 
-
-# ═══════════════════════════════════════════════════════════════════════
-# find_suggested_contacts
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestFindSuggestedContacts:
-    @pytest.fixture(autouse=True)
     def _no_creds(self):
         with patch("app.enrichment_service.get_credential_cached", return_value=None):
             yield
@@ -613,10 +480,10 @@ class TestFindSuggestedContacts:
     def test_deduplicates_by_email(self):
         from app.enrichment_service import find_suggested_contacts
         contacts = [
-            {"full_name": "Jane", "title": "Sales Manager", "email": "jane@example.com", "source": "clay"},
+            {"full_name": "Jane", "title": "Sales Manager", "email": "jane@example.com", "source": "explorium"},
             {"full_name": "Jane Doe", "title": "Sales Manager", "email": "jane@example.com", "source": "explorium"},
         ]
-        with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts[:1]):
+        with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts[:1]):
             with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts[1:]):
                 result = asyncio.run(
                     find_suggested_contacts("example.com")
@@ -627,10 +494,10 @@ class TestFindSuggestedContacts:
     def test_filters_irrelevant_titles(self):
         from app.enrichment_service import find_suggested_contacts
         contacts = [
-            {"full_name": "Sales VP", "title": "VP Sales", "email": "vp@example.com", "source": "clay"},
-            {"full_name": "Janitor", "title": "Facilities Janitor", "email": "janitor@example.com", "source": "clay"},
+            {"full_name": "Sales VP", "title": "VP Sales", "email": "vp@example.com", "source": "explorium"},
+            {"full_name": "Janitor", "title": "Facilities Janitor", "email": "janitor@example.com", "source": "explorium"},
         ]
-        with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts):
+        with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts):
             result = asyncio.run(
                 find_suggested_contacts("example.com")
             )
@@ -641,9 +508,9 @@ class TestFindSuggestedContacts:
     def test_returns_all_if_filter_removes_everything(self):
         from app.enrichment_service import find_suggested_contacts
         contacts = [
-            {"full_name": "Receptionist", "title": "Receptionist", "email": "front@example.com", "source": "clay"},
+            {"full_name": "Receptionist", "title": "Receptionist", "email": "front@example.com", "source": "explorium"},
         ]
-        with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts):
+        with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts):
             result = asyncio.run(
                 find_suggested_contacts("example.com")
             )
@@ -675,7 +542,7 @@ class TestApplyEnrichmentToCompany:
             "legal_name": "Example Corp",
             "industry": "Electronics",
             "hq_city": "Austin",
-            "source": "clay",
+            "source": "explorium",
         }
         updated = apply_enrichment_to_company(company, data)
         assert "domain" in updated
@@ -685,7 +552,7 @@ class TestApplyEnrichmentToCompany:
         assert company.domain == "example.com"
         assert company.legal_name == "Example Corp"
         assert company.last_enriched_at is not None
-        assert company.enrichment_source == "clay"
+        assert company.enrichment_source == "explorium"
 
     def test_does_not_overwrite_existing(self):
         from app.enrichment_service import apply_enrichment_to_company
@@ -699,7 +566,7 @@ class TestApplyEnrichmentToCompany:
     def test_website_only_if_empty(self):
         from app.enrichment_service import apply_enrichment_to_company
         company = self._make_company()
-        data = {"website": "https://example.com", "source": "clay"}
+        data = {"website": "https://example.com", "source": "explorium"}
         updated = apply_enrichment_to_company(company, data)
         assert "website" in updated
         assert company.website == "https://example.com"
@@ -828,61 +695,7 @@ class TestNormalizeCompanyOutputEmployeeEdgeCases:
         assert result["employee_size"] == "5,000+"
 
 
-class TestClayFindContactsTitleFilter:
-    """Line 319: _clay_find_contacts with title_filter set."""
 
-    def test_title_filter_included_in_payload(self):
-        from app.enrichment_service import _clay_find_contacts
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 200
-        mock_resp.json.return_value = {
-            "people": [
-                {"name": "Jane Doe", "title": "VP Sales", "email": "jane@example.com"},
-            ]
-        }
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _clay_find_contacts("example.com", title_filter="VP")
-                )
-                assert len(result) == 1
-                # Verify payload included title
-                call_kwargs = mock_http.post.call_args
-                assert call_kwargs.kwargs["json"]["title"] == "VP"
-
-
-class TestClayFindContactsNon200:
-    """Lines 330-331: _clay_find_contacts returns [] on non-200 status."""
-
-    def test_non_200_returns_empty_list(self):
-        from app.enrichment_service import _clay_find_contacts
-
-        mock_resp = MagicMock()
-        mock_resp.status_code = 403
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(return_value=mock_resp)
-                result = asyncio.run(
-                    _clay_find_contacts("example.com")
-                )
-                assert result == []
-
-
-class TestClayFindContactsException:
-    """Lines 347-349: _clay_find_contacts catches exception and returns []."""
-
-    def test_exception_returns_empty_list(self):
-        from app.enrichment_service import _clay_find_contacts
-
-        with patch("app.enrichment_service.get_credential_cached", return_value="clay-key"):
-            with patch("app.enrichment_service.http") as mock_http:
-                mock_http.post = AsyncMock(side_effect=Exception("network error"))
-                result = asyncio.run(
-                    _clay_find_contacts("example.com")
-                )
-                assert result == []
 
 
 class TestExploriumFindCompanyNon200:
@@ -1052,65 +865,6 @@ class TestEnrichEntityAIFillsGaps:
             with patch("app.cache.intel_cache.set_cached"):
                 yield
 
-    def test_ai_fills_remaining_fields_after_clay(self):
-        """Clay provides partial data, AI fills in the rest."""
-        from app.enrichment_service import enrich_entity
-
-        clay_data = {
-            "source": "clay",
-            "legal_name": "Partial Corp",
-            "domain": "partial.com",
-            "industry": None,
-            "hq_city": None,
-            "hq_state": None,
-            "hq_country": None,
-            "website": None,
-            "linkedin_url": None,
-            "employee_size": None,
-        }
-        ai_data = {
-            "source": "ai",
-            "legal_name": "AI Would Overwrite But Wont",
-            "domain": "partial.com",
-            "industry": "Electronics",
-            "hq_city": "Denver",
-            "hq_state": "CO",
-            "hq_country": "US",
-            "website": "https://partial.com",
-            "linkedin_url": "https://linkedin.com/company/partial",
-            "employee_size": "100",
-        }
-        with patch("app.enrichment_service.get_credential_cached", return_value="sk-key"):
-            with patch(
-                "app.enrichment_service.normalize_company_input",
-                new_callable=AsyncMock,
-                return_value=("Partial", "partial.com"),
-            ):
-                with patch(
-                    "app.enrichment_service._clay_find_company",
-                    new_callable=AsyncMock,
-                    return_value=clay_data,
-                ):
-                    with patch(
-                        "app.enrichment_service._explorium_find_company",
-                        new_callable=AsyncMock,
-                        return_value=None,
-                    ):
-                        with patch(
-                            "app.enrichment_service._ai_find_company",
-                            new_callable=AsyncMock,
-                            return_value=ai_data,
-                        ):
-                            result = asyncio.run(
-                                enrich_entity("partial.com")
-                            )
-                            # Clay's legal_name should NOT be overwritten by AI
-                            assert result["legal_name"] == "Partial CORP"
-                            # AI should have filled the missing industry
-                            assert result["industry"] == "Electronics"
-                            # Source should be merged: clay+ai
-                            assert "clay" in result["source"]
-                            assert "ai" in result["source"]
 
     def test_ai_only_source_when_no_other_providers(self):
         """When no other providers return data, AI is the sole source (line 684).
@@ -1143,7 +897,7 @@ class TestEnrichEntityAIFillsGaps:
                 return_value=("Only AI", "onlyai.com"),
             ):
                 with patch(
-                    "app.enrichment_service._clay_find_company",
+                    "app.enrichment_service._safe_clearbit",
                     new_callable=AsyncMock,
                     return_value=None,
                 ):
@@ -1199,7 +953,7 @@ class TestEnrichEntitySafeProviderExceptions:
                 return_value=("Test", "test.com"),
             ):
                 with patch(
-                    "app.enrichment_service._clay_find_company",
+                    "app.enrichment_service._safe_clearbit",
                     new_callable=AsyncMock,
                     return_value=None,
                 ):
@@ -1240,7 +994,7 @@ class TestEnrichEntitySafeProviderExceptions:
                 # internally. But if the import itself fails they'd be caught by the try/except.
                 # Let's force the inner imports to fail by patching at connector level.
                 with patch(
-                    "app.enrichment_service._clay_find_company",
+                    "app.enrichment_service._safe_clearbit",
                     new_callable=AsyncMock,
                     return_value=None,
                 ):
@@ -1291,10 +1045,10 @@ class TestFindSuggestedContactsProviderExceptions:
         from app.enrichment_service import find_suggested_contacts
 
         contacts = [
-            {"full_name": "No Title Person", "title": None, "email": "notitle@example.com", "source": "clay"},
-            {"full_name": "Irrelevant Janitor", "title": "Facilities Janitor", "email": "janitor@example.com", "source": "clay"},
+            {"full_name": "No Title Person", "title": None, "email": "notitle@example.com", "source": "explorium"},
+            {"full_name": "Irrelevant Janitor", "title": "Facilities Janitor", "email": "janitor@example.com", "source": "explorium"},
         ]
-        with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts):
+        with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts):
             result = asyncio.run(
                 find_suggested_contacts("example.com")
             )
@@ -1307,9 +1061,9 @@ class TestFindSuggestedContactsProviderExceptions:
         from app.enrichment_service import find_suggested_contacts
 
         contacts = [
-            {"full_name": "Ghost Person", "title": "", "email": None, "source": "clay"},
+            {"full_name": "Ghost Person", "title": "", "email": None, "source": "explorium"},
         ]
-        with patch("app.enrichment_service._clay_find_contacts", new_callable=AsyncMock, return_value=contacts):
+        with patch("app.enrichment_service._explorium_find_contacts", new_callable=AsyncMock, return_value=contacts):
             result = asyncio.run(
                 find_suggested_contacts("example.com")
             )
@@ -1323,10 +1077,10 @@ class TestFindSuggestedContactsProviderExceptions:
         from app.enrichment_service import find_suggested_contacts
 
         good_contacts = [
-            {"full_name": "Good Contact", "title": "Sales Manager", "email": "good@example.com", "source": "clay"},
+            {"full_name": "Good Contact", "title": "Sales Manager", "email": "good@example.com", "source": "explorium"},
         ]
         with patch(
-            "app.enrichment_service._clay_find_contacts",
+            "app.enrichment_service._explorium_find_contacts",
             new_callable=AsyncMock,
             return_value=good_contacts,
         ):
@@ -1338,7 +1092,7 @@ class TestFindSuggestedContactsProviderExceptions:
                 result = asyncio.run(
                     find_suggested_contacts("example.com")
                 )
-                # Should still return the good contact from clay
+                # Should still return the good contact
                 assert len(result) == 1
                 assert result[0]["full_name"] == "Good Contact"
 
@@ -1374,7 +1128,7 @@ class TestEnrichEntitySafeApolloAndClearbitDirectly:
                 return_value=("Test", "test.com"),
             ):
                 with patch(
-                    "app.enrichment_service._clay_find_company",
+                    "app.enrichment_service._safe_clearbit",
                     new_callable=AsyncMock,
                     return_value=None,
                 ):
@@ -1446,7 +1200,7 @@ class TestFindSuggestedContactsHunterRocketreachApolloLushaExceptions:
             "location": "Boston",
         }
         with patch(
-            "app.enrichment_service._clay_find_contacts",
+            "app.enrichment_service._explorium_find_contacts",
             new_callable=AsyncMock, return_value=[],
         ), patch(
             "app.enrichment_service._explorium_find_contacts",

@@ -97,6 +97,7 @@ class Settings:
     # Enrichment APIs
     apollo_api_key: str = os.getenv("APOLLO_API_KEY", "")
     apollo_rate_limit_per_min: int = int(os.getenv("APOLLO_RATE_LIMIT_PER_MIN", "5"))
+    apollo_monthly_credit_limit: int = int(os.getenv("APOLLO_MONTHLY_CREDIT_LIMIT", "10000"))
 
     # Deep Enrichment APIs
     hunter_api_key: str = os.getenv("HUNTER_API_KEY", "")
@@ -107,7 +108,7 @@ class Settings:
     lusha_api_key: str = os.getenv("LUSHA_API_KEY", "")
     lusha_monthly_credit_limit: int = int(os.getenv("LUSHA_MONTHLY_CREDIT_LIMIT", "6400"))
 
-    # Customer enrichment waterfall (Lusha → Clay → Hunter → Apollo)
+    # Customer enrichment waterfall (Apollo → Hunter → Lusha phones → Other)
     customer_enrichment_enabled: bool = (
         os.getenv("CUSTOMER_ENRICHMENT_ENABLED", "true").lower() == "true"
     )

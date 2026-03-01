@@ -1,6 +1,7 @@
 """Tests for customer_enrichment_service — waterfall orchestrator.
 
-Covers: enrich_customer_account, get_enrichment_gaps, helper functions, cooldown, force bypass.
+Covers: enrich_customer_account, get_enrichment_gaps, helper functions,
+cooldown, force bypass, Apollo primary discovery, Lusha phone enrichment.
 """
 
 import pytest
@@ -77,13 +78,13 @@ def test_contacts_needed_with_existing(db_session, company_with_domain, _mock_se
 def test_dedup_contacts():
     from app.services.customer_enrichment_service import _dedup_contacts
     contacts = [
-        {"email": "a@test.com", "full_name": "A", "source": "lusha"},
-        {"email": "a@test.com", "full_name": "A duplicate", "source": "clay"},
+        {"email": "a@test.com", "full_name": "A", "source": "apollo"},
+        {"email": "a@test.com", "full_name": "A duplicate", "source": "lusha"},
         {"email": "b@test.com", "full_name": "B", "source": "apollo"},
     ]
     result = _dedup_contacts(contacts)
     assert len(result) == 2
-    assert result[0]["source"] == "lusha"  # First one kept
+    assert result[0]["source"] == "apollo"  # First one kept (Apollo priority)
 
 
 def test_get_company_domain():
@@ -122,25 +123,37 @@ async def test_enrich_cooldown(db_session, company_with_domain, _mock_settings):
 
 @pytest.mark.asyncio
 async def test_enrich_force_bypass_cooldown(db_session, company_with_domain, _mock_settings):
+    """Force bypasses cooldown. Apollo is primary, Lusha enriches phones."""
     company_with_domain.customer_enrichment_at = datetime.now(timezone.utc) - timedelta(days=10)
     db_session.flush()
 
-    with patch("app.services.customer_enrichment_service._step_lusha", new_callable=AsyncMock) as mock_lusha, \
-         patch("app.services.customer_enrichment_service._step_clay", new_callable=AsyncMock) as mock_clay, \
+    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
          patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo:
-        mock_lusha.return_value = [
+         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
+        mock_apollo.return_value = [
             {"full_name": "Test Person", "email": "test@testcorp.com", "title": "Buyer",
-             "phone": "+15550100", "phone_type": "direct_dial", "source": "lusha", "confidence": 90}
+             "phone": None, "phone_type": None, "source": "apollo", "confidence": "medium",
+             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
         ]
-        mock_clay.return_value = []
-        mock_apollo.return_value = []
+
         async def _verify(db, contacts):
             for c in contacts:
                 c["email_verified"] = True
                 c["email_verification_status"] = "valid"
             return contacts
         mock_hunter.side_effect = _verify
+
+        async def _lusha_phones(db, contacts, domain):
+            for c in contacts:
+                if not c.get("phone"):
+                    c["phone"] = "+15550100"
+                    c["phone_type"] = "direct_dial"
+                    fs = c.get("enrichment_field_sources") or {}
+                    fs["phone"] = "lusha"
+                    c["enrichment_field_sources"] = fs
+            return contacts
+        mock_lusha_phones.side_effect = _lusha_phones
+
         from app.services.customer_enrichment_service import enrich_customer_account
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
         assert result.get("ok") is True
@@ -166,43 +179,50 @@ async def test_enrich_company_not_found(db_session, _mock_settings):
 
 @pytest.mark.asyncio
 async def test_full_waterfall(db_session, company_with_domain, _mock_settings):
-    """Test the full waterfall: Lusha returns contacts, Hunter verifies."""
-    with patch("app.services.customer_enrichment_service._step_lusha", new_callable=AsyncMock) as mock_lusha, \
-         patch("app.services.customer_enrichment_service._step_clay", new_callable=AsyncMock) as mock_clay, \
+    """Test the full waterfall: Apollo discovers → Hunter verifies → Lusha adds phones."""
+    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
          patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo:
+         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
 
-        mock_lusha.return_value = [
+        mock_apollo.return_value = [
             {"full_name": "Alice Buyer", "email": "alice@testcorp.com", "title": "Procurement Manager",
-             "phone": "+1-555-0100", "phone_type": "direct_dial", "source": "lusha", "confidence": 85},
+             "phone": None, "phone_type": None, "source": "apollo", "confidence": "medium",
+             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
             {"full_name": "Bob Tech", "email": "bob@testcorp.com", "title": "Sr Engineer",
-             "phone": None, "phone_type": None, "source": "lusha", "confidence": 70},
+             "phone": None, "phone_type": None, "source": "apollo", "confidence": "medium",
+             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
         ]
-        mock_clay.return_value = [
-            {"full_name": "Carol Director", "email": "carol@testcorp.com", "title": "VP Operations",
-             "phone": "+1-555-0300", "phone_type": "work", "source": "clay", "confidence": 60},
-        ]
-        # Hunter verifies all
+
         async def _verify(db, contacts):
             for c in contacts:
                 c["email_verified"] = True
                 c["email_verification_status"] = "valid"
             return contacts
         mock_hunter.side_effect = _verify
-        mock_apollo.return_value = []
+
+        async def _lusha_phones(db, contacts, domain):
+            for c in contacts:
+                if not c.get("phone") or c.get("phone_type") not in ("direct_dial", "mobile"):
+                    c["phone"] = "+1-555-0100"
+                    c["phone_type"] = "direct_dial"
+                    fs = c.get("enrichment_field_sources") or {}
+                    fs["phone"] = "lusha"
+                    c["enrichment_field_sources"] = fs
+            return contacts
+        mock_lusha_phones.side_effect = _lusha_phones
 
         from app.services.customer_enrichment_service import enrich_customer_account
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
 
         assert result["ok"] is True
-        assert result["contacts_added"] == 3
-        assert "lusha" in result["sources_used"]
-        assert "clay" in result["sources_used"]
+        assert result["contacts_added"] == 2
+        assert "apollo" in result["sources_used"]
+        assert "lusha_phones" in result["sources_used"]
 
         # Verify contacts were saved
         site = db_session.query(CustomerSite).filter_by(company_id=company_with_domain.id).first()
         contacts = db_session.query(SiteContact).filter_by(customer_site_id=site.id).all()
-        assert len(contacts) == 3
+        assert len(contacts) == 2
 
         # Verify roles were classified
         roles = {c.contact_role for c in contacts}
@@ -241,153 +261,231 @@ def test_get_enrichment_gaps(db_session, _mock_settings):
     assert gaps[0]["account_owner_id"] is not None
 
 
-# ── Clay co-primary tests ─────────────────────────────────────────
+# ── Apollo primary discovery tests ─────────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_clay_runs_even_when_lusha_fills_target(db_session, company_with_domain, _mock_settings):
-    """Clay should run concurrently with Lusha, even if Lusha returns enough contacts."""
-    with patch("app.services.customer_enrichment_service._step_lusha", new_callable=AsyncMock) as mock_lusha, \
-         patch("app.services.customer_enrichment_service._step_clay", new_callable=AsyncMock) as mock_clay, \
+async def test_apollo_primary_discovery(db_session, company_with_domain, _mock_settings):
+    """Apollo is the primary source; all contacts come from Apollo."""
+    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
          patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo:
-        # Lusha returns 5 contacts (full target)
-        mock_lusha.return_value = [
-            {"full_name": f"Lusha Person {i}", "email": f"lusha{i}@testcorp.com",
-             "title": "Buyer", "source": "lusha", "confidence": 85}
+         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
+
+        mock_apollo.return_value = [
+            {"full_name": f"Apollo Person {i}", "email": f"apollo{i}@testcorp.com",
+             "title": "Buyer", "source": "apollo", "confidence": "medium",
+             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}}
             for i in range(5)
         ]
-        # Clay should still be called
-        mock_clay.return_value = [
-            {"full_name": "Clay Person", "email": "clay@testcorp.com",
-             "title": "VP Procurement", "source": "clay", "confidence": 70},
-        ]
+
         async def _verify(db, contacts):
             for c in contacts:
                 c["email_verified"] = True
                 c["email_verification_status"] = "valid"
             return contacts
         mock_hunter.side_effect = _verify
-        mock_apollo.return_value = []
+
+        async def _lusha_phones(db, contacts, domain):
+            return contacts  # No phone enrichment
+        mock_lusha_phones.side_effect = _lusha_phones
 
         from app.services.customer_enrichment_service import enrich_customer_account
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
 
-        # Both sources were called
-        mock_lusha.assert_awaited_once()
-        mock_clay.assert_awaited_once()
-        assert "lusha" in result["sources_used"]
-        assert "clay" in result["sources_used"]
+        mock_apollo.assert_awaited_once()
+        assert "apollo" in result["sources_used"]
+        assert result["contacts_added"] == 5
 
 
 @pytest.mark.asyncio
-async def test_clay_only_when_lusha_fails(db_session, company_with_domain, _mock_settings):
-    """If Lusha returns nothing, Clay contacts should still be saved."""
-    with patch("app.services.customer_enrichment_service._step_lusha", new_callable=AsyncMock) as mock_lusha, \
-         patch("app.services.customer_enrichment_service._step_clay", new_callable=AsyncMock) as mock_clay, \
+async def test_lusha_phone_enrichment_skips_existing_direct_dials(db_session, _mock_settings):
+    """Lusha phone enrichment skips contacts that already have direct dials."""
+    contacts = [
+        {"full_name": "Has Phone", "email": "hasphone@testcorp.com",
+         "title": "Buyer", "phone": "+1-555-1111", "phone_type": "direct_dial",
+         "source": "apollo", "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": "apollo"}},
+        {"full_name": "No Phone", "email": "nophone@testcorp.com",
+         "title": "Engineer", "phone": None, "phone_type": None,
+         "source": "apollo", "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
+    ]
+
+    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
+         patch("app.services.customer_enrichment_service.record_credit_usage"), \
+         patch("app.connectors.lusha_client.find_person", new_callable=AsyncMock) as mock_find:
+        mock_find.return_value = {"phone": "+1-555-2222", "phone_type": "mobile"}
+
+        from app.services.customer_enrichment_service import _step_lusha_phones
+        result = await _step_lusha_phones(db_session, contacts, "testcorp.com")
+
+        # find_person should only be called for "No Phone" (the one without direct dial)
+        assert mock_find.await_count == 1
+        assert len(result) == 2
+        # "Has Phone" kept original
+        assert result[0]["phone"] == "+1-555-1111"
+        # "No Phone" got Lusha phone
+        assert result[1]["phone"] == "+1-555-2222"
+        assert result[1]["enrichment_field_sources"]["phone"] == "lusha"
+
+
+@pytest.mark.asyncio
+async def test_apollo_exception_handled_gracefully(db_session, company_with_domain, _mock_settings):
+    """If Apollo raises an exception, waterfall continues with fallbacks."""
+    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
          patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo:
-        mock_lusha.return_value = []
-        mock_clay.return_value = [
-            {"full_name": "Clay Buyer", "email": "buyer@testcorp.com",
-             "title": "Purchasing Manager", "source": "clay", "confidence": 70},
-        ]
+         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
+        mock_apollo.side_effect = Exception("Apollo API timeout")
         async def _verify(db, contacts):
             for c in contacts:
                 c["email_verified"] = True
                 c["email_verification_status"] = "valid"
             return contacts
         mock_hunter.side_effect = _verify
-        mock_apollo.return_value = []
+
+        async def _lusha_phones(db, contacts, domain):
+            return contacts
+        mock_lusha_phones.side_effect = _lusha_phones
 
         from app.services.customer_enrichment_service import enrich_customer_account
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
 
         assert result["ok"] is True
         assert result["contacts_added"] == 1
-        assert "clay" in result["sources_used"]
-        assert "lusha" not in result["sources_used"]
+        assert "apollo" not in result["sources_used"]
 
 
 @pytest.mark.asyncio
-async def test_clay_exception_doesnt_block_waterfall(db_session, company_with_domain, _mock_settings):
-    """If Clay raises an exception, Lusha contacts should still be processed."""
-    with patch("app.services.customer_enrichment_service._step_lusha", new_callable=AsyncMock) as mock_lusha, \
-         patch("app.services.customer_enrichment_service._step_clay", new_callable=AsyncMock) as mock_clay, \
+async def test_field_source_attribution(db_session, company_with_domain, _mock_settings):
+    """Verify enrichment_field_sources tracks per-field attribution correctly."""
+    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
          patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo:
-        mock_lusha.return_value = [
-            {"full_name": "Lusha Person", "email": "lusha@testcorp.com",
-             "title": "Buyer", "source": "lusha", "confidence": 85},
+         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
+
+        mock_apollo.return_value = [
+            {"full_name": "Jane Doe", "email": "jane@testcorp.com",
+             "title": "Buyer", "phone": None, "phone_type": None,
+             "source": "apollo", "confidence": "medium",
+             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
         ]
-        mock_clay.side_effect = Exception("Clay API timeout")
+
         async def _verify(db, contacts):
             for c in contacts:
                 c["email_verified"] = True
                 c["email_verification_status"] = "valid"
             return contacts
         mock_hunter.side_effect = _verify
-        mock_apollo.return_value = []
+
+        # Lusha adds phone
+        async def _lusha_phones(db, contacts, domain):
+            for c in contacts:
+                if not c.get("phone"):
+                    c["phone"] = "+1-555-0100"
+                    c["phone_type"] = "direct_dial"
+                    fs = c.get("enrichment_field_sources") or {}
+                    fs["phone"] = "lusha"
+                    c["enrichment_field_sources"] = fs
+            return contacts
+        mock_lusha_phones.side_effect = _lusha_phones
 
         from app.services.customer_enrichment_service import enrich_customer_account
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
 
         assert result["ok"] is True
         assert result["contacts_added"] == 1
-        assert "lusha" in result["sources_used"]
-        assert "clay" not in result["sources_used"]
 
-
-@pytest.mark.asyncio
-async def test_clay_dedup_with_lusha(db_session, company_with_domain, _mock_settings):
-    """If Lusha and Clay return the same email, only one contact is saved."""
-    with patch("app.services.customer_enrichment_service._step_lusha", new_callable=AsyncMock) as mock_lusha, \
-         patch("app.services.customer_enrichment_service._step_clay", new_callable=AsyncMock) as mock_clay, \
-         patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo:
-        # Same email from both sources
-        mock_lusha.return_value = [
-            {"full_name": "Jane Doe", "email": "jane@testcorp.com",
-             "title": "Buyer", "phone": "+1-555-0100", "phone_type": "direct_dial",
-             "source": "lusha", "confidence": 85},
-        ]
-        mock_clay.return_value = [
-            {"full_name": "Jane Doe", "email": "jane@testcorp.com",
-             "title": "Procurement Manager", "source": "clay", "confidence": 70},
-        ]
-        async def _verify(db, contacts):
-            for c in contacts:
-                c["email_verified"] = True
-                c["email_verification_status"] = "valid"
-            return contacts
-        mock_hunter.side_effect = _verify
-        mock_apollo.return_value = []
-
-        from app.services.customer_enrichment_service import enrich_customer_account
-        result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
-
-        assert result["ok"] is True
-        assert result["contacts_added"] == 1  # Deduped — only one saved
-
-        # Lusha record should be kept (higher priority, listed first)
+        # Verify field source attribution on saved contact
         site = db_session.query(CustomerSite).filter_by(company_id=company_with_domain.id).first()
         contacts = db_session.query(SiteContact).filter_by(customer_site_id=site.id).all()
         assert len(contacts) == 1
-        assert contacts[0].enrichment_source == "lusha"
+        efs = contacts[0].enrichment_field_sources
+        assert efs["email"] == "apollo"
+        assert efs["name"] == "apollo"
+        assert efs["phone"] == "lusha"
+
+
+# ── Lusha phone enrichment unit tests ─────────────────────────────
 
 
 @pytest.mark.asyncio
-async def test_step_clay_credit_check(db_session, _mock_settings):
-    """_step_clay should not call API if credits exhausted."""
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=False):
-        from app.services.customer_enrichment_service import _step_clay
-        result = await _step_clay(db_session, "test.com", "Test Corp", 5)
-        assert result == []
+async def test_step_lusha_phones_credits_exhausted(db_session, _mock_settings):
+    """Lusha phone enrichment stops calling API when credits are exhausted."""
+    contacts = [
+        {"full_name": "Person 1", "email": "p1@test.com", "phone": None, "phone_type": None},
+        {"full_name": "Person 2", "email": "p2@test.com", "phone": None, "phone_type": None},
+    ]
+    call_count = 0
+    with patch("app.services.customer_enrichment_service.can_use_credits") as mock_can, \
+         patch("app.services.customer_enrichment_service.record_credit_usage"), \
+         patch("app.connectors.lusha_client.find_person", new_callable=AsyncMock) as mock_find:
+        # Allow first call, deny second
+        mock_can.side_effect = [True, False]
+        mock_find.return_value = {"phone": "+1-555-0001", "phone_type": "direct_dial"}
+
+        from app.services.customer_enrichment_service import _step_lusha_phones
+        result = await _step_lusha_phones(db_session, contacts, "test.com")
+
+        assert len(result) == 2
+        # First contact got phone, second did not (credits exhausted)
+        assert result[0]["phone"] == "+1-555-0001"
+        assert result[1]["phone"] is None
+        assert mock_find.await_count == 1
 
 
 @pytest.mark.asyncio
-async def test_step_clay_returns_empty(db_session, _mock_settings):
-    """_step_clay should return empty list (Clay API deprecated)."""
-    from app.services.customer_enrichment_service import _step_clay
-    result = await _step_clay(db_session, "acme.com", "Acme Electronics", 5)
-    assert result == []
+async def test_apollo_zero_results_falls_through(db_session, company_with_domain, _mock_settings):
+    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
+         patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
+         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
+        mock_apollo.return_value = []
+        async def _verify(db, contacts):
+            for c in contacts:
+                c["email_verified"] = True
+                c["email_verification_status"] = "valid"
+            return contacts
+        mock_hunter.side_effect = _verify
+
+        async def _lusha_phones(db, contacts, domain):
+            return contacts
+        mock_lusha_phones.side_effect = _lusha_phones
+
+        from app.services.customer_enrichment_service import enrich_customer_account
+        result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
+
+        assert result["ok"] is True
+        assert result["contacts_added"] == 1
+        assert "apollo" not in result["sources_used"]
+
+
+@pytest.mark.asyncio
+async def test_lusha_phone_only_contacts_missing_phones(db_session, _mock_settings):
+    """Verify Lusha find_person is NOT called for contacts with direct dials."""
+    contacts = [
+        {"full_name": "Has DD", "email": "dd@test.com",
+         "phone": "+1-555-0001", "phone_type": "direct_dial"},
+        {"full_name": "Has Mobile", "email": "mob@test.com",
+         "phone": "+1-555-0002", "phone_type": "mobile"},
+        {"full_name": "No Phone", "email": "nophone@test.com",
+         "phone": None, "phone_type": None},
+        {"full_name": "Work Phone", "email": "work@test.com",
+         "phone": "+1-555-0003", "phone_type": "work"},
+    ]
+
+    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
+         patch("app.services.customer_enrichment_service.record_credit_usage"), \
+         patch("app.connectors.lusha_client.find_person", new_callable=AsyncMock) as mock_find:
+        mock_find.return_value = {"phone": "+1-555-9999", "phone_type": "direct_dial"}
+
+        from app.services.customer_enrichment_service import _step_lusha_phones
+        result = await _step_lusha_phones(db_session, contacts, "test.com")
+
+        # Only "No Phone" and "Work Phone" should trigger find_person (2 calls)
+        assert mock_find.await_count == 2
+        # All 4 contacts returned
+        assert len(result) == 4
+        # Direct dial and mobile kept original phones
+        assert result[0]["phone"] == "+1-555-0001"
+        assert result[1]["phone"] == "+1-555-0002"
+        # No Phone and Work Phone got Lusha phone
+        assert result[2]["phone"] == "+1-555-9999"
+        assert result[3]["phone"] == "+1-555-9999"
+
+

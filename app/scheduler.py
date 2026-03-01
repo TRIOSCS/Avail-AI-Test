@@ -146,7 +146,7 @@ def configure_scheduler():
                       id="calendar_scan", name="Calendar vendor meeting scan")
 
     # Monthly full enrichment refresh — runs on 1st when API credits reset
-    # Uses all available providers (Clay, Apollo, Gradient, Hunter, AI)
+    # Uses all available providers (Apollo, Gradient, Hunter, AI)
     if settings.deep_enrichment_enabled:
         scheduler.add_job(_job_monthly_enrichment_refresh, CronTrigger(day=1, hour=4, minute=0),
                           id="monthly_enrichment_refresh", name="Monthly enrichment refresh (credit reset)")
@@ -881,7 +881,7 @@ async def _job_monthly_enrichment_refresh():
     """1st of month 4AM UTC — full enrichment refresh when API credits reset.
 
     Runs a large backfill (2000 items) using all available providers:
-    Clay, Apollo, Gradient, Hunter, Anthropic AI. Entities are prioritized
+    Apollo, Gradient, Hunter, Anthropic AI. Entities are prioritized
     by most recent activity so the most-used accounts get fresh data first.
     Force-refreshes entities whose enrichment data is older than 30 days.
     """

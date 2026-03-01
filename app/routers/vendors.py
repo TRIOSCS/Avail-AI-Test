@@ -1436,8 +1436,7 @@ async def add_email_to_card(
     enrich_triggered = False
     if domain_extracted and not card.last_enriched_at:
         if (
-            get_credential_cached("clay_enrichment", "CLAY_API_KEY")
-            or get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+            get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
             or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
         ):
             asyncio.create_task(
@@ -2007,8 +2006,7 @@ async def import_stock_list_standalone(
     enrich_triggered = False
     if new_vendor and vendor_card.domain and not vendor_card.last_enriched_at:
         if (
-            get_credential_cached("clay_enrichment", "CLAY_API_KEY")
-            or get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
+            get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY")
             or get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
         ):
             asyncio.create_task(

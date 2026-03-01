@@ -168,7 +168,7 @@ class EnrichmentCreditUsage(Base):
 
     __tablename__ = "enrichment_credit_usage"
     id = Column(Integer, primary_key=True)
-    provider = Column(String(50), nullable=False)  # lusha, clay, hunter, apollo
+    provider = Column(String(50), nullable=False)  # lusha, hunter, apollo
     month = Column(String(7), nullable=False)  # "2026-02" format
     credits_used = Column(Integer, default=0, nullable=False)
     credits_limit = Column(Integer, nullable=False)

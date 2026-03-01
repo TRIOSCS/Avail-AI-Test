@@ -223,7 +223,7 @@ class TestSeedApiSources:
                 "nexar", "brokerbin", "ebay", "digikey", "mouser",
                 "oemsecrets", "sourcengine", "email_mining", "azure_oauth",
                 "anthropic_ai", "teams_notifications", "apollo_enrichment",
-                "clay_enrichment", "explorium_enrichment", "hunter_enrichment",
+                "explorium_enrichment", "hunter_enrichment",
                 "rocketreach_enrichment", "clearbit_enrichment", "netcomponents",
                 "icsource", "thebrokersite", "findchips", "arrow", "avnet",
                 "tme", "lcsc", "partfuse", "stock_list_import", "element14",

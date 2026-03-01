@@ -666,7 +666,7 @@ async def api_customer_enrich(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Trigger waterfall enrichment (Lusha → Clay → Hunter → Apollo) for a customer account."""
+    """Trigger waterfall enrichment (Lusha → Hunter → Apollo) for a customer account."""
     from ..services.customer_enrichment_service import enrich_customer_account
 
     company = db.get(Company, company_id)

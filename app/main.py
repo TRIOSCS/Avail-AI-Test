@@ -570,16 +570,6 @@ def _seed_api_sources():
                 "setup_notes": "Sign up at apollo.io → Settings → API Keys → Generate. Free tier: 10K enrichments/month. Used to enrich VendorCard contacts.",
             },
             {
-                "name": "clay_enrichment",
-                "display_name": "Clay",
-                "category": "enrichment",
-                "source_type": "enrichment",
-                "description": "Data enrichment platform — waterfall enrichment across 75+ providers for contact emails, phones, LinkedIn, and company data.",
-                "signup_url": "https://www.clay.com",
-                "env_vars": ["CLAY_API_KEY"],
-                "setup_notes": "Sign up at clay.com → Settings → API → Generate Key. Credits-based pricing. Excellent for bulk vendor contact enrichment.",
-            },
-            {
                 "name": "explorium_enrichment",
                 "display_name": "Explorium",
                 "category": "enrichment",

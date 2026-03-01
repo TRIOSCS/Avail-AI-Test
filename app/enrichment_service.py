@@ -1,7 +1,7 @@
 """AVAIL v1.2.0 — Unified Enrichment Service
 
 Shared enrichment workflow for both vendor cards and customer companies.
-Supports Clay, Explorium (Vibe Prospecting), and AI (Claude + web search)
+Supports Explorium (Vibe Prospecting) and AI (Claude + web search)
 as enrichment providers. AI runs last to fill any remaining gaps.
 """
 
@@ -259,19 +259,6 @@ def normalize_company_output(data: dict) -> dict:
     return out
 
 
-# ── Provider: Clay (deprecated — REST API returns 404) ─────────────────
-
-
-async def _clay_find_company(domain: str) -> Optional[dict]:
-    """Clay REST API is deprecated. Returns None."""
-    return None
-
-
-async def _clay_find_contacts(domain: str, title_filter: str = "") -> list[dict]:
-    """Clay REST API is deprecated. Returns []."""
-    return []
-
-
 # ── Provider: Explorium (Vibe Prospecting) ──────────────────────────────
 
 EXPLORIUM_BASE = "https://api.explorium.ai/v1"
@@ -517,9 +504,9 @@ async def _ai_find_contacts(
 async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
 
-    Phase 1: Clay, Apollo, Explorium, Clearbit, Gradient run concurrently.
+    Phase 1: Apollo, Explorium, Clearbit, Gradient run concurrently.
     Phase 2: AI + web search fills remaining gaps (conditional).
-    Merge priority: Clay > Apollo > Explorium > Clearbit > Gradient > AI.
+    Merge priority: Apollo > Explorium > Clearbit > Gradient > AI.
     Results cached in IntelCache with 14-day TTL keyed by domain.
     """
     from .cache.intel_cache import get_cached, set_cached
@@ -551,7 +538,7 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
         "hq_city", "hq_state", "hq_country", "website", "linkedin_url",
     ]
 
-    # ── Phase 1: Clay + Apollo + Explorium + Clearbit concurrently ──
+    # ── Phase 1: Apollo + Explorium + Clearbit + Gradient concurrently ──
     async def _safe_apollo_company(domain: str):
         try:
             from .connectors.apollo_client import enrich_company as apollo_enrich
@@ -568,8 +555,7 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
             logger.debug("Clearbit enrichment skipped: %s", e)
             return None
 
-    clay_result, apollo_result, exp_result, cb_result, grad_result = await asyncio.gather(
-        _clay_find_company(domain),
+    apollo_result, exp_result, cb_result, grad_result = await asyncio.gather(
         _safe_apollo_company(domain),
         _explorium_find_company(domain, name),
         _safe_clearbit(domain),
@@ -577,10 +563,9 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
         return_exceptions=True,
     )
 
-    # Merge in priority order: Clay > Apollo > Explorium > Clearbit > Gradient
+    # Merge in priority order: Apollo > Explorium > Clearbit > Gradient
     sources = []
     for provider_data, provider_name in [
-        (clay_result, "clay"),
         (apollo_result, "apollo"),
         (exp_result, "explorium"),
         (cb_result, "clearbit"),
@@ -722,14 +707,13 @@ async def find_suggested_contacts(
             logger.debug("Lusha contacts skipped: %s", e)
             return []
 
-    # Run all 7 sources concurrently
+    # Run all 6 sources concurrently (Apollo first for dedup priority)
     results = await asyncio.gather(
-        _clay_find_contacts(domain, title_filter),
-        _explorium_find_contacts(domain, title_filter),
-        _safe_hunter(domain),
-        _safe_rocketreach(domain),
         _safe_apollo_contacts(domain),
+        _safe_hunter(domain),
         _safe_lusha(domain),
+        _explorium_find_contacts(domain, title_filter),
+        _safe_rocketreach(domain),
         _ai_find_contacts(domain, name, title_filter),
         return_exceptions=True,
     )
@@ -742,8 +726,10 @@ async def find_suggested_contacts(
         all_contacts.extend(r)
 
     # Deduplicate by email or linkedin_url or full_name
+    # Apollo contacts appear first → win dedup ties
     seen = set()
     unique = []
+    lusha_phones = {}  # email → phone from Lusha for post-dedup merge
     for c in all_contacts:
         key = (
             (c.get("email") or "").lower()
@@ -751,9 +737,26 @@ async def find_suggested_contacts(
             or (c.get("full_name") or "").lower()
         )
         if not key or key in seen:
+            # Collect Lusha phone data from duplicates for later merge
+            if c.get("source") == "lusha" and c.get("phone"):
+                email_key = (c.get("email") or "").lower()
+                if email_key:
+                    lusha_phones[email_key] = c["phone"]
             continue
         seen.add(key)
+        # Also collect Lusha phones from unique contacts
+        if c.get("source") == "lusha" and c.get("phone"):
+            email_key = (c.get("email") or "").lower()
+            if email_key:
+                lusha_phones[email_key] = c["phone"]
         unique.append(c)
+
+    # Merge Lusha phone data into winning contacts that lack phones
+    for c in unique:
+        if not c.get("phone"):
+            email_key = (c.get("email") or "").lower()
+            if email_key in lusha_phones:
+                c["phone"] = lusha_phones[email_key]
 
     # Filter to relevant B2B titles — avoid wasting credits on irrelevant contacts
     _RELEVANT_KEYWORDS = {

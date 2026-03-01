@@ -154,7 +154,7 @@ def invalidate(cache_key: str) -> None:
 def flush_enrichment_cache() -> int:
     """Flush all enrichment cache entries to force re-query with fresh API credits.
 
-    Called monthly when provider credit limits reset (Clay, Apollo, etc.).
+    Called monthly when provider credit limits reset (Apollo, etc.).
     Removes all 'enrich:*' keys from both Redis and PostgreSQL.
     """
     count = 0
