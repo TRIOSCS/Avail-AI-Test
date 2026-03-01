@@ -319,11 +319,15 @@ class TestSearchEngine:
 
         pn_locator = AsyncMock()
         pn_locator.wait_for = AsyncMock()
+        pn_locator.is_visible = AsyncMock(return_value=True)
+        pn_locator.count = AsyncMock(return_value=1)
         pn_locator.fill = AsyncMock()
         page.locator = MagicMock(return_value=pn_locator)
 
         page.wait_for_selector = AsyncMock()
+        page.screenshot = AsyncMock()
         page.evaluate = AsyncMock(side_effect=[
+            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
             "<div class='tblWTBPanel'>results</div>",  # HTML content
             5,  # total_count
         ])
@@ -341,7 +345,7 @@ class TestSearchEngine:
 
     @pytest.mark.asyncio
     async def test_search_part_fallback_field(self):
-        """When primary search field not found, falls back to multi-search field."""
+        """When primary search field not found, falls back to next selector."""
         page = AsyncMock()
         page.goto = AsyncMock()
         page.url = "https://www.icsource.com/members/Search/Results.aspx"
@@ -352,6 +356,8 @@ class TestSearchEngine:
 
         fallback_locator = AsyncMock()
         fallback_locator.wait_for = AsyncMock()
+        fallback_locator.is_visible = AsyncMock(return_value=True)
+        fallback_locator.count = AsyncMock(return_value=1)
         fallback_locator.fill = AsyncMock()
 
         def mock_locator(sel):
@@ -361,7 +367,12 @@ class TestSearchEngine:
 
         page.locator = MagicMock(side_effect=mock_locator)
         page.wait_for_selector = AsyncMock()
-        page.evaluate = AsyncMock(side_effect=["<html></html>", 0])
+        page.screenshot = AsyncMock()
+        page.evaluate = AsyncMock(side_effect=[
+            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+            "<html></html>",
+            0,
+        ])
 
         with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
             mock_hb.human_type = AsyncMock()
@@ -381,11 +392,18 @@ class TestSearchEngine:
 
         locator = AsyncMock()
         locator.wait_for = AsyncMock()
+        locator.is_visible = AsyncMock(return_value=True)
+        locator.count = AsyncMock(return_value=1)
         locator.fill = AsyncMock()
         page.locator = MagicMock(return_value=locator)
 
         page.wait_for_selector = AsyncMock(side_effect=Exception("Timeout"))
-        page.evaluate = AsyncMock(side_effect=["<html>body</html>", 0])
+        page.screenshot = AsyncMock()
+        page.evaluate = AsyncMock(side_effect=[
+            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+            "<html>body</html>",
+            0,
+        ])
 
         with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
             mock_hb.human_type = AsyncMock()
