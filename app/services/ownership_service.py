@@ -17,16 +17,14 @@ Usage:
 
 import asyncio
 import html
-from loguru import logger
 from datetime import datetime, timedelta, timezone
 
+from loguru import logger
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import ActivityLog, Company, CustomerSite, User
-
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  NIGHTLY SWEEP — clear stale ownership, send warnings

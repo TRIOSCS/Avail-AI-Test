@@ -9,6 +9,7 @@ Depends on: gradient_service, claude_client
 """
 
 import json
+
 from loguru import logger
 
 from app.services.gradient_service import gradient_json, gradient_text

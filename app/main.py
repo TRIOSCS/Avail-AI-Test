@@ -124,7 +124,7 @@ async def lifespan(app):
             from .database import SessionLocal
             db = SessionLocal()
             try:
-                from .models import VendorCard, Company, Requisition
+                from .models import Company, Requisition, VendorCard
                 db.query(VendorCard).count()
                 db.query(Company).count()
                 db.query(Requisition).count()

@@ -13,16 +13,14 @@ Depends on: models/performance.py (AvailScoreSnapshot, MultiplierScoreSnapshot),
             utils/claude_client.py (claude_structured for blurbs)
 """
 
-from loguru import logger
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import and_
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..models import User
 from ..models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot
 from ..models.unified_score import UnifiedScoreSnapshot
-
 
 # ── Category Weights ────────────────────────────────────────────────
 CATEGORY_WEIGHTS = {
@@ -281,6 +279,7 @@ def _generate_blurb(
 ) -> dict | None:
     """Call Claude to generate strength + improvement blurb."""
     import asyncio
+
     from ..utils.claude_client import claude_structured
 
     # Find best and worst categories

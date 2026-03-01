@@ -8,6 +8,9 @@ Or from submodules: from app.models.auth import User
 from .auth import User  # noqa: F401
 from .base import Base  # noqa: F401
 
+# Buy Plans V3 (structured lines, dual approval tracks)
+from .buy_plan import BuyPlanLine, BuyPlanV3, VerificationGroupMember  # noqa: F401
+
 # System Config
 from .config import ApiSource, GraphSubscription, SystemConfig  # noqa: F401
 
@@ -16,7 +19,9 @@ from .crm import Company, CustomerSite, SiteContact  # noqa: F401
 
 # Discovery / Prospecting
 from .discovery_batch import DiscoveryBatch  # noqa: F401
-from .prospect_account import ProspectAccount  # noqa: F401
+
+# Email Intelligence (AI-powered inbox mining)
+from .email_intelligence import EmailIntelligence  # noqa: F401
 
 # Enrichment
 from .enrichment import (  # noqa: F401
@@ -37,12 +42,6 @@ from .ics_search_log import IcsSearchLog  # noqa: F401
 from .ics_search_queue import IcsSearchQueue  # noqa: F401
 from .ics_worker_status import IcsWorkerStatus  # noqa: F401
 
-# NetComponents Search
-from .nc_classification_cache import NcClassificationCache  # noqa: F401
-from .nc_search_log import NcSearchLog  # noqa: F401
-from .nc_search_queue import NcSearchQueue  # noqa: F401
-from .nc_worker_status import NcWorkerStatus  # noqa: F401
-
 # Intelligence: Materials, Proactive, Activity
 from .intelligence import (  # noqa: F401
     ActivityLog,
@@ -57,11 +56,14 @@ from .intelligence import (  # noqa: F401
     ReactivationSignal,
 )
 
+# NetComponents Search
+from .nc_classification_cache import NcClassificationCache  # noqa: F401
+from .nc_search_log import NcSearchLog  # noqa: F401
+from .nc_search_queue import NcSearchQueue  # noqa: F401
+from .nc_worker_status import NcWorkerStatus  # noqa: F401
+
 # Offers, Contacts, Vendor Responses
 from .offers import Contact, Offer, OfferAttachment, VendorResponse  # noqa: F401
-
-# Purchase History (Proactive matching backbone)
-from .purchase_history import CustomerPartHistory  # noqa: F401
 
 # Performance Tracking
 from .performance import (  # noqa: F401
@@ -73,20 +75,15 @@ from .performance import (  # noqa: F401
     VendorMetricsSnapshot,
 )
 
-# Unified Score (cross-role leaderboard)
-from .unified_score import UnifiedScoreSnapshot  # noqa: F401
-
-# Email Intelligence (AI-powered inbox mining)
-from .email_intelligence import EmailIntelligence  # noqa: F401
-
 # Email Pipeline
 from .pipeline import ColumnMappingCache, PendingBatch, ProcessedMessage, SyncState  # noqa: F401
+from .prospect_account import ProspectAccount  # noqa: F401
+
+# Purchase History (Proactive matching backbone)
+from .purchase_history import CustomerPartHistory  # noqa: F401
 
 # Quotes & Buy Plans (V1 — JSON line_items)
 from .quotes import BuyPlan, Quote, QuoteLine  # noqa: F401
-
-# Buy Plans V3 (structured lines, dual approval tracks)
-from .buy_plan import BuyPlanLine, BuyPlanV3, VerificationGroupMember  # noqa: F401
 
 # Core: Requisitions, Requirements & Attachments
 from .sourcing import (  # noqa: F401
@@ -99,6 +96,9 @@ from .sourcing import (  # noqa: F401
 
 # Sync
 from .sync import SyncLog  # noqa: F401
+
+# Unified Score (cross-role leaderboard)
+from .unified_score import UnifiedScoreSnapshot  # noqa: F401
 
 # Vendors
 from .vendors import VendorCard, VendorContact, VendorReview  # noqa: F401

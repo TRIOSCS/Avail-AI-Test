@@ -29,8 +29,6 @@ from sqlalchemy import text as sqltext
 from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from sqlalchemy.orm import Session
 
-from ..utils.sql_helpers import escape_like
-
 from ..cache.decorators import cached_endpoint
 from ..database import get_db
 from ..dependencies import require_admin, require_buyer, require_user
@@ -68,6 +66,7 @@ from ..schemas.vendors import (
 from ..services.credential_service import get_credential_cached
 from ..services.vendor_analysis_service import _analyze_vendor_materials
 from ..utils.normalization import normalize_mpn_key
+from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["vendors"])

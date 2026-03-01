@@ -6,17 +6,16 @@ as enrichment providers. AI runs last to fill any remaining gaps.
 """
 
 import asyncio
-from loguru import logger
 import re
 from datetime import datetime, timezone
 from typing import Optional
+
+from loguru import logger
 
 from .http_client import http
 from .services.ai_service import enrich_contacts_websearch
 from .services.credential_service import get_credential_cached
 from .utils.claude_client import claude_json, claude_text
-
-
 
 # ── Normalization ────────────────────────────────────────────────────────
 

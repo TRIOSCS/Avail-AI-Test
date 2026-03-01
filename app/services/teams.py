@@ -15,9 +15,9 @@ Called by: scheduler.py, ownership_service.py, requisitions.py, crm.py
 Depends on: utils/graph_client.py, config.py
 """
 
-from loguru import logger
 from datetime import datetime, timezone
 
+from loguru import logger
 
 # Rate limit: { "event_type:entity_id" → last_posted_at }
 _rate_limits: dict[str, datetime] = {}
@@ -82,6 +82,7 @@ async def post_to_channel(team_id: str, channel_id: str, card: dict, token: str)
     Returns True on success, False on any failure.
     """
     import json as _json
+
     from app.utils.graph_client import GraphClient
 
     payload = {

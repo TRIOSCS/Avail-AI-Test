@@ -10,10 +10,9 @@ through a three-tier confidence system:
 
 import asyncio
 import json
-from loguru import logger
 from datetime import datetime, timedelta, timezone
 
-
+from loguru import logger
 
 # ── Contact linking ──────────────────────────────────────────────────
 

@@ -7,8 +7,8 @@ Used by:
 
 import csv
 import io
-from loguru import logger
 
+from loguru import logger
 
 
 def parse_tabular_file(content: bytes, filename: str) -> list[dict]:

@@ -15,6 +15,7 @@ def _mock_settings():
         mock_s.lusha_monthly_credit_limit = 300
         mock_s.hunter_monthly_search_limit = 500
         mock_s.hunter_monthly_verify_limit = 500
+        mock_s.apollo_monthly_credit_limit = 1000
         yield mock_s
 
 
@@ -53,7 +54,7 @@ def test_record_credit_usage(db_session, _mock_settings):
 def test_get_all_budgets(db_session, _mock_settings):
     from app.services.credit_manager import get_all_budgets
     budgets = get_all_budgets(db_session)
-    assert len(budgets) == 5
+    assert len(budgets) == 4
     providers = [b["provider"] for b in budgets]
     assert "lusha" in providers
     assert "hunter_search" in providers

@@ -7,14 +7,12 @@ Called by: app/connectors/sources.py via search pipeline
 Depends on: http_client, utils.safe_float/safe_int, sources.BaseConnector
 """
 
-from loguru import logger
-
 import httpx
+from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
 from .sources import BaseConnector
-
 
 
 class OEMSecretsConnector(BaseConnector):

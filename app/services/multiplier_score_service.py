@@ -15,14 +15,13 @@ Called by: scheduler.py (daily), routers/performance.py (on-demand)
 Depends on: models (Offer, Quote, BuyPlan, Contact, StockListHash, etc.)
 """
 
-from loguru import logger
 from datetime import date, datetime, timedelta, timezone
 
+from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
 from ..models import (
-    ActivityLog,
     BuyPlan,
     Company,
     Contact,
@@ -33,7 +32,6 @@ from ..models import (
     User,
 )
 from ..models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot
-
 
 # ── Point values ─────────────────────────────────────────────────────
 # Buyer offer pipeline (non-stacking — highest tier only)

@@ -1,6 +1,7 @@
 """eBay Browse API connector — searches electronic components on eBay."""
 
 import base64
+
 from loguru import logger
 
 from ..http_client import http

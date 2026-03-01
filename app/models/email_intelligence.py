@@ -10,6 +10,7 @@ Depends on: models/base.py
 from datetime import datetime, timezone
 
 from sqlalchemy import (
+    JSON,
     Boolean,
     Column,
     DateTime,
@@ -17,9 +18,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
-    JSON,
     String,
-    Text,
 )
 
 from .base import Base

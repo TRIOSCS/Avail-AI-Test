@@ -11,12 +11,9 @@ Depends on: database.py (engine), models.py (Base)
 """
 
 from loguru import logger
-
 from sqlalchemy import text as sqltext
 
-from .database import engine
-from .database import SessionLocal
-
+from .database import SessionLocal, engine
 
 
 def run_startup_migrations() -> None:
@@ -57,9 +54,9 @@ def _create_default_user_if_env_set() -> None:
     DEFAULT_USER_EMAIL, DEFAULT_USER_PASSWORD, DEFAULT_USER_ROLE (optional).
     If the vars are missing, do nothing.
     """
-    import os
     import base64
     import hashlib
+    import os
 
     email = os.environ.get("DEFAULT_USER_EMAIL")
     password = os.environ.get("DEFAULT_USER_PASSWORD")

@@ -10,10 +10,10 @@ Target fields extracted per row:
 """
 
 import io
-from loguru import logger
 import re
 from datetime import datetime, timezone
 
+from loguru import logger
 
 # Standard column header patterns (deterministic, no AI needed)
 HEADER_PATTERNS = {

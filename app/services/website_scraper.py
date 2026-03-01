@@ -1,17 +1,16 @@
 """Website scraper — extract vendor contact emails from their websites."""
 
 import asyncio
-from loguru import logger
 import re
 
 import httpx
+from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..http_client import http_redirect
 from ..models import VendorCard, VendorContact
 from ..vendor_utils import merge_emails_into_card
-
 
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 

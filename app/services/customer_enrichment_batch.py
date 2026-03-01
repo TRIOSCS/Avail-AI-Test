@@ -14,7 +14,6 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..models.crm import Company
 from ..models.enrichment import EnrichmentJob
 from .credit_manager import can_use_credits
 from .customer_enrichment_service import enrich_customer_account, get_enrichment_gaps

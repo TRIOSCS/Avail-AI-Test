@@ -4,11 +4,10 @@ All naive datetimes from PostgreSQL are auto-tagged as UTC via event
 listener to prevent naive-vs-aware comparison errors.
 """
 
-from loguru import logger
 from datetime import datetime, timezone
 
+from loguru import logger
 from sqlalchemy import DateTime, TypeDecorator, create_engine, event
-
 from sqlalchemy.orm import sessionmaker
 
 from .config import settings

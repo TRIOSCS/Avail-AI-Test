@@ -7,7 +7,6 @@ from ..utils import safe_float
 from .sources import BaseConnector
 
 
-
 class MouserConnector(BaseConnector):
     """Mouser Search API — simple API key auth."""
 

@@ -18,17 +18,13 @@ Called by: all routers
 Depends on: models, database, config
 """
 
-from loguru import logger
 from datetime import datetime, timedelta, timezone
 
-import sqlalchemy as sa
 from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session, selectinload
 
 from .database import get_db
 from .models import Requisition, User
-
-
 
 # ── Authentication ────────────────────────────────────────────────────
 

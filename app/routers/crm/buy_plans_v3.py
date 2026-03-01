@@ -28,8 +28,9 @@ from loguru import logger
 from sqlalchemy.orm import Session, joinedload
 
 from ...database import get_db
-from ...dependencies import is_admin as _is_admin, require_buyer, require_user
-from ...models import Offer, Quote, Requirement, User
+from ...dependencies import is_admin as _is_admin
+from ...dependencies import require_buyer, require_user
+from ...models import Offer, Requirement, User
 from ...models.buy_plan import (
     BuyPlanLine,
     BuyPlanV3,
@@ -44,17 +45,6 @@ from ...schemas.buy_plan import (
     SOVerificationRequest,
     VerificationGroupUpdate,
 )
-from ...services.buyplan_v3_notifications import (
-    notify_v3_approved,
-    notify_v3_completed,
-    notify_v3_issue_flagged,
-    notify_v3_po_confirmed,
-    notify_v3_rejected,
-    notify_v3_so_rejected,
-    notify_v3_so_verified,
-    notify_v3_submitted,
-    run_v3_notify_bg,
-)
 from ...services.buy_plan_v3_service import (
     approve_buy_plan,
     build_buy_plan,
@@ -67,6 +57,17 @@ from ...services.buy_plan_v3_service import (
     submit_buy_plan,
     verify_po,
     verify_so,
+)
+from ...services.buyplan_v3_notifications import (
+    notify_v3_approved,
+    notify_v3_completed,
+    notify_v3_issue_flagged,
+    notify_v3_po_confirmed,
+    notify_v3_rejected,
+    notify_v3_so_rejected,
+    notify_v3_so_verified,
+    notify_v3_submitted,
+    run_v3_notify_bg,
 )
 
 router = APIRouter()

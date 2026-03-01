@@ -15,10 +15,10 @@ Called by: scheduler.py (daily), routers/performance.py (on-demand)
 Depends on: models (Requisition, Contact, Offer, Quote, BuyPlan, ActivityLog, etc.)
 """
 
-from loguru import logger
 from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import and_, func as sqlfunc
+from loguru import logger
+from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
 from ..models import (
@@ -36,7 +36,6 @@ from ..models import (
     User,
 )
 from ..models.performance import AvailScoreSnapshot
-
 
 # ── Bonus thresholds ─────────────────────────────────────────────────
 BONUS_1ST = 500.0

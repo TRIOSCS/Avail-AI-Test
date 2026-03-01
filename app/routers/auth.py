@@ -29,7 +29,7 @@ from ..database import get_db
 from ..dependencies import get_user
 from ..http_client import http
 from ..models import User
-from ..vite import vite_css_tags, vite_js_tags, vite_app_url, vite_crm_url
+from ..vite import vite_app_url, vite_crm_url, vite_css_tags, vite_js_tags
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")

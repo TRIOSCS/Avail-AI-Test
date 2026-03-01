@@ -18,15 +18,13 @@ Depends on: models, config, utils/graph_client, buyplan_service (_post_teams_cha
 
 import asyncio
 import html as html_mod
-from loguru import logger
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models import ActivityLog, User
 from ..models.buy_plan import BuyPlanV3
-
-
 
 # ── Background runner ────────────────────────────────────────────────
 

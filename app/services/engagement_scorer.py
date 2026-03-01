@@ -17,12 +17,11 @@ is surfaced in the UI as a color-coded ring (green ≥70, yellow 40-69, red <40)
 Integration: 20% weight in the master vendor ranking algorithm.
 """
 
-from loguru import logger
 from datetime import datetime, timezone
 
+from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-
 
 # ── Weights ──
 W_RESPONSE_RATE = 0.30

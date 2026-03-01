@@ -31,7 +31,6 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
-    Enum,
     Float,
     ForeignKey,
     Index,
@@ -43,7 +42,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from .base import Base
-
 
 # ── Enums ────────────────────────────────────────────────────────────
 

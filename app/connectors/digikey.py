@@ -7,7 +7,6 @@ from ..utils import safe_float, safe_int
 from .sources import BaseConnector
 
 
-
 class DigiKeyConnector(BaseConnector):
     """DigiKey Product Search v4 — OAuth2 client credentials."""
 

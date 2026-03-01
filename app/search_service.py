@@ -10,11 +10,11 @@
 import asyncio
 import hashlib
 import json
-from loguru import logger
 import os
 import time
 from datetime import datetime, timezone
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from .connectors.digikey import DigiKeyConnector
@@ -79,6 +79,7 @@ def _get_search_redis():
         return None
     try:
         import redis
+
         from .config import settings
         _search_redis = redis.from_url(
             settings.redis_url,

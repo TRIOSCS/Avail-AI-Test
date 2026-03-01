@@ -15,10 +15,10 @@ Depends on: models, email_service, vendor_utils, engagement_scoring
 """
 
 import asyncio
-from loguru import logger
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
@@ -42,7 +42,6 @@ from ..models import (
 )
 from ..schemas.rfq import BatchRfqSend, FollowUpEmail, PhoneCallLog, RfqPrepare
 from ..vendor_utils import normalize_vendor_name
-
 
 router = APIRouter(tags=["rfq"])
 

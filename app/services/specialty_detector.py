@@ -4,10 +4,8 @@ Uses keyword matching on email history, sighting data, and offer history
 to generate brand_tags and commodity_tags for vendor cards.
 """
 
-from loguru import logger
 import re
 from collections import Counter
-
 
 # ── Known electronic component brands (~100) ─────────────────────────
 

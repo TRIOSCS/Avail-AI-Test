@@ -7,13 +7,13 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import Company
-from app.utils.sql_helpers import escape_like
 from app.schemas.prospect_pool import (
     PoolAccountList,
     PoolAccountRead,
     PoolFilters,
     PoolStats,
 )
+from app.utils.sql_helpers import escape_like
 
 
 def _pool_base_filter(db: Session):

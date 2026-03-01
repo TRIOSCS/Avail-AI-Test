@@ -11,8 +11,9 @@ depending on the environment:
 import json
 import os
 from functools import lru_cache
-from markupsafe import Markup
 from pathlib import Path
+
+from markupsafe import Markup
 
 MANIFEST_PATH = Path(__file__).parent / "static" / "dist" / ".vite" / "manifest.json"
 VITE_DEV_ORIGIN = "http://localhost:5173"

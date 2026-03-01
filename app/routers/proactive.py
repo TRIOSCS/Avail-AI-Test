@@ -151,7 +151,7 @@ async def draft_proactive_email(
     db: Session = Depends(get_db),
 ):
     """AI-draft a proactive offer email for review before sending."""
-    from ..models import CustomerSite, Offer
+    from ..models import CustomerSite
     from ..services.proactive_email import draft_proactive_email as _draft
 
     match_ids = body.match_ids

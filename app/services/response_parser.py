@@ -13,6 +13,7 @@ Each part in a multi-part reply gets its own classification:
 """
 
 import json
+
 from loguru import logger
 
 from app.utils.claude_client import claude_structured
@@ -28,7 +29,6 @@ from app.utils.normalization import (
     normalize_price,
     normalize_quantity,
 )
-
 
 # ── Confidence thresholds ─────────────────────────────────────────────
 

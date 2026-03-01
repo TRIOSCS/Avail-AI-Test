@@ -32,8 +32,6 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
-from .http_client import http
-
 
 def _traced_job(func):
     """Wrap scheduler jobs with a unique trace_id for log correlation."""
@@ -63,7 +61,6 @@ scheduler = AsyncIOScheduler(
 
 # ── Token Management (re-exported from utils.token_manager) ─────────────
 from .utils.token_manager import _refresh_access_token, _utc, get_valid_token, refresh_user_token  # noqa: F401
-
 
 # ── Scheduler Configuration ────────────────────────────────────────────
 
@@ -632,11 +629,11 @@ async def _job_performance_tracking():
     db = SessionLocal()
     try:
         now = datetime.now(timezone.utc)
+        from .services.avail_score_service import compute_all_avail_scores
         from .services.performance_service import (
             compute_all_vendor_scorecards,
             compute_buyer_leaderboard,
         )
-        from .services.avail_score_service import compute_all_avail_scores
 
         loop = asyncio.get_running_loop()
         vs_result = await asyncio.wait_for(
@@ -1679,7 +1676,7 @@ async def _job_contact_status_compute():
       - Last activity >90 days → 'inactive'
       - No activity ever → keep 'new' or set 'inactive' if created >90 days ago
     """
-    from sqlalchemy import func, case
+    from sqlalchemy import func
 
     from .database import SessionLocal
     from .models import SiteContact

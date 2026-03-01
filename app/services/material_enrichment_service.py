@@ -1,13 +1,12 @@
 """AI-powered material card enrichment — description + commodity classification."""
 
-from loguru import logger
 from datetime import datetime, timezone
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..models import MaterialCard
 from ..services.specialty_detector import COMMODITY_MAP
-
 
 VALID_CATEGORIES = sorted(COMMODITY_MAP.keys()) + ["other"]
 
@@ -50,7 +49,6 @@ async def enrich_material_cards(
 
     Returns {"enriched": int, "skipped": int, "errors": int}.
     """
-    from ..utils.claude_client import claude_structured
 
     cards = (
         db.query(MaterialCard)

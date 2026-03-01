@@ -4,14 +4,13 @@ Provides upsert_purchase() — called by offer/quote won hooks
 and future import scripts to maintain the customer_part_history table.
 """
 
-from loguru import logger
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..models import CustomerPartHistory, MaterialCard
-
 
 
 def upsert_purchase(

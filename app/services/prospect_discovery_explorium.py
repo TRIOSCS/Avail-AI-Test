@@ -5,7 +5,6 @@ signals in a single API call. Normalizes results into ProspectAccountCreate sche
 """
 
 import asyncio
-from datetime import datetime, timezone
 
 from loguru import logger
 
@@ -13,8 +12,6 @@ from app.config import settings
 from app.http_client import http
 from app.schemas.prospect_account import ProspectAccountCreate
 from app.services.prospect_scoring import (
-    ICP_SEGMENTS,
-    apply_historical_bonus,
     calculate_fit_score,
     calculate_readiness_score,
 )

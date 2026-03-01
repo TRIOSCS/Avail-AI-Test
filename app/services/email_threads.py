@@ -16,16 +16,15 @@ Depends on: utils/graph_client.py, models.py, services/activity_service.py
 """
 
 import asyncio
-from loguru import logger
 import re
 import time
 from datetime import datetime, timedelta, timezone
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models import Contact, Requirement, Sighting, VendorCard, VendorContact, VendorResponse
 from app.utils.graph_client import GraphClient
-
 
 # ── In-memory cache ────────────────────────────────────────────────────
 # key → (timestamp, data)

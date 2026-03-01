@@ -6,9 +6,9 @@ Falls back to archived requisitions for customers without CPH data.
 Scoring: composite of recency (40%), frequency (30%), margin potential (30%).
 """
 
-from loguru import logger
 from datetime import datetime, timedelta, timezone
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -25,7 +25,6 @@ from ..models import (
     Sighting,
 )
 from ..models.purchase_history import CustomerPartHistory
-
 
 _last_scan_at = datetime.min.replace(tzinfo=timezone.utc)
 

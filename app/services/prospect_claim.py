@@ -8,7 +8,6 @@ Handles what happens when a salesperson claims a prospect:
 5. Enrichment status polling
 """
 
-import asyncio
 from datetime import datetime, timezone
 
 from loguru import logger
@@ -17,7 +16,6 @@ from sqlalchemy.orm import Session
 from app.models import Company, User
 from app.models.crm import CustomerSite, SiteContact
 from app.models.prospect_account import ProspectAccount
-
 
 # ── Claim ────────────────────────────────────────────────────────────
 

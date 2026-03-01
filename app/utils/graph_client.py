@@ -10,10 +10,10 @@ Usage:
 """
 
 import asyncio
+
 from loguru import logger
 
 from app.http_client import http
-
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 

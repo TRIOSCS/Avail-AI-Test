@@ -1,17 +1,15 @@
 """API connectors — Nexar (Octopart) and BrokerBin."""
 
 import asyncio
-from loguru import logger
 import random
 import time
 from abc import ABC, abstractmethod
 from urllib.parse import quote_plus
 
 import httpx
+from loguru import logger
 
 from ..utils import safe_float, safe_int
-
-
 
 # ── Async-compatible circuit breaker ─────────────────────────────────
 # Opens after `fail_max` consecutive failures, resets after `reset_timeout` seconds.

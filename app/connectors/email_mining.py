@@ -15,12 +15,12 @@ Hardening:
 Enriches VendorCards with verified contact info from real correspondence.
 """
 
-from loguru import logger
 import re
 from datetime import datetime, timedelta, timezone
 
-from app.utils.graph_client import GraphSyncStateExpired
+from loguru import logger
 
+from app.utils.graph_client import GraphSyncStateExpired
 
 # Common stock list file extensions
 STOCK_LIST_EXTENSIONS = {".xlsx", ".xls", ".csv", ".tsv"}

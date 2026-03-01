@@ -47,7 +47,6 @@ def run_auto_dedup(db: Session) -> dict:
 
 def _dedup_vendors(db: Session) -> int:
     """Find and merge duplicate vendor cards using fuzzy matching."""
-    from ..vendor_utils import normalize_vendor_name
     from .vendor_merge_service import merge_vendor_cards
 
     try:

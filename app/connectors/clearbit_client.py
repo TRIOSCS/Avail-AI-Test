@@ -5,11 +5,11 @@ Gracefully returns empty results when API key is not configured.
 """
 
 import asyncio
+
 from loguru import logger
 
 from app.config import settings
 from app.http_client import http
-
 
 _semaphore = asyncio.Semaphore(5)
 

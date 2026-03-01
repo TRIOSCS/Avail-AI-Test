@@ -67,7 +67,6 @@ async def main():
     from .config import IcsConfig
     from .queue_manager import (
         get_next_queued_item,
-        get_queue_stats,
         mark_completed,
         mark_status,
         recover_stale_searches,

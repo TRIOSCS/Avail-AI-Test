@@ -5,11 +5,11 @@ Gracefully returns empty results when API key is not configured.
 """
 
 import asyncio
+
 from loguru import logger
 
 from app.config import settings
 from app.http_client import http
-
 
 ROCKETREACH_BASE = "https://api.rocketreach.co/api/v2"
 _semaphore = asyncio.Semaphore(3)

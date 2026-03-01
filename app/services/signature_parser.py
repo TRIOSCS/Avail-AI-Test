@@ -4,10 +4,10 @@ Uses regex for fast extraction, falls back to Claude AI for complex signatures.
 Caches results in EmailSignatureExtract table to avoid re-parsing.
 """
 
-from loguru import logger
 import re
 from datetime import datetime, timezone
 
+from loguru import logger
 
 # ── Regex patterns for signature extraction ──────────────────────────
 

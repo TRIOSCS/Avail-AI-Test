@@ -1,7 +1,6 @@
 """Prospect pool router — browse, claim, and dismiss unowned companies."""
 
 from fastapi import APIRouter, Depends, HTTPException
-from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..database import get_db

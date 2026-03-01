@@ -13,9 +13,8 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..utils.sql_helpers import escape_like
 from ..dependencies import require_user
-from ..models import Company, User
+from ..models import User
 from ..models.discovery_batch import DiscoveryBatch
 from ..models.prospect_account import ProspectAccount
 from ..services.prospect_claim import (
@@ -24,6 +23,7 @@ from ..services.prospect_claim import (
     claim_prospect,
     trigger_deep_enrichment_bg,
 )
+from ..utils.sql_helpers import escape_like
 
 router = APIRouter()
 

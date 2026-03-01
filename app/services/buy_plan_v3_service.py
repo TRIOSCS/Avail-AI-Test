@@ -13,10 +13,10 @@ Depends on: models (BuyPlanV3, BuyPlanLine, Offer, Requirement, VendorCard, User
 """
 
 import json
-from loguru import logger
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
+from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
@@ -36,7 +36,6 @@ from ..models.buy_plan import (
     SOVerificationStatus,
     VerificationGroupMember,
 )
-
 
 # ── Routing maps (loaded once) ──────────────────────────────────────
 

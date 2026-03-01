@@ -8,13 +8,13 @@ Called by: search_service.py
 Depends on: BaseConnector, httpx
 """
 
-from loguru import logger
 from urllib.parse import quote_plus
+
+from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
 from .sources import BaseConnector
-
 
 
 class Element14Connector(BaseConnector):

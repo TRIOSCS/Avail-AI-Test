@@ -1,14 +1,14 @@
 """Admin service — user management, system config, health."""
 
-from loguru import logger
 import os
 import time
 from datetime import datetime, timezone
 
+from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
-from ..config import APP_VERSION, settings
+from ..config import APP_VERSION
 from ..models import (
     ApiSource,
     Company,
@@ -22,8 +22,6 @@ from ..models import (
     User,
     VendorCard,
 )
-
-
 
 # ── User Management ──────────────────────────────────────────────────
 

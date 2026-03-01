@@ -10,7 +10,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.connectors.apollo_client import APOLLO_BASE, DEFAULT_TITLES
+from app.connectors.apollo_client import APOLLO_BASE
 from app.http_client import http
 from app.models.prospect_account import ProspectAccount
 

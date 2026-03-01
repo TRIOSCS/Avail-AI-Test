@@ -1,11 +1,9 @@
 """PDF document generation using WeasyPrint."""
 
-from loguru import logger
 from datetime import datetime, timezone
 
 from jinja2 import Environment, FileSystemLoader
 from sqlalchemy.orm import Session
-
 
 _jinja_env = Environment(
     loader=FileSystemLoader("app/templates/documents"),

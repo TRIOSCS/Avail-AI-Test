@@ -2,9 +2,9 @@
 
 import asyncio
 import json
-from loguru import logger
 from datetime import datetime, timedelta, timezone
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from .models import (
@@ -19,7 +19,6 @@ from .models import (
 )
 from .services.credential_service import get_credential_cached
 from .vendor_utils import normalize_vendor_name
-
 
 
 def _build_html_body(plain_text: str) -> str:

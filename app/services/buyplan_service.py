@@ -13,16 +13,14 @@ Depends on: utils/graph_client, models, config
 
 import asyncio
 import html
-from loguru import logger
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..http_client import http
 from ..models import ActivityLog, BuyPlan, Offer, User
 from ..services.credential_service import get_credential_cached
-
-
 
 # ── Background Task Helper ─────────────────────────────────────────────
 

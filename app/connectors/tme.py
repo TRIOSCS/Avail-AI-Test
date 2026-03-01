@@ -10,13 +10,13 @@ Depends on: BaseConnector, httpx, hmac
 import base64
 import hashlib
 import hmac
-from loguru import logger
 import urllib.parse
+
+from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
 from .sources import BaseConnector
-
 
 
 class TMEConnector(BaseConnector):

@@ -18,9 +18,7 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..database import get_db
-from ..dependencies import is_admin as _is_admin
 from ..dependencies import require_user
-from ..utils.sql_helpers import escape_like
 from ..models import (
     Contact,
     CustomerSite,
@@ -43,6 +41,7 @@ from ..schemas.ai import (
     RfqDraftRequest,
     SaveDraftOffersRequest,
 )
+from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["ai"])

@@ -10,7 +10,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..utils.sql_helpers import escape_like
 from ..dependencies import require_admin, require_user
 from ..models import (
     ActivityLog,
@@ -32,6 +31,7 @@ from ..schemas.enrichment import (
     VerifyEmailRequest,
 )
 from ..schemas.responses import EnrichmentQueueResponse
+from ..utils.sql_helpers import escape_like
 
 router = APIRouter(tags=["enrichment"])
 

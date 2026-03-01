@@ -15,16 +15,15 @@ Usage:
 """
 
 import hmac
-from loguru import logger
 import secrets
 import time
 from datetime import datetime, timedelta, timezone
 
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import GraphSubscription, User
-
 
 # Graph webhook subscriptions for mail expire after max 3 days (4230 min)
 SUBSCRIPTION_LIFETIME_HOURS = 70  # ~3 days, renew before expiry

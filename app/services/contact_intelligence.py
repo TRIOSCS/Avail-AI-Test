@@ -12,13 +12,11 @@ Core functions:
   - generate_contact_summary: Relationship summary
 """
 
-from loguru import logger
 from datetime import datetime, timedelta, timezone
 
+from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
-
-
 
 # ── Name splitting ──────────────────────────────────────────────────
 
@@ -545,7 +543,7 @@ def generate_contact_nudges(db: Session, vendor_card_id: int) -> list[dict]:
     Rule-based triage first, then Gradient AI enrichment for actionable messages.
     """
     from ..config import settings
-    from ..models import ActivityLog, VendorContact
+    from ..models import VendorContact
 
     contacts = (
         db.query(VendorContact)

@@ -11,7 +11,6 @@ All functions are idempotent — calling twice with same data doesn't duplicate.
 from datetime import datetime, timezone
 
 from loguru import logger
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.crm import Company
@@ -130,12 +129,12 @@ async def enrich_missing_signals(prospect_id: int, db: Session) -> bool:
         return False
 
     # Lazy import to avoid circular dependency
+    from app.http_client import http
     from app.services.prospect_discovery_explorium import (
         EXPLORIUM_BASE,
         SHARED_INTENT_TOPICS,
         _get_api_key,
     )
-    from app.http_client import http
 
     api_key = _get_api_key()
     if not api_key:

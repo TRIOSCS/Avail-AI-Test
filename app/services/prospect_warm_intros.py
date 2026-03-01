@@ -12,7 +12,6 @@ Called by: prospect_suggested router (serialization), prospect_signals (enrichme
 Depends on: models (VendorCard, SiteContact, EmailSignatureExtract, Sighting)
 """
 
-from datetime import datetime, timezone
 
 from loguru import logger
 from sqlalchemy import func

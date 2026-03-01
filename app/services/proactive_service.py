@@ -9,15 +9,14 @@ Depends on: models, config, utils/graph_client
 """
 
 import html
-from loguru import logger
 import secrets
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
+from loguru import logger
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
-from ..vendor_utils import normalize_vendor_name
 from ..models import (
     ActivityLog,
     BuyPlan,
@@ -32,9 +31,8 @@ from ..models import (
     Requisition,
     SiteContact,
     User,
-    VendorCard,
 )
-
+from ..vendor_utils import normalize_vendor_name
 
 _last_proactive_scan = datetime.min.replace(tzinfo=timezone.utc)
 

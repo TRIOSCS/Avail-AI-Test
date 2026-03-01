@@ -13,11 +13,10 @@ def find_company_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> l
       3. Tie → is_strategic wins
       4. Tie → lower id (older record) wins
     """
+    from sqlalchemy import func
     from thefuzz import fuzz
 
     from .models import Company, CustomerSite
-
-    from sqlalchemy import func
 
     # Load up to 500 active companies with site counts
     rows = (

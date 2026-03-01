@@ -12,15 +12,6 @@ Sub-modules:
 
 from fastapi import APIRouter
 
-from .buy_plans import router as buy_plans_router
-from .buy_plans_v3 import router as buy_plans_v3_router
-from .clone import router as clone_router
-from .companies import router as companies_router
-from .enrichment import router as enrichment_router
-from .offers import router as offers_router
-from .quotes import router as quotes_router
-from .sites import router as sites_router
-
 # Re-export helpers for backward compatibility (tests import from app.routers.crm)
 from ._helpers import (  # noqa: F401
     _build_quote_email_html,
@@ -30,6 +21,14 @@ from ._helpers import (  # noqa: F401
     quote_to_dict,
     record_changes,
 )
+from .buy_plans import router as buy_plans_router
+from .buy_plans_v3 import router as buy_plans_v3_router
+from .clone import router as clone_router
+from .companies import router as companies_router
+from .enrichment import router as enrichment_router
+from .offers import router as offers_router
+from .quotes import router as quotes_router
+from .sites import router as sites_router
 
 router = APIRouter()
 router.include_router(companies_router)

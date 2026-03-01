@@ -16,7 +16,6 @@ from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.prospect_account import ProspectAccount
 
-
 # ── SAM.gov Enrichment ──────────────────────────────────────────────
 
 

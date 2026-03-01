@@ -24,7 +24,6 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, joinedload
 
 from ..cache.decorators import cached_endpoint, invalidate_prefix
-from ..utils.sql_helpers import escape_like
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_buyer, require_user
 from ..models import (
@@ -70,6 +69,7 @@ from ..utils.normalization import (
     normalize_price,
     normalize_quantity,
 )
+from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
 from .rfq import _enrich_with_vendor_cards
 
@@ -1001,8 +1001,8 @@ async def update_requirement(
 def _enqueue_ics_nc_batch(requirement_ids: list[int]):
     """Queue requirements for ICS and NC browser-based searches (background task)."""
     from ..database import SessionLocal
-    from ..services.nc_worker.queue_manager import enqueue_for_nc_search
     from ..services.ics_worker.queue_manager import enqueue_for_ics_search
+    from ..services.nc_worker.queue_manager import enqueue_for_nc_search
     bg_db = SessionLocal()
     try:
         for rid in requirement_ids:

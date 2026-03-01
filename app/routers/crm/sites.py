@@ -2,12 +2,13 @@ import asyncio
 
 from fastapi import APIRouter, Depends, HTTPException
 from loguru import logger
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload
 
 from ...cache.decorators import invalidate_prefix
 from ...config import settings
 from ...database import get_db
-from ...dependencies import is_admin as _is_admin, require_buyer, require_user
+from ...dependencies import is_admin as _is_admin
+from ...dependencies import require_user
 from ...models import Company, CustomerSite, Requisition, SiteContact, User
 from ...schemas.crm import SiteContactCreate, SiteContactUpdate, SiteCreate, SiteUpdate
 from ...schemas.v13_features import SiteContactNoteLog

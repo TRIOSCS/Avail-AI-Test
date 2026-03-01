@@ -9,14 +9,12 @@ Depends on: models, database
 """
 
 import hashlib
-from loguru import logger
 from datetime import date, datetime, timedelta, timezone
 
+from loguru import logger
 from sqlalchemy import and_, or_
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
-
-from ..utils.sql_helpers import escape_like
 
 from ..models import (
     ActivityLog,
@@ -37,7 +35,7 @@ from ..models import (
     VendorResponse,
     VendorReview,
 )
-
+from ..utils.sql_helpers import escape_like
 
 # ── Constants ──────────────────────────────────────────────────────────
 VENDOR_WINDOW_DAYS = 90

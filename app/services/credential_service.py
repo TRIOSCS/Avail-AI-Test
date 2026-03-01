@@ -14,14 +14,13 @@ Depends on: config.py (secret_key), models.py (ApiSource)
 """
 
 import base64
-from loguru import logger
 import os
 import time
-
 
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings

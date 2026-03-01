@@ -4,17 +4,18 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from loguru import logger
-from sqlalchemy import String, func as sqlfunc
+from sqlalchemy import String
+from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ...cache.decorators import cached_endpoint, invalidate_prefix
-from ...utils.sql_helpers import escape_like
 from ...config import settings
 from ...database import get_db
 from ...dependencies import require_user
-from ...models import Company, CustomerSite, Requisition, SiteContact, User
+from ...models import Company, CustomerSite, Requisition, User
 from ...schemas.crm import CompanyCreate, CompanyUpdate
 from ...services.credential_service import get_credential_cached
+from ...utils.sql_helpers import escape_like
 
 router = APIRouter()
 

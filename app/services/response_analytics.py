@@ -20,7 +20,6 @@ from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-
 # ── Health score weights ─────────────────────────────────────────────
 W_RESPONSE_RATE = 0.30
 W_RESPONSE_TIME = 0.25

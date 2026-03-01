@@ -10,17 +10,16 @@ Depends on: models/crm.py, models/intelligence.py, models/quotes.py
 """
 
 import asyncio
-from loguru import logger
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
+from loguru import logger
 from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
 from ..cache.decorators import cached_endpoint
 from ..database import get_db
 from ..dependencies import require_user
-
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
@@ -39,7 +38,6 @@ def needs_attention(
     """
     from ..models.crm import Company, CustomerSite
     from ..models.intelligence import ActivityLog
-    from ..models.offers import Offer
     from ..models.quotes import Quote
     from ..models.sourcing import Requisition
 
@@ -209,7 +207,7 @@ def attention_feed(
     from ..models.crm import Company, CustomerSite
     from ..models.intelligence import ActivityLog
     from ..models.offers import Offer
-    from ..models.quotes import BuyPlan, Quote
+    from ..models.quotes import Quote
     from ..models.sourcing import Requisition
 
     now = datetime.now(timezone.utc)
@@ -434,7 +432,6 @@ def morning_brief(
     from ..models.crm import Company, CustomerSite
     from ..models.intelligence import ActivityLog, ProactiveMatch
     from ..models.quotes import Quote
-    from ..models.sourcing import Requisition
 
     now = datetime.now(timezone.utc)
     week_ago = now - timedelta(days=7)
@@ -628,7 +625,7 @@ def buyer_brief(
 
     scope='my' filters to current user's work; scope='team' shows all.
     """
-    from ..models.offers import Contact, Offer
+    from ..models.offers import Offer
     from ..models.quotes import BuyPlan, Quote
     from ..models.sourcing import Requisition
 

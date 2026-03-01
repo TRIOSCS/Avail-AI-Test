@@ -8,8 +8,8 @@ international vendors.
 """
 
 import hashlib
-from loguru import logger
 
+from loguru import logger
 
 # Maximum file size for processing (10 MB)
 MAX_FILE_SIZE = 10 * 1024 * 1024

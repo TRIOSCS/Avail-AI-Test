@@ -13,10 +13,10 @@ Usage:
 import functools
 import hashlib
 import json
+
 from loguru import logger
 
 from .intel_cache import get_cached, set_cached
-
 
 
 def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | None = None):

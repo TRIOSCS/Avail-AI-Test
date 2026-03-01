@@ -6,11 +6,11 @@ Depends on: app.config.settings.lusha_api_key, app.http_client.http
 """
 
 import asyncio
+
 from loguru import logger
 
 from app.config import settings
 from app.http_client import http
-
 
 LUSHA_BASE = "https://api.lusha.com"
 _semaphore = asyncio.Semaphore(10)

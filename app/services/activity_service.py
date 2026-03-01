@@ -7,15 +7,13 @@ Usage:
     from app.services.activity_service import log_email_activity, log_call_activity, match_contact
 """
 
-from loguru import logger
 from datetime import datetime, timezone
 
+from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
-
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  CONTACT MATCHING — email or phone → company or vendor

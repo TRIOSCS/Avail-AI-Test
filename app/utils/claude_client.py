@@ -17,13 +17,13 @@ Usage:
 """
 
 import json
-from loguru import logger
 from typing import Any
 
 import sentry_sdk
+from loguru import logger
+
 from app.http_client import http
 from app.services.credential_service import get_credential_cached
-
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"

@@ -40,7 +40,6 @@ async def scan_calendar_events(
         }
     """
     from app.config import settings
-    from app.models import ActivityLog
     from app.utils.graph_client import GraphClient
 
     gc = GraphClient(token)

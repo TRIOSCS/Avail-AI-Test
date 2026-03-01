@@ -7,7 +7,6 @@ concentrations, mirroring the vendor_analysis_service pattern.
 from datetime import datetime, timezone
 
 from loguru import logger
-from sqlalchemy import func as sqlfunc
 
 from ..models import Company, CustomerSite, Requirement, Requisition, Sighting
 

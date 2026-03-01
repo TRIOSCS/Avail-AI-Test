@@ -7,7 +7,6 @@ from ..utils import safe_float, safe_int
 from .sources import BaseConnector
 
 
-
 class SourcengineConnector(BaseConnector):
     """Sourcengine REST API — search by MPN across suppliers."""
 

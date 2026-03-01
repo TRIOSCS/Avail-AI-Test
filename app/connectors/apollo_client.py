@@ -9,12 +9,12 @@ API docs: https://docs.apollo.io/reference/people-enrichment
 Gracefully returns empty results when API key is not configured.
 """
 
-from loguru import logger
 from typing import Any
+
+from loguru import logger
 
 from app.config import settings
 from app.http_client import http
-
 
 APOLLO_BASE = "https://api.apollo.io/api/v1"
 

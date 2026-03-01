@@ -8,14 +8,13 @@ unavailable (e.g., during development without Docker).
 """
 
 import json
-from loguru import logger
 import os
 from datetime import datetime, timedelta, timezone
 
+from loguru import logger
 from sqlalchemy import text
 
 from app.database import SessionLocal
-
 
 # Lazy-initialized Redis client
 _redis_client = None

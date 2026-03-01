@@ -2,14 +2,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
-from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ...config import settings
 from ...database import get_db
-from ...dependencies import is_admin as _is_admin, require_buyer, require_user
+from ...dependencies import is_admin as _is_admin
+from ...dependencies import require_user
 from ...models import (
-    ActivityLog,
     BuyPlan,
     CustomerSite,
     Offer,
@@ -27,8 +26,6 @@ from ...schemas.crm import (
     BuyPlanResubmit,
     BuyPlanSubmit,
 )
-from ...services.credential_service import get_credential_cached
-from ._helpers import quote_to_dict
 
 router = APIRouter()
 

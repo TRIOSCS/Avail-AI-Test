@@ -1,14 +1,12 @@
 """SQLAlchemy TypeDecorator for transparent Fernet encryption of text columns."""
 
 import base64
-from loguru import logger
 
 from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from loguru import logger
 from sqlalchemy import Text, TypeDecorator
-
-
 
 _fernet_instance = None
 

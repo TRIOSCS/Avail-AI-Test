@@ -11,17 +11,14 @@ Called by: scheduler.py (_job_integrity_check)
 Depends on: models (MaterialCard, Requirement, Sighting, Offer), search_service
 """
 
-from loguru import logger
 from datetime import datetime, timezone
 
-from sqlalchemy import func, text
+from loguru import logger
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ..models import MaterialCard, MaterialCardAudit, MaterialVendorHistory, Offer, Requirement, Sighting
-from ..utils.normalization import normalize_mpn_key
+from ..models import MaterialCard, MaterialVendorHistory, Offer, Requirement, Sighting
 from .audit_service import log_audit
-
-
 
 # ── Integrity Checks ─────────────────────────────────────────────────
 

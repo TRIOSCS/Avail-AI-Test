@@ -14,12 +14,11 @@ blended 80/20 with buyer review ratings to produce the final vendor_score.
 Cold start: vendors with < 5 offers get vendor_score=None, is_new_vendor=True.
 """
 
-from loguru import logger
 from datetime import datetime, timezone
 
+from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-
 
 MIN_OFFERS_FOR_SCORE = 5
 ADVANCEMENT_WEIGHT = 0.80
