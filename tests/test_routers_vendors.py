@@ -770,6 +770,54 @@ def test_delete_vendor_contact_not_found(client, db_session, test_vendor_card):
     assert resp.status_code == 404
 
 
+# ── Bulk vendor contacts ────────────────────────────────────────────────
+
+
+def test_vendor_contacts_bulk_empty(client, db_session):
+    """GET /api/vendor-contacts/bulk with no data returns empty items."""
+    resp = client.get("/api/vendor-contacts/bulk")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["items"] == []
+    assert data["total"] == 0
+    assert "limit" in data
+    assert "offset" in data
+
+
+def test_vendor_contacts_bulk_with_data(client, db_session, test_vendor_card, test_vendor_contact):
+    """GET /api/vendor-contacts/bulk returns contacts with vendor_name."""
+    resp = client.get("/api/vendor-contacts/bulk")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] >= 1
+    assert len(data["items"]) >= 1
+    item = data["items"][0]
+    assert "vendor_name" in item
+    assert item["vendor_name"] == "Arrow Electronics"
+    assert "email" in item
+    assert item["email"] == "john@arrow.com"
+
+
+def test_vendor_contacts_bulk_pagination(client, db_session, test_vendor_card, test_vendor_contact):
+    """Bulk endpoint respects limit and offset."""
+    resp = client.get("/api/vendor-contacts/bulk", params={"limit": 1, "offset": 0})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["limit"] == 1
+    assert data["offset"] == 0
+    assert len(data["items"]) <= 1
+
+
+def test_vendor_contacts_bulk_excludes_blacklisted(client, db_session, test_vendor_card, test_vendor_contact):
+    """Blacklisted vendor contacts are excluded from bulk response."""
+    test_vendor_card.is_blacklisted = True
+    db_session.commit()
+    resp = client.get("/api/vendor-contacts/bulk")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == 0
+
+
 # ── Group 4: Materials CRUD (8 tests) ───────────────────────────────────
 
 

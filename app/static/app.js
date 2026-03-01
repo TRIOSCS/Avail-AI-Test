@@ -1060,47 +1060,33 @@ async function loadContacts() {
     try {
         const people = [];
 
-        // Fetch vendor contacts and customer contacts in parallel
-        const [vendorResp, customerContacts] = await Promise.all([
-            apiFetch('/api/vendors?limit=500').catch(e => { showToast('Failed to load vendors','warn'); return []; }),
+        // Fetch vendor contacts (bulk) and customer contacts in parallel
+        const [bulkResp, customerContacts] = await Promise.all([
+            apiFetch('/api/vendor-contacts/bulk?limit=5000').catch(e => { showToast('Failed to load vendor contacts','warn'); return {items:[]}; }),
             apiFetch('/api/customer-contacts').catch(e => { showToast('Failed to load customer contacts','warn'); return []; }),
         ]);
 
-        // Step 1: Vendor contacts (existing logic)
-        const vendors = vendorResp.vendors || vendorResp || [];
-        if (Array.isArray(vendors) && vendors.length) {
-            const batchSize = 20;
-            for (let i = 0; i < vendors.length; i += batchSize) {
-                const batch = vendors.slice(i, i + batchSize);
-                const results = await Promise.allSettled(
-                    batch.map(v => apiFetch(`/api/vendors/${v.id}/contacts`).then(contacts => ({ v, contacts })))
-                );
-                for (const r of results) {
-                    if (r.status !== 'fulfilled') continue;
-                    const { v, contacts } = r.value;
-                    if (!Array.isArray(contacts)) continue;
-                    for (const c of contacts) {
-                        if (!c.full_name && !c.email) continue;
-                        people.push({
-                            id: c.id,
-                            vendor_id: v.id,
-                            vendor_name: v.display_name || 'Unknown',
-                            company_name: v.display_name || 'Unknown',
-                            full_name: c.full_name || '',
-                            title: c.title || '',
-                            email: c.email || '',
-                            phone: c.phone || '',
-                            source: c.source || '',
-                            is_verified: c.is_verified || false,
-                            confidence: c.confidence || 0,
-                            interaction_count: c.interaction_count || 0,
-                            last_interaction_at: c.last_interaction_at || null,
-                            first_seen_at: c.first_seen_at || null,
-                            contact_type: 'vendor',
-                        });
-                    }
-                }
-            }
+        // Step 1: Vendor contacts from bulk endpoint
+        const vendorItems = bulkResp.items || [];
+        for (const c of vendorItems) {
+            if (!c.full_name && !c.email) continue;
+            people.push({
+                id: c.id,
+                vendor_id: c.vendor_id,
+                vendor_name: c.vendor_name || 'Unknown',
+                company_name: c.vendor_name || 'Unknown',
+                full_name: c.full_name || '',
+                title: c.title || '',
+                email: c.email || '',
+                phone: c.phone || '',
+                source: c.source || '',
+                is_verified: c.is_verified || false,
+                confidence: c.confidence || 0,
+                interaction_count: c.interaction_count || 0,
+                last_interaction_at: c.last_interaction_at || null,
+                first_seen_at: c.first_seen_at || null,
+                contact_type: 'vendor',
+            });
         }
 
         // Step 2: Customer contacts
@@ -1132,7 +1118,7 @@ async function loadContacts() {
         renderContacts(q);
     } catch (err) {
         console.error('loadContacts error:', err);
-        list.innerHTML = '<p class="empty">Failed to load contacts.</p>';
+        list.textContent = 'Failed to load contacts.';
     }
 }
 

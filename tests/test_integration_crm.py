@@ -31,7 +31,7 @@ def test_list_companies(client):
     client.post("/api/companies?force=true", json={"name": "ListCo Beta"})
     resp = client.get("/api/companies")
     assert resp.status_code == 200
-    names = [c["name"] for c in resp.json()]
+    names = [c["name"] for c in resp.json()["items"]]
     assert "ListCo Alpha" in names
     assert "ListCo Beta" in names
 

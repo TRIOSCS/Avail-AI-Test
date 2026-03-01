@@ -28,20 +28,19 @@ async def list_companies(
     owner_id: int = 0,
     unassigned: int = 0,
     tag: str = "",
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """List active companies with sites and open requisition counts."""
+    """List active companies with denormalized counts (no sites loaded)."""
 
-    @cached_endpoint(prefix="company_list", ttl_hours=0.5, key_params=["search", "owner_id", "unassigned", "tag"])
-    def _fetch(search, owner_id, unassigned, tag, db):
+    @cached_endpoint(prefix="company_list", ttl_hours=0.5, key_params=["search", "owner_id", "unassigned", "tag", "limit", "offset"])
+    def _fetch(search, owner_id, unassigned, tag, limit, offset, db):
         query = (
             db.query(Company)
             .filter(Company.is_active == True)  # noqa: E712
-            .options(
-                selectinload(Company.sites).joinedload(CustomerSite.owner),
-                joinedload(Company.account_owner),
-            )
+            .options(joinedload(Company.account_owner))
         )
         if search.strip():
             safe = escape_like(search.strip())
@@ -54,57 +53,21 @@ async def list_companies(
             )
         if unassigned:
             query = query.filter(Company.account_owner_id == None)  # noqa: E711
-        companies = query.order_by(Company.name).limit(500).all()
-
-        # Pre-fetch open requisition counts per site (avoids N+1 query per site)
-        company_ids = [c.id for c in companies]
-        site_open_counts: dict[int, int] = {}
-        if company_ids:
-            count_rows = (
-                db.query(
-                    Requisition.customer_site_id,
-                    sqlfunc.count(Requisition.id),
+        if owner_id and not unassigned:
+            # Server-side owner filter: only companies with at least one site owned by this user
+            query = query.filter(
+                Company.id.in_(
+                    db.query(CustomerSite.company_id)
+                    .filter(CustomerSite.owner_id == owner_id, CustomerSite.is_active == True)  # noqa: E712
                 )
-                .filter(
-                    Requisition.status.notin_(["archived", "won", "lost"]),
-                )
-                .join(CustomerSite)
-                .filter(CustomerSite.company_id.in_(company_ids))
-                .group_by(Requisition.customer_site_id)
-                .all()
             )
-            site_open_counts = {row[0]: row[1] for row in count_rows}
+        query = query.order_by(Company.name)
+        total = query.count()
+        companies = query.offset(offset).limit(limit).all()
 
-        result = []
+        items = []
         for c in companies:
-            sites = []
-            for s in c.sites:
-                if not s.is_active:
-                    continue
-                if owner_id and not unassigned and s.owner_id != owner_id:
-                    continue
-                open_count = site_open_counts.get(s.id, 0)
-                sites.append(
-                    {
-                        "id": s.id,
-                        "site_name": s.site_name,
-                        "owner_id": s.owner_id,
-                        "owner_name": s.owner.name if s.owner else None,
-                        "contact_name": s.contact_name,
-                        "contact_email": s.contact_email,
-                        "contact_phone": s.contact_phone,
-                        "contact_title": s.contact_title,
-                        "payment_terms": s.payment_terms,
-                        "shipping_terms": s.shipping_terms,
-                        "city": s.city,
-                        "state": s.state,
-                        "open_reqs": open_count,
-                        "notes": s.notes,
-                    }
-                )
-            if owner_id and not unassigned and not sites:
-                continue
-            result.append(
+            items.append(
                 {
                     "id": c.id,
                     "name": c.name,
@@ -135,13 +98,16 @@ async def list_companies(
                     "account_owner_name": (c.account_owner.name if c.account_owner else None) if c.account_owner_id else None,
                     "customer_enrichment_status": c.customer_enrichment_status,
                     "customer_enrichment_at": c.customer_enrichment_at.isoformat() if c.customer_enrichment_at else None,
-                    "site_count": len(sites),
-                    "sites": sites,
+                    "site_count": c.site_count or 0,
+                    "open_req_count": c.open_req_count or 0,
                 }
             )
-        return result
+        return {"items": items, "total": total, "limit": limit, "offset": offset}
 
-    return _fetch(search=search, owner_id=owner_id, unassigned=unassigned, tag=tag, db=db)
+    return await asyncio.to_thread(
+        _fetch, search=search, owner_id=owner_id, unassigned=unassigned,
+        tag=tag, limit=limit, offset=offset, db=db,
+    )
 
 
 @router.get("/api/companies/typeahead")

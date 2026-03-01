@@ -50,6 +50,10 @@ class Company(Base):
     commodity_tags = Column(JSON, default=list)
     material_tags_updated_at = Column(DateTime)
 
+    # Denormalized counts (kept in sync by PostgreSQL triggers)
+    site_count = Column(Integer, default=0, server_default="0")
+    open_req_count = Column(Integer, default=0, server_default="0")
+
     # Record origin tracking
     source = Column(String(50), default="manual")
 

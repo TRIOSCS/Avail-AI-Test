@@ -36,6 +36,9 @@ function invalidateCompanyCache(companyId) {
 }
 
 let crmCustomers = [];
+let _custTotal = 0;
+let _custOffset = 0;
+const _CUST_PAGE_SIZE = 100;
 let crmOffers = [];
 let crmQuote = null;
 let selectedOffers = new Set();
@@ -177,45 +180,55 @@ async function showCustomers() {
 }
 
 let _custAbort = null;
-async function loadCustomers() {
+async function loadCustomers(append) {
     if (_custAbort) { try { _custAbort.abort(); } catch(e){} }
     _custAbort = new AbortController();
     var cl = document.getElementById('custList');
-    if (cl && (!crmCustomers || !crmCustomers.length)) cl.innerHTML = window.skeletonRows ? window.skeletonRows(5) : '<div class="spinner-row"><div class="spinner"></div>Loading companies…</div>';
+    if (!append) {
+        _custOffset = 0;
+        // skeleton rows use safe static HTML (no user input)
+        if (cl && (!crmCustomers || !crmCustomers.length)) cl.innerHTML = window.skeletonRows ? window.skeletonRows(5) : '<div class="spinner-row"><div class="spinner"></div>Loading companies\u2026</div>';
+    }
     try {
         const filter = document.getElementById('custFilter')?.value || '';
         const isSalesOnly = window.userRole === 'sales';
         const myOnly = document.getElementById('custMyOnly')?.checked;
-        let url = '/api/companies?search=' + encodeURIComponent(filter);
+        let url = '/api/companies?search=' + encodeURIComponent(filter) + '&limit=' + _CUST_PAGE_SIZE + '&offset=' + _custOffset;
         if ((isSalesOnly || myOnly) && window.userId) url += '&owner_id=' + window.userId;
         if (_custFilterMode === 'unassigned') url += '&unassigned=1';
         const [result, reqs] = await Promise.all([
-            apiFetch(url, {signal: _custAbort.signal}).catch(e => { if (e.name !== 'AbortError') showToast('Failed to load accounts', 'error'); return []; }),
+            apiFetch(url, {signal: _custAbort.signal}).catch(e => { if (e.name !== 'AbortError') showToast('Failed to load accounts', 'error'); return {items:[],total:0}; }),
             apiFetch('/api/requisitions', {signal: _custAbort.signal}).catch(e => { if (e.name !== 'AbortError') showToast('Failed to load requisitions','warn'); return []; }),
         ]);
-        crmCustomers = (Array.isArray(result) ? result : []).filter(c =>
+        const items = (result.items || result || []).filter(c =>
             !c.account_type || c.account_type.toLowerCase() !== 'vendor'
         );
+        _custTotal = result.total || items.length;
+        if (append) {
+            crmCustomers = crmCustomers.concat(items);
+        } else {
+            crmCustomers = items;
+        }
+        _custOffset = crmCustomers.length;
         _enrichCustomersWithReqStats(crmCustomers, Array.isArray(reqs) ? reqs : []);
         renderCustomers();
     } catch (e) { if (e.name === 'AbortError') return; showToast('Failed to load customers', 'error'); console.error(e); }
 }
 
+async function loadMoreCustomers() {
+    await loadCustomers(true);
+}
+
 function _enrichCustomersWithReqStats(companies, reqs) {
-    // Build a map: site_id → company_id
-    const siteToCompany = {};
-    for (const c of companies) {
-        for (const s of (c.sites || [])) {
-            siteToCompany[s.id] = c.id;
-        }
-    }
+    // Build company id set for fast lookup
+    const companyIds = new Set(companies.map(c => c.id));
     // Compute per-company: win rate and 90-day revenue
     const now = Date.now();
     const d90 = 90 * 86400000;
     const compStats = {};
     for (const r of reqs) {
-        const cid = r.customer_site_id ? siteToCompany[r.customer_site_id] : null;
-        if (!cid) continue;
+        const cid = r.company_id || null;
+        if (!cid || !companyIds.has(cid)) continue;
         if (!compStats[cid]) compStats[cid] = { won: 0, lost: 0, total: 0, revenue: 0, lastReqDate: null };
         const st = (r.status || '').toLowerCase();
         if (st === 'won' || st === 'lost') compStats[cid].total++;
@@ -250,10 +263,13 @@ async function goToCompany(companyId) {
     if (viewEl) viewEl.style.display = 'flex';
     setCurrentReqId(null);
     try {
-        crmCustomers = await apiFetch('/api/companies');
-        crmCustomers = (Array.isArray(crmCustomers) ? crmCustomers : []).filter(c =>
+        const result = await apiFetch('/api/companies');
+        const items = result.items || result || [];
+        crmCustomers = (Array.isArray(items) ? items : []).filter(c =>
             !c.account_type || c.account_type.toLowerCase() !== 'vendor'
         );
+        _custTotal = result.total || crmCustomers.length;
+        _custOffset = crmCustomers.length;
         renderCustomers();
     } catch (e) { showToast('Failed to load customers', 'error'); return; }
     setTimeout(() => openCustDrawer(companyId), 150);
@@ -291,7 +307,7 @@ function renderCustomers() {
 
     // Apply view filters
     let filtered = [...crmCustomers];
-    if (_custOwnerFilterId) filtered = filtered.filter(c => c.sites && c.sites.some(s => s.owner_id === _custOwnerFilterId));
+    // Owner filtering is now server-side via owner_id param; skip client filter
     if (_custFilterMode === 'strategic') filtered = filtered.filter(c => c.is_strategic);
     if (_custFilterMode === 'at-risk') filtered = filtered.filter(c => _custHealthColor(c) === 'red');
     if (_custFilterMode === 'stale') {
@@ -308,7 +324,7 @@ function renderCustomers() {
                 case 'health': va = _custHealthColor(a) === 'green' ? 0 : _custHealthColor(a) === 'amber' ? 1 : 2; vb = _custHealthColor(b) === 'green' ? 0 : _custHealthColor(b) === 'amber' ? 1 : 2; break;
                 case 'owner': va = (a.account_owner_name || 'zzz'); vb = (b.account_owner_name || 'zzz'); break;
                 case 'sites': va = (a.site_count || 0); vb = (b.site_count || 0); break;
-                case 'reqs': va = (a.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0); vb = (b.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0); break;
+                case 'reqs': va = (a.open_req_count || 0); vb = (b.open_req_count || 0); break;
                 case 'type': va = (a.account_type || 'zzz'); vb = (b.account_type || 'zzz'); break;
                 case 'revenue': va = (a.revenue_90d || 0); vb = (b.revenue_90d || 0); break;
                 case 'winrate': va = (a.win_rate || 0); vb = (b.win_rate || 0); break;
@@ -322,7 +338,7 @@ function renderCustomers() {
         filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
     }
 
-    if (countEl) countEl.textContent = filtered.length + ' accounts';
+    if (countEl) countEl.textContent = filtered.length + (_custTotal > crmCustomers.length ? ' of ' + _custTotal : '') + ' accounts';
 
     // Build table
     const thSort = (col, label) => {
@@ -349,7 +365,7 @@ function renderCustomers() {
         const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
         const healthColor = _custHealthColor(c);
         const healthLabel = _custHealthLabel(c);
-        const openReqs = (c.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0);
+        const openReqs = c.open_req_count || 0;
         const checked = _custSelectedIds.has(c.id) ? ' checked' : '';
         const activeRow = _selectedCustId === c.id ? ' active-row' : '';
         const acctType = c.account_type || 'Standard';
@@ -379,6 +395,11 @@ function renderCustomers() {
     }
     html += '</tbody></table>';
 
+    // Load More button if there are more pages
+    if (_custOffset < _custTotal) {
+        html += '<div style="text-align:center;padding:12px"><button class="btn btn-ghost" onclick="loadMoreCustomers()">Load More (' + crmCustomers.length + ' of ' + _custTotal + ')</button></div>';
+    }
+
     // Mobile: render cards instead of table
     if (window.__isMobile) {
         let mHtml = '';
@@ -394,7 +415,7 @@ function renderCustomers() {
 function _renderCustCardMobile(c) {
     const displayName = c.name.replace(/\s*(bucket|pass)\s*$/i, '').trim();
     const healthColor = _custHealthColor(c);
-    const openReqs = (c.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0);
+    const openReqs = c.open_req_count || 0;
     const rev90 = c.revenue_90d != null ? '$' + Number(c.revenue_90d).toLocaleString(undefined, {minimumFractionDigits:0, maximumFractionDigits:0}) : '';
     const owner = c.account_owner_name || '';
 
@@ -514,8 +535,9 @@ async function openCustDrawer(companyId, tab) {
             crmCustomers = cached;
         } else {
             try {
-                const companies = await apiFetch('/api/companies?search=');
-                crmCustomers = (Array.isArray(companies) ? companies : []).filter(c =>
+                const result = await apiFetch('/api/companies?search=');
+                const items = result.items || result || [];
+                crmCustomers = (Array.isArray(items) ? items : []).filter(c =>
                     c && typeof c === 'object' && c.id && c.name
                 );
                 _setCachedCompanyDetail('_all', crmCustomers);
@@ -702,16 +724,41 @@ async function _autoLoadAccountSummary(companyId) {
     }
 }
 
-function switchCustDrawerTab(tab, btn) {
+async function switchCustDrawerTab(tab, btn) {
     _currentCustTab = tab; // persist for account switches
     document.querySelectorAll('#custDrawerTabs .drawer-tab').forEach(t => t.classList.remove('active'));
     if (btn) btn.classList.add('active');
     if (!_selectedCustId) return;
+    // Lazy-load full detail (sites, contacts) when needed
+    const needsDetail = (tab === 'sites' || tab === 'contacts' || tab === 'overview');
+    if (needsDetail) await _ensureCompanyDetail(_selectedCustId);
     if (tab === 'overview') _renderCustDrawerOverview(_selectedCustId);
     else if (tab === 'contacts') _renderCustDrawerContacts(_selectedCustId);
     else if (tab === 'sites') _renderCustDrawerSites(_selectedCustId);
     else if (tab === 'activity') _renderCustDrawerActivity(_selectedCustId);
     else if (tab === 'pipeline') _renderCustDrawerPipeline(_selectedCustId);
+}
+
+async function _ensureCompanyDetail(companyId) {
+    const c = crmCustomers.find(x => x.id === companyId);
+    if (!c) return;
+    if (c.sites) return; // already has detail data
+    // Check client cache first
+    const cached = _getCachedCompanyDetail(companyId);
+    if (cached && cached.sites) {
+        c.sites = cached.sites;
+        c._detail = cached;
+        return;
+    }
+    try {
+        const detail = await apiFetch('/api/companies/' + companyId);
+        c.sites = detail.sites || [];
+        c._detail = detail;
+        _setCachedCompanyDetail(companyId, detail);
+    } catch (e) {
+        logCatchError('_ensureCompanyDetail', e);
+        c.sites = [];
+    }
 }
 
 function _renderCustDrawerOverview(companyId) {
@@ -729,9 +776,9 @@ function _renderCustDrawerOverview(companyId) {
     const healthColor = _custHealthColor(c);
     const healthLabel = _custHealthLabel(c);
 
-    // Count contacts across all sites
-    const totalContacts = (c.sites || []).reduce((n, s) => n + (s.contact_count || 0), 0);
-    const openReqs = (c.sites || []).reduce((n, s) => n + (s.open_reqs || 0), 0);
+    // Use denormalized counts (or fetch from detail if available)
+    const totalContacts = c._detail ? (c._detail.sites || []).reduce((n, s) => n + (s.contacts || []).length, 0) : 0;
+    const openReqs = c.open_req_count || 0;
 
     let html = `<div class="drawer-section" style="border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">

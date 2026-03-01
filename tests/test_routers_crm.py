@@ -254,24 +254,27 @@ class TestCompanies:
     def test_list_companies_empty(self, client):
         resp = client.get("/api/companies")
         assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
+        data = resp.json()
+        assert "items" in data
+        assert isinstance(data["items"], list)
+        assert "total" in data
 
     def test_list_companies_with_data(self, client, db_session, test_company):
         resp = client.get("/api/companies")
         assert resp.status_code == 200
-        names = [c["name"] for c in resp.json()]
+        names = [c["name"] for c in resp.json()["items"]]
         assert "Acme Electronics" in names
 
     def test_list_companies_search(self, client, db_session, test_company):
         resp = client.get("/api/companies", params={"search": "Acme"})
         assert resp.status_code == 200
-        names = [c["name"] for c in resp.json()]
+        names = [c["name"] for c in resp.json()["items"]]
         assert "Acme Electronics" in names
 
     def test_list_companies_search_no_match(self, client, db_session, test_company):
         resp = client.get("/api/companies", params={"search": "Nonexistent"})
         assert resp.status_code == 200
-        assert resp.json() == []
+        assert resp.json()["items"] == []
 
     @patch("app.routers.crm.companies.get_credential_cached", return_value=None)
     @patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock)
@@ -779,35 +782,34 @@ class TestCompaniesAdditional:
         """Filter companies with no account_owner_id."""
         resp = client.get("/api/companies", params={"unassigned": 1})
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["items"]
         # test_company has no account_owner_id, so it should appear
         names = [c["name"] for c in data]
         assert "Acme Electronics" in names
 
     def test_list_companies_owner_filter(self, client, db_session, test_company, test_user, test_customer_site):
-        """Filter sites by owner_id — skip companies with no matching sites."""
+        """Filter by owner_id — only companies with matching site owners appear."""
         test_customer_site.owner_id = test_user.id
         db_session.commit()
 
         resp = client.get("/api/companies", params={"owner_id": test_user.id})
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["items"]
         # Should see the company since it has a site owned by the user
         found = [c for c in data if c["name"] == "Acme Electronics"]
-        if found:
-            assert any(s["owner_id"] == test_user.id for s in found[0]["sites"])
+        assert len(found) == 1
 
     def test_list_companies_owner_filter_no_match(self, client, db_session, test_company, test_customer_site):
         """owner_id filter with no matching sites hides the company."""
         resp = client.get("/api/companies", params={"owner_id": 99999})
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["items"]
         # No sites belong to owner 99999 so company should be excluded
         names = [c["name"] for c in data]
         assert "Acme Electronics" not in names
 
     def test_list_companies_inactive_site_skipped(self, client, db_session, test_company):
-        """Inactive sites are skipped in the response."""
+        """Inactive sites are not counted in site_count."""
         inactive = CustomerSite(
             company_id=test_company.id,
             site_name="Closed Branch",
@@ -818,11 +820,34 @@ class TestCompaniesAdditional:
 
         resp = client.get("/api/companies")
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["items"]
         for c in data:
             if c["name"] == "Acme Electronics":
-                site_names = [s["site_name"] for s in c["sites"]]
-                assert "Closed Branch" not in site_names
+                # List endpoint no longer includes sites array
+                assert "sites" not in c
+                assert "site_count" in c
+
+    def test_list_companies_pagination(self, client, db_session, test_company):
+        """Pagination params limit and offset work correctly."""
+        resp = client.get("/api/companies", params={"limit": 1, "offset": 0})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["limit"] == 1
+        assert data["offset"] == 0
+        assert data["total"] >= 1
+        assert len(data["items"]) <= 1
+
+    def test_list_companies_response_shape(self, client, db_session, test_company):
+        """List response includes open_req_count and site_count, not sites."""
+        resp = client.get("/api/companies")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "items" in data
+        assert "total" in data
+        item = data["items"][0]
+        assert "site_count" in item
+        assert "open_req_count" in item
+        assert "sites" not in item
 
     def test_update_company_not_found(self, client):
         resp = client.put("/api/companies/99999", json={"notes": "nope"})
@@ -3359,7 +3384,7 @@ class TestCompanyTags:
 
         resp = client.get("/api/companies")
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["items"]
         comp = [c for c in data if c["name"] == "Acme Electronics"][0]
         assert comp["brand_tags"] == ["IBM", "HP"]
         assert comp["commodity_tags"] == ["Server"]
@@ -3373,7 +3398,7 @@ class TestCompanyTags:
         # Should match
         resp = client.get("/api/companies", params={"tag": "IBM"})
         assert resp.status_code == 200
-        names = [c["name"] for c in resp.json()]
+        names = [c["name"] for c in resp.json()["items"]]
         assert "Acme Electronics" in names
 
     def test_list_companies_tag_filter_no_match(self, client, db_session, test_company):
@@ -3383,7 +3408,7 @@ class TestCompanyTags:
 
         resp = client.get("/api/companies", params={"tag": "Nexperia"})
         assert resp.status_code == 200
-        assert resp.json() == []
+        assert resp.json()["items"] == []
 
     def test_list_companies_tag_filter_commodity(self, client, db_session, test_company):
         """tag filter matches commodity_tags too."""
@@ -3392,7 +3417,7 @@ class TestCompanyTags:
 
         resp = client.get("/api/companies", params={"tag": "network"})
         assert resp.status_code == 200
-        names = [c["name"] for c in resp.json()]
+        names = [c["name"] for c in resp.json()["items"]]
         assert "Acme Electronics" in names
 
     @patch(

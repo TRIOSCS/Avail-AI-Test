@@ -989,6 +989,53 @@ async def lookup_vendor_contact(
 # ── Structured Vendor Contact CRUD ──────────────────────────────────────
 
 
+@router.get("/api/vendor-contacts/bulk")
+async def bulk_vendor_contacts(
+    limit: int = Query(500, ge=1, le=5000),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """All vendor contacts in a single query — replaces N+1 per-vendor fetches."""
+    from sqlalchemy.orm import joinedload as jl
+
+    query = (
+        db.query(VendorContact)
+        .join(VendorCard)
+        .filter(VendorCard.is_blacklisted == False)  # noqa: E712
+        .options(jl(VendorContact.vendor_card))
+        .order_by(VendorContact.id)
+    )
+    total = query.count()
+    contacts = query.offset(offset).limit(limit).all()
+    items = [
+        {
+            "id": c.id,
+            "vendor_id": c.vendor_card_id,
+            "vendor_name": c.vendor_card.display_name if c.vendor_card else "Unknown",
+            "contact_type": c.contact_type,
+            "full_name": c.full_name,
+            "first_name": c.first_name,
+            "last_name": c.last_name,
+            "title": c.title,
+            "label": c.label,
+            "email": c.email,
+            "phone": c.phone,
+            "phone_mobile": c.phone_mobile,
+            "source": c.source,
+            "is_verified": c.is_verified,
+            "confidence": c.confidence,
+            "interaction_count": c.interaction_count,
+            "relationship_score": c.relationship_score,
+            "activity_trend": c.activity_trend,
+            "last_interaction_at": c.last_interaction_at.isoformat() if c.last_interaction_at else None,
+            "first_seen_at": c.first_seen_at.isoformat() if c.first_seen_at else None,
+        }
+        for c in contacts
+    ]
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
 @router.get("/api/vendors/{card_id}/contacts")
 async def list_vendor_contacts(
     card_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)

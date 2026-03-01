@@ -41,6 +41,9 @@ def run_startup_migrations() -> None:
         _seed_site_contacts(conn)
         _add_check_constraints(conn)
         _create_perf_indexes(conn)
+        _create_count_triggers(conn)
+        _backfill_company_counts(conn)
+        _analyze_hot_tables(conn)
 
     _backfill_normalized_mpn()
     # _create_default_user_if_env_set()  # Disabled for server push; re-enable when needed
@@ -631,3 +634,107 @@ def _backfill_sighting_vendor_normalized() -> None:
                 break
         if total:
             logger.info("Backfilled vendor_name_normalized on %d sightings", total)
+
+
+# ── Denormalized company count triggers ──────────────────────────────
+
+
+def _create_count_triggers(conn) -> None:
+    """Create triggers to keep companies.site_count and open_req_count in sync."""
+    # Trigger function: update site_count when customer_sites change
+    _exec(conn, """
+        CREATE OR REPLACE FUNCTION trg_update_company_site_count() RETURNS trigger AS $$
+        BEGIN
+            IF TG_OP = 'DELETE' OR TG_OP = 'UPDATE' THEN
+                UPDATE companies SET site_count = (
+                    SELECT COUNT(*) FROM customer_sites
+                    WHERE company_id = OLD.company_id AND is_active = TRUE
+                ) WHERE id = OLD.company_id;
+            END IF;
+            IF TG_OP = 'INSERT' OR TG_OP = 'UPDATE' THEN
+                UPDATE companies SET site_count = (
+                    SELECT COUNT(*) FROM customer_sites
+                    WHERE company_id = NEW.company_id AND is_active = TRUE
+                ) WHERE id = NEW.company_id;
+            END IF;
+            RETURN NULL;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+
+    _exec(conn, """
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_cs_site_count') THEN
+                CREATE TRIGGER trg_cs_site_count AFTER INSERT OR UPDATE OR DELETE ON customer_sites
+                FOR EACH ROW EXECUTE FUNCTION trg_update_company_site_count();
+            END IF;
+        END $$;
+    """)
+
+    # Trigger function: update open_req_count when requisitions change
+    _exec(conn, """
+        CREATE OR REPLACE FUNCTION trg_update_company_req_count() RETURNS trigger AS $$
+        DECLARE
+            v_company_id INTEGER;
+        BEGIN
+            IF TG_OP = 'DELETE' OR TG_OP = 'UPDATE' THEN
+                SELECT cs.company_id INTO v_company_id
+                FROM customer_sites cs WHERE cs.id = OLD.customer_site_id;
+                IF v_company_id IS NOT NULL THEN
+                    UPDATE companies SET open_req_count = (
+                        SELECT COUNT(*) FROM requisitions r
+                        JOIN customer_sites cs2 ON r.customer_site_id = cs2.id
+                        WHERE cs2.company_id = v_company_id
+                          AND r.status NOT IN ('archived', 'won', 'lost')
+                    ) WHERE id = v_company_id;
+                END IF;
+            END IF;
+            IF TG_OP = 'INSERT' OR TG_OP = 'UPDATE' THEN
+                SELECT cs.company_id INTO v_company_id
+                FROM customer_sites cs WHERE cs.id = NEW.customer_site_id;
+                IF v_company_id IS NOT NULL THEN
+                    UPDATE companies SET open_req_count = (
+                        SELECT COUNT(*) FROM requisitions r
+                        JOIN customer_sites cs2 ON r.customer_site_id = cs2.id
+                        WHERE cs2.company_id = v_company_id
+                          AND r.status NOT IN ('archived', 'won', 'lost')
+                    ) WHERE id = v_company_id;
+                END IF;
+            END IF;
+            RETURN NULL;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+
+    _exec(conn, """
+        DO $$ BEGIN
+            IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'trg_req_count') THEN
+                CREATE TRIGGER trg_req_count AFTER INSERT OR UPDATE OR DELETE ON requisitions
+                FOR EACH ROW EXECUTE FUNCTION trg_update_company_req_count();
+            END IF;
+        END $$;
+    """)
+
+
+def _backfill_company_counts(conn) -> None:
+    """Idempotent backfill of site_count and open_req_count on companies."""
+    _exec(conn, """
+        UPDATE companies c SET site_count = (
+            SELECT COUNT(*) FROM customer_sites cs
+            WHERE cs.company_id = c.id AND cs.is_active = TRUE
+        )
+    """)
+    _exec(conn, """
+        UPDATE companies c SET open_req_count = (
+            SELECT COUNT(*) FROM requisitions r
+            JOIN customer_sites cs ON r.customer_site_id = cs.id
+            WHERE cs.company_id = c.id
+              AND r.status NOT IN ('archived', 'won', 'lost')
+        )
+    """)
+
+
+def _analyze_hot_tables(conn) -> None:
+    """Run ANALYZE on hot tables to keep pg_stat estimates fresh."""
+    for tbl in ("companies", "customer_sites", "requisitions"):
+        _exec(conn, "ANALYZE " + tbl)
