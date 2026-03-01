@@ -25,7 +25,19 @@ from .credit_manager import can_use_credits, record_credit_usage
 # Title keywords for classifying contact roles
 _BUYER_TITLES = {"buyer", "purchasing", "procurement", "sourcing", "supply chain", "commodity"}
 _TECHNICAL_TITLES = {"engineer", "engineering", "technical", "design", "r&d", "quality"}
-_DECISION_TITLES = {"director", "vp", "vice president", "president", "ceo", "cfo", "coo", "owner", "gm", "general manager", "chief"}
+_DECISION_TITLES = {
+    "director",
+    "vp",
+    "vice president",
+    "president",
+    "ceo",
+    "cfo",
+    "coo",
+    "owner",
+    "gm",
+    "general manager",
+    "chief",
+}
 
 
 def _classify_contact_role(title: str | None) -> str:
@@ -65,13 +77,7 @@ def _get_company_domain(company: Company) -> str | None:
     """Extract clean domain from company."""
     domain = company.domain or company.website or ""
     if domain:
-        domain = (
-            domain.replace("https://", "")
-            .replace("http://", "")
-            .replace("www.", "")
-            .split("/")[0]
-            .strip()
-        )
+        domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].strip()
     return domain or None
 
 
@@ -101,9 +107,7 @@ def _dedup_contacts(contacts: list[dict]) -> list[dict]:
     return result
 
 
-def _save_contact(
-    db: Session, site: CustomerSite, contact: dict, source: str
-) -> SiteContact | None:
+def _save_contact(db: Session, site: CustomerSite, contact: dict, source: str) -> SiteContact | None:
     """Save a contact to a customer site, deduplicating by email."""
     email = (contact.get("email") or "").lower().strip()
     if not email:
@@ -115,11 +119,7 @@ def _save_contact(
         "name": source,
     }
 
-    existing = (
-        db.query(SiteContact)
-        .filter_by(customer_site_id=site.id, email=email)
-        .first()
-    )
+    existing = db.query(SiteContact).filter_by(customer_site_id=site.id, email=email).first()
     if existing:
         # Update missing fields
         if contact.get("phone") and not existing.phone:
@@ -154,9 +154,7 @@ def _save_contact(
     return sc
 
 
-async def _step_lusha_phones(
-    db: Session, contacts: list[dict], domain: str
-) -> list[dict]:
+async def _step_lusha_phones(db: Session, contacts: list[dict], domain: str) -> list[dict]:
     """Step 3: Enrich contacts with Lusha phone data (direct dials only).
 
     Skips contacts that already have a direct_dial or mobile phone.
@@ -208,9 +206,7 @@ async def _step_lusha_phones(
     return enriched
 
 
-async def _step_lusha_discovery(
-    db: Session, domain: str, company_name: str, needed: int
-) -> list[dict]:
+async def _step_lusha_discovery(db: Session, domain: str, company_name: str, needed: int) -> list[dict]:
     """Fallback contact discovery via Lusha when Apollo didn't fill the target.
 
     Uses search_contacts to find new contacts at the company domain.
@@ -272,9 +268,7 @@ async def _step_hunter_verify(db: Session, contacts: list[dict]) -> list[dict]:
     return verified
 
 
-async def _step_apollo(
-    db: Session, domain: str, company_name: str, needed: int
-) -> list[dict]:
+async def _step_apollo(db: Session, domain: str, company_name: str, needed: int) -> list[dict]:
     """Step 1: Primary contact discovery via Apollo."""
     if not can_use_credits(db, "apollo", 1):
         logger.info("Apollo credits exhausted, skipping")
@@ -400,10 +394,7 @@ async def enrich_customer_account(
     # Step 4: Lusha phone enrichment (only contacts missing direct dials)
     if all_contacts:
         all_contacts = await _step_lusha_phones(db, all_contacts, domain)
-        if any(
-            (c.get("enrichment_field_sources") or {}).get("phone") == "lusha"
-            for c in all_contacts
-        ):
+        if any((c.get("enrichment_field_sources") or {}).get("phone") == "lusha" for c in all_contacts):
             sources_used.append("lusha_phones")
 
     # Final dedup
@@ -411,6 +402,7 @@ async def enrich_customer_account(
 
     # Validate contacts before saving
     from .contact_quality import validate_contact
+
     validated = []
     for contact in all_contacts:
         is_valid, issues = validate_contact(contact)
@@ -445,7 +437,10 @@ async def enrich_customer_account(
     db.flush()
     logger.info(
         "Customer enrichment for %s: %d contacts saved, sources=%s, status=%s",
-        company.name, saved_count, sources_used, company.customer_enrichment_status,
+        company.name,
+        saved_count,
+        sources_used,
+        company.customer_enrichment_status,
     )
 
     return {
@@ -486,13 +481,15 @@ def get_enrichment_gaps(db: Session, limit: int = 50) -> list[dict]:
     for co in companies:
         needed = _contacts_needed(db, co.id, target)
         if needed > 0:
-            gaps.append({
-                "company_id": co.id,
-                "company_name": co.name,
-                "domain": _get_company_domain(co),
-                "account_owner_id": co.account_owner_id,
-                "contacts_needed": needed,
-                "current_status": co.customer_enrichment_status,
-                "last_enriched": co.customer_enrichment_at.isoformat() if co.customer_enrichment_at else None,
-            })
+            gaps.append(
+                {
+                    "company_id": co.id,
+                    "company_name": co.name,
+                    "domain": _get_company_domain(co),
+                    "account_owner_id": co.account_owner_id,
+                    "contacts_needed": needed,
+                    "current_status": co.customer_enrichment_status,
+                    "last_enriched": co.customer_enrichment_at.isoformat() if co.customer_enrichment_at else None,
+                }
+            )
     return gaps

@@ -36,7 +36,9 @@ from app.services.activity_service import (
 
 def _make_company(db, name="Acme Electronics", domain="acme.com"):
     co = Company(
-        name=name, domain=domain, is_active=True,
+        name=name,
+        domain=domain,
+        is_active=True,
         created_at=datetime.now(timezone.utc),
     )
     db.add(co)
@@ -46,8 +48,11 @@ def _make_company(db, name="Acme Electronics", domain="acme.com"):
 
 def _make_site(db, company_id, email="john@acme.com", phone="+15551234567"):
     site = CustomerSite(
-        company_id=company_id, site_name="HQ", is_active=True,
-        contact_email=email, contact_phone=phone,
+        company_id=company_id,
+        site_name="HQ",
+        is_active=True,
+        contact_email=email,
+        contact_phone=phone,
         created_at=datetime.now(timezone.utc),
     )
     db.add(site)
@@ -57,8 +62,11 @@ def _make_site(db, company_id, email="john@acme.com", phone="+15551234567"):
 
 def _make_vendor_card(db, name="Arrow Electronics", domain="arrow.com"):
     card = VendorCard(
-        normalized_name=name.lower(), display_name=name, domain=domain,
-        is_blacklisted=False, sighting_count=10,
+        normalized_name=name.lower(),
+        display_name=name,
+        domain=domain,
+        is_blacklisted=False,
+        sighting_count=10,
         created_at=datetime.now(timezone.utc),
     )
     db.add(card)
@@ -68,8 +76,11 @@ def _make_vendor_card(db, name="Arrow Electronics", domain="arrow.com"):
 
 def _make_vendor_contact(db, vendor_card_id, email="sales@arrow.com", phone="+15559876543"):
     vc = VendorContact(
-        vendor_card_id=vendor_card_id, email=email, phone=phone,
-        full_name="Sales Rep", source="manual",
+        vendor_card_id=vendor_card_id,
+        email=email,
+        phone=phone,
+        full_name="Sales Rep",
+        source="manual",
     )
     db.add(vc)
     db.flush()
@@ -175,9 +186,12 @@ class TestLogEmailActivity:
         db_session.commit()
 
         record = log_email_activity(
-            user_id=test_user.id, direction="sent",
-            email_addr="contact@acme.com", subject="RFQ LM317T",
-            external_id="msg-001", contact_name="John",
+            user_id=test_user.id,
+            direction="sent",
+            email_addr="contact@acme.com",
+            subject="RFQ LM317T",
+            external_id="msg-001",
+            contact_name="John",
             db=db_session,
         )
         assert record is not None
@@ -192,14 +206,26 @@ class TestLogEmailActivity:
 
         # First log succeeds
         r1 = log_email_activity(
-            test_user.id, "sent", "contact@acme.com", "Sub", "dup-id", "J", db_session,
+            test_user.id,
+            "sent",
+            "contact@acme.com",
+            "Sub",
+            "dup-id",
+            "J",
+            db_session,
         )
         db_session.commit()
         assert r1 is not None
 
         # Second log with same external_id is deduped
         r2 = log_email_activity(
-            test_user.id, "sent", "contact@acme.com", "Sub", "dup-id", "J", db_session,
+            test_user.id,
+            "sent",
+            "contact@acme.com",
+            "Sub",
+            "dup-id",
+            "J",
+            db_session,
         )
         assert r2 is None
 
@@ -209,7 +235,13 @@ class TestLogEmailActivity:
         db_session.commit()
 
         record = log_email_activity(
-            test_user.id, "received", "vendor@acme.com", "RE: RFQ", "msg-002", "V", db_session,
+            test_user.id,
+            "received",
+            "vendor@acme.com",
+            "RE: RFQ",
+            "msg-002",
+            "V",
+            db_session,
         )
         assert record is not None
         assert record.activity_type == "email_received"
@@ -217,7 +249,13 @@ class TestLogEmailActivity:
     def test_no_match_logs_unmatched(self, db_session, test_user):
         """Unmatched emails are still logged (for admin review queue)."""
         record = log_email_activity(
-            test_user.id, "sent", "nobody@unknown.com", "Hi", None, "X", db_session,
+            test_user.id,
+            "sent",
+            "nobody@unknown.com",
+            "Hi",
+            None,
+            "X",
+            db_session,
         )
         assert record is not None
         assert record.company_id is None
@@ -234,7 +272,13 @@ class TestLogCallActivity:
         db_session.commit()
 
         record = log_call_activity(
-            test_user.id, "outbound", "5551112222", 300, "call-001", "Jane", db_session,
+            test_user.id,
+            "outbound",
+            "5551112222",
+            300,
+            "call-001",
+            "Jane",
+            db_session,
         )
         assert record is not None
         assert record.activity_type == "call_outbound"
@@ -246,11 +290,23 @@ class TestLogCallActivity:
         db_session.commit()
 
         r1 = log_call_activity(
-            test_user.id, "outbound", "5551112222", 60, "call-dup", "J", db_session,
+            test_user.id,
+            "outbound",
+            "5551112222",
+            60,
+            "call-dup",
+            "J",
+            db_session,
         )
         db_session.commit()
         r2 = log_call_activity(
-            test_user.id, "outbound", "5551112222", 60, "call-dup", "J", db_session,
+            test_user.id,
+            "outbound",
+            "5551112222",
+            60,
+            "call-dup",
+            "J",
+            db_session,
         )
         assert r1 is not None
         assert r2 is None
@@ -262,8 +318,11 @@ class TestLogCallActivity:
 class TestQueryHelpers:
     def _log_activity(self, db, user_id, company_id, vendor_card_id=None):
         a = ActivityLog(
-            user_id=user_id, activity_type="email_sent", channel="email",
-            company_id=company_id, vendor_card_id=vendor_card_id,
+            user_id=user_id,
+            activity_type="email_sent",
+            channel="email",
+            company_id=company_id,
+            vendor_card_id=vendor_card_id,
             contact_email="test@test.com",
             created_at=datetime.now(timezone.utc),
         )
@@ -303,8 +362,11 @@ class TestQueryHelpers:
         co = _make_company(db_session)
         db_session.commit()
         a = ActivityLog(
-            user_id=test_user.id, activity_type="email_sent", channel="email",
-            company_id=co.id, contact_email="x@x.com",
+            user_id=test_user.id,
+            activity_type="email_sent",
+            channel="email",
+            company_id=co.id,
+            contact_email="x@x.com",
             created_at=datetime.now(timezone.utc) - timedelta(days=5),
         )
         db_session.add(a)
@@ -340,8 +402,10 @@ class TestDaysSinceLastVendorActivity:
         from app.services.activity_service import days_since_last_vendor_activity
 
         activity = ActivityLog(
-            user_id=test_user.id, activity_type="email_sent",
-            channel="email", vendor_card_id=test_vendor_card.id,
+            user_id=test_user.id,
+            activity_type="email_sent",
+            channel="email",
+            vendor_card_id=test_vendor_card.id,
             created_at=datetime.now(timezone.utc) - timedelta(days=3),
         )
         db_session.add(activity)
@@ -473,9 +537,7 @@ class TestSiteContactNoteLogging:
     def test_log_site_contact_note(self, db_session, test_user):
         co = _make_company(db_session)
         site = _make_site(db_session, co.id)
-        contact = SiteContact(
-            customer_site_id=site.id, full_name="Note Test Contact"
-        )
+        contact = SiteContact(customer_site_id=site.id, full_name="Note Test Contact")
         db_session.add(contact)
         db_session.commit()
 

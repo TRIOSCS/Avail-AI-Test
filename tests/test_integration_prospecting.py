@@ -5,16 +5,14 @@ A. Discovery → scoring → enrichment → claim → briefing
 B. Edge cases: dedup, concurrent claims, JSONB null handling, malformed data
 """
 
-import asyncio
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Company, User
 from app.models.crm import CustomerSite, SiteContact
-from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
 from app.services.prospect_claim import (
     add_prospect_manually,
@@ -23,7 +21,6 @@ from app.services.prospect_claim import (
     reveal_contacts,
 )
 from app.services.prospect_scoring import calculate_fit_score, calculate_readiness_score
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -115,7 +112,12 @@ class TestFullProspectingFlow:
             readiness_signals={"intent": {"strength": "strong"}},
             enrichment_data={
                 "contacts_full": [
-                    {"name": "Jane Buyer", "title": "VP Procurement", "email": "jane@raytheon-sensors.com", "verified": True},
+                    {
+                        "name": "Jane Buyer",
+                        "title": "VP Procurement",
+                        "email": "jane@raytheon-sensors.com",
+                        "verified": True,
+                    },
                 ]
             },
         )
@@ -150,8 +152,20 @@ class TestFullProspectingFlow:
             hq_location="Austin, TX, US",
             enrichment_data={
                 "contacts_full": [
-                    {"name": "Alice Buyer", "title": "Director Procurement", "email": "alice@contacttest.com", "verified": True, "seniority": "director"},
-                    {"name": "Bob Supply", "title": "Supply Chain Manager", "email": "bob@contacttest.com", "verified": True, "seniority": "manager"},
+                    {
+                        "name": "Alice Buyer",
+                        "title": "Director Procurement",
+                        "email": "alice@contacttest.com",
+                        "verified": True,
+                        "seniority": "director",
+                    },
+                    {
+                        "name": "Bob Supply",
+                        "title": "Supply Chain Manager",
+                        "email": "bob@contacttest.com",
+                        "verified": True,
+                        "seniority": "manager",
+                    },
                 ]
             },
         )
@@ -223,7 +237,6 @@ class TestFullProspectingFlow:
 
 
 class TestDismissFlow:
-
     def test_dismiss_removes_from_suggested(self, db_session):
         """Dismissed prospect no longer appears in suggested list."""
         user = _make_user(db_session)
@@ -236,9 +249,7 @@ class TestDismissFlow:
         db_session.commit()
 
         # Query suggested only — should not find the dismissed one
-        suggested = db_session.query(ProspectAccount).filter(
-            ProspectAccount.status == "suggested"
-        ).all()
+        suggested = db_session.query(ProspectAccount).filter(ProspectAccount.status == "suggested").all()
         assert all(s.id != p.id for s in suggested)
 
     def test_dismiss_preserves_data(self, db_session):
@@ -262,7 +273,6 @@ class TestDismissFlow:
 
 
 class TestExpireResurfaceFlow:
-
     @pytest.mark.asyncio
     async def test_expire_then_resurface(self, db_session):
         """Prospect expires, gets fresh signals, resurfaces."""
@@ -280,8 +290,7 @@ class TestExpireResurfaceFlow:
         )
 
         # Run expire
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await job_expire_and_resurface()
 
         db_session.refresh(p)
@@ -294,8 +303,7 @@ class TestExpireResurfaceFlow:
         db_session.commit()
 
         # Run again — should resurface
-        with patch("app.database.SessionLocal", return_value=db_session), \
-             patch.object(db_session, "close"):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             result = await job_expire_and_resurface()
 
         db_session.refresh(p)
@@ -309,7 +317,6 @@ class TestExpireResurfaceFlow:
 
 
 class TestConcurrentClaims:
-
     def test_double_claim_rejected(self, db_session):
         """Second claim on same prospect raises ValueError."""
         user1 = _make_user(db_session, email="rep1@test.com", azure_id="az-rep1")
@@ -342,7 +349,6 @@ class TestConcurrentClaims:
 
 
 class TestJSONBNullHandling:
-
     def test_null_readiness_signals(self, db_session):
         """Prospect with NULL readiness_signals doesn't crash scoring."""
         p = _make_prospect(
@@ -410,7 +416,6 @@ class TestJSONBNullHandling:
 
 
 class TestManualProspectEdgeCases:
-
     def test_add_manual_deduplicates(self, db_session):
         """Adding a domain that already exists returns existing record."""
         user = _make_user(db_session)
@@ -446,7 +451,6 @@ class TestManualProspectEdgeCases:
 
 
 class TestRevealContactsEdgeCases:
-
     def test_reveal_no_company_id(self, db_session):
         """Reveal contacts with no company_id returns empty."""
         p = _make_prospect(db_session, name="No Company", domain="nocompany.com", company_id=None)
@@ -507,7 +511,6 @@ class TestRevealContactsEdgeCases:
 
 
 class TestScoringEdgeCases:
-
     def test_score_with_all_none_fields(self):
         """Scoring handles completely empty prospect data."""
         data = {"name": None, "industry": None, "naics_code": None, "employee_count_range": None, "region": None}

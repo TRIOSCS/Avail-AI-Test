@@ -231,7 +231,9 @@ class TestListBuyPlans:
         assert len(plans) == 1
         assert plans[0]["submitted_by_id"] == sales_user.id
 
-    def test_trader_sees_own(self, db_session, trader_client, trader_user, test_requisition, test_quote, sales_user, test_user):
+    def test_trader_sees_own(
+        self, db_session, trader_client, trader_user, test_requisition, test_quote, sales_user, test_user
+    ):
         self._seed(db_session, test_requisition, test_quote, sales_user, test_user)
         # Trader has no plans, so should see 0
         r = trader_client.get("/api/buy-plans")
@@ -361,16 +363,37 @@ class TestGetBuyPlan:
         r = admin_client.get(f"/api/buy-plans/{plan.id}")
         data = r.json()
         expected_keys = {
-            "id", "requisition_id", "requisition_name", "quote_id",
-            "quote_number", "quote_subtotal", "customer_name", "status",
-            "line_items", "is_stock_sale",
-            "total_cost", "total_revenue", "total_profit", "overall_margin_pct",
-            "sales_order_number", "salesperson_notes",
-            "manager_notes", "rejection_reason", "submitted_by",
-            "submitted_by_id", "approved_by", "approved_by_id",
-            "rejected_by", "rejected_by_id",
-            "submitted_at", "approved_at", "rejected_at",
-            "completed_at", "completed_by", "cancelled_at", "cancelled_by",
+            "id",
+            "requisition_id",
+            "requisition_name",
+            "quote_id",
+            "quote_number",
+            "quote_subtotal",
+            "customer_name",
+            "status",
+            "line_items",
+            "is_stock_sale",
+            "total_cost",
+            "total_revenue",
+            "total_profit",
+            "overall_margin_pct",
+            "sales_order_number",
+            "salesperson_notes",
+            "manager_notes",
+            "rejection_reason",
+            "submitted_by",
+            "submitted_by_id",
+            "approved_by",
+            "approved_by_id",
+            "rejected_by",
+            "rejected_by_id",
+            "submitted_at",
+            "approved_at",
+            "rejected_at",
+            "completed_at",
+            "completed_by",
+            "cancelled_at",
+            "cancelled_by",
             "cancellation_reason",
         }
         assert expected_keys.issubset(set(data.keys()))
@@ -534,7 +557,9 @@ class TestRejectBuyPlan:
         )
         assert r.status_code == 400
 
-    def test_dict_shows_rejected_by(self, db_session, manager_client, manager_user, test_requisition, test_quote, sales_user):
+    def test_dict_shows_rejected_by(
+        self, db_session, manager_client, manager_user, test_requisition, test_quote, sales_user
+    ):
         """Bug 4 regression: rejected_by shows who rejected."""
         plan = _create_buy_plan(
             db_session,
@@ -718,8 +743,12 @@ class TestBulkPO:
             status="po_entered",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "cost_price": 0.50, "po_number": "PO-OLD",
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "cost_price": 0.50,
+                    "po_number": "PO-OLD",
                     "po_entered_at": "2026-01-01T00:00:00",
                     "po_sent_at": "2026-01-01T12:00:00",
                     "po_recipient": "vendor@arrow.com",
@@ -746,10 +775,16 @@ class TestBulkPO:
             status="po_entered",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "cost_price": 0.50, "po_number": "PO-X",
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "cost_price": 0.50,
+                    "po_number": "PO-X",
                     "po_entered_at": "2026-01-01T00:00:00",
-                    "po_sent_at": None, "po_recipient": None, "po_verified": False,
+                    "po_sent_at": None,
+                    "po_recipient": None,
+                    "po_verified": False,
                 }
             ],
         )
@@ -961,10 +996,16 @@ class TestCancelBuyPlan:
             status="approved",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "cost_price": 0.50, "po_number": "PO-123",
-                    "po_entered_at": "2026-01-01", "po_sent_at": None,
-                    "po_recipient": None, "po_verified": False,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "cost_price": 0.50,
+                    "po_number": "PO-123",
+                    "po_entered_at": "2026-01-01",
+                    "po_sent_at": None,
+                    "po_recipient": None,
+                    "po_verified": False,
                 }
             ],
         )
@@ -1065,7 +1106,9 @@ class TestResubmitBuyPlan:
         )
         assert r.status_code == 403
 
-    def test_buyer_not_submitter_forbidden(self, db_session, buyer_client, test_user, test_requisition, test_quote, sales_user):
+    def test_buyer_not_submitter_forbidden(
+        self, db_session, buyer_client, test_user, test_requisition, test_quote, sales_user
+    ):
         """Bug 3 regression: buyer who didn't submit can't resubmit."""
         plan = _create_buy_plan(
             db_session,
@@ -1119,10 +1162,16 @@ class TestResubmitBuyPlan:
             status="rejected",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Arrow",
-                    "qty": 1000, "cost_price": 0.50, "po_number": "PO-OLD",
-                    "po_entered_at": "2026-01-01", "po_sent_at": "2026-01-02",
-                    "po_recipient": "vendor@test.com", "po_verified": True,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Arrow",
+                    "qty": 1000,
+                    "cost_price": 0.50,
+                    "po_number": "PO-OLD",
+                    "po_entered_at": "2026-01-01",
+                    "po_sent_at": "2026-01-02",
+                    "po_recipient": "vendor@test.com",
+                    "po_verified": True,
                 }
             ],
         )
@@ -1167,8 +1216,16 @@ class TestForQuote:
 
 class TestStatusTransitions:
     def test_full_happy_path(
-        self, db_session, sales_client, sales_user, manager_client, buyer_client,
-        admin_client, test_quote, test_offer, test_requisition,
+        self,
+        db_session,
+        sales_client,
+        sales_user,
+        manager_client,
+        buyer_client,
+        admin_client,
+        test_quote,
+        test_offer,
+        test_requisition,
     ):
         """Full lifecycle: pending → approved → po_entered → po_confirmed → complete."""
         # Submit
@@ -1203,8 +1260,14 @@ class TestStatusTransitions:
         assert r.json()["status"] == "complete"
 
     def test_reject_and_resubmit_cycle(
-        self, db_session, sales_client, sales_user, manager_client,
-        test_quote, test_offer, test_requisition,
+        self,
+        db_session,
+        sales_client,
+        sales_user,
+        manager_client,
+        test_quote,
+        test_offer,
+        test_requisition,
     ):
         """Submit → reject → resubmit → approve."""
         r = sales_client.post(
@@ -1236,8 +1299,14 @@ class TestStatusTransitions:
         assert r.json()["status"] == "approved"
 
     def test_cancel_and_resubmit_cycle(
-        self, db_session, sales_client, sales_user, manager_client,
-        test_quote, test_offer, test_requisition,
+        self,
+        db_session,
+        sales_client,
+        sales_user,
+        manager_client,
+        test_quote,
+        test_offer,
+        test_requisition,
     ):
         """Submit → cancel → resubmit → approve."""
         r = sales_client.post(
@@ -1341,12 +1410,20 @@ class TestStockSaleDetection:
             status="rejected",
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Trio",
-                    "qty": 1000, "plan_qty": 1000, "cost_price": 0.30,
-                    "lead_time": "stock", "condition": "new",
-                    "entered_by_id": None, "po_number": None,
-                    "po_entered_at": None, "po_sent_at": None,
-                    "po_recipient": None, "po_verified": False,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Trio",
+                    "qty": 1000,
+                    "plan_qty": 1000,
+                    "cost_price": 0.30,
+                    "lead_time": "stock",
+                    "condition": "new",
+                    "entered_by_id": None,
+                    "po_number": None,
+                    "po_entered_at": None,
+                    "po_sent_at": None,
+                    "po_recipient": None,
+                    "po_verified": False,
                 }
             ],
         )
@@ -1374,18 +1451,32 @@ class TestStockSaleFastTrack:
             is_stock_sale=True,
             line_items=[
                 {
-                    "offer_id": 1, "mpn": "LM317T", "vendor_name": "Trio",
-                    "qty": 1000, "plan_qty": 1000, "cost_price": 0.30,
-                    "lead_time": "stock", "condition": "new",
-                    "entered_by_id": None, "po_number": None,
-                    "po_entered_at": None, "po_sent_at": None,
-                    "po_recipient": None, "po_verified": False,
+                    "offer_id": 1,
+                    "mpn": "LM317T",
+                    "vendor_name": "Trio",
+                    "qty": 1000,
+                    "plan_qty": 1000,
+                    "cost_price": 0.30,
+                    "lead_time": "stock",
+                    "condition": "new",
+                    "entered_by_id": None,
+                    "po_number": None,
+                    "po_entered_at": None,
+                    "po_sent_at": None,
+                    "po_recipient": None,
+                    "po_verified": False,
                 }
             ],
         )
 
     def test_approve_stock_sale_goes_complete(
-        self, db_session, manager_client, manager_user, test_requisition, test_quote, sales_user,
+        self,
+        db_session,
+        manager_client,
+        manager_user,
+        test_requisition,
+        test_quote,
+        sales_user,
     ):
         plan = self._stock_plan(db_session, test_requisition, test_quote, sales_user.id)
         r = manager_client.put(
@@ -1399,7 +1490,12 @@ class TestStockSaleFastTrack:
         assert plan.completed_by_id == manager_user.id
 
     def test_approve_non_stock_stays_approved(
-        self, db_session, manager_client, test_requisition, test_quote, sales_user,
+        self,
+        db_session,
+        manager_client,
+        test_requisition,
+        test_quote,
+        sales_user,
     ):
         plan = _create_buy_plan(
             db_session,
@@ -1415,7 +1511,12 @@ class TestStockSaleFastTrack:
         assert r.json()["status"] == "approved"
 
     def test_token_approve_stock_sale_goes_complete(
-        self, db_session, noauth_client, test_requisition, test_quote, test_user,
+        self,
+        db_session,
+        noauth_client,
+        test_requisition,
+        test_quote,
+        test_user,
     ):
         plan = self._stock_plan(db_session, test_requisition, test_quote, test_user.id)
         r = noauth_client.put(
@@ -1426,7 +1527,12 @@ class TestStockSaleFastTrack:
         assert r.json()["status"] == "complete"
 
     def test_po_entry_on_completed_stock_sale_rejected(
-        self, db_session, buyer_client, test_requisition, test_quote, sales_user,
+        self,
+        db_session,
+        buyer_client,
+        test_requisition,
+        test_quote,
+        sales_user,
     ):
         """PO entry on a completed stock sale → 400."""
         plan = self._stock_plan(db_session, test_requisition, test_quote, sales_user.id)
@@ -1623,7 +1729,12 @@ class TestSubmitDraftBuyPlan:
     """Cover lines 213-248: submit_draft_buy_plan success path."""
 
     def test_submit_draft_by_creator(
-        self, db_session, sales_client, sales_user, test_quote, test_requisition,
+        self,
+        db_session,
+        sales_client,
+        sales_user,
+        test_quote,
+        test_requisition,
         test_offer,
     ):
         """Creator can submit their own draft plan → pending_approval."""
@@ -1670,8 +1781,13 @@ class TestSubmitDraftBuyPlan:
         assert test_offer.status == "won"
 
     def test_submit_draft_by_admin(
-        self, db_session, admin_client, admin_user, sales_user,
-        test_quote, test_requisition,
+        self,
+        db_session,
+        admin_client,
+        admin_user,
+        sales_user,
+        test_quote,
+        test_requisition,
     ):
         """Admin can submit any draft plan."""
         plan = _create_buy_plan(
@@ -1691,7 +1807,12 @@ class TestSubmitDraftBuyPlan:
         assert r.status_code == 404
 
     def test_submit_draft_wrong_status(
-        self, db_session, sales_client, sales_user, test_requisition, test_quote,
+        self,
+        db_session,
+        sales_client,
+        sales_user,
+        test_requisition,
+        test_quote,
     ):
         """Submit a non-draft plan → 400."""
         plan = _create_buy_plan(
@@ -1705,7 +1826,12 @@ class TestSubmitDraftBuyPlan:
         assert r.status_code == 400
 
     def test_submit_draft_forbidden(
-        self, db_session, trader_client, sales_user, test_requisition, test_quote,
+        self,
+        db_session,
+        trader_client,
+        sales_user,
+        test_requisition,
+        test_quote,
     ):
         """Non-creator, non-admin/manager cannot submit."""
         plan = _create_buy_plan(
@@ -1724,7 +1850,10 @@ class TestSubmitDraftBuyPlan:
 
 class TestSubmitNoValidOffers:
     def test_submit_no_valid_offers_v1_enabled(
-        self, db_session, sales_client, test_quote,
+        self,
+        db_session,
+        sales_client,
+        test_quote,
     ):
         """Submit with non-existent offer IDs → 400 (no valid offers)."""
         r = sales_client.post(
@@ -1740,7 +1869,12 @@ class TestSubmitNoValidOffers:
 
 class TestListNonApprovedFilter:
     def test_filter_pending(
-        self, db_session, admin_client, test_requisition, test_quote, test_user,
+        self,
+        db_session,
+        admin_client,
+        test_requisition,
+        test_quote,
+        test_user,
     ):
         """Filter by pending_approval status returns only pending plans."""
         _create_buy_plan(
@@ -1764,7 +1898,12 @@ class TestListNonApprovedFilter:
         assert plans[0]["status"] == "pending_approval"
 
     def test_filter_draft(
-        self, db_session, admin_client, test_requisition, test_quote, test_user,
+        self,
+        db_session,
+        admin_client,
+        test_requisition,
+        test_quote,
+        test_user,
     ):
         """Filter by draft status returns only draft plans."""
         _create_buy_plan(
@@ -1793,7 +1932,12 @@ class TestListNonApprovedFilter:
 
 class TestCompleteNonBuyerNonAdmin:
     def test_sales_cannot_complete(
-        self, db_session, sales_client, sales_user, test_requisition, test_quote,
+        self,
+        db_session,
+        sales_client,
+        sales_user,
+        test_requisition,
+        test_quote,
     ):
         """Sales user (not admin, not buyer) → 403."""
         plan = _create_buy_plan(
@@ -1816,8 +1960,8 @@ class TestRecordPurchaseHistory:
 
     def test_no_req(self, db_session):
         """No requisition → returns early."""
-        from app.routers.crm.buy_plans import _record_purchase_history
         from app.models import Quote
+        from app.routers.crm.buy_plans import _record_purchase_history
 
         quote = Quote(id=1, line_items=[])
         _record_purchase_history(db_session, None, quote, [])
@@ -1825,8 +1969,8 @@ class TestRecordPurchaseHistory:
 
     def test_req_no_site_id(self, db_session, test_requisition):
         """Requisition with no customer_site_id → returns early."""
-        from app.routers.crm.buy_plans import _record_purchase_history
         from app.models import Quote
+        from app.routers.crm.buy_plans import _record_purchase_history
 
         test_requisition.customer_site_id = None
         db_session.commit()
@@ -1836,8 +1980,9 @@ class TestRecordPurchaseHistory:
     def test_site_no_company(self, db_session, test_requisition, test_customer_site):
         """Site with no company_id → returns at line 972."""
         from unittest.mock import MagicMock
-        from app.routers.crm.buy_plans import _record_purchase_history
+
         from app.models import Quote
+        from app.routers.crm.buy_plans import _record_purchase_history
 
         test_requisition.customer_site_id = test_customer_site.id
         db_session.commit()
@@ -1848,6 +1993,7 @@ class TestRecordPurchaseHistory:
 
         def patched_get(model, pk, **kw):
             from app.models import CustomerSite as CS
+
             if model is CS and pk == test_customer_site.id:
                 return fake_site
             return original_get(model, pk, **kw)
@@ -1857,11 +2003,15 @@ class TestRecordPurchaseHistory:
             _record_purchase_history(db_session, test_requisition, quote, [])
 
     def test_offer_no_material_card(
-        self, db_session, test_requisition, test_customer_site, test_offer,
+        self,
+        db_session,
+        test_requisition,
+        test_customer_site,
+        test_offer,
     ):
         """Offer with no material_card_id → skip (line 978)."""
-        from app.routers.crm.buy_plans import _record_purchase_history
         from app.models import Quote
+        from app.routers.crm.buy_plans import _record_purchase_history
 
         test_requisition.customer_site_id = test_customer_site.id
         db_session.commit()
@@ -1871,12 +2021,16 @@ class TestRecordPurchaseHistory:
         _record_purchase_history(db_session, test_requisition, quote, [test_offer])
 
     def test_offer_with_material_card(
-        self, db_session, test_requisition, test_customer_site, test_offer,
+        self,
+        db_session,
+        test_requisition,
+        test_customer_site,
+        test_offer,
         test_material_card,
     ):
         """Offer with material_card_id → calls upsert_purchase."""
-        from app.routers.crm.buy_plans import _record_purchase_history
         from app.models import Quote
+        from app.routers.crm.buy_plans import _record_purchase_history
 
         test_requisition.customer_site_id = test_customer_site.id
         db_session.commit()
@@ -1886,11 +2040,15 @@ class TestRecordPurchaseHistory:
         _record_purchase_history(db_session, test_requisition, quote, [test_offer])
 
     def test_quote_line_items_with_card(
-        self, db_session, test_requisition, test_customer_site, test_material_card,
+        self,
+        db_session,
+        test_requisition,
+        test_customer_site,
+        test_material_card,
     ):
         """Quote line items with material_card_id → calls upsert_purchase."""
-        from app.routers.crm.buy_plans import _record_purchase_history
         from app.models import Quote
+        from app.routers.crm.buy_plans import _record_purchase_history
 
         test_requisition.customer_site_id = test_customer_site.id
         db_session.commit()
@@ -1903,11 +2061,14 @@ class TestRecordPurchaseHistory:
         _record_purchase_history(db_session, test_requisition, quote, [])
 
     def test_quote_line_items_without_card(
-        self, db_session, test_requisition, test_customer_site,
+        self,
+        db_session,
+        test_requisition,
+        test_customer_site,
     ):
         """Quote line items without material_card_id → skipped (line 991)."""
-        from app.routers.crm.buy_plans import _record_purchase_history
         from app.models import Quote
+        from app.routers.crm.buy_plans import _record_purchase_history
 
         test_requisition.customer_site_id = test_customer_site.id
         db_session.commit()
@@ -1920,11 +2081,14 @@ class TestRecordPurchaseHistory:
         _record_purchase_history(db_session, test_requisition, quote, [])
 
     def test_exception_logged_not_raised(
-        self, db_session, test_requisition, test_customer_site,
+        self,
+        db_session,
+        test_requisition,
+        test_customer_site,
     ):
         """Exception in purchase history → logged but not raised (lines 1002-1003)."""
-        from app.routers.crm.buy_plans import _record_purchase_history
         from app.models import Quote
+        from app.routers.crm.buy_plans import _record_purchase_history
 
         test_requisition.customer_site_id = test_customer_site.id
         db_session.commit()
@@ -1970,7 +2134,12 @@ class TestTokenExpired:
         )
 
     def test_get_by_expired_token(
-        self, db_session, noauth_client, test_requisition, test_quote, test_user,
+        self,
+        db_session,
+        noauth_client,
+        test_requisition,
+        test_quote,
+        test_user,
     ):
         """GET token endpoint → 410 when token expired."""
         plan = self._expired_plan(db_session, test_requisition, test_quote, test_user.id)
@@ -1979,7 +2148,12 @@ class TestTokenExpired:
         assert r.status_code == 410
 
     def test_approve_expired_token(
-        self, db_session, noauth_client, test_requisition, test_quote, test_user,
+        self,
+        db_session,
+        noauth_client,
+        test_requisition,
+        test_quote,
+        test_user,
     ):
         """PUT approve via token → 410 when token expired."""
         plan = self._expired_plan(db_session, test_requisition, test_quote, test_user.id)
@@ -1991,7 +2165,12 @@ class TestTokenExpired:
         assert r.status_code == 410
 
     def test_reject_expired_token(
-        self, db_session, noauth_client, test_requisition, test_quote, test_user,
+        self,
+        db_session,
+        noauth_client,
+        test_requisition,
+        test_quote,
+        test_user,
     ):
         """PUT reject via token → 410 when token expired."""
         plan = self._expired_plan(db_session, test_requisition, test_quote, test_user.id)
@@ -2018,7 +2197,12 @@ class TestTokenApproveEdgeCases:
         assert r.status_code == 404
 
     def test_approve_blank_so(
-        self, db_session, noauth_client, test_requisition, test_quote, test_user,
+        self,
+        db_session,
+        noauth_client,
+        test_requisition,
+        test_quote,
+        test_user,
     ):
         """Approve via token with blank SO → 400."""
         plan = _create_buy_plan(
@@ -2034,7 +2218,12 @@ class TestTokenApproveEdgeCases:
         assert r.status_code == 400
 
     def test_approve_with_notes(
-        self, db_session, noauth_client, test_requisition, test_quote, test_user,
+        self,
+        db_session,
+        noauth_client,
+        test_requisition,
+        test_quote,
+        test_user,
     ):
         """Approve via token with manager_notes → notes stored."""
         plan = _create_buy_plan(
@@ -2067,7 +2256,12 @@ class TestTokenRejectEdgeCases:
         assert r.status_code == 404
 
     def test_reject_wrong_status(
-        self, db_session, noauth_client, test_requisition, test_quote, test_user,
+        self,
+        db_session,
+        noauth_client,
+        test_requisition,
+        test_quote,
+        test_user,
     ):
         """Reject via token on non-pending plan → 400."""
         plan = _create_buy_plan(
@@ -2099,7 +2293,12 @@ class TestApproveNotFoundAndBlankSO:
         assert r.status_code == 404
 
     def test_approve_blank_so(
-        self, db_session, manager_client, test_requisition, test_quote, sales_user,
+        self,
+        db_session,
+        manager_client,
+        test_requisition,
+        test_quote,
+        sales_user,
     ):
         """Approve with blank SO → 400."""
         plan = _create_buy_plan(
@@ -2115,7 +2314,12 @@ class TestApproveNotFoundAndBlankSO:
         assert r.status_code == 400
 
     def test_approve_with_line_items_override(
-        self, db_session, manager_client, test_requisition, test_quote, sales_user,
+        self,
+        db_session,
+        manager_client,
+        test_requisition,
+        test_quote,
+        sales_user,
     ):
         """Approve with line_items override → line_items stored (line 496)."""
         plan = _create_buy_plan(
@@ -2164,7 +2368,12 @@ class TestPOEntryNotFoundEmptyPO:
         assert r.status_code == 404
 
     def test_po_blank_number(
-        self, db_session, buyer_client, test_requisition, test_quote, sales_user,
+        self,
+        db_session,
+        buyer_client,
+        test_requisition,
+        test_quote,
+        sales_user,
     ):
         """PO entry with blank po_number → 400."""
         plan = _create_buy_plan(
@@ -2238,7 +2447,12 @@ class TestBulkPONotFoundAndInvalidIndex:
         assert r.status_code == 404
 
     def test_bulk_po_invalid_index_skipped(
-        self, db_session, buyer_client, test_requisition, test_quote, sales_user,
+        self,
+        db_session,
+        buyer_client,
+        test_requisition,
+        test_quote,
+        sales_user,
     ):
         """Bulk PO with invalid line_index is skipped (line 881)."""
         plan = _create_buy_plan(

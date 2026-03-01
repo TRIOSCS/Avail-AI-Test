@@ -4,13 +4,11 @@ Called by: pytest
 Depends on: conftest.py, nc_worker modules
 """
 
-from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from app.services.nc_worker.circuit_breaker import CircuitBreaker
 from app.services.nc_worker.config import NcConfig
 from app.services.nc_worker.scheduler import SearchScheduler
-
 
 # ── Scheduler Tests ──────────────────────────────────────────────────
 
@@ -116,7 +114,8 @@ def test_breaker_healthy():
     breaker.consecutive_failures = 2
 
     result = breaker.check_response_health(
-        200, "search results for stm32f103",
+        200,
+        "search results for stm32f103",
         "https://www.netcomponents.com/search/result",
     )
 
@@ -130,14 +129,16 @@ def test_breaker_captcha_detection():
     breaker = CircuitBreaker()
 
     result = breaker.check_response_health(
-        200, "please complete the captcha to continue",
+        200,
+        "please complete the captcha to continue",
         "https://www.netcomponents.com/verify",
     )
     assert result == "CAPTCHA_WARNING"
     assert not breaker.is_open  # First time, just warning
 
     result = breaker.check_response_health(
-        200, "please complete the captcha to continue",
+        200,
+        "please complete the captcha to continue",
         "https://www.netcomponents.com/verify",
     )
     assert result == "CAPTCHA_WARNING"
@@ -149,7 +150,8 @@ def test_breaker_rate_limited():
     breaker = CircuitBreaker()
 
     result = breaker.check_response_health(
-        200, "too many requests. please try again later.",
+        200,
+        "too many requests. please try again later.",
         "https://www.netcomponents.com/error",
     )
 
@@ -162,7 +164,8 @@ def test_breaker_session_expired():
     breaker = CircuitBreaker()
 
     result = breaker.check_response_health(
-        200, "please log in",
+        200,
+        "please log in",
         "https://www.netcomponents.com/account/login",
     )
 

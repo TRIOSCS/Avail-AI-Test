@@ -24,6 +24,4 @@ class IcsConfig:
         self.ICS_DEDUP_WINDOW_DAYS = int(os.environ.get("ICS_DEDUP_WINDOW_DAYS", "7"))
         self.ICS_BUSINESS_HOURS_START = int(os.environ.get("ICS_BUSINESS_HOURS_START", "8"))
         self.ICS_BUSINESS_HOURS_END = int(os.environ.get("ICS_BUSINESS_HOURS_END", "18"))
-        self.ICS_BROWSER_PROFILE_DIR = os.environ.get(
-            "ICS_BROWSER_PROFILE_DIR", "/root/ics_browser_profile"
-        )
+        self.ICS_BROWSER_PROFILE_DIR = os.environ.get("ICS_BROWSER_PROFILE_DIR", "/root/ics_browser_profile")

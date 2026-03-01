@@ -23,18 +23,24 @@ This script:
 ⚠️  Uses REAL database — creates and deletes test records.
     Prefix all test data with 'SMOKE_TEST_' for safety.
 """
-import sys
+
 import os
-from datetime import datetime, timezone, timedelta
+import sys
+from datetime import datetime
 
 # Add project root
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database import SessionLocal
 from app.models import (
-    User, Company, BuyerProfile, ActivityLog,
-    RoutingAssignment, Requirement, VendorCard, Offer,
-    Requisition
+    ActivityLog,
+    BuyerProfile,
+    Company,
+    Offer,
+    Requirement,
+    Requisition,
+    User,
+    VendorCard,
 )
 
 PASS = 0
@@ -98,11 +104,11 @@ def main():
 
         # Check new tables exist
         from sqlalchemy import inspect as sa_inspect
+
         inspector = sa_inspect(db.bind)
         tables = inspector.get_table_names()
 
-        for t in ["activity_log", "buyer_profiles", "buyer_vendor_stats",
-                   "graph_subscriptions", "routing_assignments"]:
+        for t in ["activity_log", "buyer_profiles", "buyer_vendor_stats", "graph_subscriptions", "routing_assignments"]:
             check(f"Table exists: {t}", t in tables)
 
         # Check offer columns
@@ -117,7 +123,7 @@ def main():
 
         # ── 2. Buyer Profile CRUD ──
         print("\n── 2. Buyer Profile CRUD ──")
-        from app.services.buyer_service import upsert_profile, get_profile, delete_profile
+        from app.services.buyer_service import get_profile, upsert_profile
 
         profile_data = {
             "primary_commodity": "semiconductors",
@@ -139,7 +145,7 @@ def main():
 
         # ── 3. Activity Logging ──
         print("\n── 3. Activity Logging ──")
-        from app.services.activity_service import log_email_activity, days_since_last_activity
+        from app.services.activity_service import log_email_activity
 
         # Log a test email
         activity = log_email_activity(
@@ -162,9 +168,7 @@ def main():
 
         # ── 4. Ownership Queries ──
         print("\n── 4. Ownership Queries ──")
-        from app.services.ownership_service import (
-            get_my_accounts, get_open_pool_accounts, get_accounts_at_risk
-        )
+        from app.services.ownership_service import get_accounts_at_risk, get_my_accounts, get_open_pool_accounts
 
         my_accounts = get_my_accounts(user.id, db)
         check(f"get_my_accounts returns list ({len(my_accounts)} accounts)", isinstance(my_accounts, list))
@@ -209,6 +213,7 @@ def main():
         test_offer = db.query(Offer).first()
         if test_offer:
             from app.services.routing_service import reconfirm_offer
+
             original_count = test_offer.reconfirm_count or 0
             result = reconfirm_offer(test_offer.id, db)
             # Don't commit — we don't want to actually modify real offers
@@ -220,19 +225,20 @@ def main():
         # ── 7. Config Verification ──
         print("\n── 7. Config Verification ──")
         from app.config import settings
+
         check("Activity tracking enabled", settings.activity_tracking_enabled is True)
         check("Inactivity days = 30", settings.customer_inactivity_days == 30)
         check("Routing window = 48h", settings.routing_window_hours == 48)
 
         # ── Summary ──
-        print(f"\n{'═'*58}")
+        print(f"\n{'═' * 58}")
         print(f"  SMOKE TEST: {PASS} passed, {FAIL} failed out of {PASS + FAIL}")
-        print(f"{'═'*58}")
+        print(f"{'═' * 58}")
 
         if FAIL:
             print(f"\n  ⚠️  {FAIL} failures — review above")
         else:
-            print(f"\n  ✅ ALL SMOKE TESTS PASSED!")
+            print("\n  ✅ ALL SMOKE TESTS PASSED!")
 
     finally:
         # ── Cleanup ──

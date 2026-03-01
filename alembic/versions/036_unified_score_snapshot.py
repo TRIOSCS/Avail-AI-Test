@@ -9,6 +9,7 @@ weighted unified score, cached source scores, and AI blurb columns.
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "036_unified_score_snapshot"

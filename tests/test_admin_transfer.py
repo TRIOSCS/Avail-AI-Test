@@ -38,8 +38,11 @@ def admin_client(db_session: Session, admin_user: User) -> TestClient:
 @pytest.fixture()
 def source_user(db_session: Session) -> User:
     u = User(
-        email="source@trioscs.com", name="Source User", role="buyer",
-        azure_id="src-001", created_at=datetime.now(timezone.utc),
+        email="source@trioscs.com",
+        name="Source User",
+        role="buyer",
+        azure_id="src-001",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(u)
     db_session.commit()
@@ -50,8 +53,11 @@ def source_user(db_session: Session) -> User:
 @pytest.fixture()
 def target_user(db_session: Session) -> User:
     u = User(
-        email="target@trioscs.com", name="Target User", role="buyer",
-        azure_id="tgt-001", created_at=datetime.now(timezone.utc),
+        email="target@trioscs.com",
+        name="Target User",
+        role="buyer",
+        azure_id="tgt-001",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(u)
     db_session.commit()
@@ -68,8 +74,12 @@ def company_with_sites(db_session: Session, source_user: User) -> tuple:
     sites = []
     for i in range(3):
         s = CustomerSite(
-            company_id=co.id, site_name=f"Site {i+1}", owner_id=source_user.id,
-            city=f"City{i+1}", state="TX", is_active=True,
+            company_id=co.id,
+            site_name=f"Site {i + 1}",
+            owner_id=source_user.id,
+            city=f"City{i + 1}",
+            state="TX",
+            is_active=True,
         )
         db_session.add(s)
         sites.append(s)
@@ -122,11 +132,14 @@ def test_preview_source_not_found(admin_client):
 def test_execute_transfer_all(admin_client, db_session, source_user, target_user, company_with_sites):
     co, sites = company_with_sites
     site_ids = [s.id for s in sites]
-    resp = admin_client.post("/api/admin/transfer/execute", json={
-        "source_user_id": source_user.id,
-        "target_user_id": target_user.id,
-        "site_ids": site_ids,
-    })
+    resp = admin_client.post(
+        "/api/admin/transfer/execute",
+        json={
+            "source_user_id": source_user.id,
+            "target_user_id": target_user.id,
+            "site_ids": site_ids,
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
@@ -144,11 +157,14 @@ def test_execute_transfer_all(admin_client, db_session, source_user, target_user
 
 def test_execute_cherry_pick(admin_client, db_session, source_user, target_user, company_with_sites):
     co, sites = company_with_sites
-    resp = admin_client.post("/api/admin/transfer/execute", json={
-        "source_user_id": source_user.id,
-        "target_user_id": target_user.id,
-        "site_ids": [sites[0].id],
-    })
+    resp = admin_client.post(
+        "/api/admin/transfer/execute",
+        json={
+            "source_user_id": source_user.id,
+            "target_user_id": target_user.id,
+            "site_ids": [sites[0].id],
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["transferred"] == 1
@@ -166,11 +182,14 @@ def test_execute_clears_ownership_cleared_at(admin_client, db_session, source_us
     sites[0].ownership_cleared_at = datetime.now(timezone.utc)
     db_session.commit()
 
-    resp = admin_client.post("/api/admin/transfer/execute", json={
-        "source_user_id": source_user.id,
-        "target_user_id": target_user.id,
-        "site_ids": [sites[0].id],
-    })
+    resp = admin_client.post(
+        "/api/admin/transfer/execute",
+        json={
+            "source_user_id": source_user.id,
+            "target_user_id": target_user.id,
+            "site_ids": [sites[0].id],
+        },
+    )
     assert resp.status_code == 200
     db_session.expire_all()
     assert db_session.get(CustomerSite, sites[0].id).ownership_cleared_at is None
@@ -178,54 +197,73 @@ def test_execute_clears_ownership_cleared_at(admin_client, db_session, source_us
 
 def test_execute_same_user_rejected(admin_client, source_user, company_with_sites):
     co, sites = company_with_sites
-    resp = admin_client.post("/api/admin/transfer/execute", json={
-        "source_user_id": source_user.id,
-        "target_user_id": source_user.id,
-        "site_ids": [sites[0].id],
-    })
+    resp = admin_client.post(
+        "/api/admin/transfer/execute",
+        json={
+            "source_user_id": source_user.id,
+            "target_user_id": source_user.id,
+            "site_ids": [sites[0].id],
+        },
+    )
     assert resp.status_code == 400
 
 
 def test_execute_source_not_found(admin_client, target_user):
-    resp = admin_client.post("/api/admin/transfer/execute", json={
-        "source_user_id": 99999,
-        "target_user_id": target_user.id,
-        "site_ids": [1],
-    })
+    resp = admin_client.post(
+        "/api/admin/transfer/execute",
+        json={
+            "source_user_id": 99999,
+            "target_user_id": target_user.id,
+            "site_ids": [1],
+        },
+    )
     assert resp.status_code == 404
 
 
 def test_execute_target_not_found(admin_client, source_user, company_with_sites):
     co, sites = company_with_sites
-    resp = admin_client.post("/api/admin/transfer/execute", json={
-        "source_user_id": source_user.id,
-        "target_user_id": 99999,
-        "site_ids": [sites[0].id],
-    })
+    resp = admin_client.post(
+        "/api/admin/transfer/execute",
+        json={
+            "source_user_id": source_user.id,
+            "target_user_id": 99999,
+            "site_ids": [sites[0].id],
+        },
+    )
     assert resp.status_code == 404
 
 
-def test_execute_site_not_owned_by_source_skipped(admin_client, db_session, source_user, target_user, company_with_sites):
+def test_execute_site_not_owned_by_source_skipped(
+    admin_client, db_session, source_user, target_user, company_with_sites
+):
     co, sites = company_with_sites
     # Create a site owned by someone else
     other = User(
-        email="other@trioscs.com", name="Other", role="buyer",
-        azure_id="oth-001", created_at=datetime.now(timezone.utc),
+        email="other@trioscs.com",
+        name="Other",
+        role="buyer",
+        azure_id="oth-001",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(other)
     db_session.flush()
     other_site = CustomerSite(
-        company_id=co.id, site_name="Other Site", owner_id=other.id,
+        company_id=co.id,
+        site_name="Other Site",
+        owner_id=other.id,
     )
     db_session.add(other_site)
     db_session.commit()
     db_session.refresh(other_site)
 
-    resp = admin_client.post("/api/admin/transfer/execute", json={
-        "source_user_id": source_user.id,
-        "target_user_id": target_user.id,
-        "site_ids": [sites[0].id, other_site.id],
-    })
+    resp = admin_client.post(
+        "/api/admin/transfer/execute",
+        json={
+            "source_user_id": source_user.id,
+            "target_user_id": target_user.id,
+            "site_ids": [sites[0].id, other_site.id],
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["transferred"] == 1
@@ -234,30 +272,39 @@ def test_execute_site_not_owned_by_source_skipped(admin_client, db_session, sour
 
 
 def test_execute_empty_site_ids_rejected(admin_client, source_user, target_user):
-    resp = admin_client.post("/api/admin/transfer/execute", json={
-        "source_user_id": source_user.id,
-        "target_user_id": target_user.id,
-        "site_ids": [],
-    })
+    resp = admin_client.post(
+        "/api/admin/transfer/execute",
+        json={
+            "source_user_id": source_user.id,
+            "target_user_id": target_user.id,
+            "site_ids": [],
+        },
+    )
     assert resp.status_code == 422
 
 
 def test_execute_no_matching_sites(admin_client, source_user, target_user):
-    resp = admin_client.post("/api/admin/transfer/execute", json={
-        "source_user_id": source_user.id,
-        "target_user_id": target_user.id,
-        "site_ids": [99999],
-    })
+    resp = admin_client.post(
+        "/api/admin/transfer/execute",
+        json={
+            "source_user_id": source_user.id,
+            "target_user_id": target_user.id,
+            "site_ids": [99999],
+        },
+    )
     assert resp.status_code == 400
 
 
 def test_execute_partial_match(admin_client, db_session, source_user, target_user, company_with_sites):
     co, sites = company_with_sites
-    resp = admin_client.post("/api/admin/transfer/execute", json={
-        "source_user_id": source_user.id,
-        "target_user_id": target_user.id,
-        "site_ids": [sites[0].id, sites[1].id, 99999],
-    })
+    resp = admin_client.post(
+        "/api/admin/transfer/execute",
+        json={
+            "source_user_id": source_user.id,
+            "target_user_id": target_user.id,
+            "site_ids": [sites[0].id, sites[1].id, 99999],
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["transferred"] == 2

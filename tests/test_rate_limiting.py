@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock, patch
 def test_limiter_is_configured():
     """Rate limiter module exports a Limiter with key_func."""
     from app.rate_limit import limiter
+
     assert limiter is not None
     assert limiter._key_func is not None
 
@@ -23,6 +24,7 @@ def test_limiter_uses_remote_address():
     from slowapi.util import get_remote_address
 
     from app.rate_limit import limiter
+
     assert limiter._key_func is get_remote_address
 
 
@@ -44,10 +46,12 @@ def test_search_endpoint_rate_limited(client, test_requisition):
 def test_rate_limit_disabled_in_test_mode():
     """In TESTING mode, rate limiting should not block requests."""
     import os
+
     assert os.environ.get("TESTING") == "1"
     # The limiter is configured but requests still pass because
     # TESTING mode doesn't enforce strict limiting by default
     from app.rate_limit import limiter
+
     # Verify limiter exists (won't crash even if limits are hit)
     assert limiter is not None
 
@@ -58,6 +62,7 @@ def test_resolve_storage_no_redis():
         mock_settings.cache_backend = "memory"
         mock_settings.redis_url = ""
         from app.rate_limit import _resolve_storage
+
         result = _resolve_storage()
         assert result is None
 
@@ -72,6 +77,7 @@ def test_resolve_storage_redis_unavailable():
         with patch.object(redis_lib, "from_url") as mock_from_url:
             mock_from_url.return_value.ping.side_effect = ConnectionError
             from app.rate_limit import _resolve_storage
+
             result = _resolve_storage()
             assert result is None
 
@@ -86,5 +92,6 @@ def test_resolve_storage_redis_success():
         with patch.object(redis_lib, "from_url") as mock_from_url:
             mock_from_url.return_value.ping.return_value = True
             from app.rate_limit import _resolve_storage
+
             result = _resolve_storage()
             assert result == "redis://localhost:6379/0"

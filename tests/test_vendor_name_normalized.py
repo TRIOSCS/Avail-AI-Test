@@ -23,7 +23,6 @@ from app.models import (
 )
 from app.vendor_utils import normalize_vendor_name
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -135,9 +134,7 @@ def test_mvh_query_by_normalized(db_session: Session, material_card):
 # ── Offer Tests ───────────────────────────────────────────────────────
 
 
-def test_offer_normalized_column_exists(
-    db_session: Session, requisition, material_card, vendor_card
-):
+def test_offer_normalized_column_exists(db_session: Session, requisition, material_card, vendor_card):
     """Offer has vendor_name_normalized column."""
     offer = Offer(
         requisition_id=requisition.id,
@@ -153,9 +150,7 @@ def test_offer_normalized_column_exists(
     assert offer.vendor_name_normalized == "arrow electronics"
 
 
-def test_offer_query_by_normalized(
-    db_session: Session, requisition, material_card, vendor_card
-):
+def test_offer_query_by_normalized(db_session: Session, requisition, material_card, vendor_card):
     """Can query Offer by vendor_name_normalized (replaces func.lower())."""
     offer = Offer(
         requisition_id=requisition.id,
@@ -183,9 +178,7 @@ def test_offer_query_by_normalized(
 # ── Contact Tests ─────────────────────────────────────────────────────
 
 
-def test_contact_normalized_column_exists(
-    db_session: Session, requisition, user
-):
+def test_contact_normalized_column_exists(db_session: Session, requisition, user):
     """Contact has vendor_name_normalized column."""
     contact = Contact(
         requisition_id=requisition.id,
@@ -200,9 +193,7 @@ def test_contact_normalized_column_exists(
     assert contact.vendor_name_normalized == "mouser electronics"
 
 
-def test_contact_query_by_normalized(
-    db_session: Session, requisition, user
-):
+def test_contact_query_by_normalized(db_session: Session, requisition, user):
     """Can query Contact by vendor_name_normalized (replaces LOWER(TRIM()))."""
     contact = Contact(
         requisition_id=requisition.id,
@@ -248,9 +239,7 @@ def test_normalize_vendor_name_consistency(raw, expected):
 # ── Vendor Score query pattern test ───────────────────────────────────
 
 
-def test_vendor_score_fallback_uses_normalized(
-    db_session: Session, requisition, material_card, vendor_card
-):
+def test_vendor_score_fallback_uses_normalized(db_session: Session, requisition, material_card, vendor_card):
     """vendor_score fallback path uses Offer.vendor_name_normalized, not func.lower()."""
     # Create offers without vendor_card_id (triggers fallback)
     for i in range(6):
@@ -268,20 +257,14 @@ def test_vendor_score_fallback_uses_normalized(
 
     # Query pattern from vendor_score.py (fallback path)
     norm = vendor_card.normalized_name  # "arrow electronics"
-    offers = (
-        db_session.query(Offer.id)
-        .filter(Offer.vendor_name_normalized == norm)
-        .all()
-    )
+    offers = db_session.query(Offer.id).filter(Offer.vendor_name_normalized == norm).all()
     assert len(offers) == 6
 
 
 # ── Engagement scorer query pattern test ──────────────────────────────
 
 
-def test_engagement_scorer_uses_normalized(
-    db_session: Session, requisition, user
-):
+def test_engagement_scorer_uses_normalized(db_session: Session, requisition, user):
     """Engagement scorer queries use Contact.vendor_name_normalized."""
     for _ in range(3):
         db_session.add(

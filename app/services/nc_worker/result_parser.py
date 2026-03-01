@@ -82,10 +82,12 @@ def parse_price_breaks(element) -> tuple[list[PriceBreak], str | None]:
         currency = data.get("currency")
         breaks = []
         for p in data.get("Prices", []):
-            breaks.append(PriceBreak(
-                price=float(p.get("price", 0)),
-                min_qty=int(p.get("minQty", 0)),
-            ))
+            breaks.append(
+                PriceBreak(
+                    price=float(p.get("price", 0)),
+                    min_qty=int(p.get("minQty", 0)),
+                )
+            )
         return breaks, currency
     except (json.JSONDecodeError, ValueError, TypeError) as e:
         logger.debug("NC parser: failed to parse price breaks: {}", e)

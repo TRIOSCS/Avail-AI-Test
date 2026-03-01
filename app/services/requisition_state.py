@@ -40,10 +40,7 @@ def transition(req, new_status: str | RequisitionStatus, actor, db: Session) -> 
 
     allowed = ALLOWED_TRANSITIONS.get(old_status, set())
     if new_val not in allowed:
-        raise ValueError(
-            f"Invalid transition: {old_status} → {new_val} "
-            f"(allowed: {sorted(allowed)})"
-        )
+        raise ValueError(f"Invalid transition: {old_status} → {new_val} (allowed: {sorted(allowed)})")
 
     req.status = new_val
 

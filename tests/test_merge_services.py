@@ -17,23 +17,24 @@ from app.models import (
     ActivityLog,
     Company,
     CustomerSite,
-    EnrichmentQueue,
     Offer,
     Requirement,
     Requisition,
-    Sighting,
     User,
     VendorCard,
     VendorContact,
 )
 
-
 # ── Helpers ──────────────────────────────────────────────────────────
+
 
 def _make_user(db: Session, email: str = "merge@test.com") -> User:
     u = User(
-        email=email, name="Merge Tester", role="buyer",
-        azure_id=f"az-{email}", created_at=datetime.now(timezone.utc),
+        email=email,
+        name="Merge Tester",
+        role="buyer",
+        azure_id=f"az-{email}",
+        created_at=datetime.now(timezone.utc),
     )
     db.add(u)
     db.flush()
@@ -42,8 +43,10 @@ def _make_user(db: Session, email: str = "merge@test.com") -> User:
 
 def _make_company(db: Session, name: str, **kw) -> Company:
     defaults = dict(
-        name=name, website=f"https://{name.lower().replace(' ', '')}.com",
-        industry="Electronics", is_active=True,
+        name=name,
+        website=f"https://{name.lower().replace(' ', '')}.com",
+        industry="Electronics",
+        is_active=True,
         created_at=datetime.now(timezone.utc),
     )
     defaults.update(kw)
@@ -80,15 +83,16 @@ def _make_site(db: Session, company: Company, name: str = "HQ", **kw) -> Custome
 # Vendor Merge Service
 # ══════════════════════════════════════════════════════════════════════
 
+
 class TestVendorMergeService:
     def test_merge_basic(self, db_session):
         """Merge two vendors — keep should absorb remove's data."""
         from app.services.vendor_merge_service import merge_vendor_cards
 
-        keep = _make_vendor(db_session, "Arrow Electronics", sighting_count=10,
-                            emails=["a@arrow.com"], phones=["+1-111"])
-        remove = _make_vendor(db_session, "Arrow Elec.", sighting_count=5,
-                              emails=["b@arrow.com"], phones=["+1-222"])
+        keep = _make_vendor(
+            db_session, "Arrow Electronics", sighting_count=10, emails=["a@arrow.com"], phones=["+1-111"]
+        )
+        remove = _make_vendor(db_session, "Arrow Elec.", sighting_count=5, emails=["b@arrow.com"], phones=["+1-222"])
         db_session.commit()
 
         result = merge_vendor_cards(keep.id, remove.id, db_session)
@@ -140,8 +144,10 @@ class TestVendorMergeService:
         keep = _make_vendor(db_session, "Keep Vendor")
         remove = _make_vendor(db_session, "Remove Vendor")
         contact = VendorContact(
-            vendor_card_id=remove.id, full_name="John",
-            email="john@test.com", source="manual",
+            vendor_card_id=remove.id,
+            full_name="John",
+            email="john@test.com",
+            source="manual",
         )
         db_session.add(contact)
         db_session.commit()
@@ -160,19 +166,26 @@ class TestVendorMergeService:
         keep = _make_vendor(db_session, "Keep V")
         remove = _make_vendor(db_session, "Remove V")
 
-        req = Requisition(name="REQ-1", customer_name="Test", status="open",
-                          created_by=user.id, created_at=datetime.now(timezone.utc))
+        req = Requisition(
+            name="REQ-1", customer_name="Test", status="open", created_by=user.id, created_at=datetime.now(timezone.utc)
+        )
         db_session.add(req)
         db_session.flush()
-        requirement = Requirement(requisition_id=req.id, primary_mpn="LM317T",
-                                  target_qty=100, created_at=datetime.now(timezone.utc))
+        requirement = Requirement(
+            requisition_id=req.id, primary_mpn="LM317T", target_qty=100, created_at=datetime.now(timezone.utc)
+        )
         db_session.add(requirement)
         db_session.flush()
 
         offer = Offer(
-            requisition_id=req.id, vendor_card_id=remove.id,
-            vendor_name="Remove V", mpn="LM317T", qty_available=100,
-            unit_price=0.50, status="active", entered_by_id=user.id,
+            requisition_id=req.id,
+            vendor_card_id=remove.id,
+            vendor_name="Remove V",
+            mpn="LM317T",
+            qty_available=100,
+            unit_price=0.50,
+            status="active",
+            entered_by_id=user.id,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(offer)
@@ -207,8 +220,7 @@ class TestVendorMergeService:
         """If display_name already in alternate_names, don't add again."""
         from app.services.vendor_merge_service import merge_vendor_cards
 
-        keep = _make_vendor(db_session, "Arrow Electronics",
-                            alternate_names=["Arrow Elec"])
+        keep = _make_vendor(db_session, "Arrow Electronics", alternate_names=["Arrow Elec"])
         remove = _make_vendor(db_session, "Arrow Elec")
         db_session.commit()
 
@@ -222,6 +234,7 @@ class TestVendorMergeService:
 # ══════════════════════════════════════════════════════════════════════
 # Company Merge Service
 # ══════════════════════════════════════════════════════════════════════
+
 
 class TestCompanyMergeService:
     def test_merge_basic(self, db_session):
@@ -244,11 +257,10 @@ class TestCompanyMergeService:
         """Tags from remove should merge into keep without duplicates."""
         from app.services.company_merge_service import merge_companies
 
-        keep = _make_company(db_session, "Keep Co",
-                             brand_tags=["BrandA"], commodity_tags=["ICs"])
-        remove = _make_company(db_session, "Remove Co",
-                               brand_tags=["BrandA", "BrandB"],
-                               commodity_tags=["ICs", "Capacitors"])
+        keep = _make_company(db_session, "Keep Co", brand_tags=["BrandA"], commodity_tags=["ICs"])
+        remove = _make_company(
+            db_session, "Remove Co", brand_tags=["BrandA", "BrandB"], commodity_tags=["ICs", "Capacitors"]
+        )
         db_session.commit()
 
         merge_companies(keep.id, remove.id, db_session)
@@ -279,8 +291,7 @@ class TestCompanyMergeService:
         from app.services.company_merge_service import merge_companies
 
         keep = _make_company(db_session, "Keep", domain=None, hq_city=None)
-        remove = _make_company(db_session, "Remove", domain="remove.com",
-                               hq_city="Austin")
+        remove = _make_company(db_session, "Remove", domain="remove.com", hq_city="Austin")
         db_session.commit()
 
         merge_companies(keep.id, remove.id, db_session)
@@ -336,8 +347,7 @@ class TestCompanyMergeService:
 
         keep = _make_company(db_session, "Keep")
         remove = _make_company(db_session, "Remove")
-        site = _make_site(db_session, remove, "Branch Office",
-                          contact_name="Jane", contact_email="jane@test.com")
+        site = _make_site(db_session, remove, "Branch Office", contact_name="Jane", contact_email="jane@test.com")
         db_session.commit()
 
         result = merge_companies(keep.id, remove.id, db_session)
@@ -386,8 +396,11 @@ class TestCompanyMergeService:
         keep = _make_company(db_session, "Keep")
         remove = _make_company(db_session, "Remove")
         act = ActivityLog(
-            user_id=user.id, activity_type="email_sent", channel="email",
-            company_id=remove.id, created_at=datetime.now(timezone.utc),
+            user_id=user.id,
+            activity_type="email_sent",
+            channel="email",
+            company_id=remove.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(act)
         db_session.commit()

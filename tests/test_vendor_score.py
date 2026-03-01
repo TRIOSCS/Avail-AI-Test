@@ -13,17 +13,22 @@ from datetime import datetime, timezone
 import pytest
 
 from app.models import (
-    BuyPlan, Company, CustomerSite, Offer, Quote, Requisition, User,
-    VendorCard, VendorReview,
+    BuyPlan,
+    Company,
+    CustomerSite,
+    Offer,
+    Quote,
+    Requisition,
+    User,
+    VendorCard,
+    VendorReview,
 )
 from app.services.vendor_score import (
-    MIN_OFFERS_FOR_SCORE,
     _calc_stage_points,
     compute_all_vendor_scores,
     compute_single_vendor_score,
     compute_vendor_score,
 )
-
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
@@ -378,28 +383,40 @@ class TestComputeAllVendorScores:
         card = _make_vendor_card(db_session, "name match vendor")
 
         user = User(
-            email="nmv@test.com", name="NMV", role="buyer",
-            azure_id="az-nmv", created_at=datetime.now(timezone.utc),
+            email="nmv@test.com",
+            name="NMV",
+            role="buyer",
+            azure_id="az-nmv",
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(user)
         db_session.flush()
 
         req = Requisition(
-            name="REQ-nmv", customer_name="Test", status="open",
-            created_by=user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-nmv",
+            customer_name="Test",
+            status="open",
+            created_by=user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
         db_session.flush()
 
         for i in range(6):
-            db_session.add(Offer(
-                requisition_id=req.id, vendor_card_id=None,
-                vendor_name="name match vendor",
-                vendor_name_normalized="name match vendor",
-                mpn=f"NMV-{i}",
-                qty_available=100, unit_price=1.00, entered_by_id=user.id,
-                status="active", created_at=datetime.now(timezone.utc),
-            ))
+            db_session.add(
+                Offer(
+                    requisition_id=req.id,
+                    vendor_card_id=None,
+                    vendor_name="name match vendor",
+                    vendor_name_normalized="name match vendor",
+                    mpn=f"NMV-{i}",
+                    qty_available=100,
+                    unit_price=1.00,
+                    entered_by_id=user.id,
+                    status="active",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
         db_session.commit()
 
         await compute_all_vendor_scores(db_session)
@@ -428,8 +445,9 @@ class TestComputeAllVendorScores:
 
         # Create a quote using the quoted vendor's offers
         offer_ids = [o.id for o in offers_quoted]
-        _make_quote(db_session, offers_quoted[0].requisition_id,
-                     offers_quoted[0].entered_by_id, offer_ids, status="sent")
+        _make_quote(
+            db_session, offers_quoted[0].requisition_id, offers_quoted[0].entered_by_id, offer_ids, status="sent"
+        )
         db_session.commit()
 
         await compute_all_vendor_scores(db_session)
@@ -448,14 +466,15 @@ class TestComputeAllVendorScores:
 
         # Quote for both
         offer_ids_q = [o.id for o in offers_quoted]
-        _make_quote(db_session, offers_quoted[0].requisition_id,
-                     offers_quoted[0].entered_by_id, offer_ids_q, status="sent")
+        _make_quote(
+            db_session, offers_quoted[0].requisition_id, offers_quoted[0].entered_by_id, offer_ids_q, status="sent"
+        )
 
         offer_ids_bp = [o.id for o in offers_bp]
-        q = _make_quote(db_session, offers_bp[0].requisition_id,
-                        offers_bp[0].entered_by_id, offer_ids_bp, status="sent")
-        _make_buy_plan(db_session, offers_bp[0].requisition_id,
-                       q.id, offer_ids_bp, status="approved")
+        q = _make_quote(
+            db_session, offers_bp[0].requisition_id, offers_bp[0].entered_by_id, offer_ids_bp, status="sent"
+        )
+        _make_buy_plan(db_session, offers_bp[0].requisition_id, q.id, offer_ids_bp, status="approved")
         db_session.commit()
 
         await compute_all_vendor_scores(db_session)

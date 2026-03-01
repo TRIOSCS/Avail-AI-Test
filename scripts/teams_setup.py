@@ -4,8 +4,9 @@ Run inside Docker: docker compose exec -T app python scripts/teams_setup.py
 """
 
 import asyncio
-import sys
 import os
+import sys
+
 sys.path.insert(0, "/app")
 os.environ.setdefault("TESTING", "")
 
@@ -52,13 +53,15 @@ async def main():
             )
             channels = channels_result.get("value", [])
             for ch in channels:
-                all_channels.append({
-                    "idx": idx,
-                    "team_id": team["id"],
-                    "team_name": team.get("displayName", ""),
-                    "channel_id": ch["id"],
-                    "channel_name": ch.get("displayName", ""),
-                })
+                all_channels.append(
+                    {
+                        "idx": idx,
+                        "team_id": team["id"],
+                        "team_name": team.get("displayName", ""),
+                        "channel_id": ch["id"],
+                        "channel_name": ch.get("displayName", ""),
+                    }
+                )
                 print(f"  [{idx}] {team.get('displayName', '')} → #{ch.get('displayName', '')}")
                 idx += 1
 

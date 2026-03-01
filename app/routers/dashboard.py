@@ -45,11 +45,7 @@ def needs_attention(
     cutoff = now - timedelta(days=days)
 
     # Get all active companies where user owns at least one site
-    owned_company_ids = (
-        db.query(CustomerSite.company_id)
-        .filter(CustomerSite.owner_id == user.id)
-        .distinct()
-    )
+    owned_company_ids = db.query(CustomerSite.company_id).filter(CustomerSite.owner_id == user.id).distinct()
     companies = (
         db.query(Company)
         .filter(
@@ -104,9 +100,7 @@ def needs_attention(
 
     # Batch: open req count per company (via customer_site)
     site_ids_q = (
-        db.query(CustomerSite.id, CustomerSite.company_id)
-        .filter(CustomerSite.company_id.in_(company_ids))
-        .all()
+        db.query(CustomerSite.id, CustomerSite.company_id).filter(CustomerSite.company_id.in_(company_ids)).all()
     )
     site_to_company = {s.id: s.company_id for s in site_ids_q}
     site_ids = list(site_to_company.keys())
@@ -171,16 +165,18 @@ def needs_attention(
         if last_at and last_at_aware >= cutoff:
             continue
 
-        results.append({
-            "company_id": c.id,
-            "company_name": c.name,
-            "is_strategic": bool(c.is_strategic),
-            "last_outreach_at": last_at.isoformat() if last_at else None,
-            "last_channel": last_channel_map.get(c.id),
-            "days_since_contact": days_since,
-            "open_req_count": open_req_map.get(c.id, 0),
-            "open_quote_value": round(open_quote_map.get(c.id, 0), 2),
-        })
+        results.append(
+            {
+                "company_id": c.id,
+                "company_name": c.name,
+                "is_strategic": bool(c.is_strategic),
+                "last_outreach_at": last_at.isoformat() if last_at else None,
+                "last_channel": last_channel_map.get(c.id),
+                "days_since_contact": days_since,
+                "open_req_count": open_req_map.get(c.id, 0),
+                "open_quote_value": round(open_quote_map.get(c.id, 0), 2),
+            }
+        )
 
     # Sort by staleness (most stale first)
     results.sort(key=lambda x: -x["days_since_contact"])
@@ -221,11 +217,7 @@ def attention_feed(
     urgency_order = {"critical": 0, "warning": 1, "info": 2}
 
     # ── Source 1: Stale accounts (no outreach in N days) ──
-    owned_company_ids = (
-        db.query(CustomerSite.company_id)
-        .filter(CustomerSite.owner_id == user.id)
-        .distinct()
-    )
+    owned_company_ids = db.query(CustomerSite.company_id).filter(CustomerSite.owner_id == user.id).distinct()
     last_outreach = (
         db.query(
             ActivityLog.company_id,
@@ -256,22 +248,28 @@ def attention_feed(
             days_since = 999
         urgency = "critical" if days_since > 60 or co.is_strategic else "warning"
         detail = "Never contacted" if days_since == 999 else f"{days_since}d since last outreach"
-        items.append({
-            "type": "stale_account", "urgency": urgency,
-            "title": co.name, "detail": detail,
-            "link_type": "company", "link_id": co.id,
-        })
+        items.append(
+            {
+                "type": "stale_account",
+                "urgency": urgency,
+                "title": co.name,
+                "detail": detail,
+                "link_type": "company",
+                "link_id": co.id,
+            }
+        )
 
     # ── Source 2: Reqs at risk (deadline passed or low offers) ──
     offer_count_sub = (
-        db.query(Offer.requisition_id, func.count(Offer.id).label("cnt"))
-        .group_by(Offer.requisition_id)
-        .subquery()
+        db.query(Offer.requisition_id, func.count(Offer.id).label("cnt")).group_by(Offer.requisition_id).subquery()
     )
     risk_rows = (
         db.query(
-            Requisition.id, Requisition.name, Requisition.customer_name,
-            Requisition.deadline, Requisition.created_at,
+            Requisition.id,
+            Requisition.name,
+            Requisition.customer_name,
+            Requisition.deadline,
+            Requisition.created_at,
             func.coalesce(offer_count_sub.c.cnt, 0).label("num_offers"),
         )
         .outerjoin(offer_count_sub, Requisition.id == offer_count_sub.c.requisition_id)
@@ -295,6 +293,7 @@ def attention_feed(
             elif dl != "ASAP":
                 try:
                     from datetime import date as date_type
+
                     dl_date = datetime.fromisoformat(dl).date() if "T" in dl else date_type.fromisoformat(dl)
                     days_left = (dl_date - now.date()).days
                     if days_left <= 0 and num_offers == 0:
@@ -314,23 +313,26 @@ def attention_feed(
             detail = f"No offers after {int(age_hours / 24)}d"
 
         if urgency:
-            items.append({
-                "type": "req_at_risk", "urgency": urgency,
-                "title": row.name or f"REQ #{row.id}",
-                "detail": detail,
-                "link_type": "requisition", "link_id": row.id,
-            })
+            items.append(
+                {
+                    "type": "req_at_risk",
+                    "urgency": urgency,
+                    "title": row.name or f"REQ #{row.id}",
+                    "detail": detail,
+                    "link_type": "requisition",
+                    "link_id": row.id,
+                }
+            )
 
     # ── Source 3: Needs quote (has offers, no quote sent) ──
     quoted_req_ids = (
-        db.query(Quote.requisition_id)
-        .filter(Quote.status.in_(("sent", "won")))
-        .distinct()
-        .scalar_subquery()
+        db.query(Quote.requisition_id).filter(Quote.status.in_(("sent", "won"))).distinct().scalar_subquery()
     )
     needs_quote_rows = (
         db.query(
-            Requisition.id, Requisition.name, Requisition.customer_name,
+            Requisition.id,
+            Requisition.name,
+            Requisition.customer_name,
             func.count(Offer.id).label("offer_count"),
         )
         .join(Offer, Offer.requisition_id == Requisition.id)
@@ -345,23 +347,32 @@ def attention_feed(
         .all()
     )
     for r in needs_quote_rows:
-        items.append({
-            "type": "needs_quote", "urgency": "warning",
-            "title": r.customer_name or r.name or f"REQ #{r.id}",
-            "detail": f"{r.offer_count} offer{'s' if r.offer_count != 1 else ''} ready — no quote sent",
-            "link_type": "requisition", "link_id": r.id,
-        })
+        items.append(
+            {
+                "type": "needs_quote",
+                "urgency": "warning",
+                "title": r.customer_name or r.name or f"REQ #{r.id}",
+                "detail": f"{r.offer_count} offer{'s' if r.offer_count != 1 else ''} ready — no quote sent",
+                "link_type": "requisition",
+                "link_id": r.id,
+            }
+        )
 
     # ── Source 4: Expiring quotes ──
     expiring_q = (
         db.query(
-            Quote.id.label("quote_id"), Quote.quote_number, Quote.subtotal,
-            Quote.sent_at, Quote.validity_days,
-            Requisition.id.label("req_id"), Requisition.customer_name,
+            Quote.id.label("quote_id"),
+            Quote.quote_number,
+            Quote.subtotal,
+            Quote.sent_at,
+            Quote.validity_days,
+            Requisition.id.label("req_id"),
+            Requisition.customer_name,
         )
         .join(Requisition, Requisition.id == Quote.requisition_id)
         .filter(
-            Quote.status == "sent", Quote.result.is_(None),
+            Quote.status == "sent",
+            Quote.result.is_(None),
             Quote.sent_at.isnot(None),
             _user_filter(Quote.created_by_id),
         )
@@ -377,16 +388,21 @@ def attention_feed(
             urgency = "critical" if days_left <= 0 else "warning" if days_left <= 2 else "info"
             dl_label = f"{abs(days_left)}d expired" if days_left <= 0 else f"{days_left}d left"
             val = f" — ${int(q.subtotal):,}" if q.subtotal else ""
-            items.append({
-                "type": "expiring_quote", "urgency": urgency,
-                "title": q.customer_name or q.quote_number or f"Quote #{q.quote_id}",
-                "detail": f"{q.quote_number} expiring ({dl_label}){val}",
-                "link_type": "requisition", "link_id": q.req_id,
-            })
+            items.append(
+                {
+                    "type": "expiring_quote",
+                    "urgency": urgency,
+                    "title": q.customer_name or q.quote_number or f"Quote #{q.quote_id}",
+                    "detail": f"{q.quote_number} expiring ({dl_label}){val}",
+                    "link_type": "requisition",
+                    "link_id": q.req_id,
+                }
+            )
 
     # ── Source 5: Buy plans pending ──
     try:
         from ..models.buy_plan import BuyPlanV3
+
         pending_bps = (
             db.query(BuyPlanV3.id, BuyPlanV3.total_revenue, BuyPlanV3.status, BuyPlanV3.requisition_id)
             .filter(
@@ -403,12 +419,16 @@ def attention_feed(
                 bp_names[r.id] = r.customer_name
         for bp in pending_bps:
             rev = f" — ${int(float(bp.total_revenue)):,}" if bp.total_revenue else ""
-            items.append({
-                "type": "buyplan_pending", "urgency": "info",
-                "title": bp_names.get(bp.requisition_id, f"BP #{bp.id}"),
-                "detail": f"Buy plan {bp.status}{rev}",
-                "link_type": "requisition", "link_id": bp.requisition_id or bp.id,
-            })
+            items.append(
+                {
+                    "type": "buyplan_pending",
+                    "urgency": "info",
+                    "title": bp_names.get(bp.requisition_id, f"BP #{bp.id}"),
+                    "detail": f"Buy plan {bp.status}{rev}",
+                    "link_type": "requisition",
+                    "link_id": bp.requisition_id or bp.id,
+                }
+            )
     except ImportError:
         pass
 
@@ -438,11 +458,7 @@ def morning_brief(
     # ── Gather stats ──
 
     # Stale accounts (no outbound activity in 7 days)
-    owned_company_ids_sub = (
-        db.query(CustomerSite.company_id)
-        .filter(CustomerSite.owner_id == user.id)
-        .distinct()
-    )
+    owned_company_ids_sub = db.query(CustomerSite.company_id).filter(CustomerSite.owner_id == user.id).distinct()
     owned_companies = (
         db.query(Company)
         .filter(
@@ -472,11 +488,7 @@ def morning_brief(
     # Quotes awaiting response
     site_ids = []
     if company_ids:
-        sites = (
-            db.query(CustomerSite.id)
-            .filter(CustomerSite.company_id.in_(company_ids))
-            .all()
-        )
+        sites = db.query(CustomerSite.id).filter(CustomerSite.company_id.in_(company_ids)).all()
         site_ids = [s.id for s in sites]
 
     # Quote stats: awaiting + won/lost this week (single query with case())
@@ -484,17 +496,27 @@ def morning_brief(
     won_this_week = 0
     lost_this_week = 0
     if site_ids:
-        quote_stats = db.query(
-            func.count(case(
-                (and_(Quote.status == "sent", Quote.result.is_(None)), Quote.id),
-            )).label("awaiting"),
-            func.count(case(
-                (and_(Quote.result == "won", Quote.result_at >= week_ago), Quote.id),
-            )).label("won"),
-            func.count(case(
-                (and_(Quote.result == "lost", Quote.result_at >= week_ago), Quote.id),
-            )).label("lost"),
-        ).filter(Quote.customer_site_id.in_(site_ids)).first()
+        quote_stats = (
+            db.query(
+                func.count(
+                    case(
+                        (and_(Quote.status == "sent", Quote.result.is_(None)), Quote.id),
+                    )
+                ).label("awaiting"),
+                func.count(
+                    case(
+                        (and_(Quote.result == "won", Quote.result_at >= week_ago), Quote.id),
+                    )
+                ).label("won"),
+                func.count(
+                    case(
+                        (and_(Quote.result == "lost", Quote.result_at >= week_ago), Quote.id),
+                    )
+                ).label("lost"),
+            )
+            .filter(Quote.customer_site_id.in_(site_ids))
+            .first()
+        )
         quotes_awaiting = quote_stats.awaiting or 0
         won_this_week = quote_stats.won or 0
         lost_this_week = quote_stats.lost or 0
@@ -531,21 +553,23 @@ def morning_brief(
             f"- {new_proactive_matches} new proactive match opportunities\n"
             f"- {won_this_week} won this week, {lost_this_week} lost this week\n"
             f"- {len(owned_companies)} total accounts owned\n\n"
-            f"Return JSON: {{\"text\": \"your brief here\"}}"
+            f'Return JSON: {{"text": "your brief here"}}'
         )
         schema = {
             "type": "object",
             "properties": {"text": {"type": "string"}},
             "required": ["text"],
         }
-        result = asyncio.run(claude_structured(
-            prompt=prompt,
-            schema=schema,
-            system="You write concise sales briefings. Be specific about numbers. No fluff.",
-            model_tier="fast",
-            max_tokens=256,
-            timeout=10,
-        ))
+        result = asyncio.run(
+            claude_structured(
+                prompt=prompt,
+                schema=schema,
+                system="You write concise sales briefings. Be specific about numbers. No fluff.",
+                model_tier="fast",
+                max_tokens=256,
+                timeout=10,
+            )
+        )
         if result and result.get("text"):
             brief_text = result["text"]
     except Exception as e:
@@ -580,8 +604,14 @@ def hot_offers(
         # need requisition_id (already on the Offer row)
         offers = (
             db.query(
-                Offer.id, Offer.vendor_name, Offer.mpn, Offer.unit_price,
-                Offer.currency, Offer.requisition_id, Offer.source, Offer.created_at,
+                Offer.id,
+                Offer.vendor_name,
+                Offer.mpn,
+                Offer.unit_price,
+                Offer.currency,
+                Offer.requisition_id,
+                Offer.source,
+                Offer.created_at,
             )
             .filter(
                 Offer.created_at >= cutoff,
@@ -596,17 +626,19 @@ def hot_offers(
         for o in offers:
             ca = _ensure_aware(o.created_at)
             age_hours = (now - ca).total_seconds() / 3600 if ca else 0
-            results.append({
-                "id": o.id,
-                "vendor_name": o.vendor_name,
-                "mpn": o.mpn,
-                "unit_price": float(o.unit_price) if o.unit_price else None,
-                "currency": o.currency or "USD",
-                "requisition_id": o.requisition_id,
-                "source": o.source,
-                "age_label": _age_label(age_hours),
-                "created_at": o.created_at.isoformat() if o.created_at else None,
-            })
+            results.append(
+                {
+                    "id": o.id,
+                    "vendor_name": o.vendor_name,
+                    "mpn": o.mpn,
+                    "unit_price": float(o.unit_price) if o.unit_price else None,
+                    "currency": o.currency or "USD",
+                    "requisition_id": o.requisition_id,
+                    "source": o.source,
+                    "age_label": _age_label(age_hours),
+                    "created_at": o.created_at.isoformat() if o.created_at else None,
+                }
+            )
         return results
 
     return _fetch(days=days, db=db)
@@ -661,35 +693,53 @@ def buyer_brief(
     sourcing_ratio = round(sourced_reqs_q / total_reqs_q * 100) if total_reqs_q else 0
 
     # ── KPI 2: Offer→Quote Rate (offers converted / total offers) — single query ──
-    offer_stats = db.query(
-        func.count(Offer.id).label("total"),
-        func.count(case(
-            (Offer.attribution_status == "converted", Offer.id),
-        )).label("quoted"),
-    ).filter(Offer.created_at >= month_start, _user_filter(Offer.entered_by_id)).first()
+    offer_stats = (
+        db.query(
+            func.count(Offer.id).label("total"),
+            func.count(
+                case(
+                    (Offer.attribution_status == "converted", Offer.id),
+                )
+            ).label("quoted"),
+        )
+        .filter(Offer.created_at >= month_start, _user_filter(Offer.entered_by_id))
+        .first()
+    )
     total_offers_month = offer_stats.total or 0
     quoted_offers_month = offer_stats.quoted or 0
     offer_quote_rate = round(quoted_offers_month / total_offers_month * 100) if total_offers_month else 0
 
     # ── KPI 3: Quote→Win Rate — single query ──
-    quote_stats = db.query(
-        func.count(case((Quote.result == "won", Quote.id))).label("won"),
-        func.count(case((Quote.result == "lost", Quote.id))).label("lost"),
-    ).filter(Quote.result_at >= month_start, _user_filter(Quote.created_by_id)).first()
+    quote_stats = (
+        db.query(
+            func.count(case((Quote.result == "won", Quote.id))).label("won"),
+            func.count(case((Quote.result == "lost", Quote.id))).label("lost"),
+        )
+        .filter(Quote.result_at >= month_start, _user_filter(Quote.created_by_id))
+        .first()
+    )
     won_quotes = quote_stats.won or 0
     lost_quotes = quote_stats.lost or 0
     quote_win_rate = round(won_quotes / (won_quotes + lost_quotes) * 100) if (won_quotes + lost_quotes) else 0
 
     # ── KPI 4: Buy Plan→PO Rate — single query ──
-    bp_stats = db.query(
-        func.count(BuyPlan.id).label("total"),
-        func.count(case(
-            (BuyPlan.status.in_(("approved", "po_entered", "po_confirmed", "complete")), BuyPlan.id),
-        )).label("approved"),
-        func.count(case(
-            (BuyPlan.status.in_(("po_confirmed", "complete")), BuyPlan.id),
-        )).label("confirmed"),
-    ).filter(BuyPlan.submitted_at >= month_start, _user_filter(BuyPlan.submitted_by_id)).first()
+    bp_stats = (
+        db.query(
+            func.count(BuyPlan.id).label("total"),
+            func.count(
+                case(
+                    (BuyPlan.status.in_(("approved", "po_entered", "po_confirmed", "complete")), BuyPlan.id),
+                )
+            ).label("approved"),
+            func.count(
+                case(
+                    (BuyPlan.status.in_(("po_confirmed", "complete")), BuyPlan.id),
+                )
+            ).label("confirmed"),
+        )
+        .filter(BuyPlan.submitted_at >= month_start, _user_filter(BuyPlan.submitted_by_id))
+        .first()
+    )
     total_bps = bp_stats.total or 0
     approved_bps = bp_stats.approved or 0
     po_confirmed_bps = bp_stats.confirmed or 0
@@ -710,60 +760,59 @@ def buyer_brief(
     new_req_ids = [r.id for r in new_reqs_q]
     reqs_with_offers = set()
     if new_req_ids:
-        rows = (
-            db.query(Offer.requisition_id)
-            .filter(Offer.requisition_id.in_(new_req_ids))
-            .distinct()
-            .all()
-        )
+        rows = db.query(Offer.requisition_id).filter(Offer.requisition_id.in_(new_req_ids)).distinct().all()
         reqs_with_offers = {r.requisition_id for r in rows}
 
     new_requirements = []
     for r in new_reqs_q:
         age_hours = (now - _ensure_aware(r.created_at)).total_seconds() / 3600 if r.created_at else 0
-        new_requirements.append({
-            "id": r.id,
-            "name": r.name,
-            "customer_name": r.customer_name,
-            "has_offers": r.id in reqs_with_offers,
-            "deadline": r.deadline,
-            "age_label": _age_label(age_hours),
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-        })
+        new_requirements.append(
+            {
+                "id": r.id,
+                "name": r.name,
+                "customer_name": r.customer_name,
+                "has_offers": r.id in reqs_with_offers,
+                "deadline": r.deadline,
+                "age_label": _age_label(age_hours),
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+        )
 
     # ── Tile 2: Offers to Review (needs_review status) ──
     review_offers = (
-        db.query(Offer)
-        .filter(Offer.status == "needs_review")
-        .order_by(Offer.created_at.desc())
-        .limit(15)
-        .all()
+        db.query(Offer).filter(Offer.status == "needs_review").order_by(Offer.created_at.desc()).limit(15).all()
     )
     offers_to_review = []
     for o in review_offers:
         age_hours = (now - _ensure_aware(o.created_at)).total_seconds() / 3600 if o.created_at else 0
-        offers_to_review.append({
-            "id": o.id,
-            "requisition_id": o.requisition_id,
-            "vendor_name": o.vendor_name,
-            "mpn": o.mpn,
-            "unit_price": float(o.unit_price) if o.unit_price else None,
-            "source": o.source,
-            "age_label": _age_label(age_hours),
-        })
+        offers_to_review.append(
+            {
+                "id": o.id,
+                "requisition_id": o.requisition_id,
+                "vendor_name": o.vendor_name,
+                "mpn": o.mpn,
+                "unit_price": float(o.unit_price) if o.unit_price else None,
+                "source": o.source,
+                "age_label": _age_label(age_hours),
+            }
+        )
 
     # ── Tile 3a: Revenue & Profit (from buy plans) ──
     from ..models.buy_plan import BuyPlanV3
 
-    bp_financials = db.query(
-        func.coalesce(func.sum(BuyPlanV3.total_revenue), 0).label("revenue"),
-        func.coalesce(func.sum(BuyPlanV3.total_cost), 0).label("cost"),
-        func.count(BuyPlanV3.id).label("plan_count"),
-    ).filter(
-        BuyPlanV3.status.in_(("active", "completed")),
-        BuyPlanV3.created_at >= cutoff,
-        _user_filter(BuyPlanV3.submitted_by_id),
-    ).first()
+    bp_financials = (
+        db.query(
+            func.coalesce(func.sum(BuyPlanV3.total_revenue), 0).label("revenue"),
+            func.coalesce(func.sum(BuyPlanV3.total_cost), 0).label("cost"),
+            func.count(BuyPlanV3.id).label("plan_count"),
+        )
+        .filter(
+            BuyPlanV3.status.in_(("active", "completed")),
+            BuyPlanV3.created_at >= cutoff,
+            _user_filter(BuyPlanV3.submitted_by_id),
+        )
+        .first()
+    )
 
     bp_revenue = float(bp_financials.revenue or 0)
     bp_cost = float(bp_financials.cost or 0)
@@ -771,15 +820,19 @@ def buyer_brief(
     bp_margin_pct = round((bp_gross_profit / bp_revenue) * 100, 1) if bp_revenue > 0 else 0
 
     # Pipeline (pending/draft buy plans not yet completed)
-    bp_pipeline = db.query(
-        func.coalesce(func.sum(BuyPlanV3.total_revenue), 0).label("revenue"),
-        func.coalesce(func.sum(BuyPlanV3.total_cost), 0).label("cost"),
-        func.count(BuyPlanV3.id).label("plan_count"),
-    ).filter(
-        BuyPlanV3.status.in_(("draft", "pending", "active")),
-        BuyPlanV3.created_at >= cutoff,
-        _user_filter(BuyPlanV3.submitted_by_id),
-    ).first()
+    bp_pipeline = (
+        db.query(
+            func.coalesce(func.sum(BuyPlanV3.total_revenue), 0).label("revenue"),
+            func.coalesce(func.sum(BuyPlanV3.total_cost), 0).label("cost"),
+            func.count(BuyPlanV3.id).label("plan_count"),
+        )
+        .filter(
+            BuyPlanV3.status.in_(("draft", "pending", "active")),
+            BuyPlanV3.created_at >= cutoff,
+            _user_filter(BuyPlanV3.submitted_by_id),
+        )
+        .first()
+    )
 
     pipeline_revenue = float(bp_pipeline.revenue or 0)
     pipeline_profit = pipeline_revenue - float(bp_pipeline.cost or 0)
@@ -787,9 +840,13 @@ def buyer_brief(
     # Recent buy plans for drill-down
     recent_bps = (
         db.query(
-            BuyPlanV3.id, BuyPlanV3.total_revenue, BuyPlanV3.total_cost,
-            BuyPlanV3.total_margin_pct, BuyPlanV3.status,
-            BuyPlanV3.requisition_id, BuyPlanV3.created_at,
+            BuyPlanV3.id,
+            BuyPlanV3.total_revenue,
+            BuyPlanV3.total_cost,
+            BuyPlanV3.total_margin_pct,
+            BuyPlanV3.status,
+            BuyPlanV3.requisition_id,
+            BuyPlanV3.created_at,
         )
         .filter(
             BuyPlanV3.status.in_(("active", "completed", "pending")),
@@ -802,6 +859,7 @@ def buyer_brief(
     )
     # Resolve customer names via requisition
     from ..models.sourcing import Requisition as Req2
+
     req_ids = [bp.requisition_id for bp in recent_bps if bp.requisition_id]
     req_names = {}
     if req_ids:
@@ -875,6 +933,7 @@ def buyer_brief(
             else:
                 try:
                     from datetime import date as date_type
+
                     dl_date = datetime.fromisoformat(dl).date() if "T" in dl else date_type.fromisoformat(dl)
                     days_left = (dl_date - now.date()).days
                     if days_left <= 0 and num_offers == 0:
@@ -901,14 +960,16 @@ def buyer_brief(
             urgency = "normal"
 
         if risk_reasons:
-            reqs_at_risk.append({
-                "id": row.id,
-                "name": row.name,
-                "customer_name": row.customer_name,
-                "num_offers": num_offers,
-                "risk": risk_reasons[0],
-                "urgency": urgency,
-            })
+            reqs_at_risk.append(
+                {
+                    "id": row.id,
+                    "name": row.name,
+                    "customer_name": row.customer_name,
+                    "num_offers": num_offers,
+                    "risk": risk_reasons[0],
+                    "urgency": urgency,
+                }
+            )
 
     urgency_order = {"critical": 0, "warning": 1, "normal": 2}
     reqs_at_risk.sort(key=lambda x: urgency_order.get(x["urgency"], 3))
@@ -946,13 +1007,15 @@ def buyer_brief(
                     urgency = "normal"
             except (ValueError, TypeError):
                 continue
-        quotes_due_soon.append({
-            "id": row.id,
-            "name": row.name,
-            "deadline": dl,
-            "days_left": days_left,
-            "urgency": urgency,
-        })
+        quotes_due_soon.append(
+            {
+                "id": row.id,
+                "name": row.name,
+                "deadline": dl,
+                "days_left": days_left,
+                "urgency": urgency,
+            }
+        )
     quotes_due_soon.sort(key=lambda x: x["days_left"])
     quotes_due_soon = quotes_due_soon[:15]
 
@@ -973,15 +1036,13 @@ def buyer_brief(
     # ── Tile 6a: Needs Response (have offers but no quote sent yet) ──
     # Reqs with ≥1 active offer but no sent/won quote
     from ..models.quotes import Quote as Quote2
-    quoted_req_ids = (
-        db.query(Quote2.requisition_id)
-        .filter(Quote2.status.in_(("sent", "won")))
-        .distinct()
-        .subquery()
-    )
+
+    quoted_req_ids = db.query(Quote2.requisition_id).filter(Quote2.status.in_(("sent", "won"))).distinct().subquery()
     needs_response_q = (
         db.query(
-            Requisition.id, Requisition.name, Requisition.customer_name,
+            Requisition.id,
+            Requisition.name,
+            Requisition.customer_name,
             Requisition.created_at,
             func.count(Offer.id).label("offer_count"),
         )
@@ -999,11 +1060,13 @@ def buyer_brief(
     )
     needs_response = [
         {
-            "id": r.id, "name": r.name, "customer_name": r.customer_name,
+            "id": r.id,
+            "name": r.name,
+            "customer_name": r.customer_name,
             "offer_count": r.offer_count,
-            "age_label": _age_label(
-                (now - _ensure_aware(r.created_at)).total_seconds() / 3600
-            ) if r.created_at else None,
+            "age_label": _age_label((now - _ensure_aware(r.created_at)).total_seconds() / 3600)
+            if r.created_at
+            else None,
         }
         for r in needs_response_q
     ]
@@ -1011,9 +1074,14 @@ def buyer_brief(
     # ── Tile 6b: Expiring Quotes (sent but no response, going stale) ──
     expiring_quotes_q = (
         db.query(
-            Quote.id.label("quote_id"), Quote.quote_number, Quote.subtotal,
-            Quote.sent_at, Quote.validity_days,
-            Requisition.id.label("req_id"), Requisition.name, Requisition.customer_name,
+            Quote.id.label("quote_id"),
+            Quote.quote_number,
+            Quote.subtotal,
+            Quote.sent_at,
+            Quote.validity_days,
+            Requisition.id.label("req_id"),
+            Requisition.name,
+            Requisition.customer_name,
         )
         .join(Requisition, Requisition.id == Quote.requisition_id)
         .filter(
@@ -1033,21 +1101,32 @@ def buyer_brief(
         expires_at = sent + timedelta(days=validity)
         days_left = (expires_at - now).days
         if days_left <= 7:  # Only show quotes expiring within 7 days
-            expiring_quotes.append({
-                "quote_id": q.quote_id, "quote_number": q.quote_number,
-                "requisition_id": q.req_id, "name": q.name,
-                "customer_name": q.customer_name,
-                "value": float(q.subtotal) if q.subtotal else None,
-                "days_left": days_left,
-            })
+            expiring_quotes.append(
+                {
+                    "quote_id": q.quote_id,
+                    "quote_number": q.quote_number,
+                    "requisition_id": q.req_id,
+                    "name": q.name,
+                    "customer_name": q.customer_name,
+                    "value": float(q.subtotal) if q.subtotal else None,
+                    "days_left": days_left,
+                }
+            )
     expiring_quotes.sort(key=lambda x: x["days_left"])
 
     # ── Tile 6c: Buy Plans Pending (awaiting approval or PO) ──
     from ..models.buy_plan import BuyPlanV3 as BP2
+
     pending_bps_q = (
         db.query(
-            BP2.id, BP2.total_revenue, BP2.total_cost, BP2.total_margin_pct,
-            BP2.status, BP2.so_status, BP2.requisition_id, BP2.created_at,
+            BP2.id,
+            BP2.total_revenue,
+            BP2.total_cost,
+            BP2.total_margin_pct,
+            BP2.status,
+            BP2.so_status,
+            BP2.requisition_id,
+            BP2.created_at,
         )
         .filter(
             BP2.status.in_(("draft", "pending", "active")),
@@ -1065,29 +1144,35 @@ def buyer_brief(
 
     buyplans_pending = [
         {
-            "id": bp.id, "requisition_id": bp.requisition_id,
+            "id": bp.id,
+            "requisition_id": bp.requisition_id,
             "customer_name": pending_req_names.get(bp.requisition_id, ""),
             "revenue": float(bp.total_revenue) if bp.total_revenue else 0,
             "margin_pct": float(bp.total_margin_pct) if bp.total_margin_pct else 0,
-            "status": bp.status, "so_status": bp.so_status,
-            "age_label": _age_label(
-                (now - _ensure_aware(bp.created_at)).total_seconds() / 3600
-            ) if bp.created_at else None,
+            "status": bp.status,
+            "so_status": bp.so_status,
+            "age_label": _age_label((now - _ensure_aware(bp.created_at)).total_seconds() / 3600)
+            if bp.created_at
+            else None,
         }
         for bp in pending_bps_q
     ]
 
     # ── Tile 7: Completed Deals (all-time — never filtered by days window) ──
     # Summary stats: total wins, losses, values across all time
-    completed_stats = db.query(
-        func.count(case((Quote.result == "won", Quote.id))).label("won_count"),
-        func.count(case((Quote.result == "lost", Quote.id))).label("lost_count"),
-        func.coalesce(func.sum(case((Quote.result == "won", Quote.subtotal))), 0).label("won_value"),
-        func.coalesce(func.sum(case((Quote.result == "lost", Quote.subtotal))), 0).label("lost_value"),
-    ).filter(
-        Quote.result.in_(("won", "lost")),
-        _user_filter(Quote.created_by_id),
-    ).first()
+    completed_stats = (
+        db.query(
+            func.count(case((Quote.result == "won", Quote.id))).label("won_count"),
+            func.count(case((Quote.result == "lost", Quote.id))).label("lost_count"),
+            func.coalesce(func.sum(case((Quote.result == "won", Quote.subtotal))), 0).label("won_value"),
+            func.coalesce(func.sum(case((Quote.result == "lost", Quote.subtotal))), 0).label("lost_value"),
+        )
+        .filter(
+            Quote.result.in_(("won", "lost")),
+            _user_filter(Quote.created_by_id),
+        )
+        .first()
+    )
 
     all_won = completed_stats.won_count or 0
     all_lost = completed_stats.lost_count or 0
@@ -1096,8 +1181,11 @@ def buyer_brief(
     # Recent 15 won deals
     recent_won_q = (
         db.query(
-            Requisition.id, Requisition.name, Requisition.customer_name,
-            Quote.subtotal, Quote.result_at,
+            Requisition.id,
+            Requisition.name,
+            Requisition.customer_name,
+            Quote.subtotal,
+            Quote.result_at,
         )
         .join(Quote, Quote.requisition_id == Requisition.id)
         .filter(Quote.result == "won", _user_filter(Quote.created_by_id))
@@ -1107,12 +1195,12 @@ def buyer_brief(
     )
     recent_wins = [
         {
-            "id": r.id, "name": r.name, "customer_name": r.customer_name,
+            "id": r.id,
+            "name": r.name,
+            "customer_name": r.customer_name,
             "value": float(r.subtotal) if r.subtotal else None,
             "closed_at": r.result_at.isoformat() if r.result_at else None,
-            "age_label": _age_label(
-                (now - _ensure_aware(r.result_at)).total_seconds() / 3600
-            ) if r.result_at else None,
+            "age_label": _age_label((now - _ensure_aware(r.result_at)).total_seconds() / 3600) if r.result_at else None,
         }
         for r in recent_won_q
     ]
@@ -1120,8 +1208,11 @@ def buyer_brief(
     # Recent 15 lost deals
     recent_lost_q = (
         db.query(
-            Requisition.id, Requisition.name, Requisition.customer_name,
-            Quote.subtotal, Quote.result_at,
+            Requisition.id,
+            Requisition.name,
+            Requisition.customer_name,
+            Quote.subtotal,
+            Quote.result_at,
         )
         .join(Quote, Quote.requisition_id == Requisition.id)
         .filter(Quote.result == "lost", _user_filter(Quote.created_by_id))
@@ -1131,12 +1222,12 @@ def buyer_brief(
     )
     recent_losses = [
         {
-            "id": r.id, "name": r.name, "customer_name": r.customer_name,
+            "id": r.id,
+            "name": r.name,
+            "customer_name": r.customer_name,
             "value": float(r.subtotal) if r.subtotal else None,
             "closed_at": r.result_at.isoformat() if r.result_at else None,
-            "age_label": _age_label(
-                (now - _ensure_aware(r.result_at)).total_seconds() / 3600
-            ) if r.result_at else None,
+            "age_label": _age_label((now - _ensure_aware(r.result_at)).total_seconds() / 3600) if r.result_at else None,
         }
         for r in recent_lost_q
     ]
@@ -1300,29 +1391,31 @@ def team_leaderboard(
         av = avail_map.get(uid, {})
         mu = mult_map.get(uid, {})
         name = av.get("user_name") or mu.get("user_name", f"User #{uid}")
-        entries.append({
-            "user_id": uid,
-            "user_name": name,
-            "user_role": role_map.get(uid, "buyer"),
-            # Avail Score data
-            "avail_score": av.get("avail_score", 0),
-            "behavior_total": av.get("behavior_total", 0),
-            "outcome_total": av.get("outcome_total", 0),
-            "avail_rank": av.get("avail_rank"),
-            "avail_qualified": av.get("avail_qualified", False),
-            "avail_bonus": av.get("avail_bonus", 0),
-            # Multiplier data
-            "total_points": mu.get("total_points", 0),
-            "offer_points": mu.get("offer_points", 0),
-            "bonus_points": mu.get("bonus_points", 0),
-            "mult_rank": mu.get("mult_rank"),
-            "mult_qualified": mu.get("mult_qualified", False),
-            "mult_bonus": mu.get("mult_bonus", 0),
-            "breakdown": mu.get("breakdown", {}),
-            # Full Avail metric breakdown for expandable rows
-            **{k: av.get(k, 0) for k in av if k.startswith(("b", "o")) and "_" in k},
-            "updated_at": mu.get("mult_updated_at") or av.get("avail_updated_at"),
-        })
+        entries.append(
+            {
+                "user_id": uid,
+                "user_name": name,
+                "user_role": role_map.get(uid, "buyer"),
+                # Avail Score data
+                "avail_score": av.get("avail_score", 0),
+                "behavior_total": av.get("behavior_total", 0),
+                "outcome_total": av.get("outcome_total", 0),
+                "avail_rank": av.get("avail_rank"),
+                "avail_qualified": av.get("avail_qualified", False),
+                "avail_bonus": av.get("avail_bonus", 0),
+                # Multiplier data
+                "total_points": mu.get("total_points", 0),
+                "offer_points": mu.get("offer_points", 0),
+                "bonus_points": mu.get("bonus_points", 0),
+                "mult_rank": mu.get("mult_rank"),
+                "mult_qualified": mu.get("mult_qualified", False),
+                "mult_bonus": mu.get("mult_bonus", 0),
+                "breakdown": mu.get("breakdown", {}),
+                # Full Avail metric breakdown for expandable rows
+                **{k: av.get(k, 0) for k in av if k.startswith(("b", "o")) and "_" in k},
+                "updated_at": mu.get("mult_updated_at") or av.get("avail_updated_at"),
+            }
+        )
 
     # Sort by total_points desc, tiebreak by avail_score
     entries.sort(key=lambda e: (e["total_points"], e["avail_score"]), reverse=True)
@@ -1401,6 +1494,7 @@ def unified_leaderboard(
             m = datetime.strptime(month, "%Y-%m").date()
         except ValueError:
             from fastapi import HTTPException
+
             raise HTTPException(400, "Invalid month format — use YYYY-MM")
     else:
         m = datetime.now(timezone.utc).date().replace(day=1)

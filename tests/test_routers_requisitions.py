@@ -106,12 +106,14 @@ def test_list_requisitions_pagination(client, db_session, test_user):
     from app.models import Requisition
 
     for i in range(5):
-        db_session.add(Requisition(
-            name=f"REQ-PAGE-{i}",
-            status="open",
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        ))
+        db_session.add(
+            Requisition(
+                name=f"REQ-PAGE-{i}",
+                status="open",
+                created_by=test_user.id,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
     db_session.commit()
     resp = client.get("/api/requisitions", params={"limit": 2, "offset": 0})
     assert resp.status_code == 200
@@ -239,9 +241,7 @@ def test_update_requirement(client, db_session, test_requisition):
     """PUT /api/requirements/{id} updates an existing line item."""
     from app.models import Requirement
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     resp = client.put(
         f"/api/requirements/{req_item.id}",
         json={"target_qty": 2000, "notes": "Urgent"},
@@ -260,9 +260,7 @@ def test_delete_requirement(client, db_session, test_requisition):
     """DELETE /api/requirements/{id} removes a line item."""
     from app.models import Requirement
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     resp = client.delete(f"/api/requirements/{req_item.id}")
     assert resp.status_code == 200
     assert resp.json()["ok"] is True
@@ -333,9 +331,7 @@ def test_search_one(client, db_session, test_requisition):
     """POST /api/requirements/{id}/search searches a single item."""
     from app.models import Requirement
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     with patch(
         "app.routers.requisitions.search_requirement",
         new_callable=AsyncMock,
@@ -367,9 +363,7 @@ def test_get_saved_sightings_with_data(client, db_session, test_requisition):
     """Sightings endpoint returns saved results."""
     from app.models import Requirement, Sighting
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     s = Sighting(
         requirement_id=req_item.id,
         vendor_name="Arrow",
@@ -403,9 +397,7 @@ def test_mark_sighting_unavailable(client, db_session, test_requisition):
     """PUT /api/sightings/{id}/unavailable toggles the flag."""
     from app.models import Requirement, Sighting
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     s = Sighting(
         requirement_id=req_item.id,
         vendor_name="Mouser",
@@ -432,9 +424,7 @@ def test_mark_sighting_unavailable_not_found(client):
     assert resp.status_code == 404
 
 
-def test_mark_sighting_unavailable_forbidden_for_other_sales_user(
-    db_session, test_requisition, sales_user
-):
+def test_mark_sighting_unavailable_forbidden_for_other_sales_user(db_session, test_requisition, sales_user):
     """A sales user who does NOT own the requisition gets 403."""
     from fastapi.testclient import TestClient
 
@@ -443,9 +433,7 @@ def test_mark_sighting_unavailable_forbidden_for_other_sales_user(
     from app.main import app
     from app.models import Requirement, Sighting
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     s = Sighting(
         requirement_id=req_item.id,
         vendor_name="Mouser",
@@ -484,19 +472,24 @@ def test_bulk_archive(client, db_session, test_user):
 
     # bulk-archive archives reqs NOT created by the current user
     other = User(
-        email="other@trioscs.com", name="Other", role="buyer",
-        azure_id="az-other-bulk", created_at=datetime.now(timezone.utc),
+        email="other@trioscs.com",
+        name="Other",
+        role="buyer",
+        azure_id="az-other-bulk",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(other)
     db_session.flush()
 
     r1 = Requisition(
-        name="BULK-1", status="open",
+        name="BULK-1",
+        status="open",
         created_by=other.id,
         created_at=datetime.now(timezone.utc),
     )
     r2 = Requisition(
-        name="BULK-2", status="open",
+        name="BULK-2",
+        status="open",
         created_by=other.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -529,6 +522,7 @@ def test_dismiss_new_offers_not_found(client):
 def test_upload_requirements_csv(client, test_requisition):
     """POST /api/requisitions/{id}/upload accepts a CSV of MPNs."""
     import io
+
     csv_bytes = b"mpn,qty,target_price\nNE555P,500,0.25\nLM7805,200,0.30"
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/upload",
@@ -542,6 +536,7 @@ def test_upload_requirements_csv(client, test_requisition):
 def test_upload_requirements_not_found(client):
     """Upload returns 404 for non-existent requisition."""
     import io
+
     resp = client.post(
         "/api/requisitions/99999/upload",
         files={"file": ("reqs.csv", io.BytesIO(b"mpn\nFOO"), "text/csv")},
@@ -555,6 +550,7 @@ def test_upload_requirements_not_found(client):
 def test_import_stock_list(client, db_session, test_requisition):
     """POST /api/requisitions/{id}/import-stock imports a vendor stock file."""
     import io
+
     csv_bytes = b"mpn,qty,price\nLM317T,5000,0.40\nNE555P,2000,0.20"
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/import-stock",
@@ -578,6 +574,7 @@ def test_import_stock_list_no_file(client, test_requisition):
 def test_import_stock_list_not_found(client):
     """Import stock for non-existent requisition returns 404."""
     import io
+
     resp = client.post(
         "/api/requisitions/99999/import-stock",
         data={"vendor_name": "Test"},
@@ -589,9 +586,7 @@ def test_import_stock_list_not_found(client):
 # ── Sales Role Access ─────────────────────────────────────────────────
 
 
-def test_sales_user_sees_only_own_requisitions(
-    client, db_session, test_user, sales_user
-):
+def test_sales_user_sees_only_own_requisitions(client, db_session, test_user, sales_user):
     """Sales role can only see requisitions they created."""
     from app.dependencies import require_buyer, require_user
     from app.main import app
@@ -599,13 +594,15 @@ def test_sales_user_sees_only_own_requisitions(
 
     # Create a requisition owned by test_user (buyer)
     buyer_req = Requisition(
-        name="Buyer-REQ", status="open",
+        name="Buyer-REQ",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
     # Create a requisition owned by sales_user
     sales_req = Requisition(
-        name="Sales-REQ", status="open",
+        name="Sales-REQ",
+        status="open",
         created_by=sales_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -636,7 +633,8 @@ def test_list_requisitions_with_customer_site(client, db_session, test_user, tes
     from app.models import Requisition
 
     req = Requisition(
-        name="REQ-SITE", status="open",
+        name="REQ-SITE",
+        status="open",
         customer_site_id=test_customer_site.id,
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
@@ -723,9 +721,7 @@ def test_clone_requisition_with_substitutes(client, db_session, test_requisition
     """Cloned requisition preserves and deduplicates substitutes."""
     from app.models import Requirement
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     req_item.substitutes = ["LM317T-ALT", "LM317T-ALT", "NE555P"]
     db_session.commit()
 
@@ -735,21 +731,15 @@ def test_clone_requisition_with_substitutes(client, db_session, test_requisition
     clone_id = data["id"]
 
     # Verify the cloned requirements
-    cloned_reqs = db_session.query(Requirement).filter_by(
-        requisition_id=clone_id
-    ).all()
+    cloned_reqs = db_session.query(Requirement).filter_by(requisition_id=clone_id).all()
     assert len(cloned_reqs) == 1
 
 
-def test_list_requirements_with_sightings_and_offers(
-    client, db_session, test_requisition, test_offer
-):
+def test_list_requirements_with_sightings_and_offers(client, db_session, test_requisition, test_offer):
     """Requirements list includes sighting counts and offer counts."""
     from app.models import Requirement, Sighting
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     # Link the offer to the requirement
     test_offer.requirement_id = req_item.id
     # Add a sighting
@@ -774,9 +764,7 @@ def test_list_requirements_with_sightings_and_offers(
     assert item["offer_count"] >= 1
 
 
-def test_list_requirements_with_contact_activity(
-    client, db_session, test_requisition, test_user
-):
+def test_list_requirements_with_contact_activity(client, db_session, test_requisition, test_user):
     """Requirements list includes contact_count and hours_since_activity."""
     from app.models import Contact
 
@@ -803,9 +791,7 @@ def test_update_requirement_all_fields(client, db_session, test_requisition):
     """PUT /api/requirements/{id} updates all optional fields."""
     from app.models import Requirement
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     resp = client.put(
         f"/api/requirements/{req_item.id}",
         json={
@@ -833,15 +819,16 @@ def test_update_requirement_unauthorized(client, db_session, test_user, test_req
     from app.models import Requirement, User
 
     other = User(
-        email="other2@trioscs.com", name="Other2", role="sales",
-        azure_id="az-other-unauth", created_at=datetime.now(timezone.utc),
+        email="other2@trioscs.com",
+        name="Other2",
+        role="sales",
+        azure_id="az-other-unauth",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(other)
     db_session.commit()
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
 
     app.dependency_overrides[require_user] = lambda: other
     app.dependency_overrides[require_buyer] = lambda: other
@@ -863,15 +850,16 @@ def test_delete_requirement_unauthorized(client, db_session, test_user, test_req
     from app.models import Requirement, User
 
     other = User(
-        email="other3@trioscs.com", name="Other3", role="sales",
-        azure_id="az-other-del", created_at=datetime.now(timezone.utc),
+        email="other3@trioscs.com",
+        name="Other3",
+        role="sales",
+        azure_id="az-other-del",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(other)
     db_session.commit()
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
 
     app.dependency_overrides[require_user] = lambda: other
     app.dependency_overrides[require_buyer] = lambda: other
@@ -901,9 +889,7 @@ def test_search_all_with_requirement_ids(client, db_session, test_requisition):
     """Search with requirement_ids filter only searches specified requirements."""
     from app.models import Requirement
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
 
     with patch(
         "app.routers.requisitions.search_requirement",
@@ -939,15 +925,16 @@ def test_search_one_unauthorized(client, db_session, test_user, test_requisition
     from app.models import Requirement, User
 
     other = User(
-        email="other4@trioscs.com", name="Other4", role="sales",
-        azure_id="az-other-search", created_at=datetime.now(timezone.utc),
+        email="other4@trioscs.com",
+        name="Other4",
+        role="sales",
+        azure_id="az-other-search",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(other)
     db_session.commit()
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
 
     app.dependency_overrides[require_user] = lambda: other
     app.dependency_overrides[require_buyer] = lambda: other
@@ -963,9 +950,7 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
     """Sightings endpoint includes historical offers from other requisitions."""
     from app.models import Offer, Requirement, Requisition, Sighting
 
-    req_item = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id
-    ).first()
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
 
     # Create a sighting so the requirement appears in results
     s = Sighting(
@@ -980,7 +965,8 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
 
     # Create another requisition with an offer for the same MPN
     other_req = Requisition(
-        name="OTHER-REQ", status="open",
+        name="OTHER-REQ",
+        status="open",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -1012,7 +998,8 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
 def test_upload_requirements_with_substitutes(client, test_requisition):
     """Upload CSV with substitutes column creates requirements with subs."""
     import io
-    csv_bytes = b"mpn,qty,substitutes\nABC123,100,\"DEF456,GHI789\""
+
+    csv_bytes = b'mpn,qty,substitutes\nABC123,100,"DEF456,GHI789"'
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/upload",
         files={"file": ("reqs.csv", io.BytesIO(csv_bytes), "text/csv")},
@@ -1024,9 +1011,9 @@ def test_upload_requirements_with_substitutes(client, test_requisition):
 def test_upload_requirements_with_optional_columns(client, test_requisition):
     """Upload CSV with condition, packaging, date_codes, manufacturer, notes."""
     import io
+
     csv_bytes = (
-        b"mpn,qty,condition,packaging,date_codes,manufacturer,notes,price\n"
-        b"XYZ789,200,new,reel,2025+,TI,urgent,0.50"
+        b"mpn,qty,condition,packaging,date_codes,manufacturer,notes,price\nXYZ789,200,new,reel,2025+,TI,urgent,0.50"
     )
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/upload",
@@ -1039,6 +1026,7 @@ def test_upload_requirements_with_optional_columns(client, test_requisition):
 def test_upload_requirements_parse_error(client, test_requisition):
     """Upload of unparseable file returns 400."""
     import io
+
     with patch(
         "app.file_utils.parse_tabular_file",
         side_effect=ValueError("Unsupported format"),
@@ -1053,6 +1041,7 @@ def test_upload_requirements_parse_error(client, test_requisition):
 def test_import_stock_oversized_file(client, db_session, test_requisition):
     """Import stock with file > 10MB returns 413."""
     import io
+
     # Create a file header, then pad to trigger the size check
     large_content = b"mpn,qty\n" + b"A" * (10_000_001)
     resp = client.post(
@@ -1078,8 +1067,14 @@ def test_search_all_with_source_stats_merge(client, db_session, test_requisition
     db_session.commit()
 
     search_results = [
-        {"sightings": [], "source_stats": [{"source": "BrokerBin", "results": 3, "ms": 100, "status": "ok", "error": None}]},
-        {"sightings": [], "source_stats": [{"source": "BrokerBin", "results": 5, "ms": 200, "status": "ok", "error": None}]},
+        {
+            "sightings": [],
+            "source_stats": [{"source": "BrokerBin", "results": 3, "ms": 100, "status": "ok", "error": None}],
+        },
+        {
+            "sightings": [],
+            "source_stats": [{"source": "BrokerBin", "results": 5, "ms": 200, "status": "ok", "error": None}],
+        },
     ]
     call_count = 0
 

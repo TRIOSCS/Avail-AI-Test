@@ -56,14 +56,20 @@ class TestMakeCard:
 
     def test_card_custom_accent(self):
         card = _make_card(
-            title="T", subtitle="S", facts=[], action_url="",
+            title="T",
+            subtitle="S",
+            facts=[],
+            action_url="",
             accent_color="good",
         )
         assert card["body"][0]["color"] == "good"
 
     def test_card_custom_action_title(self):
         card = _make_card(
-            title="T", subtitle="S", facts=[], action_url="",
+            title="T",
+            subtitle="S",
+            facts=[],
+            action_url="",
             action_title="Click Here",
         )
         assert card["actions"][0]["title"] == "Click Here"
@@ -151,12 +157,18 @@ class TestPostToChannel:
 class TestHotRequirementAlert:
     @pytest.mark.asyncio
     async def test_sends_when_enabled(self):
-        with patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)), \
-             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"), \
-             patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True):
+        with (
+            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True),
+        ):
             result = await send_hot_requirement_alert(
-                requirement_id=1, mpn="LM317T", target_qty=500,
-                target_price=25.0, customer_name="Acme", requisition_id=10,
+                requirement_id=1,
+                mpn="LM317T",
+                target_qty=500,
+                target_price=25.0,
+                customer_name="Acme",
+                requisition_id=10,
             )
             assert result is True
 
@@ -164,8 +176,12 @@ class TestHotRequirementAlert:
     async def test_skips_when_disabled(self):
         with patch("app.services.teams._get_teams_config", return_value=("", "", False)):
             result = await send_hot_requirement_alert(
-                requirement_id=1, mpn="LM317T", target_qty=500,
-                target_price=25.0, customer_name="Acme", requisition_id=10,
+                requirement_id=1,
+                mpn="LM317T",
+                target_qty=500,
+                target_price=25.0,
+                customer_name="Acme",
+                requisition_id=10,
             )
             assert result is False
 
@@ -174,18 +190,28 @@ class TestHotRequirementAlert:
         _mark_posted("hot_requirement", 1)
         with patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)):
             result = await send_hot_requirement_alert(
-                requirement_id=1, mpn="LM317T", target_qty=500,
-                target_price=25.0, customer_name="Acme", requisition_id=10,
+                requirement_id=1,
+                mpn="LM317T",
+                target_qty=500,
+                target_price=25.0,
+                customer_name="Acme",
+                requisition_id=10,
             )
             assert result is False
 
     @pytest.mark.asyncio
     async def test_no_token(self):
-        with patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)), \
-             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value=None):
+        with (
+            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value=None),
+        ):
             result = await send_hot_requirement_alert(
-                requirement_id=2, mpn="LM317T", target_qty=500,
-                target_price=25.0, customer_name="Acme", requisition_id=10,
+                requirement_id=2,
+                mpn="LM317T",
+                target_qty=500,
+                target_price=25.0,
+                customer_name="Acme",
+                requisition_id=10,
             )
             assert result is False
 
@@ -196,12 +222,18 @@ class TestHotRequirementAlert:
 class TestCompetitiveQuoteAlert:
     @pytest.mark.asyncio
     async def test_sends_when_enabled(self):
-        with patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)), \
-             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"), \
-             patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True):
+        with (
+            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True),
+        ):
             result = await send_competitive_quote_alert(
-                offer_id=1, mpn="LM317T", vendor_name="Arrow",
-                offer_price=0.30, best_price=0.50, requisition_id=10,
+                offer_id=1,
+                mpn="LM317T",
+                vendor_name="Arrow",
+                offer_price=0.30,
+                best_price=0.50,
+                requisition_id=10,
             )
             assert result is True
 
@@ -214,12 +246,18 @@ class TestCompetitiveQuoteAlert:
             captured_card.update(card)
             return True
 
-        with patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)), \
-             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"), \
-             patch("app.services.teams.post_to_channel", side_effect=_capture_post):
+        with (
+            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.services.teams.post_to_channel", side_effect=_capture_post),
+        ):
             await send_competitive_quote_alert(
-                offer_id=2, mpn="LM317T", vendor_name="Arrow",
-                offer_price=0.40, best_price=1.00, requisition_id=10,
+                offer_id=2,
+                mpn="LM317T",
+                vendor_name="Arrow",
+                offer_price=0.40,
+                best_price=1.00,
+                requisition_id=10,
             )
             # Savings = (1.00 - 0.40) / 1.00 * 100 = 60%
             facts = captured_card["body"][2]["facts"]
@@ -233,11 +271,16 @@ class TestCompetitiveQuoteAlert:
 class TestOwnershipWarning:
     @pytest.mark.asyncio
     async def test_sends_when_enabled(self):
-        with patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)), \
-             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"), \
-             patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True):
+        with (
+            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True),
+        ):
             result = await send_ownership_warning(
-                company_id=1, company_name="Acme", owner_name="John", days_remaining=7,
+                company_id=1,
+                company_name="Acme",
+                owner_name="John",
+                days_remaining=7,
             )
             assert result is True
 
@@ -248,9 +291,11 @@ class TestOwnershipWarning:
 class TestStockMatchAlert:
     @pytest.mark.asyncio
     async def test_sends_with_matches(self):
-        with patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)), \
-             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"), \
-             patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True):
+        with (
+            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.services.teams.post_to_channel", new_callable=AsyncMock, return_value=True),
+        ):
             result = await send_stock_match_alert(
                 matches=[
                     {"mpn": "LM317T", "requirement_id": 1, "requisition_id": 10},
@@ -281,9 +326,11 @@ class TestStockMatchAlert:
             captured_card.update(card)
             return True
 
-        with patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)), \
-             patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"), \
-             patch("app.services.teams.post_to_channel", side_effect=_capture_post):
+        with (
+            patch("app.services.teams._get_teams_config", return_value=("ch-1", "team-1", True)),
+            patch("app.services.teams._get_system_token", new_callable=AsyncMock, return_value="tok"),
+            patch("app.services.teams.post_to_channel", side_effect=_capture_post),
+        ):
             matches = [{"mpn": f"MPN-{i}", "requirement_id": i, "requisition_id": 1} for i in range(8)]
             await send_stock_match_alert(matches=matches, filename="big.xlsx", vendor_name="V")
 

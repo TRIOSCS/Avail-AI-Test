@@ -10,8 +10,9 @@ Mirrors the NetComponents search tables (022/023) for the ICsource scraper.
 revision = "031_ics_search_tables"
 down_revision = "030_customer_enrichment_schema"
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 
 def upgrade():

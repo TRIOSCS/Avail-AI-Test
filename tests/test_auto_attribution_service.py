@@ -11,18 +11,20 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import ActivityLog, Company, CustomerSite, User, VendorCard
 
-
 # ── Helpers ──────────────────────────────────────────────────────────
+
 
 def _make_user(db: Session) -> User:
     u = User(
-        email="attrib@test.com", name="Attrib Tester", role="buyer",
-        azure_id="az-attrib", created_at=datetime.now(timezone.utc),
+        email="attrib@test.com",
+        name="Attrib Tester",
+        role="buyer",
+        azure_id="az-attrib",
+        created_at=datetime.now(timezone.utc),
     )
     db.add(u)
     db.flush()
@@ -31,7 +33,9 @@ def _make_user(db: Session) -> User:
 
 def _make_unmatched_activity(db: Session, user: User, **kw) -> ActivityLog:
     defaults = dict(
-        user_id=user.id, activity_type="email", channel="email",
+        user_id=user.id,
+        activity_type="email",
+        channel="email",
         created_at=datetime.now(timezone.utc),
     )
     defaults.update(kw)
@@ -45,10 +49,12 @@ def _make_unmatched_activity(db: Session, user: User, **kw) -> ActivityLog:
 # run_auto_attribution — top-level
 # ══════════════════════════════════════════════════════════════════════
 
+
 class TestRunAutoAttribution:
     def test_empty_queue_noop(self, db_session):
         """Empty queue returns zero stats."""
         from app.services.auto_attribution_service import run_auto_attribution
+
         stats = run_auto_attribution(db_session)
         assert stats == {"rule_matched": 0, "ai_matched": 0, "auto_dismissed": 0, "skipped": 0}
 
@@ -60,12 +66,10 @@ class TestRunAutoAttribution:
         co = Company(name="Acme", is_active=True)
         db_session.add(co)
         db_session.flush()
-        site = CustomerSite(company_id=co.id, site_name="HQ",
-                            contact_email="john@acme.com")
+        site = CustomerSite(company_id=co.id, site_name="HQ", contact_email="john@acme.com")
         db_session.add(site)
 
-        act = _make_unmatched_activity(db_session, user,
-                                       contact_email="john@acme.com")
+        act = _make_unmatched_activity(db_session, user, contact_email="john@acme.com")
         db_session.commit()
 
         stats = run_auto_attribution(db_session)
@@ -78,9 +82,7 @@ class TestRunAutoAttribution:
 
         user = _make_user(db_session)
         old = datetime.now(timezone.utc) - timedelta(days=35)
-        act = _make_unmatched_activity(db_session, user,
-                                       contact_email="nobody@nowhere.com",
-                                       created_at=old)
+        act = _make_unmatched_activity(db_session, user, contact_email="nobody@nowhere.com", created_at=old)
         db_session.commit()
 
         stats = run_auto_attribution(db_session)
@@ -97,8 +99,11 @@ class TestRunAutoAttribution:
         db_session.flush()
 
         act = ActivityLog(
-            user_id=user.id, activity_type="email", channel="email",
-            contact_email="x@test.com", company_id=co.id,
+            user_id=user.id,
+            activity_type="email",
+            channel="email",
+            contact_email="x@test.com",
+            company_id=co.id,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(act)
@@ -113,7 +118,9 @@ class TestRunAutoAttribution:
 
         user = _make_user(db_session)
         act = ActivityLog(
-            user_id=user.id, activity_type="email", channel="email",
+            user_id=user.id,
+            activity_type="email",
+            channel="email",
             contact_email="x@test.com",
             dismissed_at=datetime.now(timezone.utc),
             created_at=datetime.now(timezone.utc),
@@ -134,7 +141,8 @@ class TestRunAutoAttribution:
         db_session.flush()
 
         act = _make_unmatched_activity(
-            db_session, user,
+            db_session,
+            user,
             contact_email="mystery@unknown.com",
             contact_name="Mystery Person",
         )
@@ -142,8 +150,7 @@ class TestRunAutoAttribution:
 
         ai_results = {act.id: {"entity_type": "company", "entity_id": co.id, "confidence": 0.9}}
 
-        with patch("app.services.auto_attribution_service._ai_match_batch",
-                   return_value=ai_results):
+        with patch("app.services.auto_attribution_service._ai_match_batch", return_value=ai_results):
             with patch("app.services.activity_service.attribute_activity") as mock_attr:
                 stats = run_auto_attribution(db_session)
 
@@ -155,14 +162,15 @@ class TestRunAutoAttribution:
 
         user = _make_user(db_session)
         act = _make_unmatched_activity(
-            db_session, user, contact_email="maybe@unknown.com",
+            db_session,
+            user,
+            contact_email="maybe@unknown.com",
         )
         db_session.commit()
 
         ai_results = {act.id: {"entity_type": "company", "entity_id": 1, "confidence": 0.5}}
 
-        with patch("app.services.auto_attribution_service._ai_match_batch",
-                   return_value=ai_results):
+        with patch("app.services.auto_attribution_service._ai_match_batch", return_value=ai_results):
             stats = run_auto_attribution(db_session)
 
         assert stats["skipped"] == 1
@@ -174,14 +182,15 @@ class TestRunAutoAttribution:
 
         user = _make_user(db_session)
         act = _make_unmatched_activity(
-            db_session, user, contact_email="nope@unknown.com",
+            db_session,
+            user,
+            contact_email="nope@unknown.com",
         )
         db_session.commit()
 
         ai_results = {act.id: None}
 
-        with patch("app.services.auto_attribution_service._ai_match_batch",
-                   return_value=ai_results):
+        with patch("app.services.auto_attribution_service._ai_match_batch", return_value=ai_results):
             stats = run_auto_attribution(db_session)
 
         assert stats["skipped"] == 1
@@ -192,15 +201,19 @@ class TestRunAutoAttribution:
 
         user = _make_user(db_session)
         vc = VendorCard(
-            normalized_name="acme vendor", display_name="Acme Vendor",
-            emails=[], phones=["5551234567"],
+            normalized_name="acme vendor",
+            display_name="Acme Vendor",
+            emails=[],
+            phones=["5551234567"],
         )
         db_session.add(vc)
         db_session.flush()
 
         # Use a recent timestamp to avoid the 30-day dismiss path
         act = _make_unmatched_activity(
-            db_session, user, contact_phone="5551234567",
+            db_session,
+            user,
+            contact_phone="5551234567",
             created_at=datetime.now(timezone.utc),
         )
         db_session.commit()
@@ -217,10 +230,12 @@ class TestRunAutoAttribution:
 # _ai_match_batch
 # ══════════════════════════════════════════════════════════════════════
 
+
 class TestAIMatchBatch:
     def test_empty_activities_returns_empty(self, db_session):
         """Empty activity list returns empty dict."""
         from app.services.auto_attribution_service import _ai_match_batch
+
         result = _ai_match_batch([], db_session)
         assert result == {}
 
@@ -234,17 +249,21 @@ class TestAIMatchBatch:
         db_session.flush()
 
         act = _make_unmatched_activity(
-            db_session, user, contact_email="hello@match.com",
-            contact_name="Test Person", subject="Test subject",
+            db_session,
+            user,
+            contact_email="hello@match.com",
+            contact_name="Test Person",
+            subject="Test subject",
         )
         db_session.commit()
 
-        mock_result = {
-            act.id: {"entity_type": "company", "entity_id": co.id, "confidence": 0.9}
-        }
+        mock_result = {act.id: {"entity_type": "company", "entity_id": co.id, "confidence": 0.9}}
 
-        with patch("app.services.auto_attribution_service._call_claude_for_matching",
-                   new_callable=AsyncMock, return_value=mock_result):
+        with patch(
+            "app.services.auto_attribution_service._call_claude_for_matching",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
             result = _ai_match_batch([act], db_session)
 
         assert act.id in result
@@ -258,13 +277,16 @@ class TestAIMatchBatch:
         activities = []
         for i in range(25):
             act = _make_unmatched_activity(
-                db_session, user, contact_email=f"person{i}@test.com",
+                db_session,
+                user,
+                contact_email=f"person{i}@test.com",
             )
             activities.append(act)
         db_session.commit()
 
-        with patch("app.services.auto_attribution_service._call_claude_for_matching",
-                   new_callable=AsyncMock, return_value={}) as mock_claude:
+        with patch(
+            "app.services.auto_attribution_service._call_claude_for_matching", new_callable=AsyncMock, return_value={}
+        ) as mock_claude:
             _ai_match_batch(activities, db_session)
 
         if mock_claude.called:
@@ -277,12 +299,17 @@ class TestAIMatchBatch:
 
         user = _make_user(db_session)
         act = _make_unmatched_activity(
-            db_session, user, contact_email="test@test.com",
+            db_session,
+            user,
+            contact_email="test@test.com",
         )
         db_session.commit()
 
-        with patch("app.services.auto_attribution_service._call_claude_for_matching",
-                   new_callable=AsyncMock, side_effect=RuntimeError("API failed")):
+        with patch(
+            "app.services.auto_attribution_service._call_claude_for_matching",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("API failed"),
+        ):
             result = _ai_match_batch([act], db_session)
 
         assert result == {}
@@ -298,8 +325,10 @@ class TestAIMatchBatch:
         # Make run_until_complete raise RuntimeError (simulating already-running loop)
         mock_loop = MagicMock()
         mock_loop.run_until_complete.side_effect = RuntimeError("running loop")
-        with patch("asyncio.get_event_loop", return_value=mock_loop), \
-             patch("asyncio.get_running_loop", return_value=MagicMock()):
+        with (
+            patch("asyncio.get_event_loop", return_value=mock_loop),
+            patch("asyncio.get_running_loop", return_value=MagicMock()),
+        ):
             result = _ai_match_batch([act], db_session)
 
         assert result == {}
@@ -329,8 +358,10 @@ class TestAIMatchBatch:
 
         mock_loop = MagicMock()
         mock_loop.run_until_complete.side_effect = RuntimeError("loop")
-        with patch("asyncio.get_event_loop", return_value=mock_loop), \
-             patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")):
+        with (
+            patch("asyncio.get_event_loop", return_value=mock_loop),
+            patch("asyncio.get_running_loop", side_effect=RuntimeError("no loop")),
+        ):
             result = _ai_match_batch([act], db_session)
 
         assert result == {}
@@ -343,25 +374,33 @@ class TestAIMatchBatch:
         co = Company(name="TestCo", is_active=True, domain="testco.com")
         db_session.add(co)
         vc = VendorCard(
-            normalized_name="testvend", display_name="TestVend",
-            domain="testvend.com", is_blacklisted=False,
+            normalized_name="testvend",
+            display_name="TestVend",
+            domain="testvend.com",
+            is_blacklisted=False,
         )
         db_session.add(vc)
         db_session.flush()
 
         act = _make_unmatched_activity(
-            db_session, user, contact_email="x@test.com",
+            db_session,
+            user,
+            contact_email="x@test.com",
         )
         db_session.commit()
 
         captured_args = {}
+
         async def capture_claude(activities, companies, vendors):
             captured_args["companies"] = companies
             captured_args["vendors"] = vendors
             return {}
 
-        with patch("app.services.auto_attribution_service._call_claude_for_matching",
-                   new_callable=AsyncMock, side_effect=capture_claude):
+        with patch(
+            "app.services.auto_attribution_service._call_claude_for_matching",
+            new_callable=AsyncMock,
+            side_effect=capture_claude,
+        ):
             _ai_match_batch([act], db_session)
 
         if captured_args:
@@ -372,6 +411,7 @@ class TestAIMatchBatch:
 # ══════════════════════════════════════════════════════════════════════
 # _call_claude_for_matching
 # ══════════════════════════════════════════════════════════════════════
+
 
 class TestCallClaudeForMatching:
     def test_returns_match_dict(self):
@@ -390,8 +430,7 @@ class TestCallClaudeForMatching:
             ]
         }
 
-        with patch("app.utils.claude_client.claude_structured",
-                   new_callable=AsyncMock, return_value=mock_response):
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_response):
             result = asyncio.get_event_loop().run_until_complete(
                 _call_claude_for_matching(activities, companies, vendors)
             )
@@ -404,12 +443,9 @@ class TestCallClaudeForMatching:
         """Should return empty dict when Claude returns None."""
         from app.services.auto_attribution_service import _call_claude_for_matching
 
-        with patch("app.utils.claude_client.claude_structured",
-                   new_callable=AsyncMock, return_value=None):
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=None):
             result = asyncio.get_event_loop().run_until_complete(
-                _call_claude_for_matching(
-                    [{"id": 1, "email": "", "phone": "", "name": "", "subject": ""}], [], []
-                )
+                _call_claude_for_matching([{"id": 1, "email": "", "phone": "", "name": "", "subject": ""}], [], [])
             )
 
         assert result == {}
@@ -418,12 +454,9 @@ class TestCallClaudeForMatching:
         """Should return empty dict when response has no 'matches' key."""
         from app.services.auto_attribution_service import _call_claude_for_matching
 
-        with patch("app.utils.claude_client.claude_structured",
-                   new_callable=AsyncMock, return_value={"other": "data"}):
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={"other": "data"}):
             result = asyncio.get_event_loop().run_until_complete(
-                _call_claude_for_matching(
-                    [{"id": 1, "email": "", "phone": "", "name": "", "subject": ""}], [], []
-                )
+                _call_claude_for_matching([{"id": 1, "email": "", "phone": "", "name": "", "subject": ""}], [], [])
             )
 
         assert result == {}
@@ -444,11 +477,8 @@ class TestCallClaudeForMatching:
             ]
         }
 
-        with patch("app.utils.claude_client.claude_structured",
-                   new_callable=AsyncMock, return_value=mock_response):
-            result = asyncio.get_event_loop().run_until_complete(
-                _call_claude_for_matching(activities, [], [])
-            )
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_response):
+            result = asyncio.get_event_loop().run_until_complete(_call_claude_for_matching(activities, [], []))
 
         assert len(result) == 2
         assert result[1]["entity_type"] == "company"
@@ -458,12 +488,9 @@ class TestCallClaudeForMatching:
         """Should return empty dict when Claude returns empty matches."""
         from app.services.auto_attribution_service import _call_claude_for_matching
 
-        with patch("app.utils.claude_client.claude_structured",
-                   new_callable=AsyncMock, return_value={"matches": []}):
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={"matches": []}):
             result = asyncio.get_event_loop().run_until_complete(
-                _call_claude_for_matching(
-                    [{"id": 1, "email": "", "phone": "", "name": "", "subject": ""}], [], []
-                )
+                _call_claude_for_matching([{"id": 1, "email": "", "phone": "", "name": "", "subject": ""}], [], [])
             )
 
         assert result == {}

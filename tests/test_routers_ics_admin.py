@@ -9,11 +9,7 @@ Depends on: app/routers/ics_admin.py, conftest.py
 
 from datetime import datetime, timezone
 
-import pytest
-from sqlalchemy.orm import Session
-
-from app.models import IcsSearchQueue, IcsWorkerStatus, User
-
+from app.models import IcsSearchQueue, IcsWorkerStatus
 
 # ── Queue Stats ────────────────────────────────────────────────────────
 

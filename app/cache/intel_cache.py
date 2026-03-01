@@ -36,11 +36,13 @@ def _get_redis():
 
     try:
         from app.config import settings
+
         if settings.cache_backend == "postgres":
             logger.info("Cache backend set to postgres — skipping Redis")
             return None
 
         import redis
+
         _redis_client = redis.from_url(
             settings.redis_url,
             decode_responses=True,

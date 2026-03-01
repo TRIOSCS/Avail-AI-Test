@@ -79,9 +79,7 @@ class EmailMiner:
 
     # ── H2: Dedup helpers ────────────────────────────────────────────
 
-    def _already_processed(
-        self, message_ids: list[str], processing_type: str
-    ) -> set[str]:
+    def _already_processed(self, message_ids: list[str], processing_type: str) -> set[str]:
         """Check which message IDs have already been processed (H2)."""
         if not self.db or not message_ids:
             return set()
@@ -191,9 +189,7 @@ class EmailMiner:
     #  Inbound: Vendor Contact Mining
     # ══════════════════════════════════════════════════════════════════
 
-    async def scan_inbox(
-        self, lookback_days: int = 180, max_messages: int = 500, use_delta: bool = True
-    ) -> dict:
+    async def scan_inbox(self, lookback_days: int = 180, max_messages: int = 500, use_delta: bool = True) -> dict:
         """Full inbox scan — returns enrichment data for vendor cards.
 
         H2: Skips messages already in processed_messages (processing_type='mining')
@@ -232,26 +228,20 @@ class EmailMiner:
                 messages = []
                 used_delta = False
             except Exception as e:
-                logger.warning(
-                    f"Delta query failed for mining, falling back to search: {e}"
-                )
+                logger.warning(f"Delta query failed for mining, falling back to search: {e}")
                 messages = []
                 used_delta = False
 
         # ── Fallback: Keyword search scan ──
         if not messages and not used_delta:
-            since = (
-                datetime.now(timezone.utc) - timedelta(days=lookback_days)
-            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
             queries = [
                 f"received>={since} AND (subject:RFQ OR subject:quote OR subject:stock OR subject:inventory OR subject:availability)",
                 f"received>={since} AND (body:in stock OR body:lead time OR body:unit price)",
             ]
             seen_ids = set()
             for query in queries:
-                results = await self._search_messages(
-                    query, max_messages // len(queries)
-                )
+                results = await self._search_messages(query, max_messages // len(queries))
                 for msg in results:
                     msg_id = msg.get("id", "")
                     if msg_id and msg_id not in seen_ids:
@@ -279,9 +269,7 @@ class EmailMiner:
             subject = msg.get("subject", "")
 
             # Extract vendor intelligence from this email
-            vendor_info = self._extract_vendor_info(
-                sender_name, sender_email, body, subject
-            )
+            vendor_info = self._extract_vendor_info(sender_name, sender_email, body, subject)
 
             # Track unique vendor contacts
             vendor_key = self._normalize_vendor_from_email(sender_email)
@@ -337,13 +325,12 @@ class EmailMiner:
                     received_dt = None
                     if received:
                         try:
-                            received_dt = datetime.fromisoformat(
-                                received.replace("Z", "+00:00")
-                            )
+                            received_dt = datetime.fromisoformat(received.replace("Z", "+00:00"))
                         except Exception:
                             pass
 
                     import asyncio
+
                     loop = asyncio.get_event_loop()
                     if loop.is_running():
                         # Already in async context
@@ -377,9 +364,7 @@ class EmailMiner:
                     "websites": sorted(c["websites"]),
                     "parts_mentioned": sorted(c["parts_mentioned"])[:100],
                     "message_count": c["message_count"],
-                    "last_contact": c["last_contact"].isoformat()
-                    if c["last_contact"]
-                    else None,
+                    "last_contact": c["last_contact"].isoformat() if c["last_contact"] else None,
                 }
             )
 
@@ -400,9 +385,7 @@ class EmailMiner:
 
         H2: Skips attachment messages already in processed_messages (type='attachment').
         """
-        since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime(
-            "%Y-%m-%dT%H:%M:%SZ"
-        )
+        since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
         query = f"received>={since} AND hasAttachments:true AND (subject:stock list OR subject:inventory OR subject:excess OR subject:line card)"
 
         results = []
@@ -452,9 +435,7 @@ class EmailMiner:
     #  Upgrade 3: Outbound Mining — Scan SentItems for AVAIL RFQs
     # ══════════════════════════════════════════════════════════════════
 
-    async def scan_sent_items(
-        self, lookback_days: int = 90, max_messages: int = 500
-    ) -> dict:
+    async def scan_sent_items(self, lookback_days: int = 90, max_messages: int = 500) -> dict:
         """Scan Sent Items for outbound AVAIL RFQs.
 
         Detects emails with [AVAIL-{req_id}] subject tokens.
@@ -501,9 +482,7 @@ class EmailMiner:
 
         # ── Fallback: Search SentItems ──
         if not messages and not used_delta:
-            since = (
-                datetime.now(timezone.utc) - timedelta(days=lookback_days)
-            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            since = (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%dT%H:%M:%SZ")
             try:
                 results = await self.gc.get_all_pages(
                     "/me/mailFolders/sentItems/messages",
@@ -573,9 +552,7 @@ class EmailMiner:
 
     # ── Deep Mining (scans ALL emails, not just offer-tagged) ──────────
 
-    async def deep_scan_inbox(
-        self, lookback_days: int = 365, max_messages: int = 2000
-    ) -> dict:
+    async def deep_scan_inbox(self, lookback_days: int = 365, max_messages: int = 2000) -> dict:
         """Deep scan ALL emails for contacts, signatures, and vendor intelligence.
 
         Unlike scan_inbox(), this does NOT filter by OFFER_PATTERNS — it processes
@@ -638,9 +615,7 @@ class EmailMiner:
             }
 
             try:
-                messages = await self.gc.get_all_pages(
-                    "/me/messages", params=params, max_items=max_messages
-                )
+                messages = await self.gc.get_all_pages("/me/messages", params=params, max_items=max_messages)
             except Exception as e:
                 logger.warning("Deep scan inbox error: %s", e)
                 return empty_result
@@ -654,9 +629,16 @@ class EmailMiner:
 
         # Skip common internal/system domains
         skip_domains = {
-            "gmail.com", "yahoo.com", "outlook.com", "hotmail.com",
-            "microsoft.com", "google.com", "noreply", "no-reply",
-            "notifications", "mailer-daemon",
+            "gmail.com",
+            "yahoo.com",
+            "outlook.com",
+            "hotmail.com",
+            "microsoft.com",
+            "google.com",
+            "noreply",
+            "no-reply",
+            "notifications",
+            "mailer-daemon",
         }
 
         per_domain = {}
@@ -718,6 +700,7 @@ class EmailMiner:
                     detect_brands_from_text,
                     detect_commodities_from_text,
                 )
+
                 text_for_analysis = f"{subject} {body[:2000]}"
                 brands = detect_brands_from_text(text_for_analysis)
                 commodities = detect_commodities_from_text(text_for_analysis)
@@ -770,16 +753,12 @@ class EmailMiner:
             "$select": MSG_SELECT,
         }
         try:
-            return await self.gc.get_all_pages(
-                "/me/messages", params=params, max_items=limit
-            )
+            return await self.gc.get_all_pages("/me/messages", params=params, max_items=limit)
         except Exception as e:
             logger.warning(f"Email search error: {e}")
             return []
 
-    def _extract_vendor_info(
-        self, sender_name: str, sender_email: str, body: str, subject: str
-    ) -> dict:
+    def _extract_vendor_info(self, sender_name: str, sender_email: str, body: str, subject: str) -> dict:
         """Extract vendor name, phones, websites from email content."""
         vendor_name = sender_name.strip() if sender_name else ""
         if not vendor_name or vendor_name == sender_email:

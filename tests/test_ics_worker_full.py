@@ -8,19 +8,14 @@ Called by: pytest
 Depends on: conftest.py, ics_worker modules
 """
 
-import asyncio
-import hashlib
-import math
 import os
-import random
 import time
-from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, PropertyMock, patch
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.orm import Session
 
-from app.models import IcsSearchLog, IcsSearchQueue, IcsWorkerStatus, Requirement, Sighting
+from app.models import IcsSearchQueue, IcsWorkerStatus, Requirement, Sighting
 from app.services.ics_worker.circuit_breaker import CircuitBreaker
 from app.services.ics_worker.config import IcsConfig
 from app.services.ics_worker.human_behavior import HumanBehavior
@@ -44,7 +39,6 @@ from app.services.ics_worker.result_parser import IcsSighting, parse_quantity, p
 from app.services.ics_worker.scheduler import SearchScheduler
 from app.services.ics_worker.search_engine import SEARCH_URL, search_part
 from app.services.ics_worker.sighting_writer import save_ics_sightings
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # MPN NORMALIZER
@@ -326,11 +320,13 @@ class TestSearchEngine:
 
         page.wait_for_selector = AsyncMock()
         page.screenshot = AsyncMock()
-        page.evaluate = AsyncMock(side_effect=[
-            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
-            "<div class='tblWTBPanel'>results</div>",  # HTML content
-            5,  # total_count
-        ])
+        page.evaluate = AsyncMock(
+            side_effect=[
+                {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+                "<div class='tblWTBPanel'>results</div>",  # HTML content
+                5,  # total_count
+            ]
+        )
 
         with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
             mock_hb.human_type = AsyncMock()
@@ -368,11 +364,13 @@ class TestSearchEngine:
         page.locator = MagicMock(side_effect=mock_locator)
         page.wait_for_selector = AsyncMock()
         page.screenshot = AsyncMock()
-        page.evaluate = AsyncMock(side_effect=[
-            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
-            "<html></html>",
-            0,
-        ])
+        page.evaluate = AsyncMock(
+            side_effect=[
+                {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+                "<html></html>",
+                0,
+            ]
+        )
 
         with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
             mock_hb.human_type = AsyncMock()
@@ -399,11 +397,13 @@ class TestSearchEngine:
 
         page.wait_for_selector = AsyncMock(side_effect=Exception("Timeout"))
         page.screenshot = AsyncMock()
-        page.evaluate = AsyncMock(side_effect=[
-            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
-            "<html>body</html>",
-            0,
-        ])
+        page.evaluate = AsyncMock(
+            side_effect=[
+                {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+                "<html>body</html>",
+                0,
+            ]
+        )
 
         with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
             mock_hb.human_type = AsyncMock()
@@ -803,53 +803,74 @@ class TestQueueManager:
         from app.models import MaterialCard, Requisition
 
         mc = MaterialCard(
-            normalized_mpn="lm317t", display_mpn="LM317T", manufacturer="TI",
+            normalized_mpn="lm317t",
+            display_mpn="LM317T",
+            manufacturer="TI",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(mc)
         db_session.flush()
 
         req1 = Requisition(
-            name="REQ-1", customer_name="Acme", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-1",
+            customer_name="Acme",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req1)
         db_session.flush()
 
         item1_req = Requirement(
-            requisition_id=req1.id, primary_mpn="LM317T", target_qty=100,
-            material_card_id=mc.id, created_at=datetime.now(timezone.utc),
+            requisition_id=req1.id,
+            primary_mpn="LM317T",
+            target_qty=100,
+            material_card_id=mc.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(item1_req)
         db_session.flush()
 
         queue1 = IcsSearchQueue(
-            requirement_id=item1_req.id, requisition_id=req1.id,
-            mpn="LM317T", normalized_mpn="LM317T",
-            status="completed", last_searched_at=datetime.now(timezone.utc),
+            requirement_id=item1_req.id,
+            requisition_id=req1.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="completed",
+            last_searched_at=datetime.now(timezone.utc),
         )
         db_session.add(queue1)
         db_session.flush()
 
         sighting = Sighting(
-            requirement_id=item1_req.id, vendor_name="Arrow",
-            vendor_name_normalized="arrow", mpn_matched="LM317T",
-            normalized_mpn="LM317T", source_type="icsource",
-            qty_available=500, created_at=datetime.now(timezone.utc),
+            requirement_id=item1_req.id,
+            vendor_name="Arrow",
+            vendor_name_normalized="arrow",
+            mpn_matched="LM317T",
+            normalized_mpn="LM317T",
+            source_type="icsource",
+            qty_available=500,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(sighting)
         db_session.commit()
 
         req2 = Requisition(
-            name="REQ-2", customer_name="Beta Corp", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-2",
+            customer_name="Beta Corp",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req2)
         db_session.flush()
 
         item2_req = Requirement(
-            requisition_id=req2.id, primary_mpn="LM317T", target_qty=200,
-            material_card_id=mc.id, created_at=datetime.now(timezone.utc),
+            requisition_id=req2.id,
+            primary_mpn="LM317T",
+            target_qty=200,
+            material_card_id=mc.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(item2_req)
         db_session.commit()
@@ -869,37 +890,50 @@ class TestQueueManager:
         from app.models import Requisition
 
         req1 = Requisition(
-            name="REQ-D1", customer_name="X", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-D1",
+            customer_name="X",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req1)
         db_session.flush()
 
         item1 = Requirement(
-            requisition_id=req1.id, primary_mpn="LM317T",
-            target_qty=100, created_at=datetime.now(timezone.utc),
+            requisition_id=req1.id,
+            primary_mpn="LM317T",
+            target_qty=100,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(item1)
         db_session.flush()
 
         queue1 = IcsSearchQueue(
-            requirement_id=item1.id, requisition_id=req1.id,
-            mpn="LM317T", normalized_mpn="LM317T",
-            status="completed", last_searched_at=datetime.now(timezone.utc),
+            requirement_id=item1.id,
+            requisition_id=req1.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="completed",
+            last_searched_at=datetime.now(timezone.utc),
         )
         db_session.add(queue1)
         db_session.commit()
 
         req2 = Requisition(
-            name="REQ-D2", customer_name="Y", status="open",
-            created_by=test_user.id, created_at=datetime.now(timezone.utc),
+            name="REQ-D2",
+            customer_name="Y",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req2)
         db_session.flush()
 
         item2 = Requirement(
-            requisition_id=req2.id, primary_mpn="LM317T",
-            target_qty=50, created_at=datetime.now(timezone.utc),
+            requisition_id=req2.id,
+            primary_mpn="LM317T",
+            target_qty=50,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(item2)
         db_session.commit()
@@ -910,8 +944,11 @@ class TestQueueManager:
     def test_recover_stale_searches(self, db_session, test_requisition):
         req = test_requisition.requirements[0]
         item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="searching",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="searching",
         )
         db_session.add(item)
         db_session.commit()
@@ -927,8 +964,11 @@ class TestQueueManager:
     def test_get_next_queued_item(self, db_session, test_requisition):
         req = test_requisition.requirements[0]
         item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="queued",
         )
         db_session.add(item)
         db_session.commit()
@@ -941,30 +981,56 @@ class TestQueueManager:
         from app.models import Requisition
 
         # Create two requisitions
-        r1 = Requisition(name="OLD", customer_name="A", status="open",
-                         created_by=test_user.id, created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
-        r2 = Requisition(name="NEW", customer_name="B", status="open",
-                         created_by=test_user.id, created_at=datetime(2026, 2, 1, tzinfo=timezone.utc))
+        r1 = Requisition(
+            name="OLD",
+            customer_name="A",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+        r2 = Requisition(
+            name="NEW",
+            customer_name="B",
+            status="open",
+            created_by=test_user.id,
+            created_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+        )
         db_session.add_all([r1, r2])
         db_session.flush()
 
-        req1 = Requirement(requisition_id=r1.id, primary_mpn="OLD-PART", target_qty=1,
-                           created_at=datetime(2026, 1, 1, tzinfo=timezone.utc))
-        req2 = Requirement(requisition_id=r2.id, primary_mpn="NEW-PART", target_qty=1,
-                           created_at=datetime(2026, 2, 1, tzinfo=timezone.utc))
+        req1 = Requirement(
+            requisition_id=r1.id,
+            primary_mpn="OLD-PART",
+            target_qty=1,
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        )
+        req2 = Requirement(
+            requisition_id=r2.id,
+            primary_mpn="NEW-PART",
+            target_qty=1,
+            created_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+        )
         db_session.add_all([req1, req2])
         db_session.flush()
 
         # Both same priority — newer should come first
         old_item = IcsSearchQueue(
-            requirement_id=req1.id, requisition_id=r1.id,
-            mpn="OLD-PART", normalized_mpn="old-part", status="queued",
-            priority=3, created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            requirement_id=req1.id,
+            requisition_id=r1.id,
+            mpn="OLD-PART",
+            normalized_mpn="old-part",
+            status="queued",
+            priority=3,
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         )
         new_item = IcsSearchQueue(
-            requirement_id=req2.id, requisition_id=r2.id,
-            mpn="NEW-PART", normalized_mpn="new-part", status="queued",
-            priority=3, created_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
+            requirement_id=req2.id,
+            requisition_id=r2.id,
+            mpn="NEW-PART",
+            normalized_mpn="new-part",
+            status="queued",
+            priority=3,
+            created_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
         )
         db_session.add_all([old_item, new_item])
         db_session.commit()
@@ -985,8 +1051,11 @@ class TestQueueManager:
     def test_mark_status(self, db_session, test_requisition):
         req = test_requisition.requirements[0]
         item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="queued",
         )
         db_session.add(item)
         db_session.commit()
@@ -998,8 +1067,11 @@ class TestQueueManager:
     def test_mark_status_with_error(self, db_session, test_requisition):
         req = test_requisition.requirements[0]
         item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="searching",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="searching",
         )
         db_session.add(item)
         db_session.commit()
@@ -1012,8 +1084,11 @@ class TestQueueManager:
     def test_mark_completed(self, db_session, test_requisition):
         req = test_requisition.requirements[0]
         item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="searching",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="searching",
         )
         db_session.add(item)
         db_session.commit()
@@ -1028,9 +1103,12 @@ class TestQueueManager:
     def test_mark_completed_increments_search_count(self, db_session, test_requisition):
         req = test_requisition.requirements[0]
         item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T",
-            status="searching", search_count=2,
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="searching",
+            search_count=2,
         )
         db_session.add(item)
         db_session.commit()
@@ -1095,10 +1173,14 @@ class TestSightingWriter:
         count = save_ics_sightings(db_session, queue_item, [sighting])
         assert count == 1
 
-        saved = db_session.query(Sighting).filter(
-            Sighting.requirement_id == req.id,
-            Sighting.source_type == "icsource",
-        ).first()
+        saved = (
+            db_session.query(Sighting)
+            .filter(
+                Sighting.requirement_id == req.id,
+                Sighting.source_type == "icsource",
+            )
+            .first()
+        )
         assert saved is not None
         assert saved.vendor_name == "TestVendor"
         assert saved.vendor_email == "test@vendor.com"
@@ -1113,7 +1195,9 @@ class TestSightingWriter:
         queue_item.requirement_id = req.id
 
         sighting = IcsSighting(
-            part_number="LM317T", vendor_name="Vendor1", quantity=100,
+            part_number="LM317T",
+            vendor_name="Vendor1",
+            quantity=100,
         )
         count1 = save_ics_sightings(db_session, queue_item, [sighting])
         count2 = save_ics_sightings(db_session, queue_item, [sighting])
@@ -1127,13 +1211,21 @@ class TestSightingWriter:
         queue_item.requirement_id = req.id
 
         sighting = IcsSighting(
-            part_number="LM317T", vendor_name="Vendor1", quantity=100, in_stock=False,
+            part_number="LM317T",
+            vendor_name="Vendor1",
+            quantity=100,
+            in_stock=False,
         )
         save_ics_sightings(db_session, queue_item, [sighting])
 
-        saved = db_session.query(Sighting).filter(
-            Sighting.requirement_id == req.id, Sighting.source_type == "icsource",
-        ).first()
+        saved = (
+            db_session.query(Sighting)
+            .filter(
+                Sighting.requirement_id == req.id,
+                Sighting.source_type == "icsource",
+            )
+            .first()
+        )
         assert saved.confidence == 0.3
 
 
@@ -1146,6 +1238,7 @@ class TestAiGate:
     @pytest.mark.asyncio
     async def test_classify_parts_batch_empty(self):
         from app.services.ics_worker.ai_gate import classify_parts_batch
+
         result = await classify_parts_batch([])
         assert result == []
 
@@ -1154,9 +1247,7 @@ class TestAiGate:
         from app.services.ics_worker.ai_gate import classify_parts_batch
 
         mock_response = {
-            "classifications": [
-                {"mpn": "STM32F103", "search_ics": True, "commodity": "semiconductor", "reason": "MCU"}
-            ]
+            "classifications": [{"mpn": "STM32F103", "search_ics": True, "commodity": "semiconductor", "reason": "MCU"}]
         }
         with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, return_value=mock_response):
             result = await classify_parts_batch([{"mpn": "STM32F103", "manufacturer": "ST", "description": "MCU"}])
@@ -1168,7 +1259,9 @@ class TestAiGate:
     async def test_classify_parts_batch_api_failure(self):
         from app.services.ics_worker.ai_gate import classify_parts_batch
 
-        with patch("app.utils.llm_router.routed_structured", new_callable=AsyncMock, side_effect=Exception("API error")):
+        with patch(
+            "app.utils.llm_router.routed_structured", new_callable=AsyncMock, side_effect=Exception("API error")
+        ):
             result = await classify_parts_batch([{"mpn": "STM32F103", "manufacturer": "ST", "description": ""}])
 
         assert result is None
@@ -1185,19 +1278,24 @@ class TestAiGate:
     @pytest.mark.asyncio
     async def test_process_ai_gate_no_pending(self, db_session):
         from app.services.ics_worker.ai_gate import process_ai_gate
+
         # No pending items — should return without doing anything
         await process_ai_gate(db_session)
 
     @pytest.mark.asyncio
     async def test_process_ai_gate_with_cache(self, db_session, test_requisition):
         from app.services.ics_worker.ai_gate import _classification_cache, clear_classification_cache, process_ai_gate
+
         clear_classification_cache()
 
         req = test_requisition.requirements[0]
         item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T",
-            manufacturer="TI", status="pending",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            manufacturer="TI",
+            status="pending",
         )
         db_session.add(item)
         db_session.commit()
@@ -1215,6 +1313,7 @@ class TestAiGate:
     @pytest.mark.asyncio
     async def test_process_ai_gate_cooldown(self, db_session):
         import app.services.ics_worker.ai_gate as ai_gate_mod
+
         original = ai_gate_mod._last_api_failure
         ai_gate_mod._last_api_failure = time.monotonic()
         try:
@@ -1225,6 +1324,7 @@ class TestAiGate:
 
     def test_clear_classification_cache(self):
         from app.services.ics_worker.ai_gate import _classification_cache, clear_classification_cache
+
         _classification_cache[("test", "test")] = ("x", "y", "z")
         clear_classification_cache()
         assert len(_classification_cache) == 0
@@ -1239,6 +1339,7 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_start_no_display(self):
         from app.services.ics_worker.session_manager import IcsSessionManager
+
         cfg = IcsConfig()
         sm = IcsSessionManager(cfg)
         with patch.dict(os.environ, {}, clear=True):
@@ -1249,6 +1350,7 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_login_no_credentials(self):
         from app.services.ics_worker.session_manager import IcsSessionManager
+
         cfg = IcsConfig()
         cfg.ICS_USERNAME = ""
         cfg.ICS_PASSWORD = ""
@@ -1259,6 +1361,7 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_login_exception(self):
         from app.services.ics_worker.session_manager import IcsSessionManager
+
         cfg = IcsConfig()
         cfg.ICS_USERNAME = "user"
         cfg.ICS_PASSWORD = "pass"
@@ -1273,6 +1376,7 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_ensure_session_already_valid(self):
         from app.services.ics_worker.session_manager import IcsSessionManager
+
         cfg = IcsConfig()
         sm = IcsSessionManager(cfg)
         sm.check_session_health = AsyncMock(return_value=True)
@@ -1284,6 +1388,7 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_ensure_session_needs_login(self):
         from app.services.ics_worker.session_manager import IcsSessionManager
+
         cfg = IcsConfig()
         sm = IcsSessionManager(cfg)
         sm.check_session_health = AsyncMock(return_value=False)
@@ -1296,6 +1401,7 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_stop(self):
         from app.services.ics_worker.session_manager import IcsSessionManager
+
         cfg = IcsConfig()
         sm = IcsSessionManager(cfg)
         sm._context = AsyncMock()
@@ -1310,6 +1416,7 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_stop_with_error(self):
         from app.services.ics_worker.session_manager import IcsSessionManager
+
         cfg = IcsConfig()
         sm = IcsSessionManager(cfg)
         sm._context = AsyncMock()
@@ -1321,6 +1428,7 @@ class TestSessionManager:
 
     def test_page_property(self):
         from app.services.ics_worker.session_manager import IcsSessionManager
+
         cfg = IcsConfig()
         sm = IcsSessionManager(cfg)
         sm._page = "test_page"
@@ -1329,6 +1437,7 @@ class TestSessionManager:
     @pytest.mark.asyncio
     async def test_check_session_health_exception(self):
         from app.services.ics_worker.session_manager import IcsSessionManager
+
         cfg = IcsConfig()
         sm = IcsSessionManager(cfg)
         sm._page = MagicMock()
@@ -1359,6 +1468,7 @@ class TestWorker:
 
     def test_update_worker_status_no_row(self, db_session):
         from app.services.ics_worker.worker import update_worker_status
+
         # No status row — should not raise
         update_worker_status(db_session, is_running=True)
 
@@ -1446,6 +1556,7 @@ class TestMainModule:
     def test_main_module_import(self):
         """Verify the __main__ module imports correctly."""
         import importlib
+
         spec = importlib.util.find_spec("app.services.ics_worker.__main__")
         assert spec is not None
 
@@ -1458,6 +1569,7 @@ class TestMainModule:
 class TestSignalHandler:
     def test_handle_shutdown(self):
         from app.services.ics_worker import worker as worker_mod
+
         original = worker_mod._shutdown_requested
         try:
             worker_mod._handle_shutdown(15, None)
@@ -1721,8 +1833,11 @@ class TestIcsWorkerMainLoop:
 
         req = test_requisition.requirements[0]
         queue_item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="queued",
         )
         db_session.add(queue_item)
         db_session.commit()
@@ -1771,7 +1886,9 @@ class TestIcsWorkerMainLoop:
                                 with patch(self._QUEUE_RECOVER):
                                     with patch(self._AI_GATE, new_callable=AsyncMock):
                                         with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, new_callable=AsyncMock, return_value=search_result):
+                                            with patch(
+                                                self._SEARCH, new_callable=AsyncMock, return_value=search_result
+                                            ):
                                                 with patch(self._PARSE, return_value=[]):
                                                     with patch(self._SAVE, return_value=0):
                                                         with patch(self._QUEUE_MARK):
@@ -1791,8 +1908,11 @@ class TestIcsWorkerMainLoop:
 
         req = test_requisition.requirements[0]
         queue_item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="queued",
         )
         db_session.add(queue_item)
         db_session.commit()
@@ -1833,7 +1953,9 @@ class TestIcsWorkerMainLoop:
                                 with patch(self._QUEUE_RECOVER):
                                     with patch(self._AI_GATE, new_callable=AsyncMock):
                                         with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, new_callable=AsyncMock, return_value=search_result):
+                                            with patch(
+                                                self._SEARCH, new_callable=AsyncMock, return_value=search_result
+                                            ):
                                                 with patch(self._QUEUE_MARK):
                                                     await worker_mod.main()
         finally:
@@ -1850,8 +1972,11 @@ class TestIcsWorkerMainLoop:
 
         req = test_requisition.requirements[0]
         queue_item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="queued",
         )
         db_session.add(queue_item)
         db_session.commit()
@@ -1890,7 +2015,9 @@ class TestIcsWorkerMainLoop:
                                 with patch(self._QUEUE_RECOVER):
                                     with patch(self._AI_GATE, new_callable=AsyncMock):
                                         with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, new_callable=AsyncMock, return_value=search_result):
+                                            with patch(
+                                                self._SEARCH, new_callable=AsyncMock, return_value=search_result
+                                            ):
                                                 with patch(self._QUEUE_MARK):
                                                     await worker_mod.main()
         finally:
@@ -1907,8 +2034,11 @@ class TestIcsWorkerMainLoop:
 
         req = test_requisition.requirements[0]
         queue_item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="queued",
         )
         db_session.add(queue_item)
         db_session.commit()
@@ -1958,8 +2088,11 @@ class TestIcsWorkerMainLoop:
 
         req = test_requisition.requirements[0]
         queue_item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="queued",
         )
         db_session.add(queue_item)
         db_session.commit()
@@ -1994,7 +2127,9 @@ class TestIcsWorkerMainLoop:
                                 with patch(self._QUEUE_RECOVER):
                                     with patch(self._AI_GATE, new_callable=AsyncMock):
                                         with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, new_callable=AsyncMock, side_effect=Exception("crash")):
+                                            with patch(
+                                                self._SEARCH, new_callable=AsyncMock, side_effect=Exception("crash")
+                                            ):
                                                 with patch(self._QUEUE_MARK):
                                                     await worker_mod.main()
         finally:
@@ -2126,8 +2261,11 @@ class TestIcsWorkerMainLoop:
 
         req = test_requisition.requirements[0]
         queue_item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="queued",
         )
         db_session.add(queue_item)
         db_session.commit()
@@ -2165,7 +2303,9 @@ class TestIcsWorkerMainLoop:
                                 with patch(self._QUEUE_RECOVER):
                                     with patch(self._AI_GATE, new_callable=AsyncMock):
                                         with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, new_callable=AsyncMock, side_effect=Exception("crash")):
+                                            with patch(
+                                                self._SEARCH, new_callable=AsyncMock, side_effect=Exception("crash")
+                                            ):
                                                 with patch(self._QUEUE_MARK, side_effect=mark_status_fail):
                                                     await worker_mod.main()
         finally:
@@ -2238,8 +2378,11 @@ class TestIcsWorkerMainLoop:
 
         req = test_requisition.requirements[0]
         queue_item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="LM317T", normalized_mpn="LM317T", status="queued",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="LM317T",
+            normalized_mpn="LM317T",
+            status="queued",
         )
         db_session.add(queue_item)
         db_session.commit()
@@ -2290,7 +2433,9 @@ class TestIcsWorkerMainLoop:
                                 with patch(self._QUEUE_RECOVER):
                                     with patch(self._AI_GATE, new_callable=AsyncMock):
                                         with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, new_callable=AsyncMock, return_value=search_result):
+                                            with patch(
+                                                self._SEARCH, new_callable=AsyncMock, return_value=search_result
+                                            ):
                                                 with patch(self._PARSE, return_value=[mock_sighting]):
                                                     with patch(self._SAVE, return_value=1):
                                                         with patch(self._QUEUE_MARK):
@@ -2317,8 +2462,10 @@ class TestAiGateFull:
 
         req = test_requisition.requirements[0]
         item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="STM32F103C8T6", normalized_mpn="STM32F103C8T6",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="STM32F103C8T6",
+            normalized_mpn="STM32F103C8T6",
             status="pending",
         )
         db_session.add(item)
@@ -2347,8 +2494,10 @@ class TestAiGateFull:
 
         req = test_requisition.requirements[0]
         item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="RC0402FR-07100KL", normalized_mpn="RC0402FR07100KL",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="RC0402FR-07100KL",
+            normalized_mpn="RC0402FR07100KL",
             status="pending",
         )
         db_session.add(item)
@@ -2377,8 +2526,10 @@ class TestAiGateFull:
 
         req = test_requisition.requirements[0]
         item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="UNKNOWN123", normalized_mpn="UNKNOWN123",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="UNKNOWN123",
+            normalized_mpn="UNKNOWN123",
             status="pending",
         )
         db_session.add(item)
@@ -2403,8 +2554,10 @@ class TestAiGateFull:
 
         req = test_requisition.requirements[0]
         item = IcsSearchQueue(
-            requirement_id=req.id, requisition_id=test_requisition.id,
-            mpn="MISSING_MPN", normalized_mpn="MISSING_MPN",
+            requirement_id=req.id,
+            requisition_id=test_requisition.id,
+            mpn="MISSING_MPN",
+            normalized_mpn="MISSING_MPN",
             status="pending",
         )
         db_session.add(item)
@@ -2544,12 +2697,14 @@ class TestSearchEngineFull:
         page.wait_for_selector = AsyncMock()
         page.screenshot = AsyncMock()
         # evaluate calls: 1=diagnostic, 2=JS strategy, 3=results HTML, 4=total_count
-        page.evaluate = AsyncMock(side_effect=[
-            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
-            "no method found",
-            "<html></html>",
-            0,
-        ])
+        page.evaluate = AsyncMock(
+            side_effect=[
+                {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+                "no method found",
+                "<html></html>",
+                0,
+            ]
+        )
 
         with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
             mock_hb.human_type = AsyncMock()
@@ -2576,11 +2731,13 @@ class TestSearchEngineFull:
 
         page.wait_for_selector = AsyncMock()
         page.screenshot = AsyncMock(side_effect=Exception("Screenshot failed"))
-        page.evaluate = AsyncMock(side_effect=[
-            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
-            "<html>body</html>",
-            0,
-        ])
+        page.evaluate = AsyncMock(
+            side_effect=[
+                {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+                "<html>body</html>",
+                0,
+            ]
+        )
 
         with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
             mock_hb.human_type = AsyncMock()
@@ -2621,11 +2778,13 @@ class TestSearchEngineFull:
         page.locator = MagicMock(side_effect=mock_locator)
         page.wait_for_selector = AsyncMock()
         page.screenshot = AsyncMock()
-        page.evaluate = AsyncMock(side_effect=[
-            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
-            "<html>results</html>",
-            5,
-        ])
+        page.evaluate = AsyncMock(
+            side_effect=[
+                {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+                "<html>results</html>",
+                5,
+            ]
+        )
 
         with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
             mock_hb.human_type = AsyncMock()
@@ -2662,12 +2821,14 @@ class TestSearchEngineFull:
         page.locator = MagicMock(side_effect=mock_locator)
         page.wait_for_selector = AsyncMock()
         page.screenshot = AsyncMock()
-        page.evaluate = AsyncMock(side_effect=[
-            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
-            "clicked: #btn",  # JS strategy result
-            "<html>js results</html>",
-            3,
-        ])
+        page.evaluate = AsyncMock(
+            side_effect=[
+                {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+                "clicked: #btn",  # JS strategy result
+                "<html>js results</html>",
+                3,
+            ]
+        )
 
         with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
             mock_hb.human_type = AsyncMock()
@@ -2695,22 +2856,41 @@ class TestSearchEngineFull:
         page.screenshot = AsyncMock()
 
         # Diagnostic data has buttons and forms to iterate over (covers lines 86, 89)
-        page.evaluate = AsyncMock(side_effect=[
-            {
-                "buttons": [
-                    {"tag": "INPUT", "id": "btn1", "type": "submit", "value": "Search",
-                     "text": "Search", "visible": True, "display": "block", "onclick": ""},
-                    {"tag": "BUTTON", "id": "btn2", "type": "button", "value": "",
-                     "text": "Go", "visible": False, "display": "none", "onclick": "doSearch()"},
-                ],
-                "forms": [
-                    {"id": "form1", "action": "/search", "method": "post"},
-                ],
-                "url": "http://test", "title": "Search",
-            },
-            "<html>results</html>",
-            2,
-        ])
+        page.evaluate = AsyncMock(
+            side_effect=[
+                {
+                    "buttons": [
+                        {
+                            "tag": "INPUT",
+                            "id": "btn1",
+                            "type": "submit",
+                            "value": "Search",
+                            "text": "Search",
+                            "visible": True,
+                            "display": "block",
+                            "onclick": "",
+                        },
+                        {
+                            "tag": "BUTTON",
+                            "id": "btn2",
+                            "type": "button",
+                            "value": "",
+                            "text": "Go",
+                            "visible": False,
+                            "display": "none",
+                            "onclick": "doSearch()",
+                        },
+                    ],
+                    "forms": [
+                        {"id": "form1", "action": "/search", "method": "post"},
+                    ],
+                    "url": "http://test",
+                    "title": "Search",
+                },
+                "<html>results</html>",
+                2,
+            ]
+        )
 
         with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
             mock_hb.human_type = AsyncMock()
@@ -2747,12 +2927,14 @@ class TestSearchEngineFull:
         page.locator = MagicMock(side_effect=mock_locator)
         page.wait_for_selector = AsyncMock()
         page.screenshot = AsyncMock()
-        page.evaluate = AsyncMock(side_effect=[
-            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
-            "submitted form",
-            "<html>found</html>",
-            1,
-        ])
+        page.evaluate = AsyncMock(
+            side_effect=[
+                {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+                "submitted form",
+                "<html>found</html>",
+                1,
+            ]
+        )
 
         with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
             mock_hb.human_type = AsyncMock()
@@ -2789,12 +2971,14 @@ class TestSearchEngineFull:
         page.locator = MagicMock(side_effect=mock_locator)
         page.wait_for_selector = AsyncMock()
         page.screenshot = AsyncMock()
-        page.evaluate = AsyncMock(side_effect=[
-            {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
-            "called showPageAjax()",
-            "<html>js fallback</html>",
-            0,
-        ])
+        page.evaluate = AsyncMock(
+            side_effect=[
+                {"buttons": [], "forms": [], "url": "http://x", "title": "t"},
+                "called showPageAjax()",
+                "<html>js fallback</html>",
+                0,
+            ]
+        )
 
         with patch("app.services.ics_worker.search_engine.HumanBehavior") as mock_hb:
             mock_hb.human_type = AsyncMock()

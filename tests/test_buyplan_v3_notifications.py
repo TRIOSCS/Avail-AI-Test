@@ -20,7 +20,6 @@ from app.models.buy_plan import (
     VerificationGroupMember,
 )
 
-
 # ═══════════════════════════════════════════════════════════════════════
 # HELPER FACTORIES
 # ═══════════════════════════════════════════════════════════════════════
@@ -28,8 +27,11 @@ from app.models.buy_plan import (
 
 def _make_user(db, email="buyer@trioscs.com", name="Test Buyer", role="buyer"):
     u = User(
-        email=email, name=name, role=role,
-        azure_id=f"az-{email}", m365_connected=True,
+        email=email,
+        name=name,
+        role=role,
+        azure_id=f"az-{email}",
+        m365_connected=True,
         created_at=datetime.now(timezone.utc),
     )
     db.add(u)
@@ -40,11 +42,13 @@ def _make_user(db, email="buyer@trioscs.com", name="Test Buyer", role="buyer"):
 
 def _make_plan(db, submitter_id, **overrides):
     """Create a minimal BuyPlanV3 with required FKs."""
-    from app.models import Requisition, Quote, Company, CustomerSite
+    from app.models import Company, CustomerSite, Quote, Requisition
 
     # Requisition
     req = Requisition(
-        name="REQ-BP", status="open", created_by=submitter_id,
+        name="REQ-BP",
+        status="open",
+        created_by=submitter_id,
         created_at=datetime.now(timezone.utc),
     )
     db.add(req)
@@ -58,19 +62,26 @@ def _make_plan(db, submitter_id, **overrides):
     db.add(site)
     db.flush()
     q = Quote(
-        requisition_id=req.id, customer_site_id=site.id,
-        quote_number="Q-2026-0042", status="sent",
-        line_items=[], subtotal=1000.0, total_cost=500.0,
-        total_margin_pct=50.0, created_by_id=submitter_id,
+        requisition_id=req.id,
+        customer_site_id=site.id,
+        quote_number="Q-2026-0042",
+        status="sent",
+        line_items=[],
+        subtotal=1000.0,
+        total_cost=500.0,
+        total_margin_pct=50.0,
+        created_by_id=submitter_id,
         created_at=datetime.now(timezone.utc),
     )
     db.add(q)
     db.flush()
 
     defaults = dict(
-        quote_id=q.id, requisition_id=req.id,
+        quote_id=q.id,
+        requisition_id=req.id,
         submitted_by_id=submitter_id,
-        status="pending", so_status="pending",
+        status="pending",
+        so_status="pending",
         sales_order_number="SO-001",
     )
     defaults.update(overrides)
@@ -89,7 +100,8 @@ def _add_line(db, plan, offer_mock=None, buyer_id=None, quantity=100, unit_cost=
     if not req:
         req = Requirement(
             requisition_id=plan.requisition_id,
-            primary_mpn="LM317T", target_qty=1000,
+            primary_mpn="LM317T",
+            target_qty=1000,
             created_at=datetime.now(timezone.utc),
         )
         db.add(req)
@@ -97,19 +109,25 @@ def _add_line(db, plan, offer_mock=None, buyer_id=None, quantity=100, unit_cost=
 
     offer = Offer(
         requisition_id=plan.requisition_id,
-        vendor_name="Arrow Electronics", mpn="LM317T",
-        qty_available=1000, unit_price=1.50,
+        vendor_name="Arrow Electronics",
+        mpn="LM317T",
+        qty_available=1000,
+        unit_price=1.50,
         entered_by_id=plan.submitted_by_id,
-        status="active", lead_time="2 weeks",
+        status="active",
+        lead_time="2 weeks",
         created_at=datetime.now(timezone.utc),
     )
     db.add(offer)
     db.flush()
 
     line = BuyPlanLine(
-        buy_plan_id=plan.id, requirement_id=req.id,
-        offer_id=offer.id, quantity=quantity,
-        unit_cost=unit_cost, buyer_id=buyer_id,
+        buy_plan_id=plan.id,
+        requirement_id=req.id,
+        offer_id=offer.id,
+        quantity=quantity,
+        unit_cost=unit_cost,
+        buyer_id=buyer_id,
         po_number=po_number,
     )
     db.add(line)

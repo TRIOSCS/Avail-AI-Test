@@ -310,9 +310,7 @@ class TestQuoteCreationMaterialCard:
         assert data["line_items"][0]["material_card_id"] is not None
 
         # Verify card was created in DB
-        card = db_session.query(MaterialCard).filter(
-            MaterialCard.normalized_mpn == "newpartxyz123"
-        ).first()
+        card = db_session.query(MaterialCard).filter(MaterialCard.normalized_mpn == "newpartxyz123").first()
         assert card is not None
         assert card.display_mpn == "NEWPART-XYZ-123"
 

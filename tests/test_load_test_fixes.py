@@ -10,14 +10,10 @@ Depends on: app/routers/crm/quotes.py, app/routers/crm/offers.py,
             app/routers/dashboard.py
 """
 
-from datetime import datetime, timedelta, timezone
 import os
-
-import pytest
-from sqlalchemy.orm import Session
+from datetime import datetime, timedelta, timezone
 
 from app.models import Company, CustomerSite, Offer, Quote, Requisition, User
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -61,17 +57,16 @@ def _make_company_and_site(db):
     co = Company(name="Test Co", is_active=True, created_at=datetime.now(timezone.utc))
     db.add(co)
     db.flush()
-    site = CustomerSite(
-        company_id=co.id, site_name="HQ", created_at=datetime.now(timezone.utc)
-    )
+    site = CustomerSite(company_id=co.id, site_name="HQ", created_at=datetime.now(timezone.utc))
     db.add(site)
     db.flush()
     return co, site
 
 
 def _make_quote(db, req, site, user, offer_ids, quote_number="Q-TEST-001"):
-    line_items = [{"offer_id": oid, "mpn": "LM317T", "qty": 100,
-                   "cost_price": 1.50, "sell_price": 2.00} for oid in offer_ids]
+    line_items = [
+        {"offer_id": oid, "mpn": "LM317T", "qty": 100, "cost_price": 1.50, "sell_price": 2.00} for oid in offer_ids
+    ]
     q = Quote(
         requisition_id=req.id,
         customer_site_id=site.id,
@@ -95,8 +90,12 @@ class TestPerformanceIndexes:
     def test_migration_file_exists(self):
         """Migration 015 should exist with is_stale column."""
         import importlib.util
+
         path = os.path.join(
-            os.path.dirname(__file__), "..", "alembic", "versions",
+            os.path.dirname(__file__),
+            "..",
+            "alembic",
+            "versions",
             "015_performance_indexes.py",
         )
         assert os.path.exists(path)
@@ -108,8 +107,12 @@ class TestPerformanceIndexes:
 
     def test_migration_has_upgrade_and_downgrade(self):
         import importlib.util
+
         path = os.path.join(
-            os.path.dirname(__file__), "..", "alembic", "versions",
+            os.path.dirname(__file__),
+            "..",
+            "alembic",
+            "versions",
             "015_performance_indexes.py",
         )
         spec = importlib.util.spec_from_file_location("migration_015", path)
@@ -144,8 +147,7 @@ class TestCompaniesTypeaheadCache:
         assert test_co["sites"][0]["site_name"] == "HQ"
 
     def test_typeahead_excludes_inactive_companies(self, client, db_session):
-        co = Company(name="Inactive Co", is_active=False,
-                     created_at=datetime.now(timezone.utc))
+        co = Company(name="Inactive Co", is_active=False, created_at=datetime.now(timezone.utc))
         db_session.add(co)
         db_session.commit()
 
@@ -188,8 +190,7 @@ class TestOfferStatusUnchanged:
         o1 = _make_offer(db_session, req, test_user)
         db_session.commit()
 
-        q = _make_quote(db_session, req, site, test_user,
-                        [o1.id], quote_number="Q-WIN-001")
+        q = _make_quote(db_session, req, site, test_user, [o1.id], quote_number="Q-WIN-001")
         q.status = "sent"
         db_session.commit()
 
@@ -210,8 +211,7 @@ class TestOfferStatusUnchanged:
         o1 = _make_offer(db_session, req, test_user)
         db_session.commit()
 
-        q = _make_quote(db_session, req, site, test_user,
-                        [o1.id], quote_number="Q-LOSS-001")
+        q = _make_quote(db_session, req, site, test_user, [o1.id], quote_number="Q-LOSS-001")
         q.status = "sent"
         db_session.commit()
 
@@ -311,8 +311,7 @@ class TestStaleFlag:
         req = _make_req(db_session, test_user)
         old_offer = _make_offer(db_session, req, test_user, mpn="OLD-1", days_ago=15)
         new_offer = _make_offer(db_session, req, test_user, mpn="NEW-1", days_ago=1)
-        sold_offer = _make_offer(db_session, req, test_user, mpn="SOLD-1",
-                                 status="sold", days_ago=20)
+        sold_offer = _make_offer(db_session, req, test_user, mpn="SOLD-1", status="sold", days_ago=20)
         db_session.commit()
 
         # Run the same logic as the scheduler job
@@ -354,6 +353,7 @@ class TestStaleFlag:
     def test_scheduler_has_stale_job(self):
         """The stale flagging job should be registered."""
         from app.scheduler import _job_flag_stale_offers
+
         assert callable(_job_flag_stale_offers)
 
 
@@ -368,18 +368,24 @@ class TestProactiveOfferExpiry:
         user = _make_user(db_session, "Sales User")
 
         old = ProactiveOffer(
-            customer_site_id=site.id, salesperson_id=user.id,
-            line_items=[], status="sent",
+            customer_site_id=site.id,
+            salesperson_id=user.id,
+            line_items=[],
+            status="sent",
             sent_at=datetime.now(timezone.utc) - timedelta(days=15),
         )
         recent = ProactiveOffer(
-            customer_site_id=site.id, salesperson_id=user.id,
-            line_items=[], status="sent",
+            customer_site_id=site.id,
+            salesperson_id=user.id,
+            line_items=[],
+            status="sent",
             sent_at=datetime.now(timezone.utc) - timedelta(days=2),
         )
         converted = ProactiveOffer(
-            customer_site_id=site.id, salesperson_id=user.id,
-            line_items=[], status="converted",
+            customer_site_id=site.id,
+            salesperson_id=user.id,
+            line_items=[],
+            status="converted",
             sent_at=datetime.now(timezone.utc) - timedelta(days=20),
         )
         db_session.add_all([old, recent, converted])
@@ -403,6 +409,7 @@ class TestProactiveOfferExpiry:
 
     def test_scheduler_has_expiry_job(self):
         from app.scheduler import _job_proactive_offer_expiry
+
         assert callable(_job_proactive_offer_expiry)
 
 
@@ -412,14 +419,18 @@ class TestProactiveOfferExpiry:
 class TestBuyerBriefOptimized:
     def test_at_risk_reqs_with_offer_counts(self, client, db_session, test_user):
         r1 = Requisition(
-            name="RISKY-1", status="active", created_by=test_user.id,
+            name="RISKY-1",
+            status="active",
+            created_by=test_user.id,
             created_at=datetime.now(timezone.utc) - timedelta(days=3),
         )
         db_session.add(r1)
         db_session.flush()
 
         r2 = Requisition(
-            name="SAFE-1", status="active", created_by=test_user.id,
+            name="SAFE-1",
+            status="active",
+            created_by=test_user.id,
             created_at=datetime.now(timezone.utc) - timedelta(days=3),
         )
         db_session.add(r2)

@@ -49,10 +49,7 @@ def validate_contact(contact: dict) -> tuple[bool, list[str]]:
 def dedup_contacts(db: Session, site_id: int) -> int:
     """Merge duplicate contacts within a site by email. Returns count of merged."""
     contacts = (
-        db.query(SiteContact)
-        .filter_by(customer_site_id=site_id, is_active=True)
-        .order_by(SiteContact.created_at)
-        .all()
+        db.query(SiteContact).filter_by(customer_site_id=site_id, is_active=True).order_by(SiteContact.created_at).all()
     )
 
     seen = {}

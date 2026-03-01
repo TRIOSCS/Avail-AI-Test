@@ -75,14 +75,7 @@ def score_requirement(
 
     # Weighted combination — all signals matter roughly equally
     # but calls get a slight boost to incentivize phone usage
-    raw = (
-        s_sightings * 0.15
-        + s_offers * 0.15
-        + s_rfqs * 0.20
-        + s_replies * 0.20
-        + s_calls * 0.15
-        + s_emails * 0.15
-    )
+    raw = s_sightings * 0.15 + s_offers * 0.15 + s_rfqs * 0.20 + s_replies * 0.20 + s_calls * 0.15 + s_emails * 0.15
 
     # Scale to 0–100.
     score = raw * 100
@@ -104,11 +97,7 @@ def compute_requisition_scores(requisition_id: int, db: Session) -> dict:
         }
     """
     # Fetch all requirements for this requisition
-    requirements = (
-        db.query(Requirement)
-        .filter(Requirement.requisition_id == requisition_id)
-        .all()
-    )
+    requirements = db.query(Requirement).filter(Requirement.requisition_id == requisition_id).all()
     if not requirements:
         return {
             "requisition_score": 0,
@@ -141,10 +130,7 @@ def compute_requisition_scores(requisition_id: int, db: Session) -> dict:
         or 0
     )
     reply_count = (
-        db.query(sqlfunc.count(VendorResponse.id))
-        .filter(VendorResponse.requisition_id == requisition_id)
-        .scalar()
-        or 0
+        db.query(sqlfunc.count(VendorResponse.id)).filter(VendorResponse.requisition_id == requisition_id).scalar() or 0
     )
     call_count = (
         db.query(sqlfunc.count(ActivityLog.id))
@@ -185,11 +171,18 @@ def compute_requisition_scores(requisition_id: int, db: Session) -> dict:
             emails_per_part=emails_per_part,
         )
         signals = _build_signals(
-            r_sightings, r_offers, rfqs_per_part, reply_rate,
-            calls_per_part, emails_per_part,
-            raw_sourced=r_sightings, raw_rfqs=rfq_sent,
-            raw_replies=reply_count, raw_offers=r_offers,
-            raw_calls=call_count, raw_emails=email_count,
+            r_sightings,
+            r_offers,
+            rfqs_per_part,
+            reply_rate,
+            calls_per_part,
+            emails_per_part,
+            raw_sourced=r_sightings,
+            raw_rfqs=rfq_sent,
+            raw_replies=reply_count,
+            raw_offers=r_offers,
+            raw_calls=call_count,
+            raw_emails=email_count,
             parts=num_parts,
         )
         req_scores.append(
@@ -253,12 +246,19 @@ def compute_requisition_score_fast(
         emails_per_part=emails_per_part,
     )
     signals = _build_signals(
-        sighting_count, offer_cnt, rfqs_per_part, reply_rate,
-        calls_per_part, emails_per_part,
+        sighting_count,
+        offer_cnt,
+        rfqs_per_part,
+        reply_rate,
+        calls_per_part,
+        emails_per_part,
         # raw counts for display
-        raw_sourced=sourced_count, raw_rfqs=rfq_sent_count,
-        raw_replies=reply_count, raw_offers=offer_count,
-        raw_calls=call_count, raw_emails=email_count,
+        raw_sourced=sourced_count,
+        raw_rfqs=rfq_sent_count,
+        raw_replies=reply_count,
+        raw_offers=offer_count,
+        raw_calls=call_count,
+        raw_emails=email_count,
         parts=req_count,
     )
     return (sc, _color(sc), signals)
@@ -298,24 +298,34 @@ def _build_signals(
     s_emails = _sigmoid(emails_per_part, midpoint=0.5, steepness=2.0)
 
     return {
-        "sources":  {"val": raw_sourced, "parts": parts, "pct": round(s_sightings * 100), "level": _signal_level(s_sightings)},
-        "offers":   {"val": raw_offers, "parts": parts, "pct": round(s_offers * 100), "level": _signal_level(s_offers)},
-        "rfqs":     {"val": raw_rfqs, "parts": parts, "pct": round(s_rfqs * 100), "level": _signal_level(s_rfqs)},
-        "replies":  {"val": raw_replies, "of": raw_rfqs, "pct": round(s_replies * 100), "level": _signal_level(s_replies)},
-        "calls":    {"val": raw_calls, "parts": parts, "pct": round(s_calls * 100), "level": _signal_level(s_calls)},
-        "emails":   {"val": raw_emails, "parts": parts, "pct": round(s_emails * 100), "level": _signal_level(s_emails)},
+        "sources": {
+            "val": raw_sourced,
+            "parts": parts,
+            "pct": round(s_sightings * 100),
+            "level": _signal_level(s_sightings),
+        },
+        "offers": {"val": raw_offers, "parts": parts, "pct": round(s_offers * 100), "level": _signal_level(s_offers)},
+        "rfqs": {"val": raw_rfqs, "parts": parts, "pct": round(s_rfqs * 100), "level": _signal_level(s_rfqs)},
+        "replies": {
+            "val": raw_replies,
+            "of": raw_rfqs,
+            "pct": round(s_replies * 100),
+            "level": _signal_level(s_replies),
+        },
+        "calls": {"val": raw_calls, "parts": parts, "pct": round(s_calls * 100), "level": _signal_level(s_calls)},
+        "emails": {"val": raw_emails, "parts": parts, "pct": round(s_emails * 100), "level": _signal_level(s_emails)},
     }
 
 
 def _empty_signals() -> dict:
     """Return zeroed signals dict."""
     return {
-        "sources":  {"val": 0, "parts": 0, "pct": 0, "level": "low"},
-        "offers":   {"val": 0, "parts": 0, "pct": 0, "level": "low"},
-        "rfqs":     {"val": 0, "parts": 0, "pct": 0, "level": "low"},
-        "replies":  {"val": 0, "of": 0, "pct": 0, "level": "low"},
-        "calls":    {"val": 0, "parts": 0, "pct": 0, "level": "low"},
-        "emails":   {"val": 0, "parts": 0, "pct": 0, "level": "low"},
+        "sources": {"val": 0, "parts": 0, "pct": 0, "level": "low"},
+        "offers": {"val": 0, "parts": 0, "pct": 0, "level": "low"},
+        "rfqs": {"val": 0, "parts": 0, "pct": 0, "level": "low"},
+        "replies": {"val": 0, "of": 0, "pct": 0, "level": "low"},
+        "calls": {"val": 0, "parts": 0, "pct": 0, "level": "low"},
+        "emails": {"val": 0, "parts": 0, "pct": 0, "level": "low"},
     }
 
 

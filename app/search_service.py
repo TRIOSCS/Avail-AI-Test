@@ -24,7 +24,6 @@ from .connectors.mouser import MouserConnector
 from .connectors.oemsecrets import OEMSecretsConnector
 from .connectors.sourcengine import SourcengineConnector
 from .connectors.sources import BrokerBinConnector, NexarConnector
-from .connectors.tme import TMEConnector
 from .models import (
     ApiSource,
     MaterialCard,
@@ -57,7 +56,6 @@ _CONNECTOR_SOURCE_MAP = {
     "OEMSecretsConnector": "oemsecrets",
     "SourcengineConnector": "sourcengine",
     "Element14Connector": "element14",
-    "TMEConnector": "tme",
 }
 
 
@@ -81,6 +79,7 @@ def _get_search_redis():
         import redis
 
         from .config import settings
+
         _search_redis = redis.from_url(
             settings.redis_url,
             decode_responses=True,
@@ -166,10 +165,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     fresh, source_stats = await _fetch_fresh(pns, db)
 
     # 2. Score + save — only replace sightings from connectors that succeeded
-    succeeded_sources = {
-        stat["source"] for stat in source_stats
-        if stat["status"] == "ok" and not stat.get("error")
-    }
+    succeeded_sources = {stat["source"] for stat in source_stats if stat["status"] == "ok" and not stat.get("error")}
     sightings = _save_sightings(fresh, req, db, succeeded_sources)
     logger.info(f"Req {req.id} ({pns[0]}): {len(sightings)} fresh sightings")
 
@@ -313,13 +309,19 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     def _add_or_skip(source_name, has_creds, connector_factory):
         if source_name in disabled_sources:
             source_stats_map[source_name] = {
-                "source": source_name, "results": 0, "ms": 0,
-                "error": None, "status": "disabled",
+                "source": source_name,
+                "results": 0,
+                "ms": 0,
+                "error": None,
+                "status": "disabled",
             }
         elif not has_creds:
             source_stats_map[source_name] = {
-                "source": source_name, "results": 0, "ms": 0,
-                "error": "No API key configured", "status": "skipped",
+                "source": source_name,
+                "results": 0,
+                "ms": 0,
+                "error": "No API key configured",
+                "status": "skipped",
             }
         else:
             connectors.append(connector_factory())
@@ -327,52 +329,39 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     nexar_id = _cred("nexar", "NEXAR_CLIENT_ID")
     nexar_sec = _cred("nexar", "NEXAR_CLIENT_SECRET")
     octopart_key = _cred("nexar", "OCTOPART_API_KEY")
-    _add_or_skip("nexar", nexar_id and nexar_sec or octopart_key,
-                 lambda: NexarConnector(nexar_id, nexar_sec, octopart_key))
+    _add_or_skip(
+        "nexar", nexar_id and nexar_sec or octopart_key, lambda: NexarConnector(nexar_id, nexar_sec, octopart_key)
+    )
 
     bb_key = _cred("brokerbin", "BROKERBIN_API_KEY")
     bb_sec = _cred("brokerbin", "BROKERBIN_API_SECRET")
-    _add_or_skip("brokerbin", bb_key,
-                 lambda: BrokerBinConnector(bb_key, bb_sec))
+    _add_or_skip("brokerbin", bb_key, lambda: BrokerBinConnector(bb_key, bb_sec))
 
     ebay_id = _cred("ebay", "EBAY_CLIENT_ID")
     ebay_sec = _cred("ebay", "EBAY_CLIENT_SECRET")
-    _add_or_skip("ebay", ebay_id and ebay_sec,
-                 lambda: EbayConnector(ebay_id, ebay_sec))
+    _add_or_skip("ebay", ebay_id and ebay_sec, lambda: EbayConnector(ebay_id, ebay_sec))
 
     dk_id = _cred("digikey", "DIGIKEY_CLIENT_ID")
     dk_sec = _cred("digikey", "DIGIKEY_CLIENT_SECRET")
-    _add_or_skip("digikey", dk_id and dk_sec,
-                 lambda: DigiKeyConnector(dk_id, dk_sec))
+    _add_or_skip("digikey", dk_id and dk_sec, lambda: DigiKeyConnector(dk_id, dk_sec))
 
     mouser_key = _cred("mouser", "MOUSER_API_KEY")
-    _add_or_skip("mouser", mouser_key,
-                 lambda: MouserConnector(mouser_key))
+    _add_or_skip("mouser", mouser_key, lambda: MouserConnector(mouser_key))
 
     oem_key = _cred("oemsecrets", "OEMSECRETS_API_KEY")
-    _add_or_skip("oemsecrets", oem_key,
-                 lambda: OEMSecretsConnector(oem_key))
+    _add_or_skip("oemsecrets", oem_key, lambda: OEMSecretsConnector(oem_key))
 
     src_key = _cred("sourcengine", "SOURCENGINE_API_KEY")
-    _add_or_skip("sourcengine", src_key,
-                 lambda: SourcengineConnector(src_key))
+    _add_or_skip("sourcengine", src_key, lambda: SourcengineConnector(src_key))
 
     e14_key = _cred("element14", "ELEMENT14_API_KEY")
-    _add_or_skip("element14", e14_key,
-                 lambda: Element14Connector(e14_key))
-
-    tme_token = _cred("tme", "TME_API_TOKEN")
-    tme_secret = _cred("tme", "TME_API_SECRET")
-    _add_or_skip("tme", tme_token and tme_secret,
-                 lambda: TMEConnector(tme_token, tme_secret))
+    _add_or_skip("element14", e14_key, lambda: Element14Connector(e14_key))
 
     if not connectors:
         return [], list(source_stats_map.values())
 
     # Check search cache (keyed by PNs + active connector set)
-    active_names = sorted(
-        _CONNECTOR_SOURCE_MAP.get(c.__class__.__name__, "") for c in connectors
-    )
+    active_names = sorted(_CONNECTOR_SOURCE_MAP.get(c.__class__.__name__, "") for c in connectors)
     cache_key = _search_cache_key(pns, active_names)
     cached = _get_search_cache(cache_key)
     if cached is not None:
@@ -409,6 +398,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
 
     # Fire all connector×PN combos in parallel (with concurrency limit)
     from .config import settings
+
     sem = asyncio.Semaphore(settings.search_concurrency_limit)
 
     async def _throttled(conn, pn):
@@ -422,12 +412,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     try:
         source_names = {s[0] for s in stats_updates if s[0]}
         src_map = (
-            {
-                s.name: s
-                for s in db.query(ApiSource)
-                .filter(ApiSource.name.in_(source_names))
-                .all()
-            }
+            {s.name: s for s in db.query(ApiSource).filter(ApiSource.name.in_(source_names)).all()}
             if source_names
             else {}
         )
@@ -483,9 +468,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         "no vendor",
         "no seller",
     }
-    out = [
-        r for r in out if r.get("vendor_name", "").strip().lower() not in JUNK_VENDORS
-    ]
+    out = [r for r in out if r.get("vendor_name", "").strip().lower() not in JUNK_VENDORS]
 
     # Build source_stats from stats_updates (connectors that actually ran)
     # Aggregate per source (a connector may run for multiple PNs)
@@ -517,21 +500,22 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
 
 
 def _save_sightings(
-    fresh: list[dict], req: Requirement, db: Session,
+    fresh: list[dict],
+    req: Requirement,
+    db: Session,
     succeeded_sources: set[str] | None = None,
 ) -> list[Sighting]:
     from .models import VendorCard
 
     # Build vendor-name → vendor_score lookup (only for vendors in results)
-    needed_names = {
-        normalize_vendor_name((r.get("vendor_name") or "").strip())
-        for r in fresh if r.get("vendor_name")
-    }
+    needed_names = {normalize_vendor_name((r.get("vendor_name") or "").strip()) for r in fresh if r.get("vendor_name")}
     needed_names.discard("")
     if needed_names:
-        vendor_cards = db.query(
-            VendorCard.normalized_name, VendorCard.vendor_score
-        ).filter(VendorCard.normalized_name.in_(needed_names)).all()
+        vendor_cards = (
+            db.query(VendorCard.normalized_name, VendorCard.vendor_score)
+            .filter(VendorCard.normalized_name.in_(needed_names))
+            .all()
+        )
         vendor_score_map = {vc.normalized_name: vc.vendor_score for vc in vendor_cards}
     else:
         vendor_score_map = {}
@@ -642,14 +626,15 @@ def _save_sightings(
 
     # Dedup: if a vendor+MPN exists in both old (preserved) and fresh, keep fresh
     if succeeded_sources and expanded:
-        fresh_keys = {
-            (s.vendor_name.lower(), (s.mpn_matched or "").lower())
-            for s in sightings
-        }
-        old = db.query(Sighting).filter(
-            Sighting.requirement_id == req.id,
-            ~Sighting.source_type.in_(expanded),
-        ).all()
+        fresh_keys = {(s.vendor_name.lower(), (s.mpn_matched or "").lower()) for s in sightings}
+        old = (
+            db.query(Sighting)
+            .filter(
+                Sighting.requirement_id == req.id,
+                ~Sighting.source_type.in_(expanded),
+            )
+            .all()
+        )
         for o in old:
             if (o.vendor_name.lower(), (o.mpn_matched or "").lower()) in fresh_keys:
                 db.delete(o)
@@ -696,11 +681,7 @@ def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
 
         # Create VendorContact records if not exists
         for email in emails:
-            existing = (
-                db.query(VendorContact)
-                .filter_by(vendor_card_id=card.id, email=email)
-                .first()
-            )
+            existing = db.query(VendorContact).filter_by(vendor_card_id=card.id, email=email).first()
             if existing:
                 existing.last_seen_at = datetime.now(timezone.utc)
                 continue
@@ -718,6 +699,7 @@ def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
         phones = phone_map.get(vendor_name, set())
         if phones:
             from .vendor_utils import merge_phones_into_card
+
             merge_phones_into_card(card, list(phones))
 
     try:
@@ -727,27 +709,19 @@ def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
         db.rollback()
 
 
-def _get_material_history(
-    material_card_ids: list[int], fresh_vendors: set, db: Session
-) -> list[dict]:
+def _get_material_history(material_card_ids: list[int], fresh_vendors: set, db: Session) -> list[dict]:
     """All vendor touchpoints from material cards, excluding vendors with fresh sightings."""
     if not material_card_ids:
         return []
 
     cards = (
-        db.query(MaterialCard)
-        .filter(MaterialCard.id.in_(material_card_ids), MaterialCard.deleted_at.is_(None))
-        .all()
+        db.query(MaterialCard).filter(MaterialCard.id.in_(material_card_ids), MaterialCard.deleted_at.is_(None)).all()
     )
     if not cards:
         return []
 
     card_map = {c.id: c for c in cards}
-    all_vh = (
-        db.query(MaterialVendorHistory)
-        .filter(MaterialVendorHistory.material_card_id.in_(material_card_ids))
-        .all()
-    )
+    all_vh = db.query(MaterialVendorHistory).filter(MaterialVendorHistory.material_card_id.in_(material_card_ids)).all()
 
     from .vendor_utils import normalize_vendor_name as _nvn
 
@@ -779,11 +753,7 @@ def _get_material_history(
 
 def _history_to_result(h: dict, now: datetime) -> dict:
     last_seen = h["last_seen"]
-    age_days = (
-        (now.replace(tzinfo=None) - last_seen.replace(tzinfo=None)).days
-        if last_seen
-        else 999
-    )
+    age_days = (now.replace(tzinfo=None) - last_seen.replace(tzinfo=None)).days if last_seen else 999
 
     if age_days < 7:
         base = 55
@@ -826,9 +796,7 @@ def _history_to_result(h: dict, now: datetime) -> dict:
         "is_material_history": True,
         "material_last_seen": last_seen.strftime("%b %d") if last_seen else None,
         "material_times_seen": h["times_seen"],
-        "material_first_seen": h["first_seen"].strftime("%b %d, %Y")
-        if h["first_seen"]
-        else None,
+        "material_first_seen": h["first_seen"].strftime("%b %d, %Y") if h["first_seen"] else None,
         "material_card_id": h["material_card_id"],
     }
 
@@ -837,8 +805,10 @@ def _audit_card_created(db: Session, card: MaterialCard) -> None:
     """Log a 'created' audit entry for a new material card."""
     try:
         from .services.audit_service import log_audit
-        log_audit(db, material_card_id=card.id, action="created",
-                  normalized_mpn=card.normalized_mpn, created_by="system")
+
+        log_audit(
+            db, material_card_id=card.id, action="created", normalized_mpn=card.normalized_mpn, created_by="system"
+        )
     except Exception:
         pass  # Audit should never break card creation
 
@@ -857,9 +827,7 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
         return None
 
     # Fast path — card already exists (no write, cheapest possible check)
-    card = db.query(MaterialCard).filter_by(normalized_mpn=norm).filter(
-        MaterialCard.deleted_at.is_(None)
-    ).first()
+    card = db.query(MaterialCard).filter_by(normalized_mpn=norm).filter(MaterialCard.deleted_at.is_(None)).first()
     if card:
         logger.debug("MC_METRIC: action=resolved mpn=%s card_id=%d", norm, card.id)
         return card
@@ -870,11 +838,15 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
     if dialect == "postgresql":
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-        stmt = pg_insert(MaterialCard).values(
-            normalized_mpn=norm,
-            display_mpn=display,
-            search_count=0,
-        ).on_conflict_do_nothing(index_elements=["normalized_mpn"])
+        stmt = (
+            pg_insert(MaterialCard)
+            .values(
+                normalized_mpn=norm,
+                display_mpn=display,
+                search_count=0,
+            )
+            .on_conflict_do_nothing(index_elements=["normalized_mpn"])
+        )
         result = db.execute(stmt)
         db.flush()
         # Re-fetch (unfiltered — may be soft-deleted and needs restoring)
@@ -915,9 +887,7 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
             return card
 
 
-def _upsert_material_card(
-    pn: str, sightings: list[Sighting], db: Session, now: datetime
-) -> MaterialCard | None:
+def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: datetime) -> MaterialCard | None:
     """Upsert material card + link sightings. Raises on error — caller handles rollback."""
     norm = normalize_mpn_key(pn)
     if not norm:
@@ -942,10 +912,7 @@ def _upsert_material_card(
     from .vendor_utils import normalize_vendor_name as _nvn
 
     existing_vh = {
-        _nvn(vh.vendor_name): vh
-        for vh in db.query(MaterialVendorHistory)
-        .filter_by(material_card_id=card.id)
-        .all()
+        _nvn(vh.vendor_name): vh for vh in db.query(MaterialVendorHistory).filter_by(material_card_id=card.id).all()
     }
 
     for s in pn_sightings:
@@ -1031,5 +998,11 @@ def sighting_to_dict(s: Sighting) -> dict:
         "lead_time_days": s.lead_time_days,
         "lead_time": s.lead_time,
         "created_at": s.created_at.isoformat() if s.created_at else None,
-        "is_stale": (datetime.now(timezone.utc) - (s.created_at.replace(tzinfo=timezone.utc) if s.created_at.tzinfo is None else s.created_at)).days > 90 if s.created_at else False,
+        "is_stale": (
+            datetime.now(timezone.utc)
+            - (s.created_at.replace(tzinfo=timezone.utc) if s.created_at.tzinfo is None else s.created_at)
+        ).days
+        > 90
+        if s.created_at
+        else False,
     }

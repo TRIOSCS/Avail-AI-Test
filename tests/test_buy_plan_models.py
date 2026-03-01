@@ -17,8 +17,6 @@ from sqlalchemy.orm import Session
 from app.models import (
     Offer,
     Quote,
-    Requirement,
-    Requisition,
     User,
 )
 from app.models.buy_plan import (
@@ -31,7 +29,6 @@ from app.models.buy_plan import (
     SOVerificationStatus,
     VerificationGroupMember,
 )
-
 
 # ── ENUM Tests ───────────────────────────────────────────────────────
 
@@ -104,9 +101,7 @@ class TestBuyPlanV3Model:
         assert plan.is_stock_sale is False
         assert plan.auto_approved is False
 
-    def test_create_with_all_fields(
-        self, db_session: Session, test_quote: Quote, test_user: User
-    ):
+    def test_create_with_all_fields(self, db_session: Session, test_quote: Quote, test_user: User):
         plan = BuyPlanV3(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
@@ -146,9 +141,7 @@ class TestBuyPlanV3Model:
         assert plan.quote.id == test_quote.id
         assert plan.requisition is not None
 
-    def test_submitted_by_relationship(
-        self, db_session: Session, test_quote: Quote, test_user: User
-    ):
+    def test_submitted_by_relationship(self, db_session: Session, test_quote: Quote, test_user: User):
         plan = BuyPlanV3(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
@@ -197,9 +190,7 @@ class TestBuyPlanLineModel:
         assert line.quantity == 500
         assert float(line.unit_cost) == 0.50
 
-    def test_line_relationships(
-        self, db_session: Session, test_quote: Quote, test_offer: Offer, test_user: User
-    ):
+    def test_line_relationships(self, db_session: Session, test_quote: Quote, test_offer: Offer, test_user: User):
         plan = self._make_plan(db_session, test_quote)
         line = BuyPlanLine(
             buy_plan_id=plan.id,
@@ -217,9 +208,7 @@ class TestBuyPlanLineModel:
         assert line.buyer.id == test_user.id
         assert line.assignment_reason == "vendor_ownership"
 
-    def test_plan_lines_relationship(
-        self, db_session: Session, test_quote: Quote, test_offer: Offer
-    ):
+    def test_plan_lines_relationship(self, db_session: Session, test_quote: Quote, test_offer: Offer):
         plan = self._make_plan(db_session, test_quote)
         line1 = BuyPlanLine(buy_plan_id=plan.id, offer_id=test_offer.id, quantity=500)
         line2 = BuyPlanLine(buy_plan_id=plan.id, offer_id=test_offer.id, quantity=500)
@@ -229,9 +218,7 @@ class TestBuyPlanLineModel:
 
         assert len(plan.lines) == 2
 
-    def test_split_lines_same_requirement(
-        self, db_session: Session, test_quote: Quote, test_offer: Offer
-    ):
+    def test_split_lines_same_requirement(self, db_session: Session, test_quote: Quote, test_offer: Offer):
         """Multiple lines can share the same requirement_id (split across vendors)."""
         plan = self._make_plan(db_session, test_quote)
         req_id = test_offer.requirement_id

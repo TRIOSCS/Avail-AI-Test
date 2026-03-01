@@ -20,20 +20,40 @@ from app.routers.vendors import card_to_dict, get_or_create_card
 
 # ── Stub factories ───────────────────────────────────────────────────────
 
+
 def _make_vendor_card(**overrides) -> SimpleNamespace:
     """Create a VendorCard-like stub with all real model attributes."""
     defaults = dict(
-        id=1, normalized_name="acme electronics", display_name="Acme Electronics",
-        domain="acme.com", website="https://acme.com", emails=["sales@acme.com"],
-        phones=["+1-555-0100"], sighting_count=42, is_blacklisted=False,
-        linkedin_url=None, legal_name=None, industry="Semiconductors",
-        employee_size="50-100", hq_city="Dallas", hq_state="TX", hq_country="US",
-        last_enriched_at=None, enrichment_source=None,
-        vendor_score=72.5, advancement_score=72.5, is_new_vendor=False,
-        engagement_score=72.5, total_outreach=20, total_responses=14,
-        ghost_rate=0.3, response_velocity_hours=4.2,
+        id=1,
+        normalized_name="acme electronics",
+        display_name="Acme Electronics",
+        domain="acme.com",
+        website="https://acme.com",
+        emails=["sales@acme.com"],
+        phones=["+1-555-0100"],
+        sighting_count=42,
+        is_blacklisted=False,
+        linkedin_url=None,
+        legal_name=None,
+        industry="Semiconductors",
+        employee_size="50-100",
+        hq_city="Dallas",
+        hq_state="TX",
+        hq_country="US",
+        last_enriched_at=None,
+        enrichment_source=None,
+        vendor_score=72.5,
+        advancement_score=72.5,
+        is_new_vendor=False,
+        engagement_score=72.5,
+        total_outreach=20,
+        total_responses=14,
+        ghost_rate=0.3,
+        response_velocity_hours=4.2,
         last_contact_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
-        brand_tags=[], commodity_tags=[], material_tags_updated_at=None,
+        brand_tags=[],
+        commodity_tags=[],
+        material_tags_updated_at=None,
         created_at=datetime(2025, 11, 1, tzinfo=timezone.utc),
         updated_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
     )
@@ -43,7 +63,11 @@ def _make_vendor_card(**overrides) -> SimpleNamespace:
 
 def _make_review(**overrides) -> SimpleNamespace:
     defaults = dict(
-        id=1, vendor_card_id=1, user_id=1, rating=4, comment="Good vendor",
+        id=1,
+        vendor_card_id=1,
+        user_id=1,
+        rating=4,
+        comment="Good vendor",
         created_at=datetime(2026, 1, 10, tzinfo=timezone.utc),
         user=SimpleNamespace(name="Mike"),
     )
@@ -52,6 +76,7 @@ def _make_review(**overrides) -> SimpleNamespace:
 
 
 # ── card_to_dict tests ───────────────────────────────────────────────────
+
 
 def test_card_to_dict_with_reviews():
     """card_to_dict includes avg rating, review list, brand profile."""
@@ -92,8 +117,10 @@ def test_card_to_dict_no_reviews():
 def test_card_to_dict_none_timestamps():
     """card_to_dict handles None datetimes without crashing."""
     card = _make_vendor_card(
-        last_enriched_at=None, last_contact_at=None,
-        created_at=None, updated_at=None,
+        last_enriched_at=None,
+        last_contact_at=None,
+        created_at=None,
+        updated_at=None,
     )
     db = MagicMock()
     db.query.return_value.options.return_value.filter_by.return_value.all.return_value = []
@@ -108,6 +135,7 @@ def test_card_to_dict_none_timestamps():
 
 
 # ── get_or_create_card tests ─────────────────────────────────────────────
+
 
 def test_get_or_create_card_existing():
     """Returns existing card when normalized name matches."""
@@ -199,15 +227,24 @@ from app.routers.vendors import material_card_to_dict
 
 def _make_material_card(**overrides) -> SimpleNamespace:
     defaults = dict(
-        id=10, normalized_mpn="lm358n", display_mpn="LM358N",
-        manufacturer="Texas Instruments", description="Dual Op-Amp",
+        id=10,
+        normalized_mpn="lm358n",
+        display_mpn="LM358N",
+        manufacturer="Texas Instruments",
+        description="Dual Op-Amp",
         search_count=5,
         last_searched_at=datetime(2026, 1, 20, tzinfo=timezone.utc),
         # Enrichment fields
-        lifecycle_status=None, package_type=None, category=None,
-        rohs_status=None, pin_count=None, datasheet_url=None,
-        cross_references=None, specs_summary=None,
-        enrichment_source=None, enriched_at=None,
+        lifecycle_status=None,
+        package_type=None,
+        category=None,
+        rohs_status=None,
+        pin_count=None,
+        datasheet_url=None,
+        cross_references=None,
+        specs_summary=None,
+        enrichment_source=None,
+        enriched_at=None,
         created_at=datetime(2025, 12, 1, tzinfo=timezone.utc),
         updated_at=datetime(2026, 1, 20, tzinfo=timezone.utc),
     )
@@ -217,12 +254,18 @@ def _make_material_card(**overrides) -> SimpleNamespace:
 
 def _make_vendor_history(**overrides) -> SimpleNamespace:
     defaults = dict(
-        id=1, vendor_name="Acme Electronics", source_type="broker",
+        id=1,
+        vendor_name="Acme Electronics",
+        source_type="broker",
         is_authorized=False,
         first_seen=datetime(2025, 12, 15, tzinfo=timezone.utc),
         last_seen=datetime(2026, 1, 10, tzinfo=timezone.utc),
-        times_seen=3, last_qty=500, last_price=0.45,
-        last_currency="USD", last_manufacturer="TI", vendor_sku="ACM-LM358",
+        times_seen=3,
+        last_qty=500,
+        last_price=0.45,
+        last_currency="USD",
+        last_manufacturer="TI",
+        vendor_sku="ACM-LM358",
     )
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
@@ -257,7 +300,6 @@ def test_material_card_to_dict_no_history():
 
 
 # ── Contact cleaning tests ───────────────────────────────────────────────
-
 
 
 def test_clean_emails_filters_junk_extended():
@@ -316,6 +358,7 @@ def test_is_private_url_blocks_empty_malformed():
 def test_vendor_list_includes_engagement_score(db_session):
     """list_vendors response includes engagement_score field per vendor."""
     from app.models import VendorCard
+
     vc = VendorCard(
         display_name="Test Chips Inc",
         normalized_name="test chips inc",
@@ -327,8 +370,10 @@ def test_vendor_list_includes_engagement_score(db_session):
 
     # Simulate the serialization logic from list_vendors
     result = {
-        "id": vc.id, "display_name": vc.display_name,
-        "emails": vc.emails or [], "phones": vc.phones or [],
+        "id": vc.id,
+        "display_name": vc.display_name,
+        "emails": vc.emails or [],
+        "phones": vc.phones or [],
         "sighting_count": vc.sighting_count or 0,
         "engagement_score": vc.engagement_score,
         "is_blacklisted": vc.is_blacklisted or False,
@@ -340,13 +385,15 @@ def test_vendor_list_includes_engagement_score(db_session):
 def test_vendor_list_engagement_score_null():
     """Vendors with no engagement data return None (new vendor)."""
     from types import SimpleNamespace
+
     card = SimpleNamespace(engagement_score=None)
     # Tier classification: null → 'new'
-    tier = 'new' if card.engagement_score is None else (
-        'proven' if card.engagement_score >= 70 else
-        'developing' if card.engagement_score >= 40 else 'caution'
+    tier = (
+        "new"
+        if card.engagement_score is None
+        else ("proven" if card.engagement_score >= 70 else "developing" if card.engagement_score >= 40 else "caution")
     )
-    assert tier == 'new'
+    assert tier == "new"
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -356,6 +403,7 @@ def test_vendor_list_engagement_score_null():
 from app.models import MaterialCard, User, VendorCard, VendorContact, VendorReview
 
 # ── Admin client fixture ─────────────────────────────────────────────────
+
 
 @pytest.fixture()
 def admin_client(db_session, admin_user):
@@ -458,11 +506,13 @@ def test_list_vendors_search(client, db_session):
 def test_list_vendors_pagination(client, db_session):
     """GET /api/vendors respects limit and offset parameters."""
     for i in range(3):
-        db_session.add(VendorCard(
-            normalized_name=f"pagvendor{i}",
-            display_name=f"PagVendor{i}",
-            sighting_count=1,
-        ))
+        db_session.add(
+            VendorCard(
+                normalized_name=f"pagvendor{i}",
+                display_name=f"PagVendor{i}",
+                sighting_count=1,
+            )
+        )
     db_session.commit()
 
     resp1 = client.get("/api/vendors", params={"limit": 2, "offset": 0})
@@ -603,9 +653,7 @@ def test_delete_own_review(client, db_session, test_vendor_card, test_user):
     db_session.commit()
     rid = review.id
 
-    resp = client.delete(
-        f"/api/vendors/{test_vendor_card.id}/reviews/{rid}"
-    )
+    resp = client.delete(f"/api/vendors/{test_vendor_card.id}/reviews/{rid}")
     assert resp.status_code == 200
 
 
@@ -633,9 +681,7 @@ def test_delete_others_review_forbidden(client, db_session, test_vendor_card):
     rid = review.id
 
     # The client is authenticated as test_user, not other_user
-    resp = client.delete(
-        f"/api/vendors/{test_vendor_card.id}/reviews/{rid}"
-    )
+    resp = client.delete(f"/api/vendors/{test_vendor_card.id}/reviews/{rid}")
     # delete_review filters by user_id=user.id, so it returns 404 "not yours"
     assert resp.status_code == 404
 
@@ -754,9 +800,7 @@ def test_update_vendor_contact_email_conflict(client, db_session, test_vendor_ca
 
 def test_delete_vendor_contact(client, db_session, test_vendor_card, test_vendor_contact):
     """DELETE /api/vendors/{card_id}/contacts/{contact_id} removes the contact."""
-    resp = client.delete(
-        f"/api/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}"
-    )
+    resp = client.delete(f"/api/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}")
     assert resp.status_code == 200
     data = resp.json()
     assert data["ok"] is True
@@ -764,9 +808,7 @@ def test_delete_vendor_contact(client, db_session, test_vendor_card, test_vendor
 
 def test_delete_vendor_contact_not_found(client, db_session, test_vendor_card):
     """DELETE nonexistent contact returns 404."""
-    resp = client.delete(
-        f"/api/vendors/{test_vendor_card.id}/contacts/99999"
-    )
+    resp = client.delete(f"/api/vendors/{test_vendor_card.id}/contacts/99999")
     assert resp.status_code == 404
 
 
@@ -1026,9 +1068,7 @@ def test_lookup_tier2_scrape(client, db_session, monkeypatch):
     async def mock_scrape(url):
         return {"emails": ["found@scrapetest.com"], "phones": ["+1-555-9999"]}
 
-    monkeypatch.setattr(
-        "app.routers.vendors.scrape_website_contacts", mock_scrape
-    )
+    monkeypatch.setattr("app.routers.vendors.scrape_website_contacts", mock_scrape)
 
     resp = client.post(
         "/api/vendor-contact",
@@ -1126,6 +1166,7 @@ def test_lookup_creates_card(client, db_session, monkeypatch):
 
     # Verify the card was created in DB
     from app.vendor_utils import normalize_vendor_name
+
     norm = normalize_vendor_name("Brand New Vendor XYZ")
     card = db_session.query(VendorCard).filter_by(normalized_name=norm).first()
     assert card is not None
@@ -1148,9 +1189,7 @@ def test_lookup_ssrf_blocked(client, db_session, monkeypatch):
     async def mock_scrape(url):
         return {"emails": [], "phones": []}
 
-    monkeypatch.setattr(
-        "app.routers.vendors.scrape_website_contacts", mock_scrape
-    )
+    monkeypatch.setattr("app.routers.vendors.scrape_website_contacts", mock_scrape)
     # No API key so it won't try tier 3
     monkeypatch.setattr(
         "app.routers.vendors.get_credential_cached",
@@ -1176,6 +1215,7 @@ def test_import_stock_missing_vendor(client, monkeypatch):
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
 
     import io
+
     csv_content = b"mpn,qty,price\nLM317T,1000,0.50"
     resp = client.post(
         "/api/materials/import-stock",
@@ -1273,22 +1313,17 @@ def test_list_vendors_sort_by_score(client, db_session):
 # NEW TESTS — Coverage expansion to reach 100%
 # ══════════════════════════════════════════════════════════════════════════
 
+import io
+import socket
+from unittest.mock import AsyncMock, patch
+
 from app.models import Contact, MaterialVendorHistory, Offer, Requirement, Requisition, Sighting, VendorResponse
 from app.routers.vendors import (
     _background_enrich_vendor,
     _vendor_parts_summary_query,
-    clean_emails,
-    clean_phones,
-    is_private_url,
     merge_contact_into_card,
     scrape_website_contacts,
 )
-
-import asyncio
-import io
-import socket
-from unittest.mock import AsyncMock, MagicMock, patch
-
 
 # ── _background_enrich_vendor tests (lines 111-140) ─────────────────────
 
@@ -1684,11 +1719,13 @@ def test_autocomplete_names_with_companies(client, db_session, test_vendor_card,
 def test_autocomplete_names_limit(client, db_session):
     """GET /api/autocomplete/names respects limit param."""
     for i in range(5):
-        db_session.add(VendorCard(
-            normalized_name=f"autocomp vendor {i}",
-            display_name=f"Autocomp Vendor {i}",
-            sighting_count=1,
-        ))
+        db_session.add(
+            VendorCard(
+                normalized_name=f"autocomp vendor {i}",
+                display_name=f"Autocomp Vendor {i}",
+                sighting_count=1,
+            )
+        )
     db_session.commit()
 
     resp = client.get("/api/autocomplete/names", params={"q": "autocomp", "limit": "2"})
@@ -1699,10 +1736,8 @@ def test_autocomplete_names_limit(client, db_session):
 
 def test_autocomplete_names_sorted(client, db_session):
     """GET /api/autocomplete/names returns results sorted by name."""
-    db_session.add(VendorCard(
-        normalized_name="zzz vendor", display_name="ZZZ Vendor", sighting_count=1))
-    db_session.add(VendorCard(
-        normalized_name="aaa vendor", display_name="AAA Vendor", sighting_count=1))
+    db_session.add(VendorCard(normalized_name="zzz vendor", display_name="ZZZ Vendor", sighting_count=1))
+    db_session.add(VendorCard(normalized_name="aaa vendor", display_name="AAA Vendor", sighting_count=1))
     db_session.commit()
 
     resp = client.get("/api/autocomplete/names", params={"q": "vendor"})
@@ -2231,9 +2266,7 @@ def test_delete_vendor_contact_cleans_legacy_emails(client, db_session, test_ven
     test_vendor_card.emails = ["john@arrow.com", "other@arrow.com"]
     db_session.commit()
 
-    resp = client.delete(
-        f"/api/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}"
-    )
+    resp = client.delete(f"/api/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}")
     assert resp.status_code == 200
 
     db_session.refresh(test_vendor_card)
@@ -2582,6 +2615,7 @@ def test_import_stock_existing_vendor(client, db_session, monkeypatch):
 
     # Create vendor first
     from app.vendor_utils import normalize_vendor_name
+
     norm = normalize_vendor_name("Existing Stock Vendor")
     vc = VendorCard(
         normalized_name=norm,
@@ -2605,8 +2639,8 @@ def test_import_stock_update_existing_mvh(client, db_session, monkeypatch):
     monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
     monkeypatch.setattr("app.routers.vendors.get_credential_cached", lambda *a, **kw: None)
 
-    from app.vendor_utils import normalize_vendor_name
     from app.utils.normalization import normalize_mpn_key
+    from app.vendor_utils import normalize_vendor_name
 
     norm_vendor = normalize_vendor_name("MVH Update Vendor")
     vc = VendorCard(
@@ -3160,7 +3194,6 @@ def test_delete_review_card_deleted_after_review_delete(db_session, test_user):
     after the review is deleted. We test this by directly calling the
     endpoint logic with mocks.
     """
-    from app.routers.vendors import delete_review
 
     mock_db = MagicMock()
     mock_review = MagicMock()
@@ -3347,10 +3380,10 @@ def test_list_vendors_fts_mock():
 
 def test_lookup_vendor_contact_integrity_error_race(client, db_session, monkeypatch):
     """lookup_vendor_contact handles IntegrityError on card flush (race condition)."""
-    from sqlalchemy.exc import IntegrityError as SQLAIntegrityError
 
     # Create the vendor card that would cause the IntegrityError
     from app.vendor_utils import normalize_vendor_name
+
     norm = normalize_vendor_name("Integrity Race Vendor")
     existing_vc = VendorCard(
         normalized_name=norm,
@@ -3380,9 +3413,6 @@ def test_lookup_vendor_contact_integrity_error_race(client, db_session, monkeypa
 
 
 # ── Fuzzy matching in get_or_create_card (lines 127-145) ──────────────
-
-from unittest.mock import patch, AsyncMock
-from app.models import VendorCard
 
 
 class TestGetOrCreateCardFuzzyMatch:
@@ -3445,8 +3475,6 @@ class TestListVendorsResponseRate:
 
 
 # ── Material card merge (lines 1786-1825) ────────────────────────────
-
-from app.models import MaterialCard
 
 
 class TestMaterialCardMerge:

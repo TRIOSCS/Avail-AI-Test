@@ -10,7 +10,6 @@ Depends on: database, ics_worker.queue_manager
 """
 
 import argparse
-import sys
 
 from loguru import logger
 
@@ -33,9 +32,7 @@ def main():
             .filter(
                 Requirement.primary_mpn.isnot(None),
                 Requirement.primary_mpn != "",
-                ~Requirement.id.in_(
-                    db.query(IcsSearchQueue.requirement_id)
-                ),
+                ~Requirement.id.in_(db.query(IcsSearchQueue.requirement_id)),
             )
             .order_by(Requirement.created_at.desc())
         )

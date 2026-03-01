@@ -15,6 +15,7 @@ from app.schemas.rfq import BatchRfqSend, FollowUpEmail, PhoneCallLog, RfqPrepar
 
 # ── PhoneCallLog ─────────────────────────────────────────────────────
 
+
 class TestPhoneCallLog:
     def test_valid_minimal(self):
         p = PhoneCallLog(requisition_id=1, vendor_name="Acme", vendor_phone="555-1234")
@@ -22,8 +23,7 @@ class TestPhoneCallLog:
         assert p.parts == []
 
     def test_valid_with_parts(self):
-        p = PhoneCallLog(requisition_id=1, vendor_name="Acme", vendor_phone="555-1234",
-                         parts=["LM358", "NE555"])
+        p = PhoneCallLog(requisition_id=1, vendor_name="Acme", vendor_phone="555-1234", parts=["LM358", "NE555"])
         assert len(p.parts) == 2
 
     def test_missing_vendor_name_raises(self):
@@ -46,15 +46,18 @@ class TestPhoneCallLog:
 
 # ── BatchRfqSend ─────────────────────────────────────────────────────
 
+
 class TestBatchRfqSend:
     def test_empty_groups_default(self):
         b = BatchRfqSend()
         assert b.groups == []
 
     def test_valid_groups(self):
-        b = BatchRfqSend(groups=[
-            {"vendor_name": "Acme", "vendor_email": "a@acme.com", "parts": ["LM358"]},
-        ])
+        b = BatchRfqSend(
+            groups=[
+                {"vendor_name": "Acme", "vendor_email": "a@acme.com", "parts": ["LM358"]},
+            ]
+        )
         assert len(b.groups) == 1
         assert b.groups[0].vendor_name == "Acme"
 
@@ -64,6 +67,7 @@ class TestBatchRfqSend:
 
 
 # ── RfqPrepare ───────────────────────────────────────────────────────
+
 
 class TestRfqPrepare:
     def test_empty_vendors_default(self):
@@ -77,6 +81,7 @@ class TestRfqPrepare:
 
 # ── FollowUpEmail ────────────────────────────────────────────────────
 
+
 class TestFollowUpEmail:
     def test_empty_body_default(self):
         f = FollowUpEmail()
@@ -89,14 +94,17 @@ class TestFollowUpEmail:
 
 # ── RfqVendorGroup ──────────────────────────────────────────────────
 
+
 class TestRfqVendorGroup:
     def test_valid(self):
         from app.schemas.rfq import RfqVendorGroup
+
         g = RfqVendorGroup(vendor_name="Acme", vendor_email="a@acme.com")
         assert g.subject == ""
         assert g.body == ""
 
     def test_invalid_email_raises(self):
         from app.schemas.rfq import RfqVendorGroup
+
         with pytest.raises(ValidationError, match="Invalid email"):
             RfqVendorGroup(vendor_name="Acme", vendor_email="not-an-email")

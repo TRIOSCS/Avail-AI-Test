@@ -73,9 +73,7 @@ def compute_engagement_score(
         }
 
     # ── 1. Response Rate (0-100) ──
-    response_rate = (
-        min(total_responses / total_outreach, 1.0) if total_outreach > 0 else 0
-    )
+    response_rate = min(total_responses / total_outreach, 1.0) if total_outreach > 0 else 0
     response_score = response_rate * 100
 
     # ── 2. Ghost Rate penalty (0-100, inverted: 0 ghosts = 100) ──
@@ -96,12 +94,7 @@ def compute_engagement_score(
             # Linear decay from ideal to max
             recency_score = max(
                 0,
-                100
-                * (
-                    1
-                    - (days_since - RECENCY_IDEAL_DAYS)
-                    / (RECENCY_MAX_DAYS - RECENCY_IDEAL_DAYS)
-                ),
+                100 * (1 - (days_since - RECENCY_IDEAL_DAYS) / (RECENCY_MAX_DAYS - RECENCY_IDEAL_DAYS)),
             )
 
     # ── 4. Response Velocity (0-100) ──
@@ -114,12 +107,7 @@ def compute_engagement_score(
         else:
             velocity_score = max(
                 0,
-                100
-                * (
-                    1
-                    - (avg_velocity_hours - VELOCITY_IDEAL_HOURS)
-                    / (VELOCITY_MAX_HOURS - VELOCITY_IDEAL_HOURS)
-                ),
+                100 * (1 - (avg_velocity_hours - VELOCITY_IDEAL_HOURS) / (VELOCITY_MAX_HOURS - VELOCITY_IDEAL_HOURS)),
             )
 
     # ── 5. Win Rate (0-100) ──
@@ -186,7 +174,7 @@ async def compute_all_engagement_scores(db: Session) -> dict:
     domain_to_norm = {}
     for card in db.query(VendorCard).filter(VendorCard.domain.isnot(None)).all():
         domain_to_norm[card.domain.lower()] = card.normalized_name
-        for alias in (card.domain_aliases or []):
+        for alias in card.domain_aliases or []:
             if alias:
                 domain_to_norm[alias.lower()] = card.normalized_name
 
@@ -275,13 +263,7 @@ async def compute_all_engagement_scores(db: Session) -> dict:
     BATCH_SIZE = 1000
 
     for offset in range(0, total_count, BATCH_SIZE):
-        cards = (
-            db.query(VendorCard)
-            .order_by(VendorCard.id)
-            .offset(offset)
-            .limit(BATCH_SIZE)
-            .all()
-        )
+        cards = db.query(VendorCard).order_by(VendorCard.id).offset(offset).limit(BATCH_SIZE).all()
 
         for card in cards:
             norm = card.normalized_name
@@ -325,9 +307,7 @@ async def compute_all_engagement_scores(db: Session) -> dict:
 
     try:
         db.commit()
-        logger.info(
-            f"Engagement scoring: updated {updated} vendor cards, skipped {skipped}"
-        )
+        logger.info(f"Engagement scoring: updated {updated} vendor cards, skipped {skipped}")
     except Exception as e:
         logger.error(f"Engagement scoring commit failed: {e}")
         db.rollback()
@@ -353,7 +333,7 @@ def compute_single_vendor_score(card, db: Session) -> float | None:
 
     # Match responses by email domain (vendor_name stores person name, not company)
     domains = [card.domain.lower()] if card.domain else []
-    for alias in (card.domain_aliases or []):
+    for alias in card.domain_aliases or []:
         if alias:
             domains.append(alias.lower())
 
@@ -402,20 +382,12 @@ def apply_outbound_stats(db: Session, vendors_contacted: dict[str, int]):
     updated = 0
     for domain, count in vendors_contacted.items():
         # Find vendor card by domain
-        card = (
-            db.query(VendorCard)
-            .filter(func.lower(VendorCard.domain) == domain.lower())
-            .first()
-        )
+        card = db.query(VendorCard).filter(func.lower(VendorCard.domain) == domain.lower()).first()
 
         # Fallback: try matching by normalized name (strip TLD)
         if not card:
             vendor_key = domain.split(".")[0] if "." in domain else domain
-            card = (
-                db.query(VendorCard)
-                .filter(VendorCard.normalized_name == vendor_key.lower())
-                .first()
-            )
+            card = db.query(VendorCard).filter(VendorCard.normalized_name == vendor_key.lower()).first()
 
         if card:
             card.total_outreach = (card.total_outreach or 0) + count

@@ -9,9 +9,6 @@ Depends on: app/routers/dashboard.py, app/models/performance.py
 
 from datetime import date, datetime, timezone
 
-import pytest
-from sqlalchemy.orm import Session
-
 from app.models import User
 from app.models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot
 
@@ -29,24 +26,33 @@ def _seed_avail(db, user_id, role, score=50, behavior=25, outcome=25, rank=1):
         rank=rank,
         qualified=score >= 50,
         bonus_amount=500 if rank == 1 and score >= 60 else 0,
-        b1_score=5, b1_label="Response Time",
-        b2_score=5, b2_label="RFQ Volume",
-        b3_score=5, b3_label="Source Diversity",
-        b4_score=5, b4_label="Data Quality",
-        b5_score=5, b5_label="Follow-through",
-        o1_score=5, o1_label="Win Rate",
-        o2_score=5, o2_label="Quote Accuracy",
-        o3_score=5, o3_label="Pipeline Growth",
-        o4_score=5, o4_label="Revenue",
-        o5_score=5, o5_label="Customer Sat",
+        b1_score=5,
+        b1_label="Response Time",
+        b2_score=5,
+        b2_label="RFQ Volume",
+        b3_score=5,
+        b3_label="Source Diversity",
+        b4_score=5,
+        b4_label="Data Quality",
+        b5_score=5,
+        b5_label="Follow-through",
+        o1_score=5,
+        o1_label="Win Rate",
+        o2_score=5,
+        o2_label="Quote Accuracy",
+        o3_score=5,
+        o3_label="Pipeline Growth",
+        o4_score=5,
+        o4_label="Revenue",
+        o5_score=5,
+        o5_label="Customer Sat",
     )
     db.add(snap)
     db.flush()
     return snap
 
 
-def _seed_multiplier(db, user_id, role, total_pts=10, offer_pts=8, bonus_pts=2,
-                     rank=1, qualified=True):
+def _seed_multiplier(db, user_id, role, total_pts=10, offer_pts=8, bonus_pts=2, rank=1, qualified=True):
     """Insert a MultiplierScoreSnapshot for the current month."""
     month = date.today().replace(day=1)
     snap = MultiplierScoreSnapshot(
@@ -112,8 +118,7 @@ class TestTeamLeaderboardEndpoint:
 
     def test_ranking_by_total_points(self, client, db_session, test_user):
         """Users are ranked by total_points desc, with avail_score tiebreak."""
-        user2 = User(name="Buyer Two", email="buyer2@test.com", role="buyer",
-                     created_at=datetime.now(timezone.utc))
+        user2 = User(name="Buyer Two", email="buyer2@test.com", role="buyer", created_at=datetime.now(timezone.utc))
         db_session.add(user2)
         db_session.flush()
 

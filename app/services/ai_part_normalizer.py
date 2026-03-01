@@ -120,7 +120,7 @@ async def normalize_parts(raw_parts: list[str]) -> list[dict]:
 
 async def _call_normalizer(parts: list[str]) -> list[dict] | None:
     """Call Gradient to normalize a batch of part numbers."""
-    parts_list = "\n".join(f"{i+1}. {p}" for i, p in enumerate(parts))
+    parts_list = "\n".join(f"{i + 1}. {p}" for i, p in enumerate(parts))
     prompt = f"Normalize these {len(parts)} electronic component part numbers:\n\n{parts_list}"
 
     result = await gradient_json(

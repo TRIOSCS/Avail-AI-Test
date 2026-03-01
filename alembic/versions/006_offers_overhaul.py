@@ -4,10 +4,12 @@ Revision ID: 006_offers_overhaul
 Revises: 005_ai_prompt
 Create Date: 2026-02-23
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision: str = "006_offers_overhaul"
 down_revision: Union[str, None] = "005_ai_prompt"

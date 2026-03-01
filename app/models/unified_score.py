@@ -36,9 +36,7 @@ class UnifiedScoreSnapshot(Base):
 
     __tablename__ = "unified_score_snapshot"
     id = Column(Integer, primary_key=True)
-    user_id = Column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     month = Column(Date, nullable=False)
 
     # 5 category percentages (0-100 each)

@@ -68,7 +68,10 @@ def _search_http(session_manager, part_number: str) -> dict:
 
         logger.info(
             "NC search (HTTP): '{}' in {}ms (status={}, size={}KB)",
-            part_number, duration_ms, resp.status_code, len(resp.text) // 1024,
+            part_number,
+            duration_ms,
+            resp.status_code,
+            len(resp.text) // 1024,
         )
 
         return {
@@ -132,7 +135,9 @@ async def _search_browser(session_manager, part_number: str) -> dict | None:
 
         logger.info(
             "NC search (browser): '{}' in {}ms (size={}KB)",
-            part_number, duration_ms, len(html) // 1024,
+            part_number,
+            duration_ms,
+            len(html) // 1024,
         )
 
         return {

@@ -42,9 +42,7 @@ _PART_SCHEMA = {
 }
 
 
-async def enrich_material_cards(
-    card_ids: list[int], db: Session, *, batch_size: int = 30
-) -> dict:
+async def enrich_material_cards(card_ids: list[int], db: Session, *, batch_size: int = 30) -> dict:
     """Enrich material cards with AI-generated descriptions and categories.
 
     Returns {"enriched": int, "skipped": int, "errors": int}.
@@ -69,9 +67,7 @@ async def enrich_material_cards(
     return stats
 
 
-async def _enrich_batch(
-    cards: list[MaterialCard], db: Session, stats: dict
-) -> None:
+async def _enrich_batch(cards: list[MaterialCard], db: Session, stats: dict) -> None:
     """Enrich a single batch of cards via one Claude call."""
     from ..utils.claude_client import claude_structured
 
@@ -141,9 +137,7 @@ async def _enrich_batch(
         stats["enriched"] -= len(cards)
 
 
-async def enrich_pending_cards(
-    db: Session, *, limit: int = 300, batch_size: int = 30
-) -> dict:
+async def enrich_pending_cards(db: Session, *, limit: int = 300, batch_size: int = 30) -> dict:
     """Find and enrich cards that need descriptions/categories.
 
     Priority order:

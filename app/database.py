@@ -15,6 +15,7 @@ from .config import settings
 
 class UTCDateTime(TypeDecorator):
     """DateTime type that ensures UTC timezone on load."""
+
     impl = DateTime
     cache_ok = True
 

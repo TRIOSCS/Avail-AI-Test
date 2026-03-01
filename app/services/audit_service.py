@@ -6,7 +6,6 @@ Events: created, linked, unlinked, deleted, merged, healed, restored, soft_delet
 All functions accept a db Session and do NOT commit — caller is responsible for commit.
 """
 
-
 from sqlalchemy.orm import Session
 
 from ..models import MaterialCardAudit

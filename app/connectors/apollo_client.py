@@ -78,9 +78,7 @@ async def search_contacts(
         )
 
         if resp.status_code != 200:
-            logger.warning(
-                f"Apollo search failed: {resp.status_code} {resp.text[:200]}"
-            )
+            logger.warning(f"Apollo search failed: {resp.status_code} {resp.text[:200]}")
             return []
 
         data = resp.json()

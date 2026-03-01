@@ -364,11 +364,19 @@ class TestBuildSignals:
     def test_structure(self):
         """Build signals should have all expected keys."""
         s = _build_signals(
-            sighting_count=3, offer_count=2,
-            rfqs_per_part=1.0, reply_rate=0.3,
-            calls_per_part=0.5, emails_per_part=0.5,
-            raw_sourced=3, raw_rfqs=4, raw_replies=1,
-            raw_offers=2, raw_calls=2, raw_emails=2, parts=4,
+            sighting_count=3,
+            offer_count=2,
+            rfqs_per_part=1.0,
+            reply_rate=0.3,
+            calls_per_part=0.5,
+            emails_per_part=0.5,
+            raw_sourced=3,
+            raw_rfqs=4,
+            raw_replies=1,
+            raw_offers=2,
+            raw_calls=2,
+            raw_emails=2,
+            parts=4,
         )
         expected_keys = {"sources", "offers", "rfqs", "replies", "calls", "emails"}
         assert set(s.keys()) == expected_keys
@@ -376,11 +384,19 @@ class TestBuildSignals:
     def test_raw_values_propagated(self):
         """Raw count values should be passed through to signals."""
         s = _build_signals(
-            sighting_count=5, offer_count=3,
-            rfqs_per_part=2.0, reply_rate=0.5,
-            calls_per_part=1.0, emails_per_part=1.0,
-            raw_sourced=5, raw_rfqs=10, raw_replies=5,
-            raw_offers=3, raw_calls=4, raw_emails=4, parts=4,
+            sighting_count=5,
+            offer_count=3,
+            rfqs_per_part=2.0,
+            reply_rate=0.5,
+            calls_per_part=1.0,
+            emails_per_part=1.0,
+            raw_sourced=5,
+            raw_rfqs=10,
+            raw_replies=5,
+            raw_offers=3,
+            raw_calls=4,
+            raw_emails=4,
+            parts=4,
         )
         assert s["sources"]["val"] == 5
         assert s["sources"]["parts"] == 4
@@ -394,9 +410,12 @@ class TestBuildSignals:
     def test_pct_values_are_integers(self):
         """pct values should be rounded integers."""
         s = _build_signals(
-            sighting_count=2, offer_count=1,
-            rfqs_per_part=1.5, reply_rate=0.3,
-            calls_per_part=0.3, emails_per_part=0.5,
+            sighting_count=2,
+            offer_count=1,
+            rfqs_per_part=1.5,
+            reply_rate=0.3,
+            calls_per_part=0.3,
+            emails_per_part=0.5,
         )
         for key in s:
             assert isinstance(s[key]["pct"], int)
@@ -404,9 +423,12 @@ class TestBuildSignals:
     def test_pct_range(self):
         """All pct values should be in 0-100 range."""
         s = _build_signals(
-            sighting_count=10, offer_count=5,
-            rfqs_per_part=5.0, reply_rate=0.8,
-            calls_per_part=2.0, emails_per_part=3.0,
+            sighting_count=10,
+            offer_count=5,
+            rfqs_per_part=5.0,
+            reply_rate=0.8,
+            calls_per_part=2.0,
+            emails_per_part=3.0,
         )
         for key in s:
             assert 0 <= s[key]["pct"] <= 100
@@ -414,12 +436,12 @@ class TestBuildSignals:
     def test_at_midpoints_pct_around_50(self):
         """At midpoint values, sigmoid = 0.5, so pct ~ 50."""
         s = _build_signals(
-            sighting_count=2,   # midpoint=2
-            offer_count=1,      # midpoint=1 (but steepness=1.5)
+            sighting_count=2,  # midpoint=2
+            offer_count=1,  # midpoint=1 (but steepness=1.5)
             rfqs_per_part=1.5,  # midpoint=1.5
-            reply_rate=0.3,     # reply_rate*5=1.5, midpoint=1.5
-            calls_per_part=0.3, # midpoint=0.3
-            emails_per_part=0.5, # midpoint=0.5
+            reply_rate=0.3,  # reply_rate*5=1.5, midpoint=1.5
+            calls_per_part=0.3,  # midpoint=0.3
+            emails_per_part=0.5,  # midpoint=0.5
         )
         assert s["sources"]["pct"] == 50
         assert s["rfqs"]["pct"] == 50
@@ -431,9 +453,12 @@ class TestBuildSignals:
         """Levels should be correctly classified based on sigmoid output."""
         # Very high values -> all levels should be "good"
         s = _build_signals(
-            sighting_count=100, offer_count=100,
-            rfqs_per_part=100.0, reply_rate=1.0,
-            calls_per_part=100.0, emails_per_part=100.0,
+            sighting_count=100,
+            offer_count=100,
+            rfqs_per_part=100.0,
+            reply_rate=1.0,
+            calls_per_part=100.0,
+            emails_per_part=100.0,
         )
         for key in s:
             assert s[key]["level"] == "good"
@@ -441,9 +466,12 @@ class TestBuildSignals:
     def test_zero_inputs_level_low(self):
         """Zero values should produce low-level signals (below midpoints)."""
         s = _build_signals(
-            sighting_count=0, offer_count=0,
-            rfqs_per_part=0.0, reply_rate=0.0,
-            calls_per_part=0.0, emails_per_part=0.0,
+            sighting_count=0,
+            offer_count=0,
+            rfqs_per_part=0.0,
+            reply_rate=0.0,
+            calls_per_part=0.0,
+            emails_per_part=0.0,
         )
         for key in s:
             assert s[key]["level"] == "low"
@@ -451,20 +479,26 @@ class TestBuildSignals:
     def test_default_raw_values(self):
         """When raw values are not passed, they default to 0."""
         s = _build_signals(
-            sighting_count=5, offer_count=3,
-            rfqs_per_part=2.0, reply_rate=0.5,
-            calls_per_part=1.0, emails_per_part=1.0,
+            sighting_count=5,
+            offer_count=3,
+            rfqs_per_part=2.0,
+            reply_rate=0.5,
+            calls_per_part=1.0,
+            emails_per_part=1.0,
         )
         assert s["sources"]["val"] == 0  # default raw_sourced
-        assert s["rfqs"]["val"] == 0     # default raw_rfqs
+        assert s["rfqs"]["val"] == 0  # default raw_rfqs
         assert s["sources"]["parts"] == 1  # default parts
 
     def test_replies_has_of_field(self):
         """Replies signal should have 'of' field referencing raw_rfqs."""
         s = _build_signals(
-            sighting_count=0, offer_count=0,
-            rfqs_per_part=0.0, reply_rate=0.0,
-            calls_per_part=0.0, emails_per_part=0.0,
+            sighting_count=0,
+            offer_count=0,
+            rfqs_per_part=0.0,
+            reply_rate=0.0,
+            calls_per_part=0.0,
+            emails_per_part=0.0,
             raw_rfqs=15,
         )
         assert s["replies"]["of"] == 15
@@ -505,8 +539,10 @@ class TestComputeRequisitionScoreFast:
     def test_returns_tuple_of_three(self):
         """Should return a (score, color, signals) tuple."""
         result = compute_requisition_score_fast(
-            req_count=2, sourced_count=1,
-            rfq_sent_count=3, reply_count=1,
+            req_count=2,
+            sourced_count=1,
+            rfq_sent_count=3,
+            reply_count=1,
             offer_count=1,
         )
         assert len(result) == 3
@@ -552,8 +588,10 @@ class TestComputeRequisitionScoreFast:
         """Color should be consistent with the score value."""
         # Zero activity => low score => red
         sc, color, _ = compute_requisition_score_fast(
-            req_count=1, sourced_count=0,
-            rfq_sent_count=0, reply_count=0,
+            req_count=1,
+            sourced_count=0,
+            rfq_sent_count=0,
+            reply_count=0,
             offer_count=0,
         )
         assert color == _color(sc)
@@ -586,14 +624,20 @@ class TestComputeRequisitionScoreFast:
     def test_default_call_email_counts(self):
         """call_count and email_count default to 0."""
         sc1, _, _ = compute_requisition_score_fast(
-            req_count=3, sourced_count=5,
-            rfq_sent_count=6, reply_count=2,
+            req_count=3,
+            sourced_count=5,
+            rfq_sent_count=6,
+            reply_count=2,
             offer_count=2,
         )
         sc2, _, _ = compute_requisition_score_fast(
-            req_count=3, sourced_count=5,
-            rfq_sent_count=6, reply_count=2,
-            offer_count=2, call_count=0, email_count=0,
+            req_count=3,
+            sourced_count=5,
+            rfq_sent_count=6,
+            reply_count=2,
+            offer_count=2,
+            call_count=0,
+            email_count=0,
         )
         assert sc1 == sc2
 
@@ -601,13 +645,19 @@ class TestComputeRequisitionScoreFast:
         """Internal sighting_count = int(sourced_ratio * 5)."""
         # With req_count=5, sourced_count=5 -> sourced_ratio=1.0 -> sighting_count=5
         sc_high, _, _ = compute_requisition_score_fast(
-            req_count=5, sourced_count=5,
-            rfq_sent_count=0, reply_count=0, offer_count=0,
+            req_count=5,
+            sourced_count=5,
+            rfq_sent_count=0,
+            reply_count=0,
+            offer_count=0,
         )
         # With req_count=5, sourced_count=0 -> sighting_count=0
         sc_low, _, _ = compute_requisition_score_fast(
-            req_count=5, sourced_count=0,
-            rfq_sent_count=0, reply_count=0, offer_count=0,
+            req_count=5,
+            sourced_count=0,
+            rfq_sent_count=0,
+            reply_count=0,
+            offer_count=0,
         )
         assert sc_high > sc_low
 
@@ -734,71 +784,83 @@ class TestComputeRequisitionScores:
 
         # Sightings
         for i in range(5):
-            db_session.add(Sighting(
-                requirement_id=item.id,
-                vendor_name=f"Vendor {i}",
-                mpn_matched="FULL-MPN",
-                qty_available=100,
-                source_type="api",
-                created_at=datetime.now(timezone.utc),
-            ))
+            db_session.add(
+                Sighting(
+                    requirement_id=item.id,
+                    vendor_name=f"Vendor {i}",
+                    mpn_matched="FULL-MPN",
+                    qty_available=100,
+                    source_type="api",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
 
         # Offers
         for i in range(3):
-            db_session.add(Offer(
-                requisition_id=req.id,
-                requirement_id=item.id,
-                vendor_name=f"Vendor {i}",
-                mpn="FULL-MPN",
-                qty_available=100,
-                unit_price=1.50,
-                entered_by_id=test_user.id,
-                status="active",
-                created_at=datetime.now(timezone.utc),
-            ))
+            db_session.add(
+                Offer(
+                    requisition_id=req.id,
+                    requirement_id=item.id,
+                    vendor_name=f"Vendor {i}",
+                    mpn="FULL-MPN",
+                    qty_available=100,
+                    unit_price=1.50,
+                    entered_by_id=test_user.id,
+                    status="active",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
 
         # RFQs (Contacts with status="sent")
         for i in range(4):
-            db_session.add(Contact(
-                requisition_id=req.id,
-                user_id=test_user.id,
-                contact_type="rfq",
-                vendor_name=f"Vendor {i}",
-                status="sent",
-                created_at=datetime.now(timezone.utc),
-            ))
+            db_session.add(
+                Contact(
+                    requisition_id=req.id,
+                    user_id=test_user.id,
+                    contact_type="rfq",
+                    vendor_name=f"Vendor {i}",
+                    status="sent",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
 
         # Vendor responses
         for i in range(2):
-            db_session.add(VendorResponse(
-                requisition_id=req.id,
-                vendor_name=f"Vendor {i}",
-                vendor_email=f"vendor{i}@test.com",
-                status="new",
-                created_at=datetime.now(timezone.utc),
-            ))
+            db_session.add(
+                VendorResponse(
+                    requisition_id=req.id,
+                    vendor_name=f"Vendor {i}",
+                    vendor_email=f"vendor{i}@test.com",
+                    status="new",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
 
         # Phone calls
         for i in range(3):
-            db_session.add(ActivityLog(
-                user_id=test_user.id,
-                activity_type="call",
-                channel="phone",
-                requisition_id=req.id,
-                subject=f"Call {i}",
-                created_at=datetime.now(timezone.utc),
-            ))
+            db_session.add(
+                ActivityLog(
+                    user_id=test_user.id,
+                    activity_type="call",
+                    channel="phone",
+                    requisition_id=req.id,
+                    subject=f"Call {i}",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
 
         # Emails
         for i in range(5):
-            db_session.add(ActivityLog(
-                user_id=test_user.id,
-                activity_type="email_sent",
-                channel="email",
-                requisition_id=req.id,
-                subject=f"Email {i}",
-                created_at=datetime.now(timezone.utc),
-            ))
+            db_session.add(
+                ActivityLog(
+                    user_id=test_user.id,
+                    activity_type="email_sent",
+                    channel="email",
+                    requisition_id=req.id,
+                    subject=f"Email {i}",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
 
         db_session.commit()
 
@@ -830,14 +892,16 @@ class TestComputeRequisitionScores:
         db_session.flush()
 
         for i in range(5):
-            db_session.add(Sighting(
-                requirement_id=item1.id,
-                vendor_name=f"Vendor {i}",
-                mpn_matched="MPN-A",
-                qty_available=100,
-                source_type="api",
-                created_at=datetime.now(timezone.utc),
-            ))
+            db_session.add(
+                Sighting(
+                    requirement_id=item1.id,
+                    vendor_name=f"Vendor {i}",
+                    mpn_matched="MPN-A",
+                    qty_available=100,
+                    source_type="api",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
 
         # Requirement 2: no sightings
         item2 = Requirement(
@@ -971,23 +1035,27 @@ class TestComputeRequisitionScores:
         db_session.flush()
 
         # One sent RFQ
-        db_session.add(Contact(
-            requisition_id=req.id,
-            user_id=test_user.id,
-            contact_type="rfq",
-            vendor_name="Vendor A",
-            status="sent",
-            created_at=datetime.now(timezone.utc),
-        ))
+        db_session.add(
+            Contact(
+                requisition_id=req.id,
+                user_id=test_user.id,
+                contact_type="rfq",
+                vendor_name="Vendor A",
+                status="sent",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
         # One draft RFQ (should NOT be counted)
-        db_session.add(Contact(
-            requisition_id=req.id,
-            user_id=test_user.id,
-            contact_type="rfq",
-            vendor_name="Vendor B",
-            status="draft",
-            created_at=datetime.now(timezone.utc),
-        ))
+        db_session.add(
+            Contact(
+                requisition_id=req.id,
+                user_id=test_user.id,
+                contact_type="rfq",
+                vendor_name="Vendor B",
+                status="draft",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
         db_session.commit()
 
         result = compute_requisition_scores(req.id, db_session)
@@ -1018,35 +1086,41 @@ class TestComputeRequisitionScores:
 
         # 2 phone calls
         for i in range(2):
-            db_session.add(ActivityLog(
-                user_id=test_user.id,
-                activity_type="call",
-                channel="phone",
-                requisition_id=req.id,
-                subject=f"Call {i}",
-                created_at=datetime.now(timezone.utc),
-            ))
+            db_session.add(
+                ActivityLog(
+                    user_id=test_user.id,
+                    activity_type="call",
+                    channel="phone",
+                    requisition_id=req.id,
+                    subject=f"Call {i}",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
 
         # 3 emails
         for i in range(3):
-            db_session.add(ActivityLog(
-                user_id=test_user.id,
-                activity_type="email_sent",
-                channel="email",
-                requisition_id=req.id,
-                subject=f"Email {i}",
-                created_at=datetime.now(timezone.utc),
-            ))
+            db_session.add(
+                ActivityLog(
+                    user_id=test_user.id,
+                    activity_type="email_sent",
+                    channel="email",
+                    requisition_id=req.id,
+                    subject=f"Email {i}",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
 
         # 1 system channel (should NOT count as phone or email)
-        db_session.add(ActivityLog(
-            user_id=test_user.id,
-            activity_type="system_event",
-            channel="system",
-            requisition_id=req.id,
-            subject="System event",
-            created_at=datetime.now(timezone.utc),
-        ))
+        db_session.add(
+            ActivityLog(
+                user_id=test_user.id,
+                activity_type="system_event",
+                channel="system",
+                requisition_id=req.id,
+                subject="System event",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
 
         db_session.commit()
 
@@ -1084,17 +1158,19 @@ class TestComputeRequisitionScores:
 
         # 3 offers for item1, 0 for item2
         for i in range(3):
-            db_session.add(Offer(
-                requisition_id=req.id,
-                requirement_id=item1.id,
-                vendor_name=f"Vendor {i}",
-                mpn="OFFER-A",
-                qty_available=100,
-                unit_price=1.00,
-                entered_by_id=test_user.id,
-                status="active",
-                created_at=datetime.now(timezone.utc),
-            ))
+            db_session.add(
+                Offer(
+                    requisition_id=req.id,
+                    requirement_id=item1.id,
+                    vendor_name=f"Vendor {i}",
+                    mpn="OFFER-A",
+                    qty_available=100,
+                    unit_price=1.00,
+                    entered_by_id=test_user.id,
+                    status="active",
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
         db_session.commit()
 
         result = compute_requisition_scores(req.id, db_session)

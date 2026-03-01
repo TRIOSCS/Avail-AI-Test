@@ -7,12 +7,10 @@ Covers uncovered lines:
 - _make_datetimes_aware event listener (lines 54-60)
 """
 
-import logging
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
 from app.database import UTCDateTime
-
 
 # ── UTCDateTime.process_result_value ─────────────────────────────────
 

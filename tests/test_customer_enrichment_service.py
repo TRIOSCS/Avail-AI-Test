@@ -4,12 +4,13 @@ Covers: enrich_customer_account, get_enrichment_gaps, helper functions,
 cooldown, force bypass, Apollo primary discovery, Lusha phone enrichment.
 """
 
-import pytest
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch, MagicMock
-from tests.conftest import engine  # noqa: F401
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.models.crm import Company, CustomerSite, SiteContact
+from tests.conftest import engine  # noqa: F401
 
 
 @pytest.fixture
@@ -38,6 +39,7 @@ def company_with_domain(db_session):
 
 def test_classify_contact_role():
     from app.services.customer_enrichment_service import _classify_contact_role
+
     assert _classify_contact_role("VP of Procurement") == "decision_maker"
     assert _classify_contact_role("Buyer") == "buyer"
     assert _classify_contact_role("Senior Engineer") == "technical"
@@ -48,6 +50,7 @@ def test_classify_contact_role():
 
 def test_is_direct_dial():
     from app.services.customer_enrichment_service import _is_direct_dial
+
     assert _is_direct_dial("direct_dial") is True
     assert _is_direct_dial("mobile") is True
     assert _is_direct_dial("work") is False
@@ -56,6 +59,7 @@ def test_is_direct_dial():
 
 def test_contacts_needed(db_session, company_with_domain, _mock_settings):
     from app.services.customer_enrichment_service import _contacts_needed
+
     # No contacts yet — need all 5
     needed = _contacts_needed(db_session, company_with_domain.id, 5)
     assert needed == 5
@@ -63,13 +67,16 @@ def test_contacts_needed(db_session, company_with_domain, _mock_settings):
 
 def test_contacts_needed_with_existing(db_session, company_with_domain, _mock_settings):
     from app.services.customer_enrichment_service import _contacts_needed
+
     site = db_session.query(CustomerSite).filter_by(company_id=company_with_domain.id).first()
     for i in range(3):
-        db_session.add(SiteContact(
-            customer_site_id=site.id,
-            full_name=f"Contact {i}",
-            email=f"c{i}@testcorp.com",
-        ))
+        db_session.add(
+            SiteContact(
+                customer_site_id=site.id,
+                full_name=f"Contact {i}",
+                email=f"c{i}@testcorp.com",
+            )
+        )
     db_session.flush()
     needed = _contacts_needed(db_session, company_with_domain.id, 5)
     assert needed == 2
@@ -77,6 +84,7 @@ def test_contacts_needed_with_existing(db_session, company_with_domain, _mock_se
 
 def test_dedup_contacts():
     from app.services.customer_enrichment_service import _dedup_contacts
+
     contacts = [
         {"email": "a@test.com", "full_name": "A", "source": "apollo"},
         {"email": "a@test.com", "full_name": "A duplicate", "source": "lusha"},
@@ -89,6 +97,7 @@ def test_dedup_contacts():
 
 def test_get_company_domain():
     from app.services.customer_enrichment_service import _get_company_domain
+
     co = MagicMock()
     co.domain = "acme.com"
     co.website = None
@@ -107,6 +116,7 @@ async def test_enrich_disabled(db_session, company_with_domain):
     with patch("app.services.customer_enrichment_service.settings") as mock_s:
         mock_s.customer_enrichment_enabled = False
         from app.services.customer_enrichment_service import enrich_customer_account
+
         result = await enrich_customer_account(company_with_domain.id, db_session)
         assert result["contacts_added"] == 0
         assert "disabled" in result.get("error", "")
@@ -117,6 +127,7 @@ async def test_enrich_cooldown(db_session, company_with_domain, _mock_settings):
     company_with_domain.customer_enrichment_at = datetime.now(timezone.utc) - timedelta(days=10)
     db_session.flush()
     from app.services.customer_enrichment_service import enrich_customer_account
+
     result = await enrich_customer_account(company_with_domain.id, db_session)
     assert "Cooldown" in result.get("error", "")
 
@@ -127,13 +138,24 @@ async def test_enrich_force_bypass_cooldown(db_session, company_with_domain, _mo
     company_with_domain.customer_enrichment_at = datetime.now(timezone.utc) - timedelta(days=10)
     db_session.flush()
 
-    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
-         patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
+    with (
+        patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo,
+        patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter,
+        patch(
+            "app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock
+        ) as mock_lusha_phones,
+    ):
         mock_apollo.return_value = [
-            {"full_name": "Test Person", "email": "test@testcorp.com", "title": "Buyer",
-             "phone": None, "phone_type": None, "source": "apollo", "confidence": "medium",
-             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
+            {
+                "full_name": "Test Person",
+                "email": "test@testcorp.com",
+                "title": "Buyer",
+                "phone": None,
+                "phone_type": None,
+                "source": "apollo",
+                "confidence": "medium",
+                "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None},
+            },
         ]
 
         async def _verify(db, contacts):
@@ -141,6 +163,7 @@ async def test_enrich_force_bypass_cooldown(db_session, company_with_domain, _mo
                 c["email_verified"] = True
                 c["email_verification_status"] = "valid"
             return contacts
+
         mock_hunter.side_effect = _verify
 
         async def _lusha_phones(db, contacts, domain):
@@ -152,9 +175,11 @@ async def test_enrich_force_bypass_cooldown(db_session, company_with_domain, _mo
                     fs["phone"] = "lusha"
                     c["enrichment_field_sources"] = fs
             return contacts
+
         mock_lusha_phones.side_effect = _lusha_phones
 
         from app.services.customer_enrichment_service import enrich_customer_account
+
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
         assert result.get("ok") is True
         assert result["contacts_added"] >= 1
@@ -166,6 +191,7 @@ async def test_enrich_no_domain(db_session, _mock_settings):
     db_session.add(co)
     db_session.commit()
     from app.services.customer_enrichment_service import enrich_customer_account
+
     result = await enrich_customer_account(co.id, db_session)
     assert "No domain" in result.get("error", "")
 
@@ -173,6 +199,7 @@ async def test_enrich_no_domain(db_session, _mock_settings):
 @pytest.mark.asyncio
 async def test_enrich_company_not_found(db_session, _mock_settings):
     from app.services.customer_enrichment_service import enrich_customer_account
+
     result = await enrich_customer_account(99999, db_session)
     assert "not found" in result.get("error", "")
 
@@ -180,17 +207,34 @@ async def test_enrich_company_not_found(db_session, _mock_settings):
 @pytest.mark.asyncio
 async def test_full_waterfall(db_session, company_with_domain, _mock_settings):
     """Test the full waterfall: Apollo discovers → Hunter verifies → Lusha adds phones."""
-    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
-         patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
-
+    with (
+        patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo,
+        patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter,
+        patch(
+            "app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock
+        ) as mock_lusha_phones,
+    ):
         mock_apollo.return_value = [
-            {"full_name": "Alice Buyer", "email": "alice@testcorp.com", "title": "Procurement Manager",
-             "phone": None, "phone_type": None, "source": "apollo", "confidence": "medium",
-             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
-            {"full_name": "Bob Tech", "email": "bob@testcorp.com", "title": "Sr Engineer",
-             "phone": None, "phone_type": None, "source": "apollo", "confidence": "medium",
-             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
+            {
+                "full_name": "Alice Buyer",
+                "email": "alice@testcorp.com",
+                "title": "Procurement Manager",
+                "phone": None,
+                "phone_type": None,
+                "source": "apollo",
+                "confidence": "medium",
+                "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None},
+            },
+            {
+                "full_name": "Bob Tech",
+                "email": "bob@testcorp.com",
+                "title": "Sr Engineer",
+                "phone": None,
+                "phone_type": None,
+                "source": "apollo",
+                "confidence": "medium",
+                "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None},
+            },
         ]
 
         async def _verify(db, contacts):
@@ -198,6 +242,7 @@ async def test_full_waterfall(db_session, company_with_domain, _mock_settings):
                 c["email_verified"] = True
                 c["email_verification_status"] = "valid"
             return contacts
+
         mock_hunter.side_effect = _verify
 
         async def _lusha_phones(db, contacts, domain):
@@ -209,9 +254,11 @@ async def test_full_waterfall(db_session, company_with_domain, _mock_settings):
                     fs["phone"] = "lusha"
                     c["enrichment_field_sources"] = fs
             return contacts
+
         mock_lusha_phones.side_effect = _lusha_phones
 
         from app.services.customer_enrichment_service import enrich_customer_account
+
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
 
         assert result["ok"] is True
@@ -234,8 +281,8 @@ async def test_full_waterfall(db_session, company_with_domain, _mock_settings):
 
 
 def test_get_enrichment_gaps(db_session, _mock_settings):
-    from app.services.customer_enrichment_service import get_enrichment_gaps
     from app.models.auth import User
+    from app.services.customer_enrichment_service import get_enrichment_gaps
 
     user = User(email="owner@test.com", name="Owner", azure_id="az-owner")
     db_session.add(user)
@@ -267,14 +314,22 @@ def test_get_enrichment_gaps(db_session, _mock_settings):
 @pytest.mark.asyncio
 async def test_apollo_primary_discovery(db_session, company_with_domain, _mock_settings):
     """Apollo is the primary source; all contacts come from Apollo."""
-    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
-         patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
-
+    with (
+        patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo,
+        patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter,
+        patch(
+            "app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock
+        ) as mock_lusha_phones,
+    ):
         mock_apollo.return_value = [
-            {"full_name": f"Apollo Person {i}", "email": f"apollo{i}@testcorp.com",
-             "title": "Buyer", "source": "apollo", "confidence": "medium",
-             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}}
+            {
+                "full_name": f"Apollo Person {i}",
+                "email": f"apollo{i}@testcorp.com",
+                "title": "Buyer",
+                "source": "apollo",
+                "confidence": "medium",
+                "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None},
+            }
             for i in range(5)
         ]
 
@@ -283,13 +338,16 @@ async def test_apollo_primary_discovery(db_session, company_with_domain, _mock_s
                 c["email_verified"] = True
                 c["email_verification_status"] = "valid"
             return contacts
+
         mock_hunter.side_effect = _verify
 
         async def _lusha_phones(db, contacts, domain):
             return contacts  # No phone enrichment
+
         mock_lusha_phones.side_effect = _lusha_phones
 
         from app.services.customer_enrichment_service import enrich_customer_account
+
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
 
         mock_apollo.assert_awaited_once()
@@ -301,20 +359,35 @@ async def test_apollo_primary_discovery(db_session, company_with_domain, _mock_s
 async def test_lusha_phone_enrichment_skips_existing_direct_dials(db_session, _mock_settings):
     """Lusha phone enrichment skips contacts that already have direct dials."""
     contacts = [
-        {"full_name": "Has Phone", "email": "hasphone@testcorp.com",
-         "title": "Buyer", "phone": "+1-555-1111", "phone_type": "direct_dial",
-         "source": "apollo", "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": "apollo"}},
-        {"full_name": "No Phone", "email": "nophone@testcorp.com",
-         "title": "Engineer", "phone": None, "phone_type": None,
-         "source": "apollo", "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
+        {
+            "full_name": "Has Phone",
+            "email": "hasphone@testcorp.com",
+            "title": "Buyer",
+            "phone": "+1-555-1111",
+            "phone_type": "direct_dial",
+            "source": "apollo",
+            "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": "apollo"},
+        },
+        {
+            "full_name": "No Phone",
+            "email": "nophone@testcorp.com",
+            "title": "Engineer",
+            "phone": None,
+            "phone_type": None,
+            "source": "apollo",
+            "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None},
+        },
     ]
 
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
-         patch("app.services.customer_enrichment_service.record_credit_usage"), \
-         patch("app.connectors.lusha_client.find_person", new_callable=AsyncMock) as mock_find:
+    with (
+        patch("app.services.customer_enrichment_service.can_use_credits", return_value=True),
+        patch("app.services.customer_enrichment_service.record_credit_usage"),
+        patch("app.connectors.lusha_client.find_person", new_callable=AsyncMock) as mock_find,
+    ):
         mock_find.return_value = {"phone": "+1-555-2222", "phone_type": "mobile"}
 
         from app.services.customer_enrichment_service import _step_lusha_phones
+
         result = await _step_lusha_phones(db_session, contacts, "testcorp.com")
 
         # find_person should only be called for "No Phone" (the one without direct dial)
@@ -330,27 +403,42 @@ async def test_lusha_phone_enrichment_skips_existing_direct_dials(db_session, _m
 @pytest.mark.asyncio
 async def test_apollo_exception_handled_gracefully(db_session, company_with_domain, _mock_settings):
     """If Apollo raises an exception, Lusha discovery fills the gap."""
-    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
-         patch("app.services.customer_enrichment_service._step_lusha_discovery", new_callable=AsyncMock) as mock_lusha_disc, \
-         patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
+    with (
+        patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo,
+        patch(
+            "app.services.customer_enrichment_service._step_lusha_discovery", new_callable=AsyncMock
+        ) as mock_lusha_disc,
+        patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter,
+        patch(
+            "app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock
+        ) as mock_lusha_phones,
+    ):
         mock_apollo.side_effect = Exception("Apollo API timeout")
         mock_lusha_disc.return_value = [
-            {"full_name": "Lusha Person", "email": "lusha@testcorp.com", "title": "Buyer",
-             "source": "lusha", "confidence": 85},
+            {
+                "full_name": "Lusha Person",
+                "email": "lusha@testcorp.com",
+                "title": "Buyer",
+                "source": "lusha",
+                "confidence": 85,
+            },
         ]
+
         async def _verify(db, contacts):
             for c in contacts:
                 c["email_verified"] = True
                 c["email_verification_status"] = "valid"
             return contacts
+
         mock_hunter.side_effect = _verify
 
         async def _lusha_phones(db, contacts, domain):
             return contacts
+
         mock_lusha_phones.side_effect = _lusha_phones
 
         from app.services.customer_enrichment_service import enrich_customer_account
+
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
 
         assert result["ok"] is True
@@ -362,15 +450,24 @@ async def test_apollo_exception_handled_gracefully(db_session, company_with_doma
 @pytest.mark.asyncio
 async def test_field_source_attribution(db_session, company_with_domain, _mock_settings):
     """Verify enrichment_field_sources tracks per-field attribution correctly."""
-    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
-         patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
-
+    with (
+        patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo,
+        patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter,
+        patch(
+            "app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock
+        ) as mock_lusha_phones,
+    ):
         mock_apollo.return_value = [
-            {"full_name": "Jane Doe", "email": "jane@testcorp.com",
-             "title": "Buyer", "phone": None, "phone_type": None,
-             "source": "apollo", "confidence": "medium",
-             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
+            {
+                "full_name": "Jane Doe",
+                "email": "jane@testcorp.com",
+                "title": "Buyer",
+                "phone": None,
+                "phone_type": None,
+                "source": "apollo",
+                "confidence": "medium",
+                "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None},
+            },
         ]
 
         async def _verify(db, contacts):
@@ -378,6 +475,7 @@ async def test_field_source_attribution(db_session, company_with_domain, _mock_s
                 c["email_verified"] = True
                 c["email_verification_status"] = "valid"
             return contacts
+
         mock_hunter.side_effect = _verify
 
         # Lusha adds phone
@@ -390,9 +488,11 @@ async def test_field_source_attribution(db_session, company_with_domain, _mock_s
                     fs["phone"] = "lusha"
                     c["enrichment_field_sources"] = fs
             return contacts
+
         mock_lusha_phones.side_effect = _lusha_phones
 
         from app.services.customer_enrichment_service import enrich_customer_account
+
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
 
         assert result["ok"] is True
@@ -419,14 +519,17 @@ async def test_step_lusha_phones_credits_exhausted(db_session, _mock_settings):
         {"full_name": "Person 2", "email": "p2@test.com", "phone": None, "phone_type": None},
     ]
     call_count = 0
-    with patch("app.services.customer_enrichment_service.can_use_credits") as mock_can, \
-         patch("app.services.customer_enrichment_service.record_credit_usage"), \
-         patch("app.connectors.lusha_client.find_person", new_callable=AsyncMock) as mock_find:
+    with (
+        patch("app.services.customer_enrichment_service.can_use_credits") as mock_can,
+        patch("app.services.customer_enrichment_service.record_credit_usage"),
+        patch("app.connectors.lusha_client.find_person", new_callable=AsyncMock) as mock_find,
+    ):
         # Allow first call, deny second
         mock_can.side_effect = [True, False]
         mock_find.return_value = {"phone": "+1-555-0001", "phone_type": "direct_dial"}
 
         from app.services.customer_enrichment_service import _step_lusha_phones
+
         result = await _step_lusha_phones(db_session, contacts, "test.com")
 
         assert len(result) == 2
@@ -439,27 +542,42 @@ async def test_step_lusha_phones_credits_exhausted(db_session, _mock_settings):
 @pytest.mark.asyncio
 async def test_apollo_zero_results_falls_through(db_session, company_with_domain, _mock_settings):
     """When Apollo returns 0 results, Lusha discovery fills the gap."""
-    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
-         patch("app.services.customer_enrichment_service._step_lusha_discovery", new_callable=AsyncMock) as mock_lusha_disc, \
-         patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
+    with (
+        patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo,
+        patch(
+            "app.services.customer_enrichment_service._step_lusha_discovery", new_callable=AsyncMock
+        ) as mock_lusha_disc,
+        patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter,
+        patch(
+            "app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock
+        ) as mock_lusha_phones,
+    ):
         mock_apollo.return_value = []
         mock_lusha_disc.return_value = [
-            {"full_name": "Lusha Buyer", "email": "buyer@testcorp.com", "title": "Purchasing Manager",
-             "source": "lusha", "confidence": 85},
+            {
+                "full_name": "Lusha Buyer",
+                "email": "buyer@testcorp.com",
+                "title": "Purchasing Manager",
+                "source": "lusha",
+                "confidence": 85,
+            },
         ]
+
         async def _verify(db, contacts):
             for c in contacts:
                 c["email_verified"] = True
                 c["email_verification_status"] = "valid"
             return contacts
+
         mock_hunter.side_effect = _verify
 
         async def _lusha_phones(db, contacts, domain):
             return contacts
+
         mock_lusha_phones.side_effect = _lusha_phones
 
         from app.services.customer_enrichment_service import enrich_customer_account
+
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
 
         assert result["ok"] is True
@@ -472,22 +590,21 @@ async def test_apollo_zero_results_falls_through(db_session, company_with_domain
 async def test_lusha_phone_only_contacts_missing_phones(db_session, _mock_settings):
     """Verify Lusha find_person is NOT called for contacts with direct dials."""
     contacts = [
-        {"full_name": "Has DD", "email": "dd@test.com",
-         "phone": "+1-555-0001", "phone_type": "direct_dial"},
-        {"full_name": "Has Mobile", "email": "mob@test.com",
-         "phone": "+1-555-0002", "phone_type": "mobile"},
-        {"full_name": "No Phone", "email": "nophone@test.com",
-         "phone": None, "phone_type": None},
-        {"full_name": "Work Phone", "email": "work@test.com",
-         "phone": "+1-555-0003", "phone_type": "work"},
+        {"full_name": "Has DD", "email": "dd@test.com", "phone": "+1-555-0001", "phone_type": "direct_dial"},
+        {"full_name": "Has Mobile", "email": "mob@test.com", "phone": "+1-555-0002", "phone_type": "mobile"},
+        {"full_name": "No Phone", "email": "nophone@test.com", "phone": None, "phone_type": None},
+        {"full_name": "Work Phone", "email": "work@test.com", "phone": "+1-555-0003", "phone_type": "work"},
     ]
 
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
-         patch("app.services.customer_enrichment_service.record_credit_usage"), \
-         patch("app.connectors.lusha_client.find_person", new_callable=AsyncMock) as mock_find:
+    with (
+        patch("app.services.customer_enrichment_service.can_use_credits", return_value=True),
+        patch("app.services.customer_enrichment_service.record_credit_usage"),
+        patch("app.connectors.lusha_client.find_person", new_callable=AsyncMock) as mock_find,
+    ):
         mock_find.return_value = {"phone": "+1-555-9999", "phone_type": "direct_dial"}
 
         from app.services.customer_enrichment_service import _step_lusha_phones
+
         result = await _step_lusha_phones(db_session, contacts, "test.com")
 
         # Only "No Phone" and "Work Phone" should trigger find_person (2 calls)
@@ -507,7 +624,7 @@ async def test_lusha_phone_only_contacts_missing_phones(db_session, _mock_settin
 
 def test_save_contact_no_email(db_session, company_with_domain):
     """_save_contact returns None when email is empty."""
-    from app.services.customer_enrichment_service import _save_contact, _ensure_site
+    from app.services.customer_enrichment_service import _ensure_site, _save_contact
 
     company = db_session.get(Company, company_with_domain.id)
     site = _ensure_site(db_session, company)
@@ -521,7 +638,7 @@ def test_save_contact_no_email(db_session, company_with_domain):
 
 def test_save_contact_updates_existing(db_session, company_with_domain):
     """_save_contact updates phone, linkedin_url, title on existing contact."""
-    from app.services.customer_enrichment_service import _save_contact, _ensure_site
+    from app.services.customer_enrichment_service import _ensure_site, _save_contact
 
     company = db_session.get(Company, company_with_domain.id)
     site = _ensure_site(db_session, company)
@@ -565,7 +682,7 @@ def test_save_contact_updates_existing(db_session, company_with_domain):
 
 def test_save_contact_new_contact(db_session, company_with_domain):
     """_save_contact creates new contact with all fields + enrichment_field_sources."""
-    from app.services.customer_enrichment_service import _save_contact, _ensure_site
+    from app.services.customer_enrichment_service import _ensure_site, _save_contact
 
     company = db_session.get(Company, company_with_domain.id)
     site = _ensure_site(db_session, company)
@@ -603,15 +720,17 @@ def test_save_contact_new_contact(db_session, company_with_domain):
 async def test_step_lusha_phones_exception_handled(db_session, _mock_settings):
     """find_person raises → contact kept without phone, exception swallowed."""
     contacts = [
-        {"full_name": "Crash Test", "email": "crash@test.com",
-         "phone": None, "phone_type": None},
+        {"full_name": "Crash Test", "email": "crash@test.com", "phone": None, "phone_type": None},
     ]
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
-         patch("app.services.customer_enrichment_service.record_credit_usage"), \
-         patch("app.connectors.lusha_client.find_person", new_callable=AsyncMock) as mock_find:
+    with (
+        patch("app.services.customer_enrichment_service.can_use_credits", return_value=True),
+        patch("app.services.customer_enrichment_service.record_credit_usage"),
+        patch("app.connectors.lusha_client.find_person", new_callable=AsyncMock) as mock_find,
+    ):
         mock_find.side_effect = Exception("Lusha API error")
 
         from app.services.customer_enrichment_service import _step_lusha_phones
+
         result = await _step_lusha_phones(db_session, contacts, "test.com")
 
         assert len(result) == 1
@@ -625,6 +744,7 @@ async def test_step_lusha_phones_exception_handled(db_session, _mock_settings):
 async def test_step_lusha_discovery_skipped_not_needed(db_session, _mock_settings):
     """needed=0 → returns [] immediately."""
     from app.services.customer_enrichment_service import _step_lusha_discovery
+
     result = await _step_lusha_discovery(db_session, "test.com", "Test Corp", needed=0)
     assert result == []
 
@@ -634,6 +754,7 @@ async def test_step_lusha_discovery_credits_exhausted(db_session, _mock_settings
     """can_use_credits returns False → returns []."""
     with patch("app.services.customer_enrichment_service.can_use_credits", return_value=False):
         from app.services.customer_enrichment_service import _step_lusha_discovery
+
         result = await _step_lusha_discovery(db_session, "test.com", "Test Corp", needed=5)
         assert result == []
 
@@ -641,14 +762,17 @@ async def test_step_lusha_discovery_credits_exhausted(db_session, _mock_settings
 @pytest.mark.asyncio
 async def test_step_lusha_discovery_success(db_session, _mock_settings):
     """Successful search returns contacts and records credit usage."""
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
-         patch("app.services.customer_enrichment_service.record_credit_usage") as mock_record, \
-         patch("app.connectors.lusha_client.search_contacts", new_callable=AsyncMock) as mock_search:
+    with (
+        patch("app.services.customer_enrichment_service.can_use_credits", return_value=True),
+        patch("app.services.customer_enrichment_service.record_credit_usage") as mock_record,
+        patch("app.connectors.lusha_client.search_contacts", new_callable=AsyncMock) as mock_search,
+    ):
         mock_search.return_value = [
             {"full_name": "Lusha Person", "email": "lusha@test.com", "title": "Buyer"},
         ]
 
         from app.services.customer_enrichment_service import _step_lusha_discovery
+
         result = await _step_lusha_discovery(db_session, "test.com", "Test Corp", needed=3)
 
         assert len(result) == 1
@@ -659,11 +783,14 @@ async def test_step_lusha_discovery_success(db_session, _mock_settings):
 @pytest.mark.asyncio
 async def test_step_lusha_discovery_exception(db_session, _mock_settings):
     """search_contacts raises → returns []."""
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
-         patch("app.connectors.lusha_client.search_contacts", new_callable=AsyncMock) as mock_search:
+    with (
+        patch("app.services.customer_enrichment_service.can_use_credits", return_value=True),
+        patch("app.connectors.lusha_client.search_contacts", new_callable=AsyncMock) as mock_search,
+    ):
         mock_search.side_effect = Exception("Lusha search blew up")
 
         from app.services.customer_enrichment_service import _step_lusha_discovery
+
         result = await _step_lusha_discovery(db_session, "test.com", "Test Corp", needed=3)
         assert result == []
 
@@ -679,6 +806,7 @@ async def test_step_hunter_verify_no_email(db_session, _mock_settings):
     ]
     with patch("app.connectors.hunter_client.verify_email", new_callable=AsyncMock) as mock_verify:
         from app.services.customer_enrichment_service import _step_hunter_verify
+
         result = await _step_hunter_verify(db_session, contacts)
 
         assert len(result) == 0
@@ -691,9 +819,12 @@ async def test_step_hunter_verify_credits_exhausted(db_session, _mock_settings):
     contacts = [
         {"full_name": "Person 1", "email": "p1@test.com"},
     ]
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=False), \
-         patch("app.connectors.hunter_client.verify_email", new_callable=AsyncMock) as mock_verify:
+    with (
+        patch("app.services.customer_enrichment_service.can_use_credits", return_value=False),
+        patch("app.connectors.hunter_client.verify_email", new_callable=AsyncMock) as mock_verify,
+    ):
         from app.services.customer_enrichment_service import _step_hunter_verify
+
         result = await _step_hunter_verify(db_session, contacts)
 
         assert len(result) == 1
@@ -708,12 +839,15 @@ async def test_step_hunter_verify_valid(db_session, _mock_settings):
     contacts = [
         {"full_name": "Valid Person", "email": "valid@test.com"},
     ]
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
-         patch("app.services.customer_enrichment_service.record_credit_usage"), \
-         patch("app.connectors.hunter_client.verify_email", new_callable=AsyncMock) as mock_verify:
+    with (
+        patch("app.services.customer_enrichment_service.can_use_credits", return_value=True),
+        patch("app.services.customer_enrichment_service.record_credit_usage"),
+        patch("app.connectors.hunter_client.verify_email", new_callable=AsyncMock) as mock_verify,
+    ):
         mock_verify.return_value = {"status": "valid", "score": 95}
 
         from app.services.customer_enrichment_service import _step_hunter_verify
+
         result = await _step_hunter_verify(db_session, contacts)
 
         assert len(result) == 1
@@ -727,12 +861,15 @@ async def test_step_hunter_verify_accept_all(db_session, _mock_settings):
     contacts = [
         {"full_name": "Accept All", "email": "catch@test.com"},
     ]
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
-         patch("app.services.customer_enrichment_service.record_credit_usage"), \
-         patch("app.connectors.hunter_client.verify_email", new_callable=AsyncMock) as mock_verify:
+    with (
+        patch("app.services.customer_enrichment_service.can_use_credits", return_value=True),
+        patch("app.services.customer_enrichment_service.record_credit_usage"),
+        patch("app.connectors.hunter_client.verify_email", new_callable=AsyncMock) as mock_verify,
+    ):
         mock_verify.return_value = {"status": "accept_all", "score": 50}
 
         from app.services.customer_enrichment_service import _step_hunter_verify
+
         result = await _step_hunter_verify(db_session, contacts)
 
         assert len(result) == 1
@@ -746,12 +883,15 @@ async def test_step_hunter_verify_rejected(db_session, _mock_settings):
     contacts = [
         {"full_name": "Bad Email", "email": "bad@test.com"},
     ]
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
-         patch("app.services.customer_enrichment_service.record_credit_usage"), \
-         patch("app.connectors.hunter_client.verify_email", new_callable=AsyncMock) as mock_verify:
+    with (
+        patch("app.services.customer_enrichment_service.can_use_credits", return_value=True),
+        patch("app.services.customer_enrichment_service.record_credit_usage"),
+        patch("app.connectors.hunter_client.verify_email", new_callable=AsyncMock) as mock_verify,
+    ):
         mock_verify.return_value = {"status": "invalid", "score": 10}
 
         from app.services.customer_enrichment_service import _step_hunter_verify
+
         result = await _step_hunter_verify(db_session, contacts)
 
         assert len(result) == 0  # Rejected — not in verified list
@@ -763,12 +903,15 @@ async def test_step_hunter_verify_null_result(db_session, _mock_settings):
     contacts = [
         {"full_name": "Unknown Result", "email": "unknown@test.com"},
     ]
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
-         patch("app.services.customer_enrichment_service.record_credit_usage"), \
-         patch("app.connectors.hunter_client.verify_email", new_callable=AsyncMock) as mock_verify:
+    with (
+        patch("app.services.customer_enrichment_service.can_use_credits", return_value=True),
+        patch("app.services.customer_enrichment_service.record_credit_usage"),
+        patch("app.connectors.hunter_client.verify_email", new_callable=AsyncMock) as mock_verify,
+    ):
         mock_verify.return_value = None
 
         from app.services.customer_enrichment_service import _step_hunter_verify
+
         result = await _step_hunter_verify(db_session, contacts)
 
         assert len(result) == 1
@@ -784,6 +927,7 @@ async def test_step_apollo_credits_exhausted(db_session, _mock_settings):
     """can_use_credits returns False → returns []."""
     with patch("app.services.customer_enrichment_service.can_use_credits", return_value=False):
         from app.services.customer_enrichment_service import _step_apollo
+
         result = await _step_apollo(db_session, "test.com", "Test Corp", needed=5)
         assert result == []
 
@@ -791,9 +935,11 @@ async def test_step_apollo_credits_exhausted(db_session, _mock_settings):
 @pytest.mark.asyncio
 async def test_step_apollo_success(db_session, _mock_settings):
     """Successful search → maps results with enrichment_field_sources."""
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
-         patch("app.services.customer_enrichment_service.record_credit_usage") as mock_record, \
-         patch("app.connectors.apollo_client.search_contacts", new_callable=AsyncMock) as mock_search:
+    with (
+        patch("app.services.customer_enrichment_service.can_use_credits", return_value=True),
+        patch("app.services.customer_enrichment_service.record_credit_usage") as mock_record,
+        patch("app.connectors.apollo_client.search_contacts", new_callable=AsyncMock) as mock_search,
+    ):
         mock_search.return_value = [
             {
                 "full_name": "Apollo Person",
@@ -815,6 +961,7 @@ async def test_step_apollo_success(db_session, _mock_settings):
         ]
 
         from app.services.customer_enrichment_service import _step_apollo
+
         result = await _step_apollo(db_session, "test.com", "Test Corp", needed=5)
 
         assert len(result) == 2
@@ -833,11 +980,14 @@ async def test_step_apollo_success(db_session, _mock_settings):
 @pytest.mark.asyncio
 async def test_step_apollo_exception(db_session, _mock_settings):
     """apollo_search raises → returns []."""
-    with patch("app.services.customer_enrichment_service.can_use_credits", return_value=True), \
-         patch("app.connectors.apollo_client.search_contacts", new_callable=AsyncMock) as mock_search:
+    with (
+        patch("app.services.customer_enrichment_service.can_use_credits", return_value=True),
+        patch("app.connectors.apollo_client.search_contacts", new_callable=AsyncMock) as mock_search,
+    ):
         mock_search.side_effect = Exception("Apollo timeout")
 
         from app.services.customer_enrichment_service import _step_apollo
+
         result = await _step_apollo(db_session, "test.com", "Test Corp", needed=5)
         assert result == []
 
@@ -851,15 +1001,18 @@ async def test_enrich_already_complete(db_session, company_with_domain, _mock_se
     # Fill up contacts so needed = 0
     site = db_session.query(CustomerSite).filter_by(company_id=company_with_domain.id).first()
     for i in range(5):
-        db_session.add(SiteContact(
-            customer_site_id=site.id,
-            full_name=f"Existing {i}",
-            email=f"existing{i}@testcorp.com",
-            is_active=True,
-        ))
+        db_session.add(
+            SiteContact(
+                customer_site_id=site.id,
+                full_name=f"Existing {i}",
+                email=f"existing{i}@testcorp.com",
+                is_active=True,
+            )
+        )
     db_session.flush()
 
     from app.services.customer_enrichment_service import enrich_customer_account
+
     result = await enrich_customer_account(company_with_domain.id, db_session)
 
     assert result["ok"] is True
@@ -873,10 +1026,16 @@ async def test_enrich_already_complete(db_session, company_with_domain, _mock_se
 @pytest.mark.asyncio
 async def test_enrich_lusha_discovery_exception(db_session, company_with_domain, _mock_settings):
     """Lusha discovery raises at outer try/except → gracefully handled, continues."""
-    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
-         patch("app.services.customer_enrichment_service._step_lusha_discovery", new_callable=AsyncMock) as mock_lusha_disc, \
-         patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
+    with (
+        patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo,
+        patch(
+            "app.services.customer_enrichment_service._step_lusha_discovery", new_callable=AsyncMock
+        ) as mock_lusha_disc,
+        patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter,
+        patch(
+            "app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock
+        ) as mock_lusha_phones,
+    ):
         # Apollo returns nothing → falls through to Lusha
         mock_apollo.return_value = []
         # Lusha discovery raises (outer exception path, lines 383-385)
@@ -886,6 +1045,7 @@ async def test_enrich_lusha_discovery_exception(db_session, company_with_domain,
         mock_lusha_phones.return_value = []
 
         from app.services.customer_enrichment_service import enrich_customer_account
+
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
 
         # Should not crash — gracefully handled
@@ -896,26 +1056,47 @@ async def test_enrich_lusha_discovery_exception(db_session, company_with_domain,
 @pytest.mark.asyncio
 async def test_enrich_invalid_contacts_filtered(db_session, company_with_domain, _mock_settings):
     """validate_contact rejects contacts with bad data, only valid ones are saved."""
-    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
-         patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones:
-
+    with (
+        patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo,
+        patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter,
+        patch(
+            "app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock
+        ) as mock_lusha_phones,
+    ):
         mock_apollo.return_value = [
             # Valid contact
-            {"full_name": "Good Person", "email": "good@testcorp.com",
-             "title": "Buyer", "phone": None, "phone_type": None,
-             "source": "apollo", "confidence": "medium",
-             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
+            {
+                "full_name": "Good Person",
+                "email": "good@testcorp.com",
+                "title": "Buyer",
+                "phone": None,
+                "phone_type": None,
+                "source": "apollo",
+                "confidence": "medium",
+                "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None},
+            },
             # Invalid contact — no name (will fail validate_contact)
-            {"full_name": "", "email": "badname@testcorp.com",
-             "title": "Buyer", "phone": None, "phone_type": None,
-             "source": "apollo", "confidence": "medium",
-             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
+            {
+                "full_name": "",
+                "email": "badname@testcorp.com",
+                "title": "Buyer",
+                "phone": None,
+                "phone_type": None,
+                "source": "apollo",
+                "confidence": "medium",
+                "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None},
+            },
             # Invalid contact — bad email format
-            {"full_name": "Bad Email", "email": "not-an-email",
-             "title": "Buyer", "phone": None, "phone_type": None,
-             "source": "apollo", "confidence": "medium",
-             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
+            {
+                "full_name": "Bad Email",
+                "email": "not-an-email",
+                "title": "Buyer",
+                "phone": None,
+                "phone_type": None,
+                "source": "apollo",
+                "confidence": "medium",
+                "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None},
+            },
         ]
 
         async def _verify(db, contacts):
@@ -923,10 +1104,12 @@ async def test_enrich_invalid_contacts_filtered(db_session, company_with_domain,
                 c["email_verified"] = True
                 c["email_verification_status"] = "valid"
             return contacts
+
         mock_hunter.side_effect = _verify
         mock_lusha_phones.side_effect = lambda db, contacts, domain: contacts
 
         from app.services.customer_enrichment_service import enrich_customer_account
+
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
 
         assert result["ok"] is True
@@ -943,27 +1126,38 @@ async def test_enrich_final_status_complete(db_session, company_with_domain, _mo
     # second call (the final check) returns 0 to exercise the "complete" branch.
     site = db_session.query(CustomerSite).filter_by(company_id=company_with_domain.id).first()
     for i in range(4):
-        db_session.add(SiteContact(
-            customer_site_id=site.id,
-            full_name=f"Pre-existing {i}",
-            email=f"pre{i}@testcorp.com",
-            is_active=True,
-        ))
+        db_session.add(
+            SiteContact(
+                customer_site_id=site.id,
+                full_name=f"Pre-existing {i}",
+                email=f"pre{i}@testcorp.com",
+                is_active=True,
+            )
+        )
     db_session.flush()
 
     # First call returns 1 (need 1 more), second call returns 0 (target met)
     needed_calls = iter([1, 0])
 
-    with patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo, \
-         patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter, \
-         patch("app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock) as mock_lusha_phones, \
-         patch("app.services.customer_enrichment_service._contacts_needed", side_effect=needed_calls):
-
+    with (
+        patch("app.services.customer_enrichment_service._step_apollo", new_callable=AsyncMock) as mock_apollo,
+        patch("app.services.customer_enrichment_service._step_hunter_verify", new_callable=AsyncMock) as mock_hunter,
+        patch(
+            "app.services.customer_enrichment_service._step_lusha_phones", new_callable=AsyncMock
+        ) as mock_lusha_phones,
+        patch("app.services.customer_enrichment_service._contacts_needed", side_effect=needed_calls),
+    ):
         mock_apollo.return_value = [
-            {"full_name": "Fifth Contact", "email": "fifth@testcorp.com",
-             "title": "Buyer", "phone": None, "phone_type": None,
-             "source": "apollo", "confidence": "medium",
-             "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None}},
+            {
+                "full_name": "Fifth Contact",
+                "email": "fifth@testcorp.com",
+                "title": "Buyer",
+                "phone": None,
+                "phone_type": None,
+                "source": "apollo",
+                "confidence": "medium",
+                "enrichment_field_sources": {"email": "apollo", "name": "apollo", "phone": None},
+            },
         ]
 
         async def _verify(db, contacts):
@@ -971,10 +1165,12 @@ async def test_enrich_final_status_complete(db_session, company_with_domain, _mo
                 c["email_verified"] = True
                 c["email_verification_status"] = "valid"
             return contacts
+
         mock_hunter.side_effect = _verify
         mock_lusha_phones.side_effect = lambda db, contacts, domain: contacts
 
         from app.services.customer_enrichment_service import enrich_customer_account
+
         result = await enrich_customer_account(company_with_domain.id, db_session, force=True)
 
         assert result["ok"] is True
@@ -1016,5 +1212,3 @@ def test_ensure_site_creates_when_missing(db_session, _mock_settings):
     assert site.company_id == co.id
     # Should be persisted (flushed)
     assert db_session.query(CustomerSite).filter_by(company_id=co.id).count() == 1
-
-

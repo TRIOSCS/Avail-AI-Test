@@ -12,11 +12,17 @@ Core functions:
   - generate_contact_summary: Relationship summary
 """
 
+from __future__ import annotations
+
 from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING
 
 from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from ..models import ActivityLog, VendorContact
 
 # ── Name splitting ──────────────────────────────────────────────────
 
@@ -89,11 +95,8 @@ def process_inbound_email_contact(
     if not card:
         # Try domain_aliases
         from sqlalchemy import String
-        card = (
-            db.query(VendorCard)
-            .filter(VendorCard.domain_aliases.cast(String).contains(domain))
-            .first()
-        )
+
+        card = db.query(VendorCard).filter(VendorCard.domain_aliases.cast(String).contains(domain)).first()
 
     if not card:
         return None
@@ -309,14 +312,20 @@ def compute_contact_relationship_score(
 
     # Recency: 0-7d = 100, decays linearly to 0 at 365d
     if last_interaction_at:
-        lia = last_interaction_at.replace(tzinfo=last_interaction_at.tzinfo or timezone.utc) if last_interaction_at else last_interaction_at
+        lia = (
+            last_interaction_at.replace(tzinfo=last_interaction_at.tzinfo or timezone.utc)
+            if last_interaction_at
+            else last_interaction_at
+        )
         days_since = max((now - lia).total_seconds() / 86400, 0)
         if days_since <= RECENCY_IDEAL_DAYS:
             recency = 100.0
         elif days_since >= RECENCY_MAX_DAYS:
             recency = 0.0
         else:
-            recency = max(0.0, 100.0 * (1.0 - (days_since - RECENCY_IDEAL_DAYS) / (RECENCY_MAX_DAYS - RECENCY_IDEAL_DAYS)))
+            recency = max(
+                0.0, 100.0 * (1.0 - (days_since - RECENCY_IDEAL_DAYS) / (RECENCY_MAX_DAYS - RECENCY_IDEAL_DAYS))
+            )
     else:
         recency = 0.0
 
@@ -330,7 +339,15 @@ def compute_contact_relationship_score(
         elif avg_response_hours >= RESPONSIVENESS_MAX_HOURS:
             responsiveness = 0.0
         else:
-            responsiveness = max(0.0, 100.0 * (1.0 - (avg_response_hours - RESPONSIVENESS_IDEAL_HOURS) / (RESPONSIVENESS_MAX_HOURS - RESPONSIVENESS_IDEAL_HOURS)))
+            responsiveness = max(
+                0.0,
+                100.0
+                * (
+                    1.0
+                    - (avg_response_hours - RESPONSIVENESS_IDEAL_HOURS)
+                    / (RESPONSIVENESS_MAX_HOURS - RESPONSIVENESS_IDEAL_HOURS)
+                ),
+            )
     else:
         responsiveness = 50.0  # Unknown defaults to neutral
 
@@ -471,6 +488,7 @@ def compute_all_contact_scores(db: Session) -> dict:
     response_hours_map: dict[int, float | None] = {}
     if vc_ids:
         from app.models import VendorCard
+
         vc_rows = (
             db.query(VendorCard.id, VendorCard.avg_response_hours)
             .filter(
@@ -545,11 +563,7 @@ def generate_contact_nudges(db: Session, vendor_card_id: int) -> list[dict]:
     from ..config import settings
     from ..models import VendorContact
 
-    contacts = (
-        db.query(VendorContact)
-        .filter(VendorContact.vendor_card_id == vendor_card_id)
-        .all()
-    )
+    contacts = db.query(VendorContact).filter(VendorContact.vendor_card_id == vendor_card_id).all()
     if not contacts:
         return []
 
@@ -563,7 +577,11 @@ def generate_contact_nudges(db: Session, vendor_card_id: int) -> list[dict]:
 
         days_since = None
         if c.last_interaction_at:
-            ts = c.last_interaction_at if c.last_interaction_at.tzinfo else c.last_interaction_at.replace(tzinfo=timezone.utc)
+            ts = (
+                c.last_interaction_at
+                if c.last_interaction_at.tzinfo
+                else c.last_interaction_at.replace(tzinfo=timezone.utc)
+            )
             days_since = (now - ts).days
         elif c.last_seen_at:
             ts = c.last_seen_at if c.last_seen_at.tzinfo else c.last_seen_at.replace(tzinfo=timezone.utc)
@@ -589,15 +607,17 @@ def generate_contact_nudges(db: Session, vendor_card_id: int) -> list[dict]:
         else:
             message = f"Activity with {c.full_name or c.email} is declining ({days_since}d since last contact). A quick check-in could prevent losing touch."
 
-        nudges.append({
-            "contact_id": c.id,
-            "contact_name": c.full_name or c.email,
-            "nudge_type": nudge_type,
-            "message": message,
-            "days_since_contact": days_since,
-            "relationship_score": c.relationship_score,
-            "activity_trend": c.activity_trend or "unknown",
-        })
+        nudges.append(
+            {
+                "contact_id": c.id,
+                "contact_name": c.full_name or c.email,
+                "nudge_type": nudge_type,
+                "message": message,
+                "days_since_contact": days_since,
+                "relationship_score": c.relationship_score,
+                "activity_trend": c.activity_trend or "unknown",
+            }
+        )
 
     # Try Gradient AI enrichment for personalized nudge messages
     if nudges:
@@ -627,7 +647,7 @@ def _enrich_nudges_with_ai(db: Session, nudges: list[dict], vendor_card_id: int)
             f"Status: {nudge['nudge_type']} ({nudge['days_since_contact']} days since last contact)\n"
             f"Trend: {nudge['activity_trend']}\n"
             f"Score: {nudge.get('relationship_score', 'N/A')}/100\n\n"
-            f"Return JSON: {{\"message\": \"<1-2 sentence suggestion>\"}}"
+            f'Return JSON: {{"message": "<1-2 sentence suggestion>"}}'
         )
         try:
             result = asyncio.get_event_loop().run_until_complete(

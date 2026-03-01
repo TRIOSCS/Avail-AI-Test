@@ -30,19 +30,12 @@ def link_contact_to_entities(db, sender_email: str, signature_data: dict) -> Non
     phone = signature_data.get("phone") or signature_data.get("mobile")
 
     # Try matching to VendorCard by domain or domain_aliases
-    cards = (
-        db.query(VendorCard)
-        .filter(VendorCard.domain == domain)
-        .all()
-    )
+    cards = db.query(VendorCard).filter(VendorCard.domain == domain).all()
     if not cards:
         # Try domain_aliases (JSON array)
         from sqlalchemy import String
-        cards = (
-            db.query(VendorCard)
-            .filter(VendorCard.domain_aliases.cast(String).contains(domain))
-            .all()
-        )
+
+        cards = db.query(VendorCard).filter(VendorCard.domain_aliases.cast(String).contains(domain)).all()
 
     for card in cards:
         existing = (
@@ -77,17 +70,9 @@ def link_contact_to_entities(db, sender_email: str, signature_data: dict) -> Non
                 db.add(contact)
 
     # Try matching to Company by domain — route through enrichment queue for review
-    companies = (
-        db.query(Company)
-        .filter(Company.domain == domain)
-        .all()
-    )
+    companies = db.query(Company).filter(Company.domain == domain).all()
     for company in companies:
-        site = (
-            db.query(CustomerSite)
-            .filter(CustomerSite.company_id == company.id)
-            .first()
-        )
+        site = db.query(CustomerSite).filter(CustomerSite.company_id == company.id).first()
         if site and full_name:
             existing = (
                 db.query(SiteContact)
@@ -107,7 +92,9 @@ def link_contact_to_entities(db, sender_email: str, signature_data: dict) -> Non
                 }
                 sig_conf = float(signature_data.get("confidence", 0.5))
                 route_enrichment(
-                    db, "company", company.id,
+                    db,
+                    "company",
+                    company.id,
                     f"new_contact:{sender_email.lower()}",
                     None,
                     json.dumps(contact_data),
@@ -239,46 +226,64 @@ def _apply_contact_creation(db, entity_type: str, entity_id: int, value) -> None
 
     if entity_type == "vendor_card":
         from ..models import VendorCard, VendorContact
+
         card = db.get(VendorCard, entity_id)
         if not card:
             return
-        existing = db.query(VendorContact).filter(
-            VendorContact.vendor_card_id == entity_id,
-            VendorContact.email == email,
-        ).first()
+        existing = (
+            db.query(VendorContact)
+            .filter(
+                VendorContact.vendor_card_id == entity_id,
+                VendorContact.email == email,
+            )
+            .first()
+        )
         if not existing:
-            db.add(VendorContact(
-                vendor_card_id=entity_id,
-                full_name=value.get("full_name"),
-                title=value.get("title"),
-                email=email,
-                phone=value.get("phone"),
-                linkedin_url=value.get("linkedin_url"),
-                source=value.get("source", "enrichment"),
-                confidence=70,
-                contact_type="individual",
-            ))
+            db.add(
+                VendorContact(
+                    vendor_card_id=entity_id,
+                    full_name=value.get("full_name"),
+                    title=value.get("title"),
+                    email=email,
+                    phone=value.get("phone"),
+                    linkedin_url=value.get("linkedin_url"),
+                    source=value.get("source", "enrichment"),
+                    confidence=70,
+                    contact_type="individual",
+                )
+            )
             if email not in (card.emails or []):
                 card.emails = (card.emails or []) + [email]
     elif entity_type == "company":
         from ..models import CustomerSite, SiteContact
-        site = db.query(CustomerSite).filter(
-            CustomerSite.company_id == entity_id,
-        ).first()
+
+        site = (
+            db.query(CustomerSite)
+            .filter(
+                CustomerSite.company_id == entity_id,
+            )
+            .first()
+        )
         if not site:
             return
-        existing = db.query(SiteContact).filter(
-            SiteContact.customer_site_id == site.id,
-            SiteContact.email == email,
-        ).first()
+        existing = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == site.id,
+                SiteContact.email == email,
+            )
+            .first()
+        )
         if not existing:
-            db.add(SiteContact(
-                customer_site_id=site.id,
-                full_name=value.get("full_name"),
-                title=value.get("title"),
-                email=email,
-                phone=value.get("phone"),
-            ))
+            db.add(
+                SiteContact(
+                    customer_site_id=site.id,
+                    full_name=value.get("full_name"),
+                    title=value.get("title"),
+                    email=email,
+                    phone=value.get("phone"),
+                )
+            )
 
 
 def apply_queue_item(db, queue_item, user_id: int | None = None) -> bool:
@@ -352,15 +357,16 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
     if card.domain:
         try:
             from ..enrichment_service import find_suggested_contacts
-            new_contacts = await find_suggested_contacts(
-                card.domain, card.display_name
-            )
+
+            new_contacts = await find_suggested_contacts(card.domain, card.display_name)
             existing_emails = {
                 c.email.lower()
-                for c in db.query(VendorContact).filter(
+                for c in db.query(VendorContact)
+                .filter(
                     VendorContact.vendor_card_id == vendor_card_id,
                     VendorContact.email.isnot(None),
-                ).all()
+                )
+                .all()
             }
             for contact_data in new_contacts:
                 email = (contact_data.get("email") or "").lower()
@@ -372,7 +378,9 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
                     elif src in ("hunter", "rocketreach", "clearbit"):
                         confidence = 0.8
                     route_enrichment(
-                        db, "vendor_card", card.id,
+                        db,
+                        "vendor_card",
+                        card.id,
                         f"new_contact:{email}",
                         None,
                         json.dumps(contact_data),
@@ -389,10 +397,16 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
     # ── PRIORITY 2: Email verification via Hunter.io ──
     try:
         from ..connectors.hunter_client import verify_email
-        contacts = db.query(VendorContact).filter(
-            VendorContact.vendor_card_id == vendor_card_id,
-            VendorContact.email.isnot(None),
-        ).limit(20).all()
+
+        contacts = (
+            db.query(VendorContact)
+            .filter(
+                VendorContact.vendor_card_id == vendor_card_id,
+                VendorContact.email.isnot(None),
+            )
+            .limit(20)
+            .all()
+        )
 
         async def _verify_one(contact):
             try:
@@ -420,16 +434,29 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
             return
         try:
             from ..enrichment_service import enrich_entity
+
             data = await enrich_entity(card.domain, card.display_name)
             if data:
-                for field in ("legal_name", "industry", "employee_size", "hq_city",
-                              "hq_state", "hq_country", "linkedin_url", "website"):
+                for field in (
+                    "legal_name",
+                    "industry",
+                    "employee_size",
+                    "hq_city",
+                    "hq_state",
+                    "hq_country",
+                    "linkedin_url",
+                    "website",
+                ):
                     proposed = data.get(field)
                     current = getattr(card, field, None)
                     if proposed and not current:
                         result = route_enrichment(
-                            db, "vendor_card", card.id, field,
-                            current, proposed,
+                            db,
+                            "vendor_card",
+                            card.id,
+                            field,
+                            current,
+                            proposed,
                             confidence=0.85,
                             source=data.get("source", "enrichment"),
                             enrichment_type="company_info",
@@ -444,10 +471,9 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
         nonlocal _specialty_result
         try:
             from .specialty_detector import analyze_vendor_specialties
+
             loop = asyncio.get_running_loop()
-            _specialty_result = await loop.run_in_executor(
-                None, analyze_vendor_specialties, vendor_card_id, db
-            )
+            _specialty_result = await loop.run_in_executor(None, analyze_vendor_specialties, vendor_card_id, db)
         except Exception as e:
             _p3_errors.append(f"specialty_detection: {e}")
 
@@ -455,6 +481,7 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
         nonlocal _material_ok
         try:
             from .vendor_analysis_service import _analyze_vendor_materials
+
             await _analyze_vendor_materials(vendor_card_id, db_session=db)
             _material_ok = True
         except Exception as e:
@@ -474,7 +501,10 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
     # Apply specialty results
     if specialties.get("brand_tags"):
         route_enrichment(
-            db, "vendor_card", card.id, "brand_tags",
+            db,
+            "vendor_card",
+            card.id,
+            "brand_tags",
             card.brand_tags,
             specialties["brand_tags"],
             confidence=specialties.get("confidence", 0.5),
@@ -484,7 +514,10 @@ async def deep_enrich_vendor(vendor_card_id: int, db, job_id: int | None = None,
         )
     if specialties.get("commodity_tags"):
         route_enrichment(
-            db, "vendor_card", card.id, "commodity_tags",
+            db,
+            "vendor_card",
+            card.id,
+            "commodity_tags",
             card.commodity_tags,
             specialties["commodity_tags"],
             confidence=specialties.get("confidence", 0.5),
@@ -530,6 +563,7 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
     if settings.customer_enrichment_enabled and company.account_type in ("Customer", "Prospect", None):
         try:
             from .customer_enrichment_service import enrich_customer_account
+
             result = await enrich_customer_account(company_id, db, force=force)
             if result.get("ok"):
                 # Continue with standard deep enrichment for firmographics
@@ -555,6 +589,7 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
     domain = company.domain
     if not domain and company.website:
         import re
+
         m = re.search(r"(?:https?://)?(?:www\.)?([a-zA-Z0-9\-]+\.[a-zA-Z]{2,})", company.website)
         if m:
             domain = m.group(1).lower()
@@ -563,18 +598,20 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
     if domain:
         try:
             from ..enrichment_service import find_suggested_contacts
+
             new_contacts = await find_suggested_contacts(domain, company.name)
             from ..models import CustomerSite, SiteContact
-            site = db.query(CustomerSite).filter(
-                CustomerSite.company_id == company_id
-            ).first()
+
+            site = db.query(CustomerSite).filter(CustomerSite.company_id == company_id).first()
             if site and new_contacts:
                 existing_emails = {
                     c.email.lower()
-                    for c in db.query(SiteContact).filter(
+                    for c in db.query(SiteContact)
+                    .filter(
                         SiteContact.customer_site_id == site.id,
                         SiteContact.email.isnot(None),
-                    ).all()
+                    )
+                    .all()
                 }
                 for contact_data in new_contacts:
                     email = (contact_data.get("email") or "").lower()
@@ -586,7 +623,9 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
                         elif src in ("hunter", "rocketreach", "clearbit"):
                             confidence = 0.8
                         route_enrichment(
-                            db, "company", company_id,
+                            db,
+                            "company",
+                            company_id,
                             f"new_contact:{email}",
                             None,
                             json.dumps(contact_data),
@@ -604,16 +643,30 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
     if domain:
         try:
             from ..enrichment_service import enrich_entity
+
             data = await enrich_entity(domain, company.name)
             if data:
-                for field in ("legal_name", "industry", "employee_size", "hq_city",
-                              "hq_state", "hq_country", "linkedin_url", "website", "domain"):
+                for field in (
+                    "legal_name",
+                    "industry",
+                    "employee_size",
+                    "hq_city",
+                    "hq_state",
+                    "hq_country",
+                    "linkedin_url",
+                    "website",
+                    "domain",
+                ):
                     proposed = data.get(field)
                     current = getattr(company, field, None)
                     if proposed and not current:
                         result = route_enrichment(
-                            db, "company", company.id, field,
-                            current, proposed,
+                            db,
+                            "company",
+                            company.id,
+                            field,
+                            current,
+                            proposed,
                             confidence=0.85,
                             source=data.get("source", "enrichment"),
                             enrichment_type="company_info",
@@ -627,6 +680,7 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
         # Clearbit firmographics
         try:
             from ..connectors.clearbit_client import enrich_company as clearbit_enrich
+
             cb = await clearbit_enrich(domain)
             if cb:
                 for field in ("industry", "employee_size", "hq_city", "hq_state", "hq_country"):
@@ -634,8 +688,12 @@ async def deep_enrich_company(company_id: int, db, job_id: int | None = None, fo
                     current = getattr(company, field, None)
                     if proposed and not current:
                         route_enrichment(
-                            db, "company", company.id, field,
-                            current, proposed,
+                            db,
+                            "company",
+                            company.id,
+                            field,
+                            current,
+                            proposed,
                             confidence=0.8,
                             source="clearbit",
                             enrichment_type="company_info",
@@ -682,15 +740,23 @@ async def run_backfill_job(db, started_by_id: int, scope: dict | None = None) ->
     # Count items to process
     total = 0
     if "vendor" in entity_types:
-        total += db.query(VendorCard).filter(
-            (VendorCard.deep_enrichment_at.is_(None)) |
-            (VendorCard.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
-        ).count()
+        total += (
+            db.query(VendorCard)
+            .filter(
+                (VendorCard.deep_enrichment_at.is_(None))
+                | (VendorCard.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
+            )
+            .count()
+        )
     if "company" in entity_types:
-        total += db.query(Company).filter(
-            (Company.deep_enrichment_at.is_(None)) |
-            (Company.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
-        ).count()
+        total += (
+            db.query(Company)
+            .filter(
+                (Company.deep_enrichment_at.is_(None))
+                | (Company.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
+            )
+            .count()
+        )
 
     total = min(total, max_items)
 
@@ -732,8 +798,8 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
             companies = (
                 db.query(Company)
                 .filter(
-                    (Company.deep_enrichment_at.is_(None)) |
-                    (Company.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
+                    (Company.deep_enrichment_at.is_(None))
+                    | (Company.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
                 )
                 .order_by(
                     Company.last_activity_at.desc().nullslast(),
@@ -746,7 +812,7 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
             co_sem = asyncio.Semaphore(5)
 
             for i in range(0, len(companies), batch_size):
-                batch = companies[i:i + batch_size]
+                batch = companies[i : i + batch_size]
 
                 db.refresh(job)
                 if job.status == "cancelled":
@@ -761,9 +827,7 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                         except Exception as e:
                             return {"status": "error", "error": f"company_{company.id}: {str(e)[:100]}"}
 
-                batch_results = await asyncio.gather(
-                    *[_enrich_co(c) for c in batch], return_exceptions=True
-                )
+                batch_results = await asyncio.gather(*[_enrich_co(c) for c in batch], return_exceptions=True)
 
                 for r in batch_results:
                     if isinstance(r, Exception):
@@ -793,8 +857,8 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                 vendors = (
                     db.query(VendorCard)
                     .filter(
-                        (VendorCard.deep_enrichment_at.is_(None)) |
-                        (VendorCard.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
+                        (VendorCard.deep_enrichment_at.is_(None))
+                        | (VendorCard.deep_enrichment_at < datetime.now(timezone.utc) - timedelta(days=30))
                     )
                     .order_by(
                         VendorCard.last_activity_at.desc().nullslast(),
@@ -808,7 +872,7 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                 sem = asyncio.Semaphore(5)
 
                 for i in range(0, len(vendors), batch_size):
-                    batch = vendors[i:i + batch_size]
+                    batch = vendors[i : i + batch_size]
 
                     db.refresh(job)
                     if job.status == "cancelled":
@@ -824,9 +888,7 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                             except Exception as e:
                                 return {"status": "error", "error": f"vendor_{card.id}: {str(e)[:100]}"}
 
-                    batch_results = await asyncio.gather(
-                        *[_enrich_vendor(c) for c in batch], return_exceptions=True
-                    )
+                    batch_results = await asyncio.gather(*[_enrich_vendor(c) for c in batch], return_exceptions=True)
 
                     for r in batch_results:
                         if isinstance(r, Exception):
@@ -856,10 +918,14 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                 from ..scheduler import get_valid_token
                 from .signature_parser import cache_signature_extract, extract_signature
 
-                users = db.query(User).filter(
-                    User.refresh_token.isnot(None),
-                    User.m365_connected.is_(True),
-                ).all()
+                users = (
+                    db.query(User)
+                    .filter(
+                        User.refresh_token.isnot(None),
+                        User.m365_connected.is_(True),
+                    )
+                    .all()
+                )
 
                 lookback = scope.get("lookback_days", 365)
                 for user in users:
@@ -868,16 +934,16 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
                         if not token:
                             continue
                         miner = EmailMiner(token, db=db, user_id=user.id)
-                        scan_result = await miner.deep_scan_inbox(
-                            lookback_days=lookback, max_messages=2000
-                        )
+                        scan_result = await miner.deep_scan_inbox(lookback_days=lookback, max_messages=2000)
 
                         # Process signatures from scan results
                         for domain, domain_data in scan_result.get("per_domain", {}).items():
                             for email_addr in domain_data.get("emails", []):
                                 sig_data = await extract_signature(
                                     domain_data.get("last_body", ""),
-                                    sender_name=domain_data.get("sender_names", [""])[0] if domain_data.get("sender_names") else "",
+                                    sender_name=domain_data.get("sender_names", [""])[0]
+                                    if domain_data.get("sender_names")
+                                    else "",
                                     sender_email=email_addr,
                                 )
                                 if sig_data.get("confidence", 0) > 0.3:
@@ -904,7 +970,10 @@ async def _execute_backfill(job_id: int, entity_types: list, max_items: int, sco
 
         logger.info(
             "Backfill job %d completed: %d processed, %d enriched, %d errors",
-            job_id, processed, enriched, error_count,
+            job_id,
+            processed,
+            enriched,
+            error_count,
         )
 
     except Exception as e:

@@ -54,9 +54,7 @@ class TestSightingSourceCompanyId:
 
     def test_sighting_source_company_nullable(self, db_session, test_requisition):
         """Regular sightings should have null source_company_id."""
-        requirement = db_session.query(Requirement).filter_by(
-            requisition_id=test_requisition.id
-        ).first()
+        requirement = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
 
         sighting = Sighting(
             requirement_id=requirement.id,
@@ -72,9 +70,7 @@ class TestSightingSourceCompanyId:
 
     def test_sighting_moq_zero_coerced_to_none(self, db_session, test_requisition):
         """MOQ=0 must be coerced to None by model validator (chk_sight_moq)."""
-        requirement = db_session.query(Requirement).filter_by(
-            requisition_id=test_requisition.id
-        ).first()
+        requirement = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
         sighting = Sighting(
             requirement_id=requirement.id,
             vendor_name="Test Vendor",
@@ -86,9 +82,7 @@ class TestSightingSourceCompanyId:
 
     def test_sighting_moq_negative_coerced_to_none(self, db_session, test_requisition):
         """Negative MOQ must be coerced to None."""
-        requirement = db_session.query(Requirement).filter_by(
-            requisition_id=test_requisition.id
-        ).first()
+        requirement = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
         sighting = Sighting(
             requirement_id=requirement.id,
             vendor_name="Test Vendor",
@@ -100,9 +94,7 @@ class TestSightingSourceCompanyId:
 
     def test_sighting_moq_positive_kept(self, db_session, test_requisition):
         """Positive MOQ should be preserved."""
-        requirement = db_session.query(Requirement).filter_by(
-            requisition_id=test_requisition.id
-        ).first()
+        requirement = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
         sighting = Sighting(
             requirement_id=requirement.id,
             vendor_name="Test Vendor",
@@ -114,9 +106,7 @@ class TestSightingSourceCompanyId:
 
     def test_sighting_source_company_relationship(self, db_session, test_requisition, test_company):
         """source_company relationship should resolve to Company."""
-        requirement = db_session.query(Requirement).filter_by(
-            requisition_id=test_requisition.id
-        ).first()
+        requirement = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
 
         sighting = Sighting(
             requirement_id=requirement.id,

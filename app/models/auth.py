@@ -14,9 +14,7 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     email = Column(String(255), unique=True, nullable=False)
     name = Column(String(255))
-    role = Column(
-        String(20), default="buyer"
-    )  # buyer | sales | trader | manager | admin
+    role = Column(String(20), default="buyer")  # buyer | sales | trader | manager | admin
     is_active = Column(Boolean, default=True)
     azure_id = Column(String(255), unique=True)
     refresh_token = Column(EncryptedText)

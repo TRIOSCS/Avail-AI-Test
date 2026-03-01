@@ -13,13 +13,9 @@ Depends on: conftest fixtures, app.config, app.connectors.email_mining,
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from tests.conftest import engine  # noqa: F401
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Bug 1: GRAPH_SCOPES constant
@@ -49,10 +45,9 @@ class TestGraphScopes:
 
     def test_token_refresh_uses_graph_scopes(self):
         """token_manager uses GRAPH_SCOPES for refresh, not a hardcoded subset."""
-        from app.config import GRAPH_SCOPES
-
         # Verify the function imports and uses GRAPH_SCOPES
         import inspect
+
         from app.utils.token_manager import _refresh_access_token
 
         source = inspect.getsource(_refresh_access_token)
@@ -70,6 +65,7 @@ class TestMarkProcessedSavepoint:
     def _make_miner(self, db=None, user_id=None):
         with patch("app.utils.graph_client.GraphClient"):
             from app.connectors.email_mining import EmailMiner
+
             miner = EmailMiner("fake-token", db=db, user_id=user_id)
             miner.gc = MagicMock()
         return miner
@@ -111,22 +107,24 @@ class TestDeepScanLastBody:
         """deep_scan_inbox includes last_body per domain for signature extraction."""
         with patch("app.utils.graph_client.GraphClient") as MockGC:
             mock_gc = MagicMock()
-            mock_gc.get_all_pages = AsyncMock(return_value=[
-                {
-                    "id": "msg-1",
-                    "subject": "Parts available",
-                    "from": {
-                        "emailAddress": {
-                            "address": "sales@vendor.com",
-                            "name": "Sales Team",
-                        }
+            mock_gc.get_all_pages = AsyncMock(
+                return_value=[
+                    {
+                        "id": "msg-1",
+                        "subject": "Parts available",
+                        "from": {
+                            "emailAddress": {
+                                "address": "sales@vendor.com",
+                                "name": "Sales Team",
+                            }
+                        },
+                        "body": {"content": "Hello, we have parts.\n\nBest,\nJohn Smith\nPhone: 555-0100"},
+                        "receivedDateTime": "2026-01-15T10:00:00Z",
+                        "hasAttachments": False,
+                        "conversationId": "conv-1",
                     },
-                    "body": {"content": "Hello, we have parts.\n\nBest,\nJohn Smith\nPhone: 555-0100"},
-                    "receivedDateTime": "2026-01-15T10:00:00Z",
-                    "hasAttachments": False,
-                    "conversationId": "conv-1",
-                },
-            ])
+                ]
+            )
             MockGC.return_value = mock_gc
 
             from app.connectors.email_mining import EmailMiner
@@ -162,9 +160,7 @@ class TestStockListsFieldRemoved:
             miner = EmailMiner("fake-token", db=None, user_id=1)
             miner.gc = mock_gc
 
-            result = asyncio.get_event_loop().run_until_complete(
-                miner.scan_inbox(lookback_days=30, max_messages=10)
-            )
+            result = asyncio.get_event_loop().run_until_complete(miner.scan_inbox(lookback_days=30, max_messages=10))
 
         assert "stock_lists_found" not in result
         assert "vendors_found" in result
@@ -180,18 +176,20 @@ class TestContactsSyncDelta:
     def test_sync_user_contacts_uses_delta_query(self, db_session, test_user):
         """_sync_user_contacts uses delta_query instead of get_all_pages."""
         mock_gc = MagicMock()
-        mock_gc.delta_query = AsyncMock(return_value=(
-            [
-                {
-                    "displayName": "John Sales",
-                    "companyName": "Arrow Electronics",
-                    "emailAddresses": [{"address": "john@arrow.com"}],
-                    "businessPhones": ["+1-555-0100"],
-                    "mobilePhone": None,
-                },
-            ],
-            "delta-token-123",
-        ))
+        mock_gc.delta_query = AsyncMock(
+            return_value=(
+                [
+                    {
+                        "displayName": "John Sales",
+                        "companyName": "Arrow Electronics",
+                        "emailAddresses": [{"address": "john@arrow.com"}],
+                        "businessPhones": ["+1-555-0100"],
+                        "mobilePhone": None,
+                    },
+                ],
+                "delta-token-123",
+            )
+        )
 
         test_user.access_token = "fake-token"
         db_session.commit()
@@ -199,9 +197,7 @@ class TestContactsSyncDelta:
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             from app.scheduler import _sync_user_contacts
 
-            asyncio.get_event_loop().run_until_complete(
-                _sync_user_contacts(test_user, db_session)
-            )
+            asyncio.get_event_loop().run_until_complete(_sync_user_contacts(test_user, db_session))
 
         # Verify delta_query was called (not get_all_pages)
         mock_gc.delta_query.assert_called_once()
@@ -220,9 +216,7 @@ class TestContactsSyncDelta:
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             from app.scheduler import _sync_user_contacts
 
-            asyncio.get_event_loop().run_until_complete(
-                _sync_user_contacts(test_user, db_session)
-            )
+            asyncio.get_event_loop().run_until_complete(_sync_user_contacts(test_user, db_session))
 
         sync = (
             db_session.query(SyncState)
@@ -246,8 +240,6 @@ class TestContactsSyncDelta:
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             from app.scheduler import _sync_user_contacts
 
-            asyncio.get_event_loop().run_until_complete(
-                _sync_user_contacts(test_user, db_session)
-            )
+            asyncio.get_event_loop().run_until_complete(_sync_user_contacts(test_user, db_session))
 
         mock_gc.get_all_pages.assert_called_once()

@@ -4,8 +4,6 @@ Called by: pytest
 Depends on: conftest.py, nc_worker.monitoring
 """
 
-from unittest.mock import patch
-
 from app.services.nc_worker.monitoring import (
     _known_html_hashes,
     check_html_structure_hash,

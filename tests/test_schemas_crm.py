@@ -199,7 +199,6 @@ from app.schemas.crm import (
     SiteContactUpdate,
 )
 
-
 # ── CompanyCreate phone normalization ───────────────────────────────
 
 

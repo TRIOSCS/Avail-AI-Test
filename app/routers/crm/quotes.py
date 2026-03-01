@@ -31,10 +31,10 @@ router = APIRouter()
 # ── Quotes ───────────────────────────────────────────────────────────────
 
 
-@router.get("/api/requisitions/{req_id}/quote", response_model=QuoteDetailResponse | None, response_model_exclude_none=True)
-async def get_quote(
-    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+@router.get(
+    "/api/requisitions/{req_id}/quote", response_model=QuoteDetailResponse | None, response_model_exclude_none=True
+)
+async def get_quote(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     from ...dependencies import get_req_for_user
 
     req = get_req_for_user(db, user, req_id)
@@ -57,9 +57,7 @@ async def get_quote(
 
 
 @router.get("/api/requisitions/{req_id}/quotes")
-async def list_quotes(
-    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def list_quotes(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """List all quotes (including revisions) for a requisition."""
     from ...dependencies import get_req_for_user
 
@@ -93,9 +91,7 @@ async def create_quote(
     if not req:
         raise HTTPException(404, "Requisition not found")
     if not req.customer_site_id:
-        raise HTTPException(
-            400, "Requisition must be linked to a customer site before quoting"
-        )
+        raise HTTPException(400, "Requisition must be linked to a customer site before quoting")
     offer_ids = payload.offer_ids
     line_items = [li.model_dump() for li in payload.line_items] if payload.line_items else []
     if offer_ids and not line_items:
@@ -106,11 +102,7 @@ async def create_quote(
             target = None
             last_q_price = None
             if o.requirement:
-                target = (
-                    float(o.requirement.target_price)
-                    if o.requirement.target_price
-                    else None
-                )
+                target = float(o.requirement.target_price) if o.requirement.target_price else None
                 lq = (
                     quoted_prices.get(f"card:{o.material_card_id}") if o.material_card_id else None
                 ) or quoted_prices.get((o.mpn or "").upper().strip())
@@ -148,18 +140,13 @@ async def create_quote(
             except Exception:
                 logger.warning(
                     "Failed to resolve material card for MPN=%s during quote creation for req=%d",
-                    li.get("mpn"), req_id,
+                    li.get("mpn"),
+                    req_id,
                 )
 
     site = db.get(CustomerSite, req.customer_site_id)
-    total_sell = sum(
-        (item.get("qty") or 0) * (item.get("sell_price") or 0)
-        for item in line_items
-    )
-    total_cost = sum(
-        (item.get("qty") or 0) * (item.get("cost_price") or 0)
-        for item in line_items
-    )
+    total_sell = sum((item.get("qty") or 0) * (item.get("sell_price") or 0) for item in line_items)
+    total_cost = sum((item.get("qty") or 0) * (item.get("cost_price") or 0) for item in line_items)
     from sqlalchemy.exc import IntegrityError
 
     old_status = req.status
@@ -171,11 +158,7 @@ async def create_quote(
             line_items=line_items,
             subtotal=total_sell,
             total_cost=total_cost,
-            total_margin_pct=(
-                round((total_sell - total_cost) / total_sell * 100, 2)
-                if total_sell > 0
-                else 0
-            ),
+            total_margin_pct=(round((total_sell - total_cost) / total_sell * 100, 2) if total_sell > 0 else 0),
             payment_terms=site.payment_terms if site else None,
             shipping_terms=site.shipping_terms if site else None,
             created_by_id=user.id,
@@ -193,6 +176,7 @@ async def create_quote(
                 raise
     # Write structured QuoteLine rows (parallel to JSON for backward compat)
     from ...models import QuoteLine
+
     for li in line_items:
         ql = QuoteLine(
             quote_id=quote.id,
@@ -230,21 +214,11 @@ async def update_quote(
     updates = payload.model_dump(exclude_unset=True)
     if "line_items" in updates:
         quote.line_items = updates.pop("line_items")
-        total_sell = sum(
-            (item.get("qty") or 0) * (item.get("sell_price") or 0)
-            for item in (quote.line_items or [])
-        )
-        total_cost = sum(
-            (item.get("qty") or 0) * (item.get("cost_price") or 0)
-            for item in (quote.line_items or [])
-        )
+        total_sell = sum((item.get("qty") or 0) * (item.get("sell_price") or 0) for item in (quote.line_items or []))
+        total_cost = sum((item.get("qty") or 0) * (item.get("cost_price") or 0) for item in (quote.line_items or []))
         quote.subtotal = total_sell
         quote.total_cost = total_cost
-        quote.total_margin_pct = (
-            round((total_sell - total_cost) / total_sell * 100, 2)
-            if total_sell > 0
-            else 0
-        )
+        quote.total_margin_pct = round((total_sell - total_cost) / total_sell * 100, 2) if total_sell > 0 else 0
     for field, value in updates.items():
         setattr(quote, field, value)
     db.commit()
@@ -340,9 +314,7 @@ async def send_quote(
         "message": {
             "subject": subject,
             "body": {"contentType": "HTML", "content": html},
-            "toRecipients": [
-                {"emailAddress": {"address": to_email, "name": to_name}}
-            ],
+            "toRecipients": [{"emailAddress": {"address": to_email, "name": to_name}}],
         },
         "saveToSentItems": "true",
     }
@@ -399,15 +371,17 @@ async def quote_result(
             subj = f"Quote won: {customer} — ${quote.subtotal or 0:,.0f}"
         else:
             subj = f"Quote lost: {customer} — {payload.reason or 'no reason'}"
-        db.add(ActivityLog(
-            user_id=notify_user_id,
-            activity_type=f"quote_{payload.result}",
-            channel="system",
-            requisition_id=req.id if req else None,
-            quote_id=quote.id,
-            contact_name=customer,
-            subject=subj,
-        ))
+        db.add(
+            ActivityLog(
+                user_id=notify_user_id,
+                activity_type=f"quote_{payload.result}",
+                channel="system",
+                requisition_id=req.id if req else None,
+                quote_id=quote.id,
+                contact_name=customer,
+                subject=subj,
+            )
+        )
 
     db.commit()
     return {
@@ -419,9 +393,7 @@ async def quote_result(
 
 
 @router.post("/api/quotes/{quote_id}/revise")
-async def revise_quote(
-    quote_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def revise_quote(quote_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     old = db.get(Quote, quote_id)
     if not old:
         raise HTTPException(404, "Quote not found")
@@ -491,9 +463,7 @@ async def reopen_quote(
 
 
 @router.get("/api/pricing-history/{mpn}")
-async def pricing_history(
-    mpn: str, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def pricing_history(mpn: str, user: User = Depends(require_user), db: Session = Depends(get_db)):
     from ...models import MaterialCard
     from ...utils.normalization import normalize_mpn_key
 
@@ -550,9 +520,7 @@ async def pricing_history(
     }
 
 
-def _record_quote_won_history(
-    db: Session, req: Requisition | None, quote: Quote
-) -> None:
+def _record_quote_won_history(db: Session, req: Requisition | None, quote: Quote) -> None:
     """Feed customer_part_history from quote line items when quote is won directly.
 
     Errors are logged but never block the quote result flow.
@@ -583,6 +551,8 @@ def _record_quote_won_history(
     except Exception as e:
         logger.error(
             "Quote won purchase history recording failed for quote_id=%d quote_number=%s: %s",
-            quote.id, quote.quote_number, e,
+            quote.id,
+            quote.quote_number,
+            e,
             exc_info=True,
         )

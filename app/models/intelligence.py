@@ -106,9 +106,7 @@ class MaterialCardAudit(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     created_by = Column(String(255))  # system, user email, scheduler
 
-    __table_args__ = (
-        Index("ix_mca_card_action", "material_card_id", "action"),
-    )
+    __table_args__ = (Index("ix_mca_card_action", "material_card_id", "action"),)
 
 
 class ProactiveMatch(Base):
@@ -116,15 +114,9 @@ class ProactiveMatch(Base):
 
     __tablename__ = "proactive_matches"
     id = Column(Integer, primary_key=True)
-    offer_id = Column(
-        Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False
-    )
-    requirement_id = Column(
-        Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False
-    )
-    requisition_id = Column(
-        Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
-    )
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False)
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id"), nullable=False)
     salesperson_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     mpn = Column(String(255), nullable=False)
@@ -202,9 +194,7 @@ class ProactiveThrottle(Base):
     __tablename__ = "proactive_throttle"
     id = Column(Integer, primary_key=True)
     mpn = Column(String(255), nullable=False)
-    customer_site_id = Column(
-        Integer, ForeignKey("customer_sites.id", ondelete="CASCADE"), nullable=False
-    )
+    customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="CASCADE"), nullable=False)
     last_offered_at = Column(DateTime, nullable=False)
     proactive_offer_id = Column(Integer, ForeignKey("proactive_offers.id"))
 
@@ -220,9 +210,7 @@ class ProactiveDoNotOffer(Base):
     __tablename__ = "proactive_do_not_offer"
     id = Column(Integer, primary_key=True)
     mpn = Column(String(255), nullable=False)
-    company_id = Column(
-        Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
-    )
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     reason = Column(String(255))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -230,9 +218,7 @@ class ProactiveDoNotOffer(Base):
     company = relationship("Company", foreign_keys=[company_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
 
-    __table_args__ = (
-        Index("ix_pdno_mpn_company", "mpn", "company_id", unique=True),
-    )
+    __table_args__ = (Index("ix_pdno_mpn_company", "mpn", "company_id", unique=True),)
 
 
 class ChangeLog(Base):
@@ -272,9 +258,7 @@ class ActivityLog(Base):
     requisition_id = Column(Integer, ForeignKey("requisitions.id"))
     quote_id = Column(Integer, ForeignKey("quotes.id"))
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id"))
-    site_contact_id = Column(
-        Integer, ForeignKey("site_contacts.id", ondelete="SET NULL")
-    )
+    site_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="SET NULL"))
 
     buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id"), nullable=True)
 

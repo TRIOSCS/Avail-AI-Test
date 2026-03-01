@@ -41,10 +41,7 @@ def _buyplan_to_dict(bp: BuyPlan, db=None) -> dict:
         quote_number = bp.quote.quote_number or ""
         quote_subtotal = float(bp.quote.subtotal) if bp.quote.subtotal else None
         if bp.quote.customer_site and bp.quote.customer_site.company:
-            customer_name = (
-                f"{bp.quote.customer_site.company.name} — "
-                f"{bp.quote.customer_site.site_name}"
-            )
+            customer_name = f"{bp.quote.customer_site.company.name} — {bp.quote.customer_site.site_name}"
 
     # Compute margin totals from line items
     total_cost = 0.0
@@ -56,9 +53,7 @@ def _buyplan_to_dict(bp: BuyPlan, db=None) -> dict:
         total_cost += cost
         total_revenue += sell
     total_profit = total_revenue - total_cost
-    overall_margin_pct = (
-        round((total_profit / total_revenue) * 100, 2) if total_revenue else 0
-    )
+    overall_margin_pct = round((total_profit / total_revenue) * 100, 2) if total_revenue else 0
 
     # Enrich line items with vendor scores
     enriched_items = list(bp.line_items or [])
@@ -66,9 +61,7 @@ def _buyplan_to_dict(bp: BuyPlan, db=None) -> dict:
         vendor_names = {(item.get("vendor_name") or "").strip().lower() for item in enriched_items}
         vendor_names.discard("")
         if vendor_names:
-            cards = db.query(VendorCard).filter(
-                VendorCard.normalized_name.in_(vendor_names)
-            ).all()
+            cards = db.query(VendorCard).filter(VendorCard.normalized_name.in_(vendor_names)).all()
             score_map = {
                 c.normalized_name: {
                     "vendor_score": c.vendor_score,
@@ -123,11 +116,7 @@ def _build_buy_plan_line_items(quote: Quote, body: BuyPlanSubmit, db: Session):
     offer_ids = body.offer_ids
     offers = db.query(Offer).options(joinedload(Offer.entered_by)).filter(Offer.id.in_(offer_ids)).all()
     offers_map = {o.id: o for o in offers}
-    quote_items_by_offer = {
-        item["offer_id"]: item
-        for item in (quote.line_items or [])
-        if item.get("offer_id")
-    }
+    quote_items_by_offer = {item["offer_id"]: item for item in (quote.line_items or []) if item.get("offer_id")}
     plan_qtys = body.plan_qtys or {}
     line_items = []
     for oid in offer_ids:
@@ -182,10 +171,7 @@ async def create_buy_plan_draft(
     if not line_items:
         raise HTTPException(400, "No valid offers for selected IDs")
     stock_names = settings.stock_sale_vendor_names
-    is_stock = all(
-        (item.get("vendor_name") or "").strip().lower() in stock_names
-        for item in line_items
-    )
+    is_stock = all((item.get("vendor_name") or "").strip().lower() in stock_names for item in line_items)
     plan = BuyPlan(
         requisition_id=quote.requisition_id,
         quote_id=quote_id,
@@ -199,6 +185,7 @@ async def create_buy_plan_draft(
     db.commit()
     db.refresh(plan)
     from ...services.buyplan_service import log_buyplan_activity
+
     log_buyplan_activity(db, user.id, plan, "buyplan_created", "draft created")
     return {"ok": True, "buy_plan_id": plan.id, "status": "draft"}
 
@@ -221,6 +208,7 @@ async def submit_draft_buy_plan(
         raise HTTPException(403, "Only the plan creator or admin/manager can submit for approval")
     import secrets
     from datetime import timedelta
+
     plan.status = "pending_approval"
     plan.approval_token = secrets.token_urlsafe(32)
     plan.token_expires_at = datetime.now(timezone.utc) + timedelta(days=30)
@@ -242,6 +230,7 @@ async def submit_draft_buy_plan(
         offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
         _record_purchase_history(db, req, quote, offers)
     from ...services.buyplan_service import log_buyplan_activity, notify_buyplan_submitted, run_buyplan_bg
+
     log_buyplan_activity(db, user.id, plan, "buyplan_submitted", "submitted for approval")
     db.commit()
     run_buyplan_bg(notify_buyplan_submitted, plan.id)
@@ -271,12 +260,13 @@ async def submit_buy_plan(
         raise HTTPException(400, "No valid offers for selected IDs")
 
     import secrets
+
     stock_names = settings.stock_sale_vendor_names
     is_stock = bool(line_items) and all(
-        (item.get("vendor_name") or "").strip().lower() in stock_names
-        for item in line_items
+        (item.get("vendor_name") or "").strip().lower() in stock_names for item in line_items
     )
     from datetime import timedelta
+
     plan = BuyPlan(
         requisition_id=quote.requisition_id,
         quote_id=quote_id,
@@ -302,11 +292,11 @@ async def submit_buy_plan(
         o.status = "won"
     _record_purchase_history(db, req, quote, offers)
     from ...services.buyplan_service import log_buyplan_activity
-    log_buyplan_activity(
-        db, user.id, plan, "buyplan_submitted", f"submitted for quote #{quote_id}"
-    )
+
+    log_buyplan_activity(db, user.id, plan, "buyplan_submitted", f"submitted for quote #{quote_id}")
     db.commit()
     from ...services.buyplan_service import notify_buyplan_submitted, run_buyplan_bg
+
     run_buyplan_bg(notify_buyplan_submitted, plan.id)
     return {
         "ok": True,
@@ -401,13 +391,14 @@ async def approve_buyplan_by_token(
         plan.completed_at = datetime.now(timezone.utc)
         # completed_by_id stays None (token-based)
         log_buyplan_activity(
-            db, plan.submitted_by_id, plan, "buyplan_approved",
+            db,
+            plan.submitted_by_id,
+            plan,
+            "buyplan_approved",
             "stock sale approved + auto-completed via email token",
         )
     else:
-        log_buyplan_activity(
-            db, plan.submitted_by_id, plan, "buyplan_approved", "approved via email token"
-        )
+        log_buyplan_activity(db, plan.submitted_by_id, plan, "buyplan_approved", "approved via email token")
     db.commit()
 
     from ...services.buyplan_service import notify_buyplan_approved, run_buyplan_bg
@@ -444,9 +435,7 @@ async def reject_buyplan_by_token(
 
     from ...services.buyplan_service import log_buyplan_activity
 
-    log_buyplan_activity(
-        db, plan.submitted_by_id, plan, "buyplan_rejected", "rejected via email token"
-    )
+    log_buyplan_activity(db, plan.submitted_by_id, plan, "buyplan_rejected", "rejected via email token")
     db.commit()
 
     from ...services.buyplan_service import notify_buyplan_rejected, run_buyplan_bg
@@ -509,13 +498,14 @@ async def approve_buy_plan(
         plan.completed_at = datetime.now(timezone.utc)
         plan.completed_by_id = user.id
         log_buyplan_activity(
-            db, user.id, plan, "buyplan_approved",
+            db,
+            user.id,
+            plan,
+            "buyplan_approved",
             f"stock sale approved + auto-completed with SO# {so_number}",
         )
     else:
-        log_buyplan_activity(
-            db, user.id, plan, "buyplan_approved", f"approved with SO# {so_number}"
-        )
+        log_buyplan_activity(db, user.id, plan, "buyplan_approved", f"approved with SO# {so_number}")
     db.commit()
 
     from ...services.buyplan_service import notify_buyplan_approved, run_buyplan_bg
@@ -554,9 +544,7 @@ async def reject_buy_plan(
 
     from ...services.buyplan_service import log_buyplan_activity
 
-    log_buyplan_activity(
-        db, user.id, plan, "buyplan_rejected", plan.rejection_reason or "no reason"
-    )
+    log_buyplan_activity(db, user.id, plan, "buyplan_rejected", plan.rejection_reason or "no reason")
     db.commit()
 
     from ...services.buyplan_service import notify_buyplan_rejected, run_buyplan_bg
@@ -597,9 +585,7 @@ async def enter_po_number(
     from ...services.buyplan_service import log_buyplan_activity
 
     flag_modified(plan, "line_items")
-    log_buyplan_activity(
-        db, user.id, plan, "buyplan_po_entered", f"line {line_index} PO: {po_number}"
-    )
+    log_buyplan_activity(db, user.id, plan, "buyplan_po_entered", f"line {line_index} PO: {po_number}")
     db.commit()
 
     # Trigger PO verification in background
@@ -644,9 +630,7 @@ async def complete_buy_plan(
         raise HTTPException(404, "Buy plan not found")
     allowed_statuses = ["approved", "po_entered", "po_confirmed"]
     if plan.status not in allowed_statuses:
-        raise HTTPException(
-            400, f"Can only complete from {'/'.join(allowed_statuses)}, current: {plan.status}"
-        )
+        raise HTTPException(400, f"Can only complete from {'/'.join(allowed_statuses)}, current: {plan.status}")
     is_mgr = _is_admin(user) or user.role == "manager"
     is_buyer = user.role in ("buyer", "trader")
     if is_mgr:
@@ -669,7 +653,8 @@ async def complete_buy_plan(
     from ...services.buyplan_service import notify_buyplan_completed, run_buyplan_bg
 
     run_buyplan_bg(
-        notify_buyplan_completed, plan.id,
+        notify_buyplan_completed,
+        plan.id,
         completer_name=user.name or user.email,
     )
 
@@ -695,19 +680,13 @@ async def cancel_buy_plan(
 
     if plan.status == "pending_approval":
         if not is_submitter and not is_mgr:
-            raise HTTPException(
-                403, "Only submitter or admin/manager can cancel pending plans"
-            )
+            raise HTTPException(403, "Only submitter or admin/manager can cancel pending plans")
     elif plan.status == "approved":
         if not is_mgr:
             raise HTTPException(403, "Only admin/manager can cancel approved plans")
-        has_pos = any(
-            item.get("po_number") for item in (plan.line_items or [])
-        )
+        has_pos = any(item.get("po_number") for item in (plan.line_items or []))
         if has_pos:
-            raise HTTPException(
-                400, "Cannot cancel — PO numbers already entered. Remove POs first."
-            )
+            raise HTTPException(400, "Cannot cancel — PO numbers already entered. Remove POs first.")
     else:
         raise HTTPException(400, f"Cannot cancel plan in status: {plan.status}")
 
@@ -728,11 +707,7 @@ async def cancel_buy_plan(
         quote.won_revenue = None
     if req:
         req.status = "active"
-    offer_ids = [
-        item.get("offer_id")
-        for item in (plan.line_items or [])
-        if item.get("offer_id")
-    ]
+    offer_ids = [item.get("offer_id") for item in (plan.line_items or []) if item.get("offer_id")]
     if offer_ids:
         offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
         for o in offers:
@@ -741,9 +716,7 @@ async def cancel_buy_plan(
 
     from ...services.buyplan_service import log_buyplan_activity
 
-    log_buyplan_activity(
-        db, user.id, plan, "buyplan_cancelled", reason or "cancelled"
-    )
+    log_buyplan_activity(db, user.id, plan, "buyplan_cancelled", reason or "cancelled")
     db.commit()
 
     from ...services.buyplan_service import notify_buyplan_cancelled, run_buyplan_bg
@@ -769,9 +742,7 @@ async def resubmit_buy_plan(
         if plan.submitted_by_id != user.id:
             raise HTTPException(403, "Only the original submitter, admin, or manager can resubmit")
     if plan.status not in ("rejected", "cancelled"):
-        raise HTTPException(
-            400, f"Can only resubmit from rejected/cancelled, current: {plan.status}"
-        )
+        raise HTTPException(400, f"Can only resubmit from rejected/cancelled, current: {plan.status}")
 
     salesperson_notes = body.salesperson_notes.strip()
 
@@ -792,11 +763,11 @@ async def resubmit_buy_plan(
     # Detect stock sale: all vendors match stock_sale_vendor_names
     stock_names = settings.stock_sale_vendor_names
     is_stock = bool(new_line_items) and all(
-        (item.get("vendor_name") or "").strip().lower() in stock_names
-        for item in new_line_items
+        (item.get("vendor_name") or "").strip().lower() in stock_names for item in new_line_items
     )
 
     from datetime import timedelta
+
     new_plan = BuyPlan(
         requisition_id=plan.requisition_id,
         quote_id=plan.quote_id,
@@ -820,11 +791,7 @@ async def resubmit_buy_plan(
         quote.won_revenue = quote.subtotal
     if req:
         req.status = "won"
-    offer_ids = [
-        item.get("offer_id")
-        for item in (plan.line_items or [])
-        if item.get("offer_id")
-    ]
+    offer_ids = [item.get("offer_id") for item in (plan.line_items or []) if item.get("offer_id")]
     if offer_ids:
         offers = db.query(Offer).filter(Offer.id.in_(offer_ids)).all()
         for o in offers:
@@ -833,7 +800,10 @@ async def resubmit_buy_plan(
     from ...services.buyplan_service import log_buyplan_activity
 
     log_buyplan_activity(
-        db, user.id, new_plan, "buyplan_resubmitted",
+        db,
+        user.id,
+        new_plan,
+        "buyplan_resubmitted",
         f"resubmitted from plan #{plan.id}",
     )
     db.commit()
@@ -858,9 +828,7 @@ async def bulk_po_entry(
     if not plan:
         raise HTTPException(404, "Buy plan not found")
     if plan.status not in ("approved", "po_entered"):
-        raise HTTPException(
-            400, f"Cannot modify POs for plan in status: {plan.status}"
-        )
+        raise HTTPException(400, f"Cannot modify POs for plan in status: {plan.status}")
 
     entries = body.entries
     if not entries:
@@ -890,13 +858,19 @@ async def bulk_po_entry(
                 item["po_sent_at"] = None
                 item["po_recipient"] = None
                 log_buyplan_activity(
-                    db, user.id, plan, "buyplan_po_updated",
+                    db,
+                    user.id,
+                    plan,
+                    "buyplan_po_updated",
                     f"line {idx} PO changed: {old_po} -> {po}",
                 )
                 changes += 1
             elif not old_po:
                 log_buyplan_activity(
-                    db, user.id, plan, "buyplan_po_entered",
+                    db,
+                    user.id,
+                    plan,
+                    "buyplan_po_entered",
                     f"line {idx} PO: {po}",
                 )
                 changes += 1
@@ -906,7 +880,10 @@ async def bulk_po_entry(
             # Clear PO
             if old_po:
                 log_buyplan_activity(
-                    db, user.id, plan, "buyplan_po_updated",
+                    db,
+                    user.id,
+                    plan,
+                    "buyplan_po_updated",
                     f"line {idx} PO cleared (was {old_po})",
                 )
                 changes += 1
@@ -942,20 +919,13 @@ async def get_buyplan_for_quote(
     db: Session = Depends(get_db),
 ):
     """Get the buy plan associated with a quote (newest if multiple exist)."""
-    plan = (
-        db.query(BuyPlan)
-        .filter(BuyPlan.quote_id == quote_id)
-        .order_by(BuyPlan.created_at.desc())
-        .first()
-    )
+    plan = db.query(BuyPlan).filter(BuyPlan.quote_id == quote_id).order_by(BuyPlan.created_at.desc()).first()
     if not plan:
         return None
     return _buyplan_to_dict(plan, db)
 
 
-def _record_purchase_history(
-    db: Session, req: Requisition | None, quote: Quote, offers: list[Offer]
-) -> None:
+def _record_purchase_history(db: Session, req: Requisition | None, quote: Quote, offers: list[Offer]) -> None:
     """Feed customer_part_history from won offers and quote line items.
 
     Called once when a buy plan is first submitted (not on resubmit).

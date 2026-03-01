@@ -138,10 +138,7 @@ def _message_to_dict(msg: dict) -> dict:
     """Convert a Graph API message to our response format."""
     from_data = msg.get("from", {}).get("emailAddress", {})
     from_email = from_data.get("address", "")
-    to_list = [
-        r.get("emailAddress", {}).get("address", "")
-        for r in msg.get("toRecipients", [])
-    ]
+    to_list = [r.get("emailAddress", {}).get("address", "") for r in msg.get("toRecipients", [])]
 
     return {
         "id": msg.get("id", ""),
@@ -216,16 +213,15 @@ async def fetch_threads_for_requirement(
                 if messages:
                     # Filter out internal messages
                     external_msgs = [
-                        m for m in messages
+                        m
+                        for m in messages
                         if not _is_internal_message(
                             m.get("from", {}).get("emailAddress", {}).get("address", ""),
                             [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
                         )
                     ]
                     if external_msgs:
-                        threads[conv_id] = _build_thread_summary(
-                            conv_id, external_msgs, "conversation_id"
-                        )
+                        threads[conv_id] = _build_thread_summary(conv_id, external_msgs, "conversation_id")
             except Exception as e:
                 logger.warning(f"Graph query failed for conversationId {conv_id[:20]}: {e}")
 
@@ -254,16 +250,15 @@ async def fetch_threads_for_requirement(
                 )
                 if messages:
                     external_msgs = [
-                        m for m in messages
+                        m
+                        for m in messages
                         if not _is_internal_message(
                             m.get("from", {}).get("emailAddress", {}).get("address", ""),
                             [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
                         )
                     ]
                     if external_msgs:
-                        threads[conv_id] = _build_thread_summary(
-                            conv_id, external_msgs, "conversation_id"
-                        )
+                        threads[conv_id] = _build_thread_summary(conv_id, external_msgs, "conversation_id")
             except Exception as e:
                 logger.warning(f"Graph query failed for VR conversationId: {e}")
 
@@ -290,7 +285,8 @@ async def fetch_threads_for_requirement(
 
             for cid, msgs in by_conv.items():
                 external_msgs = [
-                    m for m in msgs
+                    m
+                    for m in msgs
                     if not _is_internal_message(
                         m.get("from", {}).get("emailAddress", {}).get("address", ""),
                         [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
@@ -322,27 +318,22 @@ async def fetch_threads_for_requirement(
 
             for cid, msgs in by_conv.items():
                 external_msgs = [
-                    m for m in msgs
+                    m
+                    for m in msgs
                     if not _is_internal_message(
                         m.get("from", {}).get("emailAddress", {}).get("address", ""),
                         [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
                     )
                 ]
                 if external_msgs:
-                    threads[cid] = _build_thread_summary(
-                        cid, external_msgs, "part_number"
-                    )
+                    threads[cid] = _build_thread_summary(cid, external_msgs, "part_number")
         except Exception as e:
             logger.warning(f"Graph part number search failed for {part_number}: {e}")
 
     # ── Tier 4: Vendor domain match ──
     # Find vendors with sightings for this requirement
     vendor_domains = set()
-    sightings = (
-        db.query(Sighting)
-        .filter(Sighting.requirement_id == requirement_id)
-        .all()
-    )
+    sightings = db.query(Sighting).filter(Sighting.requirement_id == requirement_id).all()
     for s in sightings:
         if s.vendor_email and "@" in s.vendor_email:
             domain = s.vendor_email.lower().split("@", 1)[1]
@@ -352,12 +343,9 @@ async def fetch_threads_for_requirement(
     vendor_names = {s.vendor_name for s in sightings if s.vendor_name}
     if vendor_names:
         from app.vendor_utils import normalize_vendor_name
+
         norm_names = [normalize_vendor_name(n) for n in vendor_names]
-        cards = (
-            db.query(VendorCard)
-            .filter(VendorCard.normalized_name.in_(norm_names))
-            .all()
-        )
+        cards = db.query(VendorCard).filter(VendorCard.normalized_name.in_(norm_names)).all()
         for card in cards:
             if card.domain:
                 vendor_domains.add(card.domain.lower())
@@ -385,16 +373,15 @@ async def fetch_threads_for_requirement(
 
             for cid, msgs in by_conv.items():
                 external_msgs = [
-                    m for m in msgs
+                    m
+                    for m in msgs
                     if not _is_internal_message(
                         m.get("from", {}).get("emailAddress", {}).get("address", ""),
                         [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
                     )
                 ]
                 if external_msgs:
-                    domain_threads[cid] = _build_thread_summary(
-                        cid, external_msgs, "vendor_domain"
-                    )
+                    domain_threads[cid] = _build_thread_summary(cid, external_msgs, "vendor_domain")
             return domain_threads
         except Exception as e:
             logger.warning(f"Graph domain search failed for {domain}: {e}")
@@ -415,9 +402,7 @@ async def fetch_threads_for_requirement(
     return result
 
 
-def _build_thread_summary(
-    conversation_id: str, messages: list[dict], matched_via: str
-) -> dict:
+def _build_thread_summary(conversation_id: str, messages: list[dict], matched_via: str) -> dict:
     """Build a thread summary from a list of Graph API messages."""
     sorted_msgs = sorted(
         messages,
@@ -444,9 +429,7 @@ def _build_thread_summary(
 # ── Thread message fetching ────────────────────────────────────────────
 
 
-async def fetch_thread_messages(
-    conversation_id: str, user_token: str
-) -> list[dict]:
+async def fetch_thread_messages(conversation_id: str, user_token: str) -> list[dict]:
     """Fetch all messages in a conversation thread.
 
     Args:
@@ -537,7 +520,7 @@ async def fetch_threads_for_vendor(
             domains.add(domain)
 
     # Also check the vendor card's email list
-    for email in (vendor.emails or []):
+    for email in vendor.emails or []:
         if email and "@" in email:
             domain = email.lower().split("@", 1)[1]
             domains.add(domain)
@@ -575,16 +558,15 @@ async def fetch_threads_for_vendor(
 
             for cid, conv_msgs in by_conv.items():
                 external_msgs = [
-                    m for m in conv_msgs
+                    m
+                    for m in conv_msgs
                     if not _is_internal_message(
                         m.get("from", {}).get("emailAddress", {}).get("address", ""),
                         [r.get("emailAddress", {}).get("address", "") for r in m.get("toRecipients", [])],
                     )
                 ]
                 if external_msgs:
-                    domain_threads[cid] = _build_thread_summary(
-                        cid, external_msgs, "vendor_domain"
-                    )
+                    domain_threads[cid] = _build_thread_summary(cid, external_msgs, "vendor_domain")
             return domain_threads
         except Exception as e:
             logger.warning(f"Graph vendor search failed for domain {domain}: {e}")

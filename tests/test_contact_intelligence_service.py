@@ -22,7 +22,6 @@ Depends on: app/services/contact_intelligence.py, app/routers/vendors.py
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import ActivityLog, VendorCard, VendorContact
@@ -33,7 +32,6 @@ from app.services.contact_intelligence import (
     log_pipeline_event,
     process_inbound_email_contact,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────
 
@@ -100,10 +98,18 @@ class TestProcessInboundEmailContact:
         card = _make_card(db_session, "Acme Corp", "acme.com")
         db_session.commit()
 
-        with patch(
-            "app.services.contact_intelligence._run_sync_or_return_empty",
-            return_value={"full_name": "Jane Sales", "title": "VP Sales", "phone": "+1-555-9999", "confidence": 0.8},
-        ), patch("app.services.signature_parser.cache_signature_extract"):
+        with (
+            patch(
+                "app.services.contact_intelligence._run_sync_or_return_empty",
+                return_value={
+                    "full_name": "Jane Sales",
+                    "title": "VP Sales",
+                    "phone": "+1-555-9999",
+                    "confidence": 0.8,
+                },
+            ),
+            patch("app.services.signature_parser.cache_signature_extract"),
+        ):
             vc = process_inbound_email_contact(
                 db_session,
                 sender_email="jane@acme.com",
@@ -133,10 +139,13 @@ class TestProcessInboundEmailContact:
         existing.interaction_count = 5
         db_session.commit()
 
-        with patch(
-            "app.services.contact_intelligence._run_sync_or_return_empty",
-            return_value={"confidence": 0.5},
-        ), patch("app.services.signature_parser.cache_signature_extract"):
+        with (
+            patch(
+                "app.services.contact_intelligence._run_sync_or_return_empty",
+                return_value={"confidence": 0.5},
+            ),
+            patch("app.services.signature_parser.cache_signature_extract"),
+        ):
             vc = process_inbound_email_contact(
                 db_session,
                 sender_email="bob@beta.com",
@@ -153,10 +162,13 @@ class TestProcessInboundEmailContact:
 
     def test_no_card_returns_none(self, db_session, test_user):
         """Email from unknown domain returns None."""
-        with patch(
-            "app.services.contact_intelligence._run_sync_or_return_empty",
-            return_value={"confidence": 0.5},
-        ), patch("app.services.signature_parser.cache_signature_extract"):
+        with (
+            patch(
+                "app.services.contact_intelligence._run_sync_or_return_empty",
+                return_value={"confidence": 0.5},
+            ),
+            patch("app.services.signature_parser.cache_signature_extract"),
+        ):
             vc = process_inbound_email_contact(
                 db_session,
                 sender_email="nobody@unknown.com",
@@ -197,10 +209,13 @@ class TestProcessInboundEmailContact:
         card = _make_card(db_session, "Gamma Ltd", "gamma.com")
         db_session.commit()
 
-        with patch(
-            "app.services.contact_intelligence._run_sync_or_return_empty",
-            return_value={"confidence": 0.3},
-        ), patch("app.services.signature_parser.cache_signature_extract"):
+        with (
+            patch(
+                "app.services.contact_intelligence._run_sync_or_return_empty",
+                return_value={"confidence": 0.3},
+            ),
+            patch("app.services.signature_parser.cache_signature_extract"),
+        ):
             vc = process_inbound_email_contact(
                 db_session,
                 sender_email="anon@gamma.com",
@@ -354,7 +369,9 @@ class TestComputeAllContactScores:
         # 3 win activities
         for i in range(3):
             _make_activity(
-                db_session, test_user.id, vc,
+                db_session,
+                test_user.id,
+                vc,
                 activity_type="po_issued",
                 occurred_at=now - timedelta(days=i),
             )
@@ -490,7 +507,9 @@ class TestGenerateContactSummary:
         vc.activity_trend = "warming"
         vc.relationship_score = 80.0
         _make_activity(
-            db_session, test_user.id, vc,
+            db_session,
+            test_user.id,
+            vc,
             occurred_at=datetime.now(timezone.utc) - timedelta(days=1),
         )
         db_session.commit()
@@ -543,9 +562,7 @@ class TestContactEndpoints:
         db_session.add(al)
         db_session.commit()
 
-        resp = client.get(
-            f"/api/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}/timeline"
-        )
+        resp = client.get(f"/api/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}/timeline")
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) >= 1
@@ -578,18 +595,14 @@ class TestContactEndpoints:
         test_vendor_contact.relationship_score = 40.0
         db_session.commit()
 
-        resp = client.get(
-            f"/api/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}/summary"
-        )
+        resp = client.get(f"/api/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}/summary")
         assert resp.status_code == 200
         data = resp.json()
         assert "summary" in data
         assert isinstance(data["summary"], str)
 
     def test_log_call_endpoint(self, client, db_session, test_vendor_card, test_vendor_contact):
-        resp = client.post(
-            f"/api/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}/log-call"
-        )
+        resp = client.post(f"/api/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}/log-call")
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True
@@ -651,6 +664,7 @@ class TestRunSyncHelper:
     def test_returns_empty_when_loop_is_running(self):
         """Line 206: returns {} when called from within a running async loop."""
         import asyncio
+
         from app.services.contact_intelligence import _run_sync_or_return_empty
 
         async def inner():
@@ -692,10 +706,13 @@ class TestProcessInboundFieldUpdates:
             "confidence": 0.8,
         }
 
-        with patch(
-            "app.services.contact_intelligence._run_sync_or_return_empty",
-            return_value=sig_data,
-        ), patch("app.services.signature_parser.cache_signature_extract"):
+        with (
+            patch(
+                "app.services.contact_intelligence._run_sync_or_return_empty",
+                return_value=sig_data,
+            ),
+            patch("app.services.signature_parser.cache_signature_extract"),
+        ):
             vc = process_inbound_email_contact(
                 db_session,
                 sender_email="empty@fieldco.com",
@@ -740,14 +757,18 @@ class TestVendorContactFlushConflict:
                 # Check if there's a new VendorContact pending
                 for obj in db_session.new:
                     from app.models import VendorContact as VC
+
                     if isinstance(obj, VC):
                         raise Exception("Duplicate key constraint")
             return original_flush(*args, **kwargs)
 
-        with patch(
-            "app.services.contact_intelligence._run_sync_or_return_empty",
-            return_value={"full_name": "Conflict Person", "confidence": 0.8},
-        ), patch("app.services.signature_parser.cache_signature_extract"):
+        with (
+            patch(
+                "app.services.contact_intelligence._run_sync_or_return_empty",
+                return_value={"full_name": "Conflict Person", "confidence": 0.8},
+            ),
+            patch("app.services.signature_parser.cache_signature_extract"),
+        ):
             db_session.flush = fail_on_second_flush
             vc = process_inbound_email_contact(
                 db_session,
@@ -784,10 +805,13 @@ class TestActivityLogFlushError:
                 raise Exception("Activity flush error")
             return original_flush(*args, **kwargs)
 
-        with patch(
-            "app.services.contact_intelligence._run_sync_or_return_empty",
-            return_value={"full_name": "Activity Err", "confidence": 0.7},
-        ), patch("app.services.signature_parser.cache_signature_extract"):
+        with (
+            patch(
+                "app.services.contact_intelligence._run_sync_or_return_empty",
+                return_value={"full_name": "Activity Err", "confidence": 0.7},
+            ),
+            patch("app.services.signature_parser.cache_signature_extract"),
+        ):
             db_session.flush = fail_on_activity_flush
             vc = process_inbound_email_contact(
                 db_session,
@@ -1111,23 +1135,27 @@ class TestEnrichNudgesWithAI:
         from app.services.contact_intelligence import _enrich_nudges_with_ai
 
         mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
-        nudges = [{
-            "contact_name": "Test",
-            "nudge_type": "dormant",
-            "days_since_contact": 45,
-            "activity_trend": "dormant",
-            "relationship_score": 30,
-            "message": "original",
-        }]
+        nudges = [
+            {
+                "contact_name": "Test",
+                "nudge_type": "dormant",
+                "days_since_contact": 45,
+                "activity_trend": "dormant",
+                "relationship_score": 30,
+                "message": "original",
+            }
+        ]
 
         # The function uses asyncio.get_event_loop().run_until_complete(gradient_json(...))
         # We need to mock the entire chain.
         mock_loop = MagicMock()
         mock_loop.run_until_complete.return_value = {"message": "AI-enriched suggestion"}
 
-        with patch("app.config.settings", mock_settings), \
-             patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock), \
-             patch("asyncio.get_event_loop", return_value=mock_loop):
+        with (
+            patch("app.config.settings", mock_settings),
+            patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock),
+            patch("asyncio.get_event_loop", return_value=mock_loop),
+        ):
             result = _enrich_nudges_with_ai(db_session, nudges, 1)
 
         assert result[0]["message"] == "AI-enriched suggestion"
@@ -1137,21 +1165,25 @@ class TestEnrichNudgesWithAI:
         from app.services.contact_intelligence import _enrich_nudges_with_ai
 
         mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
-        nudges = [{
-            "contact_name": "Test",
-            "nudge_type": "dormant",
-            "days_since_contact": 45,
-            "activity_trend": "dormant",
-            "relationship_score": 30,
-            "message": "template message",
-        }]
+        nudges = [
+            {
+                "contact_name": "Test",
+                "nudge_type": "dormant",
+                "days_since_contact": 45,
+                "activity_trend": "dormant",
+                "relationship_score": 30,
+                "message": "template message",
+            }
+        ]
 
         mock_loop = MagicMock()
         mock_loop.run_until_complete.side_effect = Exception("API error")
 
-        with patch("app.config.settings", mock_settings), \
-             patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock), \
-             patch("asyncio.get_event_loop", return_value=mock_loop):
+        with (
+            patch("app.config.settings", mock_settings),
+            patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock),
+            patch("asyncio.get_event_loop", return_value=mock_loop),
+        ):
             result = _enrich_nudges_with_ai(db_session, nudges, 1)
 
         # Template message preserved
@@ -1162,21 +1194,25 @@ class TestEnrichNudgesWithAI:
         from app.services.contact_intelligence import _enrich_nudges_with_ai
 
         mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
-        nudges = [{
-            "contact_name": "Test",
-            "nudge_type": "cooling",
-            "days_since_contact": 20,
-            "activity_trend": "cooling",
-            "relationship_score": 50,
-            "message": "template msg",
-        }]
+        nudges = [
+            {
+                "contact_name": "Test",
+                "nudge_type": "cooling",
+                "days_since_contact": 20,
+                "activity_trend": "cooling",
+                "relationship_score": 50,
+                "message": "template msg",
+            }
+        ]
 
         mock_loop = MagicMock()
         mock_loop.run_until_complete.return_value = "not a dict"
 
-        with patch("app.config.settings", mock_settings), \
-             patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock), \
-             patch("asyncio.get_event_loop", return_value=mock_loop):
+        with (
+            patch("app.config.settings", mock_settings),
+            patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock),
+            patch("asyncio.get_event_loop", return_value=mock_loop),
+        ):
             result = _enrich_nudges_with_ai(db_session, nudges, 1)
 
         assert result[0]["message"] == "template msg"
@@ -1199,9 +1235,11 @@ class TestGenerateContactSummaryGradient:
         mock_loop = MagicMock()
         mock_loop.run_until_complete.return_value = "AI-generated relationship summary here."
 
-        with patch("app.config.settings", mock_settings), \
-             patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock), \
-             patch("asyncio.get_event_loop", return_value=mock_loop):
+        with (
+            patch("app.config.settings", mock_settings),
+            patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock),
+            patch("asyncio.get_event_loop", return_value=mock_loop),
+        ):
             result = generate_contact_summary(db_session, card.id, vc.id)
 
         assert result == "AI-generated relationship summary here."
@@ -1219,9 +1257,11 @@ class TestGenerateContactSummaryGradient:
         mock_loop = MagicMock()
         mock_loop.run_until_complete.side_effect = Exception("Gradient down")
 
-        with patch("app.config.settings", mock_settings), \
-             patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock), \
-             patch("asyncio.get_event_loop", return_value=mock_loop):
+        with (
+            patch("app.config.settings", mock_settings),
+            patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock),
+            patch("asyncio.get_event_loop", return_value=mock_loop),
+        ):
             result = generate_contact_summary(db_session, card.id, vc.id)
 
         # Should fall back to template
@@ -1241,9 +1281,11 @@ class TestGenerateContactSummaryGradient:
         mock_loop = MagicMock()
         mock_loop.run_until_complete.return_value = ""
 
-        with patch("app.config.settings", mock_settings), \
-             patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock), \
-             patch("asyncio.get_event_loop", return_value=mock_loop):
+        with (
+            patch("app.config.settings", mock_settings),
+            patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock),
+            patch("asyncio.get_event_loop", return_value=mock_loop),
+        ):
             result = generate_contact_summary(db_session, card.id, vc.id)
 
         # Empty string from Gradient -> falls to template

@@ -25,8 +25,7 @@ def _resolve_storage() -> str | None:
         return settings.redis_url
     except Exception:
         logger.warning(
-            "Redis unavailable — rate limiter using in-memory storage "
-            "(limits won't be shared across workers)"
+            "Redis unavailable — rate limiter using in-memory storage (limits won't be shared across workers)"
         )
         return None
 

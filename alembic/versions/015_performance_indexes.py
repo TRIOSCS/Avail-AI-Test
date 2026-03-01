@@ -16,8 +16,9 @@ Revises: 014_multiplier_score_snapshot
 Create Date: 2026-02-26
 """
 
-from alembic import op
 from sqlalchemy import text
+
+from alembic import op
 
 revision = "015_performance_indexes"
 down_revision = "014_multiplier_score_snapshot"

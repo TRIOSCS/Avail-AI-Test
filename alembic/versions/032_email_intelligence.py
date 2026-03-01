@@ -11,8 +11,9 @@ from the email mining pipeline.
 revision = "032_email_intelligence"
 down_revision = "031_ics_search_tables"
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 
 def upgrade() -> None:

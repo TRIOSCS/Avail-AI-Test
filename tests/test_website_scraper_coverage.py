@@ -4,16 +4,15 @@ test_website_scraper_coverage.py -- Additional coverage tests for website_scrape
 Targets missing lines: 110-206 (scrape_vendor_websites function)
 """
 
-import asyncio
-import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.models import VendorCard, VendorContact
 from app.services.website_scraper import (
-    scrape_vendor_websites,
-    _scrape_vendor,
     _fetch_page,
+    scrape_vendor_websites,
 )
 
 
@@ -93,9 +92,11 @@ class TestScrapeVendorWebsites:
 
         scrape_results = [{"email": "sales@testvendor.com", "confidence": 70}]
 
-        with patch("app.services.website_scraper._scrape_vendor", new_callable=AsyncMock, return_value=scrape_results), \
-             patch("app.services.website_scraper.merge_emails_into_card"), \
-             patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("app.services.website_scraper._scrape_vendor", new_callable=AsyncMock, return_value=scrape_results),
+            patch("app.services.website_scraper.merge_emails_into_card"),
+            patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock),
+        ):
             result = await scrape_vendor_websites(db_session, max_vendors=10)
 
         assert result["vendors_scraped"] == 1
@@ -120,9 +121,11 @@ class TestScrapeVendorWebsites:
 
         scrape_results = [{"email": "sales@testvendor2.com", "confidence": 70}]
 
-        with patch("app.services.website_scraper._scrape_vendor", new_callable=AsyncMock, return_value=scrape_results), \
-             patch("app.services.website_scraper.merge_emails_into_card"), \
-             patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("app.services.website_scraper._scrape_vendor", new_callable=AsyncMock, return_value=scrape_results),
+            patch("app.services.website_scraper.merge_emails_into_card"),
+            patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock),
+        ):
             result = await scrape_vendor_websites(db_session, max_vendors=10)
 
         assert result["vendors_scraped"] == 1
@@ -133,8 +136,14 @@ class TestScrapeVendorWebsites:
         """Lines 160-163: vendor scrape exception does not crash."""
         self._make_vendor(db_session, 1003, "https://testvendor3.com", "testvendor3")
 
-        with patch("app.services.website_scraper._scrape_vendor", new_callable=AsyncMock, side_effect=Exception("Scrape failed")), \
-             patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch(
+                "app.services.website_scraper._scrape_vendor",
+                new_callable=AsyncMock,
+                side_effect=Exception("Scrape failed"),
+            ),
+            patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock),
+        ):
             result = await scrape_vendor_websites(db_session, max_vendors=10)
 
         # Exception results in None from _scrape_one, so vendors_scraped stays 0
@@ -153,8 +162,10 @@ class TestScrapeVendorWebsites:
         """Lines 166-167: vendor scraped but no emails found."""
         self._make_vendor(db_session, 1005, "https://testvendor5.com", "testvendor5")
 
-        with patch("app.services.website_scraper._scrape_vendor", new_callable=AsyncMock, return_value=[]), \
-             patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("app.services.website_scraper._scrape_vendor", new_callable=AsyncMock, return_value=[]),
+            patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock),
+        ):
             result = await scrape_vendor_websites(db_session, max_vendors=10)
 
         assert result["vendors_scraped"] == 1
@@ -185,8 +196,10 @@ class TestScrapeVendorWebsites:
             rollback_called[0] = True
             original_rollback()
 
-        with patch("app.services.website_scraper._scrape_vendor", new_callable=AsyncMock, return_value=[]), \
-             patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("app.services.website_scraper._scrape_vendor", new_callable=AsyncMock, return_value=[]),
+            patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock),
+        ):
             db_session.commit = fail_commit
             db_session.rollback = track_rollback
             result = await scrape_vendor_websites(db_session, max_vendors=10)
@@ -211,9 +224,11 @@ class TestScrapeVendorWebsites:
 
         db_session.commit = count_commit
 
-        with patch("app.services.website_scraper._scrape_vendor", new_callable=AsyncMock, return_value=scrape_results), \
-             patch("app.services.website_scraper.merge_emails_into_card"), \
-             patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("app.services.website_scraper._scrape_vendor", new_callable=AsyncMock, return_value=scrape_results),
+            patch("app.services.website_scraper.merge_emails_into_card"),
+            patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock),
+        ):
             result = await scrape_vendor_websites(db_session, max_vendors=500)
 
         assert result["vendors_scraped"] == 50
@@ -246,14 +261,17 @@ class TestScrapeVendorWebsites:
         db_session.commit = failing_commit
         db_session.rollback = track_rollback
 
-        with patch("app.services.website_scraper._scrape_vendor", new_callable=AsyncMock, return_value=scrape_results), \
-             patch("app.services.website_scraper.merge_emails_into_card"), \
-             patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("app.services.website_scraper._scrape_vendor", new_callable=AsyncMock, return_value=scrape_results),
+            patch("app.services.website_scraper.merge_emails_into_card"),
+            patch("app.services.website_scraper.asyncio.sleep", new_callable=AsyncMock),
+        ):
             result = await scrape_vendor_websites(db_session, max_vendors=500)
 
         assert rollback_called[0] is True
         db_session.commit = original_commit
         db_session.rollback = original_rollback
+
     @pytest.mark.asyncio
     async def test_card_website_none_at_runtime(self, db_session):
         """Line 146: card.website is falsy at runtime -> return None from _scrape_one."""
@@ -269,7 +287,9 @@ class TestScrapeVendorWebsites:
             q = original_query(*args, **kwargs)
             if args and args[0] is VendorCard:
                 mock_chain = MagicMock()
-                mock_chain.outerjoin.return_value.filter.return_value.filter.return_value.limit.return_value.all.return_value = [card]
+                mock_chain.outerjoin.return_value.filter.return_value.filter.return_value.limit.return_value.all.return_value = [
+                    card
+                ]
                 return mock_chain
             return q
 
@@ -281,4 +301,3 @@ class TestScrapeVendorWebsites:
         db_session.query = original_query
         # Card with None website gets skipped -> vendors_scraped stays 0
         assert result["vendors_scraped"] == 0
-

@@ -27,6 +27,7 @@ DEEP_TEST_MPN = "LM317"
 def _get_connector(source: ApiSource, db: Session):
     """Get a connector instance for the given source. Returns None if unavailable."""
     from ..routers.sources import _get_connector_for_source
+
     try:
         return _get_connector_for_source(source.name, db)
     except Exception:
@@ -92,8 +93,12 @@ async def deep_test_source(source: ApiSource, db: Session) -> dict:
 
     if not connector:
         log = ApiUsageLog(
-            source_id=source.id, timestamp=now, endpoint="deep_test",
-            success=False, error_message="No connector", check_type="deep",
+            source_id=source.id,
+            timestamp=now,
+            endpoint="deep_test",
+            success=False,
+            error_message="No connector",
+            check_type="deep",
         )
         db.add(log)
         source.status = "disabled"
@@ -114,9 +119,13 @@ async def deep_test_source(source: ApiSource, db: Session) -> dict:
         source.calls_this_month = (source.calls_this_month or 0) + 1
 
         log = ApiUsageLog(
-            source_id=source.id, timestamp=now, endpoint="deep_test",
-            status_code=200, response_ms=elapsed_ms,
-            success=True, check_type="deep",
+            source_id=source.id,
+            timestamp=now,
+            endpoint="deep_test",
+            status_code=200,
+            response_ms=elapsed_ms,
+            success=True,
+            check_type="deep",
         )
         db.add(log)
         db.flush()
@@ -134,9 +143,13 @@ async def deep_test_source(source: ApiSource, db: Session) -> dict:
         source.error_count_24h = (source.error_count_24h or 0) + 1
 
         log = ApiUsageLog(
-            source_id=source.id, timestamp=now, endpoint="deep_test",
-            response_ms=elapsed_ms, success=False,
-            error_message=error_msg, check_type="deep",
+            source_id=source.id,
+            timestamp=now,
+            endpoint="deep_test",
+            response_ms=elapsed_ms,
+            success=False,
+            error_message=error_msg,
+            check_type="deep",
         )
         db.add(log)
         db.flush()
@@ -184,7 +197,9 @@ async def run_health_checks(check_type: str = "ping") -> dict:
         db.commit()
         logger.info(
             "Health check ({}) complete: {}/{} passed",
-            check_type, results["passed"], results["total"],
+            check_type,
+            results["passed"],
+            results["total"],
         )
 
     except Exception as e:

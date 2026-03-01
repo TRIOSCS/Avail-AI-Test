@@ -35,9 +35,7 @@ router = APIRouter()
 
 
 @router.get("/api/requisitions/{req_id}/offers", response_model=OfferListResponse, response_model_exclude_none=True)
-async def list_offers(
-    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def list_offers(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """List offers for a requisition grouped by requirement."""
     from ...dependencies import get_req_for_user
 
@@ -49,8 +47,7 @@ async def list_offers(
     if user.role == "buyer":
         query = query.filter(Offer.status != "pending_review")
     offers = (
-        query
-        .options(
+        query.options(
             joinedload(Offer.entered_by),
             joinedload(Offer.updated_by),
             selectinload(Offer.attachments),
@@ -64,21 +61,22 @@ async def list_offers(
 
     # Cross-reference quoted offers — collect offer_ids used in quotes
     quoted_map: dict[int, str] = {}  # offer_id → quote_number
-    req_quotes = db.query(Quote).filter(
-        Quote.requisition_id == req_id,
-        Quote.status.in_(["draft", "sent", "won"]),
-    ).all()
+    req_quotes = (
+        db.query(Quote)
+        .filter(
+            Quote.requisition_id == req_id,
+            Quote.status.in_(["draft", "sent", "won"]),
+        )
+        .all()
+    )
     for q in req_quotes:
-        for li in (q.line_items or []):
+        for li in q.line_items or []:
             oid = li.get("offer_id")
             if oid:
                 quoted_map[oid] = q.quote_number or f"Q-{q.id}"
     # Detect unseen offers before marking as viewed
     latest_offer_at = max((o.created_at for o in offers), default=None)
-    has_new = bool(
-        latest_offer_at
-        and (not req.offers_viewed_at or latest_offer_at > req.offers_viewed_at)
-    )
+    has_new = bool(latest_offer_at and (not req.offers_viewed_at or latest_offer_at > req.offers_viewed_at))
     # Mark as viewed if the requisition owner is viewing
     if offers and user.id == req.created_by:
         req.offers_viewed_at = datetime.now(timezone.utc)
@@ -97,9 +95,7 @@ async def list_offers(
             .group_by(VendorReview.vendor_card_id)
             .all()
         )
-        rating_map = {
-            r[0]: {"avg": round(float(r[1]), 1), "count": r[2]} for r in rating_rows
-        }
+        rating_map = {r[0]: {"avg": round(float(r[1]), 1), "count": r[2]} for r in rating_rows}
 
     groups: dict[int, list] = {}
     for o in offers:
@@ -219,9 +215,9 @@ async def list_offers(
     result = []
     for r in req.requirements:
         target = float(r.target_price) if r.target_price else None
-        last_q = (
-            quoted_prices.get(f"card:{r.material_card_id}") if r.material_card_id else None
-        ) or quoted_prices.get((r.primary_mpn or "").upper().strip())
+        last_q = (quoted_prices.get(f"card:{r.material_card_id}") if r.material_card_id else None) or quoted_prices.get(
+            (r.primary_mpn or "").upper().strip()
+        )
         result.append(
             {
                 "requirement_id": r.id,
@@ -270,12 +266,7 @@ async def create_offer(
 
         prefix = norm_name.split()[0] if norm_name else ""
         if prefix and len(prefix) >= 2:
-            candidates = (
-                db.query(VendorCard)
-                .filter(VendorCard.normalized_name.ilike(f"{prefix}%"))
-                .limit(20)
-                .all()
-            )
+            candidates = db.query(VendorCard).filter(VendorCard.normalized_name.ilike(f"{prefix}%")).limit(20).all()
             if candidates:
                 matches = fuzzy_match_vendor(
                     payload.vendor_name,
@@ -366,6 +357,7 @@ async def create_offer(
     try:
         if offer.unit_price and offer.unit_price > 0 and offer.requirement_id:
             from sqlalchemy import func
+
             best_price = (
                 db.query(func.min(Offer.unit_price))
                 .filter(
@@ -378,35 +370,44 @@ async def create_offer(
             if best_price and float(offer.unit_price) < float(best_price) * 0.8:
                 pct = round((1 - float(offer.unit_price) / float(best_price)) * 100)
                 from ...services.teams import send_competitive_quote_alert
-                asyncio.create_task(send_competitive_quote_alert(
-                    offer_id=offer.id,
-                    mpn=offer.mpn,
-                    vendor_name=offer.vendor_name,
-                    offer_price=float(offer.unit_price),
-                    best_price=float(best_price),
-                    requisition_id=req_id,
-                ))
+
+                asyncio.create_task(
+                    send_competitive_quote_alert(
+                        offer_id=offer.id,
+                        mpn=offer.mpn,
+                        vendor_name=offer.vendor_name,
+                        offer_price=float(offer.unit_price),
+                        best_price=float(best_price),
+                        requisition_id=req_id,
+                    )
+                )
                 # Deduplicated in-app notification for requisition owner
                 if req.created_by:
-                    existing_notif = db.query(ActivityLog).filter(
-                        ActivityLog.user_id == req.created_by,
-                        ActivityLog.activity_type == "competitive_quote",
-                        ActivityLog.requisition_id == req_id,
-                        ActivityLog.dismissed_at.is_(None),
-                    ).first()
+                    existing_notif = (
+                        db.query(ActivityLog)
+                        .filter(
+                            ActivityLog.user_id == req.created_by,
+                            ActivityLog.activity_type == "competitive_quote",
+                            ActivityLog.requisition_id == req_id,
+                            ActivityLog.dismissed_at.is_(None),
+                        )
+                        .first()
+                    )
                     new_subj = f"Competitive quote: {offer.vendor_name} — {offer.mpn} at ${offer.unit_price} ({pct}% below best)"
                     if existing_notif:
                         existing_notif.subject = new_subj
                         existing_notif.created_at = datetime.now(timezone.utc)
                     else:
-                        db.add(ActivityLog(
-                            user_id=req.created_by,
-                            activity_type="competitive_quote",
-                            channel="system",
-                            requisition_id=req_id,
-                            contact_name=offer.vendor_name,
-                            subject=new_subj,
-                        ))
+                        db.add(
+                            ActivityLog(
+                                user_id=req.created_by,
+                                activity_type="competitive_quote",
+                                channel="system",
+                                requisition_id=req_id,
+                                contact_name=offer.vendor_name,
+                                subject=new_subj,
+                            )
+                        )
                     db.commit()
     except Exception:
         logger.debug("Activity event creation failed", exc_info=True)
@@ -434,8 +435,18 @@ async def update_offer(
     changes = payload.model_dump(exclude_unset=True)
     # Snapshot old values for changelog
     trackable = [
-        "vendor_name", "qty_available", "unit_price", "lead_time", "condition",
-        "warranty", "manufacturer", "date_code", "packaging", "moq", "notes", "status",
+        "vendor_name",
+        "qty_available",
+        "unit_price",
+        "lead_time",
+        "condition",
+        "warranty",
+        "manufacturer",
+        "date_code",
+        "packaging",
+        "moq",
+        "notes",
+        "status",
     ]
     old_dict = {f: getattr(offer, f) for f in trackable}
     for field, value in changes.items():
@@ -454,9 +465,7 @@ async def update_offer(
 
 
 @router.delete("/api/offers/{offer_id}")
-async def delete_offer(
-    offer_id: int, user: User = Depends(require_buyer), db: Session = Depends(get_db)
-):
+async def delete_offer(offer_id: int, user: User = Depends(require_buyer), db: Session = Depends(get_db)):
     offer = db.get(Offer, offer_id)
     if not offer:
         raise HTTPException(404, "Offer not found")
@@ -503,8 +512,7 @@ async def approve_offer(
     offer.approved_at = datetime.now(timezone.utc)
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
-    record_changes(db, "offer", offer_id, user.id,
-                   {"status": old_status}, {"status": "active"}, ["status"])
+    record_changes(db, "offer", offer_id, user.id, {"status": old_status}, {"status": "active"}, ["status"])
     db.commit()
     return {"ok": True, "status": "active"}
 
@@ -528,8 +536,7 @@ async def reject_offer(
     offer.updated_by_id = user.id
     if reason:
         offer.notes = f"{offer.notes or ''}\n[Rejected: {reason}]".strip()
-    record_changes(db, "offer", offer_id, user.id,
-                   {"status": old_status}, {"status": "rejected"}, ["status"])
+    record_changes(db, "offer", offer_id, user.id, {"status": old_status}, {"status": "rejected"}, ["status"])
     db.commit()
     return {"ok": True, "status": "rejected"}
 
@@ -555,8 +562,7 @@ async def mark_offer_sold(
     offer.status = "sold"
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
-    record_changes(db, "offer", offer_id, user.id,
-                   {"status": old_status}, {"status": "sold"}, ["status"])
+    record_changes(db, "offer", offer_id, user.id, {"status": old_status}, {"status": "sold"}, ["status"])
     db.commit()
     return {"ok": True, "status": "sold"}
 
@@ -615,9 +621,7 @@ async def upload_offer_attachment(
         raise HTTPException(401, "Microsoft account not connected — please re-login")
     GraphClient(user.access_token)
     safe_name = file.filename.replace("/", "_").replace("\\", "_")
-    drive_path = (
-        f"/me/drive/root:/AvailAI/Offers/{offer.requisition_id}/{safe_name}:/content"
-    )
+    drive_path = f"/me/drive/root:/AvailAI/Offers/{offer.requisition_id}/{safe_name}:/content"
     from ...http_client import http
 
     resp = await http.put(

@@ -150,10 +150,7 @@ class TestEnrichContactsWebsearch:
     async def test_limit_parameter_respected(self):
         """Only return up to 'limit' contacts."""
         mock_result = {
-            "contacts": [
-                {"full_name": f"Person {i}", "title": "Buyer", "email": f"p{i}@co.com"}
-                for i in range(10)
-            ]
+            "contacts": [{"full_name": f"Person {i}", "title": "Buyer", "email": f"p{i}@co.com"} for i in range(10)]
         }
 
         with patch(
@@ -167,12 +164,7 @@ class TestEnrichContactsWebsearch:
 
     async def test_default_limit_is_five(self):
         """Default limit is 5 contacts."""
-        mock_result = {
-            "contacts": [
-                {"full_name": f"Person {i}", "title": "Buyer"}
-                for i in range(10)
-            ]
-        }
+        mock_result = {"contacts": [{"full_name": f"Person {i}", "title": "Buyer"} for i in range(10)]}
 
         with patch(
             "app.services.ai_service.claude_json",
@@ -241,9 +233,7 @@ class TestEnrichContactsWebsearch:
             new_callable=AsyncMock,
             return_value=mock_result,
         ):
-            contacts = await enrich_contacts_websearch(
-                "Acme Corp", domain="acme.com"
-            )
+            contacts = await enrich_contacts_websearch("Acme Corp", domain="acme.com")
 
         assert contacts[0]["confidence"] == "medium"
 
@@ -264,9 +254,7 @@ class TestEnrichContactsWebsearch:
             new_callable=AsyncMock,
             return_value=mock_result,
         ):
-            contacts = await enrich_contacts_websearch(
-                "Acme Corp", domain="acme.com"
-            )
+            contacts = await enrich_contacts_websearch("Acme Corp", domain="acme.com")
 
         assert contacts[0]["confidence"] == "medium"
 
@@ -314,11 +302,7 @@ class TestEnrichContactsWebsearch:
 
     async def test_email_normalized_lowercase(self):
         """Email addresses are lowercased."""
-        mock_result = {
-            "contacts": [
-                {"full_name": "Jane", "email": "  Jane@ACME.com  "}
-            ]
-        }
+        mock_result = {"contacts": [{"full_name": "Jane", "email": "  Jane@ACME.com  "}]}
 
         with patch(
             "app.services.ai_service.claude_json",
@@ -511,16 +495,20 @@ class TestCompanyIntel:
             "sources": ["acme.com", "reuters.com"],
         }
 
-        with patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=mock_intel,
-        ), patch(
-            "app.services.ai_service.get_cached",
-            return_value=None,
-        ), patch(
-            "app.services.ai_service.set_cached",
-        ) as mock_set:
+        with (
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+                return_value=mock_intel,
+            ),
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=None,
+            ),
+            patch(
+                "app.services.ai_service.set_cached",
+            ) as mock_set,
+        ):
             result = await company_intel("Acme Corp")
 
         assert result is not None
@@ -534,13 +522,16 @@ class TestCompanyIntel:
         """When cache hit, return cached data without calling Claude."""
         cached_data = {"summary": "Cached intel", "revenue": "$1B"}
 
-        with patch(
-            "app.services.ai_service.get_cached",
-            return_value=cached_data,
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-        ) as mock_claude:
+        with (
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=cached_data,
+            ),
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+            ) as mock_claude,
+        ):
             result = await company_intel("Acme Corp")
 
         assert result == cached_data
@@ -548,15 +539,19 @@ class TestCompanyIntel:
 
     async def test_cache_key_lowered_and_stripped(self):
         """Cache key normalizes company name to lowercase/stripped."""
-        with patch(
-            "app.services.ai_service.get_cached",
-            return_value=None,
-        ) as mock_get, patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"summary": "test"},
-        ), patch(
-            "app.services.ai_service.set_cached",
+        with (
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=None,
+            ) as mock_get,
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+                return_value={"summary": "test"},
+            ),
+            patch(
+                "app.services.ai_service.set_cached",
+            ),
         ):
             await company_intel("  ACME Corp  ")
 
@@ -565,16 +560,20 @@ class TestCompanyIntel:
 
     async def test_set_cached_with_7_day_ttl(self):
         """Cache entries use 7-day TTL."""
-        with patch(
-            "app.services.ai_service.get_cached",
-            return_value=None,
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"summary": "test"},
-        ), patch(
-            "app.services.ai_service.set_cached",
-        ) as mock_set:
+        with (
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=None,
+            ),
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+                return_value={"summary": "test"},
+            ),
+            patch(
+                "app.services.ai_service.set_cached",
+            ) as mock_set,
+        ):
             await company_intel("Acme Corp")
 
         mock_set.assert_called_once()
@@ -583,16 +582,20 @@ class TestCompanyIntel:
 
     async def test_returns_none_on_api_failure(self):
         """Returns None when claude_json returns None."""
-        with patch(
-            "app.services.ai_service.get_cached",
-            return_value=None,
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=None,
-        ), patch(
-            "app.services.ai_service.set_cached",
-        ) as mock_set:
+        with (
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=None,
+            ),
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "app.services.ai_service.set_cached",
+            ) as mock_set,
+        ):
             result = await company_intel("Ghost Corp")
 
         assert result is None
@@ -600,16 +603,20 @@ class TestCompanyIntel:
 
     async def test_returns_none_on_non_dict_response(self):
         """Returns None when claude_json returns a non-dict (e.g., list, string)."""
-        with patch(
-            "app.services.ai_service.get_cached",
-            return_value=None,
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value=["not", "a", "dict"],
-        ), patch(
-            "app.services.ai_service.set_cached",
-        ) as mock_set:
+        with (
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=None,
+            ),
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+                return_value=["not", "a", "dict"],
+            ),
+            patch(
+                "app.services.ai_service.set_cached",
+            ) as mock_set,
+        ):
             result = await company_intel("Bad Corp")
 
         assert result is None
@@ -617,16 +624,20 @@ class TestCompanyIntel:
 
     async def test_returns_none_on_empty_dict(self):
         """Returns None when claude_json returns an empty dict (falsy check)."""
-        with patch(
-            "app.services.ai_service.get_cached",
-            return_value=None,
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={},
-        ), patch(
-            "app.services.ai_service.set_cached",
-        ) as mock_set:
+        with (
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=None,
+            ),
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+                return_value={},
+            ),
+            patch(
+                "app.services.ai_service.set_cached",
+            ) as mock_set,
+        ):
             result = await company_intel("Empty Corp")
 
         # Empty dict is falsy -> should return None
@@ -635,15 +646,19 @@ class TestCompanyIntel:
 
     async def test_domain_included_in_prompt(self):
         """When domain is provided it appears in the prompt."""
-        with patch(
-            "app.services.ai_service.get_cached",
-            return_value=None,
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"summary": "test"},
-        ) as mock_claude, patch(
-            "app.services.ai_service.set_cached",
+        with (
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=None,
+            ),
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+                return_value={"summary": "test"},
+            ) as mock_claude,
+            patch(
+                "app.services.ai_service.set_cached",
+            ),
         ):
             await company_intel("Acme Corp", domain="acme.com")
 
@@ -652,15 +667,19 @@ class TestCompanyIntel:
 
     async def test_domain_not_in_prompt_when_none(self):
         """When domain is None, no domain parenthetical."""
-        with patch(
-            "app.services.ai_service.get_cached",
-            return_value=None,
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"summary": "test"},
-        ) as mock_claude, patch(
-            "app.services.ai_service.set_cached",
+        with (
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=None,
+            ),
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+                return_value={"summary": "test"},
+            ) as mock_claude,
+            patch(
+                "app.services.ai_service.set_cached",
+            ),
         ):
             await company_intel("Acme Corp", domain=None)
 
@@ -669,15 +688,19 @@ class TestCompanyIntel:
 
     async def test_uses_smart_model_tier(self):
         """Company intel uses the SMART model tier."""
-        with patch(
-            "app.services.ai_service.get_cached",
-            return_value=None,
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"summary": "test"},
-        ) as mock_claude, patch(
-            "app.services.ai_service.set_cached",
+        with (
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=None,
+            ),
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+                return_value={"summary": "test"},
+            ) as mock_claude,
+            patch(
+                "app.services.ai_service.set_cached",
+            ),
         ):
             await company_intel("Acme Corp")
 
@@ -686,15 +709,19 @@ class TestCompanyIntel:
 
     async def test_uses_web_search_tool(self):
         """Company intel enables the web_search tool."""
-        with patch(
-            "app.services.ai_service.get_cached",
-            return_value=None,
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"summary": "test"},
-        ) as mock_claude, patch(
-            "app.services.ai_service.set_cached",
+        with (
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=None,
+            ),
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+                return_value={"summary": "test"},
+            ) as mock_claude,
+            patch(
+                "app.services.ai_service.set_cached",
+            ),
         ):
             await company_intel("Acme Corp")
 
@@ -705,16 +732,20 @@ class TestCompanyIntel:
 
     async def test_string_return_from_claude_returns_none(self):
         """If claude_json somehow returns a string, return None."""
-        with patch(
-            "app.services.ai_service.get_cached",
-            return_value=None,
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value="just a string",
-        ), patch(
-            "app.services.ai_service.set_cached",
-        ) as mock_set:
+        with (
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=None,
+            ),
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+                return_value="just a string",
+            ),
+            patch(
+                "app.services.ai_service.set_cached",
+            ) as mock_set,
+        ):
             result = await company_intel("String Corp")
 
         assert result is None
@@ -1093,13 +1124,16 @@ class TestErrorHandling:
 
     async def test_company_intel_claude_exception_propagates(self):
         """If claude_json raises an unexpected exception, it propagates."""
-        with patch(
-            "app.services.ai_service.get_cached",
-            return_value=None,
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("API down"),
+        with (
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=None,
+            ),
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("API down"),
+            ),
         ):
             with pytest.raises(RuntimeError, match="API down"):
                 await company_intel("Error Corp")
@@ -1141,15 +1175,19 @@ class TestErrorHandling:
 
     async def test_company_intel_empty_company_name(self):
         """Empty company name still proceeds (caching with empty key)."""
-        with patch(
-            "app.services.ai_service.get_cached",
-            return_value=None,
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new_callable=AsyncMock,
-            return_value={"summary": "minimal"},
-        ), patch(
-            "app.services.ai_service.set_cached",
+        with (
+            patch(
+                "app.services.ai_service.get_cached",
+                return_value=None,
+            ),
+            patch(
+                "app.services.ai_service.claude_json",
+                new_callable=AsyncMock,
+                return_value={"summary": "minimal"},
+            ),
+            patch(
+                "app.services.ai_service.set_cached",
+            ),
         ):
             result = await company_intel("")
 
@@ -1161,7 +1199,7 @@ class TestErrorHandling:
         mock_result = {
             "contacts": [
                 {"full_name": "Good"},
-                {},                       # empty dict, no full_name
+                {},  # empty dict, no full_name
                 {"full_name": "Also Good", "email": "good@co.com"},
                 {"random_key": "value"},  # no full_name
             ]

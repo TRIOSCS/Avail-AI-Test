@@ -31,10 +31,7 @@ def _validate_required_fields(result: dict | list | None, schema: dict) -> bool:
 
 def _schema_to_instruction(schema: dict) -> str:
     """Convert a JSON schema into a compact instruction string for the system prompt."""
-    return (
-        "Return ONLY valid JSON matching this schema:\n"
-        f"```json\n{json.dumps(schema, separators=(',', ':'))}\n```"
-    )
+    return f"Return ONLY valid JSON matching this schema:\n```json\n{json.dumps(schema, separators=(',', ':'))}\n```"
 
 
 async def routed_structured(
@@ -56,9 +53,12 @@ async def routed_structured(
     # Extended thinking is Claude-only
     if thinking_budget:
         return await claude_structured(
-            prompt, schema,
-            system=system, model_tier=model_tier,
-            max_tokens=max_tokens, timeout=timeout,
+            prompt,
+            schema,
+            system=system,
+            model_tier=model_tier,
+            max_tokens=max_tokens,
+            timeout=timeout,
             thinking_budget=thinking_budget,
         )
 
@@ -84,9 +84,12 @@ async def routed_structured(
 
     # Fallback to Claude
     return await claude_structured(
-        prompt, schema,
-        system=system, model_tier=model_tier,
-        max_tokens=max_tokens, timeout=timeout,
+        prompt,
+        schema,
+        system=system,
+        model_tier=model_tier,
+        max_tokens=max_tokens,
+        timeout=timeout,
     )
 
 
@@ -107,8 +110,11 @@ async def routed_text(
     if tools:
         return await claude_text(
             prompt,
-            system=system, model_tier=model_tier,
-            max_tokens=max_tokens, tools=tools, timeout=timeout,
+            system=system,
+            model_tier=model_tier,
+            max_tokens=max_tokens,
+            tools=tools,
+            timeout=timeout,
         )
 
     # Try Gradient first
@@ -131,8 +137,10 @@ async def routed_text(
     # Fallback to Claude
     return await claude_text(
         prompt,
-        system=system, model_tier=model_tier,
-        max_tokens=max_tokens, timeout=timeout,
+        system=system,
+        model_tier=model_tier,
+        max_tokens=max_tokens,
+        timeout=timeout,
     )
 
 
@@ -153,8 +161,11 @@ async def routed_json(
     if tools:
         return await claude_json(
             prompt,
-            system=system, model_tier=model_tier,
-            max_tokens=max_tokens, tools=tools, timeout=timeout,
+            system=system,
+            model_tier=model_tier,
+            max_tokens=max_tokens,
+            tools=tools,
+            timeout=timeout,
         )
 
     # Try Gradient first
@@ -177,6 +188,8 @@ async def routed_json(
     # Fallback to Claude
     return await claude_json(
         prompt,
-        system=system, model_tier=model_tier,
-        max_tokens=max_tokens, timeout=timeout,
+        system=system,
+        model_tier=model_tier,
+        max_tokens=max_tokens,
+        timeout=timeout,
     )

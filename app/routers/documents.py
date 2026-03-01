@@ -28,9 +28,7 @@ async def download_rfq_pdf(
 
     try:
         loop = asyncio.get_running_loop()
-        pdf_bytes = await loop.run_in_executor(
-            None, generate_rfq_summary_pdf, requisition_id, db
-        )
+        pdf_bytes = await loop.run_in_executor(None, generate_rfq_summary_pdf, requisition_id, db)
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
@@ -57,9 +55,7 @@ async def download_quote_pdf(
 
     try:
         loop = asyncio.get_running_loop()
-        pdf_bytes = await loop.run_in_executor(
-            None, generate_quote_report_pdf, quote_id, db
-        )
+        pdf_bytes = await loop.run_in_executor(None, generate_quote_report_pdf, quote_id, db)
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:

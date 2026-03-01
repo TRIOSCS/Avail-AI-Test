@@ -83,21 +83,23 @@ class Element14Connector(BaseConnector):
 
             click_url = f"https://www.newark.com/search?st={quote_plus(mpn)}"
 
-            results.append({
-                "vendor_name": "element14",
-                "manufacturer": mfr,
-                "mpn_matched": mpn,
-                "qty_available": qty,
-                "unit_price": round(price, 4) if price else None,
-                "currency": "USD",
-                "source_type": "element14",
-                "is_authorized": True,
-                "confidence": 5 if qty and qty > 0 else 3,
-                "click_url": click_url,
-                "vendor_sku": sku,
-                "vendor_url": "https://www.newark.com",
-                "description": desc[:500] if desc else "",
-            })
+            results.append(
+                {
+                    "vendor_name": "element14",
+                    "manufacturer": mfr,
+                    "mpn_matched": mpn,
+                    "qty_available": qty,
+                    "unit_price": round(price, 4) if price else None,
+                    "currency": "USD",
+                    "source_type": "element14",
+                    "is_authorized": True,
+                    "confidence": 5 if qty and qty > 0 else 3,
+                    "click_url": click_url,
+                    "vendor_sku": sku,
+                    "vendor_url": "https://www.newark.com",
+                    "description": desc[:500] if desc else "",
+                }
+            )
 
         logger.info(f"element14: {pn} -> {len(results)} results")
         return results

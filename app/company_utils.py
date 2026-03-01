@@ -40,20 +40,22 @@ def find_company_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> l
     for r in rows:
         norm = normalize_company_name(r.name)
         if norm:
-            enriched.append({
-                "id": r.id,
-                "name": r.name,
-                "norm": norm,
-                "site_count": r.site_count or 0,
-                "has_owner": r.account_owner_id is not None,
-                "is_strategic": bool(r.is_strategic),
-            })
+            enriched.append(
+                {
+                    "id": r.id,
+                    "name": r.name,
+                    "norm": norm,
+                    "site_count": r.site_count or 0,
+                    "has_owner": r.account_owner_id is not None,
+                    "is_strategic": bool(r.is_strategic),
+                }
+            )
 
     seen_pairs: set[tuple] = set()
     candidates = []
 
     for i, a in enumerate(enriched):
-        for b in enriched[i + 1:]:
+        for b in enriched[i + 1 :]:
             pair_key = (min(a["id"], b["id"]), max(a["id"], b["id"]))
             if pair_key in seen_pairs:
                 continue
@@ -68,12 +70,24 @@ def find_company_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> l
 
                 auto_keep = a if _rank(a) >= _rank(b) else b
 
-                candidates.append({
-                    "company_a": {"id": a["id"], "name": a["name"], "site_count": a["site_count"], "has_owner": a["has_owner"]},
-                    "company_b": {"id": b["id"], "name": b["name"], "site_count": b["site_count"], "has_owner": b["has_owner"]},
-                    "score": score,
-                    "auto_keep_id": auto_keep["id"],
-                })
+                candidates.append(
+                    {
+                        "company_a": {
+                            "id": a["id"],
+                            "name": a["name"],
+                            "site_count": a["site_count"],
+                            "has_owner": a["has_owner"],
+                        },
+                        "company_b": {
+                            "id": b["id"],
+                            "name": b["name"],
+                            "site_count": b["site_count"],
+                            "has_owner": b["has_owner"],
+                        },
+                        "score": score,
+                        "auto_keep_id": auto_keep["id"],
+                    }
+                )
 
             if len(candidates) >= limit:
                 break

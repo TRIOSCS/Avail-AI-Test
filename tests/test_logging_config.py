@@ -104,8 +104,5 @@ def test_production_mode_uses_serialize():
         with patch("loguru.logger.add") as mock_add:
             setup_logging()
             # At least one call should have serialize=True
-            serialize_calls = [
-                c for c in mock_add.call_args_list
-                if c.kwargs.get("serialize") is True
-            ]
+            serialize_calls = [c for c in mock_add.call_args_list if c.kwargs.get("serialize") is True]
             assert len(serialize_calls) >= 1

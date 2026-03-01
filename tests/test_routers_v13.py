@@ -14,15 +14,21 @@ from types import SimpleNamespace
 #  _activity_to_dict unit tests (existing)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def _make_activity(**overrides):
     """Build a fake ActivityLog with sensible defaults."""
     defaults = dict(
-        id=1, user_id=10,
+        id=1,
+        user_id=10,
         user=SimpleNamespace(name="Test Buyer"),
-        activity_type="email_sent", channel="graph_api",
-        company_id=5, vendor_card_id=3,
-        contact_email="vendor@acme.com", contact_phone="+1-555-0100",
-        contact_name="Jane Vendor", subject="RFQ for LM317T",
+        activity_type="email_sent",
+        channel="graph_api",
+        company_id=5,
+        vendor_card_id=3,
+        contact_email="vendor@acme.com",
+        contact_phone="+1-555-0100",
+        contact_name="Jane Vendor",
+        subject="RFQ for LM317T",
         duration_seconds=None,
         created_at=datetime(2026, 2, 14, 12, 0, 0, tzinfo=timezone.utc),
     )
@@ -32,6 +38,7 @@ def _make_activity(**overrides):
 
 def test_activity_to_dict_full():
     from app.routers.v13_features import _activity_to_dict
+
     d = _activity_to_dict(_make_activity())
     assert d["id"] == 1
     assert d["user_name"] == "Test Buyer"
@@ -40,30 +47,51 @@ def test_activity_to_dict_full():
 
 def test_activity_to_dict_null_user():
     from app.routers.v13_features import _activity_to_dict
+
     assert _activity_to_dict(_make_activity(user=None))["user_name"] is None
 
 
 def test_activity_to_dict_null_created_at():
     from app.routers.v13_features import _activity_to_dict
+
     assert _activity_to_dict(_make_activity(created_at=None))["created_at"] is None
 
 
 def test_activity_to_dict_phone_call():
     from app.routers.v13_features import _activity_to_dict
-    d = _activity_to_dict(_make_activity(
-        activity_type="phone_call", channel="8x8", duration_seconds=342,
-    ))
+
+    d = _activity_to_dict(
+        _make_activity(
+            activity_type="phone_call",
+            channel="8x8",
+            duration_seconds=342,
+        )
+    )
     assert d["duration_seconds"] == 342
 
 
 def test_activity_to_dict_includes_all_keys():
     from app.routers.v13_features import _activity_to_dict
+
     expected = {
-        "id", "user_id", "user_name", "activity_type", "channel",
-        "company_id", "vendor_card_id", "vendor_contact_id",
-        "site_contact_id", "contact_email", "contact_phone",
-        "contact_name", "subject", "notes", "duration_seconds",
-        "requisition_id", "dismissed_at", "created_at",
+        "id",
+        "user_id",
+        "user_name",
+        "activity_type",
+        "channel",
+        "company_id",
+        "vendor_card_id",
+        "vendor_contact_id",
+        "site_contact_id",
+        "contact_email",
+        "contact_phone",
+        "contact_name",
+        "subject",
+        "notes",
+        "duration_seconds",
+        "requisition_id",
+        "dismissed_at",
+        "created_at",
     }
     assert set(_activity_to_dict(_make_activity()).keys()) == expected
 
@@ -71,6 +99,7 @@ def test_activity_to_dict_includes_all_keys():
 # ═══════════════════════════════════════════════════════════════════════
 #  Activity endpoint integration tests (Step 1)
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def test_get_company_activities_empty(client, test_company):
     resp = client.get(f"/api/companies/{test_company.id}/activities")
@@ -96,10 +125,15 @@ def test_get_vendor_activities_empty(client, test_vendor_card):
 
 def test_get_vendor_activities_with_data(client, db_session, test_user, test_vendor_card):
     from app.models import ActivityLog
+
     act = ActivityLog(
-        user_id=test_user.id, activity_type="email_sent", channel="email",
-        vendor_card_id=test_vendor_card.id, contact_email="sales@arrow.com",
-        subject="RFQ for TPS65150", created_at=datetime.now(timezone.utc),
+        user_id=test_user.id,
+        activity_type="email_sent",
+        channel="email",
+        vendor_card_id=test_vendor_card.id,
+        contact_email="sales@arrow.com",
+        subject="RFQ for TPS65150",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(act)
     db_session.commit()
@@ -117,11 +151,14 @@ def test_get_user_activities(client, test_activity):
 
 def test_log_phone_call_no_match(client):
     """Phone number that doesn't match any known contact — still logged (unmatched queue)."""
-    resp = client.post("/api/activities/call", json={
-        "direction": "outbound",
-        "phone": "+1-999-000-0000",
-        "duration_seconds": 120,
-    })
+    resp = client.post(
+        "/api/activities/call",
+        json={
+            "direction": "outbound",
+            "phone": "+1-999-000-0000",
+            "duration_seconds": 120,
+        },
+    )
     assert resp.status_code == 200
     assert resp.json()["status"] == "logged"
 
@@ -209,10 +246,13 @@ def test_vendor_activity_status(client, test_vendor_card):
 
 def test_log_email_click(client):
     """POST /api/activities/email logs an email click event."""
-    resp = client.post("/api/activities/email", json={
-        "email": "vendor@example.com",
-        "subject": "Re: RFQ LM317T",
-    })
+    resp = client.post(
+        "/api/activities/email",
+        json={
+            "email": "vendor@example.com",
+            "subject": "Re: RFQ LM317T",
+        },
+    )
     assert resp.status_code == 200
     assert resp.json()["status"] == "logged"
 
@@ -343,7 +383,7 @@ def test_graph_webhook_invalid_json(client):
 
 def test_graph_webhook_no_valid_notifications(client):
     """POST /api/webhooks/graph with empty value list returns 403."""
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import patch
 
     with patch("app.services.webhook_service.validate_notifications", return_value=[]):
         resp = client.post("/api/webhooks/graph", json={"value": []})
@@ -354,8 +394,12 @@ def test_graph_webhook_processing_error(client):
     """POST /api/webhooks/graph processing failure returns 502."""
     from unittest.mock import AsyncMock, patch
 
-    with patch("app.services.webhook_service.validate_notifications", return_value=[{"id": 1}]), \
-         patch("app.services.webhook_service.handle_notification", new_callable=AsyncMock, side_effect=RuntimeError("fail")):
+    with (
+        patch("app.services.webhook_service.validate_notifications", return_value=[{"id": 1}]),
+        patch(
+            "app.services.webhook_service.handle_notification", new_callable=AsyncMock, side_effect=RuntimeError("fail")
+        ),
+    ):
         resp = client.post("/api/webhooks/graph", json={"value": [{"resource": "test"}]})
     assert resp.status_code == 502
 
@@ -364,8 +408,10 @@ def test_graph_webhook_success(client):
     """POST /api/webhooks/graph success returns accepted."""
     from unittest.mock import AsyncMock, patch
 
-    with patch("app.services.webhook_service.validate_notifications", return_value=[{"id": 1}]), \
-         patch("app.services.webhook_service.handle_notification", new_callable=AsyncMock, return_value=None):
+    with (
+        patch("app.services.webhook_service.validate_notifications", return_value=[{"id": 1}]),
+        patch("app.services.webhook_service.handle_notification", new_callable=AsyncMock, return_value=None),
+    ):
         resp = client.post("/api/webhooks/graph", json={"value": [{"resource": "test"}]})
     assert resp.status_code == 200
     assert resp.json()["status"] == "accepted"
@@ -416,9 +462,12 @@ def test_log_email_click_empty_email(client):
 
 def test_log_email_click_no_match(client):
     """POST /api/activities/email with unknown email returns no_match or logged."""
-    resp = client.post("/api/activities/email", json={
-        "email": "nobody@nonexistent.com",
-    })
+    resp = client.post(
+        "/api/activities/email",
+        json={
+            "email": "nobody@nonexistent.com",
+        },
+    )
     assert resp.status_code == 200
     # The log_email_activity may return None (no_match) or a record (logged)
     assert resp.json()["status"] in ("logged", "no_match")
@@ -522,6 +571,7 @@ def test_manager_digest_requires_admin(client):
 def test_manager_digest_success(client, db_session, test_user):
     """GET /api/sales/manager-digest returns data for admin."""
     from unittest.mock import patch
+
     test_user.role = "admin"
     db_session.commit()
     try:
@@ -536,6 +586,7 @@ def test_manager_digest_success(client, db_session, test_user):
 def test_sales_notifications_with_data(client, db_session, test_user):
     """GET /api/sales/notifications returns notification records."""
     from app.models import ActivityLog
+
     notif = ActivityLog(
         user_id=test_user.id,
         activity_type="ownership_warning",
@@ -557,6 +608,7 @@ def test_sales_notifications_with_data(client, db_session, test_user):
 def test_mark_notification_read(client, db_session, test_user):
     """POST /api/sales/notifications/{id}/read marks it as read."""
     from app.models import ActivityLog
+
     notif = ActivityLog(
         user_id=test_user.id,
         activity_type="buyplan_pending",
@@ -581,9 +633,13 @@ def test_mark_notification_read_not_found(client):
 def test_mark_notification_read_wrong_user(client, db_session, test_user):
     """Cannot mark another user's notification as read."""
     from app.models import ActivityLog, User
+
     other = User(
-        email="other_notif@trioscs.com", name="Other Notif", role="buyer",
-        azure_id="az-other-notif", created_at=datetime.now(timezone.utc),
+        email="other_notif@trioscs.com",
+        name="Other Notif",
+        role="buyer",
+        azure_id="az-other-notif",
+        created_at=datetime.now(timezone.utc),
     )
     db_session.add(other)
     db_session.flush()
@@ -611,6 +667,7 @@ def test_unmatched_activities_admin_required(client):
 def test_attribute_activity_company(client, db_session, test_user, test_company):
     """POST /api/activities/{id}/attribute attributes to company."""
     from unittest.mock import patch
+
     from app.models import ActivityLog
 
     test_user.role = "admin"
@@ -630,6 +687,7 @@ def test_attribute_activity_company(client, db_session, test_user, test_company)
         with patch("app.services.activity_service.attribute_activity", return_value=act):
             from app.dependencies import require_admin
             from app.main import app
+
             app.dependency_overrides[require_admin] = lambda: test_user
             try:
                 resp = client.post(
@@ -652,6 +710,7 @@ def test_attribute_activity_vendor_not_found(client, db_session, test_user):
     try:
         from app.dependencies import require_admin
         from app.main import app
+
         app.dependency_overrides[require_admin] = lambda: test_user
         try:
             resp = client.post(
@@ -669,11 +728,13 @@ def test_attribute_activity_vendor_not_found(client, db_session, test_user):
 def test_dismiss_activity_not_found(client, db_session, test_user):
     """POST /api/activities/99999/dismiss returns 404."""
     from unittest.mock import patch
+
     test_user.role = "admin"
     db_session.commit()
     try:
         from app.dependencies import require_admin
         from app.main import app
+
         app.dependency_overrides[require_admin] = lambda: test_user
         try:
             with patch("app.services.activity_service.dismiss_activity", return_value=None):
@@ -689,6 +750,7 @@ def test_dismiss_activity_not_found(client, db_session, test_user):
 def test_vendor_activity_status_with_recent_activity(client, db_session, test_user, test_vendor_card):
     """Vendor with recent activity shows green status."""
     from app.models import ActivityLog
+
     act = ActivityLog(
         user_id=test_user.id,
         activity_type="email_sent",
@@ -772,8 +834,10 @@ class TestProspectingMyAccounts:
 
         # Add another site with no recent activity
         s2 = CustomerSite(
-            company_id=test_company.id, site_name="Branch2",
-            owner_id=test_user.id, is_active=True,
+            company_id=test_company.id,
+            site_name="Branch2",
+            owner_id=test_user.id,
+            is_active=True,
             last_activity_at=datetime.now(timezone.utc) - timedelta(days=60),
         )
         db_session.add(s2)

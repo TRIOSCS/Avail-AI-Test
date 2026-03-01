@@ -3,10 +3,11 @@
 Covers: get_monthly_usage, can_use_credits, record_credit_usage, get_all_budgets.
 """
 
-import pytest
 from unittest.mock import patch
+
+import pytest
+
 from tests.conftest import engine  # noqa: F401 — use test SQLite engine
-from app.models.enrichment import EnrichmentCreditUsage
 
 
 @pytest.fixture
@@ -21,6 +22,7 @@ def _mock_settings():
 
 def test_get_monthly_usage(db_session, _mock_settings):
     from app.services.credit_manager import get_monthly_usage
+
     usage = get_monthly_usage(db_session, "lusha")
     assert usage["provider"] == "lusha"
     assert usage["used"] == 0
@@ -30,11 +32,13 @@ def test_get_monthly_usage(db_session, _mock_settings):
 
 def test_can_use_credits_true(db_session, _mock_settings):
     from app.services.credit_manager import can_use_credits
+
     assert can_use_credits(db_session, "lusha", 1) is True
 
 
 def test_can_use_credits_false(db_session, _mock_settings):
     from app.services.credit_manager import can_use_credits, record_credit_usage
+
     # Use up all credits
     for _ in range(300):
         record_credit_usage(db_session, "lusha", 1)
@@ -43,7 +47,8 @@ def test_can_use_credits_false(db_session, _mock_settings):
 
 
 def test_record_credit_usage(db_session, _mock_settings):
-    from app.services.credit_manager import record_credit_usage, get_monthly_usage
+    from app.services.credit_manager import get_monthly_usage, record_credit_usage
+
     record_credit_usage(db_session, "lusha", 5)
     db_session.flush()
     usage = get_monthly_usage(db_session, "lusha")
@@ -53,6 +58,7 @@ def test_record_credit_usage(db_session, _mock_settings):
 
 def test_get_all_budgets(db_session, _mock_settings):
     from app.services.credit_manager import get_all_budgets
+
     budgets = get_all_budgets(db_session)
     assert len(budgets) == 4
     providers = [b["provider"] for b in budgets]
@@ -63,7 +69,8 @@ def test_get_all_budgets(db_session, _mock_settings):
 
 
 def test_credit_usage_incremental(db_session, _mock_settings):
-    from app.services.credit_manager import record_credit_usage, get_monthly_usage
+    from app.services.credit_manager import get_monthly_usage, record_credit_usage
+
     record_credit_usage(db_session, "lusha", 3)
     record_credit_usage(db_session, "lusha", 7)
     db_session.flush()

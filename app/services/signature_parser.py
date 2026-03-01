@@ -17,13 +17,9 @@ _PHONE_RE = re.compile(
     re.IGNORECASE,
 )
 
-_BARE_PHONE_RE = re.compile(
-    r"(?<!\d)(\+?1?[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})(?!\d)"
-)
+_BARE_PHONE_RE = re.compile(r"(?<!\d)(\+?1?[\s.-]?\(?\d{3}\)?[\s.-]?\d{3}[\s.-]?\d{4})(?!\d)")
 
-_EMAIL_RE = re.compile(
-    r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}"
-)
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 
 _WEBSITE_RE = re.compile(
     r"(?:https?://)?(?:www\.)?([a-zA-Z0-9][\w\-]*\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?)",
@@ -36,12 +32,39 @@ _LINKEDIN_RE = re.compile(
 )
 
 _TITLE_KEYWORDS = {
-    "president", "ceo", "cfo", "coo", "cto", "vp", "vice president",
-    "director", "manager", "supervisor", "lead", "head", "chief",
-    "engineer", "analyst", "specialist", "coordinator", "associate",
-    "sales", "buyer", "purchasing", "procurement", "sourcing",
-    "logistics", "supply chain", "account", "representative",
-    "admin", "assistant", "executive", "partner", "founder", "owner",
+    "president",
+    "ceo",
+    "cfo",
+    "coo",
+    "cto",
+    "vp",
+    "vice president",
+    "director",
+    "manager",
+    "supervisor",
+    "lead",
+    "head",
+    "chief",
+    "engineer",
+    "analyst",
+    "specialist",
+    "coordinator",
+    "associate",
+    "sales",
+    "buyer",
+    "purchasing",
+    "procurement",
+    "sourcing",
+    "logistics",
+    "supply chain",
+    "account",
+    "representative",
+    "admin",
+    "assistant",
+    "executive",
+    "partner",
+    "founder",
+    "owner",
 }
 
 _SIGNATURE_DELIMITERS = [
@@ -117,7 +140,7 @@ def parse_signature_regex(body: str) -> dict:
         for m in _PHONE_RE.finditer(line):
             phone = re.sub(r"[^\d\+\-\.\(\)\s]", "", m.group(1)).strip()
             if len(re.sub(r"\D", "", phone)) >= 7:
-                label = line[:m.start()].lower().strip()
+                label = line[: m.start()].lower().strip()
                 if "mobile" in label or "cell" in label:
                     result["mobile"] = phone
                 else:
@@ -340,9 +363,7 @@ def cache_signature_extract(db, sender_email: str, extract: dict) -> None:
     from ..models import EmailSignatureExtract
 
     existing = (
-        db.query(EmailSignatureExtract)
-        .filter(EmailSignatureExtract.sender_email == sender_email.lower())
-        .first()
+        db.query(EmailSignatureExtract).filter(EmailSignatureExtract.sender_email == sender_email.lower()).first()
     )
 
     if existing:
@@ -350,8 +371,16 @@ def cache_signature_extract(db, sender_email: str, extract: dict) -> None:
         existing.updated_at = datetime.now(timezone.utc)
         # Only overwrite if new extract has higher confidence
         if extract.get("confidence", 0) > (existing.confidence or 0):
-            for field in ("full_name", "title", "company_name", "phone", "mobile",
-                          "website", "address", "linkedin_url"):
+            for field in (
+                "full_name",
+                "title",
+                "company_name",
+                "phone",
+                "mobile",
+                "website",
+                "address",
+                "linkedin_url",
+            ):
                 val = extract.get(field)
                 if val:
                     setattr(existing, field, val)

@@ -17,7 +17,6 @@ from sqlalchemy.orm import Session
 from app.models import (
     Requirement,
     RequirementAttachment,
-    Requisition,
     RequisitionAttachment,
     User,
 )
@@ -61,9 +60,7 @@ def test_list_requisition_attachments_empty(att_client, test_requisition):
     assert resp.json() == []
 
 
-def test_list_requisition_attachments_with_data(
-    att_client, db_session, test_requisition, test_user
-):
+def test_list_requisition_attachments_with_data(att_client, db_session, test_requisition, test_user):
     """Attachments appear in the list response."""
     att = RequisitionAttachment(
         requisition_id=test_requisition.id,
@@ -181,9 +178,7 @@ def test_list_requirement_attachments_empty(att_client, test_requisition, db_ses
     assert resp.json() == []
 
 
-def test_list_requirement_attachments_with_data(
-    att_client, db_session, test_requisition, test_user
-):
+def test_list_requirement_attachments_with_data(att_client, db_session, test_requisition, test_user):
     """Attachments appear in the requirement list response."""
     req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     att = RequirementAttachment(
@@ -309,12 +304,14 @@ def test_upload_requisition_no_token(notoken_client, test_requisition):
 def test_attach_from_onedrive_success(mock_gc_cls, att_client, test_requisition):
     """requisitions.py lines 1296-1322: attach existing OneDrive item."""
     mock_gc = MagicMock()
-    mock_gc.get_json = AsyncMock(return_value={
-        "name": "spec.pdf",
-        "webUrl": "https://onedrive.example.com/spec",
-        "file": {"mimeType": "application/pdf"},
-        "size": 4096,
-    })
+    mock_gc.get_json = AsyncMock(
+        return_value={
+            "name": "spec.pdf",
+            "webUrl": "https://onedrive.example.com/spec",
+            "file": {"mimeType": "application/pdf"},
+            "size": 4096,
+        }
+    )
     mock_gc_cls.return_value = mock_gc
 
     resp = att_client.post(
@@ -374,8 +371,7 @@ def test_attach_from_onedrive_item_error(mock_gc_cls, att_client, test_requisiti
 
 
 @patch("app.http_client.http")
-def test_delete_requisition_with_onedrive(mock_http, att_client, db_session,
-                                           test_requisition, test_user):
+def test_delete_requisition_with_onedrive(mock_http, att_client, db_session, test_requisition, test_user):
     """requisitions.py lines 1341-1348: delete attachment + OneDrive item."""
     mock_http.delete = AsyncMock(return_value=MagicMock(status_code=204))
 
@@ -396,8 +392,7 @@ def test_delete_requisition_with_onedrive(mock_http, att_client, db_session,
 
 
 @patch("app.http_client.http")
-def test_delete_requisition_onedrive_failure(mock_http, att_client, db_session,
-                                              test_requisition, test_user):
+def test_delete_requisition_onedrive_failure(mock_http, att_client, db_session, test_requisition, test_user):
     """requisitions.py lines 1349-1350: OneDrive delete fails → still succeeds."""
     mock_http.delete = AsyncMock(side_effect=ConnectionError("network down"))
 
@@ -422,8 +417,7 @@ def test_delete_requisition_onedrive_failure(mock_http, att_client, db_session,
 @patch("app.http_client.http")
 def test_upload_requirement_too_large(mock_http, att_client, test_requisition, db_session):
     """requisitions.py line 1393: requirement upload > 10 MB → 400."""
-    req = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id).first()
+    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     big_content = b"x" * (10 * 1024 * 1024 + 1)
     resp = att_client.post(
         f"/api/requirements/{req.id}/attachments",
@@ -434,8 +428,7 @@ def test_upload_requirement_too_large(mock_http, att_client, test_requisition, d
 
 def test_upload_requirement_no_token(notoken_client, test_requisition, db_session):
     """requisitions.py line 1395: no access_token → 401."""
-    req = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id).first()
+    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     resp = notoken_client.post(
         f"/api/requirements/{req.id}/attachments",
         files={"file": ("test.pdf", BytesIO(b"data"), "application/pdf")},
@@ -447,11 +440,9 @@ def test_upload_requirement_no_token(notoken_client, test_requisition, db_sessio
 
 
 @patch("app.http_client.http")
-def test_upload_requirement_onedrive_error(mock_http, att_client, test_requisition,
-                                            db_session):
+def test_upload_requirement_onedrive_error(mock_http, att_client, test_requisition, db_session):
     """requisitions.py lines 1410-1411: OneDrive upload failure → 502."""
-    req = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id).first()
+    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     mock_resp = MagicMock()
     mock_resp.status_code = 500
     mock_resp.text = "Internal Server Error"
@@ -468,13 +459,11 @@ def test_upload_requirement_onedrive_error(mock_http, att_client, test_requisiti
 
 
 @patch("app.http_client.http")
-def test_delete_requirement_with_onedrive(mock_http, att_client, db_session,
-                                           test_requisition, test_user):
+def test_delete_requirement_with_onedrive(mock_http, att_client, db_session, test_requisition, test_user):
     """requisitions.py lines 1443-1450: delete attachment + OneDrive item."""
     mock_http.delete = AsyncMock(return_value=MagicMock(status_code=204))
 
-    req = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id).first()
+    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     att = RequirementAttachment(
         requirement_id=req.id,
         file_name="onedrive-req-file.pdf",
@@ -492,13 +481,11 @@ def test_delete_requirement_with_onedrive(mock_http, att_client, db_session,
 
 
 @patch("app.http_client.http")
-def test_delete_requirement_onedrive_failure(mock_http, att_client, db_session,
-                                              test_requisition, test_user):
+def test_delete_requirement_onedrive_failure(mock_http, att_client, db_session, test_requisition, test_user):
     """requisitions.py lines 1451-1452: OneDrive delete fails → still succeeds."""
     mock_http.delete = AsyncMock(side_effect=TimeoutError("timed out"))
 
-    req = db_session.query(Requirement).filter_by(
-        requisition_id=test_requisition.id).first()
+    req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     att = RequirementAttachment(
         requirement_id=req.id,
         file_name="fail-req-delete.pdf",

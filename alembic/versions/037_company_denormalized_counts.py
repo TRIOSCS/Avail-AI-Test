@@ -9,6 +9,7 @@ then backfills from customer_sites and requisitions.
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "037_company_denormalized_counts"

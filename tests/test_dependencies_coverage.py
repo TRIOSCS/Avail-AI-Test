@@ -28,7 +28,6 @@ from app.dependencies import (
 )
 from app.models import Requisition, User
 
-
 # ── Helpers ──────────────────────────────────────────────────────────
 
 

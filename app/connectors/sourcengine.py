@@ -51,11 +51,7 @@ class SourcengineConnector(BaseConnector):
                 continue
 
             supplier = offer.get("supplier", {})
-            sup_name = (
-                supplier.get("name", "")
-                if isinstance(supplier, dict)
-                else str(supplier)
-            )
+            sup_name = supplier.get("name", "") if isinstance(supplier, dict) else str(supplier)
             if not sup_name:
                 sup_name = offer.get("supplier_name", offer.get("company", ""))
             if not sup_name:

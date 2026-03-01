@@ -94,30 +94,22 @@ class TestGhostRate:
 class TestRecency:
     def test_very_recent_contact(self):
         """Within ideal window → 100."""
-        result = compute_engagement_score(
-            5, 3, 0, None, NOW - timedelta(days=1), now=NOW
-        )
+        result = compute_engagement_score(5, 3, 0, None, NOW - timedelta(days=1), now=NOW)
         assert result["recency_score"] == 100.0
 
     def test_exactly_ideal_boundary(self):
-        result = compute_engagement_score(
-            5, 3, 0, None, NOW - timedelta(days=RECENCY_IDEAL_DAYS), now=NOW
-        )
+        result = compute_engagement_score(5, 3, 0, None, NOW - timedelta(days=RECENCY_IDEAL_DAYS), now=NOW)
         assert result["recency_score"] == 100.0
 
     def test_very_old_contact(self):
         """Beyond max → 0."""
-        result = compute_engagement_score(
-            5, 3, 0, None, NOW - timedelta(days=400), now=NOW
-        )
+        result = compute_engagement_score(5, 3, 0, None, NOW - timedelta(days=400), now=NOW)
         assert result["recency_score"] == 0.0
 
     def test_midway_decay(self):
         """Halfway between ideal and max → ~50."""
         mid_days = (RECENCY_IDEAL_DAYS + RECENCY_MAX_DAYS) / 2
-        result = compute_engagement_score(
-            5, 3, 0, None, NOW - timedelta(days=mid_days), now=NOW
-        )
+        result = compute_engagement_score(5, 3, 0, None, NOW - timedelta(days=mid_days), now=NOW)
         assert 40 <= result["recency_score"] <= 60
 
     def test_no_contact_zero_recency(self):
@@ -586,7 +578,6 @@ class TestComputeAllEngagementErrorPaths:
     @pytest.mark.asyncio
     async def test_relationship_months_naive_datetime(self, db_session):
         """relationship_months handles naive created_at (no tzinfo)."""
-        from datetime import timedelta
 
         card = _make_vendor_card(db_session, "naivetz", "Naive TZ Vendor", domain="naivetz.com")
         # Force a naive datetime (no tzinfo)

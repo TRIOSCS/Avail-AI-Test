@@ -15,6 +15,7 @@ import pytest
 
 try:
     import schemathesis
+
     HAS_SCHEMATHESIS = True
 except ImportError:
     HAS_SCHEMATHESIS = False

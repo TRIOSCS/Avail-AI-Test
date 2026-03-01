@@ -2,9 +2,6 @@
 
 from datetime import datetime, timezone
 
-import pytest
-from sqlalchemy.orm import Session
-
 from app.company_utils import find_company_dedup_candidates, normalize_company_name
 from app.models import Company, CustomerSite
 
@@ -51,7 +48,7 @@ class TestFindCompanyDedupCandidates:
         for i in range(sites):
             s = CustomerSite(
                 company_id=c.id,
-                site_name=f"Site {i+1}",
+                site_name=f"Site {i + 1}",
                 created_at=datetime.now(timezone.utc),
             )
             db.add(s)

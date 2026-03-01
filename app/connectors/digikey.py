@@ -89,36 +89,22 @@ class DigiKeyConnector(BaseConnector):
         results = []
 
         for prod in products:
-            mpn = (
-                prod.get("ManufacturerPartNumber")
-                or prod.get("manufacturerPartNumber")
-                or pn
-            )
-            mfr = (prod.get("Manufacturer") or prod.get("manufacturer") or {}).get(
-                "Name", ""
-            )
+            mpn = prod.get("ManufacturerPartNumber") or prod.get("manufacturerPartNumber") or pn
+            mfr = (prod.get("Manufacturer") or prod.get("manufacturer") or {}).get("Name", "")
             dk_pn = prod.get("DigiKeyPartNumber") or prod.get("digiKeyPartNumber") or ""
             qty = prod.get("QuantityAvailable") or prod.get("quantityAvailable")
             desc = prod.get("Description") or prod.get("description") or {}
-            detail_desc = (
-                desc.get("DetailedDescription", "")
-                if isinstance(desc, dict)
-                else str(desc)
-            )
+            detail_desc = desc.get("DetailedDescription", "") if isinstance(desc, dict) else str(desc)
             url = prod.get("ProductUrl") or prod.get("productUrl") or ""
 
             # Price — use unit price or first price break
             price = None
-            price_breaks = (
-                prod.get("StandardPricing") or prod.get("standardPricing") or []
-            )
+            price_breaks = prod.get("StandardPricing") or prod.get("standardPricing") or []
             if price_breaks and isinstance(price_breaks, list):
                 # Find the smallest qty price break
                 best = min(
                     price_breaks,
-                    key=lambda p: p.get(
-                        "BreakQuantity", p.get("breakQuantity", 999999)
-                    ),
+                    key=lambda p: p.get("BreakQuantity", p.get("breakQuantity", 999999)),
                 )
                 price = best.get("UnitPrice", best.get("unitPrice"))
             else:
@@ -135,11 +121,7 @@ class DigiKeyConnector(BaseConnector):
                     "source_type": "digikey",
                     "is_authorized": True,
                     "confidence": 5 if qty else 3,
-                    "click_url": url
-                    if url.startswith("http")
-                    else f"https://www.digikey.com{url}"
-                    if url
-                    else "",
+                    "click_url": url if url.startswith("http") else f"https://www.digikey.com{url}" if url else "",
                     "vendor_sku": dk_pn,
                     "vendor_url": "https://www.digikey.com",
                     "description": detail_desc,

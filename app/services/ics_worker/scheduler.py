@@ -38,6 +38,7 @@ class SearchScheduler:
         Off: Friday 5 PM → Sunday 6 PM (Saturday all day).
         """
         import os
+
         if os.environ.get("FORCE_BUSINESS_HOURS"):
             return True
         now = datetime.now(EASTERN)

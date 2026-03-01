@@ -57,7 +57,6 @@ def _get_connector_for_source(name: str, db: Session = None):
     from ..connectors.oemsecrets import OEMSecretsConnector
     from ..connectors.sourcengine import SourcengineConnector
     from ..connectors.sources import BrokerBinConnector, NexarConnector
-    from ..connectors.tme import TMEConnector
     from ..services.credential_service import get_credential
 
     def _cred(var_name):
@@ -101,11 +100,6 @@ def _get_connector_for_source(name: str, db: Session = None):
     e14_key = _cred("ELEMENT14_API_KEY")
     if name == "element14" and e14_key:
         return Element14Connector(e14_key)
-
-    tme_token = _cred("TME_API_TOKEN")
-    tme_secret = _cred("TME_API_SECRET")
-    if name == "tme" and tme_token and tme_secret:
-        return TMEConnector(tme_token, tme_secret)
 
     if name == "email_mining" and settings.email_mining_enabled:
         return _EmailMiningTestConnector()
@@ -179,15 +173,17 @@ class _TeamsTestConnector:
             webhook_url,
             json={
                 "type": "message",
-                "attachments": [{
-                    "contentType": "application/vnd.microsoft.card.adaptive",
-                    "content": {
-                        "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
-                        "type": "AdaptiveCard",
-                        "version": "1.4",
-                        "body": [{"type": "TextBlock", "text": "AVAIL connection test — OK", "wrap": True}],
-                    },
-                }],
+                "attachments": [
+                    {
+                        "contentType": "application/vnd.microsoft.card.adaptive",
+                        "content": {
+                            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+                            "type": "AdaptiveCard",
+                            "version": "1.4",
+                            "body": [{"type": "TextBlock", "text": "AVAIL connection test — OK", "wrap": True}],
+                        },
+                    }
+                ],
             },
             timeout=15,
         )
@@ -356,9 +352,7 @@ def _create_sightings_from_attachment(
 
 
 @router.get("/api/sources", response_model=SourceListResponse, response_model_exclude_none=True)
-async def list_api_sources(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def list_api_sources(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Return all API sources grouped by status."""
     sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
 
@@ -400,9 +394,7 @@ async def list_api_sources(
                 "env_vars": src.env_vars or [],
                 "env_status": env_status,
                 "credentials_masked": credentials_masked,
-                "last_success": src.last_success.isoformat()
-                if src.last_success
-                else None,
+                "last_success": src.last_success.isoformat() if src.last_success else None,
                 "last_error": src.last_error,
                 "total_searches": src.total_searches or 0,
                 "total_results": src.total_results or 0,
@@ -579,9 +571,7 @@ async def system_alerts(
 
 @router.post("/api/email-mining/scan")
 @limiter.limit("2/minute")
-async def scan_inbox_for_vendors(
-    request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def scan_inbox_for_vendors(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Run email intelligence scan — mines inbox for vendor contacts and offers."""
     token = await require_fresh_token(request, db)
 
@@ -633,9 +623,7 @@ async def scan_inbox_for_vendors(
     if em_src:
         em_src.last_success = datetime.now(timezone.utc)
         em_src.total_searches = (em_src.total_searches or 0) + 1
-        em_src.total_results = (em_src.total_results or 0) + results.get(
-            "vendors_found", 0
-        )
+        em_src.total_results = (em_src.total_results or 0) + results.get("vendors_found", 0)
         em_src.status = "live"
         db.commit()
 
@@ -648,9 +636,7 @@ async def scan_inbox_for_vendors(
 
 
 @router.get("/api/email-mining/status")
-async def email_mining_status(
-    user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def email_mining_status(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get current email mining status."""
     src = db.query(ApiSource).filter_by(name="email_mining").first()
     return {
@@ -695,11 +681,7 @@ async def email_mining_scan_outbound(
         card = db.query(VendorCard).filter(VendorCard.domain == domain).first()
         if not card:
             prefix = domain.split(".")[0].lower() if "." in domain else domain
-            card = (
-                db.query(VendorCard)
-                .filter(VendorCard.normalized_name == prefix)
-                .first()
-            )
+            card = db.query(VendorCard).filter(VendorCard.normalized_name == prefix).first()
         if card:
             card.total_outreach = (card.total_outreach or 0) + count
             card.last_contact_at = datetime.now(timezone.utc)
@@ -764,9 +746,7 @@ async def vendor_engagement_detail(
             "total_responses": card.total_responses or 0,
             "total_wins": card.total_wins or 0,
         },
-        "computed_at": card.vendor_score_computed_at.isoformat()
-        if card.vendor_score_computed_at
-        else None,
+        "computed_at": card.vendor_score_computed_at.isoformat() if card.vendor_score_computed_at else None,
     }
 
 
@@ -801,11 +781,7 @@ async def parse_response_attachments(
 
     attachments = att_data.get("value", []) if att_data else []
     parseable_exts = {".xlsx", ".xls", ".csv", ".tsv"}
-    parseable = [
-        a
-        for a in attachments
-        if any((a.get("name") or "").lower().endswith(ext) for ext in parseable_exts)
-    ]
+    parseable = [a for a in attachments if any((a.get("name") or "").lower().endswith(ext) for ext in parseable_exts)]
 
     if not parseable:
         return {
@@ -837,9 +813,7 @@ async def parse_response_attachments(
         if not is_valid:
             continue
 
-        rows = await parse_attachment(
-            file_bytes, filename, vendor_domain=vendor_domain, db=db
-        )
+        rows = await parse_attachment(file_bytes, filename, vendor_domain=vendor_domain, db=db)
         total_rows += len(rows)
 
         if vr.requisition_id and rows:

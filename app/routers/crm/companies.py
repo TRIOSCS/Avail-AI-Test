@@ -36,7 +36,9 @@ async def list_companies(
 ):
     """List active companies with denormalized counts (no sites loaded)."""
 
-    @cached_endpoint(prefix="company_list", ttl_hours=0.5, key_params=["search", "owner_id", "unassigned", "tag", "limit", "offset"])
+    @cached_endpoint(
+        prefix="company_list", ttl_hours=0.5, key_params=["search", "owner_id", "unassigned", "tag", "limit", "offset"]
+    )
     def _fetch(search, owner_id, unassigned, tag, limit, offset, db):
         query = (
             db.query(Company)
@@ -58,8 +60,10 @@ async def list_companies(
             # Server-side owner filter: only companies with at least one site owned by this user
             query = query.filter(
                 Company.id.in_(
-                    db.query(CustomerSite.company_id)
-                    .filter(CustomerSite.owner_id == owner_id, CustomerSite.is_active == True)  # noqa: E712
+                    db.query(CustomerSite.company_id).filter(
+                        CustomerSite.owner_id == owner_id,
+                        CustomerSite.is_active == True,  # noqa: E712
+                    )
                 )
             )
         query = query.order_by(Company.name)
@@ -82,9 +86,7 @@ async def list_companies(
                     "hq_city": c.hq_city,
                     "hq_state": c.hq_state,
                     "hq_country": c.hq_country,
-                    "last_enriched_at": c.last_enriched_at.isoformat()
-                    if c.last_enriched_at
-                    else None,
+                    "last_enriched_at": c.last_enriched_at.isoformat() if c.last_enriched_at else None,
                     "enrichment_source": c.enrichment_source,
                     "account_type": c.account_type,
                     "phone": c.phone,
@@ -96,9 +98,13 @@ async def list_companies(
                     "brand_tags": c.brand_tags or [],
                     "commodity_tags": c.commodity_tags or [],
                     "account_owner_id": c.account_owner_id,
-                    "account_owner_name": (c.account_owner.name if c.account_owner else None) if c.account_owner_id else None,
+                    "account_owner_name": (c.account_owner.name if c.account_owner else None)
+                    if c.account_owner_id
+                    else None,
                     "customer_enrichment_status": c.customer_enrichment_status,
-                    "customer_enrichment_at": c.customer_enrichment_at.isoformat() if c.customer_enrichment_at else None,
+                    "customer_enrichment_at": c.customer_enrichment_at.isoformat()
+                    if c.customer_enrichment_at
+                    else None,
                     "site_count": c.site_count or 0,
                     "open_req_count": c.open_req_count or 0,
                 }
@@ -106,8 +112,14 @@ async def list_companies(
         return {"items": items, "total": total, "limit": limit, "offset": offset}
 
     return await asyncio.to_thread(
-        _fetch, search=search, owner_id=owner_id, unassigned=unassigned,
-        tag=tag, limit=limit, offset=offset, db=db,
+        _fetch,
+        search=search,
+        owner_id=owner_id,
+        unassigned=unassigned,
+        tag=tag,
+        limit=limit,
+        offset=offset,
+        db=db,
     )
 
 
@@ -133,11 +145,7 @@ async def companies_typeahead(
             {
                 "id": c.id,
                 "name": c.name,
-                "sites": [
-                    {"id": s.id, "site_name": s.site_name}
-                    for s in c.sites
-                    if s.is_active
-                ],
+                "sites": [{"id": s.id, "site_name": s.site_name} for s in c.sites if s.is_active],
             }
             for c in companies
         ]
@@ -287,9 +295,7 @@ async def get_company(
             "hq_city": company.hq_city,
             "hq_state": company.hq_state,
             "hq_country": company.hq_country,
-            "last_enriched_at": company.last_enriched_at.isoformat()
-            if company.last_enriched_at
-            else None,
+            "last_enriched_at": company.last_enriched_at.isoformat() if company.last_enriched_at else None,
             "enrichment_source": company.enrichment_source,
             "account_type": company.account_type,
             "phone": company.phone,
@@ -329,9 +335,7 @@ async def create_company(
     """
     from ...enrichment_service import normalize_company_input
 
-    clean_name, clean_domain = await normalize_company_input(
-        payload.name, payload.domain or ""
-    )
+    clean_name, clean_domain = await normalize_company_input(payload.name, payload.domain or "")
 
     # Duplicate check (unless force=True)
     if not force:
@@ -375,11 +379,7 @@ async def create_company(
     # Extract domain from website if no explicit domain
     if not clean_domain and payload.website:
         clean_domain = (
-            payload.website.replace("https://", "")
-            .replace("http://", "")
-            .replace("www.", "")
-            .split("/")[0]
-            .lower()
+            payload.website.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].lower()
         )
     company = Company(
         name=clean_name,
@@ -433,12 +433,14 @@ async def create_company(
                     if settings.customer_enrichment_enabled:
                         try:
                             from ...services.customer_enrichment_service import enrich_customer_account
+
                             waterfall = await enrich_customer_account(cid, s, force=True)
                             if waterfall.get("contacts_added", 0) > 0:
                                 s.commit()
                                 logger.info(
                                     "Auto-enriched company %d: %d contacts via waterfall",
-                                    cid, waterfall["contacts_added"],
+                                    cid,
+                                    waterfall["contacts_added"],
                                 )
                         except Exception as we:
                             logger.warning("Waterfall auto-enrich error for company %d: %s", cid, we)

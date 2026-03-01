@@ -277,20 +277,28 @@ alice@widgets.com
 
     def test_cache_signature_extract_upsert_higher_confidence(self, db_session):
         # Insert initial
-        cache_signature_extract(db_session, "update@test.com", {
-            "full_name": "Old Name",
-            "confidence": 0.5,
-            "extraction_method": "regex",
-        })
+        cache_signature_extract(
+            db_session,
+            "update@test.com",
+            {
+                "full_name": "Old Name",
+                "confidence": 0.5,
+                "extraction_method": "regex",
+            },
+        )
         db_session.commit()
 
         # Upsert with higher confidence
-        cache_signature_extract(db_session, "update@test.com", {
-            "full_name": "Better Name",
-            "title": "CEO",
-            "confidence": 0.9,
-            "extraction_method": "claude_ai",
-        })
+        cache_signature_extract(
+            db_session,
+            "update@test.com",
+            {
+                "full_name": "Better Name",
+                "title": "CEO",
+                "confidence": 0.9,
+                "extraction_method": "claude_ai",
+            },
+        )
         db_session.commit()
 
         record = (
@@ -304,18 +312,26 @@ alice@widgets.com
         assert record.seen_count == 2
 
     def test_cache_signature_extract_no_overwrite_lower_confidence(self, db_session):
-        cache_signature_extract(db_session, "keep@test.com", {
-            "full_name": "Good Name",
-            "confidence": 0.9,
-            "extraction_method": "claude_ai",
-        })
+        cache_signature_extract(
+            db_session,
+            "keep@test.com",
+            {
+                "full_name": "Good Name",
+                "confidence": 0.9,
+                "extraction_method": "claude_ai",
+            },
+        )
         db_session.commit()
 
-        cache_signature_extract(db_session, "keep@test.com", {
-            "full_name": "Worse Name",
-            "confidence": 0.4,
-            "extraction_method": "regex",
-        })
+        cache_signature_extract(
+            db_session,
+            "keep@test.com",
+            {
+                "full_name": "Worse Name",
+                "confidence": 0.4,
+                "extraction_method": "regex",
+            },
+        )
         db_session.commit()
 
         record = (
@@ -338,9 +354,7 @@ class TestSpecialtyDetection:
         assert "Intel" in brands
 
     def test_detect_multiple_brands(self):
-        brands = detect_brands_from_text(
-            "We distribute Texas Instruments, NXP, and Microchip products"
-        )
+        brands = detect_brands_from_text("We distribute Texas Instruments, NXP, and Microchip products")
         assert "Texas Instruments" in brands
         assert "NXP" in brands
         assert "Microchip" in brands
@@ -354,28 +368,20 @@ class TestSpecialtyDetection:
         assert detect_brands_from_text(None) == []
 
     def test_detect_commodities(self):
-        categories = detect_commodities_from_text(
-            "DDR4 memory modules and SSD storage drives"
-        )
+        categories = detect_commodities_from_text("DDR4 memory modules and SSD storage drives")
         assert "memory" in categories
         assert "storage" in categories
 
     def test_detect_capacitors_commodity(self):
-        categories = detect_commodities_from_text(
-            "MLCC capacitors, tantalum capacitor 100uF"
-        )
+        categories = detect_commodities_from_text("MLCC capacitors, tantalum capacitor 100uF")
         assert "capacitors" in categories
 
     def test_detect_processor_commodity(self):
-        categories = detect_commodities_from_text(
-            "Xeon E5-2680 server processor"
-        )
+        categories = detect_commodities_from_text("Xeon E5-2680 server processor")
         assert "processors" in categories
 
     def test_detect_connectors_commodity(self):
-        categories = detect_commodities_from_text(
-            "PCIe connectors and backplane headers"
-        )
+        categories = detect_commodities_from_text("PCIe connectors and backplane headers")
         assert "connectors" in categories
 
     def test_no_commodities(self):
@@ -403,6 +409,7 @@ class TestConfidenceRouting:
     def test_auto_apply_high_confidence(self, db_session, sample_vendor, monkeypatch):
         """Confidence >= 0.8 should auto-apply."""
         from app.config import settings
+
         monkeypatch.setattr(settings, "deep_enrichment_auto_apply_threshold", 0.8)
         monkeypatch.setattr(settings, "deep_enrichment_review_threshold", 0.5)
 
@@ -425,14 +432,19 @@ class TestConfidenceRouting:
         assert sample_vendor.industry == "Semiconductors"
 
         # Verify queue entry was created with auto_applied status
-        item = db_session.query(EnrichmentQueue).filter(
-            EnrichmentQueue.vendor_card_id == sample_vendor.id,
-        ).first()
+        item = (
+            db_session.query(EnrichmentQueue)
+            .filter(
+                EnrichmentQueue.vendor_card_id == sample_vendor.id,
+            )
+            .first()
+        )
         assert item.status == "auto_applied"
 
     def test_pending_medium_confidence(self, db_session, sample_vendor, monkeypatch):
         """Confidence 0.5-0.8 should queue for review."""
         from app.config import settings
+
         monkeypatch.setattr(settings, "deep_enrichment_auto_apply_threshold", 0.8)
         monkeypatch.setattr(settings, "deep_enrichment_review_threshold", 0.5)
 
@@ -455,14 +467,19 @@ class TestConfidenceRouting:
         assert sample_vendor.industry is None
 
         # Queue entry with pending status
-        item = db_session.query(EnrichmentQueue).filter(
-            EnrichmentQueue.vendor_card_id == sample_vendor.id,
-        ).first()
+        item = (
+            db_session.query(EnrichmentQueue)
+            .filter(
+                EnrichmentQueue.vendor_card_id == sample_vendor.id,
+            )
+            .first()
+        )
         assert item.status == "pending"
 
     def test_low_confidence(self, db_session, sample_vendor, monkeypatch):
         """Confidence < 0.5 should create low_confidence record."""
         from app.config import settings
+
         monkeypatch.setattr(settings, "deep_enrichment_auto_apply_threshold", 0.8)
         monkeypatch.setattr(settings, "deep_enrichment_review_threshold", 0.5)
 
@@ -480,14 +497,19 @@ class TestConfidenceRouting:
 
         assert result == "low_confidence"
 
-        item = db_session.query(EnrichmentQueue).filter(
-            EnrichmentQueue.vendor_card_id == sample_vendor.id,
-        ).first()
+        item = (
+            db_session.query(EnrichmentQueue)
+            .filter(
+                EnrichmentQueue.vendor_card_id == sample_vendor.id,
+            )
+            .first()
+        )
         assert item.status == "low_confidence"
 
     def test_company_routing(self, db_session, sample_company, monkeypatch):
         """Route enrichment to a company entity."""
         from app.config import settings
+
         monkeypatch.setattr(settings, "deep_enrichment_auto_apply_threshold", 0.8)
         monkeypatch.setattr(settings, "deep_enrichment_review_threshold", 0.5)
 
@@ -504,9 +526,13 @@ class TestConfidenceRouting:
         db_session.commit()
 
         assert result == "auto_applied"
-        item = db_session.query(EnrichmentQueue).filter(
-            EnrichmentQueue.company_id == sample_company.id,
-        ).first()
+        item = (
+            db_session.query(EnrichmentQueue)
+            .filter(
+                EnrichmentQueue.company_id == sample_company.id,
+            )
+            .first()
+        )
         assert item is not None
         assert item.status == "auto_applied"
 
@@ -546,6 +572,7 @@ class TestConfidenceRouting:
     def test_route_with_job_id(self, db_session, sample_vendor, sample_job, monkeypatch):
         """Queue entries should link to the batch job."""
         from app.config import settings
+
         monkeypatch.setattr(settings, "deep_enrichment_auto_apply_threshold", 0.8)
         monkeypatch.setattr(settings, "deep_enrichment_review_threshold", 0.5)
 
@@ -562,9 +589,13 @@ class TestConfidenceRouting:
         )
         db_session.commit()
 
-        item = db_session.query(EnrichmentQueue).filter(
-            EnrichmentQueue.field_name == "hq_city",
-        ).first()
+        item = (
+            db_session.query(EnrichmentQueue)
+            .filter(
+                EnrichmentQueue.field_name == "hq_city",
+            )
+            .first()
+        )
         assert item.batch_job_id == sample_job.id
 
 
@@ -627,24 +658,28 @@ class TestEnrichmentQueueAPI:
         assert resp.json()["total"] == 3
 
     def test_list_queue_filter_entity_type(self, client, db_session, sample_vendor, sample_company):
-        db_session.add(EnrichmentQueue(
-            vendor_card_id=sample_vendor.id,
-            enrichment_type="company_info",
-            field_name="f1",
-            proposed_value="v1",
-            confidence=0.7,
-            source="test",
-            status="pending",
-        ))
-        db_session.add(EnrichmentQueue(
-            company_id=sample_company.id,
-            enrichment_type="company_info",
-            field_name="f2",
-            proposed_value="v2",
-            confidence=0.7,
-            source="test",
-            status="pending",
-        ))
+        db_session.add(
+            EnrichmentQueue(
+                vendor_card_id=sample_vendor.id,
+                enrichment_type="company_info",
+                field_name="f1",
+                proposed_value="v1",
+                confidence=0.7,
+                source="test",
+                status="pending",
+            )
+        )
+        db_session.add(
+            EnrichmentQueue(
+                company_id=sample_company.id,
+                enrichment_type="company_info",
+                field_name="f2",
+                proposed_value="v2",
+                confidence=0.7,
+                source="test",
+                status="pending",
+            )
+        )
         db_session.commit()
 
         resp = client.get("/api/enrichment/queue?status=pending&entity_type=vendor")
@@ -776,15 +811,17 @@ class TestEnrichmentStatsAPI:
     def test_stats_with_data(self, client, db_session, sample_vendor, sample_job):
         # Add some queue items
         for status in ("pending", "pending", "approved", "rejected"):
-            db_session.add(EnrichmentQueue(
-                vendor_card_id=sample_vendor.id,
-                enrichment_type="company_info",
-                field_name=f"f_{status}",
-                proposed_value="v",
-                confidence=0.7,
-                source="test",
-                status=status,
-            ))
+            db_session.add(
+                EnrichmentQueue(
+                    vendor_card_id=sample_vendor.id,
+                    enrichment_type="company_info",
+                    field_name=f"f_{status}",
+                    proposed_value="v",
+                    confidence=0.7,
+                    source="test",
+                    status=status,
+                )
+            )
         db_session.commit()
 
         resp = client.get("/api/enrichment/stats")
@@ -818,25 +855,35 @@ class TestQueueItemShape:
     """Verify the shape of queue items returned by API."""
 
     def test_queue_item_has_expected_fields(self, client, db_session, sample_vendor):
-        db_session.add(EnrichmentQueue(
-            vendor_card_id=sample_vendor.id,
-            enrichment_type="brand_tags",
-            field_name="brand_tags",
-            proposed_value=json.dumps(["Intel", "AMD"]),
-            confidence=0.85,
-            source="specialty_analysis",
-            status="pending",
-            created_at=datetime.now(timezone.utc),
-        ))
+        db_session.add(
+            EnrichmentQueue(
+                vendor_card_id=sample_vendor.id,
+                enrichment_type="brand_tags",
+                field_name="brand_tags",
+                proposed_value=json.dumps(["Intel", "AMD"]),
+                confidence=0.85,
+                source="specialty_analysis",
+                status="pending",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
         db_session.commit()
 
         resp = client.get("/api/enrichment/queue")
         item = resp.json()["items"][0]
 
         expected_keys = {
-            "id", "entity_type", "entity_name", "enrichment_type",
-            "field_name", "current_value", "proposed_value",
-            "confidence", "source", "status", "created_at",
+            "id",
+            "entity_type",
+            "entity_name",
+            "enrichment_type",
+            "field_name",
+            "current_value",
+            "proposed_value",
+            "confidence",
+            "source",
+            "status",
+            "created_at",
         }
         assert expected_keys.issubset(set(item.keys()))
         assert item["entity_type"] == "vendor"

@@ -86,10 +86,12 @@ class TestGraphClientRetry:
     @patch("app.utils.graph_client.asyncio.sleep", new_callable=AsyncMock)
     @patch("app.utils.graph_client.http")
     async def test_429_retries_with_retry_after(self, mock_http, mock_sleep):
-        mock_http.get = AsyncMock(side_effect=[
-            _mock_response(429, headers={"Retry-After": "3"}),
-            _mock_response(200, {"value": []}),
-        ])
+        mock_http.get = AsyncMock(
+            side_effect=[
+                _mock_response(429, headers={"Retry-After": "3"}),
+                _mock_response(200, {"value": []}),
+            ]
+        )
 
         gc = GraphClient("test-token")
         result = await gc.get_json("/me/messages")
@@ -100,10 +102,12 @@ class TestGraphClientRetry:
     @patch("app.utils.graph_client.asyncio.sleep", new_callable=AsyncMock)
     @patch("app.utils.graph_client.http")
     async def test_5xx_exponential_backoff(self, mock_http, mock_sleep):
-        mock_http.get = AsyncMock(side_effect=[
-            _mock_response(503, text="Service Unavailable"),
-            _mock_response(200, {"value": []}),
-        ])
+        mock_http.get = AsyncMock(
+            side_effect=[
+                _mock_response(503, text="Service Unavailable"),
+                _mock_response(200, {"value": []}),
+            ]
+        )
 
         gc = GraphClient("test-token")
         result = await gc.get_json("/me/messages")
@@ -201,15 +205,23 @@ class TestGraphClientPagination:
     @pytest.mark.asyncio
     @patch("app.utils.graph_client.http")
     async def test_follows_next_link(self, mock_http):
-        mock_http.get = AsyncMock(side_effect=[
-            _mock_response(200, {
-                "value": [{"id": 1}, {"id": 2}],
-                "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/messages?$skip=2",
-            }),
-            _mock_response(200, {
-                "value": [{"id": 3}],
-            }),
-        ])
+        mock_http.get = AsyncMock(
+            side_effect=[
+                _mock_response(
+                    200,
+                    {
+                        "value": [{"id": 1}, {"id": 2}],
+                        "@odata.nextLink": "https://graph.microsoft.com/v1.0/me/messages?$skip=2",
+                    },
+                ),
+                _mock_response(
+                    200,
+                    {
+                        "value": [{"id": 3}],
+                    },
+                ),
+            ]
+        )
 
         gc = GraphClient("test-token")
         items = await gc.get_all_pages("/me/messages")
@@ -218,10 +230,15 @@ class TestGraphClientPagination:
     @pytest.mark.asyncio
     @patch("app.utils.graph_client.http")
     async def test_max_items_cap(self, mock_http):
-        mock_http.get = AsyncMock(return_value=_mock_response(200, {
-            "value": [{"id": i} for i in range(100)],
-            "@odata.nextLink": "https://graph.microsoft.com/v1.0/next",
-        }))
+        mock_http.get = AsyncMock(
+            return_value=_mock_response(
+                200,
+                {
+                    "value": [{"id": i} for i in range(100)],
+                    "@odata.nextLink": "https://graph.microsoft.com/v1.0/next",
+                },
+            )
+        )
 
         gc = GraphClient("test-token")
         items = await gc.get_all_pages("/me/messages", max_items=50)
@@ -237,10 +254,15 @@ class TestGraphClientDelta:
     @pytest.mark.asyncio
     @patch("app.utils.graph_client.http")
     async def test_initial_sync_returns_items_and_token(self, mock_http):
-        mock_http.get = AsyncMock(return_value=_mock_response(200, {
-            "value": [{"id": "m1"}, {"id": "m2"}],
-            "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta?token=abc",
-        }))
+        mock_http.get = AsyncMock(
+            return_value=_mock_response(
+                200,
+                {
+                    "value": [{"id": "m1"}, {"id": "m2"}],
+                    "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta?token=abc",
+                },
+            )
+        )
 
         gc = GraphClient("test-token")
         items, token = await gc.delta_query("/me/mailFolders/Inbox/messages/delta")
@@ -250,20 +272,25 @@ class TestGraphClientDelta:
     @pytest.mark.asyncio
     @patch("app.utils.graph_client.http")
     async def test_incremental_sync_uses_token(self, mock_http):
-        mock_http.get = AsyncMock(return_value=_mock_response(200, {
-            "value": [{"id": "m3"}],
-            "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta?token=def",
-        }))
+        mock_http.get = AsyncMock(
+            return_value=_mock_response(
+                200,
+                {
+                    "value": [{"id": "m3"}],
+                    "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta?token=def",
+                },
+            )
+        )
 
         gc = GraphClient("test-token")
         old_token = "https://graph.microsoft.com/v1.0/delta?token=abc"
-        items, new_token = await gc.delta_query(
-            "/me/mailFolders/Inbox/messages/delta", delta_token=old_token
-        )
+        items, new_token = await gc.delta_query("/me/mailFolders/Inbox/messages/delta", delta_token=old_token)
 
         assert len(items) == 1
         # Should have called with the old token URL directly
-        call_url = mock_http.get.call_args.kwargs.get("url") or mock_http.get.call_args[1].get("url", mock_http.get.call_args[0][0] if mock_http.get.call_args[0] else "")
+        call_url = mock_http.get.call_args.kwargs.get("url") or mock_http.get.call_args[1].get(
+            "url", mock_http.get.call_args[0][0] if mock_http.get.call_args[0] else ""
+        )
         # The GraphClient should use the delta_token as the URL
         first_call_args = mock_http.get.call_args_list[0]
         assert old_token in str(first_call_args)
@@ -271,16 +298,24 @@ class TestGraphClientDelta:
     @pytest.mark.asyncio
     @patch("app.utils.graph_client.http")
     async def test_delta_pagination_nextlink_before_deltalink(self, mock_http):
-        mock_http.get = AsyncMock(side_effect=[
-            _mock_response(200, {
-                "value": [{"id": "m1"}],
-                "@odata.nextLink": "https://graph.microsoft.com/v1.0/next",
-            }),
-            _mock_response(200, {
-                "value": [{"id": "m2"}],
-                "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta?token=final",
-            }),
-        ])
+        mock_http.get = AsyncMock(
+            side_effect=[
+                _mock_response(
+                    200,
+                    {
+                        "value": [{"id": "m1"}],
+                        "@odata.nextLink": "https://graph.microsoft.com/v1.0/next",
+                    },
+                ),
+                _mock_response(
+                    200,
+                    {
+                        "value": [{"id": "m2"}],
+                        "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta?token=final",
+                    },
+                ),
+            ]
+        )
 
         gc = GraphClient("test-token")
         items, token = await gc.delta_query("/me/mailFolders/Inbox/messages/delta")
@@ -310,9 +345,7 @@ class TestGraphClientAdditional:
     @patch("app.utils.graph_client.http")
     async def test_max_retries_exhausted_5xx_returns_error(self, mock_http, mock_sleep):
         """After max retries on 5xx, returns error dict (line 189)."""
-        mock_http.get = AsyncMock(
-            return_value=_mock_response(503, text="Service Unavailable")
-        )
+        mock_http.get = AsyncMock(return_value=_mock_response(503, text="Service Unavailable"))
 
         gc = GraphClient("test-token")
         result = await gc.get_json("/me/messages")
@@ -347,10 +380,12 @@ class TestGraphClientAdditional:
     @patch("app.utils.graph_client.http")
     async def test_429_default_backoff(self, mock_http, mock_sleep):
         """429 without Retry-After header uses exponential backoff."""
-        mock_http.get = AsyncMock(side_effect=[
-            _mock_response(429, headers={}),
-            _mock_response(200, {"value": []}),
-        ])
+        mock_http.get = AsyncMock(
+            side_effect=[
+                _mock_response(429, headers={}),
+                _mock_response(200, {"value": []}),
+            ]
+        )
 
         gc = GraphClient("test-token")
         result = await gc.get_json("/me/messages")

@@ -9,7 +9,6 @@ Covers:
 - Backward compat: scheduler.py still exports the functions
 """
 
-import asyncio
 import os
 
 os.environ["TESTING"] = "1"

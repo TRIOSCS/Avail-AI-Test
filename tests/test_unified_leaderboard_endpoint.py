@@ -6,13 +6,9 @@ Called by: pytest
 Depends on: app/routers/dashboard.py, app/routers/performance.py
 """
 
-from datetime import date, datetime, timezone
+from datetime import date
 from unittest.mock import patch
 
-import pytest
-from sqlalchemy.orm import Session
-
-from app.models import User
 from app.models.unified_score import UnifiedScoreSnapshot
 
 
@@ -20,9 +16,16 @@ class TestUnifiedLeaderboardEndpoint:
     def test_returns_entries(self, client, db_session, test_user):
         month = date.today().replace(day=1)
         snap = UnifiedScoreSnapshot(
-            user_id=test_user.id, month=month, unified_score=72, rank=1,
-            primary_role="buyer", prospecting_pct=80, execution_pct=70,
-            followthrough_pct=60, closing_pct=80, depth_pct=50,
+            user_id=test_user.id,
+            month=month,
+            unified_score=72,
+            rank=1,
+            primary_role="buyer",
+            prospecting_pct=80,
+            execution_pct=70,
+            followthrough_pct=60,
+            closing_pct=80,
+            depth_pct=50,
         )
         db_session.add(snap)
         db_session.commit()
@@ -42,7 +45,10 @@ class TestUnifiedLeaderboardEndpoint:
     def test_accepts_month_param(self, client, db_session, test_user):
         month = date(2026, 1, 1)
         snap = UnifiedScoreSnapshot(
-            user_id=test_user.id, month=month, unified_score=55, rank=1,
+            user_id=test_user.id,
+            month=month,
+            unified_score=55,
+            rank=1,
             primary_role="buyer",
         )
         db_session.add(snap)
@@ -66,9 +72,16 @@ class TestUnifiedLeaderboardEndpoint:
     def test_entries_have_required_fields(self, client, db_session, test_user):
         month = date.today().replace(day=1)
         snap = UnifiedScoreSnapshot(
-            user_id=test_user.id, month=month, unified_score=60, rank=1,
-            primary_role="buyer", prospecting_pct=50, execution_pct=60,
-            followthrough_pct=70, closing_pct=80, depth_pct=30,
+            user_id=test_user.id,
+            month=month,
+            unified_score=60,
+            rank=1,
+            primary_role="buyer",
+            prospecting_pct=50,
+            execution_pct=60,
+            followthrough_pct=70,
+            closing_pct=80,
+            depth_pct=30,
             ai_blurb_strength="Great work!",
             ai_blurb_improvement="Try harder on depth.",
         )
@@ -78,9 +91,18 @@ class TestUnifiedLeaderboardEndpoint:
         resp = client.get("/api/dashboard/unified-leaderboard")
         entry = resp.json()["entries"][0]
         required_fields = [
-            "user_id", "user_name", "primary_role", "unified_score", "rank",
-            "prospecting_pct", "execution_pct", "followthrough_pct",
-            "closing_pct", "depth_pct", "ai_blurb_strength", "ai_blurb_improvement",
+            "user_id",
+            "user_name",
+            "primary_role",
+            "unified_score",
+            "rank",
+            "prospecting_pct",
+            "execution_pct",
+            "followthrough_pct",
+            "closing_pct",
+            "depth_pct",
+            "ai_blurb_strength",
+            "ai_blurb_improvement",
         ]
         for field in required_fields:
             assert field in entry, f"Missing field: {field}"
@@ -115,10 +137,11 @@ class TestUnifiedScoresRefreshEndpoint:
         assert resp.status_code == 403
 
     def test_admin_can_refresh(self, db_session, admin_user):
-        from app.main import app
+        from fastapi.testclient import TestClient
+
         from app.database import get_db
         from app.dependencies import require_user
-        from fastapi.testclient import TestClient
+        from app.main import app
 
         def _override_db():
             yield db_session
@@ -130,8 +153,10 @@ class TestUnifiedScoresRefreshEndpoint:
         app.dependency_overrides[require_user] = _override_user
         try:
             with TestClient(app) as c:
-                with patch("app.services.unified_score_service.compute_all_unified_scores",
-                           return_value={"computed": 3, "saved": 3}):
+                with patch(
+                    "app.services.unified_score_service.compute_all_unified_scores",
+                    return_value={"computed": 3, "saved": 3},
+                ):
                     resp = c.post("/api/performance/unified-scores/refresh")
                     assert resp.status_code == 200
                     data = resp.json()

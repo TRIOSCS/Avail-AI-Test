@@ -18,7 +18,6 @@ Covers:
 
 from datetime import datetime, timezone
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import MaterialCard, MaterialCardAudit, MaterialVendorHistory, Offer, Requirement, Sighting
@@ -38,7 +37,6 @@ from app.services.integrity_service import (
     heal_orphaned_records,
     run_integrity_check,
 )
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -67,9 +65,7 @@ def _make_requisition(db: Session, user: User) -> Requisition:
     return r
 
 
-def _make_requirement(
-    db: Session, requisition: Requisition, mpn: str = "LM317T", card_id=None
-) -> Requirement:
+def _make_requirement(db: Session, requisition: Requisition, mpn: str = "LM317T", card_id=None) -> Requirement:
     r = Requirement(
         requisition_id=requisition.id,
         primary_mpn=mpn,
@@ -80,9 +76,7 @@ def _make_requirement(
     return r
 
 
-def _make_sighting(
-    db: Session, requirement: Requirement, mpn: str = "LM317T", card_id=None
-) -> Sighting:
+def _make_sighting(db: Session, requirement: Requirement, mpn: str = "LM317T", card_id=None) -> Sighting:
     s = Sighting(
         requirement_id=requirement.id,
         vendor_name="TestVendor",
@@ -95,8 +89,7 @@ def _make_sighting(
 
 
 def _make_offer(
-    db: Session, requisition: Requisition, requirement: Requirement,
-    mpn: str = "LM317T", card_id=None
+    db: Session, requisition: Requisition, requirement: Requirement, mpn: str = "LM317T", card_id=None
 ) -> Offer:
     o = Offer(
         requisition_id=requisition.id,
@@ -500,7 +493,6 @@ class TestRunIntegrityCheck:
 class TestVendorNameNormalization:
     def test_upsert_normalizes_vendor_name(self, db_session):
         """Vendor names are stored normalized in new MaterialVendorHistory records."""
-        from datetime import timedelta
         from app.search_service import _upsert_material_card
 
         user = _make_user(db_session)
@@ -632,7 +624,6 @@ class TestMaterialCardMerge:
 
     def test_merge_reassigns_records(self, db_session):
         """Merging re-points all requirements, sightings, offers to target card."""
-        from app.routers.vendors import merge_material_cards
 
         _, _, source, target, req, sight, offer = self._setup_merge(db_session)
 
@@ -641,9 +632,9 @@ class TestMaterialCardMerge:
         target_id = target.id
 
         for model in [Requirement, Sighting, Offer]:
-            db_session.query(model).filter(
-                model.material_card_id == source_id
-            ).update({model.material_card_id: target_id}, synchronize_session="fetch")
+            db_session.query(model).filter(model.material_card_id == source_id).update(
+                {model.material_card_id: target_id}, synchronize_session="fetch"
+            )
 
         db_session.delete(source)
         db_session.commit()
@@ -686,12 +677,9 @@ class TestMaterialCardMerge:
 
         target_vhs = {
             normalize_vendor_name(vh.vendor_name): vh
-            for vh in db_session.query(MaterialVendorHistory)
-            .filter_by(material_card_id=target.id).all()
+            for vh in db_session.query(MaterialVendorHistory).filter_by(material_card_id=target.id).all()
         }
-        source_vhs = db_session.query(MaterialVendorHistory).filter_by(
-            material_card_id=source.id
-        ).all()
+        source_vhs = db_session.query(MaterialVendorHistory).filter_by(material_card_id=source.id).all()
 
         for svh in source_vhs:
             vn_key = normalize_vendor_name(svh.vendor_name)
@@ -704,7 +692,7 @@ class TestMaterialCardMerge:
                     tvh.last_seen = svh.last_seen
                     if svh.last_qty is not None:
                         tvh.last_qty = svh.last_qty
-                db.delete(svh) if False else db_session.delete(svh)
+                db_session.delete(svh)
 
         db_session.commit()
 
@@ -716,9 +704,7 @@ class TestMaterialCardMerge:
         assert vh_target.last_qty == 500  # From the later record
 
         # Source VH should be deleted
-        remaining = db_session.query(MaterialVendorHistory).filter_by(
-            material_card_id=source.id
-        ).count()
+        remaining = db_session.query(MaterialVendorHistory).filter_by(material_card_id=source.id).count()
         assert remaining == 0
 
     def test_merge_moves_unique_vendor(self, db_session):
@@ -832,9 +818,7 @@ class TestAuditLog:
         card = resolve_material_card("LM317T", db_session)
         db_session.commit()
 
-        entries = db_session.query(MaterialCardAudit).filter_by(
-            material_card_id=card.id, action="created"
-        ).all()
+        entries = db_session.query(MaterialCardAudit).filter_by(material_card_id=card.id, action="created").all()
         assert len(entries) == 1
 
     def test_resolve_existing_no_audit(self, db_session):
@@ -928,11 +912,7 @@ class TestSoftDelete:
         card1.deleted_at = datetime.now(timezone.utc)
         db_session.commit()
 
-        active_cards = (
-            db_session.query(MaterialCard)
-            .filter(MaterialCard.deleted_at.is_(None))
-            .all()
-        )
+        active_cards = db_session.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None)).all()
         assert len(active_cards) == 1
         assert active_cards[0].id == card2.id
 
@@ -999,6 +979,7 @@ class TestHealExceptionPaths:
         _make_offer(db_session, reqn, req, mpn="FAIL-OFFER", card_id=None)
 
         original = resolve_material_card
+
         def failing_resolve(mpn, db_arg):
             if mpn == "FAIL-OFFER":
                 raise RuntimeError("offer heal fail")

@@ -7,7 +7,7 @@ Called by: pytest
 Depends on: app/services/website_scraper.py, conftest.py
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -17,7 +17,6 @@ from app.services.website_scraper import (
     _classify_email,
     _scrape_vendor,
 )
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  _classify_email — pure, no mock

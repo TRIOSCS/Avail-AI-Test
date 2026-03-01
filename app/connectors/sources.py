@@ -14,6 +14,7 @@ from ..utils import safe_float, safe_int
 # ── Async-compatible circuit breaker ─────────────────────────────────
 # Opens after `fail_max` consecutive failures, resets after `reset_timeout` seconds.
 
+
 class CircuitBreaker:
     """Lightweight async-friendly circuit breaker."""
 
@@ -61,9 +62,7 @@ class BaseConnector(ABC):
     async def search(self, part_number: str) -> list[dict]:
         # Short-circuit if the breaker is open (service is known-down)
         if self._breaker.current_state == "open":
-            logger.warning(
-                f"{self.__class__.__name__} circuit breaker OPEN — skipping {part_number}"
-            )
+            logger.warning(f"{self.__class__.__name__} circuit breaker OPEN — skipping {part_number}")
             return []
 
         last_err = None
@@ -75,9 +74,7 @@ class BaseConnector(ABC):
             except (httpx.ConnectTimeout, httpx.ConnectError) as e:
                 # Server unreachable — no point retrying
                 self._breaker.record_failure()
-                logger.warning(
-                    f"{self.__class__.__name__} failed for {part_number}: {type(e).__name__}"
-                )
+                logger.warning(f"{self.__class__.__name__} failed for {part_number}: {type(e).__name__}")
                 raise
             except Exception as e:
                 self._breaker.record_failure()
@@ -85,9 +82,7 @@ class BaseConnector(ABC):
                 if attempt < self.max_retries:
                     await asyncio.sleep(2**attempt + random.uniform(0, 1))
                 else:
-                    logger.warning(
-                        f"{self.__class__.__name__} failed for {part_number}: {e}"
-                    )
+                    logger.warning(f"{self.__class__.__name__} failed for {part_number}: {e}")
         raise last_err  # propagate so caller can track the error
 
     @abstractmethod
@@ -276,21 +271,23 @@ class NexarConnector(BaseConnector):
                         continue
                     seen.add(key)
 
-                    results.append({
-                        "vendor_name": name,
-                        "manufacturer": mfr,
-                        "mpn_matched": mpn,
-                        "qty_available": int(qty) if qty else None,
-                        "unit_price": round(float(price), 4) if price else None,
-                        "currency": currency,
-                        "source_type": "octopart",
-                        "is_authorized": auth,
-                        "confidence": 5 if auth and qty else 4 if qty else 3,
-                        "octopart_url": octopart_url,
-                        "click_url": click_url,
-                        "vendor_url": homepage,
-                        "vendor_sku": sku,
-                    })
+                    results.append(
+                        {
+                            "vendor_name": name,
+                            "manufacturer": mfr,
+                            "mpn_matched": mpn,
+                            "qty_available": int(qty) if qty else None,
+                            "unit_price": round(float(price), 4) if price else None,
+                            "currency": currency,
+                            "source_type": "octopart",
+                            "is_authorized": auth,
+                            "confidence": 5 if auth and qty else 4 if qty else 3,
+                            "octopart_url": octopart_url,
+                            "click_url": click_url,
+                            "vendor_url": homepage,
+                            "vendor_sku": sku,
+                        }
+                    )
 
         logger.info(f"Nexar REST v4: {pn} -> {len(results)} seller results")
         return results
@@ -318,15 +315,11 @@ class NexarConnector(BaseConnector):
             if "not authorized" in msg.lower() and "sellers" in msg.lower():
                 logger.info(f"Nexar: falling back to aggregate query for {part_number}")
                 data = await self._run_query(self.AGGREGATE_QUERY, part_number)
-                results_data = (
-                    (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
-                )
+                results_data = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
                 return self._parse_aggregate(results_data, part_number) if results_data else []
             return []
 
-        results_data = (
-            (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
-        )
+        results_data = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
         if not results_data:
             return []
 
@@ -454,22 +447,24 @@ class NexarConnector(BaseConnector):
             if not total_avail and not price:
                 continue  # Skip parts with no useful data
 
-            results.append({
-                "vendor_name": "Octopart (aggregate)",
-                "manufacturer": mfr,
-                "mpn_matched": mpn,
-                "qty_available": int(total_avail) if total_avail else None,
-                "unit_price": round(float(price), 4) if price else None,
-                "currency": currency,
-                "source_type": "octopart",
-                "is_authorized": True,
-                "confidence": 4 if total_avail and price else 3,
-                "octopart_url": octopart_url,
-                "click_url": octopart_url,
-                "vendor_url": mfr_url,
-                "description": desc[:500] if desc else "",
-                "category": category,
-            })
+            results.append(
+                {
+                    "vendor_name": "Octopart (aggregate)",
+                    "manufacturer": mfr,
+                    "mpn_matched": mpn,
+                    "qty_available": int(total_avail) if total_avail else None,
+                    "unit_price": round(float(price), 4) if price else None,
+                    "currency": currency,
+                    "source_type": "octopart",
+                    "is_authorized": True,
+                    "confidence": 4 if total_avail and price else 3,
+                    "octopart_url": octopart_url,
+                    "click_url": octopart_url,
+                    "vendor_url": mfr_url,
+                    "description": desc[:500] if desc else "",
+                    "category": category,
+                }
+            )
 
         logger.info(f"Nexar: {pn} -> {len(results)} aggregate results (totalAvail + medianPrice)")
         return results
@@ -512,9 +507,7 @@ class BrokerBinConnector(BaseConnector):
         r = await http_redirect.get(self.API_URL, params=params, headers=headers, timeout=self.timeout)
 
         if r.status_code != 200:
-            logger.warning(
-                f"BrokerBin: HTTP {r.status_code} for {part_number}: {r.text[:200]}"
-            )
+            logger.warning(f"BrokerBin: HTTP {r.status_code} for {part_number}: {r.text[:200]}")
             return []
 
         try:
@@ -565,14 +558,8 @@ class BrokerBinConnector(BaseConnector):
                     "description": (item.get("description") or "").strip()[:500],
                     "country": (item.get("country") or "").strip(),
                     "age_in_days": age,
-                    "vendor_phone": (
-                        item.get("phone") or item.get("telephone") or ""
-                    ).strip()
-                    or None,
-                    "vendor_email": (
-                        item.get("email") or item.get("contact_email") or ""
-                    ).strip()
-                    or None,
+                    "vendor_phone": (item.get("phone") or item.get("telephone") or "").strip() or None,
+                    "vendor_email": (item.get("email") or item.get("contact_email") or "").strip() or None,
                 }
             )
 

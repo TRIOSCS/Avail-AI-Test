@@ -24,9 +24,7 @@ class EbayConnector(BaseConnector):
     async def _get_token(self) -> str:
         if self._token:
             return self._token
-        creds = base64.b64encode(
-            f"{self.client_id}:{self.client_secret}".encode()
-        ).decode()
+        creds = base64.b64encode(f"{self.client_id}:{self.client_secret}".encode()).decode()
         r = await http.post(
             self.TOKEN_URL,
             headers={

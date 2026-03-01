@@ -34,6 +34,7 @@ def _ensure_utc(dt: datetime | None) -> datetime | None:
         return dt.replace(tzinfo=timezone.utc)
     return dt
 
+
 # ── Discovery Slice Rotation ─────────────────────────────────────────
 
 DISCOVERY_ROTATION = [
@@ -137,9 +138,7 @@ async def job_discover_prospects() -> dict:
         try:
             from app.services.prospect_discovery_explorium import run_explorium_discovery_batch
 
-            existing_domains = {
-                d[0] for d in db.query(ProspectAccount.domain).all() if d[0]
-            }
+            existing_domains = {d[0] for d in db.query(ProspectAccount.domain).all() if d[0]}
             results = await run_explorium_discovery_batch(batch_id, existing_domains)
             for r in results:
                 pa = ProspectAccount(**r.model_dump() if hasattr(r, "model_dump") else r)
@@ -184,7 +183,8 @@ async def job_discover_prospects() -> dict:
         }
         logger.info(
             "Discovery complete: {} from Explorium, {} from email mining",
-            explorium_count, email_count,
+            explorium_count,
+            email_count,
         )
         return summary
 
@@ -256,11 +256,7 @@ async def job_refresh_scores() -> dict:
     db = None
     try:
         db = SessionLocal()
-        prospects = (
-            db.query(ProspectAccount)
-            .filter(ProspectAccount.status == "suggested")
-            .all()
-        )
+        prospects = db.query(ProspectAccount).filter(ProspectAccount.status == "suggested").all()
 
         refreshed = 0
         upgraded = 0
@@ -306,7 +302,9 @@ async def job_refresh_scores() -> dict:
         }
         logger.info(
             "Refreshed {} prospects, {} moved up, {} moved down",
-            refreshed, upgraded, downgraded,
+            refreshed,
+            upgraded,
+            downgraded,
         )
         return summary
 
@@ -383,9 +381,8 @@ async def job_expire_and_resurface() -> dict:
             signals = p.readiness_signals or {}
             intent = signals.get("intent", {})
             hiring = signals.get("hiring", {})
-            has_fresh_signals = (
-                (isinstance(intent, dict) and intent.get("strength") in ("strong", "moderate"))
-                or (isinstance(hiring, dict) and hiring.get("type"))
+            has_fresh_signals = (isinstance(intent, dict) and intent.get("strength") in ("strong", "moderate")) or (
+                isinstance(hiring, dict) and hiring.get("type")
             )
             if has_fresh_signals and (p.readiness_score or 0) >= 40:
                 p.status = "suggested"
@@ -425,9 +422,7 @@ async def job_pool_health_report() -> dict:
 
         # Status breakdown
         status_counts = dict(
-            db.query(ProspectAccount.status, func.count(ProspectAccount.id))
-            .group_by(ProspectAccount.status)
-            .all()
+            db.query(ProspectAccount.status, func.count(ProspectAccount.id)).group_by(ProspectAccount.status).all()
         )
 
         # Source breakdown
@@ -467,9 +462,7 @@ async def job_pool_health_report() -> dict:
 
         # Credit usage from recent batches
         credits_used = (
-            db.query(func.sum(DiscoveryBatch.credits_used))
-            .filter(DiscoveryBatch.created_at >= month_start)
-            .scalar()
+            db.query(func.sum(DiscoveryBatch.credits_used)).filter(DiscoveryBatch.created_at >= month_start).scalar()
             or 0
         )
 
@@ -484,7 +477,10 @@ async def job_pool_health_report() -> dict:
 
         logger.info(
             "Pool health: {} by status, claimed={}, dismissed={}, credits={}",
-            status_counts, claimed_this_month, dismissed_this_month, credits_used,
+            status_counts,
+            claimed_this_month,
+            dismissed_this_month,
+            credits_used,
         )
         return report
 

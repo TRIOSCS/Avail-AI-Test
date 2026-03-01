@@ -24,10 +24,16 @@ def _draft_response(subject="RFQ: LM358DR", body="We are looking to source..."):
     return {"subject": subject, "body": body}
 
 
-def _part(part_number="LM358DR", manufacturer=None, quantity=1000,
-          target_price=None, date_code_requirement=None,
-          condition_requirement=None, delivery_deadline=None,
-          additional_notes=None):
+def _part(
+    part_number="LM358DR",
+    manufacturer=None,
+    quantity=1000,
+    target_price=None,
+    date_code_requirement=None,
+    condition_requirement=None,
+    delivery_deadline=None,
+    additional_notes=None,
+):
     """Build a part dict for draft requests."""
     return {
         "part_number": part_number,
@@ -124,11 +130,13 @@ async def test_draft_with_requirements():
         mock.return_value = mock_result
         await draft_rfq_email(
             vendor_name="Arrow",
-            parts=[_part(
-                "LM358DR",
-                date_code_requirement="2024+",
-                condition_requirement="new only",
-            )],
+            parts=[
+                _part(
+                    "LM358DR",
+                    date_code_requirement="2024+",
+                    condition_requirement="new only",
+                )
+            ],
             buyer_name="Mike",
         )
 
@@ -196,7 +204,9 @@ async def test_draft_default_subject_many_parts():
     with patch("app.services.ai_email_drafter.gradient_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         result = await draft_rfq_email(
-            vendor_name="Arrow", parts=parts, buyer_name="Mike",
+            vendor_name="Arrow",
+            parts=parts,
+            buyer_name="Mike",
         )
 
     assert "+2 more" in result["subject"]
@@ -236,7 +246,9 @@ async def test_draft_empty_body():
 async def test_draft_empty_parts():
     """Returns None for empty parts list."""
     result = await draft_rfq_email(
-        vendor_name="Arrow", parts=[], buyer_name="Mike",
+        vendor_name="Arrow",
+        parts=[],
+        buyer_name="Mike",
     )
     assert result is None
 
@@ -249,7 +261,9 @@ async def test_draft_uses_generation_temperature():
     with patch("app.services.ai_email_drafter.gradient_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         await draft_rfq_email(
-            vendor_name="Arrow", parts=[_part()], buyer_name="Mike",
+            vendor_name="Arrow",
+            parts=[_part()],
+            buyer_name="Mike",
         )
 
     assert mock.call_args.kwargs["temperature"] == 0.6
@@ -286,6 +300,7 @@ def test_format_parts_with_condition():
 
 def test_format_parts_with_deadline():
     from datetime import date
+
     parts = [_part("LM358DR", delivery_deadline=date(2026, 3, 15))]
     result = _format_parts(parts)
     assert "2026-03-15" in result
@@ -308,8 +323,10 @@ def test_draft_rfq_email_endpoint(client):
         body="Please provide pricing for LM358DR.",
     )
 
-    with patch("app.routers.ai.settings") as mock_settings, \
-         patch("app.services.ai_email_drafter.gradient_json", new_callable=AsyncMock) as mock:
+    with (
+        patch("app.routers.ai.settings") as mock_settings,
+        patch("app.services.ai_email_drafter.gradient_json", new_callable=AsyncMock) as mock,
+    ):
         mock_settings.ai_features_enabled = "all"
         mock.return_value = mock_result
         resp = client.post(
@@ -394,6 +411,7 @@ class TestFormatPartsEdgeCases:
     def test_delivery_deadline_as_date(self):
         """delivery_deadline as a date object uses isoformat."""
         from datetime import date
+
         from app.services.ai_email_drafter import _format_parts
 
         parts = [{"part_number": "LM317T", "quantity": 100, "delivery_deadline": date(2026, 3, 15)}]
@@ -411,18 +429,21 @@ class TestFormatPartsEdgeCases:
     def test_all_optional_fields(self):
         """All optional fields are formatted together."""
         from datetime import date
+
         from app.services.ai_email_drafter import _format_parts
 
-        parts = [{
-            "part_number": "LM317T",
-            "manufacturer": "TI",
-            "quantity": 100,
-            "target_price": 0.75,
-            "date_code_requirement": "2024+",
-            "condition_requirement": "new",
-            "delivery_deadline": date(2026, 6, 1),
-            "additional_notes": "Critical",
-        }]
+        parts = [
+            {
+                "part_number": "LM317T",
+                "manufacturer": "TI",
+                "quantity": 100,
+                "target_price": 0.75,
+                "date_code_requirement": "2024+",
+                "condition_requirement": "new",
+                "delivery_deadline": date(2026, 6, 1),
+                "additional_notes": "Critical",
+            }
+        ]
         result = _format_parts(parts)
         assert "Target: $0.75" in result
         assert "DC req: 2024+" in result

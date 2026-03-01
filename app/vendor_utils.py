@@ -210,7 +210,7 @@ def find_vendor_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> li
     candidates = []
 
     for i, card_a in enumerate(cards):
-        for card_b in cards[i + 1:]:
+        for card_b in cards[i + 1 :]:
             pair_key = (min(card_a.id, card_b.id), max(card_a.id, card_b.id))
             if pair_key in seen_pairs:
                 continue
@@ -218,11 +218,21 @@ def find_vendor_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> li
             score = fuzz.token_sort_ratio(card_a.normalized_name, card_b.normalized_name)
             if score >= threshold:
                 seen_pairs.add(pair_key)
-                candidates.append({
-                    "vendor_a": {"id": card_a.id, "name": card_a.display_name, "sightings": card_a.sighting_count or 0},
-                    "vendor_b": {"id": card_b.id, "name": card_b.display_name, "sightings": card_b.sighting_count or 0},
-                    "score": score,
-                })
+                candidates.append(
+                    {
+                        "vendor_a": {
+                            "id": card_a.id,
+                            "name": card_a.display_name,
+                            "sightings": card_a.sighting_count or 0,
+                        },
+                        "vendor_b": {
+                            "id": card_b.id,
+                            "name": card_b.display_name,
+                            "sightings": card_b.sighting_count or 0,
+                        },
+                        "score": score,
+                    }
+                )
 
             if len(candidates) >= limit:
                 break

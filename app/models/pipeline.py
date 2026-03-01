@@ -31,16 +31,12 @@ class SyncState(Base):
 
     __tablename__ = "sync_state"
     id = Column(Integer, primary_key=True)
-    user_id = Column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     folder = Column(String(100), nullable=False)
     delta_token = Column(Text)
     last_sync_at = Column(DateTime)
 
-    __table_args__ = (
-        Index("ix_sync_state_user_folder", "user_id", "folder", unique=True),
-    )
+    __table_args__ = (Index("ix_sync_state_user_folder", "user_id", "folder", unique=True),)
 
 
 class ColumnMappingCache(Base):
@@ -54,9 +50,7 @@ class ColumnMappingCache(Base):
     confidence = Column(Float, nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    __table_args__ = (
-        Index("ix_colmap_domain_fp", "vendor_domain", "file_fingerprint", unique=True),
-    )
+    __table_args__ = (Index("ix_colmap_domain_fp", "vendor_domain", "file_fingerprint", unique=True),)
 
 
 class PendingBatch(Base):
@@ -73,6 +67,4 @@ class PendingBatch(Base):
     result_count = Column(Integer)
     error_message = Column(String)
 
-    __table_args__ = (
-        Index("ix_pending_batches_status", "status", "submitted_at"),
-    )
+    __table_args__ = (Index("ix_pending_batches_status", "status", "submitted_at"),)

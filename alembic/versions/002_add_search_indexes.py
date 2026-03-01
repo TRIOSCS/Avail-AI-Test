@@ -7,6 +7,7 @@ Create Date: 2026-02-21
 Adds B-tree indexes on requisitions.name, requisitions.customer_name,
 and requirements.primary_mpn to eliminate full table scans during search.
 """
+
 from typing import Sequence, Union
 
 from alembic import op

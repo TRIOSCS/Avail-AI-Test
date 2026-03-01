@@ -11,14 +11,12 @@ Depends on: conftest (db_session, test_user)
 
 from datetime import datetime, timezone
 
-import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Company, User, VendorCard, VendorContact
+from app.models import Company, VendorCard, VendorContact
 from app.models.crm import CustomerSite, SiteContact
 from app.models.prospect_account import ProspectAccount
 from app.services.prospect_warm_intros import detect_warm_intros, generate_one_liner
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -137,9 +135,7 @@ def test_warm_intro_cold(db_session):
 def test_one_liner_warm_intro(db_session):
     """Warm intro takes priority."""
     p = _make_prospect(db_session)
-    warm = {"has_warm_intro": True, "warmth": "hot", "contacts": [
-        {"name": "John Smith", "email": "j@test.com"}
-    ]}
+    warm = {"has_warm_intro": True, "warmth": "hot", "contacts": [{"name": "John Smith", "email": "j@test.com"}]}
     result = generate_one_liner(p, warm)
     assert "John Smith" in result
     assert "prior engagement" in result.lower()
@@ -282,7 +278,7 @@ def test_warm_intro_vendor_card_warm_with_low_score_contacts(db_session):
 
 def test_warm_intro_sighting_only(db_session):
     """Sighting count > 0 triggers warm intro when no VendorCard/SiteContact."""
-    from unittest.mock import patch, MagicMock
+    from unittest.mock import MagicMock, patch
 
     p = _make_prospect(db_session, domain="sightingonly.com")
 
@@ -292,15 +288,14 @@ def test_warm_intro_sighting_only(db_session):
     original_query = db_session.query
 
     def patched_query(*args, **kwargs):
-        from sqlalchemy import func as sa_func
         # Check if this is a count query on Sighting
-        if args and hasattr(args[0], 'key') and 'count' in str(args[0]):
+        if args and hasattr(args[0], "key") and "count" in str(args[0]):
             mock_q = MagicMock()
             mock_q.filter.return_value.scalar.return_value = 7
             return mock_q
         return original_query(*args, **kwargs)
 
-    with patch.object(db_session, 'query', side_effect=patched_query):
+    with patch.object(db_session, "query", side_effect=patched_query):
         result = detect_warm_intros(p, db_session)
 
     assert result["has_warm_intro"] is True
@@ -498,6 +493,7 @@ def test_enrich_warm_intros_batch_skips_non_suggested(db_session):
 def test_enrich_warm_intros_batch_handles_errors(db_session):
     """Batch enrichment counts errors without crashing."""
     from unittest.mock import patch
+
     from app.services.prospect_warm_intros import enrich_warm_intros_batch
 
     p = _make_prospect(db_session, domain="errortest.com", fit_score=80)

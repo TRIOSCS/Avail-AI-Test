@@ -9,8 +9,9 @@ Revises: 012_vendor_name_normalized
 Create Date: 2026-02-26
 """
 
-from alembic import op
 from sqlalchemy import text
+
+from alembic import op
 
 revision = "013_avail_score_snapshot"
 down_revision = "012_vendor_name_normalized"
@@ -20,7 +21,8 @@ depends_on = None
 
 def upgrade() -> None:
     conn = op.get_bind()
-    conn.execute(text("""
+    conn.execute(
+        text("""
         CREATE TABLE IF NOT EXISTS avail_score_snapshot (
             id SERIAL PRIMARY KEY,
             user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -45,16 +47,19 @@ def upgrade() -> None:
             created_at TIMESTAMP,
             updated_at TIMESTAMP
         )
-    """))
-    conn.execute(text(
-        "CREATE UNIQUE INDEX IF NOT EXISTS ix_ass_user_month ON avail_score_snapshot (user_id, month, role_type)"
-    ))
-    conn.execute(text(
-        "CREATE INDEX IF NOT EXISTS ix_ass_month_role_rank ON avail_score_snapshot (month, role_type, rank)"
-    ))
-    conn.execute(text(
-        "CREATE INDEX IF NOT EXISTS ix_ass_month_role_score ON avail_score_snapshot (month, role_type, total_score)"
-    ))
+    """)
+    )
+    conn.execute(
+        text("CREATE UNIQUE INDEX IF NOT EXISTS ix_ass_user_month ON avail_score_snapshot (user_id, month, role_type)")
+    )
+    conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_ass_month_role_rank ON avail_score_snapshot (month, role_type, rank)")
+    )
+    conn.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_ass_month_role_score ON avail_score_snapshot (month, role_type, total_score)"
+        )
+    )
 
 
 def downgrade() -> None:

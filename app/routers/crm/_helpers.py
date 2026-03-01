@@ -19,21 +19,24 @@ def _quote_date_iso(q: Quote) -> str | None:
     return dt.isoformat() if dt else None
 
 
-def record_changes(db: Session, entity_type: str, entity_id: int,
-                   user_id: int, old_dict: dict, new_dict: dict, fields: list[str]):
+def record_changes(
+    db: Session, entity_type: str, entity_id: int, user_id: int, old_dict: dict, new_dict: dict, fields: list[str]
+):
     """Record field-level changes to the change_log table."""
     for f in fields:
         old_val = str(old_dict.get(f) or "")
         new_val = str(new_dict.get(f) or "")
         if old_val != new_val:
-            db.add(ChangeLog(
-                entity_type=entity_type,
-                entity_id=entity_id,
-                user_id=user_id,
-                field_name=f,
-                old_value=old_val,
-                new_value=new_val,
-            ))
+            db.add(
+                ChangeLog(
+                    entity_type=entity_type,
+                    entity_id=entity_id,
+                    user_id=user_id,
+                    field_name=f,
+                    old_value=old_val,
+                    new_value=new_val,
+                )
+            )
 
 
 def get_last_quoted_price(mpn: str, db: Session) -> dict | None:
@@ -135,16 +138,8 @@ def quote_to_dict(q: Quote, db=None) -> dict:
             if q.customer_site and q.customer_site.company
             else ""
         ),
-        "company_domain": (
-            q.customer_site.company.domain
-            if q.customer_site and q.customer_site.company
-            else None
-        ),
-        "company_name_short": (
-            q.customer_site.company.name
-            if q.customer_site and q.customer_site.company
-            else None
-        ),
+        "company_domain": (q.customer_site.company.domain if q.customer_site and q.customer_site.company else None),
+        "company_name_short": (q.customer_site.company.name if q.customer_site and q.customer_site.company else None),
         "contact_name": q.customer_site.contact_name if q.customer_site else None,
         "contact_email": q.customer_site.contact_email if q.customer_site else None,
         "site_contacts": [
@@ -233,8 +228,8 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
         bg = row_bg[idx % 2]
         td = f'style="padding:10px 14px;border-bottom:1px solid #e8ecf0;background:{bg}"'
         rows += f"""<tr>
-            <td {td}><strong>{_esc(item.get('mpn',''))}</strong></td>
-            <td {td}>{_esc(item.get('manufacturer','') or '—')}</td>
+            <td {td}><strong>{_esc(item.get("mpn", ""))}</strong></td>
+            <td {td}>{_esc(item.get("manufacturer", "") or "—")}</td>
             <td {td} style="padding:10px 14px;border-bottom:1px solid #e8ecf0;background:{bg};text-align:center">{qty}</td>
             <td {td}>{_esc(cond)}</td>
             <td {td}>{_esc(dc)}</td>
@@ -256,7 +251,11 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
     terms_rows += f'<tr><td style="padding:6px 0;color:#8e8f92">Valid Until</td><td style="padding:6px 0;font-weight:600">{expires_str}</td></tr>'
 
     greeting = f"Dear {_esc(to_name)}," if to_name else "Dear Valued Customer,"
-    notes_block = f'<div style="margin-top:16px;padding:12px 16px;background:#F3F5F7;border-left:3px solid {BLUE};border-radius:4px;font-size:13px;color:#444">{_esc(quote.notes)}</div>' if quote.notes else ""
+    notes_block = (
+        f'<div style="margin-top:16px;padding:12px 16px;background:#F3F5F7;border-left:3px solid {BLUE};border-radius:4px;font-size:13px;color:#444">{_esc(quote.notes)}</div>'
+        if quote.notes
+        else ""
+    )
     signature = user.email_signature or user.name or "Trio Supply Chain Solutions"
     sig_html = _esc(signature).replace("\n", "<br>")
 
@@ -289,8 +288,8 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
         </td>
         <td style="text-align:right;vertical-align:top">
             <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:{BLUE};margin-bottom:6px">Prepared For</div>
-            <div style="font-size:14px;font-weight:600;color:{DARK}">{_esc(company_name or '')}</div>
-            {f'<div style="font-size:12px;color:#8e8f92;margin-top:2px">{_esc(to_name)}</div>' if to_name else ''}
+            <div style="font-size:14px;font-weight:600;color:{DARK}">{_esc(company_name or "")}</div>
+            {f'<div style="font-size:12px;color:#8e8f92;margin-top:2px">{_esc(to_name)}</div>' if to_name else ""}
         </td>
     </tr></table>
 </td></tr>
@@ -329,7 +328,7 @@ def _build_quote_email_html(quote: Quote, to_name: str, company_name: str, user:
     <!-- Terms -->
     <table cellpadding="0" cellspacing="0" style="font-size:13px;margin-bottom:16px;background:#FBFBFC;border-radius:6px;border:1px solid #e8ecf0;width:100%">
         <tr><td colspan="2" style="padding:12px 16px 6px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:{NAVY}">Terms</td></tr>
-        {terms_rows.replace('padding:6px 0', 'padding:6px 16px')}
+        {terms_rows.replace("padding:6px 0", "padding:6px 16px")}
         <tr><td colspan="2" style="height:8px"></td></tr>
     </table>
 

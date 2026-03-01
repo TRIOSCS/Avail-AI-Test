@@ -4,14 +4,14 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.models import SystemConfig, User
+from app.models import SystemConfig
 
 # ── Helper: create client with specific user role ────────────────────
+
 
 def _make_client(db_session, user):
     """Return a TestClient authenticated as the given user."""
@@ -28,18 +28,21 @@ def _make_client(db_session, user):
     def _override_buyer():
         if user.role == "sales":
             from fastapi import HTTPException
+
             raise HTTPException(403, "Buyer role required")
         return user
 
     def _override_admin():
         if user.role != "admin":
             from fastapi import HTTPException
+
             raise HTTPException(403, "Admin access required")
         return user
 
     def _override_settings():
         if user.role != "admin":
             from fastapi import HTTPException
+
             raise HTTPException(403, "Settings access required")
         return user
 
@@ -77,6 +80,7 @@ def seed_config(db_session):
 
 
 # ── Access Control Tests ──────────────────────────────────────────────
+
 
 def test_require_admin_rejects_buyer(buyer_client):
     resp = buyer_client.get("/api/admin/users")
@@ -154,6 +158,7 @@ def test_sales_cannot_access_credentials(db_session, sales_user):
 
 # ── User Management Tests ────────────────────────────────────────────
 
+
 def test_list_users(admin_client, admin_user, test_user):
     resp = admin_client.get("/api/admin/users")
     assert resp.status_code == 200
@@ -164,8 +169,7 @@ def test_list_users(admin_client, admin_user, test_user):
 
 
 def test_update_user_role(admin_client, db_session, test_user):
-    resp = admin_client.put(f"/api/admin/users/{test_user.id}",
-                            json={"role": "sales"})
+    resp = admin_client.put(f"/api/admin/users/{test_user.id}", json={"role": "sales"})
     assert resp.status_code == 200
     assert resp.json()["role"] == "sales"
     db_session.refresh(test_user)
@@ -173,27 +177,25 @@ def test_update_user_role(admin_client, db_session, test_user):
 
 
 def test_cannot_deactivate_self(admin_client, admin_user):
-    resp = admin_client.put(f"/api/admin/users/{admin_user.id}",
-                            json={"is_active": False})
+    resp = admin_client.put(f"/api/admin/users/{admin_user.id}", json={"is_active": False})
     assert resp.status_code == 400
     assert "yourself" in resp.json()["error"].lower()
 
 
 def test_cannot_change_own_role(admin_client, admin_user):
-    resp = admin_client.put(f"/api/admin/users/{admin_user.id}",
-                            json={"role": "buyer"})
+    resp = admin_client.put(f"/api/admin/users/{admin_user.id}", json={"role": "buyer"})
     assert resp.status_code == 400
     assert "own role" in resp.json()["error"].lower()
 
 
 def test_deactivate_other_user(admin_client, db_session, test_user):
-    resp = admin_client.put(f"/api/admin/users/{test_user.id}",
-                            json={"is_active": False})
+    resp = admin_client.put(f"/api/admin/users/{test_user.id}", json={"is_active": False})
     assert resp.status_code == 200
     assert resp.json()["is_active"] is False
 
 
 # ── Config Tests ─────────────────────────────────────────────────────
+
 
 def test_get_config(admin_client, seed_config):
     resp = admin_client.get("/api/admin/config")
@@ -205,14 +207,14 @@ def test_get_config(admin_client, seed_config):
 
 
 def test_set_config(admin_client, db_session, seed_config, admin_user):
-    resp = admin_client.put("/api/admin/config/inbox_scan_interval_min",
-                            json={"value": "15"})
+    resp = admin_client.put("/api/admin/config/inbox_scan_interval_min", json={"value": "15"})
     assert resp.status_code == 200
     assert resp.json()["value"] == "15"
     assert resp.json()["updated_by"] == admin_user.email
 
 
 # ── Health Endpoint Test ─────────────────────────────────────────────
+
 
 def test_health_endpoint(admin_client):
     resp = admin_client.get("/api/admin/health")

@@ -9,8 +9,9 @@ Revises: 017_proactive_matches_cph
 Create Date: 2026-02-26
 """
 
-from alembic import op
 from sqlalchemy import text
+
+from alembic import op
 
 revision = "018_missing_orm_cols"
 down_revision = "017_proactive_matches_cph"

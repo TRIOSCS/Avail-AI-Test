@@ -142,6 +142,7 @@ def test_recover_stale_searches(db_session, test_requisition):
 
     # Create items in various states — need unique requirement_ids for the unique constraint
     from app.models import Requirement
+
     req2 = Requirement(requisition_id=req_id, primary_mpn="LM317T", normalized_mpn="LM317T")
     req3 = Requirement(requisition_id=req_id, primary_mpn="NE555", normalized_mpn="NE555")
     db_session.add_all([req2, req3])

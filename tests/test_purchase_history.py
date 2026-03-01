@@ -1,9 +1,8 @@
 """Tests for customer purchase history model and upsert service."""
 
-from datetime import datetime, timezone
 from decimal import Decimal
 
-from app.models import Company, CustomerSite, MaterialCard, Offer, Requisition, Requirement
+from app.models import Company, MaterialCard
 from app.models.purchase_history import CustomerPartHistory
 from app.services.purchase_history_service import upsert_purchase
 
@@ -46,14 +45,24 @@ def test_unique_constraint(db_session):
     db_session.add(card)
     db_session.flush()
 
-    db_session.add(CustomerPartHistory(
-        company_id=co.id, material_card_id=card.id, mpn="XYZ-789", source="avail_offer",
-    ))
+    db_session.add(
+        CustomerPartHistory(
+            company_id=co.id,
+            material_card_id=card.id,
+            mpn="XYZ-789",
+            source="avail_offer",
+        )
+    )
     db_session.commit()
 
-    db_session.add(CustomerPartHistory(
-        company_id=co.id, material_card_id=card.id, mpn="XYZ-789", source="avail_offer",
-    ))
+    db_session.add(
+        CustomerPartHistory(
+            company_id=co.id,
+            material_card_id=card.id,
+            mpn="XYZ-789",
+            source="avail_offer",
+        )
+    )
     try:
         db_session.commit()
         assert False, "Should have raised IntegrityError"
@@ -69,12 +78,22 @@ def test_different_sources_allowed(db_session):
     db_session.add(card)
     db_session.flush()
 
-    db_session.add(CustomerPartHistory(
-        company_id=co.id, material_card_id=card.id, mpn="DEF-456", source="avail_offer",
-    ))
-    db_session.add(CustomerPartHistory(
-        company_id=co.id, material_card_id=card.id, mpn="DEF-456", source="avail_quote_won",
-    ))
+    db_session.add(
+        CustomerPartHistory(
+            company_id=co.id,
+            material_card_id=card.id,
+            mpn="DEF-456",
+            source="avail_offer",
+        )
+    )
+    db_session.add(
+        CustomerPartHistory(
+            company_id=co.id,
+            material_card_id=card.id,
+            mpn="DEF-456",
+            source="avail_quote_won",
+        )
+    )
     db_session.commit()
 
     count = db_session.query(CustomerPartHistory).filter_by(company_id=co.id).count()
@@ -119,15 +138,23 @@ def test_upsert_updates_existing(db_session):
 
     # First purchase: $10, qty 100
     upsert_purchase(
-        db_session, company_id=co.id, material_card_id=card.id,
-        source="avail_offer", unit_price=10.00, quantity=100,
+        db_session,
+        company_id=co.id,
+        material_card_id=card.id,
+        source="avail_offer",
+        unit_price=10.00,
+        quantity=100,
     )
     db_session.flush()
 
     # Second purchase: $20, qty 200
     result = upsert_purchase(
-        db_session, company_id=co.id, material_card_id=card.id,
-        source="avail_offer", unit_price=20.00, quantity=200,
+        db_session,
+        company_id=co.id,
+        material_card_id=card.id,
+        source="avail_offer",
+        unit_price=20.00,
+        quantity=200,
     )
     db_session.commit()
 
@@ -148,7 +175,9 @@ def test_upsert_no_price(db_session):
     db_session.flush()
 
     result = upsert_purchase(
-        db_session, company_id=co.id, material_card_id=card.id,
+        db_session,
+        company_id=co.id,
+        material_card_id=card.id,
         source="salesforce_import",
     )
     db_session.commit()
@@ -168,14 +197,20 @@ def test_upsert_updates_source_ref(db_session):
     db_session.flush()
 
     upsert_purchase(
-        db_session, company_id=co.id, material_card_id=card.id,
-        source="avail_offer", source_ref="offer:1",
+        db_session,
+        company_id=co.id,
+        material_card_id=card.id,
+        source="avail_offer",
+        source_ref="offer:1",
     )
     db_session.flush()
 
     result = upsert_purchase(
-        db_session, company_id=co.id, material_card_id=card.id,
-        source="avail_offer", source_ref="offer:2",
+        db_session,
+        company_id=co.id,
+        material_card_id=card.id,
+        source="avail_offer",
+        source_ref="offer:2",
     )
     db_session.commit()
 
@@ -190,9 +225,14 @@ def test_cascade_delete_company(db_session):
     db_session.add(card)
     db_session.flush()
 
-    db_session.add(CustomerPartHistory(
-        company_id=co.id, material_card_id=card.id, mpn="CAS-001", source="avail_offer",
-    ))
+    db_session.add(
+        CustomerPartHistory(
+            company_id=co.id,
+            material_card_id=card.id,
+            mpn="CAS-001",
+            source="avail_offer",
+        )
+    )
     db_session.commit()
 
     db_session.delete(co)
@@ -210,9 +250,14 @@ def test_cascade_delete_material_card(db_session):
     db_session.add(card)
     db_session.flush()
 
-    db_session.add(CustomerPartHistory(
-        company_id=co.id, material_card_id=card.id, mpn="CAS-002", source="avail_offer",
-    ))
+    db_session.add(
+        CustomerPartHistory(
+            company_id=co.id,
+            material_card_id=card.id,
+            mpn="CAS-002",
+            source="avail_offer",
+        )
+    )
     db_session.commit()
 
     db_session.delete(card)

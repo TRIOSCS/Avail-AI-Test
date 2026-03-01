@@ -64,16 +64,18 @@ async def search_company_contacts(
             for p in profiles[:limit]:
                 emails = p.get("emails", [])
                 phones = p.get("phones", [])
-                contacts.append({
-                    "full_name": p.get("name"),
-                    "title": p.get("current_title"),
-                    "email": emails[0].get("email") if emails else None,
-                    "phone": phones[0].get("number") if phones else None,
-                    "linkedin_url": p.get("linkedin_url"),
-                    "company_name": p.get("current_employer"),
-                    "source": "rocketreach",
-                    "confidence": 0.8 if emails else 0.5,
-                })
+                contacts.append(
+                    {
+                        "full_name": p.get("name"),
+                        "title": p.get("current_title"),
+                        "email": emails[0].get("email") if emails else None,
+                        "phone": phones[0].get("number") if phones else None,
+                        "linkedin_url": p.get("linkedin_url"),
+                        "company_name": p.get("current_employer"),
+                        "source": "rocketreach",
+                        "confidence": 0.8 if emails else 0.5,
+                    }
+                )
             return contacts
         except Exception as e:
             logger.warning("RocketReach search error: %s", e)

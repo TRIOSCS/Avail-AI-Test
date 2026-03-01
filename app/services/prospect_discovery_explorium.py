@@ -81,9 +81,7 @@ def _get_api_key() -> str:
 # ── API calls ────────────────────────────────────────────────────────
 
 
-async def discover_companies_with_signals(
-    segment_key: str, region_key: str
-) -> list[dict]:
+async def discover_companies_with_signals(segment_key: str, region_key: str) -> list[dict]:
     """Call Explorium API to find companies matching an ICP segment + region.
 
     Returns raw normalized dicts with company data + signal data combined.
@@ -123,7 +121,10 @@ async def discover_companies_with_signals(
         if resp.status_code != 200:
             logger.warning(
                 "Explorium search failed for {}/{}: {} {}",
-                segment_key, region_key, resp.status_code, resp.text[:200],
+                segment_key,
+                region_key,
+                resp.status_code,
+                resp.text[:200],
             )
             return []
 
@@ -134,7 +135,9 @@ async def discover_companies_with_signals(
 
         logger.info(
             "Explorium {}/{}: {} raw results",
-            segment_key, region_key, len(businesses),
+            segment_key,
+            region_key,
+            len(businesses),
         )
 
         return [normalize_explorium_result(b, segment_key) for b in businesses]
@@ -174,11 +177,19 @@ def normalize_explorium_result(raw: dict, segment_key: str) -> dict:
     intent_topics = raw.get("business_intent_topics") or raw.get("intent_topics") or []
     if isinstance(intent_topics, list) and intent_topics:
         component_topics = [
-            t for t in intent_topics
-            if any(kw in t.lower() for kw in [
-                "electronic", "component", "semiconductor", "circuit",
-                "procurement", "sourcing",
-            ])
+            t
+            for t in intent_topics
+            if any(
+                kw in t.lower()
+                for kw in [
+                    "electronic",
+                    "component",
+                    "semiconductor",
+                    "circuit",
+                    "procurement",
+                    "sourcing",
+                ]
+            )
         ]
         if len(component_topics) >= 3:
             intent_strength = "strong"
@@ -201,13 +212,17 @@ def normalize_explorium_result(raw: dict, segment_key: str) -> dict:
         engineering_growth = workforce.get("engineering") or workforce.get("r_and_d")
 
         if procurement_growth and (
-            isinstance(procurement_growth, (int, float)) and procurement_growth > 0
-            or isinstance(procurement_growth, str) and "growth" in procurement_growth.lower()
+            isinstance(procurement_growth, (int, float))
+            and procurement_growth > 0
+            or isinstance(procurement_growth, str)
+            and "growth" in procurement_growth.lower()
         ):
             result["hiring"] = {"type": "procurement", "detail": procurement_growth}
         elif engineering_growth and (
-            isinstance(engineering_growth, (int, float)) and engineering_growth > 0
-            or isinstance(engineering_growth, str) and "growth" in engineering_growth.lower()
+            isinstance(engineering_growth, (int, float))
+            and engineering_growth > 0
+            or isinstance(engineering_growth, str)
+            and "growth" in engineering_growth.lower()
         ):
             result["hiring"] = {"type": "engineering", "detail": engineering_growth}
         else:
@@ -221,11 +236,13 @@ def normalize_explorium_result(raw: dict, segment_key: str) -> dict:
     if isinstance(events_raw, list):
         for ev in events_raw:
             if isinstance(ev, dict):
-                result["events"].append({
-                    "type": ev.get("type") or ev.get("event_type", "unknown"),
-                    "date": ev.get("date") or ev.get("event_date"),
-                    "description": ev.get("description") or ev.get("title"),
-                })
+                result["events"].append(
+                    {
+                        "type": ev.get("type") or ev.get("event_type", "unknown"),
+                        "date": ev.get("date") or ev.get("event_date"),
+                        "description": ev.get("description") or ev.get("title"),
+                    }
+                )
             elif isinstance(ev, str):
                 result["events"].append({"type": ev, "date": None, "description": ev})
 
@@ -345,9 +362,7 @@ async def run_explorium_discovery_batch(
                     "events": r.get("events", []),
                     "hiring": r.get("hiring", {}),
                 }
-                readiness_score, readiness_breakdown = calculate_readiness_score(
-                    fit_data, signals
-                )
+                readiness_score, readiness_breakdown = calculate_readiness_score(fit_data, signals)
 
                 prospect = ProspectAccountCreate(
                     name=r["name"],
@@ -378,7 +393,10 @@ async def run_explorium_discovery_batch(
 
     logger.info(
         "Explorium batch {}: {} raw results, {} unique after dedup, ~{} credits",
-        batch_id, total_raw, len(prospects), credits_est,
+        batch_id,
+        total_raw,
+        len(prospects),
+        credits_est,
     )
 
     return prospects

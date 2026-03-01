@@ -58,6 +58,7 @@ def update_worker_status(db: Session, **kwargs):
 async def run_ai_gate(db: Session):
     """Run the AI gate (async wrapper since claude_structured is async)."""
     from .ai_gate import process_ai_gate
+
     await process_ai_gate(db)
 
 
@@ -138,7 +139,8 @@ def main():
                     if last_stats_date is not None:
                         logger.info(
                             "NC daily summary: {} searches, {} sightings",
-                            searches_today, sightings_today,
+                            searches_today,
+                            sightings_today,
                         )
                         db = SessionLocal()
                         try:
@@ -282,9 +284,12 @@ def main():
 
                     logger.info(
                         "NC worker: '{}' done — {} results, {} sightings [{}] (today: {}/{})",
-                        item.mpn, len(nc_sightings), created_count,
+                        item.mpn,
+                        len(nc_sightings),
+                        created_count,
                         search_result.get("mode", "unknown"),
-                        searches_today, config.NC_MAX_DAILY_SEARCHES,
+                        searches_today,
+                        config.NC_MAX_DAILY_SEARCHES,
                     )
 
                 except Exception as e:
@@ -309,7 +314,8 @@ def main():
     finally:
         logger.info(
             "NC worker shutting down: {} searches, {} sightings today",
-            searches_today, sightings_today,
+            searches_today,
+            sightings_today,
         )
         session.stop()
         if session.has_browser:

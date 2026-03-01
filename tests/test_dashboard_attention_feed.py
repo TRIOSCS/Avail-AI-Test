@@ -9,9 +9,6 @@ Depends on: app/routers/dashboard.py, conftest fixtures
 
 from datetime import date, datetime, timedelta, timezone
 
-import pytest
-from sqlalchemy.orm import Session
-
 from app.models import (
     ActivityLog,
     Company,
@@ -21,7 +18,7 @@ from app.models import (
     Requisition,
     User,
 )
-from app.models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot
+from app.models.performance import AvailScoreSnapshot
 
 
 class TestAttentionFeed:
@@ -59,7 +56,8 @@ class TestAttentionFeed:
         db.add(co)
         db.flush()
         site = CustomerSite(
-            company_id=co.id, owner_id=user.id,
+            company_id=co.id,
+            owner_id=user.id,
             site_name="HQ",
             created_at=datetime.now(timezone.utc),
         )
@@ -142,7 +140,9 @@ class TestAttentionFeed:
         db_session.add(co)
         db_session.flush()
         site = CustomerSite(
-            company_id=co.id, owner_id=test_user.id, site_name="HQ",
+            company_id=co.id,
+            owner_id=test_user.id,
+            site_name="HQ",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(site)
@@ -280,8 +280,11 @@ class TestTeamLeaderboardUserRole:
     def test_multiple_users_with_roles(self, client, db_session, test_user):
         """Multiple users show correct roles in leaderboard."""
         trader = User(
-            email="trader@trioscs.com", name="Test Trader", role="trader",
-            azure_id="trader-001", created_at=datetime.now(timezone.utc),
+            email="trader@trioscs.com",
+            name="Test Trader",
+            role="trader",
+            azure_id="trader-001",
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(trader)
         db_session.flush()
@@ -289,9 +292,14 @@ class TestTeamLeaderboardUserRole:
         current_month = date.today().replace(day=1)
         for u, score in [(test_user, 80.0), (trader, 70.0)]:
             snap = AvailScoreSnapshot(
-                user_id=u.id, month=current_month, role_type="buyer",
-                total_score=score, behavior_total=score/2, outcome_total=score/2,
-                rank=None, qualified=True,
+                user_id=u.id,
+                month=current_month,
+                role_type="buyer",
+                total_score=score,
+                behavior_total=score / 2,
+                outcome_total=score / 2,
+                rank=None,
+                qualified=True,
             )
             db_session.add(snap)
         db_session.commit()

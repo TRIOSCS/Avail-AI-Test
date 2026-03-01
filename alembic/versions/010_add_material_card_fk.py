@@ -5,8 +5,9 @@ Revises: 009_prospect_accounts_discovery_batches
 Create Date: 2026-02-25
 """
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = "010_add_material_card_fk"
 down_revision = "009_prospect_accounts_discovery_batches"
@@ -22,16 +23,28 @@ def upgrade() -> None:
 
     # Foreign keys
     op.create_foreign_key(
-        "fk_requirements_material_card", "requirements", "material_cards",
-        ["material_card_id"], ["id"], ondelete="SET NULL",
+        "fk_requirements_material_card",
+        "requirements",
+        "material_cards",
+        ["material_card_id"],
+        ["id"],
+        ondelete="SET NULL",
     )
     op.create_foreign_key(
-        "fk_sightings_material_card", "sightings", "material_cards",
-        ["material_card_id"], ["id"], ondelete="SET NULL",
+        "fk_sightings_material_card",
+        "sightings",
+        "material_cards",
+        ["material_card_id"],
+        ["id"],
+        ondelete="SET NULL",
     )
     op.create_foreign_key(
-        "fk_offers_material_card", "offers", "material_cards",
-        ["material_card_id"], ["id"], ondelete="SET NULL",
+        "fk_offers_material_card",
+        "offers",
+        "material_cards",
+        ["material_card_id"],
+        ["id"],
+        ondelete="SET NULL",
     )
 
     # Indexes for FK lookups

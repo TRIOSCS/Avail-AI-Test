@@ -67,5 +67,3 @@ async def enrich_company(domain: str) -> dict | None:
         except Exception as e:
             logger.warning("Clearbit company error: %s", e)
             return None
-
-

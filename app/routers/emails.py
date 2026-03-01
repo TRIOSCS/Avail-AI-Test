@@ -52,9 +52,7 @@ async def list_requirement_emails(
         ).model_dump()
 
     try:
-        threads = await fetch_threads_for_requirement(
-            requirement_id, token, db, user_id=user.id
-        )
+        threads = await fetch_threads_for_requirement(requirement_id, token, db, user_id=user.id)
         return EmailThreadListResponse(threads=threads).model_dump()
     except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
         logger.error(f"Failed to fetch threads for requirement {requirement_id}: {e}")
@@ -108,9 +106,7 @@ async def list_vendor_emails(
         ).model_dump()
 
     try:
-        threads = await fetch_threads_for_vendor(
-            vendor_card_id, token, db, user_id=user.id
-        )
+        threads = await fetch_threads_for_vendor(vendor_card_id, token, db, user_id=user.id)
         return EmailThreadListResponse(threads=threads).model_dump()
     except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
         logger.error(f"Failed to fetch threads for vendor {vendor_card_id}: {e}")
@@ -161,6 +157,7 @@ async def send_reply(
 
     # Invalidate cache for threads involving this conversation
     from ..services.email_threads import clear_cache
+
     clear_cache()
 
     return {"ok": True, "message": f"Reply sent to {payload.to}"}
@@ -200,9 +197,7 @@ async def list_email_intelligence(
     """Recent AI-classified email intelligence for dashboard display."""
     from ..services.email_intelligence_service import get_recent_intelligence
 
-    data = get_recent_intelligence(
-        db, user.id, limit=min(limit, 200), classification=classification
-    )
+    data = get_recent_intelligence(db, user.id, limit=min(limit, 200), classification=classification)
     return {"items": data, "count": len(data)}
 
 

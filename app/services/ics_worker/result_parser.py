@@ -27,15 +27,15 @@ class IcsSighting:
     part_number: str = ""
     manufacturer: str = ""
     date_code: str = ""
-    description: str = ""        # from Comments column
+    description: str = ""  # from Comments column
     quantity: int | None = None
-    price: str = ""              # raw price string
-    vendor_name: str = ""        # company name
-    vendor_email: str = ""       # from mailto link
-    vendor_phone: str = ""       # from .clicktocall
+    price: str = ""  # raw price string
+    vendor_name: str = ""  # company name
+    vendor_email: str = ""  # from mailto link
+    vendor_phone: str = ""  # from .clicktocall
     vendor_company_id: str = ""  # from OpenProfile(ID)
-    in_stock: bool = False       # from Stock checkmark column
-    uploaded_date: str = ""      # from .divDateGroup
+    in_stock: bool = False  # from Stock checkmark column
+    uploaded_date: str = ""  # from .divDateGroup
 
 
 def parse_quantity(text: str) -> int | None:

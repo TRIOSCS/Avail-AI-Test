@@ -129,11 +129,7 @@ def recover_stale_searches(db: Session) -> int:
 
     Called once on worker startup.
     """
-    stale = (
-        db.query(NcSearchQueue)
-        .filter(NcSearchQueue.status == "searching")
-        .all()
-    )
+    stale = db.query(NcSearchQueue).filter(NcSearchQueue.status == "searching").all()
     count = 0
     for item in stale:
         item.status = "queued"
@@ -184,11 +180,7 @@ def mark_completed(db: Session, queue_item: NcSearchQueue, results_found: int, s
 
 def get_queue_stats(db: Session) -> dict:
     """Return queue statistics by status plus daily totals."""
-    rows = (
-        db.query(NcSearchQueue.status, func.count())
-        .group_by(NcSearchQueue.status)
-        .all()
-    )
+    rows = db.query(NcSearchQueue.status, func.count()).group_by(NcSearchQueue.status).all()
     counts = {status: count for status, count in rows}
 
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)

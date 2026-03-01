@@ -20,7 +20,6 @@ from sqlalchemy.orm import Session
 from app.models import Company, User
 from app.models.crm import CustomerSite
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -59,9 +58,7 @@ def _make_company(db: Session, name: str = "Acme Corp", **kw) -> Company:
     return co
 
 
-def _make_site(
-    db: Session, company: Company, owner: User | None = None, **kw
-) -> CustomerSite:
+def _make_site(db: Session, company: Company, owner: User | None = None, **kw) -> CustomerSite:
     defaults = {
         "company_id": company.id,
         "site_name": f"{company.name} - HQ",
@@ -118,13 +115,17 @@ def test_my_accounts_health_status(sales_client, db_session, sales_user):
 
     # Active site (activity within 30 days)
     _make_site(
-        db_session, co, sales_user,
+        db_session,
+        co,
+        sales_user,
         site_name="Active Site",
         last_activity_at=now - timedelta(days=5),
     )
     # Inactive site (no activity)
     _make_site(
-        db_session, co, sales_user,
+        db_session,
+        co,
+        sales_user,
         site_name="Inactive Site",
     )
 
@@ -139,9 +140,7 @@ def test_my_accounts_health_status(sales_client, db_session, sales_user):
 
 def test_my_accounts_excludes_other_users(sales_client, db_session, sales_user):
     """Only shows accounts where the current user owns sites."""
-    other = User(
-        email="other@test.com", name="Other", role="sales", azure_id="az-other"
-    )
+    other = User(email="other@test.com", name="Other", role="sales", azure_id="az-other")
     db_session.add(other)
     db_session.commit()
     db_session.refresh(other)
@@ -211,7 +210,9 @@ def test_capacity_stale_accounts(sales_client, db_session, sales_user):
     co = _make_company(db_session, "Stale Corp")
     old = datetime.now(timezone.utc) - timedelta(days=120)
     _make_site(
-        db_session, co, sales_user,
+        db_session,
+        co,
+        sales_user,
         site_name="Stale Site",
         last_activity_at=old,
     )
@@ -243,9 +244,7 @@ def test_release_site(sales_client, db_session, sales_user):
 
 def test_release_site_not_yours(sales_client, db_session, sales_user):
     """Cannot release a site owned by another user."""
-    other = User(
-        email="other2@test.com", name="Other2", role="sales", azure_id="az-other2"
-    )
+    other = User(email="other2@test.com", name="Other2", role="sales", azure_id="az-other2")
     db_session.add(other)
     db_session.commit()
     db_session.refresh(other)

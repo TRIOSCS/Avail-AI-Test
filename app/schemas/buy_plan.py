@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 class BuyPlanLineEdit(BaseModel):
     """Salesperson edit for a single line (new, swap, or split)."""
+
     requirement_id: int
     offer_id: int
     quantity: int = Field(..., gt=0)
@@ -35,6 +36,7 @@ class BuyPlanLineEdit(BaseModel):
 
 class BuyPlanV3Submit(BaseModel):
     """Submit a buy plan from a won quote."""
+
     sales_order_number: str
     customer_po_number: str | None = None
     line_edits: list[BuyPlanLineEdit] | None = None
@@ -51,6 +53,7 @@ class BuyPlanV3Submit(BaseModel):
 
 class BuyPlanLineOverride(BaseModel):
     """Manager override for a single line during approval."""
+
     line_id: int
     offer_id: int | None = None
     quantity: int | None = Field(default=None, gt=0)
@@ -59,6 +62,7 @@ class BuyPlanLineOverride(BaseModel):
 
 class BuyPlanV3Approval(BaseModel):
     """Manager approves or rejects the buy plan."""
+
     action: Literal["approve", "reject"]
     line_overrides: list[BuyPlanLineOverride] | None = None
     notes: str | None = None
@@ -66,6 +70,7 @@ class BuyPlanV3Approval(BaseModel):
 
 class SOVerificationRequest(BaseModel):
     """Ops verifies the Sales Order setup in Acctivate."""
+
     action: Literal["approve", "reject", "halt"]
     rejection_note: str | None = None
 
@@ -80,6 +85,7 @@ class SOVerificationRequest(BaseModel):
 
 class POConfirmation(BaseModel):
     """Buyer confirms PO was cut in Acctivate."""
+
     po_number: str
     estimated_ship_date: datetime
 
@@ -94,6 +100,7 @@ class POConfirmation(BaseModel):
 
 class POVerificationRequest(BaseModel):
     """Ops verifies a PO was properly entered."""
+
     action: Literal["approve", "reject"]
     rejection_note: str | None = None
 
@@ -108,6 +115,7 @@ class POVerificationRequest(BaseModel):
 
 class BuyPlanLineIssue(BaseModel):
     """Buyer flags an issue on a line."""
+
     issue_type: Literal["sold_out", "price_changed", "lead_time_changed", "other"]
     note: str | None = None
 
@@ -122,6 +130,7 @@ class BuyPlanLineIssue(BaseModel):
 
 class VerificationGroupUpdate(BaseModel):
     """Add or remove a user from the ops verification group."""
+
     user_id: int
     action: Literal["add", "remove"]
 
@@ -131,6 +140,7 @@ class VerificationGroupUpdate(BaseModel):
 
 class BuyPlanLineResponse(BaseModel, extra="allow"):
     """Single line in a buy plan response."""
+
     id: int
     buy_plan_id: int
     requirement_id: int | None = None
@@ -176,6 +186,7 @@ class BuyPlanLineResponse(BaseModel, extra="allow"):
 
 class AIFlag(BaseModel):
     """AI-generated flag on a buy plan or line."""
+
     type: str
     severity: str = "warning"
     line_id: int | None = None
@@ -184,6 +195,7 @@ class AIFlag(BaseModel):
 
 class BuyPlanV3Response(BaseModel, extra="allow"):
     """Full buy plan with nested lines and AI analysis."""
+
     id: int
     quote_id: int
     requisition_id: int
@@ -244,6 +256,7 @@ class BuyPlanV3Response(BaseModel, extra="allow"):
 
 class BuyPlanV3ListItem(BaseModel, extra="allow"):
     """Summary item for queue views."""
+
     id: int
     quote_id: int
     requisition_id: int
@@ -281,6 +294,7 @@ class BuyPlanV3ListItem(BaseModel, extra="allow"):
 
 class OfferComparisonItem(BaseModel, extra="allow"):
     """Single offer in a comparison view for a requirement."""
+
     offer_id: int
     vendor_name: str
     vendor_score: float | None = None
@@ -298,6 +312,7 @@ class OfferComparisonItem(BaseModel, extra="allow"):
 
 class OfferComparisonResponse(BaseModel, extra="allow"):
     """All available offers for a requirement — used in manager and salesperson views."""
+
     requirement_id: int
     mpn: str | None = None
     target_qty: int | None = None
@@ -307,6 +322,7 @@ class OfferComparisonResponse(BaseModel, extra="allow"):
 
 class VerificationGroupMemberResponse(BaseModel):
     """Member of the ops verification group."""
+
     id: int
     user_id: int
     user_name: str | None = None

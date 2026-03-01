@@ -11,11 +11,11 @@ Depends on: conftest fixtures, buy_plan_v3_service module
 
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus, BuyPlanStatus, BuyPlanV3
+from app.models.buy_plan import BuyPlanLineStatus, BuyPlanStatus
 from app.services.buy_plan_v3_service import (
     _check_quantity_gaps,
     _country_to_region,
@@ -29,16 +29,22 @@ from app.services.buy_plan_v3_service import (
     score_offer,
 )
 
-
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
 def _make_offer(**kw):
     defaults = {
-        "id": 1, "unit_price": 0.50, "lead_time": "5 days",
-        "qty_available": 1000, "status": "active", "manufacturer": None,
-        "entered_by_id": None, "vendor_card": None, "vendor_name": "Acme",
-        "requirement_id": 1, "created_at": datetime.now(timezone.utc),
+        "id": 1,
+        "unit_price": 0.50,
+        "lead_time": "5 days",
+        "qty_available": 1000,
+        "status": "active",
+        "manufacturer": None,
+        "entered_by_id": None,
+        "vendor_card": None,
+        "vendor_name": "Acme",
+        "requirement_id": 1,
+        "created_at": datetime.now(timezone.utc),
     }
     defaults.update(kw)
     return SimpleNamespace(**defaults)
@@ -52,8 +58,11 @@ def _make_requirement(**kw):
 
 def _make_vendor_card(**kw):
     defaults = {
-        "vendor_score": 75, "is_new_vendor": False, "hq_country": "united states",
-        "total_pos": 10, "commodity_tags": ["semiconductors"],
+        "vendor_score": 75,
+        "is_new_vendor": False,
+        "hq_country": "united states",
+        "total_pos": 10,
+        "commodity_tags": ["semiconductors"],
     }
     defaults.update(kw)
     return SimpleNamespace(**defaults)
@@ -96,6 +105,7 @@ class TestRoutingMaps:
     def setup_method(self):
         # Reset the cached routing maps so each test is clean
         import app.services.buy_plan_v3_service as mod
+
         mod._ROUTING_MAPS = None
 
     def test_get_routing_maps_loads_file(self):
@@ -117,6 +127,7 @@ class TestRoutingMaps:
     def test_missing_file_returns_defaults(self):
         with patch("pathlib.Path.exists", return_value=False):
             import app.services.buy_plan_v3_service as mod
+
             mod._ROUTING_MAPS = None
             maps = _get_routing_maps()
             assert maps == {"brand_commodity_map": {}, "country_region_map": {}}
@@ -221,6 +232,7 @@ class TestScoreOffer:
 class TestAssignBuyer:
     def test_vendor_ownership(self, db_session):
         from app.models import User
+
         buyer = User(email="b@test.com", name="B", role="buyer", azure_id="az1", is_active=True)
         db_session.add(buyer)
         db_session.commit()
@@ -237,6 +249,7 @@ class TestAssignBuyer:
 
     def test_workload_assignment(self, db_session):
         from app.models import User
+
         b1 = User(email="b1@test.com", name="B1", role="buyer", azure_id="az2", is_active=True)
         b2 = User(email="b2@test.com", name="B2", role="trader", azure_id="az3", is_active=True)
         db_session.add_all([b1, b2])
@@ -248,6 +261,7 @@ class TestAssignBuyer:
 
     def test_entered_by_inactive_falls_through(self, db_session):
         from app.models import User
+
         inactive = User(email="gone@test.com", name="Gone", role="buyer", azure_id="az4", is_active=False)
         active = User(email="here@test.com", name="Here", role="buyer", azure_id="az5", is_active=True)
         db_session.add_all([inactive, active])
@@ -259,6 +273,7 @@ class TestAssignBuyer:
 
     def test_entered_by_sales_role_falls_through(self, db_session):
         from app.models import User
+
         sales = User(email="s@test.com", name="S", role="sales", azure_id="az6", is_active=True)
         buyer = User(email="buy@test.com", name="Buy", role="buyer", azure_id="az7", is_active=True)
         db_session.add_all([sales, buyer])
@@ -271,6 +286,7 @@ class TestAssignBuyer:
     def test_commodity_tags_and_manufacturer(self, db_session):
         """Exercises the commodity/brand matching code path (currently falls through to workload)."""
         from app.models import User
+
         buyer = User(email="comm@test.com", name="Comm", role="buyer", azure_id="az8", is_active=True)
         db_session.add(buyer)
         db_session.commit()
@@ -282,6 +298,7 @@ class TestAssignBuyer:
     def test_geography_path(self, db_session):
         """Exercises the geography matching code path (currently falls through to workload)."""
         from app.models import User
+
         buyer = User(email="geo@test.com", name="Geo", role="buyer", azure_id="az9", is_active=True)
         db_session.add(buyer)
         db_session.commit()
@@ -372,8 +389,12 @@ class TestGenerateAiFlags:
         old_date = datetime.now(timezone.utc) - timedelta(days=30)
         offer = _make_offer(created_at=old_date)
         line = SimpleNamespace(
-            id=1, offer_id=1, offer=offer, margin_pct=50.0,
-            requirement_id=None, quantity=100,
+            id=1,
+            offer_id=1,
+            offer=offer,
+            margin_pct=50.0,
+            requirement_id=None,
+            quantity=100,
         )
         plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
@@ -383,8 +404,12 @@ class TestGenerateAiFlags:
 
     def test_low_margin_warning(self, db_session):
         line = SimpleNamespace(
-            id=1, offer_id=None, offer=None, margin_pct=5.0,
-            requirement_id=None, quantity=100,
+            id=1,
+            offer_id=None,
+            offer=None,
+            margin_pct=5.0,
+            requirement_id=None,
+            quantity=100,
         )
         plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
@@ -394,8 +419,12 @@ class TestGenerateAiFlags:
 
     def test_negative_margin_critical(self, db_session):
         line = SimpleNamespace(
-            id=1, offer_id=None, offer=None, margin_pct=-5.0,
-            requirement_id=None, quantity=100,
+            id=1,
+            offer_id=None,
+            offer=None,
+            margin_pct=-5.0,
+            requirement_id=None,
+            quantity=100,
         )
         plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
@@ -406,8 +435,12 @@ class TestGenerateAiFlags:
         recent = datetime.now(timezone.utc) - timedelta(days=1)
         offer = _make_offer(created_at=recent)
         line = SimpleNamespace(
-            id=1, offer_id=1, offer=offer, margin_pct=50.0,
-            requirement_id=None, quantity=100,
+            id=1,
+            offer_id=1,
+            offer=offer,
+            margin_pct=50.0,
+            requirement_id=None,
+            quantity=100,
         )
         plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
@@ -416,8 +449,12 @@ class TestGenerateAiFlags:
     def test_stale_offer_fetched_from_db(self, db_session):
         """When line.offer is None, the flag code fetches from DB via offer_id."""
         line = SimpleNamespace(
-            id=1, offer_id=999, offer=None, margin_pct=50.0,
-            requirement_id=None, quantity=100,
+            id=1,
+            offer_id=999,
+            offer=None,
+            margin_pct=50.0,
+            requirement_id=None,
+            quantity=100,
         )
         plan = SimpleNamespace(lines=[line], quote_id=None)
         flags = generate_ai_flags(plan, db_session)
@@ -493,6 +530,7 @@ class TestBuildBuyPlan:
     def _make_site(self, db_session):
         """Helper to create a CustomerSite (required FK for Quote)."""
         from app.models import Company, CustomerSite
+
         co = Company(name="TestCo", website="https://testco.com", industry="Electronics", is_active=True)
         db_session.add(co)
         db_session.flush()
@@ -507,6 +545,7 @@ class TestBuildBuyPlan:
 
     def test_no_requirements(self, db_session):
         from app.models import Quote, Requisition, User
+
         site = self._make_site(db_session)
         user = User(email="noreq@test.com", name="NoReq", role="buyer", azure_id="aznoreq", is_active=True)
         db_session.add(user)
@@ -515,8 +554,12 @@ class TestBuildBuyPlan:
         db_session.add(req)
         db_session.flush()
         q = Quote(
-            requisition_id=req.id, customer_site_id=site.id,
-            quote_number="Q-V3-001", status="sent", line_items=[], subtotal=100,
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            quote_number="Q-V3-001",
+            status="sent",
+            line_items=[],
+            subtotal=100,
         )
         db_session.add(q)
         db_session.commit()
@@ -525,6 +568,7 @@ class TestBuildBuyPlan:
 
     def test_build_with_offers(self, db_session):
         from app.models import Offer, Quote, Requirement, Requisition, User
+
         site = self._make_site(db_session)
         buyer = User(email="bv3@test.com", name="BV3", role="buyer", azure_id="azv3", is_active=True)
         db_session.add(buyer)
@@ -536,16 +580,24 @@ class TestBuildBuyPlan:
         db_session.add(item)
         db_session.flush()
         q = Quote(
-            requisition_id=req.id, customer_site_id=site.id,
-            quote_number="Q-V3-2", status="sent", line_items=[], subtotal=100,
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            quote_number="Q-V3-2",
+            status="sent",
+            line_items=[],
+            subtotal=100,
         )
         db_session.add(q)
         db_session.flush()
         offer = Offer(
-            requisition_id=req.id, requirement_id=item.id,
-            vendor_name="Arrow", mpn="LM317T",
-            qty_available=200, unit_price=0.50,
-            entered_by_id=buyer.id, status="active",
+            requisition_id=req.id,
+            requirement_id=item.id,
+            vendor_name="Arrow",
+            mpn="LM317T",
+            qty_available=200,
+            unit_price=0.50,
+            entered_by_id=buyer.id,
+            status="active",
         )
         db_session.add(offer)
         db_session.commit()
@@ -559,6 +611,7 @@ class TestBuildBuyPlan:
     def test_auto_split(self, db_session):
         """When no single offer covers qty, splits across offers."""
         from app.models import Offer, Quote, Requirement, Requisition, User
+
         site = self._make_site(db_session)
         buyer = User(email="split@test.com", name="Split", role="buyer", azure_id="azsplit", is_active=True)
         db_session.add(buyer)
@@ -570,30 +623,45 @@ class TestBuildBuyPlan:
         db_session.add(item)
         db_session.flush()
         q = Quote(
-            requisition_id=req.id, customer_site_id=site.id,
-            quote_number="Q-SPLIT", status="sent", line_items=[], subtotal=200,
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            quote_number="Q-SPLIT",
+            status="sent",
+            line_items=[],
+            subtotal=200,
         )
         db_session.add(q)
         db_session.flush()
         o1 = Offer(
-            requisition_id=req.id, requirement_id=item.id,
-            vendor_name="V1", mpn="X", qty_available=60, unit_price=1.00,
-            entered_by_id=buyer.id, status="active",
+            requisition_id=req.id,
+            requirement_id=item.id,
+            vendor_name="V1",
+            mpn="X",
+            qty_available=60,
+            unit_price=1.00,
+            entered_by_id=buyer.id,
+            status="active",
         )
         o2 = Offer(
-            requisition_id=req.id, requirement_id=item.id,
-            vendor_name="V2", mpn="X", qty_available=80, unit_price=1.50,
-            entered_by_id=buyer.id, status="active",
+            requisition_id=req.id,
+            requirement_id=item.id,
+            vendor_name="V2",
+            mpn="X",
+            qty_available=80,
+            unit_price=1.50,
+            entered_by_id=buyer.id,
+            status="active",
         )
         db_session.add_all([o1, o2])
         db_session.commit()
         plan = build_buy_plan(q.id, db_session)
         assert len(plan.lines) == 2
-        total_qty = sum(l.quantity for l in plan.lines)
+        total_qty = sum(ln.quantity for ln in plan.lines)
         assert total_qty == 100
 
     def test_no_active_offers(self, db_session):
         from app.models import Quote, Requirement, Requisition, User
+
         site = self._make_site(db_session)
         user = User(email="nooff@test.com", name="NoOff", role="buyer", azure_id="aznooff", is_active=True)
         db_session.add(user)
@@ -605,8 +673,12 @@ class TestBuildBuyPlan:
         db_session.add(item)
         db_session.flush()
         q = Quote(
-            requisition_id=req.id, customer_site_id=site.id,
-            quote_number="Q-NOOFF", status="sent", line_items=[], subtotal=100,
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            quote_number="Q-NOOFF",
+            status="sent",
+            line_items=[],
+            subtotal=100,
         )
         db_session.add(q)
         db_session.commit()
@@ -617,6 +689,7 @@ class TestBuildBuyPlan:
     def test_customer_site_region(self, db_session):
         """Exercises customer_region from customer_site."""
         from app.models import Company, CustomerSite, Offer, Quote, Requirement, Requisition, User
+
         user = User(email="reg@test.com", name="Reg", role="buyer", azure_id="azreg", is_active=True)
         db_session.add(user)
         db_session.flush()
@@ -633,15 +706,24 @@ class TestBuildBuyPlan:
         db_session.add(item)
         db_session.flush()
         q = Quote(
-            requisition_id=req.id, customer_site_id=site.id,
-            quote_number="Q-REG", status="sent", line_items=[], subtotal=100,
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            quote_number="Q-REG",
+            status="sent",
+            line_items=[],
+            subtotal=100,
         )
         db_session.add(q)
         db_session.flush()
         offer = Offer(
-            requisition_id=req.id, requirement_id=item.id,
-            vendor_name="V", mpn="Z", qty_available=100, unit_price=1.00,
-            entered_by_id=user.id, status="active",
+            requisition_id=req.id,
+            requirement_id=item.id,
+            vendor_name="V",
+            mpn="Z",
+            qty_available=100,
+            unit_price=1.00,
+            entered_by_id=user.id,
+            status="active",
         )
         db_session.add(offer)
         db_session.commit()

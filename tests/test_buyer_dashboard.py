@@ -2,15 +2,11 @@
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
-from sqlalchemy.orm import Session
-
 from app.models import (
     Contact,
     Offer,
     Quote,
     Requisition,
-    User,
 )
 
 
@@ -100,7 +96,7 @@ class TestBuyerBrief:
 
     # 4. Quote win rate KPI
     def test_quote_win_rate(self, client, db_session, test_user):
-        from app.models import CustomerSite, Company
+        from app.models import Company, CustomerSite
 
         co = Company(name="Test Co", is_active=True, created_at=datetime.now(timezone.utc))
         db_session.add(co)
@@ -112,9 +108,11 @@ class TestBuyerBrief:
         r1 = self._make_req(db_session, test_user)
         for i, result in enumerate(["won", "won", "lost"]):
             q = Quote(
-                requisition_id=r1.id, customer_site_id=site.id,
+                requisition_id=r1.id,
+                customer_site_id=site.id,
                 quote_number=f"Q-{result}-{i}",
-                status="sent", result=result,
+                status="sent",
+                result=result,
                 result_at=datetime.now(timezone.utc),
                 created_by_id=test_user.id,
                 created_at=datetime.now(timezone.utc),
@@ -179,6 +177,7 @@ class TestBuyerBrief:
     # 7c. Reqs at Risk — deadline approaching with no offers
     def test_reqs_at_risk_deadline(self, client, db_session, test_user):
         from datetime import date
+
         soon = (date.today() + timedelta(days=2)).isoformat()
         # Deadline soon + no offers → critical
         self._make_req(db_session, test_user, name="URGENT-BARE", deadline=soon, days_ago=0)
@@ -235,6 +234,7 @@ class TestBuyerBrief:
     # 9. Quotes due soon with date deadline
     def test_quotes_due_soon_date(self, client, db_session, test_user):
         from datetime import date
+
         soon = (date.today() + timedelta(days=2)).isoformat()
         far = (date.today() + timedelta(days=10)).isoformat()
         self._make_req(db_session, test_user, name="SOON", deadline=soon)
@@ -253,6 +253,7 @@ class TestBuyerBrief:
     # 10. Overdue deadline
     def test_quotes_due_overdue(self, client, db_session, test_user):
         from datetime import date
+
         past = (date.today() - timedelta(days=3)).isoformat()
         self._make_req(db_session, test_user, name="OVERDUE", deadline=past)
         db_session.commit()
@@ -331,12 +332,15 @@ class TestAgeLabel:
 
     def test_just_now(self):
         from app.routers.dashboard import _age_label
+
         assert _age_label(0.5) == "just now"
 
     def test_hours(self):
         from app.routers.dashboard import _age_label
+
         assert _age_label(3) == "3h ago"
 
     def test_days(self):
         from app.routers.dashboard import _age_label
+
         assert _age_label(48) == "2d ago"

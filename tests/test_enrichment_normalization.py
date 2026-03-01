@@ -1,4 +1,5 @@
 """Tests for enrichment normalization layers."""
+
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -12,6 +13,7 @@ from app.enrichment_service import (
 )
 
 # ── _clean_domain ────────────────────────────────────────────────────────
+
 
 class TestCleanDomain:
     def test_strips_protocol(self):
@@ -41,6 +43,7 @@ class TestCleanDomain:
 
 # ── _name_looks_suspicious ───────────────────────────────────────────────
 
+
 class TestNameLooksSuspicious:
     def test_clean_name(self):
         assert _name_looks_suspicious("International Business Machines") is False
@@ -60,6 +63,7 @@ class TestNameLooksSuspicious:
 
 # ── _title_case_preserve_acronyms ────────────────────────────────────────
 
+
 class TestTitleCasePreserve:
     def test_normal(self):
         assert _title_case_preserve_acronyms("texas instruments") == "Texas Instruments"
@@ -76,6 +80,7 @@ class TestTitleCasePreserve:
 
 
 # ── normalize_company_input ──────────────────────────────────────────────
+
 
 class TestNormalizeCompanyInput:
     @pytest.mark.asyncio
@@ -122,20 +127,23 @@ class TestNormalizeCompanyInput:
 
 # ── normalize_company_output ─────────────────────────────────────────────
 
+
 class TestNormalizeCompanyOutput:
     def test_full_normalization(self):
-        result = normalize_company_output({
-            "legal_name": "ibm corporation",
-            "domain": "HTTPS://WWW.IBM.COM/",
-            "industry": "information technology",
-            "employee_size": "350000",
-            "hq_city": "armonk",
-            "hq_state": "ny",
-            "hq_country": "US",
-            "website": "ibm.com",
-            "linkedin_url": "linkedin.com/company/ibm",
-            "source": "clay",
-        })
+        result = normalize_company_output(
+            {
+                "legal_name": "ibm corporation",
+                "domain": "HTTPS://WWW.IBM.COM/",
+                "industry": "information technology",
+                "employee_size": "350000",
+                "hq_city": "armonk",
+                "hq_state": "ny",
+                "hq_country": "US",
+                "website": "ibm.com",
+                "linkedin_url": "linkedin.com/company/ibm",
+                "source": "clay",
+            }
+        )
         assert result["legal_name"] == "IBM Corporation"
         assert result["domain"] == "ibm.com"
         assert result["industry"] == "Information Technology"

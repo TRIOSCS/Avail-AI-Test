@@ -519,6 +519,7 @@ async def test_parse_non_dict_response():
 async def test_parse_quotes_as_string():
     """Handles edge case where quotes field is a JSON string instead of list."""
     import json as _json
+
     mock_result = {
         "quotes": _json.dumps([{"part_number": "LM358DR", "confidence": 0.9}]),
         "overall_confidence": 0.8,
@@ -555,8 +556,10 @@ def test_parse_email_endpoint(client):
         "vendor_notes": None,
     }
 
-    with patch("app.routers.ai.settings") as mock_settings, \
-         patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock:
+    with (
+        patch("app.routers.ai.settings") as mock_settings,
+        patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock,
+    ):
         mock_settings.ai_features_enabled = "all"
         mock.return_value = mock_result
         resp = client.post(
@@ -589,8 +592,10 @@ def test_parse_email_endpoint_empty_body(client):
 
 def test_parse_email_endpoint_failure(client):
     """Returns parsed=False when parser fails."""
-    with patch("app.routers.ai.settings") as mock_settings, \
-         patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock:
+    with (
+        patch("app.routers.ai.settings") as mock_settings,
+        patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock,
+    ):
         mock_settings.ai_features_enabled = "all"
         mock.return_value = None
         resp = client.post(
@@ -613,8 +618,9 @@ class TestNormalizeQuotesEdgeCases:
 
     def test_quotes_as_json_string(self):
         """Quotes as a JSON string should be parsed."""
-        from app.services.ai_email_parser import _normalize_quotes
         import json
+
+        from app.services.ai_email_parser import _normalize_quotes
 
         quotes_list = [{"part_number": "LM317T", "unit_price": "1.50"}]
         result = {"quotes": json.dumps(quotes_list)}
@@ -667,10 +673,12 @@ class TestNormalizeQuotesEdgeCases:
         """Confidence > 1.0 is clamped to 1.0; < 0.0 is clamped to 0.0."""
         from app.services.ai_email_parser import _normalize_quotes
 
-        result = {"quotes": [
-            {"confidence": 1.5},
-            {"confidence": -0.5},
-        ]}
+        result = {
+            "quotes": [
+                {"confidence": 1.5},
+                {"confidence": -0.5},
+            ]
+        }
         _normalize_quotes(result)
         assert result["quotes"][0]["confidence"] == 1.0
         assert result["quotes"][1]["confidence"] == 0.0

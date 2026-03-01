@@ -76,9 +76,7 @@ class Company(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    sites = relationship(
-        "CustomerSite", back_populates="company", cascade="all, delete-orphan"
-    )
+    sites = relationship("CustomerSite", back_populates="company", cascade="all, delete-orphan")
     account_owner = relationship("User", foreign_keys=[account_owner_id])
 
     __table_args__ = (
@@ -94,9 +92,7 @@ class CustomerSite(Base):
 
     __tablename__ = "customer_sites"
     id = Column(Integer, primary_key=True)
-    company_id = Column(
-        Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
-    )
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     site_name = Column(String(255), nullable=False)
     owner_id = Column(Integer, ForeignKey("users.id"))
 
@@ -141,9 +137,7 @@ class CustomerSite(Base):
 
     company = relationship("Company", back_populates="sites")
     owner = relationship("User", foreign_keys=[owner_id])
-    site_contacts = relationship(
-        "SiteContact", back_populates="customer_site", cascade="all, delete-orphan"
-    )
+    site_contacts = relationship("SiteContact", back_populates="customer_site", cascade="all, delete-orphan")
 
     __table_args__ = (
         Index("ix_cs_company", "company_id"),
@@ -156,9 +150,7 @@ class SiteContact(Base):
 
     __tablename__ = "site_contacts"
     id = Column(Integer, primary_key=True)
-    customer_site_id = Column(
-        Integer, ForeignKey("customer_sites.id", ondelete="CASCADE"), nullable=False
-    )
+    customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="CASCADE"), nullable=False)
     full_name = Column(String(255), nullable=False)
     title = Column(String(255))
     email = Column(String(255))

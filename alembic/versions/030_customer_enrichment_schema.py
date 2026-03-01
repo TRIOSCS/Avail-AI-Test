@@ -9,6 +9,7 @@ Create Date: 2026-02-28
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "030_customer_enrichment_schema"

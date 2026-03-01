@@ -103,10 +103,7 @@ def _merge_trader_categories(
     If only one role has data, use that alone (no penalization).
     """
     if buyer_cats and sales_cats:
-        return {
-            k: (buyer_cats[k] + sales_cats[k]) / 2
-            for k in CATEGORY_WEIGHTS
-        }
+        return {k: (buyer_cats[k] + sales_cats[k]) / 2 for k in CATEGORY_WEIGHTS}
     return buyer_cats or sales_cats or {k: 0.0 for k in CATEGORY_WEIGHTS}
 
 
@@ -127,22 +124,14 @@ def compute_all_unified_scores(db: Session, month: date | None = None) -> dict:
     users = db.query(User).filter(*_human).all()
 
     # Load all AvailScoreSnapshots for this month
-    avail_snaps = (
-        db.query(AvailScoreSnapshot)
-        .filter(AvailScoreSnapshot.month == month)
-        .all()
-    )
+    avail_snaps = db.query(AvailScoreSnapshot).filter(AvailScoreSnapshot.month == month).all()
     # Index by (user_id, role_type)
     avail_idx: dict[tuple[int, str], AvailScoreSnapshot] = {}
     for s in avail_snaps:
         avail_idx[(s.user_id, s.role_type)] = s
 
     # Load MultiplierScoreSnapshots for cached display
-    mult_snaps = (
-        db.query(MultiplierScoreSnapshot)
-        .filter(MultiplierScoreSnapshot.month == month)
-        .all()
-    )
+    mult_snaps = db.query(MultiplierScoreSnapshot).filter(MultiplierScoreSnapshot.month == month).all()
     mult_idx: dict[tuple[int, str], MultiplierScoreSnapshot] = {}
     for s in mult_snaps:
         mult_idx[(s.user_id, s.role_type)] = s
@@ -175,17 +164,19 @@ def compute_all_unified_scores(db: Session, month: date | None = None) -> dict:
         buyer_mult = mult_idx.get((user.id, "buyer"))
         sales_mult = mult_idx.get((user.id, "sales"))
 
-        results.append({
-            "user_id": user.id,
-            "user_name": user.name,
-            "primary_role": primary_role,
-            "cats": cats,
-            "score": round(score, 2),
-            "avail_score_buyer": buyer_snap.total_score if buyer_snap else None,
-            "avail_score_sales": sales_snap.total_score if sales_snap else None,
-            "multiplier_points_buyer": buyer_mult.total_points if buyer_mult else None,
-            "multiplier_points_sales": sales_mult.total_points if sales_mult else None,
-        })
+        results.append(
+            {
+                "user_id": user.id,
+                "user_name": user.name,
+                "primary_role": primary_role,
+                "cats": cats,
+                "score": round(score, 2),
+                "avail_score_buyer": buyer_snap.total_score if buyer_snap else None,
+                "avail_score_sales": sales_snap.total_score if sales_snap else None,
+                "multiplier_points_buyer": buyer_mult.total_points if buyer_mult else None,
+                "multiplier_points_sales": sales_mult.total_points if sales_mult else None,
+            }
+        )
 
     # Rank by unified score descending
     results.sort(key=lambda r: r["score"], reverse=True)
@@ -256,8 +247,12 @@ def _refresh_blurbs(db: Session, month: date, results: list[dict]) -> None:
 
         try:
             blurb = _generate_blurb(
-                r["user_name"], r["primary_role"], r["cats"],
-                r["score"], r["rank"], total,
+                r["user_name"],
+                r["primary_role"],
+                r["cats"],
+                r["score"],
+                r["rank"],
+                total,
             )
             if blurb:
                 snap.ai_blurb_strength = blurb.get("strength", "")
@@ -312,6 +307,7 @@ def _generate_blurb(
         loop = asyncio.get_event_loop()
         if loop.is_running():
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 future = pool.submit(
                     asyncio.run,
@@ -319,9 +315,7 @@ def _generate_blurb(
                 )
                 return future.result(timeout=30)
         else:
-            return asyncio.run(
-                claude_structured(user_msg, schema, system=system, model_tier="fast", max_tokens=256)
-            )
+            return asyncio.run(claude_structured(user_msg, schema, system=system, model_tier="fast", max_tokens=256))
     except Exception as e:
         logger.warning(f"Claude blurb call failed: {e}")
         return None
@@ -342,20 +336,12 @@ def get_unified_leaderboard(db: Session, month: date | None = None) -> dict:
     )
 
     # Load full AvailScore + Multiplier breakdowns for expandable rows
-    avail_snaps = (
-        db.query(AvailScoreSnapshot)
-        .filter(AvailScoreSnapshot.month == month)
-        .all()
-    )
+    avail_snaps = db.query(AvailScoreSnapshot).filter(AvailScoreSnapshot.month == month).all()
     avail_idx: dict[tuple[int, str], AvailScoreSnapshot] = {}
     for s in avail_snaps:
         avail_idx[(s.user_id, s.role_type)] = s
 
-    mult_snaps = (
-        db.query(MultiplierScoreSnapshot)
-        .filter(MultiplierScoreSnapshot.month == month)
-        .all()
-    )
+    mult_snaps = db.query(MultiplierScoreSnapshot).filter(MultiplierScoreSnapshot.month == month).all()
     mult_idx: dict[tuple[int, str], MultiplierScoreSnapshot] = {}
     for s in mult_snaps:
         mult_idx[(s.user_id, s.role_type)] = s
@@ -442,7 +428,9 @@ def get_unified_leaderboard(db: Session, month: date | None = None) -> dict:
         entry["total_points"] = entry.get(f"{pr}_total_points", 0)
         # For traders, sum both roles' points
         if pr == "trader":
-            entry["total_points"] = (entry.get("buyer_total_points", 0) or 0) + (entry.get("sales_total_points", 0) or 0)
+            entry["total_points"] = (entry.get("buyer_total_points", 0) or 0) + (
+                entry.get("sales_total_points", 0) or 0
+            )
             entry["avail_score"] = snap.avail_score_buyer or snap.avail_score_sales or 0
         # Qualification & bonus aggregation
         entry["avail_qualified"] = entry.get("buyer_qualified", False) or entry.get("sales_qualified", False)
@@ -459,19 +447,53 @@ def get_scoring_info() -> dict:
     """Return static scoring system explanation for the info pill tooltip."""
     return {
         "categories": [
-            {"name": "Execution", "weight": 30, "description": "Speed and volume of core work — sourcing speed, outreach consistency, pipeline throughput"},
-            {"name": "Follow-Through", "weight": 25, "description": "Persistence and deal progression — vendor follow-ups, quote conversions, offer advancement"},
-            {"name": "Closing", "weight": 30, "description": "Win rate and revenue generation — deals won, buy plans completed, revenue produced"},
-            {"name": "Depth", "weight": 15, "description": "Strategic breadth — vendor diversity for buyers, strategic wins for sales"},
+            {
+                "name": "Execution",
+                "weight": 30,
+                "description": "Speed and volume of core work — sourcing speed, outreach consistency, pipeline throughput",
+            },
+            {
+                "name": "Follow-Through",
+                "weight": 25,
+                "description": "Persistence and deal progression — vendor follow-ups, quote conversions, offer advancement",
+            },
+            {
+                "name": "Closing",
+                "weight": 30,
+                "description": "Win rate and revenue generation — deals won, buy plans completed, revenue produced",
+            },
+            {
+                "name": "Depth",
+                "weight": 15,
+                "description": "Strategic breadth — vendor diversity for buyers, strategic wins for sales",
+            },
         ],
         "total_range": "0-100",
         "normalization": "Scores are normalized by role so buyers, sales, and traders compete fairly. Traders average their buyer and sales scores.",
         "ai_refresh": "AI insights refresh every 2 hours.",
         "avail_score": {
             "description": "10 metrics (5 behaviors + 5 outcomes) scored 0-10 each, totaling 0-100.",
-            "buyer_behaviors": ["Speed to Source", "Multi-Source Breadth", "Vendor Follow-Up", "Pipeline Hygiene", "Stock List Uploads"],
-            "buyer_outcomes": ["Sourcing Ratio", "Offer-to-Quote", "Win Rate", "Buy Plan Completion", "Vendor Diversity"],
-            "sales_behaviors": ["Account Coverage", "Outreach Consistency", "Quote Follow-Up", "Proactive Selling", "New Business"],
+            "buyer_behaviors": [
+                "Speed to Source",
+                "Multi-Source Breadth",
+                "Vendor Follow-Up",
+                "Pipeline Hygiene",
+                "Stock List Uploads",
+            ],
+            "buyer_outcomes": [
+                "Sourcing Ratio",
+                "Offer-to-Quote",
+                "Win Rate",
+                "Buy Plan Completion",
+                "Vendor Diversity",
+            ],
+            "sales_behaviors": [
+                "Account Coverage",
+                "Outreach Consistency",
+                "Quote Follow-Up",
+                "Proactive Selling",
+                "New Business",
+            ],
             "sales_outcomes": ["Win Rate", "Revenue", "Quote Volume", "Proactive Conversion", "Strategic Wins"],
         },
         "multiplier_points": {

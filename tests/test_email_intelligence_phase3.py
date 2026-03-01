@@ -10,14 +10,10 @@ Depends on: conftest fixtures
 """
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-from sqlalchemy.orm import Session
-
 from tests.conftest import engine  # noqa: F401
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  3A: Mailbox Settings
@@ -30,18 +26,20 @@ class TestMailboxIntelligence:
         from app.services.mailbox_intelligence import fetch_and_store_mailbox_settings
 
         mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(return_value={
-            "timeZone": "Eastern Standard Time",
-            "workingHours": {
-                "startTime": "08:00:00.0000000",
-                "endTime": "17:00:00.0000000",
-                "daysOfWeek": ["monday", "tuesday", "wednesday", "thursday", "friday"],
-                "timeZone": {"name": "Eastern Standard Time"},
-            },
-            "automaticRepliesSetting": {
-                "status": "disabled",
-            },
-        })
+        mock_gc.get_json = AsyncMock(
+            return_value={
+                "timeZone": "Eastern Standard Time",
+                "workingHours": {
+                    "startTime": "08:00:00.0000000",
+                    "endTime": "17:00:00.0000000",
+                    "daysOfWeek": ["monday", "tuesday", "wednesday", "thursday", "friday"],
+                    "timeZone": {"name": "Eastern Standard Time"},
+                },
+                "automaticRepliesSetting": {
+                    "status": "disabled",
+                },
+            }
+        )
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = asyncio.get_event_loop().run_until_complete(
@@ -157,25 +155,27 @@ class TestCalendarIntelligence:
         from app.services.calendar_intelligence import scan_calendar_events
 
         mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=[
-            {
-                "subject": "Quarterly Business Review",
-                "attendees": [
-                    {
-                        "emailAddress": {"address": "rep@arrow.com", "name": "Arrow Rep"},
-                        "type": "required",
-                    },
-                    {
-                        "emailAddress": {"address": "buyer@trioscs.com", "name": "Our Buyer"},
-                        "type": "required",
-                    },
-                ],
-                "start": {"dateTime": "2026-02-20T10:00:00"},
-                "end": {"dateTime": "2026-02-20T11:00:00"},
-                "location": {"displayName": "Zoom"},
-                "organizer": {"emailAddress": {"address": "buyer@trioscs.com"}},
-            },
-        ])
+        mock_gc.get_all_pages = AsyncMock(
+            return_value=[
+                {
+                    "subject": "Quarterly Business Review",
+                    "attendees": [
+                        {
+                            "emailAddress": {"address": "rep@arrow.com", "name": "Arrow Rep"},
+                            "type": "required",
+                        },
+                        {
+                            "emailAddress": {"address": "buyer@trioscs.com", "name": "Our Buyer"},
+                            "type": "required",
+                        },
+                    ],
+                    "start": {"dateTime": "2026-02-20T10:00:00"},
+                    "end": {"dateTime": "2026-02-20T11:00:00"},
+                    "location": {"displayName": "Zoom"},
+                    "organizer": {"emailAddress": {"address": "buyer@trioscs.com"}},
+                },
+            ]
+        )
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = asyncio.get_event_loop().run_until_complete(
@@ -191,16 +191,18 @@ class TestCalendarIntelligence:
         from app.services.calendar_intelligence import scan_calendar_events
 
         mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=[
-            {
-                "subject": "Electronica 2026 Munich",
-                "attendees": [],
-                "start": {"dateTime": "2026-11-12T09:00:00"},
-                "end": {"dateTime": "2026-11-15T17:00:00"},
-                "location": {"displayName": "Messe München"},
-                "organizer": {},
-            },
-        ])
+        mock_gc.get_all_pages = AsyncMock(
+            return_value=[
+                {
+                    "subject": "Electronica 2026 Munich",
+                    "attendees": [],
+                    "start": {"dateTime": "2026-11-12T09:00:00"},
+                    "end": {"dateTime": "2026-11-15T17:00:00"},
+                    "location": {"displayName": "Messe München"},
+                    "organizer": {},
+                },
+            ]
+        )
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = asyncio.get_event_loop().run_until_complete(
@@ -214,18 +216,20 @@ class TestCalendarIntelligence:
         from app.services.calendar_intelligence import scan_calendar_events
 
         mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=[
-            {
-                "subject": "Team Standup",
-                "attendees": [
-                    {"emailAddress": {"address": "colleague@trioscs.com", "name": "Colleague"}},
-                ],
-                "start": {"dateTime": "2026-02-25T09:00:00"},
-                "end": {"dateTime": "2026-02-25T09:15:00"},
-                "location": {},
-                "organizer": {},
-            },
-        ])
+        mock_gc.get_all_pages = AsyncMock(
+            return_value=[
+                {
+                    "subject": "Team Standup",
+                    "attendees": [
+                        {"emailAddress": {"address": "colleague@trioscs.com", "name": "Colleague"}},
+                    ],
+                    "start": {"dateTime": "2026-02-25T09:00:00"},
+                    "end": {"dateTime": "2026-02-25T09:15:00"},
+                    "location": {},
+                    "organizer": {},
+                },
+            ]
+        )
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
             result = asyncio.get_event_loop().run_until_complete(
@@ -295,6 +299,7 @@ class TestUserMailboxColumns:
         db_session.commit()
 
         from app.models import User
+
         fetched = db_session.query(User).get(test_user.id)
         assert fetched.timezone == "Pacific Standard Time"
         assert fetched.working_hours_start == "09:00"

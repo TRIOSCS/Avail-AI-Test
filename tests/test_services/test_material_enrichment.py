@@ -10,8 +10,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from tests.conftest import engine, TestSessionLocal
 from app.models import Base, MaterialCard
+from tests.conftest import TestSessionLocal, engine
 
 
 @pytest.fixture(autouse=True)
@@ -208,9 +208,7 @@ async def test_enrich_material_cards_batch_processing(db):
         new_callable=AsyncMock,
         side_effect=mock_claude,
     ):
-        stats = await enrich_material_cards(
-            [c.id for c in cards], db, batch_size=2
-        )
+        stats = await enrich_material_cards([c.id for c in cards], db, batch_size=2)
 
     # 5 cards / batch_size 2 = 3 Claude calls
     assert call_count == 3

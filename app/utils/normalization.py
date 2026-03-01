@@ -378,9 +378,7 @@ def fuzzy_mpn_match(mpn_a: str | None, mpn_b: str | None) -> bool:
 
     # One is prefix of the other (trailing revision)
     if a_stripped.startswith(b_stripped) or b_stripped.startswith(a_stripped):
-        suffix = a_stripped.replace(b_stripped, "") or b_stripped.replace(
-            a_stripped, ""
-        )
+        suffix = a_stripped.replace(b_stripped, "") or b_stripped.replace(a_stripped, "")
         if len(suffix) <= 2:  # Short suffix = likely revision
             return True
 

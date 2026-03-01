@@ -5,20 +5,15 @@ Missing lines: 37-38, 45-53, 57-65, 117-120, 160-170, 191-195,
                233-241, 250, 326-327, 333-335, 767-773, 781
 """
 
-import os
 import asyncio
-from contextlib import asynccontextmanager
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
+import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
 
 # ── Lifespan: S1 secret key fail-fast (lines 37-38) ──────────────────
+
 
 class TestLifespanSecretKey:
     """Cover lines 37-38: RuntimeError when secret_key is default and TESTING unset."""
@@ -52,6 +47,7 @@ class TestLifespanSecretKey:
 
 # ── Lifespan: S2 missing env var warnings (lines 45-53) ──────────────
 
+
 class TestLifespanMissingEnvVars:
     """Cover lines 45-53: Warning about missing Azure env vars."""
 
@@ -62,15 +58,16 @@ class TestLifespanMissingEnvVars:
         mock_app = MagicMock()
         original = os.environ.pop("TESTING", None)
         try:
-            with patch("app.main.settings") as mock_settings, \
-                 patch("app.startup.run_startup_migrations"), \
-                 patch("app.main._seed_api_sources"), \
-                 patch("app.connector_status.log_connector_status", return_value={}), \
-                 patch("app.scheduler.configure_scheduler"), \
-                 patch("app.scheduler.scheduler") as mock_sched, \
-                 patch("app.http_client.close_clients", new_callable=AsyncMock), \
-                 patch("app.main.logger") as mock_logger:
-
+            with (
+                patch("app.main.settings") as mock_settings,
+                patch("app.startup.run_startup_migrations"),
+                patch("app.main._seed_api_sources"),
+                patch("app.connector_status.log_connector_status", return_value={}),
+                patch("app.scheduler.configure_scheduler"),
+                patch("app.scheduler.scheduler") as mock_sched,
+                patch("app.http_client.close_clients", new_callable=AsyncMock),
+                patch("app.main.logger") as mock_logger,
+            ):
                 mock_settings.secret_key = "a-real-secret-key"
                 mock_settings.sentry_dsn = ""
                 mock_settings.azure_client_id = ""
@@ -79,9 +76,11 @@ class TestLifespanMissingEnvVars:
 
                 loop = asyncio.new_event_loop()
                 try:
+
                     async def run_lifespan():
                         async with lifespan(mock_app) as _:
                             pass
+
                     loop.run_until_complete(run_lifespan())
                 finally:
                     loop.close()
@@ -100,15 +99,16 @@ class TestLifespanMissingEnvVars:
         mock_app = MagicMock()
         original = os.environ.pop("TESTING", None)
         try:
-            with patch("app.main.settings") as mock_settings, \
-                 patch("app.startup.run_startup_migrations"), \
-                 patch("app.main._seed_api_sources"), \
-                 patch("app.connector_status.log_connector_status", return_value={}), \
-                 patch("app.scheduler.configure_scheduler"), \
-                 patch("app.scheduler.scheduler") as mock_sched, \
-                 patch("app.http_client.close_clients", new_callable=AsyncMock), \
-                 patch("app.main.logger") as mock_logger:
-
+            with (
+                patch("app.main.settings") as mock_settings,
+                patch("app.startup.run_startup_migrations"),
+                patch("app.main._seed_api_sources"),
+                patch("app.connector_status.log_connector_status", return_value={}),
+                patch("app.scheduler.configure_scheduler"),
+                patch("app.scheduler.scheduler") as mock_sched,
+                patch("app.http_client.close_clients", new_callable=AsyncMock),
+                patch("app.main.logger") as mock_logger,
+            ):
                 mock_settings.secret_key = "a-real-secret-key"
                 mock_settings.sentry_dsn = ""
                 mock_settings.azure_client_id = "cid"
@@ -117,9 +117,11 @@ class TestLifespanMissingEnvVars:
 
                 loop = asyncio.new_event_loop()
                 try:
+
                     async def run_lifespan():
                         async with lifespan(mock_app) as _:
                             pass
+
                     loop.run_until_complete(run_lifespan())
                 finally:
                     loop.close()
@@ -135,6 +137,7 @@ class TestLifespanMissingEnvVars:
 
 # ── Lifespan: Sentry init (lines 57-65) ──────────────────────────────
 
+
 class TestLifespanSentry:
     """Cover lines 57-65: Sentry SDK initialization when DSN is set."""
 
@@ -145,15 +148,16 @@ class TestLifespanSentry:
         mock_app = MagicMock()
         original = os.environ.pop("TESTING", None)
         try:
-            with patch("app.main.settings") as mock_settings, \
-                 patch("app.startup.run_startup_migrations"), \
-                 patch("app.main._seed_api_sources"), \
-                 patch("app.connector_status.log_connector_status", return_value={}), \
-                 patch("app.scheduler.configure_scheduler"), \
-                 patch("app.scheduler.scheduler") as mock_sched, \
-                 patch("app.http_client.close_clients", new_callable=AsyncMock), \
-                 patch("sentry_sdk.init") as mock_sentry_init:
-
+            with (
+                patch("app.main.settings") as mock_settings,
+                patch("app.startup.run_startup_migrations"),
+                patch("app.main._seed_api_sources"),
+                patch("app.connector_status.log_connector_status", return_value={}),
+                patch("app.scheduler.configure_scheduler"),
+                patch("app.scheduler.scheduler") as mock_sched,
+                patch("app.http_client.close_clients", new_callable=AsyncMock),
+                patch("sentry_sdk.init") as mock_sentry_init,
+            ):
                 mock_settings.secret_key = "a-real-secret-key"
                 mock_settings.sentry_dsn = "https://examplePublicKey@o0.ingest.sentry.io/0"
                 mock_settings.sentry_traces_sample_rate = 0.1
@@ -165,9 +169,11 @@ class TestLifespanSentry:
 
                 loop = asyncio.new_event_loop()
                 try:
+
                     async def run_lifespan():
                         async with lifespan(mock_app) as _:
                             pass
+
                     loop.run_until_complete(run_lifespan())
                 finally:
                     loop.close()
@@ -187,18 +193,20 @@ class TestLifespanSentry:
     def test_sentry_before_send_scrubs_headers(self):
         """Verify _sentry_before_send scrubs sensitive headers and vars."""
         from app.main import lifespan
+
         mock_app = MagicMock()
         original = os.environ.pop("TESTING", None)
         try:
-            with patch("app.main.settings") as mock_settings, \
-                 patch("app.startup.run_startup_migrations"), \
-                 patch("app.main._seed_api_sources"), \
-                 patch("app.connector_status.log_connector_status", return_value={}), \
-                 patch("app.scheduler.configure_scheduler"), \
-                 patch("app.scheduler.scheduler") as mock_sched, \
-                 patch("app.http_client.close_clients", new_callable=AsyncMock), \
-                 patch("sentry_sdk.init") as mock_sentry_init:
-
+            with (
+                patch("app.main.settings") as mock_settings,
+                patch("app.startup.run_startup_migrations"),
+                patch("app.main._seed_api_sources"),
+                patch("app.connector_status.log_connector_status", return_value={}),
+                patch("app.scheduler.configure_scheduler"),
+                patch("app.scheduler.scheduler") as mock_sched,
+                patch("app.http_client.close_clients", new_callable=AsyncMock),
+                patch("sentry_sdk.init") as mock_sentry_init,
+            ):
                 mock_settings.secret_key = "a-real-secret-key"
                 mock_settings.sentry_dsn = "https://examplePublicKey@o0.ingest.sentry.io/0"
                 mock_settings.sentry_traces_sample_rate = 0.1
@@ -210,9 +218,11 @@ class TestLifespanSentry:
 
                 loop = asyncio.new_event_loop()
                 try:
+
                     async def run_lifespan():
                         async with lifespan(mock_app) as _:
                             pass
+
                     loop.run_until_complete(run_lifespan())
                 finally:
                     loop.close()
@@ -226,11 +236,7 @@ class TestLifespanSentry:
                         "query_string": "apiKey=secret123&q=test",
                     },
                     "exception": {
-                        "values": [{
-                            "stacktrace": {
-                                "frames": [{"vars": {"api_key": "sk-1234", "name": "test"}}]
-                            }
-                        }]
+                        "values": [{"stacktrace": {"frames": [{"vars": {"api_key": "sk-1234", "name": "test"}}]}}]
                     },
                 }
                 result = before_send(event, {})
@@ -257,15 +263,16 @@ class TestLifespanSentry:
         mock_app = MagicMock()
         original = os.environ.pop("TESTING", None)
         try:
-            with patch("app.main.settings") as mock_settings, \
-                 patch("app.startup.run_startup_migrations"), \
-                 patch("app.main._seed_api_sources"), \
-                 patch("app.connector_status.log_connector_status", return_value={}), \
-                 patch("app.scheduler.configure_scheduler"), \
-                 patch("app.scheduler.scheduler") as mock_sched, \
-                 patch("app.http_client.close_clients", new_callable=AsyncMock), \
-                 patch("sentry_sdk.init") as mock_sentry_init:
-
+            with (
+                patch("app.main.settings") as mock_settings,
+                patch("app.startup.run_startup_migrations"),
+                patch("app.main._seed_api_sources"),
+                patch("app.connector_status.log_connector_status", return_value={}),
+                patch("app.scheduler.configure_scheduler"),
+                patch("app.scheduler.scheduler") as mock_sched,
+                patch("app.http_client.close_clients", new_callable=AsyncMock),
+                patch("sentry_sdk.init") as mock_sentry_init,
+            ):
                 mock_settings.secret_key = "a-real-secret-key"
                 mock_settings.sentry_dsn = "https://example@sentry.io/0"
                 mock_settings.sentry_traces_sample_rate = 0.1
@@ -277,9 +284,11 @@ class TestLifespanSentry:
 
                 loop = asyncio.new_event_loop()
                 try:
+
                     async def run_lifespan():
                         async with lifespan(mock_app) as _:
                             pass
+
                     loop.run_until_complete(run_lifespan())
                 finally:
                     loop.close()
@@ -295,6 +304,7 @@ class TestLifespanSentry:
 
 # ── Rate limit handler (lines 117-120) ────────────────────────────────
 
+
 class TestRateLimitHandler:
     """Cover lines 117-120: Rate limit exception handler registration."""
 
@@ -302,25 +312,28 @@ class TestRateLimitHandler:
         """Verify the rate limit handler components are importable."""
         from slowapi import _rate_limit_exceeded_handler
         from slowapi.errors import RateLimitExceeded
+
         assert _rate_limit_exceeded_handler is not None
         assert RateLimitExceeded is not None
 
     def test_rate_limit_enabled_branch(self):
         """Test that rate limit handler code path works when enabled."""
         from app.main import app
+
         assert hasattr(app.state, "limiter")
 
 
 # ── Global exception handler (lines 160-170) ─────────────────────────
+
 
 class TestGlobalExceptionHandler:
     """Cover lines 160-170: The catch-all Exception handler."""
 
     def test_unhandled_exception_returns_500_json(self, db_session, test_user):
         """An unhandled exception in a route returns structured 500 JSON."""
-        from app.main import app
         from app.database import get_db
-        from app.dependencies import require_user, require_buyer
+        from app.dependencies import require_buyer, require_user
+        from app.main import app
 
         def _override_db():
             yield db_session
@@ -350,6 +363,7 @@ class TestGlobalExceptionHandler:
 
 # ── CSRF middleware (lines 191-195) ───────────────────────────────────
 
+
 class TestCSRFMiddleware:
     """Cover lines 191-195: CSRF middleware is only added when not TESTING."""
 
@@ -357,16 +371,19 @@ class TestCSRFMiddleware:
         """In TESTING mode, CSRF middleware is not added."""
         assert os.environ.get("TESTING") == "1"
         from app.main import app
-        middleware_classes = [type(m).__name__ for m in getattr(app, 'user_middleware', [])]
+
+        middleware_classes = [type(m).__name__ for m in getattr(app, "user_middleware", [])]
         assert "CSRFMiddleware" not in str(middleware_classes)
 
     def test_csrf_module_importable(self):
         """Verify CSRFMiddleware can be imported (for non-testing path)."""
         from starlette_csrf import CSRFMiddleware
+
         assert CSRFMiddleware is not None
 
 
 # ── HSTS header (line 250) ────────────────────────────────────────────
+
 
 class TestHSTSHeader:
     """Cover line 250: HSTS header set when app_url starts with https."""
@@ -374,11 +391,13 @@ class TestHSTSHeader:
     def test_hsts_header_when_https(self, client):
         """When app_url starts with https, HSTS header is set."""
         from app.config import Settings
+
         original_app_url = Settings.app_url
 
         try:
             Settings.app_url = "https://app.example.com"
             from app.main import settings
+
             settings.app_url = "https://app.example.com"
             resp = client.get("/health")
             assert "Strict-Transport-Security" in resp.headers
@@ -390,14 +409,15 @@ class TestHSTSHeader:
 
 # ── Middleware exception path (lines 233-241) ─────────────────────────
 
+
 class TestMiddlewareExceptionPath:
     """Cover lines 233-241: Exception in middleware logs and re-raises."""
 
     def test_middleware_exception_logged(self, db_session, test_user):
         """When an exception occurs in route, middleware logs it before re-raising."""
-        from app.main import app
         from app.database import get_db
-        from app.dependencies import require_user, require_buyer
+        from app.dependencies import require_buyer, require_user
+        from app.main import app
 
         def _override_db():
             yield db_session
@@ -419,14 +439,15 @@ class TestMiddlewareExceptionPath:
 
 # ── Health endpoint: DB failure (lines 326-327) ──────────────────────
 
+
 class TestHealthDbFailure:
     """Cover lines 326-327: DB exception sets db_ok = False."""
 
     def test_health_db_error_returns_degraded(self, db_session, test_user):
         """When DB query fails, health returns degraded."""
-        from app.main import app
         from app.database import get_db
-        from app.dependencies import require_user, require_buyer
+        from app.dependencies import require_buyer, require_user
+        from app.main import app
 
         mock_session = MagicMock()
         mock_session.execute.side_effect = Exception("DB down")
@@ -448,6 +469,7 @@ class TestHealthDbFailure:
 
 
 # ── Health endpoint: Redis failure (lines 333-335) ───────────────────
+
 
 class TestHealthRedisFailure:
     """Cover lines 333-335: Redis exception sets redis_status = 'error'."""
@@ -472,6 +494,7 @@ class TestHealthRedisFailure:
 
 
 # ── _seed_api_sources: existing source update (lines 767-773) ────────
+
 
 class TestSeedApiSourcesUpdate:
     """Cover lines 767-773: Update existing sources' attributes."""
@@ -510,10 +533,11 @@ class TestSeedApiSourcesUpdate:
 
             _seed_api_sources()
 
-            assert hasattr(existing_nexar, 'display_name')
+            assert hasattr(existing_nexar, "display_name")
 
 
 # ── _seed_api_sources: env vars all set -> status "live" (line 781) ──
+
 
 class TestSeedApiSourcesLiveStatus:
     """Cover line 781: status = 'live' when all env vars are set."""
@@ -528,14 +552,25 @@ class TestSeedApiSourcesLiveStatus:
             mock_db.query.return_value.all.return_value = []
 
             original_getenv = os.getenv
+
             def mock_getenv(key, default=None):
-                if key in ("NEXAR_CLIENT_ID", "NEXAR_CLIENT_SECRET",
-                           "BROKERBIN_API_KEY", "BROKERBIN_API_SECRET",
-                           "EBAY_CLIENT_ID", "EBAY_CLIENT_SECRET",
-                           "DIGIKEY_CLIENT_ID", "DIGIKEY_CLIENT_SECRET",
-                           "MOUSER_API_KEY", "OEMSECRETS_API_KEY",
-                           "SOURCENGINE_API_KEY", "ANTHROPIC_API_KEY",
-                           "AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID"):
+                if key in (
+                    "NEXAR_CLIENT_ID",
+                    "NEXAR_CLIENT_SECRET",
+                    "BROKERBIN_API_KEY",
+                    "BROKERBIN_API_SECRET",
+                    "EBAY_CLIENT_ID",
+                    "EBAY_CLIENT_SECRET",
+                    "DIGIKEY_CLIENT_ID",
+                    "DIGIKEY_CLIENT_SECRET",
+                    "MOUSER_API_KEY",
+                    "OEMSECRETS_API_KEY",
+                    "SOURCENGINE_API_KEY",
+                    "ANTHROPIC_API_KEY",
+                    "AZURE_CLIENT_ID",
+                    "AZURE_CLIENT_SECRET",
+                    "AZURE_TENANT_ID",
+                ):
                     return "fake-value"
                 return original_getenv(key, default)
 
@@ -559,7 +594,9 @@ class TestSeedApiSourcesLiveStatus:
             mock_db.add.assert_called()
             mock_db.commit.assert_called_once()
 
+
 # ── Module-level branches: rate limit & CSRF (lines 117-120, 191-195) ─
+
 
 class TestModuleLevelBranches:
     """Cover lines 117-120 and 191-195 which are module-level conditional branches.
@@ -576,14 +613,15 @@ class TestModuleLevelBranches:
         - lines 191-195: CSRF middleware registration
         """
         import importlib
-        import sys
 
         # Save original module state
         import app.main as main_mod
+
         original_app = main_mod.app
 
         # Temporarily enable rate limiting and disable TESTING
         from app.config import settings as real_settings
+
         original_rl = real_settings.rate_limit_enabled
         original_testing = os.environ.pop("TESTING", None)
         real_settings.rate_limit_enabled = True
@@ -606,5 +644,3 @@ class TestModuleLevelBranches:
 
 
 # ── Cache warmup (lines 121-123) ───────────────────────────────────────
-
-

@@ -4,12 +4,13 @@ Covers: validate_contact, dedup_contacts, score_contact_completeness,
         flag_stale_contacts, compute_enrichment_status.
 """
 
-import pytest
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
-from tests.conftest import engine  # noqa: F401
+
+import pytest
 
 from app.models.crm import Company, CustomerSite, SiteContact
+from tests.conftest import engine  # noqa: F401
 
 
 @pytest.fixture
@@ -35,17 +36,21 @@ def site_with_contacts(db_session):
 
 def test_validate_contact_valid():
     from app.services.contact_quality import validate_contact
-    valid, issues = validate_contact({
-        "full_name": "Jane Doe",
-        "email": "jane@acme.com",
-        "phone": "+1-555-0100",
-    })
+
+    valid, issues = validate_contact(
+        {
+            "full_name": "Jane Doe",
+            "email": "jane@acme.com",
+            "phone": "+1-555-0100",
+        }
+    )
     assert valid is True
     assert issues == []
 
 
 def test_validate_contact_missing_name():
     from app.services.contact_quality import validate_contact
+
     valid, issues = validate_contact({"email": "test@test.com"})
     assert valid is False
     assert "missing_name" in issues
@@ -53,6 +58,7 @@ def test_validate_contact_missing_name():
 
 def test_validate_contact_missing_email():
     from app.services.contact_quality import validate_contact
+
     valid, issues = validate_contact({"full_name": "Test"})
     assert valid is False
     assert "missing_email" in issues
@@ -60,6 +66,7 @@ def test_validate_contact_missing_email():
 
 def test_validate_contact_bad_email():
     from app.services.contact_quality import validate_contact
+
     valid, issues = validate_contact({"full_name": "Test", "email": "not-an-email"})
     assert valid is False
     assert "invalid_email_format" in issues
@@ -67,9 +74,8 @@ def test_validate_contact_bad_email():
 
 def test_validate_contact_short_phone():
     from app.services.contact_quality import validate_contact
-    valid, issues = validate_contact({
-        "full_name": "Test", "email": "t@t.com", "phone": "123"
-    })
+
+    valid, issues = validate_contact({"full_name": "Test", "email": "t@t.com", "phone": "123"})
     assert valid is False
     assert "phone_too_short" in issues
 
@@ -82,22 +88,35 @@ def test_dedup_contacts(db_session, site_with_contacts):
     from app.services.contact_quality import dedup_contacts
 
     # Add duplicates
-    db_session.add(SiteContact(
-        customer_site_id=site.id, full_name="Jane Doe",
-        email="jane@quality.com", phone="+1-555-0100",
-    ))
-    db_session.add(SiteContact(
-        customer_site_id=site.id, full_name="Jane D.",
-        email="jane@quality.com", title="VP Procurement",
-    ))
+    db_session.add(
+        SiteContact(
+            customer_site_id=site.id,
+            full_name="Jane Doe",
+            email="jane@quality.com",
+            phone="+1-555-0100",
+        )
+    )
+    db_session.add(
+        SiteContact(
+            customer_site_id=site.id,
+            full_name="Jane D.",
+            email="jane@quality.com",
+            title="VP Procurement",
+        )
+    )
     db_session.flush()
 
     merged = dedup_contacts(db_session, site.id)
     assert merged == 1
     # Primary should have the merged title
-    active = db_session.query(SiteContact).filter_by(
-        customer_site_id=site.id, is_active=True,
-    ).all()
+    active = (
+        db_session.query(SiteContact)
+        .filter_by(
+            customer_site_id=site.id,
+            is_active=True,
+        )
+        .all()
+    )
     assert len(active) == 1
     assert active[0].title == "VP Procurement"
 
@@ -106,14 +125,20 @@ def test_dedup_no_duplicates(db_session, site_with_contacts):
     co, site = site_with_contacts
     from app.services.contact_quality import dedup_contacts
 
-    db_session.add(SiteContact(
-        customer_site_id=site.id, full_name="Alice",
-        email="alice@quality.com",
-    ))
-    db_session.add(SiteContact(
-        customer_site_id=site.id, full_name="Bob",
-        email="bob@quality.com",
-    ))
+    db_session.add(
+        SiteContact(
+            customer_site_id=site.id,
+            full_name="Alice",
+            email="alice@quality.com",
+        )
+    )
+    db_session.add(
+        SiteContact(
+            customer_site_id=site.id,
+            full_name="Bob",
+            email="bob@quality.com",
+        )
+    )
     db_session.flush()
 
     merged = dedup_contacts(db_session, site.id)
@@ -208,6 +233,7 @@ def test_flag_stale_contacts_fresh(db_session, site_with_contacts):
 def test_compute_status_missing(db_session, site_with_contacts, _mock_settings):
     co, site = site_with_contacts
     from app.services.contact_quality import compute_enrichment_status
+
     assert compute_enrichment_status(db_session, co.id) == "missing"
 
 
@@ -215,9 +241,13 @@ def test_compute_status_partial(db_session, site_with_contacts, _mock_settings):
     co, site = site_with_contacts
     from app.services.contact_quality import compute_enrichment_status
 
-    db_session.add(SiteContact(
-        customer_site_id=site.id, full_name="One", email="one@quality.com",
-    ))
+    db_session.add(
+        SiteContact(
+            customer_site_id=site.id,
+            full_name="One",
+            email="one@quality.com",
+        )
+    )
     db_session.flush()
     assert compute_enrichment_status(db_session, co.id) == "partial"
 
@@ -227,10 +257,14 @@ def test_compute_status_complete(db_session, site_with_contacts, _mock_settings)
     from app.services.contact_quality import compute_enrichment_status
 
     for i in range(3):
-        db_session.add(SiteContact(
-            customer_site_id=site.id, full_name=f"Contact {i}",
-            email=f"c{i}@quality.com", email_verified=True,
-        ))
+        db_session.add(
+            SiteContact(
+                customer_site_id=site.id,
+                full_name=f"Contact {i}",
+                email=f"c{i}@quality.com",
+                email_verified=True,
+            )
+        )
     db_session.flush()
     assert compute_enrichment_status(db_session, co.id) == "complete"
 
@@ -240,9 +274,13 @@ def test_compute_status_stale(db_session, site_with_contacts, _mock_settings):
     from app.services.contact_quality import compute_enrichment_status
 
     for i in range(3):
-        db_session.add(SiteContact(
-            customer_site_id=site.id, full_name=f"Contact {i}",
-            email=f"c{i}@quality.com", needs_refresh=True,
-        ))
+        db_session.add(
+            SiteContact(
+                customer_site_id=site.id,
+                full_name=f"Contact {i}",
+                email=f"c{i}@quality.com",
+                needs_refresh=True,
+            )
+        )
     db_session.flush()
     assert compute_enrichment_status(db_session, co.id) == "stale"

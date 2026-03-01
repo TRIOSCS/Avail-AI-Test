@@ -14,20 +14,14 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-from sqlalchemy.orm import Session
-
-from tests.conftest import TestSessionLocal
-
-
 # ── Scheduler Job Wrappers ───────────────────────────────────────────
 
 
 class TestSchedulerProactiveOfferExpiry:
     def test_expires_old_sent_offers(self, db_session):
         """_job_proactive_offer_expiry marks sent offers older than 14d as expired."""
+        from app.models import Company, CustomerSite, User
         from app.models.intelligence import ProactiveOffer
-        from app.models import User, Company, CustomerSite
 
         user = User(email="sched1@test.com", name="S1", role="buyer", azure_id="azsched1", is_active=True)
         db_session.add(user)
@@ -40,15 +34,21 @@ class TestSchedulerProactiveOfferExpiry:
         db_session.flush()
 
         old = ProactiveOffer(
-            customer_site_id=site.id, salesperson_id=user.id,
-            line_items=[], recipient_emails=["a@b.com"],
-            subject="Test", status="sent",
+            customer_site_id=site.id,
+            salesperson_id=user.id,
+            line_items=[],
+            recipient_emails=["a@b.com"],
+            subject="Test",
+            status="sent",
             sent_at=datetime.now(timezone.utc) - timedelta(days=20),
         )
         recent = ProactiveOffer(
-            customer_site_id=site.id, salesperson_id=user.id,
-            line_items=[], recipient_emails=["a@b.com"],
-            subject="Test2", status="sent",
+            customer_site_id=site.id,
+            salesperson_id=user.id,
+            line_items=[],
+            recipient_emails=["a@b.com"],
+            subject="Test2",
+            status="sent",
             sent_at=datetime.now(timezone.utc) - timedelta(days=3),
         )
         db_session.add_all([old, recent])
@@ -83,13 +83,23 @@ class TestSchedulerFlagStaleOffers:
         db_session.flush()
 
         old = Offer(
-            requisition_id=req.id, vendor_name="V", mpn="X",
-            qty_available=10, unit_price=1.0, status="active", is_stale=False,
+            requisition_id=req.id,
+            vendor_name="V",
+            mpn="X",
+            qty_available=10,
+            unit_price=1.0,
+            status="active",
+            is_stale=False,
             created_at=datetime.now(timezone.utc) - timedelta(days=20),
         )
         recent = Offer(
-            requisition_id=req.id, vendor_name="V2", mpn="Y",
-            qty_available=10, unit_price=1.0, status="active", is_stale=False,
+            requisition_id=req.id,
+            vendor_name="V2",
+            mpn="Y",
+            qty_available=10,
+            unit_price=1.0,
+            status="active",
+            is_stale=False,
             created_at=datetime.now(timezone.utc) - timedelta(days=3),
         )
         db_session.add_all([old, recent])
@@ -116,36 +126,42 @@ class TestSchedulerProspectingJobs:
     def test_job_pool_health(self):
         with patch("app.services.prospect_scheduler.job_pool_health_report", new_callable=AsyncMock) as mock:
             from app.scheduler import _job_pool_health_report
+
             asyncio.get_event_loop().run_until_complete(_job_pool_health_report())
             mock.assert_called_once()
 
     def test_job_discover_prospects(self):
         with patch("app.services.prospect_scheduler.job_discover_prospects", new_callable=AsyncMock) as mock:
             from app.scheduler import _job_discover_prospects
+
             asyncio.get_event_loop().run_until_complete(_job_discover_prospects())
             mock.assert_called_once()
 
     def test_job_enrich_pool(self):
         with patch("app.services.prospect_scheduler.job_enrich_pool", new_callable=AsyncMock) as mock:
             from app.scheduler import _job_enrich_pool
+
             asyncio.get_event_loop().run_until_complete(_job_enrich_pool())
             mock.assert_called_once()
 
     def test_job_find_contacts(self):
         with patch("app.services.prospect_scheduler.job_find_contacts", new_callable=AsyncMock) as mock:
             from app.scheduler import _job_find_contacts
+
             asyncio.get_event_loop().run_until_complete(_job_find_contacts())
             mock.assert_called_once()
 
     def test_job_refresh_scores(self):
         with patch("app.services.prospect_scheduler.job_refresh_scores", new_callable=AsyncMock) as mock:
             from app.scheduler import _job_refresh_scores
+
             asyncio.get_event_loop().run_until_complete(_job_refresh_scores())
             mock.assert_called_once()
 
     def test_job_expire_and_resurface(self):
         with patch("app.services.prospect_scheduler.job_expire_and_resurface", new_callable=AsyncMock) as mock:
             from app.scheduler import _job_expire_and_resurface
+
             asyncio.get_event_loop().run_until_complete(_job_expire_and_resurface())
             mock.assert_called_once()
 
@@ -154,12 +170,14 @@ class TestSchedulerIntegrityCheck:
     def test_runs_integrity_check(self):
         mock_db = MagicMock()
         mock_report = {
-            "status": "healthy", "material_cards_total": 100,
+            "status": "healthy",
+            "material_cards_total": 100,
             "healed": {"requirements": 0, "sightings": 0, "offers": 0},
         }
         with patch("app.database.SessionLocal", return_value=mock_db):
             with patch("app.services.integrity_service.run_integrity_check", return_value=mock_report):
                 from app.scheduler import _job_integrity_check
+
                 asyncio.get_event_loop().run_until_complete(_job_integrity_check())
 
     def test_integrity_check_exception(self):
@@ -167,6 +185,7 @@ class TestSchedulerIntegrityCheck:
         with patch("app.database.SessionLocal", return_value=mock_db):
             with patch("app.services.integrity_service.run_integrity_check", side_effect=Exception("db down")):
                 from app.scheduler import _job_integrity_check
+
                 # Should not raise
                 asyncio.get_event_loop().run_until_complete(_job_integrity_check())
 
@@ -175,15 +194,25 @@ class TestSchedulerMaterialEnrichment:
     def test_runs_enrichment(self):
         mock_db = MagicMock()
         with patch("app.database.SessionLocal", return_value=mock_db):
-            with patch("app.services.material_enrichment_service.enrich_pending_cards", new_callable=AsyncMock, return_value={"enriched": 5, "errors": 0, "pending": 10}):
+            with patch(
+                "app.services.material_enrichment_service.enrich_pending_cards",
+                new_callable=AsyncMock,
+                return_value={"enriched": 5, "errors": 0, "pending": 10},
+            ):
                 from app.scheduler import _job_material_enrichment
+
                 asyncio.get_event_loop().run_until_complete(_job_material_enrichment())
 
     def test_enrichment_exception(self):
         mock_db = MagicMock()
         with patch("app.database.SessionLocal", return_value=mock_db):
-            with patch("app.services.material_enrichment_service.enrich_pending_cards", new_callable=AsyncMock, side_effect=Exception("fail")):
+            with patch(
+                "app.services.material_enrichment_service.enrich_pending_cards",
+                new_callable=AsyncMock,
+                side_effect=Exception("fail"),
+            ):
                 from app.scheduler import _job_material_enrichment
+
                 asyncio.get_event_loop().run_until_complete(_job_material_enrichment())
 
 
@@ -195,6 +224,7 @@ class TestSchedulerMonthlyEnrichment:
         mock_db.query.return_value = mock_query
         with patch("app.database.SessionLocal", return_value=mock_db):
             from app.scheduler import _job_monthly_enrichment_refresh
+
             asyncio.get_event_loop().run_until_complete(_job_monthly_enrichment_refresh())
         mock_db.close.assert_called_once()
 
@@ -205,8 +235,11 @@ class TestSchedulerMonthlyEnrichment:
         mock_db.query.return_value = mock_query
         with patch("app.database.SessionLocal", return_value=mock_db):
             with patch("app.cache.intel_cache.flush_enrichment_cache", return_value=5):
-                with patch("app.services.deep_enrichment_service.run_backfill_job", new_callable=AsyncMock, return_value=42):
+                with patch(
+                    "app.services.deep_enrichment_service.run_backfill_job", new_callable=AsyncMock, return_value=42
+                ):
                     from app.scheduler import _job_monthly_enrichment_refresh
+
                     asyncio.get_event_loop().run_until_complete(_job_monthly_enrichment_refresh())
 
     def test_exception_handled(self):
@@ -214,6 +247,7 @@ class TestSchedulerMonthlyEnrichment:
         mock_db.query.side_effect = Exception("db error")
         with patch("app.database.SessionLocal", return_value=mock_db):
             from app.scheduler import _job_monthly_enrichment_refresh
+
             asyncio.get_event_loop().run_until_complete(_job_monthly_enrichment_refresh())
 
 
@@ -242,6 +276,7 @@ class TestPerformanceRouter:
     def test_refresh_avail_scores_admin(self, client, admin_user, db_session):
         from app.dependencies import require_user
         from app.main import app
+
         app.dependency_overrides[require_user] = lambda: admin_user
         with patch("app.services.avail_score_service.compute_all_avail_scores", return_value={"computed": 5}):
             resp = client.post("/api/performance/avail-scores/refresh?month=2026-01")
@@ -251,6 +286,7 @@ class TestPerformanceRouter:
     def test_refresh_avail_scores_invalid_month(self, client, admin_user, db_session):
         from app.dependencies import require_user
         from app.main import app
+
         app.dependency_overrides[require_user] = lambda: admin_user
         resp = client.post("/api/performance/avail-scores/refresh?month=bad")
         assert resp.status_code == 400
@@ -258,6 +294,7 @@ class TestPerformanceRouter:
     def test_refresh_avail_scores_default_month(self, client, admin_user, db_session):
         from app.dependencies import require_user
         from app.main import app
+
         app.dependency_overrides[require_user] = lambda: admin_user
         with patch("app.services.avail_score_service.compute_all_avail_scores", return_value={"computed": 5}):
             resp = client.post("/api/performance/avail-scores/refresh")
@@ -293,6 +330,7 @@ class TestPerformanceRouter:
     def test_refresh_multiplier_scores_admin(self, client, admin_user, db_session):
         from app.dependencies import require_user
         from app.main import app
+
         app.dependency_overrides[require_user] = lambda: admin_user
         with patch("app.services.multiplier_score_service.compute_all_multiplier_scores", return_value={"computed": 3}):
             resp = client.post("/api/performance/multiplier-scores/refresh?month=2026-01")
@@ -301,6 +339,7 @@ class TestPerformanceRouter:
     def test_refresh_multiplier_scores_invalid_month(self, client, admin_user, db_session):
         from app.dependencies import require_user
         from app.main import app
+
         app.dependency_overrides[require_user] = lambda: admin_user
         resp = client.post("/api/performance/multiplier-scores/refresh?month=nope")
         assert resp.status_code == 400
@@ -308,6 +347,7 @@ class TestPerformanceRouter:
     def test_refresh_multiplier_scores_default_month(self, client, admin_user, db_session):
         from app.dependencies import require_user
         from app.main import app
+
         app.dependency_overrides[require_user] = lambda: admin_user
         with patch("app.services.multiplier_score_service.compute_all_multiplier_scores", return_value={"computed": 3}):
             resp = client.post("/api/performance/multiplier-scores/refresh")
@@ -319,9 +359,9 @@ class TestPerformanceRouter:
 
 class TestMaterialDelete:
     def test_soft_delete(self, client, admin_user, db_session, test_material_card):
-        from app.dependencies import require_user
-        from app.main import app
         from app.dependencies import require_admin
+        from app.main import app
+
         app.dependency_overrides[require_admin] = lambda: admin_user
         resp = client.delete(f"/api/materials/{test_material_card.id}")
         assert resp.status_code == 200
@@ -332,6 +372,7 @@ class TestMaterialDelete:
     def test_delete_not_found(self, client, admin_user, db_session):
         from app.dependencies import require_admin
         from app.main import app
+
         app.dependency_overrides[require_admin] = lambda: admin_user
         resp = client.delete("/api/materials/999999")
         assert resp.status_code == 404
@@ -339,6 +380,7 @@ class TestMaterialDelete:
     def test_delete_already_deleted(self, client, admin_user, db_session, test_material_card):
         from app.dependencies import require_admin
         from app.main import app
+
         app.dependency_overrides[require_admin] = lambda: admin_user
         test_material_card.deleted_at = datetime.now(timezone.utc)
         db_session.commit()
@@ -350,6 +392,7 @@ class TestMaterialRestore:
     def test_restore(self, client, admin_user, db_session, test_material_card):
         from app.dependencies import require_admin
         from app.main import app
+
         app.dependency_overrides[require_admin] = lambda: admin_user
         test_material_card.deleted_at = datetime.now(timezone.utc)
         db_session.commit()
@@ -360,6 +403,7 @@ class TestMaterialRestore:
     def test_restore_not_found(self, client, admin_user, db_session):
         from app.dependencies import require_admin
         from app.main import app
+
         app.dependency_overrides[require_admin] = lambda: admin_user
         resp = client.post("/api/materials/999999/restore")
         assert resp.status_code == 404
@@ -367,6 +411,7 @@ class TestMaterialRestore:
     def test_restore_not_deleted(self, client, admin_user, db_session, test_material_card):
         from app.dependencies import require_admin
         from app.main import app
+
         app.dependency_overrides[require_admin] = lambda: admin_user
         resp = client.post(f"/api/materials/{test_material_card.id}/restore")
         assert resp.status_code == 400
@@ -385,9 +430,13 @@ class TestMaterialMerge:
         db_session.add_all([source, target])
         db_session.commit()
 
-        resp = client.post("/api/materials/merge", json={
-            "source_card_id": source.id, "target_card_id": target.id,
-        })
+        resp = client.post(
+            "/api/materials/merge",
+            json={
+                "source_card_id": source.id,
+                "target_card_id": target.id,
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         assert resp.json()["target_card_id"] == target.id
@@ -395,6 +444,7 @@ class TestMaterialMerge:
     def test_merge_missing_ids(self, client, admin_user, db_session):
         from app.dependencies import require_admin
         from app.main import app
+
         app.dependency_overrides[require_admin] = lambda: admin_user
         resp = client.post("/api/materials/merge", json={})
         assert resp.status_code == 400
@@ -402,28 +452,43 @@ class TestMaterialMerge:
     def test_merge_same_id(self, client, admin_user, db_session):
         from app.dependencies import require_admin
         from app.main import app
+
         app.dependency_overrides[require_admin] = lambda: admin_user
-        resp = client.post("/api/materials/merge", json={
-            "source_card_id": 1, "target_card_id": 1,
-        })
+        resp = client.post(
+            "/api/materials/merge",
+            json={
+                "source_card_id": 1,
+                "target_card_id": 1,
+            },
+        )
         assert resp.status_code == 400
 
     def test_merge_source_not_found(self, client, admin_user, db_session, test_material_card):
         from app.dependencies import require_admin
         from app.main import app
+
         app.dependency_overrides[require_admin] = lambda: admin_user
-        resp = client.post("/api/materials/merge", json={
-            "source_card_id": 999999, "target_card_id": test_material_card.id,
-        })
+        resp = client.post(
+            "/api/materials/merge",
+            json={
+                "source_card_id": 999999,
+                "target_card_id": test_material_card.id,
+            },
+        )
         assert resp.status_code == 404
 
     def test_merge_target_not_found(self, client, admin_user, db_session, test_material_card):
         from app.dependencies import require_admin
         from app.main import app
+
         app.dependency_overrides[require_admin] = lambda: admin_user
-        resp = client.post("/api/materials/merge", json={
-            "source_card_id": test_material_card.id, "target_card_id": 999999,
-        })
+        resp = client.post(
+            "/api/materials/merge",
+            json={
+                "source_card_id": test_material_card.id,
+                "target_card_id": 999999,
+            },
+        )
         assert resp.status_code == 404
 
 

@@ -19,9 +19,17 @@ from app.services.ai_quote_analyzer import _format_quotes, _validate_result, com
 # ── Helpers ───────────────────────────────────────────────────────────
 
 
-def _quote(vendor_name="Arrow", unit_price=1.50, vendor_score=85,
-           currency="USD", quantity_available=5000, lead_time_days=14,
-           date_code="2025+", condition="New", moq=100):
+def _quote(
+    vendor_name="Arrow",
+    unit_price=1.50,
+    vendor_score=85,
+    currency="USD",
+    quantity_available=5000,
+    lead_time_days=14,
+    date_code="2025+",
+    condition="New",
+    moq=100,
+):
     """Build a quote dict for comparison requests."""
     return {
         "vendor_name": vendor_name,
@@ -36,9 +44,12 @@ def _quote(vendor_name="Arrow", unit_price=1.50, vendor_score=85,
     }
 
 
-def _comparison_result(summary="Three quotes received.",
-                       recommendation="Go with Arrow for best overall value.",
-                       risk_factors=None, anomalies=None):
+def _comparison_result(
+    summary="Three quotes received.",
+    recommendation="Go with Arrow for best overall value.",
+    risk_factors=None,
+    anomalies=None,
+):
     """Build a mock comparison result from the LLM."""
     return {
         "summary": summary,
@@ -203,8 +214,7 @@ def test_format_quotes_basic():
 
 
 def test_format_quotes_with_all_fields():
-    quotes = [_quote("Arrow", unit_price=1.50, lead_time_days=7,
-                     date_code="2025+", condition="New", moq=100)]
+    quotes = [_quote("Arrow", unit_price=1.50, lead_time_days=7, date_code="2025+", condition="New", moq=100)]
     result = _format_quotes(quotes)
     assert "7 day lead" in result
     assert "DC: 2025+" in result
@@ -282,8 +292,10 @@ def test_compare_quotes_endpoint(client):
     """POST /api/ai/compare-quotes returns comparison result."""
     mock_result = _comparison_result()
 
-    with patch("app.routers.ai.settings") as mock_settings, \
-         patch("app.services.ai_quote_analyzer.gradient_json", new_callable=AsyncMock) as mock:
+    with (
+        patch("app.routers.ai.settings") as mock_settings,
+        patch("app.services.ai_quote_analyzer.gradient_json", new_callable=AsyncMock) as mock,
+    ):
         mock_settings.ai_features_enabled = "all"
         mock.return_value = mock_result
         resp = client.post(
@@ -359,8 +371,10 @@ def test_compare_quotes_endpoint_with_required_qty(client):
     """Accepts optional required_qty field."""
     mock_result = _comparison_result()
 
-    with patch("app.routers.ai.settings") as mock_settings, \
-         patch("app.services.ai_quote_analyzer.gradient_json", new_callable=AsyncMock) as mock:
+    with (
+        patch("app.routers.ai.settings") as mock_settings,
+        patch("app.services.ai_quote_analyzer.gradient_json", new_callable=AsyncMock) as mock,
+    ):
         mock_settings.ai_features_enabled = "all"
         mock.return_value = mock_result
         resp = client.post(

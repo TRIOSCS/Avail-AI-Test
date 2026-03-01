@@ -14,11 +14,7 @@ import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-from sqlalchemy.orm import Session
-
 from tests.conftest import engine  # noqa: F401
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  4A: AI Brand/Commodity Detection
@@ -73,9 +69,7 @@ class TestDetectSpecialtiesAI:
             new_callable=AsyncMock,
             return_value=mock_results,
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                detect_specialties_ai(["text1", "text2", "text3"])
-            )
+            result = asyncio.get_event_loop().run_until_complete(detect_specialties_ai(["text1", "text2", "text3"]))
 
         assert len(result) == 3
         assert result[0]["brands"] == ["NXP"]
@@ -95,9 +89,7 @@ class TestDetectSpecialtiesAI:
             new_callable=AsyncMock,
             return_value=mock_results,
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                detect_specialties_ai(["text"])
-            )
+            result = asyncio.get_event_loop().run_until_complete(detect_specialties_ai(["text"]))
 
         assert result[0]["brands"] == []
         assert result[0]["commodities"] == ["caps"]
@@ -111,9 +103,7 @@ class TestDetectSpecialtiesAI:
             new_callable=AsyncMock,
             return_value=[None, None],
         ):
-            result = asyncio.get_event_loop().run_until_complete(
-                detect_specialties_ai(["text1", "text2"])
-            )
+            result = asyncio.get_event_loop().run_until_complete(detect_specialties_ai(["text1", "text2"]))
 
         assert result == [None, None]
 
@@ -153,8 +143,10 @@ class TestSummarizeThread:
         mock_gc = MagicMock()
         mock_gc.get_all_pages = AsyncMock(return_value=mock_messages)
 
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
-             patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=mock_summary):
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=mock_summary),
+        ):
             result = asyncio.get_event_loop().run_until_complete(
                 summarize_thread("fake-token", "conv-sum-1", db_session, test_user.id)
             )
@@ -172,17 +164,19 @@ class TestSummarizeThread:
             "key_points": ["Cached summary"],
             "thread_status": "quoted",
         }
-        db_session.add(EmailIntelligence(
-            message_id="msg-cache-1",
-            user_id=test_user.id,
-            sender_email="v@t.com",
-            sender_domain="t.com",
-            classification="offer",
-            confidence=0.9,
-            conversation_id="conv-cached",
-            thread_summary=cached_summary,
-            created_at=datetime.now(timezone.utc),
-        ))
+        db_session.add(
+            EmailIntelligence(
+                message_id="msg-cache-1",
+                user_id=test_user.id,
+                sender_email="v@t.com",
+                sender_domain="t.com",
+                classification="offer",
+                confidence=0.9,
+                conversation_id="conv-cached",
+                thread_summary=cached_summary,
+                created_at=datetime.now(timezone.utc),
+            )
+        )
         db_session.commit()
 
         # Should NOT call Graph API or Gradient
@@ -227,17 +221,21 @@ class TestSummarizeThread:
         from app.services.email_intelligence_service import summarize_thread
 
         mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=[
-            {
-                "from": {"emailAddress": {"address": "v@t.com"}},
-                "subject": "Test",
-                "body": {"content": "Test body"},
-                "receivedDateTime": "2026-02-20T10:00:00Z",
-            },
-        ])
+        mock_gc.get_all_pages = AsyncMock(
+            return_value=[
+                {
+                    "from": {"emailAddress": {"address": "v@t.com"}},
+                    "subject": "Test",
+                    "body": {"content": "Test body"},
+                    "receivedDateTime": "2026-02-20T10:00:00Z",
+                },
+            ]
+        )
 
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
-             patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=None):
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=None),
+        ):
             result = asyncio.get_event_loop().run_until_complete(
                 summarize_thread("fake-token", "conv-ai-fail", db_session, test_user.id)
             )
@@ -250,31 +248,37 @@ class TestSummarizeThread:
         from app.services.email_intelligence_service import summarize_thread
 
         # Create an existing record for this conversation
-        db_session.add(EmailIntelligence(
-            message_id="msg-tocache",
-            user_id=test_user.id,
-            sender_email="v@t.com",
-            sender_domain="t.com",
-            classification="offer",
-            confidence=0.9,
-            conversation_id="conv-to-cache",
-            created_at=datetime.now(timezone.utc),
-        ))
+        db_session.add(
+            EmailIntelligence(
+                message_id="msg-tocache",
+                user_id=test_user.id,
+                sender_email="v@t.com",
+                sender_domain="t.com",
+                classification="offer",
+                confidence=0.9,
+                conversation_id="conv-to-cache",
+                created_at=datetime.now(timezone.utc),
+            )
+        )
         db_session.commit()
 
         mock_gc = MagicMock()
-        mock_gc.get_all_pages = AsyncMock(return_value=[
-            {
-                "from": {"emailAddress": {"address": "v@t.com"}},
-                "subject": "Quote",
-                "body": {"content": "LM317T at $0.50"},
-                "receivedDateTime": "2026-02-20T10:00:00Z",
-            },
-        ])
+        mock_gc.get_all_pages = AsyncMock(
+            return_value=[
+                {
+                    "from": {"emailAddress": {"address": "v@t.com"}},
+                    "subject": "Quote",
+                    "body": {"content": "LM317T at $0.50"},
+                    "receivedDateTime": "2026-02-20T10:00:00Z",
+                },
+            ]
+        )
         mock_summary = {"key_points": ["New summary"], "thread_status": "active"}
 
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc), \
-             patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=mock_summary):
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+            patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=mock_summary),
+        ):
             result = asyncio.get_event_loop().run_until_complete(
                 summarize_thread("fake-token", "conv-to-cache", db_session, test_user.id)
             )
@@ -282,11 +286,7 @@ class TestSummarizeThread:
         assert result == mock_summary
 
         # Verify it was cached in the DB
-        cached = (
-            db_session.query(EmailIntelligence)
-            .filter_by(conversation_id="conv-to-cache")
-            .first()
-        )
+        cached = db_session.query(EmailIntelligence).filter_by(conversation_id="conv-to-cache").first()
         assert cached.thread_summary == mock_summary
 
 
@@ -303,14 +303,17 @@ class TestThreadSummaryEndpoint:
             "thread_status": "active",
         }
 
-        with patch(
-            "app.routers.emails.require_fresh_token",
-            new_callable=AsyncMock,
-            return_value="fake-token",
-        ), patch(
-            "app.services.email_intelligence_service.summarize_thread",
-            new_callable=AsyncMock,
-            return_value=mock_summary,
+        with (
+            patch(
+                "app.routers.emails.require_fresh_token",
+                new_callable=AsyncMock,
+                return_value="fake-token",
+            ),
+            patch(
+                "app.services.email_intelligence_service.summarize_thread",
+                new_callable=AsyncMock,
+                return_value=mock_summary,
+            ),
         ):
             resp = client.get("/api/email-intelligence/thread-summary/conv-123")
 
@@ -320,14 +323,17 @@ class TestThreadSummaryEndpoint:
 
     def test_get_thread_summary_no_summary(self, client, db_session, test_user):
         """Returns error when summary cannot be generated."""
-        with patch(
-            "app.routers.emails.require_fresh_token",
-            new_callable=AsyncMock,
-            return_value="fake-token",
-        ), patch(
-            "app.services.email_intelligence_service.summarize_thread",
-            new_callable=AsyncMock,
-            return_value=None,
+        with (
+            patch(
+                "app.routers.emails.require_fresh_token",
+                new_callable=AsyncMock,
+                return_value="fake-token",
+            ),
+            patch(
+                "app.services.email_intelligence_service.summarize_thread",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
         ):
             resp = client.get("/api/email-intelligence/thread-summary/conv-none")
 
@@ -357,6 +363,7 @@ class TestDeepScanDeltaQuery:
     def _make_miner(self, db=None, user_id=None):
         with patch("app.utils.graph_client.GraphClient"):
             from app.connectors.email_mining import EmailMiner
+
             miner = EmailMiner("fake-token", db=db, user_id=user_id)
             miner.gc = MagicMock()
         return miner
@@ -382,9 +389,7 @@ class TestDeepScanDeltaQuery:
         miner._already_processed = MagicMock(return_value=set())
         miner._mark_processed = MagicMock()
 
-        result = asyncio.get_event_loop().run_until_complete(
-            miner.deep_scan_inbox(lookback_days=30, max_messages=100)
-        )
+        result = asyncio.get_event_loop().run_until_complete(miner.deep_scan_inbox(lookback_days=30, max_messages=100))
 
         miner.gc.delta_query.assert_called_once()
         miner._save_delta_token.assert_called_once_with("deep_mining", "new-delta-token")
@@ -415,9 +420,7 @@ class TestDeepScanDeltaQuery:
         }
         miner.gc.get_all_pages = AsyncMock(return_value=[fallback_msg])
 
-        result = asyncio.get_event_loop().run_until_complete(
-            miner.deep_scan_inbox(lookback_days=30, max_messages=100)
-        )
+        result = asyncio.get_event_loop().run_until_complete(miner.deep_scan_inbox(lookback_days=30, max_messages=100))
 
         miner._clear_delta_token.assert_called_once_with("deep_mining")
         miner.gc.get_all_pages.assert_called_once()
@@ -438,9 +441,7 @@ class TestDeepScanDeltaQuery:
         miner.gc.get_all_pages = AsyncMock(return_value=[msg])
         miner._already_processed = MagicMock(return_value=set())
 
-        result = asyncio.get_event_loop().run_until_complete(
-            miner.deep_scan_inbox(lookback_days=30, max_messages=100)
-        )
+        result = asyncio.get_event_loop().run_until_complete(miner.deep_scan_inbox(lookback_days=30, max_messages=100))
 
         # Delta query should never be called
         miner.gc.delta_query = AsyncMock()
@@ -466,9 +467,7 @@ class TestDeepScanDeltaQuery:
         miner._already_processed = MagicMock(return_value=set())
         miner._mark_processed = MagicMock()
 
-        result = asyncio.get_event_loop().run_until_complete(
-            miner.deep_scan_inbox(lookback_days=30, max_messages=100)
-        )
+        result = asyncio.get_event_loop().run_until_complete(miner.deep_scan_inbox(lookback_days=30, max_messages=100))
 
         assert "arrow.com" in result["per_domain"]
         assert result["per_domain"]["arrow.com"]["last_body"] != ""

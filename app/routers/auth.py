@@ -105,7 +105,6 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
         logger.error(f"Azure token response missing access_token: {list(tokens.keys())}")
         return RedirectResponse("/")
 
-
     # Calculate token expiry
     expires_in = tokens.get("expires_in", 3600)
     token_expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
@@ -123,9 +122,7 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
         logger.error(f"Graph /me request failed: {e}")
         return RedirectResponse("/")
     profile = me.json()
-    email = (
-        (profile.get("mail") or profile.get("userPrincipalName", "")).strip().lower()
-    )
+    email = (profile.get("mail") or profile.get("userPrincipalName", "")).strip().lower()
     user = db.query(User).filter_by(email=email).first()
     if not user:
         user = User(
@@ -153,15 +150,14 @@ async def callback(request: Request, code: str = "", db: Session = Depends(get_d
     # Fetch mailbox settings (timezone, working hours) on login
     try:
         from ..services.mailbox_intelligence import fetch_and_store_mailbox_settings
+
         await fetch_and_store_mailbox_settings(access_token, user, db)
     except Exception as e:
         logger.debug(f"Mailbox settings fetch skipped for {user.email}: {e}")
 
     # Trigger first-time backfill if user has never been scanned
     if not user.last_inbox_scan:
-        logger.info(
-            f"New M365 connection for {user.email} — backfill will run on next scheduler tick"
-        )
+        logger.info(f"New M365 connection for {user.email} — backfill will run on next scheduler tick")
 
     request.session["user_id"] = user.id
     return RedirectResponse("/")
@@ -190,9 +186,7 @@ async def auth_status(request: Request, db: Session = Depends(get_db)):
         status = "connected"
         if not u.m365_connected:
             status = "disconnected"
-        elif u.token_expires_at and u.token_expires_at.replace(
-            tzinfo=timezone.utc
-        ) < datetime.now(timezone.utc):
+        elif u.token_expires_at and u.token_expires_at.replace(tzinfo=timezone.utc) < datetime.now(timezone.utc):
             status = "expired"
         users_status.append(
             {
@@ -202,15 +196,9 @@ async def auth_status(request: Request, db: Session = Depends(get_db)):
                 "role": u.role or "buyer",
                 "status": status,
                 "m365_error": u.m365_error_reason,
-                "m365_last_healthy": u.m365_last_healthy.isoformat()
-                if u.m365_last_healthy
-                else None,
-                "last_inbox_scan": u.last_inbox_scan.isoformat()
-                if u.last_inbox_scan
-                else None,
-                "last_contacts_sync": u.last_contacts_sync.isoformat()
-                if u.last_contacts_sync
-                else None,
+                "m365_last_healthy": u.m365_last_healthy.isoformat() if u.m365_last_healthy else None,
+                "last_inbox_scan": u.last_inbox_scan.isoformat() if u.last_inbox_scan else None,
+                "last_contacts_sync": u.last_contacts_sync.isoformat() if u.last_contacts_sync else None,
             }
         )
 
@@ -222,9 +210,7 @@ async def auth_status(request: Request, db: Session = Depends(get_db)):
             "user_name": user.name or user.email.split("@")[0],
             "user_role": user.role or "buyer",
             "m365_error": user.m365_error_reason,
-            "m365_last_healthy": user.m365_last_healthy.isoformat()
-            if user.m365_last_healthy
-            else None,
+            "m365_last_healthy": user.m365_last_healthy.isoformat() if user.m365_last_healthy else None,
             "users": users_status,
         }
     )

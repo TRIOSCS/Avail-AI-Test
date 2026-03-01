@@ -9,7 +9,6 @@ Depends on: app.main (request_id_middleware)
 """
 
 
-
 def test_x_request_id_header(client):
     """Every response includes X-Request-ID."""
     resp = client.get("/health")

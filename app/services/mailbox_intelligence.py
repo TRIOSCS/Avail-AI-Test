@@ -68,8 +68,11 @@ async def fetch_and_store_mailbox_settings(token: str, user, db: Session) -> dic
 
     logger.info(
         "Mailbox settings for %s: tz=%s, hours=%s-%s, auto_reply=%s",
-        user.email, user.timezone, user.working_hours_start,
-        user.working_hours_end, auto_reply_status,
+        user.email,
+        user.timezone,
+        user.working_hours_start,
+        user.working_hours_end,
+        auto_reply_status,
     )
 
     return result

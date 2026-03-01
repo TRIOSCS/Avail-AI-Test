@@ -165,7 +165,9 @@ async def search_contacts(
                 timeout=25,
             )
             if search_resp.status_code not in (200, 201):
-                logger.warning("Lusha prospecting search failed: %s %s", search_resp.status_code, search_resp.text[:200])
+                logger.warning(
+                    "Lusha prospecting search failed: %s %s", search_resp.status_code, search_resp.text[:200]
+                )
                 return []
 
             search_data = search_resp.json()
@@ -176,10 +178,7 @@ async def search_contacts(
 
             # Pre-filter by title before enriching to save credits
             if title_set:
-                filtered = [
-                    c for c in candidates
-                    if any(kw in (c.get("jobTitle") or "").lower() for kw in title_set)
-                ]
+                filtered = [c for c in candidates if any(kw in (c.get("jobTitle") or "").lower() for kw in title_set)]
                 candidates = filtered or candidates[:limit]
 
             # Take top N for enrichment
@@ -194,7 +193,9 @@ async def search_contacts(
                 timeout=25,
             )
             if enrich_resp.status_code not in (200, 201):
-                logger.warning("Lusha prospecting enrich failed: %s %s", enrich_resp.status_code, enrich_resp.text[:200])
+                logger.warning(
+                    "Lusha prospecting enrich failed: %s %s", enrich_resp.status_code, enrich_resp.text[:200]
+                )
                 return []
 
             enriched = enrich_resp.json().get("contacts") or []
@@ -208,16 +209,18 @@ async def search_contacts(
                 emails = c.get("emailAddresses") or []
                 best_email, confidence = _best_email(emails)
                 linkedin = (c.get("socialLinks") or {}).get("linkedin")
-                contacts.append({
-                    "full_name": c.get("fullName"),
-                    "title": c.get("jobTitle"),
-                    "email": best_email,
-                    "phone": phone,
-                    "phone_type": phone_type,
-                    "linkedin_url": linkedin,
-                    "source": "lusha",
-                    "confidence": confidence,
-                })
+                contacts.append(
+                    {
+                        "full_name": c.get("fullName"),
+                        "title": c.get("jobTitle"),
+                        "email": best_email,
+                        "phone": phone,
+                        "phone_type": phone_type,
+                        "linkedin_url": linkedin,
+                        "source": "lusha",
+                        "confidence": confidence,
+                    }
+                )
             return contacts
         except Exception as e:
             logger.warning("Lusha contacts search error: %s", e)

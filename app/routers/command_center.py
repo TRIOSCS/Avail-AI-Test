@@ -59,11 +59,7 @@ def get_command_center_actions(
 
     # Offers needing review
     pending_reviews = (
-        db.query(Offer)
-        .filter(Offer.status == "needs_review")
-        .order_by(Offer.created_at.desc())
-        .limit(20)
-        .all()
+        db.query(Offer).filter(Offer.status == "needs_review").order_by(Offer.created_at.desc()).limit(20).all()
     )
 
     # Today's vendor responses
@@ -91,7 +87,9 @@ def get_command_center_actions(
                 "requisition_id": q.requisition_id,
                 "quote_number": q.quote_number,
                 "sent_at": q.sent_at.isoformat() if q.sent_at else None,
-                "days_pending": (now - (q.sent_at if q.sent_at.tzinfo else q.sent_at.replace(tzinfo=timezone.utc))).days if q.sent_at else None,
+                "days_pending": (now - (q.sent_at if q.sent_at.tzinfo else q.sent_at.replace(tzinfo=timezone.utc))).days
+                if q.sent_at
+                else None,
             }
             for q in pending_quotes
         ],

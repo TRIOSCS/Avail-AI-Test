@@ -122,12 +122,14 @@ async def add_do_not_offer(
             .first()
         )
         if not existing:
-            db.add(ProactiveDoNotOffer(
-                mpn=mpn,
-                company_id=item.company_id,
-                created_by_id=user.id,
-                reason=item.reason,
-            ))
+            db.add(
+                ProactiveDoNotOffer(
+                    mpn=mpn,
+                    company_id=item.company_id,
+                    created_by_id=user.id,
+                    reason=item.reason,
+                )
+            )
             suppressed += 1
 
         # Auto-dismiss any open matches for this mpn + company
@@ -187,20 +189,20 @@ async def draft_proactive_email(
         offer = m.offer
         cost = float(offer.unit_price) if offer and offer.unit_price else 0
         sell = body.sell_prices.get(str(m.id), cost * 1.3)
-        parts.append({
-            "mpn": m.mpn,
-            "manufacturer": offer.manufacturer if offer else "",
-            "qty": offer.qty_available if offer else 0,
-            "sell_price": float(sell),
-            "condition": offer.condition if offer else "",
-            "lead_time": offer.lead_time if offer else "",
-            "customer_purchase_count": m.customer_purchase_count or 0,
-            "customer_last_purchased_at": (
-                m.customer_last_purchased_at.strftime("%b %Y")
-                if m.customer_last_purchased_at
-                else None
-            ),
-        })
+        parts.append(
+            {
+                "mpn": m.mpn,
+                "manufacturer": offer.manufacturer if offer else "",
+                "qty": offer.qty_available if offer else 0,
+                "sell_price": float(sell),
+                "condition": offer.condition if offer else "",
+                "lead_time": offer.lead_time if offer else "",
+                "customer_purchase_count": m.customer_purchase_count or 0,
+                "customer_last_purchased_at": (
+                    m.customer_last_purchased_at.strftime("%b %Y") if m.customer_last_purchased_at else None
+                ),
+            }
+        )
 
     salesperson_name = user.name or user.email.split("@")[0]
 

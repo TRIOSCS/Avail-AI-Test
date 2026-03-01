@@ -99,10 +99,7 @@ def _enable_fk(dbapi_conn, _):
 _PG_ONLY_TABLES = {"buyer_profiles"}
 
 # Create tables once at import time — NOT per test.
-_sqlite_safe = [
-    t for name, t in Base.metadata.tables.items()
-    if name not in _PG_ONLY_TABLES
-]
+_sqlite_safe = [t for name, t in Base.metadata.tables.items() if name not in _PG_ONLY_TABLES]
 Base.metadata.create_all(bind=engine, tables=_sqlite_safe)
 
 # Pre-compute delete order (respects FK dependencies via reversed create order).
@@ -114,13 +111,13 @@ _delete_stmts = [t.delete() for t in _delete_order if t.name not in _PG_ONLY_TAB
 def _reset_ai_gate_state():
     """Clear AI gate module state between tests to prevent order-dependent failures."""
     yield
-    try:
-        from app.services.nc_worker.ai_gate import clear_classification_cache
-        from app.services.nc_worker import ai_gate
-        clear_classification_cache()
-        ai_gate._last_api_failure = 0.0
-    except ImportError:
-        pass
+    for module_path in ("app.services.nc_worker", "app.services.ics_worker"):
+        try:
+            gate = __import__(f"{module_path}.ai_gate", fromlist=["ai_gate"])
+            gate.clear_classification_cache()
+            gate._last_api_failure = 0.0
+        except (ImportError, AttributeError):
+            pass
 
 
 @pytest.fixture(autouse=True)
@@ -439,13 +436,15 @@ def test_proactive_offer(
     po = ProactiveOffer(
         customer_site_id=test_customer_site.id,
         salesperson_id=test_user.id,
-        line_items=[{
-            "mpn": "LM317T",
-            "vendor_name": "Arrow Electronics",
-            "qty": 1000,
-            "cost": 0.50,
-            "sell": 0.75,
-        }],
+        line_items=[
+            {
+                "mpn": "LM317T",
+                "vendor_name": "Arrow Electronics",
+                "qty": 1000,
+                "cost": 0.50,
+                "sell": 0.75,
+            }
+        ],
         recipient_emails=["jane@acme-electronics.com"],
         subject="Proactive Offer: LM317T",
         status="sent",

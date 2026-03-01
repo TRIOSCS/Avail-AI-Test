@@ -17,9 +17,7 @@ from loguru import logger
 from .config import NcConfig
 
 _USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-    "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/131.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
 )
 
 
@@ -30,11 +28,13 @@ class NcSessionManager:
         self.config = config
         # HTTP session (always available)
         self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": _USER_AGENT,
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.9",
-        })
+        self.session.headers.update(
+            {
+                "User-Agent": _USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+            }
+        )
         # Browser (lazy-started only when needed)
         self._playwright = None
         self._context = None
@@ -166,6 +166,7 @@ class NcSessionManager:
         try:
             await self._page.goto("https://www.netcomponents.com/#/account/login")
             import asyncio
+
             await asyncio.sleep(3)
 
             acct_input = self._page.locator("#AccountNumber")

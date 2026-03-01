@@ -15,19 +15,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.models import (
-    ActivityLog,
     BuyPlan,
     Company,
     CustomerSite,
     Offer,
     OfferAttachment,
     Quote,
-    Requirement,
     Requisition,
     SiteContact,
     SyncLog,
     User,
-    VendorCard,
     VendorContact,
 )
 from app.routers.crm import (
@@ -233,7 +230,7 @@ def test_margin_calculation():
     total_cost = sum((i["qty"]) * (i["cost_price"]) for i in line_items)
     margin = round((total_sell - total_cost) / total_sell * 100, 2) if total_sell > 0 else 0
     assert total_sell == 1000.0  # 500 + 500
-    assert total_cost == 700.0   # 350 + 350
+    assert total_cost == 700.0  # 350 + 350
     assert margin == 30.0
 
 
@@ -552,13 +549,15 @@ class TestBuyPlans:
             quote_id=test_quote.id,
             status="pending_approval",
             submitted_by_id=test_user.id,
-            line_items=[{
-                "offer_id": test_offer.id,
-                "mpn": "LM317T",
-                "qty": 1000,
-                "cost_price": 0.50,
-                "vendor_name": "Arrow Electronics",
-            }],
+            line_items=[
+                {
+                    "offer_id": test_offer.id,
+                    "mpn": "LM317T",
+                    "qty": 1000,
+                    "cost_price": 0.50,
+                    "vendor_name": "Arrow Electronics",
+                }
+            ],
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(bp)
@@ -596,7 +595,7 @@ class TestBuyPlans:
         db_session.commit()
 
         # Prevent background notification task from running
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)
+        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
 
         resp = client.post(
             f"/api/quotes/{q.id}/buy-plan",
@@ -612,10 +611,12 @@ class TestBuyPlans:
         resp = client.get(f"/api/buy-plans/{bp.id}")
         assert resp.status_code == 200
 
-    def test_cancel_buy_plan(self, client, db_session, test_requisition, test_quote, test_offer, test_user, monkeypatch):
+    def test_cancel_buy_plan(
+        self, client, db_session, test_requisition, test_quote, test_offer, test_user, monkeypatch
+    ):
         bp = self._make_buy_plan(db_session, test_requisition, test_quote, test_offer, test_user)
         # Prevent background notification task from running
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)
+        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
         resp = client.put(f"/api/buy-plans/{bp.id}/cancel", json={})
         assert resp.status_code == 200
         data = resp.json()
@@ -858,10 +859,13 @@ class TestCompaniesAdditional:
     def test_create_company_with_website_domain(self, mock_normalize, mock_cred, client, db_session):
         """Domain is extracted from website when no explicit domain given."""
         mock_normalize.return_value = ("WebCo", "")
-        resp = client.post("/api/companies", json={
-            "name": "WebCo",
-            "website": "https://www.webco-electronics.com/about",
-        })
+        resp = client.post(
+            "/api/companies",
+            json={
+                "name": "WebCo",
+                "website": "https://www.webco-electronics.com/about",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["name"] == "WebCo"
@@ -980,9 +984,7 @@ class TestSitesAdditional:
 
     def test_update_site_contact_wrong_site(self, client, db_session, test_company, test_customer_site):
         """Contact must belong to the specified site."""
-        other_site = CustomerSite(
-            company_id=test_company.id, site_name="Other"
-        )
+        other_site = CustomerSite(company_id=test_company.id, site_name="Other")
         db_session.add(other_site)
         db_session.flush()
         c = SiteContact(customer_site_id=other_site.id, full_name="Wrong Site")
@@ -1095,7 +1097,9 @@ class TestSiteOwnershipGuard:
         Captures the coroutine from create_task and runs it to cover the _bg_enrich body.
         """
         import asyncio
+
         from app.config import settings
+
         monkeypatch.setattr(settings, "customer_enrichment_enabled", True)
         test_company.domain = "acme.com"
         db_session.commit()
@@ -1141,7 +1145,10 @@ class TestEnrichment:
         resp = client.post(f"/api/enrich/company/{test_company.id}")
         assert resp.status_code == 503
 
-    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
     def test_enrich_company_success(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company):
@@ -1154,12 +1161,18 @@ class TestEnrichment:
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
-    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
     def test_enrich_company_not_found(self, mock_cred, client):
         resp = client.post("/api/enrich/company/99999")
         assert resp.status_code == 404
 
-    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
     def test_enrich_company_no_domain(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company):
@@ -1171,10 +1184,15 @@ class TestEnrichment:
         resp = client.post(f"/api/enrich/company/{test_company.id}")
         assert resp.status_code == 400
 
-    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
-    def test_enrich_company_with_override_domain(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company):
+    def test_enrich_company_with_override_domain(
+        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company
+    ):
         """Override domain in the payload."""
         mock_enrich.return_value = {}
         mock_apply.return_value = []
@@ -1191,7 +1209,10 @@ class TestEnrichment:
         resp = client.post(f"/api/enrich/vendor/{test_vendor_card.id}")
         assert resp.status_code == 503
 
-    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_vendor")
     def test_enrich_vendor_success(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_vendor_card):
@@ -1204,12 +1225,18 @@ class TestEnrichment:
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
-    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
     def test_enrich_vendor_not_found(self, mock_cred, client):
         resp = client.post("/api/enrich/vendor/99999")
         assert resp.status_code == 404
 
-    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_vendor")
     def test_enrich_vendor_no_domain(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_vendor_card):
@@ -1220,10 +1247,15 @@ class TestEnrichment:
         resp = client.post(f"/api/enrich/vendor/{test_vendor_card.id}")
         assert resp.status_code == 400
 
-    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_vendor")
-    def test_enrich_vendor_override_domain(self, mock_apply, mock_enrich, mock_cred, client, db_session, test_vendor_card):
+    def test_enrich_vendor_override_domain(
+        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_vendor_card
+    ):
         mock_enrich.return_value = {}
         mock_apply.return_value = []
 
@@ -1238,17 +1270,21 @@ class TestEnrichment:
         resp = client.get("/api/suggested-contacts", params={"domain": "acme.com"})
         assert resp.status_code == 503
 
-    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
     def test_suggested_contacts_no_domain(self, mock_cred, client):
         resp = client.get("/api/suggested-contacts")
         assert resp.status_code == 400
 
-    @patch("app.routers.crm.enrichment.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
     @patch("app.enrichment_service.find_suggested_contacts", new_callable=AsyncMock)
     def test_suggested_contacts_success(self, mock_contacts, mock_cred, client):
-        mock_contacts.return_value = [
-            {"full_name": "Jane Doe", "email": "jane@acme.com", "title": "CEO"}
-        ]
+        mock_contacts.return_value = [{"full_name": "Jane Doe", "email": "jane@acme.com", "title": "CEO"}]
         resp = client.get("/api/suggested-contacts", params={"domain": "https://www.acme.com/about", "name": "Acme"})
         assert resp.status_code == 200
         data = resp.json()
@@ -1256,19 +1292,25 @@ class TestEnrichment:
         assert data["count"] == 1
 
     def test_add_suggested_to_vendor_not_found(self, client):
-        resp = client.post("/api/suggested-contacts/add-to-vendor", json={
-            "vendor_card_id": 99999,
-            "contacts": [{"email": "test@test.com"}],
-        })
+        resp = client.post(
+            "/api/suggested-contacts/add-to-vendor",
+            json={
+                "vendor_card_id": 99999,
+                "contacts": [{"email": "test@test.com"}],
+            },
+        )
         assert resp.status_code == 404
 
     def test_add_suggested_to_vendor_success(self, client, db_session, test_vendor_card):
-        resp = client.post("/api/suggested-contacts/add-to-vendor", json={
-            "vendor_card_id": test_vendor_card.id,
-            "contacts": [
-                {"email": "newguy@arrow.com", "full_name": "New Guy", "title": "Sales"},
-            ],
-        })
+        resp = client.post(
+            "/api/suggested-contacts/add-to-vendor",
+            json={
+                "vendor_card_id": test_vendor_card.id,
+                "contacts": [
+                    {"email": "newguy@arrow.com", "full_name": "New Guy", "title": "Sales"},
+                ],
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["added"] == 1
 
@@ -1284,33 +1326,42 @@ class TestEnrichment:
         db_session.add(vc)
         db_session.commit()
 
-        resp = client.post("/api/suggested-contacts/add-to-vendor", json={
-            "vendor_card_id": test_vendor_card.id,
-            "contacts": [
-                {"email": "existing@arrow.com", "full_name": "Existing"},
-            ],
-        })
+        resp = client.post(
+            "/api/suggested-contacts/add-to-vendor",
+            json={
+                "vendor_card_id": test_vendor_card.id,
+                "contacts": [
+                    {"email": "existing@arrow.com", "full_name": "Existing"},
+                ],
+            },
+        )
         assert resp.status_code == 200
         assert resp.json()["added"] == 0
 
     def test_add_suggested_to_site_not_found(self, client):
-        resp = client.post("/api/suggested-contacts/add-to-site", json={
-            "site_id": 99999,
-            "contact": {"full_name": "Test"},
-        })
+        resp = client.post(
+            "/api/suggested-contacts/add-to-site",
+            json={
+                "site_id": 99999,
+                "contact": {"full_name": "Test"},
+            },
+        )
         assert resp.status_code == 404
 
     def test_add_suggested_to_site_success(self, client, db_session, test_customer_site):
-        resp = client.post("/api/suggested-contacts/add-to-site", json={
-            "site_id": test_customer_site.id,
-            "contact": {
-                "full_name": "Suggested Person",
-                "email": "suggested@acme.com",
-                "phone": "+1-555-0100",
-                "title": "VP Sales",
-                "linkedin_url": "https://linkedin.com/in/suggested",
+        resp = client.post(
+            "/api/suggested-contacts/add-to-site",
+            json={
+                "site_id": test_customer_site.id,
+                "contact": {
+                    "full_name": "Suggested Person",
+                    "email": "suggested@acme.com",
+                    "phone": "+1-555-0100",
+                    "title": "VP Sales",
+                    "linkedin_url": "https://linkedin.com/in/suggested",
+                },
             },
-        })
+        )
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
         db_session.refresh(test_customer_site)
@@ -1374,16 +1425,19 @@ class TestUsersList:
 
 class TestCustomerImport:
     def test_import_customers(self, admin_client, db_session, admin_user):
-        resp = admin_client.post("/api/customers/import", json=[
-            {
-                "company_name": "Import Co",
-                "site_name": "Main Office",
-                "contact_name": "Bob Smith",
-                "contact_email": "bob@importco.com",
-                "city": "Denver",
-                "state": "CO",
-            },
-        ])
+        resp = admin_client.post(
+            "/api/customers/import",
+            json=[
+                {
+                    "company_name": "Import Co",
+                    "site_name": "Main Office",
+                    "contact_name": "Bob Smith",
+                    "contact_email": "bob@importco.com",
+                    "city": "Denver",
+                    "state": "CO",
+                },
+            ],
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["created_companies"] == 1
@@ -1391,38 +1445,47 @@ class TestCustomerImport:
 
     def test_import_customers_existing(self, admin_client, db_session, test_company, test_customer_site):
         """Importing existing company/site updates instead of duplicating."""
-        resp = admin_client.post("/api/customers/import", json=[
-            {
-                "company_name": "Acme Electronics",
-                "site_name": "Acme HQ",
-                "contact_name": "Updated Name",
-            },
-        ])
+        resp = admin_client.post(
+            "/api/customers/import",
+            json=[
+                {
+                    "company_name": "Acme Electronics",
+                    "site_name": "Acme HQ",
+                    "contact_name": "Updated Name",
+                },
+            ],
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["created_companies"] == 0
         assert data["created_sites"] == 0
 
     def test_import_with_owner(self, admin_client, db_session, admin_user):
-        resp = admin_client.post("/api/customers/import", json=[
-            {
-                "company_name": "Owner Co",
-                "site_name": "HQ",
-                "owner_email": admin_user.email,
-            },
-        ])
+        resp = admin_client.post(
+            "/api/customers/import",
+            json=[
+                {
+                    "company_name": "Owner Co",
+                    "site_name": "HQ",
+                    "owner_email": admin_user.email,
+                },
+            ],
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["created_companies"] == 1
 
     def test_import_with_address(self, admin_client, db_session):
-        resp = admin_client.post("/api/customers/import", json=[
-            {
-                "company_name": "Address Co",
-                "site_name": "HQ",
-                "address": "123 Main Street",
-            },
-        ])
+        resp = admin_client.post(
+            "/api/customers/import",
+            json=[
+                {
+                    "company_name": "Address Co",
+                    "site_name": "HQ",
+                    "address": "123 Main Street",
+                },
+            ],
+        )
         assert resp.status_code == 200
 
 
@@ -1435,12 +1498,15 @@ class TestOffersAdditional:
         assert resp.status_code == 404
 
     def test_create_offer_not_found(self, client):
-        resp = client.post("/api/requisitions/99999/offers", json={
-            "vendor_name": "Test",
-            "mpn": "LM317T",
-            "qty_available": 100,
-            "unit_price": 1.00,
-        })
+        resp = client.post(
+            "/api/requisitions/99999/offers",
+            json={
+                "vendor_name": "Test",
+                "mpn": "LM317T",
+                "qty_available": 100,
+                "unit_price": 1.00,
+            },
+        )
         assert resp.status_code == 404
 
     def test_update_offer_not_found(self, client):
@@ -1464,7 +1530,7 @@ class TestOffersAdditional:
 
     def test_create_offer_new_vendor(self, client, db_session, test_requisition, monkeypatch):
         """Creating offer with unknown vendor auto-creates a VendorCard."""
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)
+        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
         req = test_requisition
         requirement = req.requirements[0]
         resp = client.post(
@@ -1483,7 +1549,7 @@ class TestOffersAdditional:
 
     def test_create_offer_competitive_alert(self, client, db_session, test_requisition, test_offer, monkeypatch):
         """Creating a significantly cheaper offer triggers competitive alert."""
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)
+        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
         req = test_requisition
         requirement = req.requirements[0]
         test_offer.requirement_id = requirement.id
@@ -1722,7 +1788,9 @@ class TestQuotesAdditional:
 
     @patch("app.dependencies.require_fresh_token", new_callable=AsyncMock)
     @patch("app.utils.graph_client.GraphClient.post_json", new_callable=AsyncMock)
-    def test_send_quote_success(self, mock_graph_post, mock_token, client, db_session, test_requisition, test_customer_site, test_user):
+    def test_send_quote_success(
+        self, mock_graph_post, mock_token, client, db_session, test_requisition, test_customer_site, test_user
+    ):
         mock_token.return_value = "fake-token"
         mock_graph_post.return_value = {}  # No error
 
@@ -1808,7 +1876,9 @@ class TestQuotesAdditional:
 
     @patch("app.dependencies.require_fresh_token", new_callable=AsyncMock)
     @patch("app.utils.graph_client.GraphClient.post_json", new_callable=AsyncMock)
-    def test_send_quote_graph_error(self, mock_graph_post, mock_token, client, db_session, test_requisition, test_customer_site, test_user):
+    def test_send_quote_graph_error(
+        self, mock_graph_post, mock_token, client, db_session, test_requisition, test_customer_site, test_user
+    ):
         """Graph API error returns 502."""
         mock_token.return_value = "fake-token"
         mock_graph_post.return_value = {"error": "SendFailed", "detail": "Auth error"}
@@ -1917,20 +1987,25 @@ class TestBuyPlansAdditional:
             quote_id=test_quote.id,
             status=kwargs.get("status", "pending_approval"),
             submitted_by_id=test_user.id,
-            line_items=kwargs.get("line_items", [{
-                "offer_id": test_offer.id,
-                "mpn": "LM317T",
-                "qty": 1000,
-                "plan_qty": 1000,
-                "cost_price": 0.50,
-                "sell_price": 1.00,
-                "vendor_name": "Arrow Electronics",
-                "po_number": None,
-                "po_entered_at": None,
-                "po_sent_at": None,
-                "po_recipient": None,
-                "po_verified": False,
-            }]),
+            line_items=kwargs.get(
+                "line_items",
+                [
+                    {
+                        "offer_id": test_offer.id,
+                        "mpn": "LM317T",
+                        "qty": 1000,
+                        "plan_qty": 1000,
+                        "cost_price": 0.50,
+                        "sell_price": 1.00,
+                        "vendor_name": "Arrow Electronics",
+                        "po_number": None,
+                        "po_entered_at": None,
+                        "po_sent_at": None,
+                        "po_recipient": None,
+                        "po_verified": False,
+                    }
+                ],
+            ),
             approval_token=kwargs.get("approval_token", None),
             # Store token_expires_at without TZ info so SQLite can round-trip it
             token_expires_at=kwargs.get("token_expires_at", None),
@@ -1957,21 +2032,27 @@ class TestBuyPlansAdditional:
         resp = client.get("/api/buy-plans/99999")
         assert resp.status_code == 404
 
-    def test_get_buy_plan_access_denied(self, sales_client, db_session, test_requisition, test_quote, test_offer, test_user, sales_user):
+    def test_get_buy_plan_access_denied(
+        self, sales_client, db_session, test_requisition, test_quote, test_offer, test_user, sales_user
+    ):
         """Sales user can only view own buy plans."""
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
         # bp was submitted by test_user, not sales_user
         resp = sales_client.get(f"/api/buy-plans/{bp.id}")
         assert resp.status_code == 403
 
-    def test_list_buy_plans_with_status_filter(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_list_buy_plans_with_status_filter(
+        self, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
         resp = client.get("/api/buy-plans", params={"status": "approved"})
         assert resp.status_code == 200
         data = resp.json()
         assert all(bp["status"] == "approved" for bp in data)
 
-    def test_list_buy_plans_sales_filter(self, sales_client, db_session, test_requisition, test_quote, test_offer, sales_user):
+    def test_list_buy_plans_sales_filter(
+        self, sales_client, db_session, test_requisition, test_quote, test_offer, sales_user
+    ):
         """Sales users only see their own buy plans."""
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, sales_user)
         resp = sales_client.get("/api/buy-plans")
@@ -1985,18 +2066,30 @@ class TestBuyPlansAdditional:
         resp = client.get("/api/buy-plans/token/nonexistent-token")
         assert resp.status_code == 404
 
-    def test_get_buyplan_by_token_expired(self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_get_buyplan_by_token_expired(
+        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             approval_token="expired-token",
             token_expires_at=datetime.utcnow() - timedelta(days=1),
         )
         resp = client.get("/api/buy-plans/token/expired-token")
         assert resp.status_code == 410
 
-    def test_get_buyplan_by_token_success(self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_get_buyplan_by_token_success(
+        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         bp = self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             approval_token="valid-token",
             token_expires_at=datetime.utcnow() + timedelta(days=30),
         )
@@ -2006,9 +2099,15 @@ class TestBuyPlansAdditional:
         assert data["id"] == bp.id
 
     @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_approve_by_token(self, mock_bg, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_approve_by_token(
+        self, mock_bg, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             approval_token="approve-token",
             token_expires_at=datetime.utcnow() + timedelta(days=30),
         )
@@ -2020,9 +2119,15 @@ class TestBuyPlansAdditional:
         assert resp.json()["ok"] is True
 
     @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_approve_by_token_stock_sale(self, mock_bg, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_approve_by_token_stock_sale(
+        self, mock_bg, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             approval_token="stock-token",
             token_expires_at=datetime.utcnow() + timedelta(days=30),
             is_stock_sale=True,
@@ -2042,9 +2147,15 @@ class TestBuyPlansAdditional:
         )
         assert resp.status_code == 404
 
-    def test_approve_by_token_expired(self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_approve_by_token_expired(
+        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             approval_token="exp-approve",
             token_expires_at=datetime.utcnow() - timedelta(days=1),
         )
@@ -2054,9 +2165,15 @@ class TestBuyPlansAdditional:
         )
         assert resp.status_code == 410
 
-    def test_approve_by_token_wrong_status(self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_approve_by_token_wrong_status(
+        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             approval_token="wrong-status",
             token_expires_at=datetime.utcnow() + timedelta(days=30),
             status="approved",
@@ -2067,9 +2184,15 @@ class TestBuyPlansAdditional:
         )
         assert resp.status_code == 400
 
-    def test_approve_by_token_missing_so(self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_approve_by_token_missing_so(
+        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             approval_token="no-so-token",
             token_expires_at=datetime.utcnow() + timedelta(days=30),
         )
@@ -2080,9 +2203,15 @@ class TestBuyPlansAdditional:
         assert resp.status_code == 400
 
     @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_reject_by_token(self, mock_bg, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_reject_by_token(
+        self, mock_bg, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             approval_token="reject-token",
             token_expires_at=datetime.utcnow() + timedelta(days=30),
         )
@@ -2100,9 +2229,15 @@ class TestBuyPlansAdditional:
         )
         assert resp.status_code == 404
 
-    def test_reject_by_token_expired(self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_reject_by_token_expired(
+        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             approval_token="exp-reject",
             token_expires_at=datetime.utcnow() - timedelta(days=1),
         )
@@ -2112,9 +2247,15 @@ class TestBuyPlansAdditional:
         )
         assert resp.status_code == 410
 
-    def test_reject_by_token_wrong_status(self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_reject_by_token_wrong_status(
+        self, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             approval_token="rej-wrong-status",
             token_expires_at=datetime.utcnow() + timedelta(days=30),
             status="approved",
@@ -2128,7 +2269,9 @@ class TestBuyPlansAdditional:
     # ── Authenticated approve/reject ──
 
     @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_approve_buy_plan_admin(self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user, admin_user):
+    def test_approve_buy_plan_admin(
+        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user, admin_user
+    ):
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
         resp = admin_client.put(
             f"/api/buy-plans/{bp.id}/approve",
@@ -2138,9 +2281,15 @@ class TestBuyPlansAdditional:
         assert resp.json()["ok"] is True
 
     @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_approve_buy_plan_stock_sale(self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_approve_buy_plan_stock_sale(
+        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         bp = self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             is_stock_sale=True,
         )
         resp = admin_client.put(
@@ -2163,7 +2312,9 @@ class TestBuyPlansAdditional:
         resp = admin_client.put("/api/buy-plans/99999/approve", json={"sales_order_number": "SO-X"})
         assert resp.status_code == 404
 
-    def test_approve_buy_plan_wrong_status(self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_approve_buy_plan_wrong_status(
+        self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
         resp = admin_client.put(
             f"/api/buy-plans/{bp.id}/approve",
@@ -2171,7 +2322,9 @@ class TestBuyPlansAdditional:
         )
         assert resp.status_code == 400
 
-    def test_approve_buy_plan_missing_so(self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_approve_buy_plan_missing_so(
+        self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
         resp = admin_client.put(
             f"/api/buy-plans/{bp.id}/approve",
@@ -2180,7 +2333,9 @@ class TestBuyPlansAdditional:
         assert resp.status_code == 400
 
     @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_reject_buy_plan(self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_reject_buy_plan(
+        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
         resp = admin_client.put(
             f"/api/buy-plans/{bp.id}/reject",
@@ -2201,7 +2356,9 @@ class TestBuyPlansAdditional:
         resp = admin_client.put("/api/buy-plans/99999/reject", json={"reason": "x"})
         assert resp.status_code == 404
 
-    def test_reject_buy_plan_wrong_status(self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_reject_buy_plan_wrong_status(
+        self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
         resp = admin_client.put(
             f"/api/buy-plans/{bp.id}/reject",
@@ -2268,28 +2425,41 @@ class TestBuyPlansAdditional:
     # ── Complete ──
 
     @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_complete_buy_plan(self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_complete_buy_plan(
+        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="po_confirmed")
         resp = admin_client.put(f"/api/buy-plans/{bp.id}/complete")
         assert resp.status_code == 200
         assert resp.json()["status"] == "complete"
 
     @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_complete_stock_sale(self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_complete_stock_sale(
+        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         bp = self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
-            status="approved", is_stock_sale=True,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
+            status="approved",
+            is_stock_sale=True,
         )
         resp = admin_client.put(f"/api/buy-plans/{bp.id}/complete")
         assert resp.status_code == 200
 
-    def test_complete_buy_plan_buyer_from_po_confirmed(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_complete_buy_plan_buyer_from_po_confirmed(
+        self, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         """Buyers can complete from po_confirmed status."""
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="po_confirmed")
         resp = client.put(f"/api/buy-plans/{bp.id}/complete")
         assert resp.status_code == 200
 
-    def test_complete_buy_plan_buyer_forbidden_from_approved(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_complete_buy_plan_buyer_forbidden_from_approved(
+        self, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         """Buyers cannot complete from approved status."""
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
         resp = client.put(f"/api/buy-plans/{bp.id}/complete")
@@ -2299,7 +2469,9 @@ class TestBuyPlansAdditional:
         resp = admin_client.put("/api/buy-plans/99999/complete")
         assert resp.status_code == 404
 
-    def test_complete_buy_plan_wrong_status(self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_complete_buy_plan_wrong_status(
+        self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="pending_approval")
         resp = admin_client.put(f"/api/buy-plans/{bp.id}/complete")
         assert resp.status_code == 400
@@ -2310,38 +2482,52 @@ class TestBuyPlansAdditional:
         resp = client.put("/api/buy-plans/99999/cancel", json={})
         assert resp.status_code == 404
 
-    def test_cancel_approved_plan_not_admin(self, client, db_session, test_requisition, test_quote, test_offer, test_user, monkeypatch):
+    def test_cancel_approved_plan_not_admin(
+        self, client, db_session, test_requisition, test_quote, test_offer, test_user, monkeypatch
+    ):
         """Non-admin cannot cancel approved plans."""
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)
+        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
         resp = client.put(f"/api/buy-plans/{bp.id}/cancel", json={})
         assert resp.status_code == 403
 
-    def test_cancel_approved_with_pos(self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_cancel_approved_with_pos(
+        self, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         """Cannot cancel approved plan with PO numbers already entered."""
         bp = self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             status="approved",
             line_items=[{"offer_id": test_offer.id, "mpn": "LM317T", "po_number": "PO-123"}],
         )
         resp = admin_client.put(f"/api/buy-plans/{bp.id}/cancel", json={})
         assert resp.status_code == 400
 
-    def test_cancel_wrong_status(self, client, db_session, test_requisition, test_quote, test_offer, test_user, monkeypatch):
+    def test_cancel_wrong_status(
+        self, client, db_session, test_requisition, test_quote, test_offer, test_user, monkeypatch
+    ):
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="complete")
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)
+        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
         resp = client.put(f"/api/buy-plans/{bp.id}/cancel", json={})
         assert resp.status_code == 400
 
-    def test_cancel_pending_not_submitter(self, sales_client, db_session, test_requisition, test_quote, test_offer, test_user, monkeypatch):
+    def test_cancel_pending_not_submitter(
+        self, sales_client, db_session, test_requisition, test_quote, test_offer, test_user, monkeypatch
+    ):
         """Non-submitter, non-admin cannot cancel pending plans."""
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)
+        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
         resp = sales_client.put(f"/api/buy-plans/{bp.id}/cancel", json={})
         assert resp.status_code == 403
 
     @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_cancel_approved_admin(self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_cancel_approved_admin(
+        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         """Admin can cancel approved plans (no POs)."""
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
         resp = admin_client.put(
@@ -2383,7 +2569,9 @@ class TestBuyPlansAdditional:
         resp = client.put(f"/api/buy-plans/{bp.id}/resubmit", json={})
         assert resp.status_code == 400
 
-    def test_resubmit_not_submitter(self, sales_client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_resubmit_not_submitter(
+        self, sales_client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         """Non-submitter, non-admin cannot resubmit."""
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="rejected")
         resp = sales_client.put(f"/api/buy-plans/{bp.id}/resubmit", json={})
@@ -2427,20 +2615,26 @@ class TestBuyPlansAdditional:
     def test_bulk_po_clear(self, mock_bg, client, db_session, test_requisition, test_quote, test_offer, test_user):
         """Clearing PO reverts status to approved."""
         bp = self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             status="po_entered",
-            line_items=[{
-                "offer_id": test_offer.id,
-                "mpn": "LM317T",
-                "qty": 1000,
-                "cost_price": 0.50,
-                "vendor_name": "Arrow Electronics",
-                "po_number": "PO-OLD",
-                "po_entered_at": "2026-01-01T00:00:00",
-                "po_sent_at": None,
-                "po_recipient": None,
-                "po_verified": False,
-            }],
+            line_items=[
+                {
+                    "offer_id": test_offer.id,
+                    "mpn": "LM317T",
+                    "qty": 1000,
+                    "cost_price": 0.50,
+                    "vendor_name": "Arrow Electronics",
+                    "po_number": "PO-OLD",
+                    "po_entered_at": "2026-01-01T00:00:00",
+                    "po_sent_at": None,
+                    "po_recipient": None,
+                    "po_verified": False,
+                }
+            ],
         )
         resp = client.put(
             f"/api/buy-plans/{bp.id}/po-bulk",
@@ -2451,23 +2645,31 @@ class TestBuyPlansAdditional:
         assert resp.json()["changes"] == 1
 
     @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_bulk_po_update_existing(self, mock_bg, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_bulk_po_update_existing(
+        self, mock_bg, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         """Updating an existing PO resets verification."""
         bp = self._make_bp(
-            db_session, test_requisition, test_quote, test_offer, test_user,
+            db_session,
+            test_requisition,
+            test_quote,
+            test_offer,
+            test_user,
             status="po_entered",
-            line_items=[{
-                "offer_id": test_offer.id,
-                "mpn": "LM317T",
-                "qty": 1000,
-                "cost_price": 0.50,
-                "vendor_name": "Arrow Electronics",
-                "po_number": "PO-OLD",
-                "po_entered_at": "2026-01-01T00:00:00",
-                "po_sent_at": "2026-01-02T00:00:00",
-                "po_recipient": "vendor@arrow.com",
-                "po_verified": True,
-            }],
+            line_items=[
+                {
+                    "offer_id": test_offer.id,
+                    "mpn": "LM317T",
+                    "qty": 1000,
+                    "cost_price": 0.50,
+                    "vendor_name": "Arrow Electronics",
+                    "po_number": "PO-OLD",
+                    "po_entered_at": "2026-01-01T00:00:00",
+                    "po_sent_at": "2026-01-02T00:00:00",
+                    "po_recipient": "vendor@arrow.com",
+                    "po_verified": True,
+                }
+            ],
         )
         resp = client.put(
             f"/api/buy-plans/{bp.id}/po-bulk",
@@ -2476,16 +2678,20 @@ class TestBuyPlansAdditional:
         assert resp.status_code == 200
         assert resp.json()["changes"] == 1
 
-    def test_bulk_po_invalid_index_skipped(self, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_bulk_po_invalid_index_skipped(
+        self, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         """Invalid line indices are silently skipped."""
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
         # Both a valid and invalid index
         resp = client.put(
             f"/api/buy-plans/{bp.id}/po-bulk",
-            json={"entries": [
-                {"line_index": 99, "po_number": "PO-BAD"},
-                {"line_index": 0, "po_number": "PO-GOOD"},
-            ]},
+            json={
+                "entries": [
+                    {"line_index": 99, "po_number": "PO-BAD"},
+                    {"line_index": 0, "po_number": "PO-GOOD"},
+                ]
+            },
         )
         assert resp.status_code == 200
 
@@ -2614,7 +2820,9 @@ class TestBuildQuoteEmailHtml:
         assert "5 days" in html
         assert "10-15 days" in html
 
-    def test_email_html_lead_time_with_keyword(self, client, db_session, test_requisition, test_customer_site, test_user):
+    def test_email_html_lead_time_with_keyword(
+        self, client, db_session, test_requisition, test_customer_site, test_user
+    ):
         """Lead time already containing 'days'/'weeks' is not doubled."""
         q = Quote(
             requisition_id=test_requisition.id,
@@ -2694,7 +2902,13 @@ class TestOneDrive:
         mock_get.return_value = {
             "value": [
                 {"id": "item1", "name": "Documents", "folder": {}, "size": None, "webUrl": "https://onedrive.com/doc"},
-                {"id": "item2", "name": "report.pdf", "file": {"mimeType": "application/pdf"}, "size": 12345, "webUrl": "https://onedrive.com/report"},
+                {
+                    "id": "item2",
+                    "name": "report.pdf",
+                    "file": {"mimeType": "application/pdf"},
+                    "size": 12345,
+                    "webUrl": "https://onedrive.com/report",
+                },
             ]
         }
         resp = client.get("/api/onedrive/browse")
@@ -2722,6 +2936,7 @@ class TestOneDrive:
 
     def test_upload_attachment_offer_not_found(self, client):
         import io
+
         resp = client.post(
             "/api/offers/99999/attachments",
             files={"file": ("test.pdf", io.BytesIO(b"content"), "application/pdf")},
@@ -2730,6 +2945,7 @@ class TestOneDrive:
 
     def test_upload_attachment_no_token(self, client, db_session, test_offer, test_user):
         import io
+
         test_user.access_token = None
         db_session.commit()
         resp = client.post(
@@ -2740,6 +2956,7 @@ class TestOneDrive:
 
     def test_upload_attachment_too_large(self, client, db_session, test_offer, test_user):
         import io
+
         test_user.access_token = "fake-token"
         db_session.commit()
         # 11 MB file
@@ -2753,6 +2970,7 @@ class TestOneDrive:
     @patch("app.http_client.http.put", new_callable=AsyncMock)
     def test_upload_attachment_success(self, mock_http_put, client, db_session, test_offer, test_user):
         import io
+
         test_user.access_token = "fake-token"
         db_session.commit()
 
@@ -2773,6 +2991,7 @@ class TestOneDrive:
     @patch("app.http_client.http.put", new_callable=AsyncMock)
     def test_upload_attachment_onedrive_error(self, mock_http_put, client, db_session, test_offer, test_user):
         import io
+
         test_user.access_token = "fake-token"
         db_session.commit()
 
@@ -2878,6 +3097,7 @@ class TestOffersWithRatings:
     def test_list_offers_with_vendor_rating(self, client, db_session, test_requisition, test_offer, test_vendor_card):
         """Offers linked to VendorCard show avg rating."""
         from app.models import VendorReview
+
         req_item = test_requisition.requirements[0]
         test_offer.requirement_id = req_item.id
         test_offer.vendor_card_id = test_vendor_card.id
@@ -2914,13 +3134,18 @@ class TestBuyPlanApproveEdgeCases:
             quote_id=test_quote.id,
             status=kwargs.get("status", "pending_approval"),
             submitted_by_id=test_user.id,
-            line_items=kwargs.get("line_items", [{
-                "offer_id": test_offer.id,
-                "mpn": "LM317T",
-                "qty": 1000,
-                "cost_price": 0.50,
-                "vendor_name": "Arrow Electronics",
-            }]),
+            line_items=kwargs.get(
+                "line_items",
+                [
+                    {
+                        "offer_id": test_offer.id,
+                        "mpn": "LM317T",
+                        "qty": 1000,
+                        "cost_price": 0.50,
+                        "vendor_name": "Arrow Electronics",
+                    }
+                ],
+            ),
             is_stock_sale=kwargs.get("is_stock_sale", False),
             created_at=datetime.now(timezone.utc),
         )
@@ -2930,7 +3155,9 @@ class TestBuyPlanApproveEdgeCases:
         return bp
 
     @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_approve_with_line_items_override(self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_approve_with_line_items_override(
+        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         """Manager can override line items during approval."""
         bp = self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user)
         resp = admin_client.put(
@@ -2945,7 +3172,9 @@ class TestBuyPlanApproveEdgeCases:
         assert resp.json()["ok"] is True
 
     @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_approve_token_with_manager_notes(self, mock_bg, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_approve_token_with_manager_notes(
+        self, mock_bg, naive_crm_datetime, client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         """Token-based approval with manager_notes."""
         bp = BuyPlan(
             requisition_id=test_requisition.id,
@@ -2967,7 +3196,9 @@ class TestBuyPlanApproveEdgeCases:
         assert resp.status_code == 200
 
     @patch("app.services.buyplan_service.run_buyplan_bg")
-    def test_cancel_reverts_offers(self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user):
+    def test_cancel_reverts_offers(
+        self, mock_bg, admin_client, db_session, test_requisition, test_quote, test_offer, test_user
+    ):
         """Cancelling a buy plan reverts offer status from 'won' to 'active'."""
         test_offer.status = "won"
         db_session.commit()
@@ -2990,10 +3221,13 @@ class TestCustomerImportErrors:
         """Rows that trigger exceptions are captured in errors list."""
         # This tests the except branch in the import loop
         # We mock sqlfunc.lower to raise on a specific call
-        resp = admin_client.post("/api/customers/import", json=[
-            {"company_name": "Good Co", "site_name": "HQ"},
-            {"company_name": "Another Co", "site_name": "Branch"},
-        ])
+        resp = admin_client.post(
+            "/api/customers/import",
+            json=[
+                {"company_name": "Good Co", "site_name": "HQ"},
+                {"company_name": "Another Co", "site_name": "Branch"},
+            ],
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["created_companies"] >= 1
@@ -3008,10 +3242,13 @@ class TestCustomerImportErrors:
             return original_init(self, *args, **kwargs)
 
         with patch.object(Company, "__init__", _raising_init):
-            resp = admin_client.post("/api/customers/import", json=[
-                {"company_name": "OK Co", "site_name": "HQ"},
-                {"company_name": "FAIL_ROW", "site_name": "HQ"},
-            ])
+            resp = admin_client.post(
+                "/api/customers/import",
+                json=[
+                    {"company_name": "OK Co", "site_name": "HQ"},
+                    {"company_name": "FAIL_ROW", "site_name": "HQ"},
+                ],
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["errors"]) >= 1
@@ -3021,14 +3258,18 @@ class TestCustomerImportErrors:
 class TestEnrichCustomerWaterfallException:
     """Test customer waterfall enrichment exception handling (lines 66-67)."""
 
-    @patch("app.routers.crm.enrichment.get_credential_cached",
-           side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
+    @patch(
+        "app.routers.crm.enrichment.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
     @patch("app.enrichment_service.enrich_entity", new_callable=AsyncMock)
     @patch("app.enrichment_service.apply_enrichment_to_company")
-    def test_waterfall_exception_caught(self, mock_apply, mock_enrich, mock_cred,
-                                         client, db_session, test_company, monkeypatch):
+    def test_waterfall_exception_caught(
+        self, mock_apply, mock_enrich, mock_cred, client, db_session, test_company, monkeypatch
+    ):
         """Customer waterfall enrichment exception is caught and doesn't break the request."""
         from app.config import settings
+
         monkeypatch.setattr(settings, "customer_enrichment_enabled", True)
         test_company.domain = "acme.com"
         db_session.commit()
@@ -3053,7 +3294,7 @@ class TestEnrichCustomerWaterfallException:
 class TestReqStatusTransitions:
     def test_create_offer_changes_req_status(self, client, db_session, test_requisition, monkeypatch):
         """Creating an offer transitions req from 'active' to 'offers'."""
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)
+        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
         test_requisition.status = "active"
         db_session.commit()
 
@@ -3074,7 +3315,9 @@ class TestReqStatusTransitions:
         assert data["status_changed"] is True
         assert data["req_status"] == "offers"
 
-    def test_create_quote_changes_req_status(self, client, db_session, test_requisition, test_customer_site, test_offer):
+    def test_create_quote_changes_req_status(
+        self, client, db_session, test_requisition, test_customer_site, test_offer
+    ):
         """Creating a quote transitions req to 'quoting'."""
         test_requisition.customer_site_id = test_customer_site.id
         test_requisition.status = "offers"
@@ -3092,7 +3335,7 @@ class TestReqStatusTransitions:
     @patch("app.routers.crm.offers.get_credential_cached", return_value=None)
     def test_create_offer_with_vendor_website(self, mock_cred, client, db_session, test_requisition, monkeypatch):
         """Creating offer with vendor_website extracts domain for new VendorCard."""
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)
+        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
         req = test_requisition
         requirement = req.requirements[0]
         resp = client.post(
@@ -3108,10 +3351,15 @@ class TestReqStatusTransitions:
         )
         assert resp.status_code == 200
 
-    @patch("app.routers.crm.offers.get_credential_cached", side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None)
-    def test_create_offer_triggers_vendor_enrichment(self, mock_cred, client, db_session, test_requisition, monkeypatch):
+    @patch(
+        "app.routers.crm.offers.get_credential_cached",
+        side_effect=lambda scope, key: "fake-key" if key == "ANTHROPIC_API_KEY" else None,
+    )
+    def test_create_offer_triggers_vendor_enrichment(
+        self, mock_cred, client, db_session, test_requisition, monkeypatch
+    ):
         """Creating offer with new vendor + domain triggers background enrichment."""
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)
+        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
         req = test_requisition
         requirement = req.requirements[0]
         resp = client.post(
@@ -3188,7 +3436,9 @@ class TestQuoteEmailEdgeCases:
         # Whole number price should be formatted as $100
         assert "$100" in html
 
-    def test_email_html_lead_time_with_days_keyword(self, client, db_session, test_requisition, test_customer_site, test_user):
+    def test_email_html_lead_time_with_days_keyword(
+        self, client, db_session, test_requisition, test_customer_site, test_user
+    ):
         """Lead time containing 'days' is passed through as-is."""
         q = Quote(
             requisition_id=test_requisition.id,
@@ -3273,9 +3523,7 @@ class TestHistoricalOffersSubstitutes:
 class TestContactNotes:
     def test_post_contact_note(self, client, db_session, test_customer_site):
         """POST a note on a site contact."""
-        contact = SiteContact(
-            customer_site_id=test_customer_site.id, full_name="Note Contact"
-        )
+        contact = SiteContact(customer_site_id=test_customer_site.id, full_name="Note Contact")
         db_session.add(contact)
         db_session.commit()
 
@@ -3290,9 +3538,7 @@ class TestContactNotes:
 
     def test_get_contact_notes(self, client, db_session, test_customer_site):
         """GET note history returns logged notes."""
-        contact = SiteContact(
-            customer_site_id=test_customer_site.id, full_name="History Contact"
-        )
+        contact = SiteContact(customer_site_id=test_customer_site.id, full_name="History Contact")
         db_session.add(contact)
         db_session.commit()
 
@@ -3306,9 +3552,7 @@ class TestContactNotes:
             json={"notes": "Second note"},
         )
 
-        resp = client.get(
-            f"/api/sites/{test_customer_site.id}/contacts/{contact.id}/notes"
-        )
+        resp = client.get(f"/api/sites/{test_customer_site.id}/contacts/{contact.id}/notes")
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 2
@@ -3326,14 +3570,10 @@ class TestContactNotes:
 
     def test_post_note_wrong_site(self, client, db_session, test_company, test_customer_site):
         """404 when contact belongs to a different site."""
-        other_site = CustomerSite(
-            company_id=test_company.id, site_name="Other Site"
-        )
+        other_site = CustomerSite(company_id=test_company.id, site_name="Other Site")
         db_session.add(other_site)
         db_session.flush()
-        contact = SiteContact(
-            customer_site_id=other_site.id, full_name="Other Contact"
-        )
+        contact = SiteContact(customer_site_id=other_site.id, full_name="Other Contact")
         db_session.add(contact)
         db_session.commit()
 
@@ -3350,9 +3590,7 @@ class TestContactNotes:
 
     def test_get_notes_bad_contact(self, client, db_session, test_customer_site):
         """404 when contact doesn't exist."""
-        resp = client.get(
-            f"/api/sites/{test_customer_site.id}/contacts/99999/notes"
-        )
+        resp = client.get(f"/api/sites/{test_customer_site.id}/contacts/99999/notes")
         assert resp.status_code == 404
 
     def test_post_note_bad_site(self, client):
@@ -3640,9 +3878,12 @@ class TestCompanyCreateDuplicates:
         db_session.add(existing)
         db_session.commit()
 
-        resp = client.post("/api/companies", json={
-            "name": "acme electronics",  # case-insensitive match
-        })
+        resp = client.post(
+            "/api/companies",
+            json={
+                "name": "acme electronics",  # case-insensitive match
+            },
+        )
         assert resp.status_code == 409
         assert "duplicates" in resp.json()
 
@@ -3652,9 +3893,12 @@ class TestCompanyCreateDuplicates:
         db_session.add(existing)
         db_session.commit()
 
-        resp = client.post("/api/companies", json={
-            "name": "Advanced Micro Devices Inc",
-        })
+        resp = client.post(
+            "/api/companies",
+            json={
+                "name": "Advanced Micro Devices Inc",
+            },
+        )
         assert resp.status_code == 409
 
 
@@ -3662,8 +3906,7 @@ class TestCompanyCreateDuplicates:
 
 
 class TestCompanySummarize:
-    @patch("app.services.account_summary_service.generate_account_summary",
-           new_callable=AsyncMock, return_value=None)
+    @patch("app.services.account_summary_service.generate_account_summary", new_callable=AsyncMock, return_value=None)
     def test_summarize_returns_empty_when_none(self, mock_gen, client, db_session, test_company):
         """AI returns None -> empty defaults."""
         resp = client.post(f"/api/companies/{test_company.id}/summarize")
@@ -3672,9 +3915,11 @@ class TestCompanySummarize:
         assert data["situation"] == ""
         assert data["next_steps"] == []
 
-    @patch("app.services.account_summary_service.generate_account_summary",
-           new_callable=AsyncMock,
-           return_value={"situation": "Growing company", "development": "Expanding", "next_steps": ["Call"]})
+    @patch(
+        "app.services.account_summary_service.generate_account_summary",
+        new_callable=AsyncMock,
+        return_value={"situation": "Growing company", "development": "Expanding", "next_steps": ["Call"]},
+    )
     def test_summarize_returns_result(self, mock_gen, client, db_session, test_company):
         resp = client.post(f"/api/companies/{test_company.id}/summarize")
         assert resp.status_code == 200
@@ -3689,7 +3934,9 @@ class TestCompanySummarize:
 
 
 class TestQuoteCreationRetry:
-    def test_create_quote_integrity_error_retries(self, client, db_session, test_requisition, test_customer_site, test_offer):
+    def test_create_quote_integrity_error_retries(
+        self, client, db_session, test_requisition, test_customer_site, test_offer
+    ):
         """IntegrityError on quote number collision triggers retry (lines 189-193).
 
         We mock the next_quote_number to trigger the collision path indirectly.
@@ -3712,7 +3959,9 @@ class TestQuoteCreationRetry:
 
 
 class TestQuoteWonPurchaseHistory:
-    def test_quote_won_purchase_history_exception(self, client, db_session, test_requisition, test_customer_site, test_offer, test_quote):
+    def test_quote_won_purchase_history_exception(
+        self, client, db_session, test_requisition, test_customer_site, test_offer, test_quote
+    ):
         """Exception in purchase history recording doesn't break quote result (lines 583-584)."""
         test_quote.requisition_id = test_requisition.id
         test_quote.customer_site_id = test_customer_site.id
@@ -3750,7 +3999,9 @@ class TestQuoteWonPurchaseHistory:
 
 
 class TestOfferWonPurchaseHistory:
-    def test_offer_status_update_purchase_history_error(self, client, db_session, test_offer, test_requisition, test_customer_site, test_material_card):
+    def test_offer_status_update_purchase_history_error(
+        self, client, db_session, test_offer, test_requisition, test_customer_site, test_material_card
+    ):
         """Exception in purchase history on offer won doesn't break status update (lines 796-797)."""
         test_offer.requisition_id = test_requisition.id
         test_offer.material_card_id = test_material_card.id
@@ -3787,7 +4038,7 @@ class TestOfferWonPurchaseHistory:
 class TestOfferCompetitiveNotif:
     def test_create_offer_competitive_updates_existing_notif(self, client, db_session, test_requisition, monkeypatch):
         """Existing competitive_quote notification gets updated, not duplicated (lines 399-400)."""
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, 'close') else None)
+        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
         test_requisition.status = "active"
         db_session.commit()
         req = test_requisition

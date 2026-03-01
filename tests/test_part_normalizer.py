@@ -33,8 +33,9 @@ def _clear_cache():
     _cache.clear()
 
 
-def _norm_result(original, normalized, manufacturer=None, base_part=None,
-                 package_code=None, is_alias=False, confidence=0.9):
+def _norm_result(
+    original, normalized, manufacturer=None, base_part=None, package_code=None, is_alias=False, confidence=0.9
+):
     """Build a single normalized part result dict."""
     return {
         "original": original,
@@ -55,7 +56,8 @@ async def test_normalize_single_part():
     """Normalizes a single part number with manufacturer and package info."""
     mock_result = [
         _norm_result(
-            "lm358dr", "LM358DR",
+            "lm358dr",
+            "LM358DR",
             manufacturer="Texas Instruments",
             base_part="LM358",
             package_code="DR",
@@ -81,7 +83,8 @@ async def test_normalize_stm32_part():
     """Normalizes a complex STM32 part number."""
     mock_result = [
         _norm_result(
-            "stm32f407vgt6", "STM32F407VGT6",
+            "stm32f407vgt6",
+            "STM32F407VGT6",
             manufacturer="STMicroelectronics",
             base_part="STM32F407",
             package_code="VGT6",
@@ -154,7 +157,7 @@ async def test_partial_cache():
 
     assert len(results) == 2
     assert results[0]["normalized"] == "LM358DR"  # from cache
-    assert results[1]["normalized"] == "NE555P"    # from LLM
+    assert results[1]["normalized"] == "NE555P"  # from LLM
     mock.assert_called_once()  # Only called for NE555P
 
 
@@ -173,9 +176,7 @@ async def test_clear_cache():
 @pytest.mark.asyncio
 async def test_low_confidence_fallback():
     """Low confidence result returns original string unchanged."""
-    mock_result = [
-        _norm_result("XYZABC123", "XYZABC123", confidence=0.3)
-    ]
+    mock_result = [_norm_result("XYZABC123", "XYZABC123", confidence=0.3)]
 
     with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
@@ -194,7 +195,8 @@ async def test_alias_detection():
     """Detects distributor SKUs that aren't real MPNs."""
     mock_result = [
         _norm_result(
-            "296-1395-1-ND", "LM358DR",
+            "296-1395-1-ND",
+            "LM358DR",
             manufacturer="Texas Instruments",
             is_alias=True,
             confidence=0.85,
@@ -257,9 +259,7 @@ async def test_empty_input():
 @pytest.mark.asyncio
 async def test_dict_wrapped_response():
     """Handles LLM returning {parts: [...]} instead of bare array."""
-    mock_result = {
-        "parts": [_norm_result("LM358DR", "LM358DR", confidence=0.9)]
-    }
+    mock_result = {"parts": [_norm_result("LM358DR", "LM358DR", confidence=0.9)]}
 
     with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
@@ -341,8 +341,10 @@ def test_normalize_parts_endpoint(client):
         _norm_result("NE555P", "NE555P", manufacturer="Texas Instruments", confidence=0.9),
     ]
 
-    with patch("app.routers.ai.settings") as mock_settings, \
-         patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
+    with (
+        patch("app.routers.ai.settings") as mock_settings,
+        patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock,
+    ):
         mock_settings.ai_features_enabled = "all"
         mock.return_value = mock_result
         resp = client.post(
@@ -392,11 +394,7 @@ class TestCallNormalizerResponseFormats:
         """Response as dict with 'results' key extracts the list."""
         from app.services.ai_part_normalizer import _call_normalizer
 
-        mock_response = {
-            "results": [
-                {"original": "LM317T", "normalized": "LM317T", "confidence": 0.95}
-            ]
-        }
+        mock_response = {"results": [{"original": "LM317T", "normalized": "LM317T", "confidence": 0.95}]}
         with patch(
             "app.services.ai_part_normalizer.gradient_json",
             new_callable=AsyncMock,
@@ -413,11 +411,7 @@ class TestCallNormalizerResponseFormats:
         """Response as dict with 'normalized' key extracts the list."""
         from app.services.ai_part_normalizer import _call_normalizer
 
-        mock_response = {
-            "normalized": [
-                {"original": "LM358DR", "normalized": "LM358DR", "confidence": 0.9}
-            ]
-        }
+        mock_response = {"normalized": [{"original": "LM358DR", "normalized": "LM358DR", "confidence": 0.9}]}
         with patch(
             "app.services.ai_part_normalizer.gradient_json",
             new_callable=AsyncMock,
@@ -433,11 +427,7 @@ class TestCallNormalizerResponseFormats:
         """Response as dict with 'parts' key extracts the list."""
         from app.services.ai_part_normalizer import _call_normalizer
 
-        mock_response = {
-            "parts": [
-                {"original": "NE555P", "normalized": "NE555P", "confidence": 0.85}
-            ]
-        }
+        mock_response = {"parts": [{"original": "NE555P", "normalized": "NE555P", "confidence": 0.85}]}
         with patch(
             "app.services.ai_part_normalizer.gradient_json",
             new_callable=AsyncMock,

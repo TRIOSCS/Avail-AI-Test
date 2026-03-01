@@ -4,10 +4,12 @@ Revision ID: 007_contact_notes_archive
 Revises: 006_offers_overhaul
 Create Date: 2026-02-23
 """
+
 from typing import Sequence, Union
 
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision: str = "007_contact_notes_archive"
 down_revision: Union[str, None] = "006_offers_overhaul"

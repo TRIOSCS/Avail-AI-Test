@@ -99,13 +99,18 @@ def test_callback_success_new_user(mock_http, auth_client, db_session):
 @patch("app.routers.auth.http")
 def test_callback_success_existing_user(mock_http, auth_client, db_session, test_user):
     """Callback updates tokens for existing user."""
-    mock_http.post = AsyncMock(return_value=_mock_token_response(
-        access_token="updated-token",
-        refresh_token="updated-refresh",
-    ))
-    mock_http.get = AsyncMock(return_value=_mock_graph_me(
-        email=test_user.email, name=test_user.name,
-    ))
+    mock_http.post = AsyncMock(
+        return_value=_mock_token_response(
+            access_token="updated-token",
+            refresh_token="updated-refresh",
+        )
+    )
+    mock_http.get = AsyncMock(
+        return_value=_mock_graph_me(
+            email=test_user.email,
+            name=test_user.name,
+        )
+    )
 
     resp = auth_client.get("/auth/callback?code=test-auth-code", follow_redirects=False)
     assert resp.status_code in (302, 307)
@@ -143,12 +148,16 @@ def test_callback_graph_me_fails(mock_http, auth_client):
 def test_callback_auto_admin_promotion(mock_http, auth_client, db_session, monkeypatch):
     """User in ADMIN_EMAILS gets auto-promoted to admin."""
     from app.config import settings
+
     monkeypatch.setattr(settings, "admin_emails", ["promoted@trioscs.com"])
 
     mock_http.post = AsyncMock(return_value=_mock_token_response())
-    mock_http.get = AsyncMock(return_value=_mock_graph_me(
-        email="promoted@trioscs.com", name="Promoted User",
-    ))
+    mock_http.get = AsyncMock(
+        return_value=_mock_graph_me(
+            email="promoted@trioscs.com",
+            name="Promoted User",
+        )
+    )
 
     auth_client.get("/auth/callback?code=test-code", follow_redirects=False)
 
@@ -206,6 +215,7 @@ def test_index_serves_template(client):
 # ── Additional coverage tests ─────────────────────────────────────────
 
 from datetime import datetime, timedelta, timezone
+
 import httpx
 
 
@@ -253,9 +263,7 @@ class TestCallbackHTTPErrors:
             "expires_in": 3600,
         }
         mock_http.post = AsyncMock(return_value=token_resp)
-        mock_http.get = AsyncMock(return_value=_mock_graph_me(
-            email="norefresh@trioscs.com", name="No Refresh"
-        ))
+        mock_http.get = AsyncMock(return_value=_mock_graph_me(email="norefresh@trioscs.com", name="No Refresh"))
 
         resp = auth_client.get("/auth/callback?code=test-code", follow_redirects=False)
         assert resp.status_code in (302, 307)
@@ -269,9 +277,7 @@ class TestCallbackHTTPErrors:
     def test_callback_first_login_no_inbox_scan(self, mock_http, auth_client, db_session):
         """New user with no last_inbox_scan -> logs backfill info."""
         mock_http.post = AsyncMock(return_value=_mock_token_response())
-        mock_http.get = AsyncMock(return_value=_mock_graph_me(
-            email="firsttime@trioscs.com", name="First Timer"
-        ))
+        mock_http.get = AsyncMock(return_value=_mock_graph_me(email="firsttime@trioscs.com", name="First Timer"))
 
         resp = auth_client.get("/auth/callback?code=test-code", follow_redirects=False)
         assert resp.status_code in (302, 307)
@@ -382,9 +388,7 @@ class TestMailboxSettingsError:
     def test_callback_mailbox_settings_exception(self, mock_http, auth_client, db_session):
         """fetch_and_store_mailbox_settings raises -> callback still succeeds."""
         mock_http.post = AsyncMock(return_value=_mock_token_response())
-        mock_http.get = AsyncMock(return_value=_mock_graph_me(
-            email="mailboxerr@trioscs.com", name="Mailbox Error"
-        ))
+        mock_http.get = AsyncMock(return_value=_mock_graph_me(email="mailboxerr@trioscs.com", name="Mailbox Error"))
 
         with patch(
             "app.services.mailbox_intelligence.fetch_and_store_mailbox_settings",

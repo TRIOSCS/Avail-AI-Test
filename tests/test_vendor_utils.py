@@ -121,12 +121,15 @@ class TestMergeEmails:
 
     def test_multiple_mixed(self):
         card = self._make_card(["existing@test.com"])
-        added = merge_emails_into_card(card, [
-            "existing@test.com",  # dup
-            "new1@test.com",
-            "new2@test.com",
-            "bad-email",  # no @
-        ])
+        added = merge_emails_into_card(
+            card,
+            [
+                "existing@test.com",  # dup
+                "new1@test.com",
+                "new2@test.com",
+                "bad-email",  # no @
+            ],
+        )
         assert added == 2
         assert len(card.emails) == 3
 
@@ -170,12 +173,15 @@ class TestMergePhones:
 
     def test_multiple_mixed(self):
         card = self._make_card(["+1-555-0100"])
-        added = merge_phones_into_card(card, [
-            "+1-555-0100",     # dup
-            "+1-555-0200",     # new
-            "123",             # too short
-            "+44-20-7946-0958",  # new
-        ])
+        added = merge_phones_into_card(
+            card,
+            [
+                "+1-555-0100",  # dup
+                "+1-555-0200",  # new
+                "123",  # too short
+                "+44-20-7946-0958",  # new
+            ],
+        )
         assert added == 2
         assert len(card.phones) == 3
 
@@ -308,12 +314,14 @@ class TestFindVendorDedupCandidates:
 
         # Create many similar vendors to exceed limit
         for i in range(10):
-            db_session.add(VendorCard(
-                normalized_name=f"test vendor {i}",
-                display_name=f"Test Vendor {i}",
-                sighting_count=10,
-                created_at=datetime.now(timezone.utc),
-            ))
+            db_session.add(
+                VendorCard(
+                    normalized_name=f"test vendor {i}",
+                    display_name=f"Test Vendor {i}",
+                    sighting_count=10,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
         db_session.commit()
 
         results = find_vendor_dedup_candidates(db_session, threshold=50, limit=3)
@@ -329,12 +337,24 @@ class TestFindVendorDedupCandidates:
         from app.models import VendorCard
 
         cards = [
-            VendorCard(normalized_name="arrow electronics", display_name="Arrow Electronics",
-                       sighting_count=10, created_at=datetime.now(timezone.utc)),
-            VendorCard(normalized_name="arrow electronic", display_name="Arrow Electronic",
-                       sighting_count=10, created_at=datetime.now(timezone.utc)),
-            VendorCard(normalized_name="arrow electro", display_name="Arrow Electro",
-                       sighting_count=10, created_at=datetime.now(timezone.utc)),
+            VendorCard(
+                normalized_name="arrow electronics",
+                display_name="Arrow Electronics",
+                sighting_count=10,
+                created_at=datetime.now(timezone.utc),
+            ),
+            VendorCard(
+                normalized_name="arrow electronic",
+                display_name="Arrow Electronic",
+                sighting_count=10,
+                created_at=datetime.now(timezone.utc),
+            ),
+            VendorCard(
+                normalized_name="arrow electro",
+                display_name="Arrow Electro",
+                sighting_count=10,
+                created_at=datetime.now(timezone.utc),
+            ),
         ]
         db_session.add_all(cards)
         db_session.commit()
@@ -353,12 +373,18 @@ class TestFindVendorDedupCandidates:
 
         # Create only 2 similar cards — second iteration would try same pair
         cards = [
-            VendorCard(normalized_name="test company alpha",
-                       display_name="Test Company Alpha",
-                       sighting_count=10, created_at=datetime.now(timezone.utc)),
-            VendorCard(normalized_name="test company alpha inc",
-                       display_name="Test Company Alpha Inc",
-                       sighting_count=10, created_at=datetime.now(timezone.utc)),
+            VendorCard(
+                normalized_name="test company alpha",
+                display_name="Test Company Alpha",
+                sighting_count=10,
+                created_at=datetime.now(timezone.utc),
+            ),
+            VendorCard(
+                normalized_name="test company alpha inc",
+                display_name="Test Company Alpha Inc",
+                sighting_count=10,
+                created_at=datetime.now(timezone.utc),
+            ),
         ]
         db_session.add_all(cards)
         db_session.commit()

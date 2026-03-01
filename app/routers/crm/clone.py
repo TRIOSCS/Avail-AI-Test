@@ -18,9 +18,7 @@ router = APIRouter()
 
 
 @router.post("/api/requisitions/{req_id}/clone")
-async def clone_requisition(
-    req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
-):
+async def clone_requisition(req_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     from ...dependencies import get_req_for_user
 
     req = get_req_for_user(db, user, req_id)
@@ -41,7 +39,7 @@ async def clone_requisition(
         # Dedup substitutes by canonical key
         seen_keys = {normalize_mpn_key(cloned_mpn)}
         deduped_subs = []
-        for s in (r.substitutes or []):
+        for s in r.substitutes or []:
             ns = normalize_mpn(s) or s
             key = normalize_mpn_key(ns)
             if key and key not in seen_keys:
@@ -64,14 +62,10 @@ async def clone_requisition(
         db.add(new_r)
     db.flush()
     # Map old requirement IDs → new for offer cloning (batch query)
-    new_reqs = db.query(Requirement).filter(
-        Requirement.requisition_id == new_req.id
-    ).all()
+    new_reqs = db.query(Requirement).filter(Requirement.requisition_id == new_req.id).all()
     mpn_to_new_id = {r.primary_mpn: r.id for r in new_reqs}
     req_map = {
-        old_r.id: mpn_to_new_id[old_r.primary_mpn]
-        for old_r in req.requirements
-        if old_r.primary_mpn in mpn_to_new_id
+        old_r.id: mpn_to_new_id[old_r.primary_mpn] for old_r in req.requirements if old_r.primary_mpn in mpn_to_new_id
     }
     for o in req.offers:
         if o.status in ("active", "selected"):

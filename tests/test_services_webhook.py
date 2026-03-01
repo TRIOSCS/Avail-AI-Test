@@ -107,8 +107,9 @@ class TestExtractName:
 # ══════════════════════════════════════════════════════════════════════
 
 
-def _make_subscription(db: Session, user: User, sub_id: str = "sub-001",
-                       client_state: str = "state123") -> GraphSubscription:
+def _make_subscription(
+    db: Session, user: User, sub_id: str = "sub-001", client_state: str = "state123"
+) -> GraphSubscription:
     """Create a GraphSubscription record for testing."""
     sub = GraphSubscription(
         user_id=user.id,
@@ -124,9 +125,12 @@ def _make_subscription(db: Session, user: User, sub_id: str = "sub-001",
     return sub
 
 
-def _make_notification(sub_id: str = "sub-001", client_state: str = "state123",
-                       change_type: str = "created",
-                       resource: str = "Users('abc')/Messages('msg-001')") -> dict:
+def _make_notification(
+    sub_id: str = "sub-001",
+    client_state: str = "state123",
+    change_type: str = "created",
+    resource: str = "Users('abc')/Messages('msg-001')",
+) -> dict:
     """Build a Graph webhook notification entry."""
     return {
         "subscriptionId": sub_id,
@@ -136,11 +140,14 @@ def _make_notification(sub_id: str = "sub-001", client_state: str = "state123",
     }
 
 
-def _make_message(msg_id: str = "msg-001", subject: str = "RE: RFQ LM317T",
-                  from_email: str = "vendor@supplier.com",
-                  from_name: str = "Vendor Sales",
-                  is_draft: bool = False,
-                  parent_folder_id: str = "inbox-folder") -> dict:
+def _make_message(
+    msg_id: str = "msg-001",
+    subject: str = "RE: RFQ LM317T",
+    from_email: str = "vendor@supplier.com",
+    from_name: str = "Vendor Sales",
+    is_draft: bool = False,
+    parent_folder_id: str = "inbox-folder",
+) -> dict:
     """Build a Graph message response."""
     return {
         "id": msg_id,
@@ -151,9 +158,7 @@ def _make_message(msg_id: str = "msg-001", subject: str = "RE: RFQ LM317T",
                 "name": from_name,
             }
         },
-        "toRecipients": [
-            {"emailAddress": {"address": "testbuyer@trioscs.com", "name": "Test Buyer"}}
-        ],
+        "toRecipients": [{"emailAddress": {"address": "testbuyer@trioscs.com", "name": "Test Buyer"}}],
         "sentDateTime": "2026-02-20T10:00:00Z",
         "isDraft": is_draft,
         "parentFolderId": parent_folder_id,
@@ -207,10 +212,12 @@ class TestHandleNotification:
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock(return_value=_make_message())
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY), \
-             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]):
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY),
+            patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]),
+        ):
             _run(handle_notification(payload, db_session))
             # Should have proceeded to fetch message
             mock_gc.get_json.assert_called_once()
@@ -225,8 +232,10 @@ class TestHandleNotification:
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock()
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc):
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+        ):
             _run(handle_notification(payload, db_session))
             mock_gc.get_json.assert_not_called()
 
@@ -240,8 +249,10 @@ class TestHandleNotification:
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock()
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value=None), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc):
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value=None),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+        ):
             _run(handle_notification(payload, db_session))
             mock_gc.get_json.assert_not_called()
 
@@ -255,9 +266,11 @@ class TestHandleNotification:
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock(return_value=_make_message(is_draft=True))
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY) as mock_log:
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY) as mock_log,
+        ):
             _run(handle_notification(payload, db_session))
             mock_log.assert_not_called()
 
@@ -270,15 +283,19 @@ class TestHandleNotification:
 
         # Message sent BY the user
         mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(return_value=_make_message(
-            from_email="testbuyer@trioscs.com",  # same as test_user.email
-            from_name="Test Buyer",
-        ))
+        mock_gc.get_json = AsyncMock(
+            return_value=_make_message(
+                from_email="testbuyer@trioscs.com",  # same as test_user.email
+                from_name="Test Buyer",
+            )
+        )
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY) as mock_log, \
-             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock) as mock_poll:
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY) as mock_log,
+            patch(_PATCH_POLL_INBOX, new_callable=AsyncMock) as mock_poll,
+        ):
             _run(handle_notification(payload, db_session))
             mock_log.assert_not_called()
             mock_poll.assert_not_called()
@@ -291,14 +308,18 @@ class TestHandleNotification:
         payload = {"value": [_make_notification(sub_id="sub-case")]}
 
         mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(return_value=_make_message(
-            from_email="TestBuyer@TRIOSCS.com",
-        ))
+        mock_gc.get_json = AsyncMock(
+            return_value=_make_message(
+                from_email="TestBuyer@TRIOSCS.com",
+            )
+        )
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY) as mock_log, \
-             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock) as mock_poll:
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY) as mock_log,
+            patch(_PATCH_POLL_INBOX, new_callable=AsyncMock) as mock_poll,
+        ):
             _run(handle_notification(payload, db_session))
             mock_log.assert_not_called()
             mock_poll.assert_not_called()
@@ -311,17 +332,21 @@ class TestHandleNotification:
         payload = {"value": [_make_notification(sub_id="sub-in")]}
 
         mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(return_value=_make_message(
-            msg_id="msg-inbound-001",
-            subject="RE: RFQ LM317T",
-            from_email="vendor@supplier.com",
-            from_name="Vendor Sales",
-        ))
+        mock_gc.get_json = AsyncMock(
+            return_value=_make_message(
+                msg_id="msg-inbound-001",
+                subject="RE: RFQ LM317T",
+                from_email="vendor@supplier.com",
+                from_name="Vendor Sales",
+            )
+        )
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY) as mock_log, \
-             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]):
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY) as mock_log,
+            patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]),
+        ):
             _run(handle_notification(payload, db_session))
             mock_log.assert_called_once_with(
                 user_id=test_user.id,
@@ -343,10 +368,12 @@ class TestHandleNotification:
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock(return_value=_make_message())
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token-abc"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY), \
-             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]) as mock_poll:
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token-abc"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY),
+            patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]) as mock_poll,
+        ):
             _run(handle_notification(payload, db_session))
             mock_poll.assert_called_once_with(
                 token="token-abc",
@@ -364,11 +391,12 @@ class TestHandleNotification:
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock(return_value=_make_message())
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY), \
-             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock,
-                   return_value=[{"id": "r1"}, {"id": "r2"}]):
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY),
+            patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[{"id": "r1"}, {"id": "r2"}]),
+        ):
             # Should not raise, even with responses
             _run(handle_notification(payload, db_session))
 
@@ -382,11 +410,12 @@ class TestHandleNotification:
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock(return_value=_make_message())
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY), \
-             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock,
-                   side_effect=Exception("Graph timeout")):
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY),
+            patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, side_effect=Exception("Graph timeout")),
+        ):
             # Should not raise
             _run(handle_notification(payload, db_session))
 
@@ -400,9 +429,11 @@ class TestHandleNotification:
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock(side_effect=Exception("404 Not Found"))
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY) as mock_log:
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY) as mock_log,
+        ):
             _run(handle_notification(payload, db_session))
             mock_log.assert_not_called()
 
@@ -431,10 +462,12 @@ class TestHandleNotification:
         mock_gc = MagicMock()
         mock_gc.get_json = mock_get_json
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY) as mock_log, \
-             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]) as mock_poll:
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY) as mock_log,
+            patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]) as mock_poll,
+        ):
             _run(handle_notification(payload, db_session))
             # Two log calls (one per message)
             assert mock_log.call_count == 2
@@ -454,19 +487,19 @@ class TestHandleNotification:
 
         payload = {
             "value": [
-                _make_notification(sub_id="sub-u1", client_state="st1",
-                                   resource="Users('a')/Messages('m1')"),
-                _make_notification(sub_id="sub-u2", client_state="st2",
-                                   resource="Users('b')/Messages('m2')"),
+                _make_notification(sub_id="sub-u1", client_state="st1", resource="Users('a')/Messages('m1')"),
+                _make_notification(sub_id="sub-u2", client_state="st2", resource="Users('b')/Messages('m2')"),
             ]
         }
 
         msg_map = {
             "/Users('a')/Messages('m1')": _make_message(
-                msg_id="m1", from_email="vendor1@ext.com",
+                msg_id="m1",
+                from_email="vendor1@ext.com",
             ),
             "/Users('b')/Messages('m2')": _make_message(
-                msg_id="m2", from_email="vendor2@ext.com",
+                msg_id="m2",
+                from_email="vendor2@ext.com",
             ),
         }
 
@@ -476,10 +509,12 @@ class TestHandleNotification:
         mock_gc = MagicMock()
         mock_gc.get_json = mock_get_json
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY) as mock_log, \
-             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]) as mock_poll:
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY) as mock_log,
+            patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]) as mock_poll,
+        ):
             _run(handle_notification(payload, db_session))
             assert mock_log.call_count == 2
             assert mock_poll.call_count == 2
@@ -499,8 +534,10 @@ class TestHandleNotification:
                 return None
             return original_get(model, ident)
 
-        with patch.object(db_session, "get", side_effect=mock_db_get), \
-             patch(_PATCH_GET_TOKEN, new_callable=AsyncMock) as mock_token:
+        with (
+            patch.object(db_session, "get", side_effect=mock_db_get),
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock) as mock_token,
+        ):
             _run(handle_notification(payload, db_session))
             mock_token.assert_not_called()
 
@@ -517,10 +554,12 @@ class TestHandleNotification:
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock(return_value=msg)
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY) as mock_log, \
-             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock) as mock_poll:
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY) as mock_log,
+            patch(_PATCH_POLL_INBOX, new_callable=AsyncMock) as mock_poll,
+        ):
             _run(handle_notification(payload, db_session))
             mock_log.assert_not_called()
             # No poll since no inbound user tracked
@@ -536,10 +575,12 @@ class TestHandleNotification:
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock(return_value=_make_message(subject=""))
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY) as mock_log, \
-             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]):
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY) as mock_log,
+            patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]),
+        ):
             _run(handle_notification(payload, db_session))
             mock_log.assert_called_once()
             assert mock_log.call_args.kwargs["subject"] == ""
@@ -556,10 +597,12 @@ class TestHandleNotification:
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock(return_value=_make_message())
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY), \
-             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]):
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="tok"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY),
+            patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]),
+        ):
             # resource defaults to "" via .get("resource", "")
             _run(handle_notification(payload, db_session))
             # Should still try to fetch "/"
@@ -572,7 +615,6 @@ class TestHandleNotification:
 
 
 class TestCreateMailSubscription:
-
     def test_no_valid_token_returns_none(self, db_session, test_user):
         """Returns None when the user has no valid token."""
         from app.services.webhook_service import create_mail_subscription
@@ -590,8 +632,10 @@ class TestCreateMailSubscription:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock()
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc):
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+        ):
             result = _run(create_mail_subscription(test_user, db_session))
             assert result.subscription_id == "existing-sub"
             mock_gc.post_json.assert_not_called()
@@ -603,9 +647,11 @@ class TestCreateMailSubscription:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(return_value={"id": "new-sub-id-123"})
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch("app.services.webhook_service.settings") as mock_settings:
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch("app.services.webhook_service.settings") as mock_settings,
+        ):
             mock_settings.app_url = "https://app.example.com"
             result = _run(create_mail_subscription(test_user, db_session))
             assert result is not None
@@ -622,9 +668,11 @@ class TestCreateMailSubscription:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(side_effect=Exception("Graph error"))
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch("app.services.webhook_service.settings") as mock_settings:
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch("app.services.webhook_service.settings") as mock_settings,
+        ):
             mock_settings.app_url = "https://app.example.com"
             result = _run(create_mail_subscription(test_user, db_session))
             assert result is None
@@ -636,9 +684,11 @@ class TestCreateMailSubscription:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(return_value={"error": "something went wrong"})
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch("app.services.webhook_service.settings") as mock_settings:
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch("app.services.webhook_service.settings") as mock_settings,
+        ):
             mock_settings.app_url = "https://app.example.com"
             result = _run(create_mail_subscription(test_user, db_session))
             assert result is None
@@ -662,9 +712,11 @@ class TestCreateMailSubscription:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(return_value={"id": "fresh-sub-id"})
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch("app.services.webhook_service.settings") as mock_settings:
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch("app.services.webhook_service.settings") as mock_settings,
+        ):
             mock_settings.app_url = "https://app.example.com"
             result = _run(create_mail_subscription(test_user, db_session))
             assert result is not None
@@ -677,9 +729,11 @@ class TestCreateMailSubscription:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(return_value={"id": "sub-payload-test"})
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch("app.services.webhook_service.settings") as mock_settings:
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch("app.services.webhook_service.settings") as mock_settings,
+        ):
             mock_settings.app_url = "https://myapp.example.com"
             _run(create_mail_subscription(test_user, db_session))
 
@@ -700,7 +754,6 @@ class TestCreateMailSubscription:
 
 
 class TestRenewSubscription:
-
     def test_renew_success(self, db_session, test_user):
         """Successful renewal updates expiration_dt and returns True."""
         from app.services.webhook_service import renew_subscription
@@ -712,8 +765,10 @@ class TestRenewSubscription:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(return_value={})
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc):
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+        ):
             result = _run(renew_subscription(sub, db_session))
             assert result is True
             new_exp = sub.expiration_dt.replace(tzinfo=None) if sub.expiration_dt.tzinfo else sub.expiration_dt
@@ -757,8 +812,10 @@ class TestRenewSubscription:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(side_effect=Exception("Graph 404"))
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc):
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+        ):
             result = _run(renew_subscription(sub, db_session))
             assert result is False
             # Subscription should be deleted
@@ -774,8 +831,10 @@ class TestRenewSubscription:
         mock_gc = MagicMock()
         mock_gc.post_json = AsyncMock(return_value={})
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc):
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+        ):
             _run(renew_subscription(sub, db_session))
             call_args = mock_gc.post_json.call_args
             path = call_args[0][0]
@@ -790,7 +849,6 @@ class TestRenewSubscription:
 
 
 class TestRenewExpiringSubscriptions:
-
     def test_renews_expiring_subs(self, db_session, test_user):
         """Subscriptions expiring within the buffer window are renewed."""
         from app.services.webhook_service import renew_expiring_subscriptions
@@ -868,7 +926,6 @@ class TestRenewExpiringSubscriptions:
 
 
 class TestEnsureAllUsersSubscribed:
-
     def test_creates_subscription_for_unsubscribed_user(self, db_session, test_user):
         """Creates subscriptions for M365-connected users without one."""
         from app.services.webhook_service import ensure_all_users_subscribed
@@ -1022,8 +1079,9 @@ class TestValidateNotifications:
     def test_validate_replay_protection(self, db_session, test_user):
         """Duplicate notifications (same sub+resource) within window are rejected."""
         _make_subscription(db_session, test_user, sub_id="sub-val-3", client_state="secret")
-        notif = _make_notification(sub_id="sub-val-3", client_state="secret",
-                                   resource="Users('abc')/Messages('msg-dup')")
+        notif = _make_notification(
+            sub_id="sub-val-3", client_state="secret", resource="Users('abc')/Messages('msg-dup')"
+        )
 
         # First call should accept
         result1 = validate_notifications({"value": [notif.copy()]}, db_session)
@@ -1038,8 +1096,9 @@ class TestValidateNotifications:
         import time
 
         _make_subscription(db_session, test_user, sub_id="sub-val-4", client_state="secret")
-        notif = _make_notification(sub_id="sub-val-4", client_state="secret",
-                                   resource="Users('abc')/Messages('msg-replay')")
+        notif = _make_notification(
+            sub_id="sub-val-4", client_state="secret", resource="Users('abc')/Messages('msg-replay')"
+        )
 
         # First call
         result1 = validate_notifications({"value": [notif.copy()]}, db_session)
@@ -1130,10 +1189,12 @@ class TestHandleNotificationValidated:
         mock_gc = MagicMock()
         mock_gc.get_json = AsyncMock(return_value=mock_msg)
 
-        with patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"), \
-             patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc), \
-             patch(_PATCH_LOG_ACTIVITY, return_value=MagicMock()) as mock_log, \
-             patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]):
+        with (
+            patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
+            patch(_PATCH_GRAPH_CLIENT, return_value=mock_gc),
+            patch(_PATCH_LOG_ACTIVITY, return_value=MagicMock()) as mock_log,
+            patch(_PATCH_POLL_INBOX, new_callable=AsyncMock, return_value=[]),
+        ):
             _run(handle_notification({}, db_session, validated=[validated_item]))
 
         # log_email_activity should have been called for the inbound message

@@ -47,10 +47,7 @@ def save_ics_sightings(
         )
         .all()
     )
-    existing_keys = {
-        ((v or "").lower(), (m or "").lower(), q)
-        for v, m, q in existing
-    }
+    existing_keys = {((v or "").lower(), (m or "").lower(), q) for v, m, q in existing}
 
     created = 0
     for ics in ics_sightings:

@@ -70,7 +70,7 @@ async def generate_trouble_prompt(
         view_key = current_view.lower().split("/")[-1] if "/" in (current_view or "") else (current_view or "").lower()
         relevant_files = VIEW_FILE_MAP.get(view_key, "")
 
-    parts = [f"User ({reporter_name or 'unknown'}) reported:\n\"{user_message}\""]
+    parts = [f'User ({reporter_name or "unknown"}) reported:\n"{user_message}"']
 
     if current_url:
         parts.append(f"URL: {current_url}")

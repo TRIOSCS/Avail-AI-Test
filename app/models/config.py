@@ -92,6 +92,4 @@ class ApiUsageLog(Base):
     error_message = Column(String(500))
     check_type = Column(String(20), nullable=False)
 
-    __table_args__ = (
-        Index("ix_usage_log_source_ts", "source_id", "timestamp"),
-    )
+    __table_args__ = (Index("ix_usage_log_source_ts", "source_id", "timestamp"),)

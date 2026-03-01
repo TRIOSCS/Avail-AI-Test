@@ -11,6 +11,7 @@ Addresses performance audit findings:
 - contacts: 99.96% sequential scans (207K seq scans)
 - requisitions: missing indexes on customer_site_id, created_by, cloned_from_id
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -125,18 +126,24 @@ def downgrade() -> None:
     # ── Restore duplicate indexes ───────────────────────────────────────
     op.create_index("ix_vr_message_id", "vendor_responses", ["message_id"], unique=True)
     op.create_index(
-        "ix_vendor_responses_vendor_name", "vendor_responses", ["vendor_name"],
+        "ix_vendor_responses_vendor_name",
+        "vendor_responses",
+        ["vendor_name"],
         postgresql_where="vendor_name IS NOT NULL",
     )
     op.create_index("ix_vc_domain", "vendor_cards", ["domain"])
     op.create_index("ix_sysconfig_key", "system_config", ["key"], unique=True)
     op.create_index(
-        "ix_offers_vendor_card", "offers", ["vendor_card_id"],
+        "ix_offers_vendor_card",
+        "offers",
+        ["vendor_card_id"],
         postgresql_where="vendor_card_id IS NOT NULL",
     )
     op.create_index("ix_ese_email", "email_signature_extracts", ["sender_email"], unique=True)
     op.create_index(
-        "ix_contacts_vendor_name", "contacts", ["vendor_name"],
+        "ix_contacts_vendor_name",
+        "contacts",
+        ["vendor_name"],
         postgresql_where="vendor_name IS NOT NULL",
     )
     op.create_index("ix_buyplans_token", "buy_plans", ["approval_token"])

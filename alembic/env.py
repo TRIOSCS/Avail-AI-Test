@@ -14,9 +14,9 @@ Depends on: app.models (Base + all tables), app.config (settings)
 
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from alembic import context
 from app.config import Settings
 from app.models import Base  # noqa: F401 — imports all models via Base.metadata
 

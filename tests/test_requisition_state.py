@@ -11,12 +11,12 @@ import os
 
 os.environ["TESTING"] = "1"
 
+
 import pytest
-from unittest.mock import MagicMock
 
 from app.enums import RequisitionStatus
-from app.services.requisition_state import ALLOWED_TRANSITIONS, transition
 from app.models import ActivityLog
+from app.services.requisition_state import ALLOWED_TRANSITIONS, transition
 
 
 class TestTransition:
@@ -55,10 +55,14 @@ class TestTransition:
         transition(test_requisition, "sourcing", test_user, db_session)
         db_session.flush()
 
-        logs = db_session.query(ActivityLog).filter_by(
-            requisition_id=test_requisition.id,
-            activity_type="status_change",
-        ).all()
+        logs = (
+            db_session.query(ActivityLog)
+            .filter_by(
+                requisition_id=test_requisition.id,
+                activity_type="status_change",
+            )
+            .all()
+        )
         assert len(logs) == 1
         assert "active → sourcing" in logs[0].subject
 

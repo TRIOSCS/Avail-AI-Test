@@ -22,7 +22,6 @@ from app.models import (
     Requisition,
     User,
     VendorCard,
-    VendorContact,
     VendorResponse,
     VendorReview,
 )
@@ -59,6 +58,7 @@ def test_garbage_vendor_case_insensitive():
 # Blacklist filtering logic (unit test of the check pattern)
 # ---------------------------------------------------------------------------
 
+
 def test_blacklisted_vendor_skipped():
     """Sightings with is_blacklisted=True should be removed."""
     summary = {"is_blacklisted": True, "card_id": 1}
@@ -74,6 +74,7 @@ def test_non_blacklisted_vendor_kept():
 # ---------------------------------------------------------------------------
 # Enrichment results structure
 # ---------------------------------------------------------------------------
+
 
 def _make_results_dict(sightings: list[dict]) -> dict:
     """Build a results dict matching the search_service format."""
@@ -95,40 +96,48 @@ def _filter_sightings(results: dict) -> list[dict]:
 
 
 def test_filter_removes_garbage():
-    results = _make_results_dict([
-        {"vendor_name": "Arrow", "mpn_matched": "LM317T"},
-        {"vendor_name": "No Seller Listed", "mpn_matched": "LM317T"},
-        {"vendor_name": "", "mpn_matched": "LM317T"},
-    ])
+    results = _make_results_dict(
+        [
+            {"vendor_name": "Arrow", "mpn_matched": "LM317T"},
+            {"vendor_name": "No Seller Listed", "mpn_matched": "LM317T"},
+            {"vendor_name": "", "mpn_matched": "LM317T"},
+        ]
+    )
     kept = _filter_sightings(results)
     assert len(kept) == 1
     assert kept[0]["vendor_name"] == "Arrow"
 
 
 def test_filter_removes_blacklisted():
-    results = _make_results_dict([
-        {"vendor_name": "Good Vendor", "mpn_matched": "LM317T"},
-        {"vendor_name": "Bad Vendor", "mpn_matched": "LM317T", "_blacklisted": True},
-    ])
+    results = _make_results_dict(
+        [
+            {"vendor_name": "Good Vendor", "mpn_matched": "LM317T"},
+            {"vendor_name": "Bad Vendor", "mpn_matched": "LM317T", "_blacklisted": True},
+        ]
+    )
     kept = _filter_sightings(results)
     assert len(kept) == 1
     assert kept[0]["vendor_name"] == "Good Vendor"
 
 
 def test_filter_handles_none_vendor():
-    results = _make_results_dict([
-        {"vendor_name": None, "mpn_matched": "LM317T"},
-    ])
+    results = _make_results_dict(
+        [
+            {"vendor_name": None, "mpn_matched": "LM317T"},
+        ]
+    )
     kept = _filter_sightings(results)
     assert len(kept) == 0  # None → "" → in _GARBAGE_VENDORS
 
 
 def test_filter_preserves_order():
-    results = _make_results_dict([
-        {"vendor_name": "Alpha", "mpn_matched": "A"},
-        {"vendor_name": "N/A", "mpn_matched": "B"},
-        {"vendor_name": "Beta", "mpn_matched": "C"},
-    ])
+    results = _make_results_dict(
+        [
+            {"vendor_name": "Alpha", "mpn_matched": "A"},
+            {"vendor_name": "N/A", "mpn_matched": "B"},
+            {"vendor_name": "Beta", "mpn_matched": "C"},
+        ]
+    )
     kept = _filter_sightings(results)
     assert [s["vendor_name"] for s in kept] == ["Alpha", "Beta"]
 
@@ -188,7 +197,9 @@ def test_follow_ups_empty(client):
 def test_follow_ups_returns_stale_contacts(client, db_session, test_user, test_requisition):
     """Contacts sent >3 days ago with 'sent' status appear as follow-ups."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Slow Vendor",
         vendor_contact="slow@vendor.com",
         status="sent",
@@ -196,7 +207,9 @@ def test_follow_ups_returns_stale_contacts(client, db_session, test_user, test_r
     )
     # Recent contact should NOT appear
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Fast Vendor",
         vendor_contact="fast@vendor.com",
         status="sent",
@@ -217,12 +230,20 @@ def test_follow_ups_returns_stale_contacts(client, db_session, test_user, test_r
 def test_follow_ups_summary(client, db_session, test_user, test_requisition):
     """Summary groups stale contacts by requisition."""
     _make_contact(
-        db_session, test_requisition, test_user,
-        vendor_name="Vendor A", status="sent", days_ago=5,
+        db_session,
+        test_requisition,
+        test_user,
+        vendor_name="Vendor A",
+        status="sent",
+        days_ago=5,
     )
     _make_contact(
-        db_session, test_requisition, test_user,
-        vendor_name="Vendor B", status="opened", days_ago=7,
+        db_session,
+        test_requisition,
+        test_user,
+        vendor_name="Vendor B",
+        status="opened",
+        days_ago=7,
     )
 
     resp = client.get("/api/follow-ups/summary")
@@ -328,13 +349,17 @@ def test_rfq_prepare_unknown_vendor(client, test_requisition):
 def test_get_activity(client, db_session, test_user, test_requisition):
     """Activity endpoint returns vendor-level summary."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Arrow Electronics",
         status="sent",
         days_ago=2,
     )
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Arrow Electronics",
         vendor_contact="rfq@arrow.com",
         status="replied",
@@ -427,14 +452,17 @@ def test_send_rfq(rfq_client, db_session, test_user, test_requisition):
         {"vendor_name": "Arrow", "status": "sent", "email": "sales@arrow.com"},
     ]
 
-    with patch(
-        "app.routers.rfq.require_fresh_token",
-        new_callable=AsyncMock,
-        return_value="fake-token",
-    ), patch(
-        "app.routers.rfq.send_batch_rfq",
-        new_callable=AsyncMock,
-        return_value=mock_results,
+    with (
+        patch(
+            "app.routers.rfq.require_fresh_token",
+            new_callable=AsyncMock,
+            return_value="fake-token",
+        ),
+        patch(
+            "app.routers.rfq.send_batch_rfq",
+            new_callable=AsyncMock,
+            return_value=mock_results,
+        ),
     ):
         resp = rfq_client.post(
             f"/api/requisitions/{test_requisition.id}/rfq",
@@ -492,14 +520,17 @@ def test_poll_inbox(rfq_client, db_session, test_user, test_requisition):
     """POST poll delegates to poll_inbox and returns responses."""
     mock_results = [{"vendor_name": "Arrow", "subject": "Re: RFQ"}]
 
-    with patch(
-        "app.routers.rfq.require_fresh_token",
-        new_callable=AsyncMock,
-        return_value="fake-token",
-    ), patch(
-        "app.routers.rfq.poll_inbox",
-        new_callable=AsyncMock,
-        return_value=mock_results,
+    with (
+        patch(
+            "app.routers.rfq.require_fresh_token",
+            new_callable=AsyncMock,
+            return_value="fake-token",
+        ),
+        patch(
+            "app.routers.rfq.poll_inbox",
+            new_callable=AsyncMock,
+            return_value=mock_results,
+        ),
     ):
         resp = rfq_client.post(f"/api/requisitions/{test_requisition.id}/poll")
 
@@ -531,7 +562,9 @@ def test_poll_inbox_auth_failure(rfq_client, test_requisition):
 def test_get_activity_quoted_status(client, db_session, test_user, test_requisition):
     """Contact with 'quoted' status gives vendor status 'quoted'."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Quoter Vendor",
         status="quoted",
         days_ago=1,
@@ -547,7 +580,9 @@ def test_get_activity_quoted_status(client, db_session, test_user, test_requisit
 def test_get_activity_declined_status(client, db_session, test_user, test_requisition):
     """Contact with only 'declined' status gives vendor status 'declined'."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Decliner Vendor",
         status="declined",
         days_ago=1,
@@ -563,7 +598,9 @@ def test_get_activity_declined_status(client, db_session, test_user, test_requis
 def test_get_activity_opened_status(client, db_session, test_user, test_requisition):
     """Contact with 'opened' status gives vendor status 'opened'."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Opener Vendor",
         status="opened",
         days_ago=1,
@@ -579,7 +616,9 @@ def test_get_activity_opened_status(client, db_session, test_user, test_requisit
 def test_get_activity_awaiting_status(client, db_session, test_user, test_requisition):
     """Contacts with 'sent' status only gives vendor status 'awaiting'."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Silent Vendor",
         status="sent",
         days_ago=1,
@@ -595,7 +634,9 @@ def test_get_activity_awaiting_status(client, db_session, test_user, test_requis
 def test_get_activity_responded_to_replied(client, db_session, test_user, test_requisition):
     """Contact with 'responded' status gives vendor status 'replied'."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Responder Vendor",
         status="responded",
         days_ago=1,
@@ -609,11 +650,16 @@ def test_get_activity_responded_to_replied(client, db_session, test_user, test_r
 
 
 def test_get_activity_declined_with_response_becomes_declined(
-    client, db_session, test_user, test_requisition,
+    client,
+    db_session,
+    test_user,
+    test_requisition,
 ):
     """Has response + only declined/sent/opened contacts yields 'declined'."""
     c = _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Decline Reply Vendor",
         vendor_contact="decline@vendor.com",
         status="declined",
@@ -641,11 +687,16 @@ def test_get_activity_declined_with_response_becomes_declined(
 
 
 def test_get_activity_has_response_replied(
-    client, db_session, test_user, test_requisition,
+    client,
+    db_session,
+    test_user,
+    test_requisition,
 ):
     """Vendor with a response (no special contact status) gives 'replied'."""
     c = _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Reply Vendor",
         vendor_contact="reply@vendor.com",
         status="sent",
@@ -672,11 +723,16 @@ def test_get_activity_has_response_replied(
 
 
 def test_get_activity_response_grouped_by_contact(
-    client, db_session, test_user, test_requisition,
+    client,
+    db_session,
+    test_user,
+    test_requisition,
 ):
     """Response with contact_id groups under the contact's vendor name."""
     c = _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Acme Corp",
         vendor_contact="sales@acme.com",
         status="sent",
@@ -706,7 +762,10 @@ def test_get_activity_response_grouped_by_contact(
 
 
 def test_get_activity_response_without_contact(
-    client, db_session, test_user, test_requisition,
+    client,
+    db_session,
+    test_user,
+    test_requisition,
 ):
     """Response without contact_id groups under its own vendor_name."""
     vr = VendorResponse(
@@ -729,7 +788,11 @@ def test_get_activity_response_without_contact(
 
 
 def test_get_activity_with_manual_activities(
-    client, db_session, test_user, test_requisition, test_vendor_card,
+    client,
+    db_session,
+    test_user,
+    test_requisition,
+    test_vendor_card,
 ):
     """Activity endpoint includes manual activity entries."""
     activity = ActivityLog(
@@ -759,11 +822,17 @@ def test_get_activity_with_manual_activities(
 
 
 def test_get_activity_vendor_card_resolution(
-    client, db_session, test_user, test_requisition, test_vendor_card,
+    client,
+    db_session,
+    test_user,
+    test_requisition,
+    test_vendor_card,
 ):
     """Vendor card is resolved by normalized_name for vendors without activities."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Arrow Electronics",
         status="sent",
         days_ago=1,
@@ -777,11 +846,17 @@ def test_get_activity_vendor_card_resolution(
 
 
 def test_get_activity_vendor_phones_from_card(
-    client, db_session, test_user, test_requisition, test_vendor_card,
+    client,
+    db_session,
+    test_user,
+    test_requisition,
+    test_vendor_card,
 ):
     """Vendor phones are collected from VendorCard.phones."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Arrow Electronics",
         status="sent",
         days_ago=1,
@@ -795,11 +870,18 @@ def test_get_activity_vendor_phones_from_card(
 
 
 def test_get_activity_vendor_phones_from_vendor_contact(
-    client, db_session, test_user, test_requisition, test_vendor_card, test_vendor_contact,
+    client,
+    db_session,
+    test_user,
+    test_requisition,
+    test_vendor_card,
+    test_vendor_contact,
 ):
     """Vendor phones also include numbers from VendorContact records."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Arrow Electronics",
         status="sent",
         days_ago=1,
@@ -815,17 +897,24 @@ def test_get_activity_vendor_phones_from_vendor_contact(
 
 
 def test_get_activity_multiple_vendors(
-    client, db_session, test_user, test_requisition,
+    client,
+    db_session,
+    test_user,
+    test_requisition,
 ):
     """Activity groups multiple vendors separately."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Arrow Electronics",
         status="sent",
         days_ago=2,
     )
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Mouser Electronics",
         status="opened",
         days_ago=1,
@@ -839,29 +928,40 @@ def test_get_activity_multiple_vendors(
 
 
 def test_get_activity_summary_counts(
-    client, db_session, test_user, test_requisition,
+    client,
+    db_session,
+    test_user,
+    test_requisition,
 ):
     """Summary counts are computed correctly for different statuses."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Awaiting Vendor",
         status="sent",
         days_ago=1,
     )
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Quoted Vendor",
         status="quoted",
         days_ago=1,
     )
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Opened Vendor",
         status="opened",
         days_ago=1,
     )
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Declined Vendor",
         status="declined",
         days_ago=1,
@@ -879,11 +979,16 @@ def test_get_activity_summary_counts(
 
 
 def test_get_activity_contact_parts(
-    client, db_session, test_user, test_requisition,
+    client,
+    db_session,
+    test_user,
+    test_requisition,
 ):
     """Parts from contacts are collected and sorted in all_parts."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Parts Vendor",
         status="sent",
         days_ago=1,
@@ -899,11 +1004,16 @@ def test_get_activity_contact_parts(
 
 
 def test_get_activity_contact_details_fields(
-    client, db_session, test_user, test_requisition,
+    client,
+    db_session,
+    test_user,
+    test_requisition,
 ):
     """Each contact in activity response includes expected fields."""
     c = _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Detail Vendor",
         vendor_contact="detail@vendor.com",
         status="sent",
@@ -941,7 +1051,9 @@ def test_rfq_prepare_not_found(client):
 def test_rfq_prepare_exhaustion_map(client, db_session, test_user, test_requisition, test_vendor_card):
     """rfq-prepare shows already_asked parts from previous contacts."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Arrow Electronics",
         vendor_contact="sales@arrow.com",
         status="sent",
@@ -1061,16 +1173,18 @@ def test_rfq_prepare_past_contact_emails(client, db_session, test_user, test_req
     """rfq-prepare uses emails from past RFQ contacts when VendorCard has no emails."""
     # Create a second requisition with a contact for the same vendor
     other_req = Requisition(
-        name="Other Req", created_by=test_user.id, status="active",
+        name="Other Req",
+        created_by=test_user.id,
+        status="active",
     )
     db_session.add(other_req)
     db_session.commit()
     db_session.refresh(other_req)
 
-    from app.vendor_utils import normalize_vendor_name
-
     _make_contact(
-        db_session, other_req, test_user,
+        db_session,
+        other_req,
+        test_user,
         vendor_name="Past Vendor Co",
         vendor_contact="past@vendor.com",
         status="sent",
@@ -1099,7 +1213,9 @@ def test_rfq_prepare_past_contacts_exclude_current_req(client, db_session, test_
     """rfq-prepare past_contacts does NOT include contacts from the current requisition."""
     # Contact on the CURRENT requisition — should be excluded from past_contacts
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Current Only Vendor",
         vendor_contact="current@vendor.com",
         status="sent",
@@ -1154,14 +1270,18 @@ def test_rfq_prepare_timeout_sets_fail_reason(client, db_session, test_user, tes
 def test_cross_req_history_returned(client, db_session, test_user, test_requisition):
     """rfq-prepare returns past_contacts from OTHER requisitions for context."""
     other_req = Requisition(
-        name="Cross Req Test", created_by=test_user.id, status="active",
+        name="Cross Req Test",
+        created_by=test_user.id,
+        status="active",
     )
     db_session.add(other_req)
     db_session.commit()
     db_session.refresh(other_req)
 
     _make_contact(
-        db_session, other_req, test_user,
+        db_session,
+        other_req,
+        test_user,
         vendor_name="Cross Vendor Inc",
         vendor_contact="cross@vendor.com",
         status="sent",
@@ -1193,7 +1313,9 @@ def test_cross_req_history_excludes_current_req(client, db_session, test_user, t
     """rfq-prepare past_contacts excludes contacts from the CURRENT requisition."""
     # Only a contact on the current req — no cross-req history
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Same Req Vendor",
         vendor_contact="same@vendor.com",
         status="sent",
@@ -1224,7 +1346,9 @@ def test_cross_req_history_excludes_current_req(client, db_session, test_user, t
 def test_send_follow_up_custom_body(rfq_client, db_session, test_user, test_requisition):
     """Follow-up with custom body sends email via Graph API."""
     c = _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Follow Up Vendor",
         vendor_contact="followup@vendor.com",
         status="sent",
@@ -1234,13 +1358,16 @@ def test_send_follow_up_custom_body(rfq_client, db_session, test_user, test_requ
     mock_gc = MagicMock()
     mock_gc.post_json = AsyncMock(return_value=None)
 
-    with patch(
-        "app.routers.rfq.require_fresh_token",
-        new_callable=AsyncMock,
-        return_value="fake-token",
-    ), patch(
-        "app.utils.graph_client.GraphClient",
-        return_value=mock_gc,
+    with (
+        patch(
+            "app.routers.rfq.require_fresh_token",
+            new_callable=AsyncMock,
+            return_value="fake-token",
+        ),
+        patch(
+            "app.utils.graph_client.GraphClient",
+            return_value=mock_gc,
+        ),
     ):
         resp = rfq_client.post(
             f"/api/follow-ups/{c.id}/send",
@@ -1256,7 +1383,9 @@ def test_send_follow_up_custom_body(rfq_client, db_session, test_user, test_requ
 def test_send_follow_up_default_body(rfq_client, db_session, test_user, test_requisition):
     """Follow-up with empty body uses default template."""
     c = _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Default Follow Up",
         vendor_contact="default@vendor.com",
         status="sent",
@@ -1267,13 +1396,16 @@ def test_send_follow_up_default_body(rfq_client, db_session, test_user, test_req
     mock_gc = MagicMock()
     mock_gc.post_json = AsyncMock(return_value=None)
 
-    with patch(
-        "app.routers.rfq.require_fresh_token",
-        new_callable=AsyncMock,
-        return_value="fake-token",
-    ), patch(
-        "app.utils.graph_client.GraphClient",
-        return_value=mock_gc,
+    with (
+        patch(
+            "app.routers.rfq.require_fresh_token",
+            new_callable=AsyncMock,
+            return_value="fake-token",
+        ),
+        patch(
+            "app.utils.graph_client.GraphClient",
+            return_value=mock_gc,
+        ),
     ):
         resp = rfq_client.post(
             f"/api/follow-ups/{c.id}/send",
@@ -1309,13 +1441,16 @@ def test_send_follow_up_no_subject(rfq_client, db_session, test_user, test_requi
     mock_gc = MagicMock()
     mock_gc.post_json = AsyncMock(return_value=None)
 
-    with patch(
-        "app.routers.rfq.require_fresh_token",
-        new_callable=AsyncMock,
-        return_value="fake-token",
-    ), patch(
-        "app.utils.graph_client.GraphClient",
-        return_value=mock_gc,
+    with (
+        patch(
+            "app.routers.rfq.require_fresh_token",
+            new_callable=AsyncMock,
+            return_value="fake-token",
+        ),
+        patch(
+            "app.utils.graph_client.GraphClient",
+            return_value=mock_gc,
+        ),
     ):
         resp = rfq_client.post(
             f"/api/follow-ups/{c.id}/send",
@@ -1348,7 +1483,9 @@ def test_send_follow_up_auth_failure(rfq_client, db_session, test_user, test_req
     from fastapi import HTTPException
 
     c = _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Auth Fail Vendor",
         vendor_contact="authfail@vendor.com",
         status="sent",
@@ -1368,14 +1505,16 @@ def test_send_follow_up_auth_failure(rfq_client, db_session, test_user, test_req
     assert resp.status_code == 401
 
 
-
 # ══════════════════════════════════════════════════════════════════════
 # NEW TESTS — Follow-ups with sales role filtering
 # ══════════════════════════════════════════════════════════════════════
 
 
 def test_follow_ups_sales_role_filtering(
-    db_session, sales_user, test_user, test_requisition,
+    db_session,
+    sales_user,
+    test_user,
+    test_requisition,
 ):
     """Sales user only sees follow-ups for their own requisitions."""
     from app.database import get_db
@@ -1384,7 +1523,9 @@ def test_follow_ups_sales_role_filtering(
 
     # Create a stale contact on test_requisition (owned by test_user, not sales_user)
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Other Team Vendor",
         vendor_contact="other@vendor.com",
         status="sent",
@@ -1403,7 +1544,9 @@ def test_follow_ups_sales_role_filtering(
     db_session.commit()
 
     _make_contact(
-        db_session, sales_req, sales_user,
+        db_session,
+        sales_req,
+        sales_user,
         vendor_name="My Vendor",
         vendor_contact="my@vendor.com",
         status="sent",
@@ -1433,7 +1576,10 @@ def test_follow_ups_sales_role_filtering(
 
 
 def test_follow_ups_summary_sales_role_filtering(
-    db_session, sales_user, test_user, test_requisition,
+    db_session,
+    sales_user,
+    test_user,
+    test_requisition,
 ):
     """Sales user only sees follow-up summary for their own requisitions."""
     from app.database import get_db
@@ -1441,7 +1587,9 @@ def test_follow_ups_summary_sales_role_filtering(
     from app.main import app
 
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Other Team Vendor",
         status="sent",
         days_ago=5,
@@ -1458,7 +1606,9 @@ def test_follow_ups_summary_sales_role_filtering(
     db_session.commit()
 
     _make_contact(
-        db_session, sales_req, sales_user,
+        db_session,
+        sales_req,
+        sales_user,
         vendor_name="My Vendor",
         status="sent",
         days_ago=5,
@@ -1894,7 +2044,9 @@ def test_enrich_with_vendor_cards_multiple_groups(db_session):
 def test_follow_ups_opened_contacts(client, db_session, test_user, test_requisition):
     """Contacts with 'opened' status >3 days old also appear as follow-ups."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Opened Vendor",
         vendor_contact="opened@vendor.com",
         status="opened",
@@ -1912,7 +2064,9 @@ def test_follow_ups_opened_contacts(client, db_session, test_user, test_requisit
 def test_follow_ups_phone_contacts_excluded(client, db_session, test_user, test_requisition):
     """Only email contacts appear as follow-ups (not phone)."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Phone Vendor",
         vendor_contact="+1-555-0100",
         contact_type="phone",
@@ -1929,7 +2083,9 @@ def test_follow_ups_phone_contacts_excluded(client, db_session, test_user, test_
 def test_follow_ups_replied_excluded(client, db_session, test_user, test_requisition):
     """Contacts with 'replied' status are excluded from follow-ups."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Replied Vendor",
         vendor_contact="replied@vendor.com",
         status="replied",
@@ -1945,7 +2101,9 @@ def test_follow_ups_replied_excluded(client, db_session, test_user, test_requisi
 def test_follow_ups_includes_req_name(client, db_session, test_user, test_requisition):
     """Follow-ups include requisition_name."""
     _make_contact(
-        db_session, test_requisition, test_user,
+        db_session,
+        test_requisition,
+        test_user,
         vendor_name="Req Name Vendor",
         vendor_contact="reqname@vendor.com",
         status="sent",
@@ -1965,21 +2123,34 @@ def test_follow_ups_includes_req_name(client, db_session, test_user, test_requis
 
 def test_send_follow_up_batch_success(rfq_client, db_session, test_user, test_requisition):
     """Batch follow-up sends to multiple contacts."""
-    c1 = _make_contact(db_session, test_requisition, test_user,
-                       vendor_name="Vendor A", vendor_contact="a@v.com",
-                       status="sent", days_ago=5)
-    c2 = _make_contact(db_session, test_requisition, test_user,
-                       vendor_name="Vendor B", vendor_contact="b@v.com",
-                       status="sent", days_ago=5, parts=["LM358N"])
+    c1 = _make_contact(
+        db_session,
+        test_requisition,
+        test_user,
+        vendor_name="Vendor A",
+        vendor_contact="a@v.com",
+        status="sent",
+        days_ago=5,
+    )
+    c2 = _make_contact(
+        db_session,
+        test_requisition,
+        test_user,
+        vendor_name="Vendor B",
+        vendor_contact="b@v.com",
+        status="sent",
+        days_ago=5,
+        parts=["LM358N"],
+    )
 
     mock_gc = MagicMock()
     mock_gc.post_json = AsyncMock(return_value=None)
 
-    with patch("app.routers.rfq.require_fresh_token",
-               new_callable=AsyncMock, return_value="fake-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        resp = rfq_client.post("/api/follow-ups/send-batch",
-                               json={"contact_ids": [c1.id, c2.id]})
+    with (
+        patch("app.routers.rfq.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+    ):
+        resp = rfq_client.post("/api/follow-ups/send-batch", json={"contact_ids": [c1.id, c2.id]})
 
     assert resp.status_code == 200
     data = resp.json()
@@ -1992,27 +2163,31 @@ def test_send_follow_up_batch_success(rfq_client, db_session, test_user, test_re
 
 def test_send_follow_up_batch_empty_ids(rfq_client):
     """Empty contact_ids returns 400."""
-    with patch("app.routers.rfq.require_fresh_token",
-               new_callable=AsyncMock, return_value="fake-token"):
-        resp = rfq_client.post("/api/follow-ups/send-batch",
-                               json={"contact_ids": []})
+    with patch("app.routers.rfq.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"):
+        resp = rfq_client.post("/api/follow-ups/send-batch", json={"contact_ids": []})
     assert resp.status_code == 400
 
 
 def test_send_follow_up_batch_missing_contact(rfq_client, db_session, test_user, test_requisition):
     """Non-existent contact ID is skipped."""
-    c1 = _make_contact(db_session, test_requisition, test_user,
-                       vendor_name="Real Vendor", vendor_contact="real@v.com",
-                       status="sent", days_ago=5)
+    c1 = _make_contact(
+        db_session,
+        test_requisition,
+        test_user,
+        vendor_name="Real Vendor",
+        vendor_contact="real@v.com",
+        status="sent",
+        days_ago=5,
+    )
 
     mock_gc = MagicMock()
     mock_gc.post_json = AsyncMock(return_value=None)
 
-    with patch("app.routers.rfq.require_fresh_token",
-               new_callable=AsyncMock, return_value="fake-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        resp = rfq_client.post("/api/follow-ups/send-batch",
-                               json={"contact_ids": [c1.id, 99999]})
+    with (
+        patch("app.routers.rfq.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+    ):
+        resp = rfq_client.post("/api/follow-ups/send-batch", json={"contact_ids": [c1.id, 99999]})
 
     data = resp.json()
     assert data["sent"] == 1
@@ -2024,18 +2199,24 @@ def test_send_follow_up_batch_missing_contact(rfq_client, db_session, test_user,
 
 def test_send_follow_up_batch_send_failure(rfq_client, db_session, test_user, test_requisition):
     """Graph API failure marks contact as failed, doesn't crash batch."""
-    c1 = _make_contact(db_session, test_requisition, test_user,
-                       vendor_name="Fail Vendor", vendor_contact="fail@v.com",
-                       status="sent", days_ago=5)
+    c1 = _make_contact(
+        db_session,
+        test_requisition,
+        test_user,
+        vendor_name="Fail Vendor",
+        vendor_contact="fail@v.com",
+        status="sent",
+        days_ago=5,
+    )
 
     mock_gc = MagicMock()
     mock_gc.post_json = AsyncMock(side_effect=Exception("Graph API error"))
 
-    with patch("app.routers.rfq.require_fresh_token",
-               new_callable=AsyncMock, return_value="fake-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        resp = rfq_client.post("/api/follow-ups/send-batch",
-                               json={"contact_ids": [c1.id]})
+    with (
+        patch("app.routers.rfq.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+    ):
+        resp = rfq_client.post("/api/follow-ups/send-batch", json={"contact_ids": [c1.id]})
 
     data = resp.json()
     assert data["ok"] is True
@@ -2047,10 +2228,14 @@ def test_send_follow_up_batch_send_failure(rfq_client, db_session, test_user, te
 def test_send_follow_up_batch_no_subject_fallback(rfq_client, db_session, test_user, test_requisition):
     """Contact without subject gets fallback subject line."""
     c = Contact(
-        requisition_id=test_requisition.id, user_id=test_user.id,
-        contact_type="email", vendor_name="NoSub",
-        vendor_contact="nosub@v.com", parts_included=["LM317T"],
-        subject=None, status="sent",
+        requisition_id=test_requisition.id,
+        user_id=test_user.id,
+        contact_type="email",
+        vendor_name="NoSub",
+        vendor_contact="nosub@v.com",
+        parts_included=["LM317T"],
+        subject=None,
+        status="sent",
         created_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=5),
     )
     db_session.add(c)
@@ -2060,11 +2245,11 @@ def test_send_follow_up_batch_no_subject_fallback(rfq_client, db_session, test_u
     mock_gc = MagicMock()
     mock_gc.post_json = AsyncMock(return_value=None)
 
-    with patch("app.routers.rfq.require_fresh_token",
-               new_callable=AsyncMock, return_value="fake-token"), \
-         patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-        resp = rfq_client.post("/api/follow-ups/send-batch",
-                               json={"contact_ids": [c.id]})
+    with (
+        patch("app.routers.rfq.require_fresh_token", new_callable=AsyncMock, return_value="fake-token"),
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+    ):
+        resp = rfq_client.post("/api/follow-ups/send-batch", json={"contact_ids": [c.id]})
 
     assert resp.status_code == 200
     call_args = mock_gc.post_json.call_args[0][1]

@@ -151,10 +151,7 @@ async def claude_structured(
 
             # Tool use response — extract the tool input (guaranteed valid JSON)
             for block in data.get("content", []):
-                if (
-                    block.get("type") == "tool_use"
-                    and block.get("name") == "structured_output"
-                ):
+                if block.get("type") == "tool_use" and block.get("name") == "structured_output":
                     return block.get("input")
 
             logger.warning("Claude structured output: no tool_use block in response")
@@ -247,9 +244,7 @@ async def claude_text(
                 span.set_data("ai.cache_read_tokens", usage["cache_read_input_tokens"])
 
             # Extract text from response (may be interleaved with tool use)
-            texts = [
-                b["text"] for b in data.get("content", []) if b.get("type") == "text"
-            ]
+            texts = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
             return "\n".join(texts) if texts else None
 
     except Exception as e:
@@ -471,19 +466,14 @@ async def claude_batch_results(
                     message = result.get("message", {})
                     # Extract tool_use input (same as claude_structured)
                     for block in message.get("content", []):
-                        if (
-                            block.get("type") == "tool_use"
-                            and block.get("name") == "structured_output"
-                        ):
+                        if block.get("type") == "tool_use" and block.get("name") == "structured_output":
                             parsed[cid] = block.get("input")
                             break
                     else:
                         parsed[cid] = None
                 else:
                     error = result.get("error", {})
-                    logger.warning(
-                        f"Batch item {cid} failed: {error.get('type', 'unknown')}"
-                    )
+                    logger.warning(f"Batch item {cid} failed: {error.get('type', 'unknown')}")
                     parsed[cid] = None
 
             except json.JSONDecodeError:
@@ -492,9 +482,7 @@ async def claude_batch_results(
 
         counts = data.get("request_counts", {})
         logger.info(
-            f"Batch {batch_id} complete: "
-            f"{counts.get('succeeded', 0)} succeeded, "
-            f"{counts.get('errored', 0)} errored"
+            f"Batch {batch_id} complete: {counts.get('succeeded', 0)} succeeded, {counts.get('errored', 0)} errored"
         )
         return parsed
 

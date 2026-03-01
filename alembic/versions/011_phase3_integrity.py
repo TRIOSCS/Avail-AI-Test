@@ -5,8 +5,9 @@ Revises: 010_add_material_card_fk
 Create Date: 2026-02-25
 """
 
-from alembic import op
 from sqlalchemy import text
+
+from alembic import op
 
 revision = "011_phase3_integrity"
 down_revision = "010_add_material_card_fk"
@@ -27,7 +28,8 @@ def upgrade() -> None:
     conn.execute(text("ALTER TABLE material_cards ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP"))
 
     # 3. Audit log table (idempotent: table may exist from prior partial run or create_all)
-    conn.execute(text("""
+    conn.execute(
+        text("""
         CREATE TABLE IF NOT EXISTS material_card_audit (
             id SERIAL PRIMARY KEY,
             material_card_id INTEGER,
@@ -41,10 +43,13 @@ def upgrade() -> None:
             created_at TIMESTAMP,
             created_by VARCHAR(255)
         )
-    """))
+    """)
+    )
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_mca_material_card_id ON material_card_audit (material_card_id)"))
     conn.execute(text("CREATE INDEX IF NOT EXISTS ix_mca_normalized_mpn ON material_card_audit (normalized_mpn)"))
-    conn.execute(text("CREATE INDEX IF NOT EXISTS ix_mca_card_action ON material_card_audit (material_card_id, action)"))
+    conn.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_mca_card_action ON material_card_audit (material_card_id, action)")
+    )
 
 
 def downgrade() -> None:

@@ -48,16 +48,18 @@ from .base import Base
 
 class BuyPlanStatus(str, enum.Enum):
     """Buy plan header statuses."""
+
     draft = "draft"
-    pending = "pending"           # awaiting manager approval
-    active = "active"             # approved, buy instructions sent
-    halted = "halted"             # ops halted the deal
+    pending = "pending"  # awaiting manager approval
+    active = "active"  # approved, buy instructions sent
+    halted = "halted"  # ops halted the deal
     completed = "completed"
     cancelled = "cancelled"
 
 
 class SOVerificationStatus(str, enum.Enum):
     """Sales Order verification by ops."""
+
     pending = "pending"
     approved = "approved"
     rejected = "rejected"
@@ -65,15 +67,17 @@ class SOVerificationStatus(str, enum.Enum):
 
 class BuyPlanLineStatus(str, enum.Enum):
     """Per-line statuses tracking buyer execution."""
-    awaiting_po = "awaiting_po"       # buyer needs to cut PO
+
+    awaiting_po = "awaiting_po"  # buyer needs to cut PO
     pending_verify = "pending_verify"  # PO entered, awaiting ops verify
-    verified = "verified"             # ops confirmed PO
-    issue = "issue"                   # buyer flagged a problem
+    verified = "verified"  # ops confirmed PO
+    issue = "issue"  # buyer flagged a problem
     cancelled = "cancelled"
 
 
 class LineIssueType(str, enum.Enum):
     """Types of issues a buyer can flag on a line."""
+
     sold_out = "sold_out"
     price_changed = "price_changed"
     lead_time_changed = "lead_time_changed"
@@ -82,6 +86,7 @@ class LineIssueType(str, enum.Enum):
 
 class AIFlagSeverity(str, enum.Enum):
     """Severity levels for AI-generated flags."""
+
     info = "info"
     warning = "warning"
     critical = "critical"
@@ -98,24 +103,16 @@ class BuyPlanV3(Base):
     id = Column(Integer, primary_key=True)
 
     # ── Quote / Deal linkage
-    quote_id = Column(
-        Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False
-    )
-    requisition_id = Column(
-        Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
-    )
+    quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="CASCADE"), nullable=False)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
 
     # ── Acctivate references
     sales_order_number = Column(String(100))
     customer_po_number = Column(String(100))
 
     # ── Status tracks
-    status = Column(
-        String(30), default=BuyPlanStatus.draft.value, nullable=False
-    )
-    so_status = Column(
-        String(30), default=SOVerificationStatus.pending.value, nullable=False
-    )
+    status = Column(String(30), default=BuyPlanStatus.draft.value, nullable=False)
+    so_status = Column(String(30), default=SOVerificationStatus.pending.value, nullable=False)
 
     # ── Financials (computed from lines)
     total_cost = Column(Numeric(12, 2))
@@ -173,7 +170,9 @@ class BuyPlanV3(Base):
     cancelled_by = relationship("User", foreign_keys=[cancelled_by_id])
     halted_by = relationship("User", foreign_keys=[halted_by_id])
     lines = relationship(
-        "BuyPlanLine", back_populates="buy_plan", cascade="all, delete-orphan",
+        "BuyPlanLine",
+        back_populates="buy_plan",
+        cascade="all, delete-orphan",
         order_by="BuyPlanLine.id",
     )
 
@@ -199,17 +198,11 @@ class BuyPlanLine(Base):
     __tablename__ = "buy_plan_lines"
 
     id = Column(Integer, primary_key=True)
-    buy_plan_id = Column(
-        Integer, ForeignKey("buy_plans_v3.id", ondelete="CASCADE"), nullable=False
-    )
+    buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id", ondelete="CASCADE"), nullable=False)
 
     # ── What to buy
-    requirement_id = Column(
-        Integer, ForeignKey("requirements.id", ondelete="SET NULL")
-    )
-    offer_id = Column(
-        Integer, ForeignKey("offers.id", ondelete="SET NULL")
-    )
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"))
+    offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"))
     quantity = Column(Integer, nullable=False)
 
     # ── Pricing
@@ -225,9 +218,7 @@ class BuyPlanLine(Base):
     assignment_reason = Column(String(100))  # vendor_ownership, commodity, geo, workload
 
     # ── Status
-    status = Column(
-        String(30), default=BuyPlanLineStatus.awaiting_po.value, nullable=False
-    )
+    status = Column(String(30), default=BuyPlanLineStatus.awaiting_po.value, nullable=False)
 
     # ── PO confirmation
     po_number = Column(String(100))
@@ -285,14 +276,10 @@ class VerificationGroupMember(Base):
     __tablename__ = "verification_group_members"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True
-    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
     is_active = Column(Boolean, default=True, nullable=False)
     added_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User", foreign_keys=[user_id])
 
-    __table_args__ = (
-        Index("ix_vgm_active", "is_active"),
-    )
+    __table_args__ = (Index("ix_vgm_active", "is_active"),)

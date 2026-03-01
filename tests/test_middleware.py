@@ -9,7 +9,6 @@ Depends on: app/main.py (middleware), tests/conftest.py (client fixture)
 """
 
 
-
 def test_request_id_header_present(client):
     """Every response should include X-Request-ID."""
     resp = client.get("/health")

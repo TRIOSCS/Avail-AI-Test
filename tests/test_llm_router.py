@@ -11,15 +11,16 @@ Covers:
   - Schema prompt building
 """
 
-import pytest
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
 from app.utils.llm_router import (
-    _validate_required_fields,
     _schema_to_instruction,
+    _validate_required_fields,
+    routed_json,
     routed_structured,
     routed_text,
-    routed_json,
 )
 
 SAMPLE_SCHEMA = {

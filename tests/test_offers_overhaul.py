@@ -9,19 +9,15 @@ os.environ["RATE_LIMIT_ENABLED"] = "false"
 from datetime import datetime, timezone
 
 import pytest
-from sqlalchemy.orm import Session
 
 from app.models import (
     ActivityLog,
     ChangeLog,
     Offer,
     Quote,
-    Requirement,
     Requisition,
-    User,
     VendorResponse,
 )
-
 
 # ── Changelog / Audit Trail ──────────────────────────────────────────
 
@@ -47,7 +43,7 @@ class TestChangelog:
         assert "vendor_name" in fields_changed
         assert "lead_time" in fields_changed
 
-        vn_log = next(l for l in logs if l.field_name == "vendor_name")
+        vn_log = next(lg for lg in logs if lg.field_name == "vendor_name")
         assert vn_log.old_value == "Arrow Electronics"
         assert vn_log.new_value == "Mouser Electronics"
 
@@ -71,9 +67,7 @@ class TestChangelog:
         )
         assert len(logs) == 0
 
-    def test_requirement_update_creates_changelog(
-        self, client, test_requisition, db_session
-    ):
+    def test_requirement_update_creates_changelog(self, client, test_requisition, db_session):
         """PUT /api/requirements/{id} records field-level changes."""
         req_item = test_requisition.requirements[0]
         resp = client.put(
@@ -200,11 +194,9 @@ class TestOfferApproval:
 class TestQuotedOfferBadge:
     """Offers show quoted_on badge when used in a quote."""
 
-    def test_offers_include_quoted_on(
-        self, client, test_requisition, db_session, test_user
-    ):
+    def test_offers_include_quoted_on(self, client, test_requisition, db_session, test_user):
         """Offers used in quotes have quoted_on set."""
-        from app.models import CustomerSite, Company
+        from app.models import Company, CustomerSite
 
         req_item = test_requisition.requirements[0]
         # Create offer linked to requirement
@@ -258,9 +250,7 @@ class TestQuotedOfferBadge:
         assert found is not None
         assert found["quoted_on"] == "Q-2026-0099"
 
-    def test_offers_no_quoted_on_when_not_used(
-        self, client, test_requisition, db_session, test_user
-    ):
+    def test_offers_no_quoted_on_when_not_used(self, client, test_requisition, db_session, test_user):
         """Offers not in any quote have no quoted_on."""
         req_item = test_requisition.requirements[0]
         offer = Offer(
@@ -297,11 +287,9 @@ class TestQuotedOfferBadge:
 class TestBuyPlanQuoteLineItems:
     """Buy plan preserves user edits from quote line_items."""
 
-    def test_buy_plan_uses_quote_lead_time(
-        self, client, test_requisition, test_offer, db_session, test_user
-    ):
+    def test_buy_plan_uses_quote_lead_time(self, client, test_requisition, test_offer, db_session, test_user):
         """submit_buy_plan reads lead_time from quote, not original offer."""
-        from app.models import CustomerSite, Company
+        from app.models import Company, CustomerSite
 
         co = Company(name="BP Test Co", is_active=True, created_at=datetime.now(timezone.utc))
         db_session.add(co)
@@ -358,11 +346,9 @@ class TestBuyPlanQuoteLineItems:
         assert li["condition"] == "New Surplus"
         assert li["entered_by_name"] == "Test Buyer"
 
-    def test_buy_plan_fallback_to_offer_values(
-        self, client, test_requisition, test_offer, db_session, test_user
-    ):
+    def test_buy_plan_fallback_to_offer_values(self, client, test_requisition, test_offer, db_session, test_user):
         """When quote line_items don't have the offer, fallback to offer values."""
-        from app.models import CustomerSite, Company
+        from app.models import Company, CustomerSite
 
         co = Company(name="BP Fallback Co", is_active=True, created_at=datetime.now(timezone.utc))
         db_session.add(co)
@@ -445,11 +431,7 @@ class TestAutoParseOffers:
         db_session.flush()
 
         # Check that offers were created
-        offers = (
-            db_session.query(Offer)
-            .filter(Offer.vendor_response_id == vr.id)
-            .all()
-        )
+        offers = db_session.query(Offer).filter(Offer.vendor_response_id == vr.id).all()
         assert len(offers) == 1
         assert offers[0].mpn == "LM317T"
         assert offers[0].status == "pending_review"
@@ -476,9 +458,7 @@ class TestAutoParseOffers:
             "confidence": 0.9,
             "overall_sentiment": "positive",
             "overall_classification": "quote_provided",
-            "parts": [
-                {"mpn": "LM317T", "status": "quoted", "unit_price": 0.50, "qty_available": 1000}
-            ],
+            "parts": [{"mpn": "LM317T", "status": "quoted", "unit_price": 0.50, "qty_available": 1000}],
         }
 
         from app.email_service import _apply_parsed_result
@@ -512,9 +492,7 @@ class TestAutoParseOffers:
             "confidence": 0.3,
             "overall_sentiment": "neutral",
             "overall_classification": "clarification_needed",
-            "parts": [
-                {"mpn": "LM317T", "status": "quoted", "unit_price": 1.00, "qty_available": 100}
-            ],
+            "parts": [{"mpn": "LM317T", "status": "quoted", "unit_price": 1.00, "qty_available": 100}],
         }
 
         from app.email_service import _apply_parsed_result
@@ -543,9 +521,7 @@ class TestAutoParseOffers:
             "confidence": 0.8,
             "overall_sentiment": "positive",
             "overall_classification": "quote_provided",
-            "parts": [
-                {"mpn": "LM317T", "status": "quoted", "unit_price": 0.45, "qty_available": 2000}
-            ],
+            "parts": [{"mpn": "LM317T", "status": "quoted", "unit_price": 0.45, "qty_available": 2000}],
         }
 
         from app.email_service import _apply_parsed_result

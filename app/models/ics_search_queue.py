@@ -19,12 +19,8 @@ class IcsSearchQueue(Base):
     __tablename__ = "ics_search_queue"
 
     id = Column(Integer, primary_key=True)
-    requirement_id = Column(
-        Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False, unique=True
-    )
-    requisition_id = Column(
-        Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False
-    )
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False, unique=True)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
     mpn = Column(String(100), nullable=False)
     normalized_mpn = Column(String(100), nullable=False)
     manufacturer = Column(String(200))

@@ -9,11 +9,9 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy.orm import Session
 
 from app.models import NcSearchQueue, Requirement, Requisition
 from app.services.nc_worker.ai_gate import (
-    _classification_cache,
     classify_parts_batch,
     clear_classification_cache,
     process_ai_gate,

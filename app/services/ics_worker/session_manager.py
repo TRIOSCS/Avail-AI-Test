@@ -157,9 +157,7 @@ class IcsSessionManager:
             try:
                 await login_btn.wait_for(state="visible", timeout=5000)
             except Exception:
-                login_btn = self._page.locator(
-                    "#ctl00_ctl00_body_bodycontent_logincontrol_btnLogIn"
-                )
+                login_btn = self._page.locator("#ctl00_ctl00_body_bodycontent_logincontrol_btnLogIn")
             await HumanBehavior.human_click(self._page, login_btn)
             await asyncio.sleep(5)
 

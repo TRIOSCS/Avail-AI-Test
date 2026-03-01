@@ -57,11 +57,7 @@ class OEMSecretsConnector(BaseConnector):
         - prices: {USD: [{unit_break, unit_price}, ...], ...}
         - buy_now_url, datasheet_url, manufacturer, moq
         """
-        stock_data = (
-            data
-            if isinstance(data, list)
-            else data.get("stock", data.get("results", []))
-        )
+        stock_data = data if isinstance(data, list) else data.get("stock", data.get("results", []))
         if not isinstance(stock_data, list):
             stock_data = []
 
@@ -120,7 +116,9 @@ class OEMSecretsConnector(BaseConnector):
 
             # Authorization status
             auth_status = item.get("distributor_authorisation_status", "")
-            is_auth = auth_status == "authorised" if auth_status else item.get("authorized", item.get("is_authorized", True))
+            is_auth = (
+                auth_status == "authorised" if auth_status else item.get("authorized", item.get("is_authorized", True))
+            )
 
             results.append(
                 {

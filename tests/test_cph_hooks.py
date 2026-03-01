@@ -23,7 +23,6 @@ from app.models import (
 )
 from app.models.purchase_history import CustomerPartHistory
 
-
 # ── Helpers ─────────────────────────────────────────────────────────
 
 
@@ -85,9 +84,7 @@ def _setup_quote_scenario(db: Session, user: User, company: Company, site: Custo
 class TestQuoteWonCPHHook:
     def test_quote_won_creates_cph(self, client, db_session, test_user, test_company, test_customer_site):
         """Marking a quote as won creates a CPH record."""
-        req, quote, card = _setup_quote_scenario(
-            db_session, test_user, test_company, test_customer_site
-        )
+        req, quote, card = _setup_quote_scenario(db_session, test_user, test_company, test_customer_site)
         resp = client.post(
             f"/api/quotes/{quote.id}/result",
             json={"result": "won"},
@@ -112,9 +109,7 @@ class TestQuoteWonCPHHook:
 
     def test_quote_lost_no_cph(self, client, db_session, test_user, test_company, test_customer_site):
         """Marking a quote as lost does NOT create CPH."""
-        req, quote, card = _setup_quote_scenario(
-            db_session, test_user, test_company, test_customer_site
-        )
+        req, quote, card = _setup_quote_scenario(db_session, test_user, test_company, test_customer_site)
         resp = client.post(
             f"/api/quotes/{quote.id}/result",
             json={"result": "lost", "reason": "price"},
@@ -156,16 +151,12 @@ class TestQuoteWonCPHHook:
         )
         assert resp.status_code == 200
 
-        cph_count = db_session.query(CustomerPartHistory).filter_by(
-            company_id=test_company.id
-        ).count()
+        cph_count = db_session.query(CustomerPartHistory).filter_by(company_id=test_company.id).count()
         assert cph_count == 0
 
     def test_quote_won_upsert_increments(self, client, db_session, test_user, test_company, test_customer_site):
         """Winning same quote twice increments purchase_count."""
-        req, quote, card = _setup_quote_scenario(
-            db_session, test_user, test_company, test_customer_site
-        )
+        req, quote, card = _setup_quote_scenario(db_session, test_user, test_company, test_customer_site)
         # First win
         resp = client.post(
             f"/api/quotes/{quote.id}/result",
@@ -307,9 +298,11 @@ class TestOfferWonCPHHook:
         )
         assert resp.status_code == 200
 
-        cph_count = db_session.query(CustomerPartHistory).filter_by(
-            company_id=test_company.id, material_card_id=card.id
-        ).count()
+        cph_count = (
+            db_session.query(CustomerPartHistory)
+            .filter_by(company_id=test_company.id, material_card_id=card.id)
+            .count()
+        )
         assert cph_count == 0
 
     def test_offer_already_won_no_double_cph(self, client, db_session, test_user, test_company, test_customer_site):
@@ -344,9 +337,11 @@ class TestOfferWonCPHHook:
         )
         assert resp.status_code == 200
 
-        cph_count = db_session.query(CustomerPartHistory).filter_by(
-            company_id=test_company.id, material_card_id=card.id
-        ).count()
+        cph_count = (
+            db_session.query(CustomerPartHistory)
+            .filter_by(company_id=test_company.id, material_card_id=card.id)
+            .count()
+        )
         assert cph_count == 0
 
     def test_offer_won_no_card_skipped(self, client, db_session, test_user, test_customer_site):

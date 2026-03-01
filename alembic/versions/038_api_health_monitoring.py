@@ -6,6 +6,7 @@ Create Date: 2026-03-01
 """
 
 import sqlalchemy as sa
+
 from alembic import op
 
 revision = "038_api_health_monitoring"

@@ -4,11 +4,12 @@ Covers: POST customer/{id}, POST verify-email, GET credits,
         POST customer-backfill, GET customer-gaps.
 """
 
-import pytest
 from unittest.mock import AsyncMock, patch
-from tests.conftest import engine  # noqa: F401
+
+import pytest
 
 from app.models.crm import Company, CustomerSite
+from tests.conftest import engine  # noqa: F401
 
 
 @pytest.fixture
@@ -45,14 +46,19 @@ def test_customer_enrich_not_found(client):
 
 
 def test_verify_email_endpoint(client, db_session):
-    with patch(
-        "app.connectors.hunter_client.verify_email",
-        new_callable=AsyncMock,
-        return_value={"email": "test@test.com", "status": "valid", "score": 95, "sources": 3},
-    ), patch(
-        "app.services.credit_manager.can_use_credits", return_value=True,
-    ), patch(
-        "app.services.credit_manager.record_credit_usage",
+    with (
+        patch(
+            "app.connectors.hunter_client.verify_email",
+            new_callable=AsyncMock,
+            return_value={"email": "test@test.com", "status": "valid", "score": 95, "sources": 3},
+        ),
+        patch(
+            "app.services.credit_manager.can_use_credits",
+            return_value=True,
+        ),
+        patch(
+            "app.services.credit_manager.record_credit_usage",
+        ),
     ):
         resp = client.post("/api/enrichment/verify-email", json={"email": "test@test.com"})
         assert resp.status_code == 200
@@ -62,7 +68,8 @@ def test_verify_email_endpoint(client, db_session):
 
 def test_verify_email_credits_exhausted(client, db_session):
     with patch(
-        "app.services.credit_manager.can_use_credits", return_value=False,
+        "app.services.credit_manager.can_use_credits",
+        return_value=False,
     ):
         resp = client.post("/api/enrichment/verify-email", json={"email": "test@test.com"})
         assert resp.status_code == 429
@@ -85,15 +92,17 @@ def test_credits_endpoint(client, db_session):
 def test_customer_gaps_endpoint(client, db_session, test_co):
     with patch(
         "app.services.customer_enrichment_service.get_enrichment_gaps",
-        return_value=[{
-            "company_id": test_co.id,
-            "company_name": "API Test Corp",
-            "domain": "apitest.com",
-            "account_owner_id": None,
-            "contacts_needed": 5,
-            "current_status": None,
-            "last_enriched": None,
-        }],
+        return_value=[
+            {
+                "company_id": test_co.id,
+                "company_name": "API Test Corp",
+                "domain": "apitest.com",
+                "account_owner_id": None,
+                "contacts_needed": 5,
+                "current_status": None,
+                "last_enriched": None,
+            }
+        ],
     ):
         resp = client.get("/api/enrichment/customer-gaps")
         assert resp.status_code == 200
@@ -143,6 +152,7 @@ def test_batch_enrich_empty(client, db_session):
 
 def test_enrichment_status_with_contacts(client, db_session, test_co):
     from app.models.crm import SiteContact
+
     site = db_session.query(CustomerSite).filter_by(company_id=test_co.id).first()
     sc = SiteContact(
         customer_site_id=site.id,

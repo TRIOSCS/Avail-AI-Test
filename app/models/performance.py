@@ -23,9 +23,7 @@ class VendorMetricsSnapshot(Base):
 
     __tablename__ = "vendor_metrics_snapshot"
     id = Column(Integer, primary_key=True)
-    vendor_card_id = Column(
-        Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False
-    )
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
     snapshot_date = Column(Date, nullable=False)
 
     response_rate = Column(Float)
@@ -62,9 +60,7 @@ class BuyerLeaderboardSnapshot(Base):
 
     __tablename__ = "buyer_leaderboard_snapshot"
     id = Column(Integer, primary_key=True)
-    user_id = Column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     month = Column(Date, nullable=False)
 
     offers_logged = Column(Integer, default=0)
@@ -108,12 +104,8 @@ class StockListHash(Base):
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"))
     file_name = Column(String(500))
     row_count = Column(Integer)
-    first_seen_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
-    last_seen_at = Column(
-        DateTime, nullable=False, default=lambda: datetime.now(timezone.utc)
-    )
+    first_seen_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    last_seen_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     upload_count = Column(Integer, default=1)
 
     user = relationship("User", foreign_keys=[user_id])
@@ -137,9 +129,7 @@ class AvailScoreSnapshot(Base):
 
     __tablename__ = "avail_score_snapshot"
     id = Column(Integer, primary_key=True)
-    user_id = Column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     month = Column(Date, nullable=False)
     role_type = Column(String(20), nullable=False)  # 'buyer' or 'sales'
 
@@ -216,9 +206,7 @@ class MultiplierScoreSnapshot(Base):
 
     __tablename__ = "multiplier_score_snapshot"
     id = Column(Integer, primary_key=True)
-    user_id = Column(
-        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
-    )
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     month = Column(Date, nullable=False)
     role_type = Column(String(20), nullable=False)  # 'buyer' or 'sales'
 
@@ -307,5 +295,3 @@ class BuyerVendorStats(Base):
         Index("ix_bvs_user", "user_id"),
         Index("ix_bvs_unique", "user_id", "vendor_card_id", unique=True),
     )
-
-

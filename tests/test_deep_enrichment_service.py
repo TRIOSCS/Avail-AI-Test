@@ -250,11 +250,7 @@ class TestLinkContactToEntities:
         )
         db_session.commit()
 
-        contact = (
-            db_session.query(VendorContact)
-            .filter(VendorContact.vendor_card_id == vendor_with_domain.id)
-            .first()
-        )
+        contact = db_session.query(VendorContact).filter(VendorContact.vendor_card_id == vendor_with_domain.id).first()
         assert contact is not None
         assert contact.email == "john.doe@acmeparts.com"
         assert contact.full_name == "John Doe"
@@ -366,11 +362,7 @@ class TestLinkContactToEntities:
         )
         db_session.commit()
 
-        contact = (
-            db_session.query(VendorContact)
-            .filter(VendorContact.email == "mobilefallback@acmeparts.com")
-            .first()
-        )
+        contact = db_session.query(VendorContact).filter(VendorContact.email == "mobilefallback@acmeparts.com").first()
         assert contact is not None
         assert contact.phone == "+1-555-MOBI"
 
@@ -383,9 +375,7 @@ class TestLinkContactToEntities:
         )
         db_session.commit()
 
-        contacts = db_session.query(VendorContact).filter(
-            VendorContact.email == "nofullname@acmeparts.com"
-        ).all()
+        contacts = db_session.query(VendorContact).filter(VendorContact.email == "nofullname@acmeparts.com").all()
         assert len(contacts) == 0
 
     def test_link_contact_company_match(self, db_session, company_with_domain):
@@ -397,11 +387,7 @@ class TestLinkContactToEntities:
         )
         db_session.commit()
 
-        site = (
-            db_session.query(CustomerSite)
-            .filter(CustomerSite.company_id == company_with_domain.id)
-            .first()
-        )
+        site = db_session.query(CustomerSite).filter(CustomerSite.company_id == company_with_domain.id).first()
         sc = (
             db_session.query(SiteContact)
             .filter(
@@ -416,9 +402,7 @@ class TestLinkContactToEntities:
 
     def test_link_contact_company_existing_site_contact_dedup(self, db_session, company_with_domain):
         """Existing SiteContact with same email is not duplicated."""
-        site = db_session.query(CustomerSite).filter(
-            CustomerSite.company_id == company_with_domain.id
-        ).first()
+        site = db_session.query(CustomerSite).filter(CustomerSite.company_id == company_with_domain.id).first()
         existing = SiteContact(
             customer_site_id=site.id,
             full_name="Already There",
@@ -434,9 +418,7 @@ class TestLinkContactToEntities:
         )
         db_session.commit()
 
-        count = db_session.query(SiteContact).filter(
-            SiteContact.email == "already@widgetcorp.com"
-        ).count()
+        count = db_session.query(SiteContact).filter(SiteContact.email == "already@widgetcorp.com").count()
         assert count == 1
 
     def test_link_contact_no_match(self, db_session, vendor_with_domain):
@@ -448,9 +430,7 @@ class TestLinkContactToEntities:
         )
         db_session.commit()
 
-        contacts = db_session.query(VendorContact).filter(
-            VendorContact.email == "nobody@unknowndomain.com"
-        ).all()
+        contacts = db_session.query(VendorContact).filter(VendorContact.email == "nobody@unknowndomain.com").all()
         assert len(contacts) == 0
 
     def test_link_contact_empty_email(self, db_session, vendor_with_domain):
@@ -477,11 +457,7 @@ class TestLinkContactToEntities:
         )
         db_session.commit()
 
-        contact = (
-            db_session.query(VendorContact)
-            .filter(VendorContact.email == "detailed@acmeparts.com")
-            .first()
-        )
+        contact = db_session.query(VendorContact).filter(VendorContact.email == "detailed@acmeparts.com").first()
         assert contact is not None
         assert contact.full_name == "Detailed Person"
         assert contact.title == "VP of Sales"
@@ -525,10 +501,14 @@ class TestRouteEnrichment:
         db_session.refresh(enrichable_vendor)
         assert enrichable_vendor.industry == "Semiconductors"
 
-        eq = db_session.query(EnrichmentQueue).filter(
-            EnrichmentQueue.vendor_card_id == enrichable_vendor.id,
-            EnrichmentQueue.status == "auto_applied",
-        ).first()
+        eq = (
+            db_session.query(EnrichmentQueue)
+            .filter(
+                EnrichmentQueue.vendor_card_id == enrichable_vendor.id,
+                EnrichmentQueue.status == "auto_applied",
+            )
+            .first()
+        )
         assert eq is not None
 
     def test_route_pending(self, db_session, enrichable_vendor):
@@ -546,10 +526,14 @@ class TestRouteEnrichment:
         db_session.flush()
         assert result == "pending"
 
-        eq = db_session.query(EnrichmentQueue).filter(
-            EnrichmentQueue.vendor_card_id == enrichable_vendor.id,
-            EnrichmentQueue.status == "pending",
-        ).first()
+        eq = (
+            db_session.query(EnrichmentQueue)
+            .filter(
+                EnrichmentQueue.vendor_card_id == enrichable_vendor.id,
+                EnrichmentQueue.status == "pending",
+            )
+            .first()
+        )
         assert eq is not None
         assert eq.proposed_value == "Pending Industry"
 
@@ -568,10 +552,14 @@ class TestRouteEnrichment:
         db_session.flush()
         assert result == "low_confidence"
 
-        eq = db_session.query(EnrichmentQueue).filter(
-            EnrichmentQueue.vendor_card_id == enrichable_vendor.id,
-            EnrichmentQueue.status == "low_confidence",
-        ).first()
+        eq = (
+            db_session.query(EnrichmentQueue)
+            .filter(
+                EnrichmentQueue.vendor_card_id == enrichable_vendor.id,
+                EnrichmentQueue.status == "low_confidence",
+            )
+            .first()
+        )
         assert eq is not None
 
     def test_route_vendor_contact_entity_type(self, db_session, enrichable_vendor):
@@ -600,9 +588,13 @@ class TestRouteEnrichment:
         db_session.flush()
         assert result == "auto_applied"
 
-        eq = db_session.query(EnrichmentQueue).filter(
-            EnrichmentQueue.vendor_contact_id == contact.id,
-        ).first()
+        eq = (
+            db_session.query(EnrichmentQueue)
+            .filter(
+                EnrichmentQueue.vendor_contact_id == contact.id,
+            )
+            .first()
+        )
         assert eq is not None
         assert eq.vendor_contact_id == contact.id
 
@@ -621,9 +613,13 @@ class TestRouteEnrichment:
         db_session.flush()
         assert result == "pending"
 
-        eq = db_session.query(EnrichmentQueue).filter(
-            EnrichmentQueue.company_id == enrichable_company.id,
-        ).first()
+        eq = (
+            db_session.query(EnrichmentQueue)
+            .filter(
+                EnrichmentQueue.company_id == enrichable_company.id,
+            )
+            .first()
+        )
         assert eq is not None
         assert eq.company_id == enrichable_company.id
 
@@ -643,10 +639,14 @@ class TestRouteEnrichment:
         db_session.flush()
         assert result == "auto_applied"
 
-        eq = db_session.query(EnrichmentQueue).filter(
-            EnrichmentQueue.vendor_card_id == enrichable_vendor.id,
-            EnrichmentQueue.field_name == "brand_tags",
-        ).first()
+        eq = (
+            db_session.query(EnrichmentQueue)
+            .filter(
+                EnrichmentQueue.vendor_card_id == enrichable_vendor.id,
+                EnrichmentQueue.field_name == "brand_tags",
+            )
+            .first()
+        )
         assert eq is not None
         assert eq.current_value == '["old_tag"]'
 
@@ -676,9 +676,13 @@ class TestRouteEnrichment:
         )
         db_session.flush()
 
-        eq = db_session.query(EnrichmentQueue).filter(
-            EnrichmentQueue.batch_job_id == job.id,
-        ).first()
+        eq = (
+            db_session.query(EnrichmentQueue)
+            .filter(
+                EnrichmentQueue.batch_job_id == job.id,
+            )
+            .first()
+        )
         assert eq is not None
 
 
@@ -1165,7 +1169,8 @@ class TestDeepEnrichVendor:
         with _vendor_enrich_patches():
             with (
                 patch.object(
-                    db_session, "commit",
+                    db_session,
+                    "commit",
                     side_effect=Exception("DB commit failed"),
                 ),
                 patch.object(db_session, "rollback") as mock_rollback,
@@ -2249,7 +2254,10 @@ class TestExecuteBackfill:
             patch("app.services.signature_parser.cache_signature_extract"),
         ):
             await _execute_backfill(
-                job.id, [], 500, {"include_deep_email": True},
+                job.id,
+                [],
+                500,
+                {"include_deep_email": True},
             )
 
         db_session.refresh(job)
@@ -2295,7 +2303,10 @@ class TestExecuteBackfill:
             patch("app.services.signature_parser.cache_signature_extract"),
         ):
             await _execute_backfill(
-                job.id, [], 500, {"include_deep_email": True},
+                job.id,
+                [],
+                500,
+                {"include_deep_email": True},
             )
 
         db_session.refresh(job)
@@ -2323,7 +2334,10 @@ class TestExecuteBackfill:
             patch.dict("sys.modules", {"app.connectors.email_mining": None}),
         ):
             await _execute_backfill(
-                job.id, [], 500, {"include_deep_email": True},
+                job.id,
+                [],
+                500,
+                {"include_deep_email": True},
             )
 
         db_session.refresh(job)
@@ -2381,7 +2395,9 @@ class TestExecuteBackfill:
         mock_session.close.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_execute_backfill_both_vendors_and_companies(self, db_session, test_user, enrichable_vendor, enrichable_company):
+    async def test_execute_backfill_both_vendors_and_companies(
+        self, db_session, test_user, enrichable_vendor, enrichable_company
+    ):
         """Processing both vendors and companies in a single backfill job."""
         job = EnrichmentJob(
             job_type="backfill",
@@ -2470,7 +2486,10 @@ class TestExecuteBackfill:
             mock_miner_instance.deep_scan_inbox = AsyncMock(return_value=mock_scan_result)
 
             await _execute_backfill(
-                job.id, [], 500, {"include_deep_email": True},
+                job.id,
+                [],
+                500,
+                {"include_deep_email": True},
             )
 
         # cache_signature_extract and link_contact_to_entities should NOT be called
@@ -2504,8 +2523,6 @@ class TestExecuteBackfill:
                     c.close()
                 return [RuntimeError("Semaphore error")]
             return await original_gather(*coros, **kwargs)
-
-        import asyncio as _asyncio
 
         with (
             patch("app.database.SessionLocal", return_value=db_session),
@@ -2609,10 +2626,17 @@ class TestExecuteBackfill:
             mock_miner_instance.deep_scan_inbox = AsyncMock(return_value=mock_scan_result)
 
             await _execute_backfill(
-                job.id, [], 500, {"include_deep_email": True},
+                job.id,
+                [],
+                500,
+                {"include_deep_email": True},
             )
 
         # extract_signature should have been called with sender_name=""
         mock_extract.assert_called_once()
         call_kwargs = mock_extract.call_args
-        assert call_kwargs[1]["sender_name"] == "" or call_kwargs[0][1] == "" if len(call_kwargs[0]) > 1 else call_kwargs[1].get("sender_name") == ""
+        assert (
+            call_kwargs[1]["sender_name"] == "" or call_kwargs[0][1] == ""
+            if len(call_kwargs[0]) > 1
+            else call_kwargs[1].get("sender_name") == ""
+        )

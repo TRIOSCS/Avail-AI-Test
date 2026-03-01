@@ -19,19 +19,9 @@ def generate_rfq_summary_pdf(requisition_id: int, db: Session) -> bytes:
     if not requisition:
         raise ValueError(f"Requisition {requisition_id} not found")
 
-    requirements = (
-        db.query(Requirement)
-        .filter_by(requisition_id=requisition_id)
-        .order_by(Requirement.id)
-        .all()
-    )
+    requirements = db.query(Requirement).filter_by(requisition_id=requisition_id).order_by(Requirement.id).all()
 
-    offers = (
-        db.query(Offer)
-        .filter_by(requisition_id=requisition_id)
-        .order_by(Offer.created_at.desc())
-        .all()
-    )
+    offers = db.query(Offer).filter_by(requisition_id=requisition_id).order_by(Offer.created_at.desc()).all()
 
     template = _jinja_env.get_template("rfq_summary.html")
     html = template.render(
@@ -42,6 +32,7 @@ def generate_rfq_summary_pdf(requisition_id: int, db: Session) -> bytes:
     )
 
     from weasyprint import HTML
+
     return HTML(string=html).write_pdf()
 
 
@@ -68,4 +59,5 @@ def generate_quote_report_pdf(quote_id: int, db: Session) -> bytes:
     )
 
     from weasyprint import HTML
+
     return HTML(string=html).write_pdf()

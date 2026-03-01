@@ -16,9 +16,23 @@ EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 
 # Emails matching these prefixes get lower confidence
 GENERIC_PREFIXES = {
-    "noreply", "no-reply", "no_reply", "donotreply", "support", "info",
-    "admin", "webmaster", "postmaster", "mailer-daemon", "help", "abuse",
-    "newsletter", "marketing", "notifications", "alerts", "bounces",
+    "noreply",
+    "no-reply",
+    "no_reply",
+    "donotreply",
+    "support",
+    "info",
+    "admin",
+    "webmaster",
+    "postmaster",
+    "mailer-daemon",
+    "help",
+    "abuse",
+    "newsletter",
+    "marketing",
+    "notifications",
+    "alerts",
+    "bounces",
 }
 
 # Pages to try scraping
@@ -150,9 +164,7 @@ async def scrape_vendor_websites(
                 logger.debug("Scrape failed for %s: %s", card.website, e)
                 return None
 
-    scrape_results_list = await asyncio.gather(
-        *[_scrape_one(c) for c in vendors], return_exceptions=True
-    )
+    scrape_results_list = await asyncio.gather(*[_scrape_one(c) for c in vendors], return_exceptions=True)
 
     for result in scrape_results_list:
         if isinstance(result, Exception) or result is None:
@@ -169,11 +181,7 @@ async def scrape_vendor_websites(
 
         for r in results:
             email = r["email"]
-            existing = (
-                db.query(VendorContact)
-                .filter_by(vendor_card_id=card.id, email=email)
-                .first()
-            )
+            existing = db.query(VendorContact).filter_by(vendor_card_id=card.id, email=email).first()
             if existing:
                 continue
 

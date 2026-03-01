@@ -55,9 +55,7 @@ async def run_ownership_sweep(db: Session) -> dict:
 
     for company in owned:
         inactivity_limit = (
-            settings.strategic_inactivity_days
-            if company.is_strategic
-            else settings.customer_inactivity_days
+            settings.strategic_inactivity_days if company.is_strategic else settings.customer_inactivity_days
         )
         warning_day = inactivity_limit - 7  # 7 days before expiration
 
@@ -86,9 +84,7 @@ async def run_ownership_sweep(db: Session) -> dict:
 
         # In warning zone → send alert (only once per day)
         if days_inactive >= warning_day:
-            already_warned_today = _was_warned_today(
-                company.id, company.account_owner_id, db
-            )
+            already_warned_today = _was_warned_today(company.id, company.account_owner_id, db)
             if not already_warned_today:
                 await _send_warning_alert(company, days_inactive, inactivity_limit, db)
                 warned += 1
@@ -128,10 +124,7 @@ def check_and_claim_open_account(company_id: int, user_id: int, db: Session) -> 
 
     # Lock the row to prevent concurrent claims
     company = (
-        db.query(Company)
-        .filter(Company.id == company_id, Company.account_owner_id.is_(None))
-        .with_for_update()
-        .first()
+        db.query(Company).filter(Company.id == company_id, Company.account_owner_id.is_(None)).with_for_update().first()
     )
     if not company:
         return False
@@ -140,9 +133,7 @@ def check_and_claim_open_account(company_id: int, user_id: int, db: Session) -> 
     company.ownership_cleared_at = None  # Clear the "was cleared" timestamp
     db.flush()
 
-    logger.info(
-        f"Account claimed: '{company.name}' (ID {company.id}) by user {user.name} (ID {user_id})"
-    )
+    logger.info(f"Account claimed: '{company.name}' (ID {company.id}) by user {user.name} (ID {user_id})")
     return True
 
 
@@ -171,9 +162,7 @@ def get_accounts_at_risk(db: Session) -> list[dict]:
     at_risk = []
     for company, owner in owned:
         inactivity_limit = (
-            settings.strategic_inactivity_days
-            if company.is_strategic
-            else settings.customer_inactivity_days
+            settings.strategic_inactivity_days if company.is_strategic else settings.customer_inactivity_days
         )
         warning_day = inactivity_limit - 7
 
@@ -218,12 +207,8 @@ def get_open_pool_accounts(db: Session) -> list[dict]:
         {
             "company_id": c.id,
             "company_name": c.name,
-            "ownership_cleared_at": c.ownership_cleared_at.isoformat()
-            if c.ownership_cleared_at
-            else None,
-            "last_activity_at": c.last_activity_at.isoformat()
-            if c.last_activity_at
-            else None,
+            "ownership_cleared_at": c.ownership_cleared_at.isoformat() if c.ownership_cleared_at else None,
+            "last_activity_at": c.last_activity_at.isoformat() if c.last_activity_at else None,
             "is_strategic": c.is_strategic or False,
         }
         for c in companies
@@ -245,11 +230,7 @@ def get_my_accounts(user_id: int, db: Session) -> list[dict]:
 
     results = []
     for c in companies:
-        inactivity_limit = (
-            settings.strategic_inactivity_days
-            if c.is_strategic
-            else settings.customer_inactivity_days
-        )
+        inactivity_limit = settings.strategic_inactivity_days if c.is_strategic else settings.customer_inactivity_days
         warning_day = inactivity_limit - 7
         days_inactive = _days_since_activity(c, now)
 
@@ -270,9 +251,7 @@ def get_my_accounts(user_id: int, db: Session) -> list[dict]:
                 "inactivity_limit": inactivity_limit,
                 "status": status,
                 "is_strategic": c.is_strategic or False,
-                "last_activity_at": c.last_activity_at.isoformat()
-                if c.last_activity_at
-                else None,
+                "last_activity_at": c.last_activity_at.isoformat() if c.last_activity_at else None,
             }
         )
 
@@ -321,15 +300,12 @@ def get_manager_digest(db: Session) -> dict:
             {
                 "company_id": c.id,
                 "company_name": c.name,
-                "cleared_at": c.ownership_cleared_at.isoformat()
-                if c.ownership_cleared_at
-                else None,
+                "cleared_at": c.ownership_cleared_at.isoformat() if c.ownership_cleared_at else None,
             }
             for c in recently_cleared
         ],
         "team_activity": [
-            {"user_id": uid, "user_name": name, "activity_count": count}
-            for uid, name, count in user_activity
+            {"user_id": uid, "user_name": name, "activity_count": count} for uid, name, count in user_activity
         ],
         "generated_at": now.isoformat(),
     }
@@ -366,9 +342,7 @@ def run_site_ownership_sweep(db: Session) -> dict:
         if days_inactive is None:
             if site.created_at:
                 created = (
-                    site.created_at.replace(tzinfo=timezone.utc)
-                    if site.created_at.tzinfo is None
-                    else site.created_at
+                    site.created_at.replace(tzinfo=timezone.utc) if site.created_at.tzinfo is None else site.created_at
                 )
                 days_inactive = (now - created).days
             else:
@@ -379,10 +353,7 @@ def run_site_ownership_sweep(db: Session) -> dict:
             site.ownership_cleared_at = now
             db.flush()
             cleared += 1
-            logger.info(
-                f"Site ownership cleared: '{site.site_name}' (ID {site.id}) — "
-                f"{days_inactive} days inactive"
-            )
+            logger.info(f"Site ownership cleared: '{site.site_name}' (ID {site.id}) — {days_inactive} days inactive")
             continue
 
         if days_inactive >= warning_day:
@@ -440,18 +411,20 @@ def get_open_pool_sites(db: Session) -> list[dict]:
         if s.company_id not in company_cache:
             company_cache[s.company_id] = db.get(Company, s.company_id)
         co = company_cache[s.company_id]
-        results.append({
-            "site_id": s.id,
-            "site_name": s.site_name,
-            "company_id": s.company_id,
-            "company_name": co.name if co else None,
-            "contact_name": s.contact_name,
-            "contact_email": s.contact_email,
-            "city": s.city,
-            "state": s.state,
-            "last_activity_at": s.last_activity_at.isoformat() if s.last_activity_at else None,
-            "ownership_cleared_at": s.ownership_cleared_at.isoformat() if s.ownership_cleared_at else None,
-        })
+        results.append(
+            {
+                "site_id": s.id,
+                "site_name": s.site_name,
+                "company_id": s.company_id,
+                "company_name": co.name if co else None,
+                "contact_name": s.contact_name,
+                "contact_email": s.contact_email,
+                "city": s.city,
+                "state": s.state,
+                "last_activity_at": s.last_activity_at.isoformat() if s.last_activity_at else None,
+                "ownership_cleared_at": s.ownership_cleared_at.isoformat() if s.ownership_cleared_at else None,
+            }
+        )
     return results
 
 
@@ -474,9 +447,7 @@ def claim_site(site_id: int, user_id: int, db: Session) -> bool:
     site.ownership_cleared_at = None
     db.flush()
 
-    logger.info(
-        f"Site claimed: '{site.site_name}' (ID {site.id}) by user {user.name} (ID {user_id})"
-    )
+    logger.info(f"Site claimed: '{site.site_name}' (ID {site.id}) by user {user.name} (ID {user_id})")
     return True
 
 
@@ -513,20 +484,22 @@ def get_my_sites(user_id: int, db: Session) -> list[dict]:
         else:
             status = "red"
 
-        results.append({
-            "site_id": s.id,
-            "site_name": s.site_name,
-            "company_id": s.company_id,
-            "company_name": co.name if co else None,
-            "contact_name": s.contact_name,
-            "contact_email": s.contact_email,
-            "city": s.city,
-            "state": s.state,
-            "days_inactive": days_inactive,
-            "inactivity_limit": inactivity_limit,
-            "status": status,
-            "last_activity_at": s.last_activity_at.isoformat() if s.last_activity_at else None,
-        })
+        results.append(
+            {
+                "site_id": s.id,
+                "site_name": s.site_name,
+                "company_id": s.company_id,
+                "company_name": co.name if co else None,
+                "contact_name": s.contact_name,
+                "contact_email": s.contact_email,
+                "city": s.city,
+                "state": s.state,
+                "days_inactive": days_inactive,
+                "inactivity_limit": inactivity_limit,
+                "status": status,
+                "last_activity_at": s.last_activity_at.isoformat() if s.last_activity_at else None,
+            }
+        )
     return results
 
 
@@ -558,17 +531,19 @@ def get_sites_at_risk(db: Session) -> list[dict]:
             if site.company_id not in company_cache:
                 company_cache[site.company_id] = db.get(Company, site.company_id)
             co = company_cache[site.company_id]
-            at_risk.append({
-                "site_id": site.id,
-                "site_name": site.site_name,
-                "company_id": site.company_id,
-                "company_name": co.name if co else None,
-                "owner_id": site.owner_id,
-                "owner_name": owner.name if owner else None,
-                "days_inactive": days_inactive,
-                "days_remaining": days_remaining,
-                "inactivity_limit": inactivity_limit,
-            })
+            at_risk.append(
+                {
+                    "site_id": site.id,
+                    "site_name": site.site_name,
+                    "company_id": site.company_id,
+                    "company_name": co.name if co else None,
+                    "owner_id": site.owner_id,
+                    "owner_name": owner.name if owner else None,
+                    "days_inactive": days_inactive,
+                    "days_remaining": days_remaining,
+                    "inactivity_limit": inactivity_limit,
+                }
+            )
 
     at_risk.sort(key=lambda x: x["days_remaining"])
     return at_risk
@@ -614,9 +589,7 @@ def _was_warned_today(company_id: int, owner_id: int, db: Session) -> bool:
 
     Uses a simple activity_log check — warnings are logged as system activities.
     """
-    today_start = datetime.now(timezone.utc).replace(
-        hour=0, minute=0, second=0, microsecond=0
-    )
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
     existing = (
         db.query(ActivityLog)
         .filter(
@@ -629,9 +602,7 @@ def _was_warned_today(company_id: int, owner_id: int, db: Session) -> bool:
     return existing is not None
 
 
-async def _send_warning_alert(
-    company: Company, days_inactive: int, inactivity_limit: int, db: Session
-):
+async def _send_warning_alert(company: Company, days_inactive: int, inactivity_limit: int, db: Session):
     """Send day-23 (or equivalent) warning to the account owner.
 
     1. Send email via Graph API
@@ -662,9 +633,7 @@ async def _send_warning_alert(
 
         token = await get_valid_token(owner, db)
         if not token:
-            logger.warning(
-                f"No token for {owner.email}, skipping warning email for {company.name}"
-            )
+            logger.warning(f"No token for {owner.email}, skipping warning email for {company.name}")
             return
 
         gc = GraphClient(token)
@@ -694,18 +663,15 @@ async def _send_warning_alert(
             "saveToSentItems": "false",  # Don't clutter sent items with system alerts
         }
         await gc.post_json("/me/sendMail", payload)
-        logger.info(
-            f"Warning email sent to {owner.email} for {company.name} ({days_remaining} days remaining)"
-        )
+        logger.info(f"Warning email sent to {owner.email} for {company.name} ({days_remaining} days remaining)")
 
     except Exception as e:
-        logger.error(
-            f"Failed to send warning email to {owner.email} for {company.name}: {e}"
-        )
+        logger.error(f"Failed to send warning email to {owner.email} for {company.name}: {e}")
 
     # Teams channel alert (fire-and-forget)
     try:
         from app.services.teams import send_ownership_warning
+
         await send_ownership_warning(
             company_id=company.id,
             company_name=company.name,
@@ -728,15 +694,9 @@ async def send_manager_digest_email(db: Session):
     lines = ["<h2>Weekly Account Health Digest</h2>"]
 
     if digest["at_risk_accounts"]:
-        lines.append(
-            f"<h3 style='color: #d97706;'>⚠️ {digest['at_risk_count']} Account(s) At Risk</h3>"
-        )
-        lines.append(
-            "<table border='1' cellpadding='8' cellspacing='0' style='border-collapse: collapse;'>"
-        )
-        lines.append(
-            "<tr><th>Account</th><th>Owner</th><th>Days Inactive</th><th>Days Left</th></tr>"
-        )
+        lines.append(f"<h3 style='color: #d97706;'>⚠️ {digest['at_risk_count']} Account(s) At Risk</h3>")
+        lines.append("<table border='1' cellpadding='8' cellspacing='0' style='border-collapse: collapse;'>")
+        lines.append("<tr><th>Account</th><th>Owner</th><th>Days Inactive</th><th>Days Left</th></tr>")
         for acct in digest["at_risk_accounts"]:
             color = "#dc2626" if acct["days_remaining"] <= 2 else "#d97706"
             lines.append(
@@ -757,16 +717,10 @@ async def send_manager_digest_email(db: Session):
 
     if digest["team_activity"]:
         lines.append("<h3>📊 Team Activity (Last 7 Days)</h3>")
-        lines.append(
-            "<table border='1' cellpadding='8' cellspacing='0' style='border-collapse: collapse;'>"
-        )
+        lines.append("<table border='1' cellpadding='8' cellspacing='0' style='border-collapse: collapse;'>")
         lines.append("<tr><th>Salesperson</th><th>Activities</th></tr>")
-        for ta in sorted(
-            digest["team_activity"], key=lambda x: x["activity_count"], reverse=True
-        ):
-            lines.append(
-                f"<tr><td>{html.escape(str(ta['user_name']))}</td><td>{ta['activity_count']}</td></tr>"
-            )
+        for ta in sorted(digest["team_activity"], key=lambda x: x["activity_count"], reverse=True):
+            lines.append(f"<tr><td>{html.escape(str(ta['user_name']))}</td><td>{ta['activity_count']}</td></tr>")
         lines.append("</table>")
 
     html_body = "\n".join(lines)

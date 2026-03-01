@@ -16,7 +16,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy.orm import Session
 
 from app.models import (
     Company,
@@ -31,7 +30,6 @@ from app.models import (
     User,
     VendorCard,
 )
-
 
 # ── QuoteLine Tests ──────────────────────────────────────────────────
 
@@ -53,22 +51,32 @@ class TestQuoteLine:
         db_session.flush()
 
         req = Requisition(
-            name="QL Test Req", created_by=user.id, customer_site_id=site.id,
+            name="QL Test Req",
+            created_by=user.id,
+            customer_site_id=site.id,
             status="active",
         )
         db_session.add(req)
         db_session.flush()
 
         from app.models.sourcing import Requirement
+
         rq = Requirement(
-            requisition_id=req.id, primary_mpn="LM317T", target_qty=100,
+            requisition_id=req.id,
+            primary_mpn="LM317T",
+            target_qty=100,
         )
         db_session.add(rq)
         db_session.flush()
 
         offer = Offer(
-            requisition_id=req.id, requirement_id=rq.id, vendor_name="Arrow",
-            mpn="LM317T", qty_available=1000, unit_price=1.50, source="manual",
+            requisition_id=req.id,
+            requirement_id=rq.id,
+            vendor_name="Arrow",
+            mpn="LM317T",
+            qty_available=1000,
+            unit_price=1.50,
+            source="manual",
         )
         db_session.add(offer)
         db_session.commit()
@@ -87,6 +95,7 @@ class TestQuoteLine:
             }
         ]
         from app.services.crm_service import next_quote_number
+
         quote = Quote(
             requisition_id=req.id,
             customer_site_id=site.id,
@@ -134,16 +143,21 @@ class TestQuoteLine:
         db_session.flush()
 
         req = Requisition(
-            name="QL2 Req", created_by=user.id, customer_site_id=site.id,
+            name="QL2 Req",
+            created_by=user.id,
+            customer_site_id=site.id,
             status="draft",
         )
         db_session.add(req)
         db_session.flush()
 
         from app.services.crm_service import next_quote_number
+
         quote = Quote(
-            requisition_id=req.id, customer_site_id=site.id,
-            quote_number=next_quote_number(db_session), line_items=[],
+            requisition_id=req.id,
+            customer_site_id=site.id,
+            quote_number=next_quote_number(db_session),
+            line_items=[],
             created_by_id=user.id,
         )
         db_session.add(quote)
@@ -219,10 +233,11 @@ class TestReactivationSignal:
 
     def test_dashboard_endpoint(self, db_session):
         """GET /api/dashboard/reactivation-signals returns active signals."""
+        from fastapi.testclient import TestClient
+
         from app.database import get_db
         from app.dependencies import require_user
         from app.main import app
-        from fastapi.testclient import TestClient
 
         user = User(email="sig@test.com", name="Sig User", role="sales", azure_id="az-sig")
         db_session.add(user)
@@ -233,11 +248,13 @@ class TestReactivationSignal:
         db_session.flush()
 
         sig1 = ReactivationSignal(
-            company_id=co.id, signal_type="churn_risk",
+            company_id=co.id,
+            signal_type="churn_risk",
             reason="90 days silent",
         )
         sig2 = ReactivationSignal(
-            company_id=co.id, signal_type="reactivation_opportunity",
+            company_id=co.id,
+            signal_type="reactivation_opportunity",
             reason="New sighting",
             dismissed_at=datetime.now(timezone.utc),
         )
@@ -269,18 +286,25 @@ class TestCommodityRouting:
     def test_commodity_match_assigns_buyer(self, db_session):
         """assign_buyer picks buyer with matching commodity_tags."""
         buyer1 = User(
-            email="buyer1@test.com", name="Buyer Semi", role="buyer",
-            azure_id="az-b1", commodity_tags=["semiconductors"],
+            email="buyer1@test.com",
+            name="Buyer Semi",
+            role="buyer",
+            azure_id="az-b1",
+            commodity_tags=["semiconductors"],
         )
         buyer2 = User(
-            email="buyer2@test.com", name="Buyer Pass", role="buyer",
-            azure_id="az-b2", commodity_tags=["passives"],
+            email="buyer2@test.com",
+            name="Buyer Pass",
+            role="buyer",
+            azure_id="az-b2",
+            commodity_tags=["passives"],
         )
         db_session.add_all([buyer1, buyer2])
         db_session.flush()
 
         vc = VendorCard(
-            normalized_name="ti supply", display_name="TI Supply",
+            normalized_name="ti supply",
+            display_name="TI Supply",
             commodity_tags=["semiconductors"],
         )
         db_session.add(vc)
@@ -298,6 +322,7 @@ class TestCommodityRouting:
 
         with patch("app.services.buy_plan_v3_service._get_routing_maps", return_value=routing_maps):
             from app.services.buy_plan_v3_service import assign_buyer
+
             assigned, reason = assign_buyer(offer, vc, db_session)
 
         assert assigned is not None
@@ -307,14 +332,18 @@ class TestCommodityRouting:
     def test_no_commodity_match_falls_to_workload(self, db_session):
         """When no buyer has matching commodity, falls to workload."""
         buyer1 = User(
-            email="bw1@test.com", name="Buyer W1", role="buyer",
-            azure_id="az-bw1", commodity_tags=["connectors"],
+            email="bw1@test.com",
+            name="Buyer W1",
+            role="buyer",
+            azure_id="az-bw1",
+            commodity_tags=["connectors"],
         )
         db_session.add(buyer1)
         db_session.flush()
 
         vc = VendorCard(
-            normalized_name="semi supply", display_name="Semi Supply",
+            normalized_name="semi supply",
+            display_name="Semi Supply",
             commodity_tags=["semiconductors"],
         )
         db_session.add(vc)
@@ -329,6 +358,7 @@ class TestCommodityRouting:
 
         with patch("app.services.buy_plan_v3_service._get_routing_maps", return_value=routing_maps):
             from app.services.buy_plan_v3_service import assign_buyer
+
             assigned, reason = assign_buyer(offer, vc, db_session)
 
         assert assigned is not None
@@ -337,12 +367,17 @@ class TestCommodityRouting:
     def test_vendor_ownership_takes_priority(self, db_session):
         """Vendor ownership (Priority 1) beats commodity match."""
         buyer1 = User(
-            email="vo1@test.com", name="Vendor Owner", role="buyer",
+            email="vo1@test.com",
+            name="Vendor Owner",
+            role="buyer",
             azure_id="az-vo1",
         )
         buyer2 = User(
-            email="vo2@test.com", name="Commodity Buyer", role="buyer",
-            azure_id="az-vo2", commodity_tags=["semiconductors"],
+            email="vo2@test.com",
+            name="Commodity Buyer",
+            role="buyer",
+            azure_id="az-vo2",
+            commodity_tags=["semiconductors"],
         )
         db_session.add_all([buyer1, buyer2])
         db_session.flush()
@@ -353,6 +388,7 @@ class TestCommodityRouting:
         )
 
         from app.services.buy_plan_v3_service import assign_buyer
+
         assigned, reason = assign_buyer(offer, None, db_session)
         assert assigned.id == buyer1.id
         assert reason == "vendor_ownership"
@@ -380,15 +416,20 @@ class TestSearchCrossReferences:
         db_session.flush()
 
         req = Requisition(
-            name="XR Req", created_by=user.id, customer_site_id=site.id,
+            name="XR Req",
+            created_by=user.id,
+            customer_site_id=site.id,
             status="active",
         )
         db_session.add(req)
         db_session.flush()
 
         from app.models.sourcing import Requirement
+
         rq = Requirement(
-            requisition_id=req.id, primary_mpn="LM317T", target_qty=100,
+            requisition_id=req.id,
+            primary_mpn="LM317T",
+            target_qty=100,
         )
         db_session.add(rq)
         db_session.flush()
@@ -400,14 +441,24 @@ class TestSearchCrossReferences:
 
         # Create sightings with same card but different MPNs
         s1 = Sighting(
-            requirement_id=rq.id, vendor_name="Arrow", mpn_matched="LM317T",
-            qty_available=100, unit_price=1.50, source_type="nexar",
-            material_card_id=card.id, confidence=0.9,
+            requirement_id=rq.id,
+            vendor_name="Arrow",
+            mpn_matched="LM317T",
+            qty_available=100,
+            unit_price=1.50,
+            source_type="nexar",
+            material_card_id=card.id,
+            confidence=0.9,
         )
         s2 = Sighting(
-            requirement_id=rq.id, vendor_name="Mouser", mpn_matched="LM317T-NOPB",
-            qty_available=200, unit_price=1.25, source_type="mouser",
-            material_card_id=card.id, confidence=0.85,
+            requirement_id=rq.id,
+            vendor_name="Mouser",
+            mpn_matched="LM317T-NOPB",
+            qty_available=200,
+            unit_price=1.25,
+            source_type="mouser",
+            material_card_id=card.id,
+            confidence=0.85,
         )
         db_session.add_all([s1, s2])
         db_session.commit()
@@ -415,13 +466,17 @@ class TestSearchCrossReferences:
         # Mock _fetch_fresh to return pre-built results
         mock_fresh = [
             {
-                "vendor_name": "Arrow", "mpn_matched": "LM317T",
-                "source_type": "nexar", "confidence": 0.9,
+                "vendor_name": "Arrow",
+                "mpn_matched": "LM317T",
+                "source_type": "nexar",
+                "confidence": 0.9,
                 "material_card_id": card.id,
             },
             {
-                "vendor_name": "Mouser", "mpn_matched": "LM317T-NOPB",
-                "source_type": "mouser", "confidence": 0.85,
+                "vendor_name": "Mouser",
+                "mpn_matched": "LM317T-NOPB",
+                "source_type": "mouser",
+                "confidence": 0.85,
                 "material_card_id": card.id,
             },
         ]

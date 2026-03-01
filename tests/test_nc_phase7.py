@@ -4,12 +4,7 @@ Called by: pytest
 Depends on: conftest.py, nc_worker modules, nc_admin router
 """
 
-from datetime import datetime, timezone
-
-from fastapi.testclient import TestClient
-
-from app.models import NcSearchQueue, Requirement, Requisition
-
+from app.models import NcSearchQueue
 
 # ── Trigger Tests ────────────────────────────────────────────────────
 

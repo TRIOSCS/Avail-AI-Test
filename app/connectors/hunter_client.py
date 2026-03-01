@@ -87,18 +87,20 @@ async def find_domain_emails(domain: str, limit: int = 10) -> list[dict]:
                 last = (e.get("last_name") or "").strip()
                 full_name = f"{first} {last}".strip() if first or last else None
 
-                contacts.append({
-                    "email": e.get("value"),
-                    "first_name": first or None,
-                    "last_name": last or None,
-                    "full_name": full_name,
-                    "position": e.get("position"),
-                    "department": e.get("department"),
-                    "linkedin_url": e.get("linkedin"),
-                    "phone_number": e.get("phone_number"),
-                    "confidence": e.get("confidence", 0),
-                    "source": "hunter",
-                })
+                contacts.append(
+                    {
+                        "email": e.get("value"),
+                        "first_name": first or None,
+                        "last_name": last or None,
+                        "full_name": full_name,
+                        "position": e.get("position"),
+                        "department": e.get("department"),
+                        "linkedin_url": e.get("linkedin"),
+                        "phone_number": e.get("phone_number"),
+                        "confidence": e.get("confidence", 0),
+                        "source": "hunter",
+                    }
+                )
 
             return contacts
         except Exception as e:

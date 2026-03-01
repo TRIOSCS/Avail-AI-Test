@@ -81,8 +81,11 @@ def run_auto_attribution(db: Session) -> dict:
         for act_id, result in ai_results.items():
             if result and result.get("confidence", 0) >= 0.8:
                 attribute_activity(
-                    act_id, result["entity_type"], result["entity_id"],
-                    db, user_id=None,
+                    act_id,
+                    result["entity_type"],
+                    result["entity_id"],
+                    db,
+                    user_id=None,
                 )
                 stats["ai_matched"] += 1
             else:
@@ -91,8 +94,10 @@ def run_auto_attribution(db: Session) -> dict:
 
     logger.info(
         "Auto-attribution complete: %d rule-matched, %d AI-matched, %d dismissed, %d skipped",
-        stats["rule_matched"], stats["ai_matched"],
-        stats["auto_dismissed"], stats["skipped"],
+        stats["rule_matched"],
+        stats["ai_matched"],
+        stats["auto_dismissed"],
+        stats["skipped"],
     )
     return stats
 
@@ -107,12 +112,7 @@ def _ai_match_batch(activities: list[ActivityLog], db: Session) -> dict:
     from ..models import Company, VendorCard
 
     # Build entity reference lists
-    companies = (
-        db.query(Company.id, Company.name, Company.domain)
-        .filter(Company.is_active.is_(True))
-        .limit(500)
-        .all()
-    )
+    companies = db.query(Company.id, Company.name, Company.domain).filter(Company.is_active.is_(True)).limit(500).all()
     vendors = (
         db.query(VendorCard.id, VendorCard.display_name, VendorCard.domain)
         .filter(VendorCard.is_blacklisted.is_(False))
@@ -120,25 +120,21 @@ def _ai_match_batch(activities: list[ActivityLog], db: Session) -> dict:
         .all()
     )
 
-    company_list = [
-        {"id": c.id, "name": c.name, "domain": c.domain or ""}
-        for c in companies
-    ]
-    vendor_list = [
-        {"id": v.id, "name": v.display_name, "domain": v.domain or ""}
-        for v in vendors
-    ]
+    company_list = [{"id": c.id, "name": c.name, "domain": c.domain or ""} for c in companies]
+    vendor_list = [{"id": v.id, "name": v.display_name, "domain": v.domain or ""} for v in vendors]
 
     # Build activity descriptions for Claude
     activity_items = []
     for act in activities[:20]:  # Cap at 20 per batch to limit cost
-        activity_items.append({
-            "id": act.id,
-            "email": act.contact_email or "",
-            "phone": act.contact_phone or "",
-            "name": act.contact_name or "",
-            "subject": (act.subject or "")[:100],
-        })
+        activity_items.append(
+            {
+                "id": act.id,
+                "email": act.contact_email or "",
+                "phone": act.contact_phone or "",
+                "name": act.contact_name or "",
+                "subject": (act.subject or "")[:100],
+            }
+        )
 
     if not activity_items:
         return {}
@@ -153,12 +149,11 @@ def _ai_match_batch(activities: list[ActivityLog], db: Session) -> dict:
         try:
             loop = asyncio.get_running_loop()
             import concurrent.futures
+
             with concurrent.futures.ThreadPoolExecutor() as pool:
                 result = loop.run_in_executor(
                     pool,
-                    lambda: asyncio.run(
-                        _call_claude_for_matching(activity_items, company_list, vendor_list)
-                    ),
+                    lambda: asyncio.run(_call_claude_for_matching(activity_items, company_list, vendor_list)),
                 )
                 # Can't await in sync context; skip AI matching this round
                 logger.debug("AI matching deferred — event loop conflict")
@@ -178,10 +173,7 @@ async def _call_claude_for_matching(
     """Call Claude to match activities to entities."""
     from ..utils.claude_client import claude_structured
 
-    prompt = (
-        "Match these unmatched activities to the correct company or vendor.\n\n"
-        "ACTIVITIES:\n"
-    )
+    prompt = "Match these unmatched activities to the correct company or vendor.\n\nACTIVITIES:\n"
     for a in activities:
         prompt += f"- ID {a['id']}: email={a['email']}, phone={a['phone']}, name={a['name']}, subject={a['subject']}\n"
 

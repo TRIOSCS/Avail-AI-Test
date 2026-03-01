@@ -192,20 +192,22 @@ def api_connector_health(
             recent_success = max(0, total - errors_24h)
             if errors_24h > recent_success:
                 status = "degraded"
-        result.append({
-            "id": src.id,
-            "name": src.name,
-            "display_name": src.display_name,
-            "status": status,
-            "is_active": src.is_active,
-            "avg_response_ms": src.avg_response_ms or 0,
-            "total_searches": total,
-            "total_results": total_results,
-            "last_success": src.last_success.isoformat() if src.last_success else None,
-            "last_error": src.last_error,
-            "last_error_at": src.last_error_at.isoformat() if src.last_error_at else None,
-            "error_count_24h": errors_24h,
-        })
+        result.append(
+            {
+                "id": src.id,
+                "name": src.name,
+                "display_name": src.display_name,
+                "status": status,
+                "is_active": src.is_active,
+                "avg_response_ms": src.avg_response_ms or 0,
+                "total_searches": total,
+                "total_results": total_results,
+                "last_success": src.last_success.isoformat() if src.last_success else None,
+                "last_error": src.last_error,
+                "last_error_at": src.last_error_at.isoformat() if src.last_error_at else None,
+                "error_count_24h": errors_24h,
+            }
+        )
     return {"connectors": result}
 
 
@@ -224,9 +226,7 @@ def api_health_dashboard(
 
     # Aggregate usage log stats per source (SQLite-compatible)
     check_stats_raw = (
-        db.query(ApiUsageLog.source_id, ApiUsageLog.success)
-        .filter(ApiUsageLog.timestamp >= cutoff_24h)
-        .all()
+        db.query(ApiUsageLog.source_id, ApiUsageLog.success).filter(ApiUsageLog.timestamp >= cutoff_24h).all()
     )
     stats_map = {}
     for row in check_stats_raw:
@@ -244,28 +244,30 @@ def api_health_dashboard(
         usage_pct = round((calls / quota) * 100, 1) if quota and quota > 0 else None
         checks = stats_map.get(src.id, {"total": 0, "failures": 0})
 
-        result.append({
-            "id": src.id,
-            "name": src.name,
-            "display_name": src.display_name,
-            "category": src.category,
-            "source_type": src.source_type,
-            "status": src.status,
-            "is_active": src.is_active,
-            "last_success": src.last_success.isoformat() if src.last_success else None,
-            "last_error": src.last_error,
-            "last_error_at": src.last_error_at.isoformat() if src.last_error_at else None,
-            "error_count_24h": src.error_count_24h or 0,
-            "avg_response_ms": src.avg_response_ms or 0,
-            "total_searches": src.total_searches or 0,
-            "monthly_quota": quota,
-            "calls_this_month": calls,
-            "usage_pct": usage_pct,
-            "last_ping_at": src.last_ping_at.isoformat() if src.last_ping_at else None,
-            "last_deep_test_at": src.last_deep_test_at.isoformat() if src.last_deep_test_at else None,
-            "recent_checks": checks["total"],
-            "recent_failures": checks["failures"],
-        })
+        result.append(
+            {
+                "id": src.id,
+                "name": src.name,
+                "display_name": src.display_name,
+                "category": src.category,
+                "source_type": src.source_type,
+                "status": src.status,
+                "is_active": src.is_active,
+                "last_success": src.last_success.isoformat() if src.last_success else None,
+                "last_error": src.last_error,
+                "last_error_at": src.last_error_at.isoformat() if src.last_error_at else None,
+                "error_count_24h": src.error_count_24h or 0,
+                "avg_response_ms": src.avg_response_ms or 0,
+                "total_searches": src.total_searches or 0,
+                "monthly_quota": quota,
+                "calls_this_month": calls,
+                "usage_pct": usage_pct,
+                "last_ping_at": src.last_ping_at.isoformat() if src.last_ping_at else None,
+                "last_deep_test_at": src.last_deep_test_at.isoformat() if src.last_deep_test_at else None,
+                "recent_checks": checks["total"],
+                "recent_failures": checks["failures"],
+            }
+        )
 
     return {"sources": result}
 
@@ -542,9 +544,21 @@ def api_company_merge_preview(
     # Fields to fill
     fill_fields = []
     for field in (
-        "domain", "linkedin_url", "legal_name", "employee_size",
-        "hq_city", "hq_state", "hq_country", "website", "industry",
-        "phone", "credit_terms", "tax_id", "currency", "preferred_carrier", "account_type",
+        "domain",
+        "linkedin_url",
+        "legal_name",
+        "employee_size",
+        "hq_city",
+        "hq_state",
+        "hq_country",
+        "website",
+        "industry",
+        "phone",
+        "credit_terms",
+        "tax_id",
+        "currency",
+        "preferred_carrier",
+        "account_type",
     ):
         if getattr(keep, field) is None and getattr(remove, field) is not None:
             fill_fields.append(field)
@@ -734,11 +748,7 @@ async def import_vendors(
 
         normalized = vendor_name.lower().strip()
         if normalized not in seen_vendors:
-            vc = (
-                db.query(VendorCard)
-                .filter(VendorCard.normalized_name == normalized)
-                .first()
-            )
+            vc = db.query(VendorCard).filter(VendorCard.normalized_name == normalized).first()
             if not vc:
                 domain = (row.get("domain") or "").strip() or None
                 website = (row.get("website") or "").strip() or None
@@ -821,12 +831,21 @@ def api_get_teams_config(
     has_enabled_row = False
 
     # Runtime overrides from SystemConfig
-    for row in db.query(SystemConfig).filter(
-        SystemConfig.key.in_([
-            "teams_team_id", "teams_channel_id", "teams_enabled",
-            "teams_channel_name", "teams_hot_threshold",
-        ])
-    ).all():
+    for row in (
+        db.query(SystemConfig)
+        .filter(
+            SystemConfig.key.in_(
+                [
+                    "teams_team_id",
+                    "teams_channel_id",
+                    "teams_enabled",
+                    "teams_channel_name",
+                    "teams_hot_threshold",
+                ]
+            )
+        )
+        .all()
+    ):
         if row.key == "teams_team_id" and row.value:
             config["team_id"] = row.value
         elif row.key == "teams_channel_id" and row.value:
@@ -866,7 +885,9 @@ def api_set_teams_config(
     if body.hot_threshold is not None:
         _upsert_config(db, "teams_hot_threshold", str(body.hot_threshold), user.email)
     db.commit()
-    logger.info(f"Teams config updated by {user.email}: team={body.team_id}, channel={body.channel_id}, enabled={body.enabled}")
+    logger.info(
+        f"Teams config updated by {user.email}: team={body.team_id}, channel={body.channel_id}, enabled={body.enabled}"
+    )
     return {"status": "saved"}
 
 
@@ -912,9 +933,7 @@ async def api_list_teams_channels(
             for ch in channels
         ]
 
-    channel_lists = await asyncio.gather(
-        *[_fetch_channels(t) for t in teams_list], return_exceptions=True
-    )
+    channel_lists = await asyncio.gather(*[_fetch_channels(t) for t in teams_list], return_exceptions=True)
     result = []
     for channels in channel_lists:
         if isinstance(channels, Exception):
@@ -977,11 +996,7 @@ def api_transfer_preview(
     if not source:
         raise HTTPException(404, "Source user not found")
 
-    sites = (
-        db.query(CustomerSite)
-        .filter(CustomerSite.owner_id == source_user_id)
-        .all()
-    )
+    sites = db.query(CustomerSite).filter(CustomerSite.owner_id == source_user_id).all()
 
     # Batch-fetch company names to avoid N+1
     company_ids = {s.company_id for s in sites if s.company_id}
@@ -1051,7 +1066,12 @@ def api_transfer_execute(
 
     logger.info(
         "Mass transfer: %d sites from %s (id=%d) to %s (id=%d) by %s",
-        len(sites), source.name, source.id, target.name, target.id, user.email,
+        len(sites),
+        source.name,
+        source.id,
+        target.name,
+        target.id,
+        user.email,
     )
 
     return {
@@ -1067,6 +1087,7 @@ def api_transfer_execute(
 def _upsert_config(db: Session, key: str, value: str, admin_email: str):
     """Insert or update a SystemConfig row."""
     from datetime import datetime, timezone
+
     row = db.query(SystemConfig).filter(SystemConfig.key == key).first()
     if row:
         row.value = value
@@ -1074,7 +1095,9 @@ def _upsert_config(db: Session, key: str, value: str, admin_email: str):
         row.updated_at = datetime.now(timezone.utc)
     else:
         row = SystemConfig(
-            key=key, value=value, updated_by=admin_email,
+            key=key,
+            value=value,
+            updated_by=admin_email,
             description=f"Teams integration: {key}",
         )
         db.add(row)

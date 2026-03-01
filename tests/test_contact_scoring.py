@@ -64,18 +64,28 @@ class TestRecencyScore:
         """Within 7 days = 100."""
         result = compute_contact_relationship_score(
             last_interaction_at=NOW - timedelta(days=1),
-            interactions_30d=5, interactions_60d=10, interactions_90d=15,
-            avg_response_hours=None, wins=0, total_interactions=15,
-            distinct_channels=1, now=NOW,
+            interactions_30d=5,
+            interactions_60d=10,
+            interactions_90d=15,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=15,
+            distinct_channels=1,
+            now=NOW,
         )
         assert result["recency_score"] == 100.0
 
     def test_exactly_7_days(self):
         result = compute_contact_relationship_score(
             last_interaction_at=NOW - timedelta(days=7),
-            interactions_30d=5, interactions_60d=10, interactions_90d=15,
-            avg_response_hours=None, wins=0, total_interactions=15,
-            distinct_channels=1, now=NOW,
+            interactions_30d=5,
+            interactions_60d=10,
+            interactions_90d=15,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=15,
+            distinct_channels=1,
+            now=NOW,
         )
         assert result["recency_score"] == 100.0
 
@@ -83,18 +93,28 @@ class TestRecencyScore:
         """365+ days = 0."""
         result = compute_contact_relationship_score(
             last_interaction_at=NOW - timedelta(days=400),
-            interactions_30d=0, interactions_60d=0, interactions_90d=0,
-            avg_response_hours=None, wins=0, total_interactions=10,
-            distinct_channels=1, now=NOW,
+            interactions_30d=0,
+            interactions_60d=0,
+            interactions_90d=0,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=10,
+            distinct_channels=1,
+            now=NOW,
         )
         assert result["recency_score"] == 0.0
 
     def test_no_interaction(self):
         result = compute_contact_relationship_score(
             last_interaction_at=None,
-            interactions_30d=0, interactions_60d=0, interactions_90d=0,
-            avg_response_hours=None, wins=0, total_interactions=0,
-            distinct_channels=0, now=NOW,
+            interactions_30d=0,
+            interactions_60d=0,
+            interactions_90d=0,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=0,
+            distinct_channels=0,
+            now=NOW,
         )
         assert result["recency_score"] == 0.0
 
@@ -102,9 +122,14 @@ class TestRecencyScore:
         """~186 days should be roughly 50%."""
         result = compute_contact_relationship_score(
             last_interaction_at=NOW - timedelta(days=186),
-            interactions_30d=0, interactions_60d=0, interactions_90d=0,
-            avg_response_hours=None, wins=0, total_interactions=10,
-            distinct_channels=1, now=NOW,
+            interactions_30d=0,
+            interactions_60d=0,
+            interactions_90d=0,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=10,
+            distinct_channels=1,
+            now=NOW,
         )
         assert 40 <= result["recency_score"] <= 60
 
@@ -115,28 +140,43 @@ class TestRecencyScore:
 class TestFrequencyScore:
     def test_high_frequency(self):
         result = compute_contact_relationship_score(
-            last_interaction_at=NOW, interactions_30d=15,
-            interactions_60d=20, interactions_90d=25,
-            avg_response_hours=None, wins=0, total_interactions=25,
-            distinct_channels=1, now=NOW,
+            last_interaction_at=NOW,
+            interactions_30d=15,
+            interactions_60d=20,
+            interactions_90d=25,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=25,
+            distinct_channels=1,
+            now=NOW,
         )
         assert result["frequency_score"] == 100.0  # capped at 100
 
     def test_zero_frequency(self):
         result = compute_contact_relationship_score(
-            last_interaction_at=NOW, interactions_30d=0,
-            interactions_60d=0, interactions_90d=0,
-            avg_response_hours=None, wins=0, total_interactions=0,
-            distinct_channels=1, now=NOW,
+            last_interaction_at=NOW,
+            interactions_30d=0,
+            interactions_60d=0,
+            interactions_90d=0,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=0,
+            distinct_channels=1,
+            now=NOW,
         )
         assert result["frequency_score"] == 0.0
 
     def test_half_frequency(self):
         result = compute_contact_relationship_score(
-            last_interaction_at=NOW, interactions_30d=5,
-            interactions_60d=10, interactions_90d=15,
-            avg_response_hours=None, wins=0, total_interactions=15,
-            distinct_channels=1, now=NOW,
+            last_interaction_at=NOW,
+            interactions_30d=5,
+            interactions_60d=10,
+            interactions_90d=15,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=15,
+            distinct_channels=1,
+            now=NOW,
         )
         assert result["frequency_score"] == 50.0
 
@@ -147,29 +187,44 @@ class TestFrequencyScore:
 class TestResponsivenessScore:
     def test_fast_response(self):
         result = compute_contact_relationship_score(
-            last_interaction_at=NOW, interactions_30d=5,
-            interactions_60d=10, interactions_90d=15,
-            avg_response_hours=2.0, wins=0, total_interactions=15,
-            distinct_channels=1, now=NOW,
+            last_interaction_at=NOW,
+            interactions_30d=5,
+            interactions_60d=10,
+            interactions_90d=15,
+            avg_response_hours=2.0,
+            wins=0,
+            total_interactions=15,
+            distinct_channels=1,
+            now=NOW,
         )
         assert result["responsiveness_score"] == 100.0
 
     def test_slow_response(self):
         result = compute_contact_relationship_score(
-            last_interaction_at=NOW, interactions_30d=5,
-            interactions_60d=10, interactions_90d=15,
-            avg_response_hours=200.0, wins=0, total_interactions=15,
-            distinct_channels=1, now=NOW,
+            last_interaction_at=NOW,
+            interactions_30d=5,
+            interactions_60d=10,
+            interactions_90d=15,
+            avg_response_hours=200.0,
+            wins=0,
+            total_interactions=15,
+            distinct_channels=1,
+            now=NOW,
         )
         assert result["responsiveness_score"] == 0.0
 
     def test_unknown_response(self):
         """None defaults to neutral 50."""
         result = compute_contact_relationship_score(
-            last_interaction_at=NOW, interactions_30d=5,
-            interactions_60d=10, interactions_90d=15,
-            avg_response_hours=None, wins=0, total_interactions=15,
-            distinct_channels=1, now=NOW,
+            last_interaction_at=NOW,
+            interactions_30d=5,
+            interactions_60d=10,
+            interactions_90d=15,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=15,
+            distinct_channels=1,
+            now=NOW,
         )
         assert result["responsiveness_score"] == 50.0
 
@@ -180,28 +235,43 @@ class TestResponsivenessScore:
 class TestWinRateScore:
     def test_good_win_rate(self):
         result = compute_contact_relationship_score(
-            last_interaction_at=NOW, interactions_30d=5,
-            interactions_60d=10, interactions_90d=15,
-            avg_response_hours=None, wins=8, total_interactions=15,
-            distinct_channels=1, now=NOW,
+            last_interaction_at=NOW,
+            interactions_30d=5,
+            interactions_60d=10,
+            interactions_90d=15,
+            avg_response_hours=None,
+            wins=8,
+            total_interactions=15,
+            distinct_channels=1,
+            now=NOW,
         )
         assert 50 <= result["win_rate_score"] <= 60
 
     def test_zero_wins(self):
         result = compute_contact_relationship_score(
-            last_interaction_at=NOW, interactions_30d=5,
-            interactions_60d=10, interactions_90d=15,
-            avg_response_hours=None, wins=0, total_interactions=15,
-            distinct_channels=1, now=NOW,
+            last_interaction_at=NOW,
+            interactions_30d=5,
+            interactions_60d=10,
+            interactions_90d=15,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=15,
+            distinct_channels=1,
+            now=NOW,
         )
         assert result["win_rate_score"] == 0.0
 
     def test_zero_interactions(self):
         result = compute_contact_relationship_score(
-            last_interaction_at=None, interactions_30d=0,
-            interactions_60d=0, interactions_90d=0,
-            avg_response_hours=None, wins=0, total_interactions=0,
-            distinct_channels=0, now=NOW,
+            last_interaction_at=None,
+            interactions_30d=0,
+            interactions_60d=0,
+            interactions_90d=0,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=0,
+            distinct_channels=0,
+            now=NOW,
         )
         assert result["win_rate_score"] == 0.0
 
@@ -212,28 +282,43 @@ class TestWinRateScore:
 class TestChannelScore:
     def test_three_channels(self):
         result = compute_contact_relationship_score(
-            last_interaction_at=NOW, interactions_30d=5,
-            interactions_60d=10, interactions_90d=15,
-            avg_response_hours=None, wins=0, total_interactions=15,
-            distinct_channels=3, now=NOW,
+            last_interaction_at=NOW,
+            interactions_30d=5,
+            interactions_60d=10,
+            interactions_90d=15,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=15,
+            distinct_channels=3,
+            now=NOW,
         )
         assert result["channel_score"] == 100.0
 
     def test_one_channel(self):
         result = compute_contact_relationship_score(
-            last_interaction_at=NOW, interactions_30d=5,
-            interactions_60d=10, interactions_90d=15,
-            avg_response_hours=None, wins=0, total_interactions=15,
-            distinct_channels=1, now=NOW,
+            last_interaction_at=NOW,
+            interactions_30d=5,
+            interactions_60d=10,
+            interactions_90d=15,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=15,
+            distinct_channels=1,
+            now=NOW,
         )
         assert 30 <= result["channel_score"] <= 40
 
     def test_zero_channels(self):
         result = compute_contact_relationship_score(
-            last_interaction_at=NOW, interactions_30d=0,
-            interactions_60d=0, interactions_90d=0,
-            avg_response_hours=None, wins=0, total_interactions=0,
-            distinct_channels=0, now=NOW,
+            last_interaction_at=NOW,
+            interactions_30d=0,
+            interactions_60d=0,
+            interactions_90d=0,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=0,
+            distinct_channels=0,
+            now=NOW,
         )
         assert result["channel_score"] == 0.0
 
@@ -275,9 +360,14 @@ class TestOverallScore:
         """All metrics maxed out → high score."""
         result = compute_contact_relationship_score(
             last_interaction_at=NOW,
-            interactions_30d=15, interactions_60d=30, interactions_90d=45,
-            avg_response_hours=2.0, wins=10, total_interactions=20,
-            distinct_channels=4, now=NOW,
+            interactions_30d=15,
+            interactions_60d=30,
+            interactions_90d=45,
+            avg_response_hours=2.0,
+            wins=10,
+            total_interactions=20,
+            distinct_channels=4,
+            now=NOW,
         )
         assert result["relationship_score"] >= 80
 
@@ -285,9 +375,14 @@ class TestOverallScore:
         """All metrics zeroed → zero score."""
         result = compute_contact_relationship_score(
             last_interaction_at=None,
-            interactions_30d=0, interactions_60d=0, interactions_90d=0,
-            avg_response_hours=None, wins=0, total_interactions=0,
-            distinct_channels=0, now=NOW,
+            interactions_30d=0,
+            interactions_60d=0,
+            interactions_90d=0,
+            avg_response_hours=None,
+            wins=0,
+            total_interactions=0,
+            distinct_channels=0,
+            now=NOW,
         )
         # responsiveness defaults to 50, so score won't be exactly 0
         assert result["relationship_score"] <= 15
@@ -298,10 +393,15 @@ class TestOverallScore:
 
     def test_returns_all_fields(self):
         result = compute_contact_relationship_score(
-            last_interaction_at=NOW, interactions_30d=5,
-            interactions_60d=10, interactions_90d=15,
-            avg_response_hours=4.0, wins=2, total_interactions=15,
-            distinct_channels=2, now=NOW,
+            last_interaction_at=NOW,
+            interactions_30d=5,
+            interactions_60d=10,
+            interactions_90d=15,
+            avg_response_hours=4.0,
+            wins=2,
+            total_interactions=15,
+            distinct_channels=2,
+            now=NOW,
         )
         assert "relationship_score" in result
         assert "recency_score" in result
@@ -314,8 +414,13 @@ class TestOverallScore:
     def test_score_bounded_0_100(self):
         result = compute_contact_relationship_score(
             last_interaction_at=NOW - timedelta(days=500),
-            interactions_30d=0, interactions_60d=0, interactions_90d=0,
-            avg_response_hours=500.0, wins=0, total_interactions=0,
-            distinct_channels=0, now=NOW,
+            interactions_30d=0,
+            interactions_60d=0,
+            interactions_90d=0,
+            avg_response_hours=500.0,
+            wins=0,
+            total_interactions=0,
+            distinct_channels=0,
+            now=NOW,
         )
         assert 0 <= result["relationship_score"] <= 100

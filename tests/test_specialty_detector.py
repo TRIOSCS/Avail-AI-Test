@@ -10,17 +10,12 @@ Depends on: app/services/specialty_detector.py, conftest.py
 
 from datetime import datetime, timezone
 
-import pytest
-
-from app.models import Offer, Requisition, Sighting, Requirement, User, VendorCard
+from app.models import Offer, Requirement, Requisition, Sighting, User, VendorCard
 from app.services.specialty_detector import (
-    BRAND_LIST,
-    COMMODITY_MAP,
     analyze_vendor_specialties,
     detect_brands_from_text,
     detect_commodities_from_text,
 )
-
 
 # ── detect_brands_from_text ──────────────────────────────────────────
 
@@ -109,7 +104,9 @@ def _make_vendor_card(db, name="test vendor"):
 
 def _make_user(db, email="specialty-user@test.com"):
     u = User(
-        email=email, name="Specialty User", role="buyer",
+        email=email,
+        name="Specialty User",
+        role="buyer",
         azure_id=f"az-{email}",
         created_at=datetime.now(timezone.utc),
     )
@@ -120,8 +117,11 @@ def _make_user(db, email="specialty-user@test.com"):
 
 def _make_requisition(db, user_id):
     req = Requisition(
-        name="REQ-SPEC", customer_name="Test", status="open",
-        created_by=user_id, created_at=datetime.now(timezone.utc),
+        name="REQ-SPEC",
+        customer_name="Test",
+        status="open",
+        created_by=user_id,
+        created_at=datetime.now(timezone.utc),
     )
     db.add(req)
     db.flush()
@@ -153,8 +153,10 @@ class TestAnalyzeVendorSpecialties:
         req = _make_requisition(db_session, user.id)
 
         requirement = Requirement(
-            requisition_id=req.id, primary_mpn="LM317T",
-            target_qty=100, created_at=datetime.now(timezone.utc),
+            requisition_id=req.id,
+            primary_mpn="LM317T",
+            target_qty=100,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(requirement)
         db_session.flush()
@@ -251,8 +253,10 @@ class TestAnalyzeVendorSpecialties:
         req = _make_requisition(db_session, user.id)
 
         requirement = Requirement(
-            requisition_id=req.id, primary_mpn="TEST",
-            target_qty=100, created_at=datetime.now(timezone.utc),
+            requisition_id=req.id,
+            primary_mpn="TEST",
+            target_qty=100,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(requirement)
         db_session.flush()

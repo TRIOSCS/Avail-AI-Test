@@ -20,6 +20,7 @@ GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 class GraphSyncStateExpired(Exception):
     """Raised when Graph API returns 410 — the delta token is stale and must be discarded."""
+
     pass
 
 
@@ -44,9 +45,7 @@ class GraphClient:
             **IMMUTABLE_ID_HEADER,
         }
 
-    async def get_json(
-        self, path: str, params: dict | None = None, timeout: int = 30
-    ) -> dict:
+    async def get_json(self, path: str, params: dict | None = None, timeout: int = 30) -> dict:
         """GET → parsed JSON. Raises on non-200 after retries."""
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
         return await self._request_with_retry("GET", url, params=params, timeout=timeout)
@@ -54,9 +53,7 @@ class GraphClient:
     async def post_json(self, path: str, json_data: dict, timeout: int = 30) -> dict:
         """POST → parsed JSON or empty dict on 202."""
         url = path if path.startswith("http") else f"{GRAPH_BASE}{path}"
-        return await self._request_with_retry(
-            "POST", url, json_data=json_data, timeout=timeout
-        )
+        return await self._request_with_retry("POST", url, json_data=json_data, timeout=timeout)
 
     async def get_all_pages(
         self,
@@ -134,13 +131,9 @@ class GraphClient:
         for attempt in range(MAX_RETRIES + 1):
             try:
                 if method == "GET":
-                    resp = await http.get(
-                        url, params=params, headers=self._base_headers, timeout=timeout
-                    )
+                    resp = await http.get(url, params=params, headers=self._base_headers, timeout=timeout)
                 else:
-                    resp = await http.post(
-                        url, json=json_data, headers=self._base_headers, timeout=timeout
-                    )
+                    resp = await http.post(url, json=json_data, headers=self._base_headers, timeout=timeout)
 
                 # Success
                 if resp.status_code in (200, 201):
@@ -152,9 +145,7 @@ class GraphClient:
 
                 # Throttled — respect Retry-After
                 if resp.status_code == 429:
-                    wait = int(
-                        resp.headers.get("Retry-After", BACKOFF_BASE ** (attempt + 1))
-                    )
+                    wait = int(resp.headers.get("Retry-After", BACKOFF_BASE ** (attempt + 1)))
                     logger.warning(f"Graph 429 — retry in {wait}s (attempt {attempt + 1})")
                     await asyncio.sleep(wait)
                     continue
@@ -162,9 +153,7 @@ class GraphClient:
                 # Server error — exponential backoff
                 if resp.status_code >= 500:
                     wait = BACKOFF_BASE ** (attempt + 1)
-                    logger.warning(
-                        f"Graph {resp.status_code} — retry in {wait}s (attempt {attempt + 1})"
-                    )
+                    logger.warning(f"Graph {resp.status_code} — retry in {wait}s (attempt {attempt + 1})")
                     await asyncio.sleep(wait)
                     continue
 

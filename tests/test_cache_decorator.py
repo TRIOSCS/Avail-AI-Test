@@ -19,8 +19,10 @@ def test_cache_miss_calls_function():
         call_count += 1
         return {"value": x}
 
-    with patch("app.cache.decorators.get_cached", return_value=None), \
-         patch("app.cache.decorators.set_cached") as mock_set:
+    with (
+        patch("app.cache.decorators.get_cached", return_value=None),
+        patch("app.cache.decorators.set_cached") as mock_set,
+    ):
         result = my_func(x=42)
 
     assert result == {"value": 42}
@@ -56,8 +58,10 @@ def test_different_params_different_keys():
     def my_func(x, db=None):
         return {"value": x}
 
-    with patch("app.cache.decorators.get_cached", return_value=None) as mock_get, \
-         patch("app.cache.decorators.set_cached"):
+    with (
+        patch("app.cache.decorators.get_cached", return_value=None) as mock_get,
+        patch("app.cache.decorators.set_cached"),
+    ):
         my_func(x=1)
         my_func(x=2)
 
@@ -70,8 +74,10 @@ def test_invalidate_prefix():
     """invalidate_prefix deletes matching PG cache entries."""
     from app.cache.decorators import invalidate_prefix
 
-    with patch("app.cache.intel_cache._get_redis", return_value=None), \
-         patch("app.database.SessionLocal") as mock_session_cls:
+    with (
+        patch("app.cache.intel_cache._get_redis", return_value=None),
+        patch("app.database.SessionLocal") as mock_session_cls,
+    ):
         mock_db = mock_session_cls.return_value.__enter__.return_value
         invalidate_prefix("test_prefix")
         mock_db.execute.assert_called_once()
@@ -89,8 +95,10 @@ def test_key_params_none_uses_all_kwargs():
     def my_func(sort_by="name", order="asc", db=None, user=None, request=None):
         return {"data": True}
 
-    with patch("app.cache.decorators.get_cached", return_value=None) as mock_get, \
-         patch("app.cache.decorators.set_cached"):
+    with (
+        patch("app.cache.decorators.get_cached", return_value=None) as mock_get,
+        patch("app.cache.decorators.set_cached"),
+    ):
         my_func(sort_by="name", order="asc", db="ignored", user="ignored", request="ignored")
 
     # The key should include sort_by and order, but NOT db, user, request
@@ -105,8 +113,10 @@ def test_cache_read_error_handled():
     def my_func(x):
         return {"value": x}
 
-    with patch("app.cache.decorators.get_cached", side_effect=Exception("Redis error")), \
-         patch("app.cache.decorators.set_cached"):
+    with (
+        patch("app.cache.decorators.get_cached", side_effect=Exception("Redis error")),
+        patch("app.cache.decorators.set_cached"),
+    ):
         result = my_func(x=1)
 
     assert result == {"value": 1}
@@ -120,8 +130,10 @@ def test_cache_write_error_handled():
     def my_func(x):
         return {"value": x}
 
-    with patch("app.cache.decorators.get_cached", return_value=None), \
-         patch("app.cache.decorators.set_cached", side_effect=Exception("Write failed")):
+    with (
+        patch("app.cache.decorators.get_cached", return_value=None),
+        patch("app.cache.decorators.set_cached", side_effect=Exception("Write failed")),
+    ):
         result = my_func(x=1)
 
     assert result == {"value": 1}
@@ -135,8 +147,10 @@ def test_non_dict_result_not_cached():
     def my_func(x):
         return "plain string"
 
-    with patch("app.cache.decorators.get_cached", return_value=None), \
-         patch("app.cache.decorators.set_cached") as mock_set:
+    with (
+        patch("app.cache.decorators.get_cached", return_value=None),
+        patch("app.cache.decorators.set_cached") as mock_set,
+    ):
         result = my_func(x=1)
 
     assert result == "plain string"
@@ -151,8 +165,10 @@ def test_list_result_is_cached():
     def my_func(x):
         return [1, 2, 3]
 
-    with patch("app.cache.decorators.get_cached", return_value=None), \
-         patch("app.cache.decorators.set_cached") as mock_set:
+    with (
+        patch("app.cache.decorators.get_cached", return_value=None),
+        patch("app.cache.decorators.set_cached") as mock_set,
+    ):
         result = my_func(x=1)
 
     assert result == [1, 2, 3]
@@ -182,8 +198,10 @@ def test_invalidate_prefix_with_redis():
         (0, ["intel:perf:key3"]),
     ]
 
-    with patch("app.cache.intel_cache._get_redis", return_value=mock_redis), \
-         patch("app.database.SessionLocal") as mock_session_cls:
+    with (
+        patch("app.cache.intel_cache._get_redis", return_value=mock_redis),
+        patch("app.database.SessionLocal") as mock_session_cls,
+    ):
         mock_db = mock_session_cls.return_value.__enter__.return_value
         invalidate_prefix("perf")
 
@@ -200,8 +218,10 @@ def test_invalidate_prefix_redis_error():
     mock_redis = MagicMock()
     mock_redis.scan.side_effect = Exception("Redis error")
 
-    with patch("app.cache.intel_cache._get_redis", return_value=mock_redis), \
-         patch("app.database.SessionLocal") as mock_session_cls:
+    with (
+        patch("app.cache.intel_cache._get_redis", return_value=mock_redis),
+        patch("app.database.SessionLocal") as mock_session_cls,
+    ):
         mock_db = mock_session_cls.return_value.__enter__.return_value
         invalidate_prefix("perf")  # Should not raise
 
@@ -212,7 +232,9 @@ def test_invalidate_prefix_pg_error():
     """PG error during prefix invalidation is caught (lines 113-114)."""
     from app.cache.decorators import invalidate_prefix
 
-    with patch("app.cache.intel_cache._get_redis", return_value=None), \
-         patch("app.database.SessionLocal") as mock_session_cls:
+    with (
+        patch("app.cache.intel_cache._get_redis", return_value=None),
+        patch("app.database.SessionLocal") as mock_session_cls,
+    ):
         mock_session_cls.return_value.__enter__.side_effect = Exception("PG error")
         invalidate_prefix("perf")  # Should not raise

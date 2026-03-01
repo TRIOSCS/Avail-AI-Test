@@ -10,11 +10,7 @@ Depends on: app/routers/dashboard.py, app/models
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
-from sqlalchemy.orm import Session
-
 from app.models import Company, CustomerSite, Offer, Quote, Requisition, User
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -58,9 +54,7 @@ def _make_company_and_site(db):
     co = Company(name="KPI Co", is_active=True, created_at=datetime.now(timezone.utc))
     db.add(co)
     db.flush()
-    site = CustomerSite(
-        company_id=co.id, site_name="HQ", created_at=datetime.now(timezone.utc)
-    )
+    site = CustomerSite(company_id=co.id, site_name="HQ", created_at=datetime.now(timezone.utc))
     db.add(site)
     db.flush()
     return co, site
@@ -198,13 +192,9 @@ class TestBuyPlansAllStatuses:
 class TestActionTilesStillFiltered:
     def test_reqs_at_risk_excludes_won_reqs(self, client, db_session, test_user):
         """Won reqs with 0 offers should NOT appear in reqs_at_risk."""
-        won_req = _make_req(
-            db_session, test_user, name="WON-NORISK", status="won", days_ago=3
-        )
+        won_req = _make_req(db_session, test_user, name="WON-NORISK", status="won", days_ago=3)
         # Active req with 0 offers SHOULD appear
-        active_req = _make_req(
-            db_session, test_user, name="ACTIVE-ATRISK", status="active", days_ago=3
-        )
+        active_req = _make_req(db_session, test_user, name="ACTIVE-ATRISK", status="active", days_ago=3)
         db_session.commit()
 
         resp = client.get("/api/dashboard/buyer-brief")
@@ -216,7 +206,6 @@ class TestActionTilesStillFiltered:
 
     def test_quotes_due_soon_excludes_won_reqs(self, client, db_session, test_user):
         """Won reqs with deadlines should NOT appear in quotes_due_soon."""
-        from datetime import date
 
         tomorrow = (datetime.now(timezone.utc) + timedelta(days=1)).date().isoformat()
         won_req = _make_req(db_session, test_user, name="WON-DL", status="won")
