@@ -510,10 +510,13 @@ async def health_summary(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Lightweight health check — returns active sources with errors (for 60s polling)."""
+    """Lightweight health check — returns active sources with errors/degraded (for 60s polling)."""
     errored = (
         db.query(ApiSource)
-        .filter(ApiSource.is_active == True, ApiSource.status == "error")  # noqa: E712
+        .filter(
+            ApiSource.is_active == True,  # noqa: E712
+            ApiSource.status.in_(["error", "degraded"]),
+        )
         .all()
     )
     return {
@@ -523,9 +526,44 @@ async def health_summary(
                 "id": s.id,
                 "display_name": s.display_name,
                 "last_error": s.last_error,
+                "status": s.status,
             }
             for s in errored
         ],
+    }
+
+
+@router.get("/api/system/alerts")
+async def system_alerts(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Active API alerts — sources in error or degraded state.
+
+    Polled by frontend every 60s for the warning banner.
+    Available to all authenticated users (not admin-only).
+    """
+    problem_sources = (
+        db.query(ApiSource)
+        .filter(
+            ApiSource.is_active == True,  # noqa: E712
+            ApiSource.status.in_(["error", "degraded"]),
+        )
+        .order_by(ApiSource.display_name)
+        .all()
+    )
+    return {
+        "alerts": [
+            {
+                "source_name": s.name,
+                "display_name": s.display_name,
+                "status": s.status,
+                "last_error": s.last_error,
+                "since": s.last_error_at.isoformat() if s.last_error_at else None,
+            }
+            for s in problem_sources
+        ],
+        "count": len(problem_sources),
     }
 
 

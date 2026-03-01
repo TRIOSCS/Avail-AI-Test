@@ -23,6 +23,7 @@ from ..models import (
     VendorCard,
     VendorContact,
 )
+from ..models.config import ApiUsageLog
 from ..rate_limit import limiter
 from ..schemas.crm import CompanyMergeRequest, MassTransferRequest
 from ..services.admin_service import (
@@ -206,6 +207,67 @@ def api_connector_health(
             "error_count_24h": errors_24h,
         })
     return {"connectors": result}
+
+
+@router.get("/api/admin/api-health/dashboard")
+@limiter.limit("30/minute")
+def api_health_dashboard(
+    request: Request,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Full API health dashboard data — status, usage, recent check history."""
+    from datetime import datetime, timedelta, timezone
+
+    sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
+    cutoff_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+
+    # Aggregate usage log stats per source (SQLite-compatible)
+    check_stats_raw = (
+        db.query(ApiUsageLog.source_id, ApiUsageLog.success)
+        .filter(ApiUsageLog.timestamp >= cutoff_24h)
+        .all()
+    )
+    stats_map = {}
+    for row in check_stats_raw:
+        sid = row.source_id
+        if sid not in stats_map:
+            stats_map[sid] = {"total": 0, "failures": 0}
+        stats_map[sid]["total"] += 1
+        if not row.success:
+            stats_map[sid]["failures"] += 1
+
+    result = []
+    for src in sources:
+        quota = src.monthly_quota
+        calls = src.calls_this_month or 0
+        usage_pct = round((calls / quota) * 100, 1) if quota and quota > 0 else None
+        checks = stats_map.get(src.id, {"total": 0, "failures": 0})
+
+        result.append({
+            "id": src.id,
+            "name": src.name,
+            "display_name": src.display_name,
+            "category": src.category,
+            "source_type": src.source_type,
+            "status": src.status,
+            "is_active": src.is_active,
+            "last_success": src.last_success.isoformat() if src.last_success else None,
+            "last_error": src.last_error,
+            "last_error_at": src.last_error_at.isoformat() if src.last_error_at else None,
+            "error_count_24h": src.error_count_24h or 0,
+            "avg_response_ms": src.avg_response_ms or 0,
+            "total_searches": src.total_searches or 0,
+            "monthly_quota": quota,
+            "calls_this_month": calls,
+            "usage_pct": usage_pct,
+            "last_ping_at": src.last_ping_at.isoformat() if src.last_ping_at else None,
+            "last_deep_test_at": src.last_deep_test_at.isoformat() if src.last_deep_test_at else None,
+            "recent_checks": checks["total"],
+            "recent_failures": checks["failures"],
+        })
+
+    return {"sources": result}
 
 
 # ── Credential Management (admin) ─────────────────────────────────────

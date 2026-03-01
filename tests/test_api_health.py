@@ -257,3 +257,124 @@ def test_list_sources_does_not_auto_set_status(admin_client, db_session):
     broken = next(s for s in data["sources"] if s["name"] == "broken_but_creds_set")
     # Status must remain "error" — not be flipped to "live" just because creds exist
     assert broken["status"] == "error"
+
+
+# ── Scheduler Integration Tests ──────────────────────────────────────
+
+
+def test_scheduler_has_health_jobs():
+    """Scheduler registers health check jobs."""
+    from app.scheduler import scheduler, configure_scheduler
+    configure_scheduler()
+    job_ids = [j.id for j in scheduler.get_jobs()]
+    assert "health_ping" in job_ids
+    assert "health_deep" in job_ids
+    assert "cleanup_usage_log" in job_ids
+    assert "reset_monthly_usage" in job_ids
+    scheduler.remove_all_jobs()
+
+
+# ── System Alerts Endpoint Tests ─────────────────────────────────────
+
+
+def test_system_alerts_returns_errors(admin_client, db_session):
+    """GET /api/system/alerts returns sources in error/degraded state."""
+    ok_src = ApiSource(
+        name="ok_api", display_name="OK API", category="api",
+        source_type="test", status="live", is_active=True,
+    )
+    bad_src = ApiSource(
+        name="bad_api", display_name="Bad API", category="api",
+        source_type="test", status="error", is_active=True,
+        last_error="401 Unauthorized",
+    )
+    db_session.add_all([ok_src, bad_src])
+    db_session.commit()
+
+    resp = admin_client.get("/api/system/alerts")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["alerts"][0]["source_name"] == "bad_api"
+    assert "401" in data["alerts"][0]["last_error"]
+
+
+def test_system_alerts_includes_degraded(admin_client, db_session):
+    """Degraded sources also appear in alerts."""
+    src = ApiSource(
+        name="degraded_api", display_name="Degraded API", category="api",
+        source_type="test", status="degraded", is_active=True,
+        last_error="Timeout",
+    )
+    db_session.add(src)
+    db_session.commit()
+
+    resp = admin_client.get("/api/system/alerts")
+    data = resp.json()
+    assert data["count"] == 1
+    assert data["alerts"][0]["status"] == "degraded"
+
+
+def test_system_alerts_empty_when_healthy(admin_client, db_session):
+    """No alerts when all sources are live."""
+    src = ApiSource(
+        name="healthy", display_name="Healthy", category="api",
+        source_type="test", status="live", is_active=True,
+    )
+    db_session.add(src)
+    db_session.commit()
+
+    resp = admin_client.get("/api/system/alerts")
+    data = resp.json()
+    assert data["count"] == 0
+    assert data["alerts"] == []
+
+
+# ── Dashboard Endpoint Tests ─────────────────────────────────────────
+
+
+def test_api_health_dashboard(admin_client, db_session):
+    """GET /api/admin/api-health/dashboard returns full connector stats."""
+    src = ApiSource(
+        name="dash_test", display_name="Dashboard Test", category="api",
+        source_type="test", status="live", is_active=True,
+        total_searches=100, total_results=500, avg_response_ms=200,
+        monthly_quota=1000, calls_this_month=450,
+    )
+    db_session.add(src)
+    db_session.commit()
+
+    resp = admin_client.get("/api/admin/api-health/dashboard")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["sources"]) >= 1
+
+    test_src = next(s for s in data["sources"] if s["name"] == "dash_test")
+    assert test_src["monthly_quota"] == 1000
+    assert test_src["calls_this_month"] == 450
+    assert test_src["usage_pct"] == 45.0
+
+
+def test_api_health_dashboard_usage_log(admin_client, db_session):
+    """Dashboard includes recent health check history from usage log."""
+    src = ApiSource(
+        name="log_test", display_name="Log Test", category="api",
+        source_type="test", status="live", is_active=True,
+    )
+    db_session.add(src)
+    db_session.flush()
+
+    for i in range(3):
+        log = ApiUsageLog(
+            source_id=src.id, timestamp=datetime.now(timezone.utc),
+            success=(i != 1), response_ms=100 + i * 50,
+            check_type="ping",
+        )
+        db_session.add(log)
+    db_session.commit()
+
+    resp = admin_client.get("/api/admin/api-health/dashboard")
+    data = resp.json()
+    log_src = next(s for s in data["sources"] if s["name"] == "log_test")
+    assert log_src["recent_checks"] == 3
+    assert log_src["recent_failures"] == 1
